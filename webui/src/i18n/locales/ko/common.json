@@ -1565,9 +1565,6 @@
       "loadFailed": "하위 작업을 불러올 수 없습니다.",
       "stopFailed": "이 작업을 중지할 수 없습니다.",
       "stopTask": "{{label}} 중지",
-      "iteration": "실행 단계: {{count}}",
-      "result": "결과",
-      "partialResult": "부분 결과",
       "receiptHelp": "전달됨은 메시지가 하위 작업의 다음 모델 요청에 포함되었음을 뜻하며, 실행 완료를 의미하지 않습니다.",
       "states": {
         "queued": "대기 중",
@@ -1592,15 +1589,7 @@
       "running": "진행 중: {{count}}",
       "finished": "종료: {{count}}",
       "needsReview": "확인 필요: {{count}}",
-      "details": "작업 상세",
-      "description": "작업 설명",
-      "activity": "실행 기록",
-      "messages": "메시지 전달 상태",
-      "toolStates": {
-        "running": "실행 중",
-        "ok": "완료",
-        "error": "실패"
-      }
+      "messages": "메시지 전달 상태"
     },
     "compaction": {
       "cancelled": "컨텍스트 압축이 취소되었습니다",

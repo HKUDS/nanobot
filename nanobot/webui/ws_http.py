@@ -27,7 +27,7 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.agent.subagent import SubagentControlError
-from nanobot.agent.subagent_sessions import SubagentSessionError
+from nanobot.agent.subagent_sessions import SubagentSessionError, SubagentSessions
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -133,6 +133,7 @@ from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import (
     TranscriptReplayStats,
+    build_session_thread_response,
     build_webui_thread_response,
     build_webui_trace_detail_response,
     webui_transcript_revision,
@@ -858,6 +859,10 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_session_automations(request, m.group(1))
 
+        m = re.fullmatch(r"/api/sessions/([^/]+)/subagents/([^/]+)/webui-thread", got)
+        if m:
+            return await asyncio.to_thread(self._handle_subagent_thread_get, request, m.group(1), m.group(2))
+
         m = re.fullmatch(r"/api/sessions/([^/]+)/subagents", got)
         if m:
             return self._handle_subagents_get(request, m.group(1))
@@ -927,6 +932,39 @@ class GatewayHTTPHandler:
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response(status.as_dict(), extra_headers=_NO_STORE_HEADERS)
+
+    def _handle_subagent_thread_get(self, request: WsRequest, key: str, task_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        session_key, decoded_task_id = _decode_api_key(key), _decode_api_key(task_id)
+        if session_key is None or decoded_task_id is None:
+            return _http_error(400, "invalid task key")
+        if not is_webui_session_key(session_key):
+            return _http_error(404, "task unavailable")
+        if self.subagent_manager is None or self.session_manager is None:
+            return _http_error(503, "task history unavailable")
+        try:
+            status = self.subagent_manager.check(decoded_task_id, session_key)
+            child = self.session_manager.read_session_snapshot(SubagentSessions.key(decoded_task_id))
+        except SubagentControlError:
+            return _http_error(404, "task unavailable")
+        except (OSError, SubagentSessionError):
+            return _http_error(503, "task history unavailable")
+        if child is None:
+            return _http_error(404, "task unavailable")
+        scope = self.workspaces.scope_for_session_key(session_key)
+        data = build_session_thread_response(
+            child,
+            active=status.state in {"queued", "running", "stopping"},
+            latency_ms=(int(max(0.0, status.finished_at - status.started_at) * 1000)
+                        if status.finished_at is not None else None),
+            augment_user_media=self.media.augment_transcript_media,
+            augment_assistant_media=self.media.augment_transcript_media,
+            augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(
+                text, workspace_path=scope.project_path,
+            ),
+        )
+        return _http_json_response(data, extra_headers=_NO_STORE_HEADERS)
 
     async def _handle_session_context_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):

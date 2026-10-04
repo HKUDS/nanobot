@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MessageBlockMenuActions, MessageBubble, MessageCopyButton } from "@/components/MessageBubble";
@@ -10,7 +10,6 @@ import {
   formatActivityDuration,
 } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
-import { SubagentWork, SubagentTaskErrors, useSubagentTaskGroups } from "@/components/thread/SubagentTasks";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -22,6 +21,9 @@ import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } 
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
+  beforeMessages?: ReactNode;
+  afterUserMessage?: (message: UIMessage) => ReactNode;
+  afterMessages?: ReactNode;
   temporary?: boolean;
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
@@ -77,6 +79,9 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
 
 export function ThreadMessages({
   messages,
+  beforeMessages,
+  afterUserMessage,
+  afterMessages,
   temporary = false,
   isStreaming = false,
   activeTurnId = null,
@@ -95,7 +100,6 @@ export function ThreadMessages({
   onActivityToggle,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
-  const taskGroups = useSubagentTaskGroups(messages);
   const messageListRef = useRef<HTMLDivElement>(null);
   const mobileActions = useMediaQuery("(max-width: 767px)");
   const units = useMemo(
@@ -173,7 +177,7 @@ export function ThreadMessages({
         containerRef={messageListRef}
         onQuoteSelection={onQuoteSelection}
       />
-      <SubagentWork tasks={taskGroups.unlinked} unlinked />
+      {beforeMessages}
       {units.map((unit, index) => {
         const next = units[index + 1];
         const hasBodyBelow =
@@ -269,12 +273,12 @@ export function ThreadMessages({
             onContextBlockMenuOpenChange={setContextBlockMenuOpen}
           />
           {unit.type === "message" && unit.message.role === "user" ? (
-            <SubagentWork tasks={taskGroups.byMessage.get(unit.message.id) ?? []} />
+            afterUserMessage?.(unit.message)
           ) : null}
           </Fragment>
         );
       })}
-      <SubagentTaskErrors />
+      {afterMessages}
       {pendingActivity ? (
         <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>
           <AgentActivityCluster

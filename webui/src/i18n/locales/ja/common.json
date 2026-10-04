@@ -1565,9 +1565,6 @@
       "loadFailed": "サブタスクを読み込めませんでした。",
       "stopFailed": "このタスクを停止できませんでした。",
       "stopTask": "{{label}} を停止",
-      "iteration": "実行ステップ: {{count}}",
-      "result": "結果",
-      "partialResult": "部分的な結果",
       "receiptHelp": "配信済みは子タスクの次のモデルリクエストにメッセージが含まれたことを示し、実行完了を意味しません。",
       "states": {
         "queued": "待機中",
@@ -1592,15 +1589,7 @@
       "running": "実行中: {{count}}",
       "finished": "終了: {{count}}",
       "needsReview": "要確認: {{count}}",
-      "details": "タスクの詳細",
-      "description": "タスクの説明",
-      "activity": "実行履歴",
-      "messages": "メッセージの送信状況",
-      "toolStates": {
-        "running": "実行中",
-        "ok": "完了",
-        "error": "失敗"
-      }
+      "messages": "メッセージの送信状況"
     },
     "compaction": {
       "cancelled": "コンテキストの圧縮をキャンセルしました",

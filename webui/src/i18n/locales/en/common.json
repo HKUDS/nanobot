@@ -1765,9 +1765,6 @@
       "loadFailed": "Could not load subtasks.",
       "stopFailed": "Could not stop this task.",
       "stopTask": "Stop {{label}}",
-      "iteration": "Iteration {{count}}",
-      "result": "Result",
-      "partialResult": "Partial result",
       "receiptHelp": "Delivered means the message was included in the subtask’s next model request. It does not mean the instructions have been carried out.",
       "states": {
         "queued": "Queued",
@@ -1792,15 +1789,7 @@
       "running": "Running: {{count}}",
       "finished": "Finished: {{count}}",
       "needsReview": "Review needed: {{count}}",
-      "details": "Task details",
-      "description": "Task description",
-      "activity": "Execution activity",
-      "messages": "Message delivery",
-      "toolStates": {
-        "running": "Running",
-        "ok": "Completed",
-        "error": "Failed"
-      }
+      "messages": "Message delivery"
     },
     "compaction": {
       "cancelled": "Context compaction cancelled",

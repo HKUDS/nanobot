@@ -1765,9 +1765,6 @@
       "loadFailed": "无法加载子任务。",
       "stopFailed": "无法停止此任务。",
       "stopTask": "停止 {{label}}",
-      "iteration": "第 {{count}} 轮",
-      "result": "结果",
-      "partialResult": "部分结果",
       "receiptHelp": "已送达表示消息已进入子任务的下一次模型请求，不代表已执行完成。",
       "states": {
         "queued": "排队中",
@@ -1792,15 +1789,7 @@
       "running": "{{count}} 项进行中",
       "finished": "{{count}} 项已结束",
       "needsReview": "{{count}} 项需检查",
-      "details": "任务详情",
-      "description": "任务描述",
-      "activity": "执行记录",
-      "messages": "消息送达状态",
-      "toolStates": {
-        "running": "执行中",
-        "ok": "已完成",
-        "error": "失败"
-      }
+      "messages": "消息送达状态"
     },
     "compaction": {
       "cancelled": "上下文压缩已取消",

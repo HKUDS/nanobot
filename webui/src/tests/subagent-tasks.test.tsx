@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
-import { buildDisplayUnits, ThreadMessages, unitKeysForDisplay } from "@/components/thread/ThreadMessages";
+import { SubagentTasksProvider, SubagentThreadMessages as ThreadMessages } from "@/components/thread/SubagentTasks";
+import { buildDisplayUnits, unitKeysForDisplay } from "@/components/thread/ThreadMessages";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { setAppLanguage } from "@/i18n";
 import type { ConnectionStatus, InboundEvent, SubagentTaskSnapshot, UIMessage } from "@/lib/types";
@@ -45,9 +45,19 @@ function task(overrides: Partial<SubagentTaskSnapshot> = {}): SubagentTaskSnapsh
 function response(tasks: SubagentTaskSnapshot[]): Response {
   return new Response(JSON.stringify({ tasks }), { headers: { "content-type": "application/json" } });
 }
-function layout({ enabled = true, liveEvents = true, sessionKey = "websocket:a", visible = true, threadMessages = messages } = {}) {
+function childThread(answer: string, active = true): Response {
+  return new Response(JSON.stringify({ schemaVersion: 3, projection: "events", active_turn_id: active ? "child-turn" : null,
+    events: [
+      { event: "user_message", chat_id: "task-1", starts_turn: true, projection_id: "child-prompt", turn_id: "child-turn", text: "Inspect configuration in the child session", created_at_ms: 100000 },
+      { event: "message", chat_id: "task-1", projection_id: "child-tool", turn_id: "child-turn", kind: "tool_hint", text: 'read_file({"path":"config.py"})',
+        tool_events: [{ call_id: "read-1", name: "read_file", arguments: { path: "config.py" }, phase: "end", result: "configuration values" }] },
+      { event: "message", chat_id: "task-1", projection_id: "child-answer", turn_id: "child-turn", text: answer },
+    ],
+  }), { headers: { "content-type": "application/json" } });
+}
+function layout({ enabled = true, liveEvents = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, threadMessages = messages } = {}) {
   return <ThreadVisibilityContext.Provider value={visible}>
-    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents}>
+    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled}>
       <div data-testid="messages"><ThreadMessages messages={threadMessages} /></div>
       <div data-testid="composer"><textarea aria-label="Message" /></div>
     </SubagentTasksProvider>
@@ -65,6 +75,89 @@ describe("session-owned task UI", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response([task()])));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it("renders the child Session in the shared chat view and refreshes it from task events", async () => {
+    let completed = false;
+    const fetcher = vi.fn(async (url: string) => url.endsWith("/webui-thread")
+      ? childThread(completed ? "## Findings\n\n- **Verified** the full session\n\n| Check | Result |\n| --- | --- |\n| Configuration | Passed |" : "Checking the configuration", !completed)
+      : response([task()]));
+    vi.stubGlobal("fetch", fetcher);
+    const user = userEvent.setup();
+    const view = render(layout({ historyEnabled: true }));
+    await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
+    const detail = screen.getByRole("dialog", { name: "Config check" });
+    expect(await within(detail).findByText("Inspect configuration in the child session")).toBeVisible();
+    expect(within(detail).getByText("Checking the configuration")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Aa/subagents/task-1/webui-thread", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    completed = true;
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Bounded task summary" }));
+    expect(await within(detail).findByRole("heading", { name: "Findings" })).toBeVisible();
+    expect(within(detail).getByRole("table")).toHaveTextContent("ConfigurationPassed");
+    expect(within(detail).getByText("Inspect configuration in the child session")).toBeVisible();
+    // Opening and reading details never mutates execution; a fresh view reads the same saved child.
+    expect(requestMutation).not.toHaveBeenCalled();
+    view.unmount();
+    fetcher.mockImplementation(async (url) => url.endsWith("/webui-thread") ? childThread("## Findings\n\nVerified the full session", false)
+      : response([task({ revision: 2, state: "done", completed_at: 102 })]));
+    render(layout({ historyEnabled: true }));
+    await user.click(await screen.findByRole("button", { name: /Delegated work/ }));
+    await user.click(screen.getByRole("button", { name: /Config check Completed/ }));
+    expect(await within(screen.getByRole("dialog")).findByRole("heading", { name: "Findings" })).toBeVisible();
+  });
+
+  it("coalesces history reads and discards an outstanding read when the session changes", async () => {
+    let resolveFirst!: (value: Response) => void;
+    let resolveOld!: (value: Response) => void;
+    let reads = 0;
+    const readSignals: AbortSignal[] = [];
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (!url.endsWith("/webui-thread")) return response([task()]);
+      if (init?.signal) readSignals.push(init.signal);
+      reads += 1;
+      if (reads === 1) return new Promise<Response>((resolve) => { resolveFirst = resolve; });
+      if (reads === 3) return new Promise<Response>((resolve) => { resolveOld = resolve; });
+      return childThread("Latest child response", false);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const user = userEvent.setup();
+    const view = render(layout({ historyEnabled: true }));
+    await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
+    await waitFor(() => expect(reads).toBe(1));
+    emitTask(task({ revision: 2, iteration: 2 }));
+    emitTask(task({ revision: 3, iteration: 3 }));
+    expect(reads).toBe(1);
+    await act(async () => { resolveFirst(childThread("Earlier checkpoint")); });
+    expect(await within(screen.getByRole("dialog")).findByText("Latest child response")).toBeVisible();
+    expect(reads).toBe(2);
+    emitTask(task({ revision: 4, iteration: 4 }));
+    await waitFor(() => expect(reads).toBe(3));
+    const oldSignal = readSignals.at(-1);
+    view.rerender(layout({ historyEnabled: true, sessionKey: "websocket:b" }));
+    await screen.findByRole("button", { name: /Config check Running/ });
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => { resolveOld(childThread("Old session response")); });
+    await user.click(screen.getByRole("button", { name: /Config check Running/ }));
+    expect(await within(screen.getByRole("dialog")).findByText("Latest child response")).toBeVisible();
+  });
+
+  it("retries a failed history read through the shared history controls", async () => {
+    let offline = true;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (!url.endsWith("/webui-thread")) return response([task()]);
+      if (offline) throw new Error("offline");
+      return childThread("Recovered child response");
+    }));
+    const user = userEvent.setup();
+    render(layout({ historyEnabled: true }));
+    await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
+    const detail = screen.getByRole("dialog");
+    expect(await within(detail).findByRole("alert")).toHaveTextContent("Loading failed.");
+    offline = false;
+    await user.click(within(detail).getByRole("button", { name: "Retry" }));
+    expect(await within(detail).findByText("Recovered child response")).toBeVisible();
+  });
 
   it("keeps the same work block under its prompt, folds completed work and restores it after refresh", async () => {
     const view = render(layout());
@@ -101,7 +194,8 @@ describe("session-owned task UI", () => {
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
     expect(within(detail).getByText(/has not been restarted automatically/)).toBeVisible();
-    expect(within(detail).getByText("Partial result")).toBeVisible();
+    expect(detail).toHaveFocus();
+    expect(within(detail).getByText("Interrupted")).toBeVisible();
     expect(within(detail).getByText("Found a conflicting setting")).toBeVisible();
     await user.click(within(detail).getByText("Message delivery"));
     expect(within(detail).getByText("Delivered: 1")).toBeVisible();

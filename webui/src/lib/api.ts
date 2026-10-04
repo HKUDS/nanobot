@@ -561,6 +561,16 @@ export async function fetchSubagentTasks(token: string, sessionKey: string): Pro
   return { tasks: payload.tasks };
 }
 
+export async function fetchSubagentThread(
+  token: string, sessionKey: string, taskId: string, signal?: AbortSignal,
+): Promise<WebuiThreadPersistedPayload> {
+  const payload = await request<unknown>(
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents/${encodeURIComponent(taskId)}/webui-thread`,
+    token, { signal, cache: "no-store" }, API_READ_TIMEOUT_MS,
+  );
+  return parseWebuiThreadPayload(payload);
+}
+
 export async function cancelSubagentTask(
   transport: WebUIMutationTransport, sessionKey: string, taskId: string,
 ): Promise<SubagentTaskSnapshot> {

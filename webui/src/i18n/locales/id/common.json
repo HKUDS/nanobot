@@ -1565,9 +1565,6 @@
       "loadFailed": "Tidak dapat memuat subtugas.",
       "stopFailed": "Tidak dapat menghentikan tugas ini.",
       "stopTask": "Hentikan {{label}}",
-      "iteration": "Iterasi {{count}}",
-      "result": "Hasil",
-      "partialResult": "Hasil parsial",
       "receiptHelp": "Terkirim berarti pesan disertakan dalam permintaan model berikutnya dari subagen, bukan konfirmasi bahwa pekerjaan selesai.",
       "states": {
         "queued": "Dalam antrean",
@@ -1592,15 +1589,7 @@
       "running": "Berjalan: {{count}}",
       "finished": "Berakhir: {{count}}",
       "needsReview": "Perlu diperiksa: {{count}}",
-      "details": "Detail tugas",
-      "description": "Deskripsi tugas",
-      "activity": "Aktivitas eksekusi",
-      "messages": "Status pengiriman pesan",
-      "toolStates": {
-        "running": "Berjalan",
-        "ok": "Selesai",
-        "error": "Gagal"
-      }
+      "messages": "Status pengiriman pesan"
     },
     "compaction": {
       "cancelled": "Pemadatan konteks dibatalkan",

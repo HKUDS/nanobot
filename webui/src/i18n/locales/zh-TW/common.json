@@ -1565,9 +1565,6 @@
       "loadFailed": "無法載入子任務。",
       "stopFailed": "無法停止此任務。",
       "stopTask": "停止 {{label}}",
-      "iteration": "第 {{count}} 輪",
-      "result": "結果",
-      "partialResult": "部分結果",
       "receiptHelp": "已送達表示訊息已進入子任務的下一次模型請求，不代表已執行完成。",
       "states": {
         "queued": "排隊中",
@@ -1592,15 +1589,7 @@
       "running": "{{count}} 項進行中",
       "finished": "{{count}} 項已結束",
       "needsReview": "{{count}} 項需檢查",
-      "details": "任務詳情",
-      "description": "任務描述",
-      "activity": "執行記錄",
-      "messages": "訊息傳送狀態",
-      "toolStates": {
-        "running": "執行中",
-        "ok": "已完成",
-        "error": "失敗"
-      }
+      "messages": "訊息傳送狀態"
     },
     "compaction": {
       "cancelled": "上下文壓縮已取消",

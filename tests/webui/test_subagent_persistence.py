@@ -23,7 +23,13 @@ from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
-from nanobot.providers.base import GenerationSettings, LLMProvider, ProviderConversationState
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMProvider,
+    LLMResponse,
+    ProviderConversationState,
+    ToolCallRequest,
+)
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
@@ -54,6 +60,82 @@ def gateway_for(manager, sessions, workspace):
     )
     token = gateway.tokens.issue_api_token(60)
     return gateway, SimpleNamespace(remote_address=("127.0.0.1", 12345)), Headers({"Authorization": f"Bearer {token}"})
+
+
+@pytest.mark.asyncio
+async def test_child_thread_reads_real_session_through_parent_without_new_persistence(tmp_path):
+    workspace, root = tmp_path / "agent", tmp_path / "sessions"
+    workspace.mkdir()
+    (workspace / "config.txt").write_text("configured value", encoding="utf-8")
+    manager, sessions, runtime = manager_with_storage(workspace, root)
+    entered, release = asyncio.Event(), asyncio.Event()
+    final_text = ("## Findings\n\n" + "Verified configuration.\n" * 1000).rstrip()
+    calls = 0
+
+    async def respond(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return LLMResponse(content="Inspecting configuration", tool_calls=[
+                ToolCallRequest("read-config", "read_file", {"path": "config.txt"}),
+            ])
+        entered.set()
+        await release.wait()
+        return LLMResponse(content=final_text)
+
+    runtime.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    gateway, connection, headers = gateway_for(manager, sessions, workspace)
+    try:
+        await manager.spawn("Inspect configuration", session_key="websocket:parent", runtime=runtime)
+        await asyncio.wait_for(entered.wait(), 5)
+        task_id, = manager.statuses_for_session("websocket:parent")
+        child_key = SubagentSessions.key(task_id)
+        path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
+        files_before = set(root.rglob("*"))
+        denied = await gateway.http.dispatch(connection, Request(path, Headers()))
+        assert denied.status_code == 401
+        unknown = []
+        for candidate in (path.replace("parent", "other"), path.replace(task_id, "missing")):
+            response = await gateway.http.dispatch(connection, Request(candidate, headers))
+            assert response.status_code == 404
+            unknown.append(response.body)
+        assert unknown[0] == unknown[1]
+        direct = await gateway.http.dispatch(connection, Request(
+            f"/api/sessions/{quote(child_key, safe='')}/webui-thread", headers,
+        ))
+        assert direct.status_code == 404
+        response = await gateway.http.dispatch(connection, Request(path, headers))
+        assert response.status_code == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        running = json.loads(response.body)
+        assert running["active_turn_id"]
+        assert [(event["event"], event.get("text")) for event in running["events"][:2]] == [
+            ("user_message", "Inspect configuration"), ("message", "Inspecting configuration"),
+        ]
+        tool = next(event for event in running["events"] if event.get("kind") == "tool_hint")
+        assert tool["tool_events"][0]["phase"] == "end"
+        assert "configured value" in tool["tool_events"][0]["result"]
+        assert set(root.rglob("*")) == files_before
+        release.set()
+        await asyncio.gather(*list(manager._running_tasks.values()))
+        assert len(manager.check(task_id, "websocket:parent").result) == 16000
+        await manager.close()
+        manager, sessions, _ = manager_with_storage(workspace, root)
+        gateway, connection, headers = gateway_for(manager, sessions, workspace)
+        response = await gateway.http.dispatch(connection, Request(path, headers))
+        completed = json.loads(response.body)
+        assert completed["active_turn_id"] is None
+        assert next(event["text"] for event in completed["events"] if event.get("turn_phase") == "answer") == final_text
+        assert [event["projection_id"] for event in completed["events"][:3]] == [
+            event["projection_id"] for event in running["events"]
+        ]
+        assert manager.get_running_count() == 0
+        deleted = await gateway.http.dispatch_webui_mutation(connection, "session.delete", {"key": "websocket:parent"})
+        assert deleted.status_code == 200
+        assert (await gateway.http.dispatch(connection, Request(path, headers))).status_code == 404
+    finally:
+        release.set()
+        await manager.close()
 
 
 @pytest.mark.asyncio

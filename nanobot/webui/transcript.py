@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Sequence, cast
 from urllib.parse import unquote, urlparse
@@ -23,7 +24,7 @@ from nanobot.config.paths import get_webui_dir
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import atomic_write_lines
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 from nanobot.webui.session_identity import webui_chat_id, webui_session_key
@@ -1374,36 +1375,8 @@ def write_session_messages_as_transcript(
     messages: list[dict[str, Any]],
 ) -> None:
     """Write a minimal WebUI transcript from already-truncated session messages."""
-    target_chat_id = _chat_id_from_session_key(target_key)
-    rows: list[dict[str, Any]] = []
-    for msg in messages:
-        if is_hidden_history_message(msg):
-            continue
-        msg = public_history_message(msg)
-        role = msg.get("role")
-        content = msg.get("content")
-        text = content if isinstance(content, str) else ""
-        if role == "user":
-            row: dict[str, Any] = {"event": "user", "chat_id": target_chat_id, "text": text}
-            media = msg.get("media")
-            if isinstance(media, list) and media:
-                row["media_paths"] = [
-                    str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
-                ]
-            for key in ("cli_apps", "mcp_presets", "session_mentions"):
-                value = msg.get(key)
-                if isinstance(value, list) and value:
-                    row[key] = json.loads(json.dumps(value, ensure_ascii=False))
-        elif role == "assistant" and text.strip():
-            row = {"event": "message", "chat_id": target_chat_id, "text": text}
-            media = msg.get("media")
-            if isinstance(media, list) and media:
-                row["media"] = [
-                    str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
-                ]
-        else:
-            continue
-        rows.append(row)
+    rows = [row for msg in messages
+            if (row := _session_user_event(target_key, msg) or _session_assistant_event(target_key, msg)) is not None]
     _write_transcript_lines(target_key, rows)
 
 
@@ -2446,6 +2419,86 @@ def _client_projection_events(
             deferred_until = group.stop
         events.append(event)
     return events, fork_boundary_event_index
+
+
+def build_session_thread_response(
+    session: Session,
+    *,
+    active: bool = False,
+    latency_ms: int | None = None,
+    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+    augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+    augment_assistant_text: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    """Project a Session snapshot without creating a second display transcript."""
+    results = {message["tool_call_id"]: message.get("content") for message in session.messages
+               if message.get("role") == "tool" and isinstance(message.get("tool_call_id"), str)
+               and not is_hidden_history_message(message)}
+    rows: list[dict[str, Any]] = []
+    chat_id = session.key.split(":", 1)[-1]
+    turn_id = f"session:{session.key}:0"
+    created_at_ms = int(session.created_at.timestamp() * 1000)
+    for index, message in enumerate(session.messages):
+        if is_hidden_history_message(message):
+            continue
+        if message.get("role") == "user":
+            turn_id = f"session:{session.key}:{index}"
+        timestamp = message.get("timestamp")
+        if isinstance(timestamp, str):
+            try:
+                created_at_ms = int(datetime.fromisoformat(timestamp).timestamp() * 1000)
+            except ValueError:
+                pass
+        records: list[dict[str, Any]] = []
+        row = _session_user_event(session.key, message) or _session_assistant_event(session.key, message)
+        reasoning = message.get("reasoning_content")
+        if message.get("role") == "assistant" and isinstance(reasoning, str) and reasoning:
+            records.append({"event": "message", "text": reasoning, "kind": "reasoning"})
+        calls = message.get("tool_calls")
+        if row is not None:
+            if isinstance(calls, list) and calls:
+                row["kind"] = "progress"
+            records.append(row)
+        if message.get("role") == "assistant" and isinstance(calls, list):
+            tool_events: list[dict[str, Any]] = []
+            for call in cast(list[object], calls):
+                if not isinstance(call, dict):
+                    continue
+                call_data = cast(dict[str, Any], call)
+                if _format_tool_call_trace(call_data) is None:
+                    continue
+                raw_call_id = call_data.get("id")
+                call_id = raw_call_id if isinstance(raw_call_id, str) else None
+                event = {**call_data, "call_id": call_id,
+                         "phase": "end" if call_id in results else "start"}
+                if call_id in results:
+                    event["result"] = results[call_id]
+                tool_events.append(event)
+            if tool_events:
+                records.append({"event": "message", "kind": "tool_hint",
+                                "text": "\n".join(tool_trace_lines_from_events(tool_events)),
+                                "tool_events": tool_events})
+        for offset, record in enumerate(records):
+            record.update({
+                "chat_id": chat_id, "turn_id": turn_id,
+                "turn_phase": "user" if record["event"] == "user" else
+                    "reasoning" if record.get("kind") == "reasoning" else
+                    "activity" if record.get("kind") in {"progress", "tool_hint"} else "answer",
+                "created_at_ms": created_at_ms,
+                _WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:{index}:{offset}",
+            })
+            rows.append(record)
+    if not active and rows:
+        rows.append({"event": "turn_end", "chat_id": chat_id,
+                     "turn_id": turn_id, "latency_ms": latency_ms,
+                     _WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:end"})
+    events = [event for record in rows if (event := _client_projection_event(
+        record, augment_user_media=augment_user_media, augment_assistant_media=augment_assistant_media,
+        augment_assistant_text=augment_assistant_text,
+    )) is not None]
+    return {"schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION, "sessionKey": session.key,
+            "projection": "events", "events": events,
+            "active_turn_id": turn_id if active else None}
 
 
 def build_webui_thread_response(

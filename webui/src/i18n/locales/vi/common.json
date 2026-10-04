@@ -1565,9 +1565,6 @@
       "loadFailed": "Không thể tải tác vụ con.",
       "stopFailed": "Không thể dừng tác vụ này.",
       "stopTask": "Dừng {{label}}",
-      "iteration": "Vòng {{count}}",
-      "result": "Kết quả",
-      "partialResult": "Kết quả một phần",
       "receiptHelp": "Đã chuyển nghĩa là tin nhắn đã được đưa vào yêu cầu mô hình tiếp theo của tác nhân con, không xác nhận công việc đã hoàn tất.",
       "states": {
         "queued": "Đang chờ",
@@ -1592,15 +1589,7 @@
       "running": "Đang chạy: {{count}}",
       "finished": "Đã kết thúc: {{count}}",
       "needsReview": "Cần kiểm tra: {{count}}",
-      "details": "Chi tiết tác vụ",
-      "description": "Mô tả tác vụ",
-      "activity": "Nhật ký thực thi",
-      "messages": "Trạng thái tin nhắn",
-      "toolStates": {
-        "running": "Đang chạy",
-        "ok": "Hoàn thành",
-        "error": "Thất bại"
-      }
+      "messages": "Trạng thái tin nhắn"
     },
     "compaction": {
       "cancelled": "Đã hủy nén ngữ cảnh",

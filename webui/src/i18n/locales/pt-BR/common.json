@@ -1579,9 +1579,6 @@
       "loadFailed": "Não foi possível carregar as subtarefas.",
       "stopFailed": "Não foi possível interromper esta tarefa.",
       "stopTask": "Interromper {{label}}",
-      "iteration": "Iteração {{count}}",
-      "result": "Resultado",
-      "partialResult": "Resultado parcial",
       "receiptHelp": "Entregue significa que a mensagem foi incluída na próxima solicitação do subagente, sem confirmar sua execução.",
       "states": {
         "queued": "Na fila",
@@ -1606,15 +1603,7 @@
       "running": "Em andamento: {{count}}",
       "finished": "Encerradas: {{count}}",
       "needsReview": "Revisar: {{count}}",
-      "details": "Detalhes da tarefa",
-      "description": "Descrição da tarefa",
-      "activity": "Atividade de execução",
-      "messages": "Status das mensagens",
-      "toolStates": {
-        "running": "Em andamento",
-        "ok": "Concluído",
-        "error": "Falhou"
-      }
+      "messages": "Status das mensagens"
     },
     "compaction": {
       "cancelled": "Compactação do contexto cancelada",

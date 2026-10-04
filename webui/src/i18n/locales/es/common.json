@@ -1566,9 +1566,6 @@
       "loadFailed": "No se pudieron cargar las subtareas.",
       "stopFailed": "No se pudo detener esta tarea.",
       "stopTask": "Detener {{label}}",
-      "iteration": "Iteración {{count}}",
-      "result": "Resultado",
-      "partialResult": "Resultado parcial",
       "receiptHelp": "Entregado significa que el mensaje se incluyó en la siguiente solicitud del subagente, sin confirmar su ejecución.",
       "states": {
         "queued": "En cola",
@@ -1593,15 +1590,7 @@
       "running": "En curso: {{count}}",
       "finished": "Finalizadas: {{count}}",
       "needsReview": "Revisar: {{count}}",
-      "details": "Detalles de la tarea",
-      "description": "Descripción de la tarea",
-      "activity": "Actividad de ejecución",
-      "messages": "Estado de los mensajes",
-      "toolStates": {
-        "running": "En curso",
-        "ok": "Completado",
-        "error": "Fallido"
-      }
+      "messages": "Estado de los mensajes"
     },
     "compaction": {
       "cancelled": "Compresión de contexto cancelada",

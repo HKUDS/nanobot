@@ -1565,9 +1565,6 @@
       "loadFailed": "Impossible de charger les sous-tâches.",
       "stopFailed": "Impossible d’arrêter cette tâche.",
       "stopTask": "Arrêter {{label}}",
-      "iteration": "Itération {{count}}",
-      "result": "Résultat",
-      "partialResult": "Résultat partiel",
       "receiptHelp": "Livré signifie que le message a été inclus dans la prochaine requête du sous-agent, sans confirmer son exécution.",
       "states": {
         "queued": "En attente",
@@ -1592,15 +1589,7 @@
       "running": "En cours : {{count}}",
       "finished": "Terminées : {{count}}",
       "needsReview": "À vérifier : {{count}}",
-      "details": "Détails de la tâche",
-      "description": "Description de la tâche",
-      "activity": "Historique d’exécution",
-      "messages": "État des messages",
-      "toolStates": {
-        "running": "En cours",
-        "ok": "Terminé",
-        "error": "Échec"
-      }
+      "messages": "État des messages"
     },
     "compaction": {
       "cancelled": "Compression du contexte annulée",

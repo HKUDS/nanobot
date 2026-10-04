@@ -16,6 +16,7 @@ from nanobot.webui.remote_ssh import Tunnel
     ["webui.core.v1"],
     ["webui.core.v1", "webui.subagents.v1"],
     ["webui.core.v1", "webui.subagents.v1", "webui.subagents.events.v1"],
+    ["webui.core.v1", "webui.subagents.v1", "webui.subagents.events.v1", "webui.subagents.history.v1"],
 ])
 async def test_proxy_preserves_independently_declared_host_capabilities(monkeypatch, capabilities):
     tunnel = MagicMock(spec=Tunnel)
