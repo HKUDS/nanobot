@@ -15,6 +15,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
+    SessionTitleEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
@@ -94,6 +95,8 @@ class WebUIOutboundTransport(Protocol):
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None: ...
 
+    async def send_session_title(self, chat_id: str, *, title: str) -> None: ...
+
     async def send_file_edit_events(
         self,
         chat_id: str,
@@ -155,6 +158,7 @@ class WebUIOutboundProjector:
                 UserInputEvent,
                 TurnEndEvent,
                 SessionUpdatedEvent,
+                SessionTitleEvent,
                 GoalStatusEvent,
                 GoalStateSyncEvent,
                 ContextCompactionEvent,
@@ -247,6 +251,10 @@ class WebUIOutboundProjector:
         if isinstance(event, SessionUpdatedEvent):
             if conns:
                 await self._transport.send_session_updated(msg.chat_id, scope=event.scope)
+            return
+        if isinstance(event, SessionTitleEvent):
+            if conns:
+                await self._transport.send_session_title(msg.chat_id, title=event.title)
             return
         if progress_event and progress_event.file_edit_events:
             await self._transport.send_file_edit_events(
