@@ -36,12 +36,14 @@ class SubagentStatus:
     origin_turn_id: str | None = None
     created_at: float = field(default_factory=time.time)
     completed_at: float | None = None
+    revision: int = 0
 
     def as_dict(self) -> dict[str, object]:
         """Serialize task observations without exposing ownership or resources."""
         end = self.finished_at if self.finished_at is not None else time.monotonic()
         return {
             "task_id": self.task_id,
+            "revision": self.revision,
             "origin_message_id": self.origin_message_id,
             "origin_turn_id": self.origin_turn_id,
             "created_at": self.created_at,

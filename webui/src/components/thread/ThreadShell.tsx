@@ -1882,6 +1882,7 @@ export function ThreadShell({
   return (
     <SubagentTasksProvider client={client} token={token}
       sessionKey={session?.key ?? null}
+      liveEvents={webuiCapabilities.includes("webui.subagents.events.v1")}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
     <section ref={shellRef} data-preview-open={previewOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">

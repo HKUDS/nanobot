@@ -21,12 +21,14 @@ from nanobot.agent.tools.context import RequestContext, current_request_context,
 from nanobot.agent.tools.session_messages import ListSessionsTool, SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.websocket.runtime import WebSocketConfig
+from nanobot.bus.runtime_events import SubagentTaskChanged
+from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider, ProviderConversationState
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
+from nanobot.session.webui_turns import WebuiTurnCoordinator
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.gateway_services import build_gateway_services
 
@@ -70,6 +72,93 @@ async def test_new_unsaved_parent_has_an_empty_task_collection(tmp_path):
         assert sessions.read_session_metadata(key) is None
     finally:
         await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_task_changes_use_parent_chat_events_and_saved_child_observations(tmp_path):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    gateway, _, _ = gateway_for(manager, sessions, tmp_path / "agent")
+    channel = WebSocketChannel(WebSocketConfig(), manager.bus, gateway=gateway)
+    channel._safe_send_to = AsyncMock()
+    parent_connection, other_connection = MagicMock(), MagicMock()
+    channel._attach(parent_connection, "parent")
+    channel._attach(other_connection, "other")
+    coordinator = WebuiTurnCoordinator(manager.bus, sessions, schedule_background=MagicMock())
+    entered, release = asyncio.Queue(), asyncio.Event()
+
+    async def held(spec):
+        await spec.checkpoint_callback({"phase": "awaiting_model", "iteration": 1})
+        await entered.put(True)
+        await release.wait()
+        return AgentRunResult(messages=[], final_content="## Private findings\n\n- Verified")
+
+    async def deliver():
+        await manager.bus.drain()
+        while manager.bus.outbound_size:
+            message = await manager.bus.consume_outbound()
+            assert isinstance(message.event, SubagentTaskChanged)
+            await channel.send(message)
+        return [
+            (call.args[0], json.loads(call.args[1]))
+            for call in channel._safe_send_to.await_args_list
+        ]
+
+    manager.runner.run = held
+    try:
+        with coordinator.connected():
+            for chat in ("parent", "parent", "other"):
+                await manager.spawn(
+                    "Investigate configuration", origin_channel="websocket", origin_chat_id=chat,
+                    session_key=f"websocket:{chat}", origin_turn_id="finished-parent-turn", runtime=runtime,
+                )
+                await asyncio.wait_for(entered.get(), 2)
+            first, sibling = manager.statuses_for_session("websocket:parent")
+            foreign, = manager.statuses_for_session("websocket:other")
+            parent = sessions.get_existing("websocket:parent")
+            parent.add_message("assistant", "Parent reply already delivered")
+            sessions.save(parent)
+            original_messages = parent.messages.copy()
+            routed = await deliver()
+            assert {payload["task"]["task_id"] for conn, payload in routed if conn is parent_connection} == {first, sibling}
+            assert {payload["task"]["task_id"] for conn, payload in routed if conn is other_connection} == {foreign}
+            for _, payload in routed:
+                assert payload["event"] == "subagent_task"
+                assert "turn_id" not in payload
+                assert "owner" not in payload["task"]
+                assert payload["task"]["phase"] == "awaiting_model"
+                assert payload["task"]["revision"] > 1
+            previous_revision = manager.check(first, "websocket:parent").revision
+            channel._safe_send_to.reset_mock()
+            stopped = await manager.cancel(first, "websocket:parent")
+            routed = await deliver()
+            assert routed and all(conn is parent_connection for conn, _ in routed)
+            assert all(payload["task"]["state"] == "cancelled" for _, payload in routed)
+            assert stopped.revision > previous_revision
+            assert manager.check(sibling, "websocket:parent").state == "running"
+            channel._safe_send_to.reset_mock()
+            release.set()
+            await asyncio.gather(*list(manager._running_tasks.values()), return_exceptions=True)
+            routed = await deliver()
+            assert any(conn is parent_connection and payload["task"]["state"] == "done" for conn, payload in routed)
+            assert parent.messages == original_messages
+            saved = manager.sessions.status(sibling, "websocket:parent")
+            assert saved.revision == manager.check(sibling, "websocket:parent").revision
+            assert saved.result == "## Private findings\n\n- Verified"
+
+            channel._safe_send_to.reset_mock()
+            await manager.spawn(
+                "Queued before parent deletion", origin_channel="websocket", origin_chat_id="parent",
+                session_key="websocket:parent", runtime=runtime,
+            )
+            await manager.bus.drain()
+            assert manager.bus.outbound_size > 0
+            sessions.delete_session("websocket:parent")
+            assert await deliver() == []
+    finally:
+        await manager.close()
+        await manager.bus.drain()
+        await channel._cleanup_connection(parent_connection)
+        await channel._cleanup_connection(other_connection)
 
 
 @pytest.mark.asyncio

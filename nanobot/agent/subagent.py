@@ -34,6 +34,7 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeEventContext, SubagentTaskChanged
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
 from nanobot.providers.base import LLMProvider, ToolCallRequest
@@ -294,8 +295,19 @@ class SubagentManager:
     def _save_status(
         self, status: SubagentStatus, *, fsync: bool = False,
     ) -> None:
-        if self.sessions is not None:
-            self.sessions.save(status, fsync=fsync)
+        status.revision += 1
+        if self.sessions is not None and not self.sessions.save(status, fsync=fsync):
+            return
+        self._publish_status(status)
+
+    def _publish_status(self, status: SubagentStatus) -> None:
+        origin = self._tasks[status.task_id].origin
+        self.bus.publish_nowait(SubagentTaskChanged(
+            context=RuntimeEventContext(
+                channel=origin["channel"], chat_id=origin["chat_id"], session_key=status.owner,
+            ),
+            task_id=status.task_id,
+        ))
 
     def recover_interrupted(self) -> None:
         """Recover observations only after the host has claimed execution ownership."""
@@ -510,6 +522,7 @@ class SubagentManager:
         task_id = str(uuid.uuid4())
         status = SubagentStatus(
             task_id=task_id,
+            revision=1,
             label=label or task[:30] + ("..." if len(task) > 30 else ""),
             task_description=task,
             started_at=time.monotonic(),
@@ -535,6 +548,7 @@ class SubagentManager:
             announce=announce,
         )
         self._tasks[task_id] = record
+        self._publish_status(status)
         execution = asyncio.create_task(self._run_subagent(record))
         self._running_tasks[task_id] = execution
         execution.add_done_callback(partial(self._task_done, record))
@@ -669,8 +683,11 @@ class SubagentManager:
 
         async def _on_checkpoint(payload: dict[str, Any]) -> None:
             record.raise_if_stopping()
-            status.phase = payload.get("phase", status.phase)
-            status.iteration = payload.get("iteration", status.iteration)
+            phase = payload.get("phase", status.phase)
+            iteration = payload.get("iteration", status.iteration)
+            if (phase, iteration) != (status.phase, status.iteration):
+                status.phase, status.iteration = phase, iteration
+                self._save_status(status)
 
         root = workspace_scope.project_path if workspace_scope is not None else self.workspace
         cfg = None

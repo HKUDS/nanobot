@@ -14,6 +14,7 @@ from nanobot import __version__
 WEBUI_PROTOCOL = 1
 CORE_CAPABILITY = "webui.core.v1"
 SUBAGENT_CAPABILITY = "webui.subagents.v1"
+SUBAGENT_EVENTS_CAPABILITY = "webui.subagents.events.v1"
 
 
 class Compatibility(TypedDict):
@@ -27,7 +28,7 @@ def webui_contract() -> dict[str, object]:
         "version": __version__,
         "min_protocol": WEBUI_PROTOCOL,
         "max_protocol": WEBUI_PROTOCOL,
-        "capabilities": [CORE_CAPABILITY, SUBAGENT_CAPABILITY],
+        "capabilities": [CORE_CAPABILITY, SUBAGENT_CAPABILITY, SUBAGENT_EVENTS_CAPABILITY],
     }
 
 

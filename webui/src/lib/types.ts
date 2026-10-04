@@ -68,6 +68,7 @@ export type SubagentTaskState = "queued" | "running" | "stopping" | "done" | "in
 
 export interface SubagentTaskSnapshot {
   task_id: string;
+  revision?: number;
   origin_message_id: string | null;
   origin_turn_id: string | null;
   created_at: number;
@@ -1383,6 +1384,7 @@ interface InboundTurnMetadata {
 }
 
 export type InboundEvent =
+  | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
   | { event: "ready"; chat_id: string; client_id: string }
   | {
       event: "attached";

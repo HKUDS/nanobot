@@ -70,17 +70,18 @@ class SubagentSessions:
             self.sessions.save(child, fsync=True)
             return child
 
-    def save(self, status: SubagentStatus, *, fsync: bool = False) -> None:
+    def save(self, status: SubagentStatus, *, fsync: bool = False) -> bool:
         with self.sessions.locked_session_files():
             if not self.exists(status.owner):
-                return
+                return False
             child = self.sessions.get_existing(self.key(status.task_id))
             if child is None or not self.contains(status.task_id, status.owner):
-                return
+                return False
             child.metadata[TASK_METADATA_KEY] = self._payload(status)
             # Only create() establishes identity. Progress and late completion
             # cannot recreate a child removed with its parent.
             self.sessions.save(child, fsync=fsync)
+            return True
 
     def status(self, task_id: str, owner: str) -> SubagentStatus | None:
         payload = self.sessions.read_session_metadata(self.key(task_id))
@@ -136,6 +137,7 @@ class SubagentSessions:
                 if status is None or status.state not in _ACTIVE_STATES:
                     continue
                 status.state = status.phase = "interrupted"
+                status.revision += 1
                 status.stop_reason = "host_restarted"
                 status.finished_at = time.monotonic()
                 status.completed_at = time.time()

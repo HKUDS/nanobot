@@ -20,6 +20,7 @@ from nanobot.bus.outbound_events import (
     TurnModelUpdatedEvent,
     UserInputEvent,
 )
+from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.session.webui_turns import clear_websocket_turn_if_current
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
@@ -94,6 +95,8 @@ class WebUIOutboundTransport(Protocol):
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None: ...
 
+    async def send_subagent_task(self, chat_id: str, task_id: str) -> None: ...
+
     async def send_file_edit_events(
         self,
         chat_id: str,
@@ -157,6 +160,7 @@ class WebUIOutboundProjector:
                 SessionUpdatedEvent,
                 GoalStatusEvent,
                 GoalStateSyncEvent,
+                SubagentTaskChanged,
                 ContextCompactionEvent,
             )
             log = (
@@ -243,6 +247,10 @@ class WebUIOutboundProjector:
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
             await self._transport.send_session_updated(msg.chat_id, scope=session_update_scope)
+            return
+        if isinstance(event, SubagentTaskChanged):
+            if conns:
+                await self._transport.send_subagent_task(msg.chat_id, event.task_id)
             return
         if isinstance(event, SessionUpdatedEvent):
             if conns:

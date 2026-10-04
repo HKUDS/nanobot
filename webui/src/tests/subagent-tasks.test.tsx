@@ -6,10 +6,28 @@ import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { buildDisplayUnits, ThreadMessages, unitKeysForDisplay } from "@/components/thread/ThreadMessages";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { setAppLanguage } from "@/i18n";
-import type { SubagentTaskSnapshot, UIMessage } from "@/lib/types";
+import type { ConnectionStatus, InboundEvent, SubagentTaskSnapshot, UIMessage } from "@/lib/types";
 
 const requestMutation = vi.fn();
-const client = { requestMutation };
+const chatHandlers = new Map<string, Set<(event: InboundEvent) => void>>();
+const statusHandlers = new Set<(status: ConnectionStatus) => void>();
+const client = {
+  requestMutation,
+  onChat: vi.fn((chatId: string, handler: (event: InboundEvent) => void) => {
+    const handlers = chatHandlers.get(chatId) ?? new Set();
+    chatHandlers.set(chatId, handlers);
+    handlers.add(handler);
+    return () => { handlers.delete(handler); };
+  }),
+  onStatus: vi.fn((handler: (status: ConnectionStatus) => void) => {
+    statusHandlers.add(handler);
+    handler("open");
+    return () => { statusHandlers.delete(handler); };
+  }),
+};
+function emitTask(snapshot: SubagentTaskSnapshot, chatId = "a") {
+  act(() => { chatHandlers.get(chatId)?.forEach((handler) => handler({ event: "subagent_task", chat_id: chatId, task: snapshot })); });
+}
 const messages: UIMessage[] = [
   { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a" },
   { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a" },
@@ -17,7 +35,7 @@ const messages: UIMessage[] = [
 
 function task(overrides: Partial<SubagentTaskSnapshot> = {}): SubagentTaskSnapshot {
   return {
-    task_id: "task-1", label: "Config check", task_description: "Check configuration values",
+    task_id: "task-1", revision: 1, label: "Config check", task_description: "Check configuration values",
     state: "running", phase: "awaiting_model", elapsed_seconds: 2, iteration: 1,
     tool_events: [], usage: null, receipts: {}, result: null, partial: false,
     stop_reason: null, error: null, origin_turn_id: "turn-a", origin_message_id: null,
@@ -27,9 +45,9 @@ function task(overrides: Partial<SubagentTaskSnapshot> = {}): SubagentTaskSnapsh
 function response(tasks: SubagentTaskSnapshot[]): Response {
   return new Response(JSON.stringify({ tasks }), { headers: { "content-type": "application/json" } });
 }
-function layout({ enabled = true, sessionKey = "websocket:a", visible = true, threadMessages = messages } = {}) {
+function layout({ enabled = true, liveEvents = true, sessionKey = "websocket:a", visible = true, threadMessages = messages } = {}) {
   return <ThreadVisibilityContext.Provider value={visible}>
-    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled}>
+    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents}>
       <div data-testid="messages"><ThreadMessages messages={threadMessages} /></div>
       <div data-testid="composer"><textarea aria-label="Message" /></div>
     </SubagentTasksProvider>
@@ -40,6 +58,10 @@ describe("session-owned task UI", () => {
   beforeEach(async () => {
     await setAppLanguage("en");
     requestMutation.mockReset();
+    client.onChat.mockClear();
+    client.onStatus.mockClear();
+    chatHandlers.clear();
+    statusHandlers.clear();
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response([task()])));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -51,7 +73,7 @@ describe("session-owned task UI", () => {
     const header = within(work!).getByRole("button", { name: /Delegated work/ });
     expect(screen.getByTestId("messages")).toContainElement(runningRow);
     expect(header).toHaveAttribute("aria-expanded", "true");
-    vi.mocked(fetch).mockImplementation(async () => response([task({ state: "done", result: "Verified", completed_at: 102 })]));
+    vi.mocked(fetch).mockImplementation(async () => response([task({ revision: 2, state: "done", result: "Verified", completed_at: 102 })]));
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(header).toHaveAttribute("aria-expanded", "false"));
     fireEvent.click(header);
@@ -100,7 +122,7 @@ describe("session-owned task UI", () => {
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    await act(async () => { resolveStop(task({ state: "cancelled", completed_at: 102 })); });
+    await act(async () => { resolveStop(task({ revision: 3, state: "cancelled", completed_at: 102 })); });
     await user.click(screen.getByRole("button", { name: /Delegated work Finished: 1/ }));
     await screen.findByRole("button", { name: /Config check Cancelled/ });
     await act(async () => { resolveRefresh(response([task()])); });
@@ -108,7 +130,7 @@ describe("session-owned task UI", () => {
     expect(requestMutation).toHaveBeenCalledWith("subagent.cancel", { session_key: "websocket:a", task_id: "task-1" }, 20_000);
   });
 
-  it("does not request an unsupported feature and pauses polling in hidden panes", async () => {
+  it("does not request an unsupported feature and detaches events in hidden panes", async () => {
     const view = render(layout({ enabled: false }));
     expect(fetch).not.toHaveBeenCalled();
     view.rerender(layout({ visible: false }));
@@ -120,6 +142,8 @@ describe("session-owned task UI", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent(window, new Event("focus"));
     expect(fetch).toHaveBeenCalledTimes(1);
+    expect(chatHandlers.get("a")?.size).toBe(0);
+    expect(statusHandlers.size).toBe(0);
   });
 
   it("keeps load failures visible and keeps stop failures across a successful refresh", async () => {
@@ -168,7 +192,7 @@ describe("session-owned task UI", () => {
     const row = await screen.findByRole("button", { name: /Config check Running/ });
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
-    vi.mocked(fetch).mockImplementation(async () => response([task({ state: "done", completed_at: 102,
+    vi.mocked(fetch).mockImplementation(async () => response([task({ revision: 2, state: "done", completed_at: 102,
       result: "## Findings\n\n- **Release** resources\n- Cover exceptions\n\n```python\nawait connection.close()\n```\n\n| Check | Result |\n| --- | --- |\n| Cancellation | Passed |\n\n[Evidence](https://example.com/review)",
     })]));
     fireEvent(window, new Event("focus"));
@@ -197,7 +221,7 @@ describe("session-owned task UI", () => {
     const rows = screen.getAllByRole("button", { name: /check Running/ });
     expect(rows.map((row) => row.dataset.subagentId)).toEqual(["task-1", "second"]);
     vi.mocked(fetch).mockImplementation(async () => response([
-      task({ task_id: "second", label: "Second check", created_at: 101, origin_message_id: "old-prompt-id", state: "error", error: "Unreadable file" }),
+      task({ task_id: "second", revision: 2, label: "Second check", created_at: 101, origin_message_id: "old-prompt-id", state: "error", error: "Unreadable file" }),
       task({ origin_message_id: "old-prompt-id" }),
     ]));
     fireEvent(window, new Event("focus"));
@@ -213,5 +237,70 @@ describe("session-owned task UI", () => {
     await screen.findByRole("button", { name: /Config check Running/ });
     const group = screen.getByRole("region", { name: "Delegated work" });
     expect(screen.getByText("Check more").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("merges live work before the initial read without polling or rolling back completed work", async () => {
+    let resolveRead!: (value: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
+    render(layout());
+    emitTask(task({ revision: 3, state: "done", result: "Verified", completed_at: 102 }));
+    emitTask(task({ task_id: "task-2", label: "Sibling check", created_at: 101 }));
+    await screen.findByRole("button", { name: /Sibling check Running/ });
+    await act(async () => { resolveRead(response([task()])); });
+    expect(screen.getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    expect(screen.getAllByRole("region", { name: "Delegated work" })).toHaveLength(1);
+    vi.useFakeTimers();
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("keeps elapsed time consistent when inspecting a task long after its last event", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(performance, "now").mockImplementation(() => Date.now());
+    render(layout());
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    const row = screen.getByRole("button", { name: /Config check Running/ });
+    expect(row).toHaveTextContent("12s");
+    fireEvent.click(row);
+    expect(screen.getByRole("dialog", { name: "Config check" })).toHaveTextContent("12s");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.mocked(performance.now).mockRestore();
+  });
+
+  it("recovers missed siblings after reconnect even when an older read is still pending", async () => {
+    let resolveOld!: (value: Response) => void;
+    render(layout());
+    await screen.findByRole("button", { name: /Config check Running/ });
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    fireEvent(window, new Event("focus"));
+    emitTask(task({ revision: 3, state: "cancelled", completed_at: 102 }));
+    vi.mocked(fetch).mockImplementationOnce(async () => response([
+      task({ revision: 2 }), task({ task_id: "task-2", label: "Recovered check", created_at: 101 }),
+    ]));
+    act(() => { statusHandlers.forEach((handler) => { handler("closed"); handler("open"); }); });
+    await act(async () => { resolveOld(response([task()])); });
+    await screen.findByRole("button", { name: /Recovered check Running/ });
+    expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    emitTask({ ...task(), revision: -1 });
+    expect(screen.getByText("Could not load subagent tasks.")).toBeVisible();
+  });
+
+  it("keeps protocol 1 task controls usable on a host without event support", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined })]));
+    vi.useFakeTimers();
+    const view = render(layout({ liveEvents: false }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined, state: "done", completed_at: 102 })]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByRole("button", { name: /Delegated work Finished: 1/ })).toBeVisible();
+    expect(client.onChat).not.toHaveBeenCalled();
+    view.rerender(layout({ liveEvents: false, visible: false }));
+    const reads = vi.mocked(fetch).mock.calls.length;
+    await act(async () => { vi.advanceTimersByTime(6000); });
+    expect(fetch).toHaveBeenCalledTimes(reads);
   });
 });

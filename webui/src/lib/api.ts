@@ -49,6 +49,7 @@ import type {
   WorkspaceScopePayload,
 } from "./types";
 import { fetchWithTimeout } from "./http";
+import { isSubagentTask } from "./subagent-tasks";
 
 const API_READ_TIMEOUT_MS = 20_000;
 const API_MUTATION_TIMEOUT_MS = 20_000;
@@ -547,25 +548,6 @@ export async function updateAutomation(
   values: AutomationUpdatePayload,
 ): Promise<AutomationsPayload> {
   return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
-}
-
-function isSubagentTask(value: unknown): value is SubagentTaskSnapshot {
-  if (!isRecord(value)) return false;
-  const nullableText = (entry: unknown) => entry === null || typeof entry === "string";
-  return typeof value.task_id === "string" && value.task_id.length > 0
-    && typeof value.label === "string" && typeof value.task_description === "string"
-    && typeof value.phase === "string" && typeof value.state === "string"
-    && ["queued", "running", "stopping", "done", "incomplete", "error", "cancelled", "interrupted"].includes(value.state)
-    && typeof value.elapsed_seconds === "number" && Number.isFinite(value.elapsed_seconds) && value.elapsed_seconds >= 0
-    && typeof value.iteration === "number" && Number.isInteger(value.iteration) && value.iteration >= 0
-    && typeof value.created_at === "number" && Number.isFinite(value.created_at)
-    && (value.completed_at === null || (typeof value.completed_at === "number" && Number.isFinite(value.completed_at)))
-    && nullableText(value.origin_turn_id) && nullableText(value.origin_message_id)
-    && nullableText(value.result) && nullableText(value.error) && nullableText(value.stop_reason)
-    && typeof value.partial === "boolean"
-    && isRecordArray(value.tool_events) && value.tool_events.every((entry) => typeof entry.name === "string" && typeof entry.status === "string")
-    && isRecord(value.receipts) && Object.values(value.receipts).every((entry) => typeof entry === "string" && ["accepted", "delivered", "undelivered"].includes(entry))
-    && (value.usage === null || (isRecord(value.usage) && Object.values(value.usage).every((entry) => entry === null || typeof entry === "string" || (typeof entry === "number" && Number.isFinite(entry)))));
 }
 
 export async function fetchSubagentTasks(token: string, sessionKey: string): Promise<SubagentTasksPayload> {
