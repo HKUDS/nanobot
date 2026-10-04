@@ -50,17 +50,22 @@ class SubagentSessions:
             "elapsed_seconds": status.as_dict()["elapsed_seconds"],
         }
 
-    def create(self, status: SubagentStatus) -> Session:
+    def create(self, status: SubagentStatus, *, policy: SessionPolicy | None = None) -> Session:
         with self.sessions.locked_session_files():
             parent = self.sessions.get_existing(status.owner)
             if parent is None:
                 parent = self.sessions.get_or_create(status.owner)
-            if parent.policy.persist and self.sessions.read_session_metadata(parent.key) is None:
+            requested = policy or SessionPolicy()
+            effective = SessionPolicy(
+                persist=parent.policy.persist and requested.persist,
+                log_content=parent.policy.log_content and requested.log_content,
+            )
+            if effective.persist and self.sessions.read_session_metadata(parent.key) is None:
                 self.sessions.save(parent, fsync=True)
             key = self.key(status.task_id)
-            child = (self.sessions.get_or_create(key) if parent.policy.persist
+            child = (self.sessions.get_or_create(key) if effective.persist
                      else self.sessions.get_or_create_transient(key))
-            child.policy = SessionPolicy(persist=parent.policy.persist, log_content=parent.policy.log_content)
+            child.policy = effective
             child.metadata.update({
                 SESSION_TYPE_KEY: SUBAGENT.name,
                 PARENT_SESSION_KEY: status.owner,

@@ -43,6 +43,7 @@ class RequestContext:
     log_content: bool = True
     # The host has a live consumer for automatic child completion notices.
     background_subagents: bool = True
+    persist_session: bool = True
 
 
 @runtime_checkable

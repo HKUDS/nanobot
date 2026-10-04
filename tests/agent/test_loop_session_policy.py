@@ -21,6 +21,8 @@ from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequ
 from nanobot.runtime_context import RuntimeContextBlock
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionPolicy
+from nanobot.webui.temporary_chats import WebUITemporaryChats
+from nanobot.webui.workspaces import WebUIWorkspaceController
 
 
 def _message(key: str, content: str) -> InboundMessage:
@@ -55,11 +57,14 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
 async def test_transient_session_keeps_history_without_persisting_or_durable_tools(tmp_path) -> None:
     loop = _loop(tmp_path, ["first answer", "second answer"])
     loop.context.memory.write_memory("private durable memory")
-    key = "websocket:transient-test"
-    loop.sessions.get_or_create_transient(
-        key,
-        disabled_tools={"create_goal", "update_goal", "spawn", "cron"},
+    temporary_chats = WebUITemporaryChats(
+        bus=loop.bus, session_manager=loop.sessions, logger=logger,
+        workspaces=WebUIWorkspaceController(
+            session_manager=loop.sessions, default_workspace=tmp_path,
+            default_restrict_to_workspace=True,
+        ),
     )
+    key = f"websocket:{temporary_chats.create(object(), trusted_webui=True)}"
 
     await loop._process_message(_message(key, "first question"))
     await loop._process_message(_message(key, "second question"))
@@ -68,7 +73,7 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     assert "private durable memory" not in str(calls[0].kwargs["messages"])
     tool_names = {item["function"]["name"] for item in calls[0].kwargs["tools"]}
     assert "read_session" in tool_names
-    assert {"create_goal", "update_goal", "spawn", "cron"}.isdisjoint(tool_names)
+    assert {"create_goal", "update_goal", "subagent", "cron"}.isdisjoint(tool_names)
     assert "first answer" in str(calls[1].kwargs["messages"])
     session = loop.sessions.get_cached(key)
     assert session is not None
@@ -79,6 +84,8 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
         "assistant",
     ]
     assert loop.sessions.read_session_file(key) is None
+    temporary_chats.close()
+    await loop.aclose()
 
 
 @pytest.mark.parametrize("selection", ["explicit_empty", "disable_all", "default"])
@@ -365,7 +372,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
     previous_file_state = loop._file_state_store.for_session(key)
     loop.sessions.get_or_create_transient(
         key,
-        disabled_tools={"create_goal", "update_goal", "spawn", "cron"},
+        disabled_tools={"create_goal", "update_goal", "subagent", "cron"},
     )
     run_task = asyncio.create_task(loop.run())
     await loop.bus.publish_inbound(_message(key, "private"))

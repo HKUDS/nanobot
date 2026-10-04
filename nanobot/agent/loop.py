@@ -737,6 +737,7 @@ class AgentLoop:
             turn_id=ctx.delivery.route.turn_id or ctx.turn_id,
             workspace=scope.project_path,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
+            persist_session=ctx.session.policy.persist and not ctx.ephemeral,
             background_subagents=self._running,
         )
 
@@ -1003,7 +1004,7 @@ class AgentLoop:
         ephemeral = ephemeral or (session is not None and not session.policy.persist)
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
-            if session is None:
+            if session is None or ephemeral:
                 return
             public_payload = dict(payload)
             private_state = public_payload.pop("provider_state", None)
@@ -1194,6 +1195,10 @@ class AgentLoop:
             log_content=(
                 request_ctx.log_content and not ephemeral
                 and (session is None or session.policy.log_content)
+            ),
+            persist_session=(
+                request_ctx.persist_session and not ephemeral
+                and (session is None or session.policy.persist)
             ),
         )
         effective_tools = tools if tools is not None else self.tools
@@ -1968,7 +1973,7 @@ class AgentLoop:
 
         if ctx.kind is TurnKind.SYSTEM:
             logger.info("Processing system message from {}", msg.sender_id)
-        elif session.policy.log_content:
+        elif session.policy.log_content and not ctx.ephemeral:
             preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
             logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
         else:
@@ -2150,7 +2155,7 @@ class AgentLoop:
                 staged_provider_state = True
         elif stored_state is not None:
             session.provider_state = None
-        if ctx.kind is TurnKind.USER:
+        if ctx.kind is TurnKind.USER and (not ctx.ephemeral or not session.policy.persist):
             ctx.input_persisted_early = self._persist_user_message_early(
                 ctx.msg,
                 session,
@@ -2207,7 +2212,6 @@ class AgentLoop:
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
-        turn_continuation.prepare_save_boundary(ctx)
 
         if (
             ctx.kind is TurnKind.USER
@@ -2226,6 +2230,13 @@ class AgentLoop:
             else ctx.turn_wall_started_at
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
+        ctx.delivery.record_latency(ctx.turn_latency_ms)
+        # A per-run ephemeral SDK call must not enter the durable cache either:
+        # later ordinary turns and flush() would otherwise persist its content.
+        # Transient sessions still retain their in-memory conversation history.
+        if ctx.ephemeral and session.policy.persist:
+            return
+        turn_continuation.prepare_save_boundary(ctx)
         if ctx.usage is not None and not ctx.ephemeral:
             session.metadata["_last_usage"] = ctx.usage.to_dict()
         self._save_turn(
@@ -2242,7 +2253,6 @@ class AgentLoop:
             # The next request must rebuild from the portable checkpoint;
             # the opaque continuation predates that transcript rewrite.
             session.provider_state = None
-        ctx.delivery.record_latency(ctx.turn_latency_ms)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)

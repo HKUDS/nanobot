@@ -27,6 +27,7 @@ from nanobot.agent.tools.context import (
     ToolContext,
     bind_request_context,
     reset_request_context,
+    tool_log_content_allowed,
 )
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStates
@@ -185,7 +186,8 @@ class _SubagentHook(AgentHook):
         if self._status is not None and self._on_status is not None:
             self._on_status(self._status)
         for tool_call in context.tool_calls:
-            args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+            args_str = (json.dumps(tool_call.arguments, ensure_ascii=False)
+                        if tool_log_content_allowed() else "[content hidden]")
             logger.debug(
                 "Subagent [{}] executing: {} with arguments: {}",
                 self._task_id, tool_call.name, args_str,
@@ -510,6 +512,7 @@ class SubagentManager:
         session_key: str | None, origin_message_id: str | None,
         temperature: float | None, workspace_scope: WorkspaceScope | None,
         runtime: LLMRuntime | None, *, announce: bool, origin_turn_id: str | None,
+        session_policy: SessionPolicy | None,
     ) -> _SubagentTask:
         if runtime is None:
             runtime = self._compat_spawn_runtime()
@@ -531,9 +534,9 @@ class SubagentManager:
             origin_turn_id=origin_turn_id,
         )
         if self.sessions is not None:
-            child = self.sessions.create(status)
+            child = self.sessions.create(status, policy=session_policy)
         else:
-            child = Session(key=SubagentSessions.key(task_id), policy=SessionPolicy(persist=False))
+            child = Session(key=SubagentSessions.key(task_id), policy=session_policy or SessionPolicy())
             child.add_message("user", task)
         record = _SubagentTask(
             status=status,
@@ -552,7 +555,8 @@ class SubagentManager:
         execution = asyncio.create_task(self._run_subagent(record))
         self._running_tasks[task_id] = execution
         execution.add_done_callback(partial(self._task_done, record))
-        logger.info("Started subagent [{}]: {}", task_id, record.status.label)
+        logger.info("Started subagent [{}]: {}", task_id,
+                    record.status.label if child.policy.log_content else "[content hidden]")
         return record
 
     async def spawn(
@@ -568,12 +572,14 @@ class SubagentManager:
         *,
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
+        session_policy: SessionPolicy | None = None,
     ) -> str:
         """Start background work and route its terminal result to the parent."""
         try:
             record = self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=True, origin_turn_id=origin_turn_id,
+                session_policy=session_policy,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
@@ -593,12 +599,14 @@ class SubagentManager:
         *,
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
+        session_policy: SessionPolicy | None = None,
     ) -> str:
         """Wait for the same task lifecycle without a background notice."""
         try:
             record = self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=False, origin_turn_id=origin_turn_id,
+                session_policy=session_policy,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
@@ -625,7 +633,8 @@ class SubagentManager:
         self._running_tasks.pop(record.status.task_id, None)
         error = None if task.cancelled() else task.exception()
         if error is not None:
-            logger.error("Subagent [{}] failed: {}", record.status.task_id, error)
+            logger.error("Subagent [{}] failed: {}", record.status.task_id,
+                         error if record.session.policy.log_content else type(error).__name__)
         if record.status.finished_at is None:
             # An externally cancelled execution still owns cleanup and a terminal result.
             record.decide(
@@ -654,13 +663,15 @@ class SubagentManager:
         except asyncio.CancelledError:
             record.decide(_SubagentOutcome("cancelled", "Task cancelled.", "cancelled"))
         except Exception as exc:
-            logger.exception("Subagent [{}] failed", status.task_id)
+            logger.opt(exception=record.session.policy.log_content).error("Subagent [{}] failed", status.task_id)
             record.decide(_SubagentOutcome("error", f"Error: {exc}", "error", str(exc)))
         cleanup_error = None
         try:
             await asyncio.shield(self._start_cleanup(record))
         except Exception as exc:
-            logger.exception("Subagent [{}] exec cleanup failed", status.task_id)
+            logger.opt(exception=record.session.policy.log_content).error(
+                "Subagent [{}] exec cleanup failed", status.task_id,
+            )
             cleanup_error = f"Error cleaning up task processes: {exc}"
         outcome = self._finish(record, cleanup_error)
         if record.announce and not record.suppress_notice and not self._closed:
@@ -679,7 +690,8 @@ class SubagentManager:
         status, origin, runtime = record.status, record.origin, record.runtime
         task_id, label = status.task_id, status.label
         origin_message_id, workspace_scope = record.origin_message_id, record.workspace_scope
-        logger.info("Subagent [{}] starting task: {}", task_id, label)
+        logger.info("Subagent [{}] starting task: {}", task_id,
+                    label if record.session.policy.log_content else "[content hidden]")
 
         async def _on_checkpoint(payload: dict[str, Any]) -> None:
             record.raise_if_stopping()
@@ -709,6 +721,7 @@ class SubagentManager:
             session_key=record.session.key,
             runtime=runtime,
             log_content=record.session.policy.log_content,
+            persist_session=record.session.policy.persist,
         ))
         token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
         try:
@@ -745,7 +758,7 @@ class SubagentManager:
                 checkpoint_callback=_on_checkpoint,
                 injection_callback=partial(self._drain_inbox, record),
                 session_key=record.session.key,
-                workspace=root,
+                workspace=root if record.session.policy.persist else None,
                 llm_usage_source=origin.get(
                     "llm_usage_source",
                     current_llm_usage_source(),

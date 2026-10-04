@@ -17,6 +17,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.security.workspace_access import current_workspace_scope
+from nanobot.session.manager import SessionPolicy
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
         description=(
             "For create: wait for the result directly when it must inform the current turn. "
             "Defaults to false for background execution with a completion notification. "
-            "Hosts without a background consumer always wait."
+            "Ephemeral requests and hosts without a background consumer always wait."
         ),
         default=False,
     ),
@@ -134,7 +135,8 @@ class SubagentTool(Tool):
         )
         if not session_key:
             return ToolResult.error("Error: create requires an active session identity")
-        method = self._manager.run_inline if wait or not request_ctx.background_subagents else self._manager.spawn
+        inline = wait or not request_ctx.background_subagents or not request_ctx.persist_session
+        method = self._manager.run_inline if inline else self._manager.spawn
         return await method(
             task=task,
             runtime=request_ctx.runtime,
@@ -146,4 +148,8 @@ class SubagentTool(Tool):
             origin_turn_id=request_ctx.turn_id,
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
+            session_policy=SessionPolicy(
+                persist=request_ctx.persist_session,
+                log_content=request_ctx.log_content,
+            ),
         )

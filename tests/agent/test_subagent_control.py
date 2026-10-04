@@ -11,17 +11,19 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from loguru import logger
 
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.nanobot import Nanobot
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -80,6 +82,76 @@ async def test_direct_turn_waits_for_child_without_a_background_consumer(loop_fa
         assert next(iter(loop.subagents.statuses_for_session("cli:direct").values())).state == "done"
     finally:
         await loop.subagents.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing_parent", [False, True])
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_sdk_ephemeral_delegation_never_persists_on_later_flush(
+    loop_factory, existing_parent, streamed,
+):
+    loop = loop_factory()
+    bot = Nanobot(loop)
+    key = "sdk:ephemeral-delegation"
+    parent = loop.sessions.get_or_create(key)
+    if existing_parent:
+        parent.add_message("user", "Earlier durable question")
+        loop.sessions.save(parent)
+    before = {path.name: path.read_bytes() for path in loop.sessions.sessions_dir.glob("*.jsonl")}
+    secret = "private-delegation-marker"
+    source = loop.workspace / f"{secret}.txt"
+    source.write_text(secret * 1000, encoding="utf-8")
+    loop.max_tool_result_chars = 2048
+    responses = iter([
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="delegate", name="subagent", arguments={"action": "create", "task": secret},
+        )]),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="inspect", name="read_file", arguments={"path": str(source)},
+        )]),
+        LLMResponse(content=f"Child findings: {secret}"),
+        LLMResponse(content=f"Parent conclusion: {secret}"),
+    ])
+    requests = []
+
+    async def respond(**kwargs):
+        requests.append(current_request_context())
+        return next(responses)
+
+    loop.provider.provider_name = "test"
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    logs = []
+    sink = logger.add(lambda message: logs.append(message.record["message"]))
+    consumer = asyncio.create_task(loop.run())
+    try:
+        await asyncio.sleep(0)
+        assert loop._running
+        if streamed:
+            stream = await bot.run_streamed(secret, session_key=key, ephemeral=True)
+            result = await stream.wait()
+        else:
+            result = await bot.run(secret, session_key=key, ephemeral=True)
+        assert result.content == f"Parent conclusion: {secret}"
+        assert all(ctx is not None and not ctx.log_content and not ctx.persist_session for ctx in requests)
+        assert secret not in "\n".join(logs)
+        assert {path.name: path.read_bytes() for path in loop.sessions.sessions_dir.glob("*.jsonl")} == before
+        assert not list(loop.sessions.sessions_dir.glob("*.checkpoint.json"))
+        assert not (loop.workspace / ".nanobot" / "tool-results").exists()
+        assert loop.bus.inbound_size == 0
+
+        loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Durable answer"))
+        await bot.run("Durable follow-up", session_key=key)
+        bot.sessions.flush()
+        saved = "\n".join(path.read_text() for path in loop.sessions.sessions_dir.glob("*.jsonl"))
+        assert "Durable answer" in saved
+        assert ("Earlier durable question" in saved) is existing_parent
+        assert secret not in saved
+        assert len(list(loop.sessions.sessions_dir.glob("*.jsonl"))) == 1
+    finally:
+        loop.stop()
+        await asyncio.wait_for(consumer, timeout=2)
+        logger.remove(sink)
+        await bot.aclose()
 
 
 @pytest.mark.asyncio
