@@ -265,6 +265,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="opencode.ai/zen/go",
         default_api_base="https://opencode.ai/zen/go/v1",
         strip_model_prefixes=("opencode-go", "opencode_go"),
+        responses_models=("muse-spark-1.2-contributor", "muse-spark-1.3-contributor"),
     ),
     # Hugging Face Inference Providers: OpenAI-compatible router for chat models.
     ProviderSpec(
