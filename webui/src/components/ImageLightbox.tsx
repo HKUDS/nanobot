@@ -142,7 +142,7 @@ export function ImageLightbox({
           <DialogPrimitive.Close
             aria-label={t("lightbox.close")}
             className={cn(
-              "absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full",
+              "touch-target absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full",
               "bg-black/55 text-white/90 hover:bg-black/70 hover:text-white",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70",
               "transition-colors motion-reduce:transition-none",
