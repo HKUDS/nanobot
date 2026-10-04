@@ -24,6 +24,32 @@ function feature(overrides: Partial<NanobotFeatureInfo>): NanobotFeatureInfo {
 }
 
 describe("channelSetup", () => {
+  it("offers a localized inherited option without changing ordinary booleans", () => {
+    const setup = channelSetup(feature({ setup: { fields: [
+      {
+        key: "channels.plugin-chat.showCompactionNotices",
+        field: "showCompactionNotices",
+        kind: "bool",
+        choices: [],
+        required: false,
+        inheritable: true,
+      },
+      {
+        key: "channels.plugin-chat.sendProgress",
+        field: "sendProgress",
+        kind: "bool",
+        choices: [],
+        required: false,
+      },
+    ] } }), "zh-CN");
+    expect(setup.fields?.[0]?.options).toEqual([
+      { value: "", label: "默认" },
+      { value: "true", label: "True" },
+      { value: "false", label: "False" },
+    ]);
+    expect(setup.fields?.[1]?.options?.map((option) => option.value)).toEqual(["true", "false"]);
+  });
+
   it("builds editable fields for a plugin-owned backend contract", () => {
     const setup = channelSetup(feature({
       setup: {
@@ -120,12 +146,25 @@ describe("channelSetup", () => {
       webui: "webui/index.ts",
     }), "zh-CN");
 
-    expect(setup.summary).toBe("钉钉需要 Stream 模式的应用凭据。");
-    expect(setup.steps[0]).toBe("创建或选择一个已启用 Stream 模式的钉钉应用。");
+    expect(setup.docsLabel).toBe("打开钉钉配置指南");
+    expect(setup.officialLabel).toBe("打开钉钉开发者后台");
     expect(setup.fields).toContainEqual(expect.objectContaining({
       key: "channels.dingtalk.allowFrom",
       label: "允许的用户",
     }));
+  });
+
+  it("loads custom setup section labels from the channel-owned locale", () => {
+    const setup = channelSetup(feature({
+      name: "email",
+      display_name: "Email",
+      webui: "webui/index.ts",
+    }));
+
+    expect(setup.sectionLabels).toEqual({
+      receiving: "Receiving mail",
+      sending: "Sending mail",
+    });
   });
 });
 

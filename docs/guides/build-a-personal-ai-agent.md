@@ -20,13 +20,9 @@ delivery.
 
 ## Install
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-```
-
-The wizard creates `~/.nanobot/config.json` and helps you choose a provider and
-model. If terminals and config files are new to you, use
+Follow [Quick Start](../quick-start.md) to install nanobot using the recommended
+method for your operating system and configure one model. Return here after
+you receive the first reply. If terminals and config files are new to you, use
 [Start Without Technical Background](../start-without-technical-background.md)
 instead.
 

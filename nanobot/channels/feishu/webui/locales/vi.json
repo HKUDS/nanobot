@@ -1,17 +1,8 @@
 {
-  "description": "Sử dụng nanobot trong cuộc trò chuyện và nhóm Feishu.",
-  "requirements": "Thông tin xác thực Feishu, đăng ký sự kiện và gateway",
   "setup": {
     "primaryAction": "Kết nối Feishu",
     "docsLabel": "Mở hướng dẫn Feishu",
     "officialLabel": "Mở bảng điều khiển Feishu",
-    "tryIt": "Gửi tin nhắn riêng hoặc nhắc trợ lý trong nhóm.",
-    "summary": "Kết nối tạo hoặc liên kết ứng dụng Feishu bằng QR và lưu thông tin xác thực.",
-    "steps": [
-      "Nhấn Kết nối và quét QR bằng Feishu hoặc Lark.",
-      "Phê duyệt kết nối. nanobot tự lưu App ID và Secret.",
-      "Gửi tin nhắn riêng cho bot hoặc nhắc bot trong nhóm Feishu."
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
@@ -19,8 +10,7 @@
       },
       "appSecret": {
         "label": "App Secret",
-        "placeholder": "Để trống để giữ secret hiện tại",
-        "help": "Chỉ dán secret mới khi xoay vòng thông tin xác thực."
+        "placeholder": "Để trống để giữ khóa hiện tại"
       },
       "domain": {
         "label": "Khu vực",
@@ -47,21 +37,45 @@
           "true": "Phiên riêng cho từng chủ đề",
           "false": "Dùng chung một phiên cho nhóm"
         }
+      },
+      "name": {
+        "label": "Tên tài khoản"
+      },
+      "encryptKey": {
+        "label": "Khóa mã hóa"
+      },
+      "verificationToken": {
+        "label": "Mã thông báo xác minh"
+      },
+      "reactEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "doneEmoji": {
+        "label": "biểu tượng cảm xúc xong"
+      },
+      "toolHintPrefix": {
+        "label": "Tiền tố gợi ý công cụ"
+      },
+      "replyToMessage": {
+        "label": "Trả lời tin nhắn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
       }
     }
   },
   "custom": {
-    "toggleAssistant": "Trợ lý {{name}}",
+    "toggleAssistant": "Bật trợ lý {{name}}",
     "configured": "Đã kết nối",
     "needsSetup": "Cần cấp quyền",
-    "noAppId": "Không có App ID",
-    "createAnother": "Tạo trợ lý khác",
-    "createHint": "Tạo bot Feishu riêng cho nhóm hoặc quy trình khác.",
-    "createAssistant": "Tạo trợ lý",
-    "reconnect": "Kết nối lại",
-    "countNone": "Chưa kết nối trợ lý",
-    "countOne": "Đã kết nối 1 trợ lý",
-    "countMany": "Đã kết nối {{count}} trợ lý",
     "qrAlt": "Mã QR kết nối Feishu",
     "scanTitle": "Quét bằng Feishu",
     "scanDescription": "Quét bằng Feishu hoặc Lark trên điện thoại. nanobot sẽ hoàn tất cấu hình sau khi cấp quyền.",

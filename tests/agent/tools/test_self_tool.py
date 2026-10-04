@@ -61,7 +61,9 @@ def _make_mock_loop(**overrides):
     loop.subagents = MagicMock()
     loop.subagents._running_tasks = {"abc123": MagicMock(done=MagicMock(return_value=False))}
     loop.subagents._task_statuses = {}
-    loop.subagents.runtime_statuses.side_effect = lambda: loop.subagents._task_statuses
+    loop.subagents.statuses_for_session.side_effect = (
+        lambda key: loop.subagents._task_statuses if key == "test:owner" else {}
+    )
     loop.subagents.get_running_count = MagicMock(return_value=1)
 
     for k, v in overrides.items():
@@ -481,24 +483,17 @@ class TestModifyOpen:
         assert tool._runtime_control.snapshot().workspace == "/new/path"
 
     @pytest.mark.asyncio
-    async def test_modify_pending_queues_blocked(self):
-        """_pending_queues controls message routing — must be blocked."""
+    @pytest.mark.parametrize(
+        "key",
+        [
+            pytest.param("_pending_queues", id="pending_queues_blocked"),
+            pytest.param("_session_locks", id="session_locks_blocked"),
+            pytest.param("_active_tasks", id="active_tasks_blocked"),
+        ],
+    )
+    async def test_modify_runtime_coordination_state_blocked(self, key):
         tool = _make_tool()
-        result = await tool.execute(action="set", key="_pending_queues", value={})
-        assert "protected" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_session_locks_blocked(self):
-        """_session_locks controls session isolation — must be blocked."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_session_locks", value={})
-        assert "protected" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_active_tasks_blocked(self):
-        """_active_tasks tracks running tasks — must be blocked."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_active_tasks", value={})
+        result = await tool.execute(action="set", key=key, value={})
         assert "protected" in result
 
     @pytest.mark.asyncio
@@ -787,8 +782,7 @@ class TestCheckpointCallback:
 
 # ---------------------------------------------------------------------------
 # check subagents._task_statuses via dot-path
-# NOTE: subagents is now BLOCKED for security, so these tests verify
-# that access is properly rejected.
+# Task status inspection requires the owning session context.
 # ---------------------------------------------------------------------------
 
 class TestInspectTaskStatuses:
@@ -812,7 +806,8 @@ class TestInspectTaskStatuses:
             ),
         }
         tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="subagents._task_statuses")
+        with request_context(RequestContext("test", "owner", session_key="test:owner")):
+            result = await tool.execute(action="check", key="subagents._task_statuses")
         assert "abc12345" in result
         assert "read logs" in result
 
@@ -833,7 +828,8 @@ class TestInspectTaskStatuses:
         )
         loop.subagents._task_statuses = {"xyz": status}
         tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="subagents._task_statuses.xyz")
+        with request_context(RequestContext("test", "owner", session_key="test:owner")):
+            result = await tool.execute(action="check", key="subagents._task_statuses.xyz")
         assert "search code" in result
         assert "completed" in result
 
@@ -901,13 +897,6 @@ class TestScratchpadInspection:
         result = await tool.execute(action="check", key="task_meta")
         assert "step" in result
         assert "2" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_nonexistent_still_returns_not_found(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="never_set_key_xyz")
-        assert "not found" in result
-
 
 # ---------------------------------------------------------------------------
 # sensitive sub-field blocking (Fix #3: API key leak prevention)

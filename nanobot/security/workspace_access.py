@@ -19,6 +19,7 @@ _PROVIDER_LABELS = {
     "unknown": "Unknown system sandbox",
     "macos_app_sandbox": "macOS App Sandbox",
     "bwrap": "Bubblewrap",
+    "seatbelt": "macOS Seatbelt",
 }
 
 _CURRENT_WORKSPACE_SCOPE: ContextVar["WorkspaceScope | None"] = ContextVar(
@@ -122,17 +123,6 @@ class WorkspaceScopeResolver:
         return default_workspace_scope(
             self.default_workspace,
             self.default_restrict_to_workspace,
-        )
-
-    def for_message(
-        self,
-        msg: Any,
-        session_metadata: Any,
-    ) -> WorkspaceScope:
-        return self.for_turn(
-            channel=getattr(msg, "channel", None),
-            message_metadata=getattr(msg, "metadata", None),
-            session_metadata=session_metadata,
         )
 
     def for_turn(

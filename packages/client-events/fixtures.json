@@ -6,5 +6,9 @@
   {"event":"recovery_state","chat_id":"chat","status":"resuming","recovery_id":"r1","attempts":0},
   {"event":"recovery_state","chat_id":"chat","status":"awaiting_user","recovery_id":"r1","attempts":1,"reason":"tool_state_unknown","can_continue":false},
   {"event":"recovery_state","chat_id":"chat","status":"recovered","recovery_id":"r1","attempts":1},
-  {"event":"recovery_state","chat_id":"chat","status":"failed","recovery_id":"r1","attempts":2}
+  {"event":"recovery_state","chat_id":"chat","status":"failed","recovery_id":"r1","attempts":2},
+  {"event":"retry_status","chat_id":"chat","state":"waiting","attempt":1,"max_attempts":4,"error_kind":"connection","retry_after_s":2},
+  {"event":"retry_status","chat_id":"chat","state":"recovered","attempt":2,"max_attempts":4,"error_kind":"connection"},
+  {"event":"retry_status","chat_id":"chat","state":"cleared","attempt":2,"max_attempts":4,"error_kind":"connection"},
+  {"event":"retry_status","chat_id":"chat","state":"exhausted","attempt":4,"max_attempts":4,"error_kind":"connection"}
 ]

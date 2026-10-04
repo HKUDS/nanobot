@@ -49,7 +49,11 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
-from nanobot.webui.outbound_wire import WebUIWirePayload, WebUIWirePersistence
+from nanobot.webui.outbound_wire import (
+    WebUIWirePayload,
+    WebUIWirePersistence,
+    project_tool_events,
+)
 from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
@@ -672,6 +676,7 @@ class WebSocketChannel(BaseChannel):
             )
 
     async def start(self) -> None:
+        self.gateway.http.remote_instances.resume()
         from nanobot.utils.logging_bridge import redirect_lib_logging
 
         redirect_lib_logging("websockets", level="WARNING")
@@ -801,6 +806,7 @@ class WebSocketChannel(BaseChannel):
             client_id = client_id[:128]
 
         default_chat_id = str(uuid.uuid4())
+        from nanobot.webui.client_contract import gateway_identity
 
         try:
             await connection.send(
@@ -809,6 +815,8 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        **({"terminal": gateway_identity(self.gateway.tokens.instance_id)}
+                           if _query_first(query, "terminal_protocol") == "1" else {}),
                     },
                     ensure_ascii=False,
                 )
@@ -870,13 +878,10 @@ class WebSocketChannel(BaseChannel):
             return
         await self._commands.dispatch(connection, client_id, envelope)
 
-    def _prune_webui_request_operations(self) -> None:
-        """Compatibility hook for request-cache boundary tests."""
-        self._commands.prune_request_operations()
-
     # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:
+        await self.gateway.http.remote_instances.close()
         server_task = self._server_task
         if (
             not self._running
@@ -1099,6 +1104,9 @@ class WebSocketChannel(BaseChannel):
     ) -> bool:
         """Persist one canonical turn event and retain unsafe owners on failure."""
         if not self._temporary_chats.should_persist_transcript(chat_id):
+            self._transcripts.prepare_event(
+                chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
+            )
             return True
         persisted = self._transcripts.prepare_and_append(
             chat_id,
@@ -1143,6 +1151,9 @@ class WebSocketChannel(BaseChannel):
     ) -> bool:
         """Persist the canonical end of a live stream, never its wire chunks."""
         if not self._temporary_chats.should_persist_transcript(chat_id):
+            self._transcripts.prepare_event(
+                chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
+            )
             return True
         persisted = self._transcripts.prepare_and_append_stream_event(
             chat_id,
@@ -1194,7 +1205,7 @@ class WebSocketChannel(BaseChannel):
         if isinstance(lat, (int, float)):
             payload["latency_ms"] = int(lat)
         if progress_event and progress_event.tool_events:
-            payload["tool_events"] = progress_event.tool_events
+            payload["tool_events"] = project_tool_events(progress_event.tool_events)
         agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
         if agent_ui is not None:
             payload["agent_ui"] = agent_ui
@@ -1518,6 +1529,7 @@ class WebSocketChannel(BaseChannel):
         model_preset: Any = None,
         context_window_tokens: Any = None,
         fallback: bool = False,
+        reauth_provider: str | None = None,
     ) -> None:
         """Notify one chat's subscribers which model is handling its current request."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1538,6 +1550,8 @@ class WebSocketChannel(BaseChannel):
             body["context_window_tokens"] = context_window_tokens
         if fallback:
             body["fallback"] = True
+            if reauth_provider:
+                body["reauth_provider"] = reauth_provider
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_model_updated ")

@@ -26,6 +26,7 @@ from nanobot.gateway.service import (
     GatewayServiceResult,
     ServiceManagerKind,
 )
+from nanobot.utils.log_config import add_console_log_sink
 from nanobot.webui.build import BuildMode
 
 RuntimeConfigLoader = Callable[[str | None, str | None], Config]
@@ -66,18 +67,7 @@ def create_gateway_app(
         if not verbose:
             return
         logger.remove(log_handler_id)
-        logger.add(
-            sys.stderr,
-            format=(
-                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <5}</level> | "
-                "<cyan>{extra[channel]}</cyan> | "
-                "<level>{message}</level>"
-            ),
-            level="DEBUG",
-            colorize=None,
-            filter=lambda record: record["extra"].setdefault("channel", "-") or True,
-        )
+        add_console_log_sink(sys.stderr, level="DEBUG")
 
     def instance_for_selectors(
         *,

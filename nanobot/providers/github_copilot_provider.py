@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import threading
 import time
 import webbrowser
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,7 @@ from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot.providers.base import LLMResponse, ProviderCallContext
 from nanobot.providers.oauth_model_catalog import (
+    OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
 )
@@ -80,10 +82,27 @@ def get_github_copilot_login_status() -> OAuthToken | None:
 def login_github_copilot(
     print_fn: Callable[[str], None] | None = None,
     prompt_fn: Callable[[str], str] | None = None,
+    *,
+    on_authorization: Callable[[str, str, int], None] | None = None,
+    cancelled: threading.Event | None = None,
+    open_browser: bool = True,
+    persist: bool = True,
 ) -> OAuthToken:
     """Run GitHub device flow and persist the GitHub OAuth token used for Copilot."""
     del prompt_fn
     printer = print_fn or print
+
+    def check_cancelled() -> None:
+        if cancelled is not None and cancelled.is_set():
+            raise RuntimeError("GitHub sign-in cancelled.")
+
+    def wait(seconds: int) -> None:
+        if cancelled is None:
+            time.sleep(seconds)
+        else:
+            cancelled.wait(seconds)
+            check_cancelled()
+
     timeout = httpx.Timeout(20.0, connect=20.0)
 
     client_id = _resolve("NANOBOT_GITHUB_COPILOT_CLIENT_ID", GITHUB_COPILOT_CLIENT_ID)
@@ -111,7 +130,10 @@ def login_github_copilot(
 
         printer(f"Open: {verify_url}")
         printer(f"Code: {user_code}")
-        if verify_complete:
+        check_cancelled()
+        if on_authorization is not None:
+            on_authorization(verify_complete, user_code, expires_in)
+        if verify_complete and open_browser:
             with suppress(Exception):
                 webbrowser.open(verify_complete)
 
@@ -120,6 +142,7 @@ def login_github_copilot(
         access_token = None
         token_expires_in = _LONG_LIVED_TOKEN_SECONDS
         while time.time() < deadline:
+            check_cancelled()
             poll = client.post(
                 access_token_url,
                 headers={"Accept": "application/json", "User-Agent": USER_AGENT},
@@ -139,11 +162,11 @@ def login_github_copilot(
 
             error = poll_payload.get("error")
             if error == "authorization_pending":
-                time.sleep(current_interval)
+                wait(current_interval)
                 continue
             if error == "slow_down":
                 current_interval += 5
-                time.sleep(current_interval)
+                wait(current_interval)
                 continue
             if error == "expired_token":
                 raise RuntimeError("GitHub device code expired. Please run login again.")
@@ -152,7 +175,7 @@ def login_github_copilot(
             if error:
                 desc = poll_payload.get("error_description") or error
                 raise RuntimeError(str(desc))
-            time.sleep(current_interval)
+            wait(current_interval)
         else:
             raise RuntimeError("GitHub device flow timed out.")
 
@@ -175,7 +198,9 @@ def login_github_copilot(
         expires=expires_ms,
         account_id=str(account_id) if account_id else None,
     )
-    get_storage().save(token)
+    check_cancelled()
+    if persist:
+        get_storage().save(token)
     return token
 
 
@@ -326,7 +351,7 @@ def invalidate_github_copilot_model_catalog() -> None:
 def _fetch_github_copilot_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
     github_token = get_storage().load()
     if not github_token or not github_token.access:
-        raise RuntimeError("GitHub Copilot is not logged in")
+        raise OAuthCatalogAuthRequiredError()
 
     common_headers = {
         "Accept": "application/json",

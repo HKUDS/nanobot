@@ -34,7 +34,7 @@ class TestNewCommandArchival:
             model="test-model",
             context_window_tokens=1,
         )
-        loop.provider.chat_with_retry = AsyncMock(
+        loop.provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(content="ok", tool_calls=[])
         )
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -95,12 +95,6 @@ class TestNewCommandArchival:
         session.last_archived = len(session.messages) - 2
         ordinary_history = session.get_history()
         assert [message["content"] for message in ordinary_history] == [
-            "msg1",
-            "resp1",
-            "msg2",
-            "resp2",
-            "msg3",
-            "resp3",
             "msg4",
             "resp4",
         ]
@@ -119,7 +113,7 @@ class TestNewCommandArchival:
         assert len(scheduled) == 1
         await scheduled[0]
         await loop.aclose()
-        sent = loop.provider.chat_with_retry.call_args.kwargs["messages"]
+        sent = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
         assert sent[1:-1] == ordinary_history
         assert sent[-1]["content"] == _ARCHIVE_PROMPT
 

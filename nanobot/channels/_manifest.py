@@ -18,6 +18,7 @@ def field(
     default: Any = None,
     writable: bool = True,
     snapshot: bool = True,
+    inheritable: bool = False,
 ) -> ChannelFieldSpec:
     return ChannelFieldSpec(
         kind=kind,
@@ -25,6 +26,7 @@ def field(
         default=default,
         writable=writable,
         snapshot=snapshot,
+        inheritable=inheritable,
     )
 
 

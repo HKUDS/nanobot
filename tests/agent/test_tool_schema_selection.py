@@ -129,7 +129,7 @@ def test_selection_fails_open_for_server_name_without_an_operation() -> None:
 @pytest.mark.asyncio
 async def test_runner_sends_budgeted_view_without_changing_registry() -> None:
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
     builtin = _schema("read_file", "Read a local file")
     weather = _schema("mcp_weather_forecast", "Return a weather forecast")
     calendar = _schema("mcp_calendar_events", "List calendar events")
@@ -147,6 +147,6 @@ async def test_runner_sends_budgeted_view_without_changing_registry() -> None:
         mcp_schema_budget_bytes=schema_list_size_bytes([weather]),
     ))
 
-    sent = provider.chat_with_retry.await_args.kwargs["tools"]
+    sent = provider.chat_stream_with_retry.await_args.kwargs["tools"]
     assert _names(sent) == ["read_file", "mcp_weather_forecast"]
     assert tools.get_definitions.return_value is definitions

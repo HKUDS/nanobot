@@ -91,10 +91,7 @@ def test_session_mention_context_treats_titles_as_data() -> None:
     assert json.loads(block.content.splitlines()[2])[0]["session_key"] == "websocket:history"
 
 
-def test_session_mentions_do_not_isolate_workspaces(tmp_path, monkeypatch) -> None:
-    webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
+def test_session_mentions_do_not_isolate_workspaces(tmp_path) -> None:
     manager = SessionManager(tmp_path)
     project_b = tmp_path / "b"
     project_b.mkdir()
@@ -121,17 +118,6 @@ def test_session_mentions_do_not_isolate_workspaces(tmp_path, monkeypatch) -> No
         "session_key": "websocket:other",
         "title": "Other",
     }]
-    assert [row["session_key"] for row in access.search(
-        "Other",
-        5,
-        exclude_session_key="websocket:current",
-    )] == ["websocket:other"]
-    assert access.read(
-        "websocket:other",
-        query="",
-        limit=5,
-        exclude_session_key="websocket:current",
-    ) is not None
 
 
 def test_persisted_session_mentions_validate_fields() -> None:

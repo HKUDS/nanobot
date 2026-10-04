@@ -6,6 +6,7 @@ import {
   floatingSurfaceMotionClassName,
 } from "@/components/ui/floating-surface";
 import { cn } from "@/lib/utils";
+import { useFloatingPortal } from "@/components/ui/floating-portal";
 
 const Popover = PopoverPrimitive.Root;
 const PopoverTrigger = PopoverPrimitive.Trigger;
@@ -18,8 +19,10 @@ interface PopoverContentProps
 const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
   PopoverContentProps
->(({ className, sideOffset = 4, portalContainer, ...props }, ref) => (
-  <PopoverPrimitive.Portal container={portalContainer ?? undefined}>
+>(({ className, sideOffset = 4, portalContainer, ...props }, ref) => {
+  const dialogContainer = useFloatingPortal();
+  return (
+  <PopoverPrimitive.Portal container={portalContainer ?? dialogContainer ?? undefined}>
     <PopoverPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
@@ -32,7 +35,8 @@ const PopoverContent = React.forwardRef<
       {...props}
     />
   </PopoverPrimitive.Portal>
-));
+  );
+});
 PopoverContent.displayName = PopoverPrimitive.Content.displayName;
 
 export {

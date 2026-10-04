@@ -121,6 +121,12 @@ class ToolLoader:
                         builtin_names.add(tool.name)
                 except Exception:
                     logger.exception("Failed to register tool: %s", cls_label)
+            if not is_plugin_source and "rg" in builtin_names:
+                replaced = builtin_names & {"grep", "find_files"}
+                for name in replaced:
+                    registry.unregister(name)
+                registered = [name for name in registered if name not in replaced]
+                builtin_names.difference_update(replaced)
         return registered
 
 
