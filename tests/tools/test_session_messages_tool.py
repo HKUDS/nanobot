@@ -2,6 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Callable
+from unittest.mock import patch
 
 import pytest
 
@@ -184,6 +185,66 @@ async def test_rate_limit_is_per_source_session_and_uses_a_rolling_minute(
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_releases_expired_source_state_and_keeps_recent_sources(
+    tmp_path: Path,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    _persist(
+        sessions,
+        "websocket:a",
+        "websocket:b",
+        "websocket:c",
+        "websocket:target",
+    )
+    now = 0.0
+    tool = SendSessionMessageTool(
+        sessions=sessions,
+        bus=MessageBus(),
+        max_messages_per_minute=2,
+        clock=lambda: now,
+    )
+    target = _handle(sessions, "websocket:target").name
+
+    for source in ("websocket:a", "websocket:b"):
+        await tool.enqueue(
+            source_session_key=source,
+            target_handle=target,
+            content="initial",
+            expect_reply=False,
+        )
+    now = 30.0
+    await tool.enqueue(
+        source_session_key="websocket:a",
+        target_handle=target,
+        content="recent",
+        expect_reply=False,
+    )
+
+    now = 61.0
+    await tool.enqueue(
+        source_session_key="websocket:c",
+        target_handle=target,
+        content="trigger cleanup",
+        expect_reply=False,
+    )
+
+    assert set(tool._sent_at) == {"websocket:a", "websocket:c"}
+    await tool.enqueue(
+        source_session_key="websocket:a",
+        target_handle=target,
+        content="within rolling window",
+        expect_reply=False,
+    )
+    with pytest.raises(SessionMessageError, match="rate limit"):
+        await tool.enqueue(
+            source_session_key="websocket:a",
+            target_handle=target,
+            content="over limit",
+            expect_reply=False,
+        )
+
+
+@pytest.mark.asyncio
 async def test_reply_timeout_injects_a_user_input_back_into_the_source(
     tmp_path: Path,
 ) -> None:
@@ -215,6 +276,45 @@ async def test_reply_timeout_injects_a_user_input_back_into_the_source(
     assert timeout.chat_id == "websocket:source"
     assert timeout.is_user_input
     assert timeout.content == f"No reply from @{target.name} after 5 seconds."
+
+
+@pytest.mark.asyncio
+async def test_reply_timeout_observes_background_delivery_failure(
+    tmp_path: Path,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    _persist(sessions, "websocket:source", "websocket:target")
+    bus = MessageBus()
+    scheduler = _Scheduler()
+    tool = SendSessionMessageTool(
+        sessions=sessions,
+        bus=bus,
+        schedule_later=scheduler,
+    )
+    target = _handle(sessions, "websocket:target")
+
+    await tool.enqueue(
+        source_session_key="websocket:source",
+        target_handle=target.name,
+        content="Question",
+        expect_reply=True,
+        reply_timeout_seconds=5,
+    )
+    await bus.consume_inbound()
+
+    async def fail_publish(_message) -> None:
+        raise RuntimeError("queue unavailable")
+
+    bus.publish_inbound = fail_publish
+    with patch("nanobot.agent.tools.session_messages.logger") as logger:
+        scheduler.calls[0][1].fire()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    assert tool._expiry_tasks == set()
+    logger.exception.assert_called_once_with(
+        "Session reply timeout delivery failed",
+    )
 
 
 @pytest.mark.asyncio

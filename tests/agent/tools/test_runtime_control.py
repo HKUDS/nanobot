@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.runtime_control import (
     RUNTIME_COMMAND_KEYS,
     RUNTIME_SNAPSHOT_KEYS,
@@ -17,6 +18,8 @@ from nanobot.agent.tools.runtime_control import (
 from nanobot.agent.tools.self import MyTool, MyToolConfig
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
+from nanobot.providers.base import GenerationSettings
+from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def _make_loop(tmp_path: Path, *, allow_set: bool = False) -> AgentLoop:
@@ -45,7 +48,6 @@ def test_agent_loop_assembles_my_tool_with_runtime_control(tmp_path: Path) -> No
     assert isinstance(tool._runtime_control, RuntimeControl)
     assert isinstance(tool._runtime_control, AgentRuntimeControl)
     assert tool._runtime_control is not loop
-    assert not hasattr(tool, "_runtime_state")
 
 
 def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path) -> None:
@@ -238,3 +240,71 @@ async def test_workspace_display_command_cannot_change_path_enforcement(tmp_path
     assert tool._runtime_control.snapshot().workspace == "elsewhere"
     assert loop.workspace == tmp_path
     assert loop.workspace_scopes.default_workspace == tmp_path
+
+
+@pytest.fixture
+def runtime() -> LLMRuntime:
+    return LLMRuntime(MagicMock(), "test", GenerationSettings(), 128_000)
+
+
+@pytest.mark.parametrize("key", [None, "subagents", "subagents._task_statuses"])
+async def test_my_subagent_snapshot_is_session_scoped(tmp_path, key, runtime):
+    loop = _make_loop(tmp_path)
+    manager = loop.subagents
+    # Spawn without yielding to the child runner: queued tasks must be scoped too.
+    await manager.spawn("ALPHA_PRIVATE_TASK", label="ALPHA_LABEL", session_key="owner:a", runtime=runtime)
+    await manager.spawn("BETA_PRIVATE_TASK", label="BETA_LABEL", session_key="owner:b", runtime=runtime)
+    try:
+        tool = _my_tool(loop)
+        with request_context(RequestContext("test", "same-chat", session_key="owner:a")):
+            snapshot = tool._runtime_control.snapshot()
+            assert len(snapshot.subagent_statuses) == 1
+            assert "BETA" not in repr(snapshot.as_mapping())
+            result = await tool.execute(action="check", key=key)
+            assert "ALPHA_LABEL" in result
+            assert "BETA" not in result
+        with request_context(RequestContext("test", "same-chat", session_key="owner:b")):
+            result = await tool.execute(action="check", key=key)
+            assert "BETA_LABEL" in result
+            assert "ALPHA" not in result
+    finally:
+        await manager.close()
+
+
+@pytest.mark.parametrize("field", ["", ".task_description", ".tool_events", ".usage"])
+async def test_my_rejects_other_sessions_task_paths(tmp_path, field, runtime):
+    loop = _make_loop(tmp_path)
+    manager = loop.subagents
+    await manager.spawn("PRIVATE_TASK", session_key="owner:a", runtime=runtime)
+    try:
+        task_id = next(iter(manager.statuses_for_session("owner:a")))
+        tool = _my_tool(loop)
+        with request_context(RequestContext("test", "same-chat", session_key="owner:a")):
+            detail = await tool.execute(action="check", key=f"subagents._task_statuses.{task_id}")
+            assert "PRIVATE_TASK" in detail
+        with request_context(RequestContext("test", "same-chat", session_key="owner:b")):
+            result = await tool.execute(
+                action="check", key=f"subagents._task_statuses.{task_id}{field}",
+            )
+            assert result.startswith("Error:")
+            assert "PRIVATE_TASK" not in result
+    finally:
+        await manager.close()
+
+
+@pytest.mark.parametrize("session_key", [None, ""])
+async def test_my_without_session_cannot_enumerate_tasks(tmp_path, session_key, runtime):
+    loop = _make_loop(tmp_path)
+    manager = loop.subagents
+    await manager.spawn("PRIVATE_TASK", session_key="owner:a", runtime=runtime)
+    try:
+        tool = _my_tool(loop)
+        assert tool._runtime_control.snapshot().subagent_statuses == {}
+        assert "PRIVATE_TASK" not in await tool.execute(action="check")
+        assert "unavailable" in await tool.execute(action="check", key="subagents")
+        with request_context(RequestContext("test", "same-chat", session_key=session_key)):
+            assert tool._runtime_control.snapshot().subagent_statuses == {}
+            assert "PRIVATE_TASK" not in await tool.execute(action="check")
+            assert "unavailable" in await tool.execute(action="check", key="subagents._task_statuses")
+    finally:
+        await manager.close()

@@ -300,6 +300,26 @@ async def test_chat_stream_invokes_tool_call_delta_for_input_json_delta() -> Non
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_rejects_eof_without_stop_reason() -> None:
+    provider = AnthropicProvider(api_key="sk-test")
+    provider._client = MagicMock()
+    partial = _final_message_stub("partial summary")
+    partial.stop_reason = None
+    fake = _FakeAsyncStream([])
+    fake.get_final_message = AsyncMock(return_value=partial)
+    stream_cm = MagicMock()
+    stream_cm.__aenter__ = AsyncMock(return_value=fake)
+    stream_cm.__aexit__ = AsyncMock(return_value=None)
+    provider._client.messages.stream = MagicMock(return_value=stream_cm)
+
+    result = await provider.chat_stream(messages=[{"role": "user", "content": "summarize"}])
+
+    assert result.finish_reason == "error"
+    assert result.error_kind == "connection"
+    stream_cm.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_without_callback_still_finalizes() -> None:
     provider = AnthropicProvider(api_key="sk-test")
     provider._client = MagicMock()

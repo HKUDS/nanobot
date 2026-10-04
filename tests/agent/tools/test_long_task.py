@@ -21,7 +21,6 @@ from nanobot.agent.tools.long_task import (
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.outbound_events import GoalStateSyncEvent
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.session.goal_state import GOAL_STATE_KEY, MAX_GOAL_OBJECTIVE_CHARS
 from nanobot.session.manager import SessionManager
 from nanobot.session.turn_continuation import should_finalize_on_max_iterations
@@ -378,17 +377,16 @@ async def test_registry_does_not_reuse_goal_context_after_request_scope(tmp_path
 
 @pytest.mark.asyncio
 async def test_goal_state_events_publish_active_then_inactive(tmp_path):
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
-    runtime_events = RuntimeEventBus()
     sm = SessionManager(tmp_path)
     WebuiTurnCoordinator(
         bus=bus,
         sessions=sm,
         schedule_background=lambda _coro: None,
-    ).subscribe(runtime_events)
-    create = CreateGoalTool(sessions=sm, runtime_events=runtime_events)
-    update = UpdateGoalTool(sessions=sm, runtime_events=runtime_events)
+    ).subscribe()
+    create = CreateGoalTool(sessions=sm, bus=bus)
+    update = UpdateGoalTool(sessions=sm, bus=bus)
     rc = _request_context(chat_id="chat-99")
     await _execute(
         create,

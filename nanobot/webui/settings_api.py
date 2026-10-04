@@ -19,6 +19,7 @@ from nanobot.config.schema import Config
 from nanobot.webui import settings_capabilities as capabilities
 from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as models
+from nanobot.webui import settings_runtime as runtime
 from nanobot.webui import settings_system as system
 from nanobot.webui.settings_contracts import QueryParams, WebUISettingsError
 from nanobot.webui.workspaces import write_webui_default_access_mode
@@ -269,7 +270,11 @@ def update_model_call_order(
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     config = _load_settings_config(config_path)
-    if models.update_model_call_order(config, query):
+    if models.update_model_call_order(
+        config,
+        query,
+        oauth_status=_oauth_provider_status,
+    ):
         _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
 
@@ -280,7 +285,10 @@ def migrate_model_configurations(
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     config = _load_settings_config(config_path)
-    if models.migrate_model_configurations(config):
+    if models.migrate_model_configurations(
+        config,
+        oauth_status=_oauth_provider_status,
+    ):
         _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
 
@@ -452,3 +460,16 @@ def update_transcription_settings(
     if capabilities.update_transcription_settings(config, query):
         _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
+
+
+def update_runtime_config_settings(
+    values: dict[str, Any], *, local_browser: bool = False, config_path: Path | None = None,
+) -> dict[str, Any]:
+    config = _load_settings_config(config_path)
+    changed = runtime.update_runtime_config(config, values, local_browser=local_browser)
+    if changed:
+        _save_settings_config(config, config_path)
+    return settings_payload(
+        requires_restart=changed,
+        config_path=config_path,
+    )

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import run_session
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.session.recovery import RUNTIME_CHECKPOINT_KEY
@@ -44,13 +45,10 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 
 @pytest.mark.asyncio
 async def test_dispatch_cancellation_restores_checkpoint():
-    """Regression for #2966: /stop interrupting _dispatch must materialize the
+    """Regression for #2966: /stop interrupting a session worker must materialize the
     in-flight runtime checkpoint into session.messages before the cancellation
     unwinds, so the next turn can see the partial work.
 
-    This exercises the real _dispatch path (locks, pending queues, the
-    CancelledError handler), so a future refactor that drops the cancel-time
-    restore is caught by CI instead of silently regressing.
     """
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -105,7 +103,7 @@ async def test_dispatch_cancellation_restores_checkpoint():
     msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="work")
 
     with pytest.raises(asyncio.CancelledError):
-        await loop._dispatch(msg)
+        await run_session(loop, msg)
 
     roles = [m.get("role") for m in session.messages]
     assert roles == ["user", "assistant", "tool"], (
@@ -145,7 +143,7 @@ async def test_dispatch_cancellation_keeps_checkpoint_for_gateway_shutdown(tmp_p
     from nanobot.bus.events import InboundMessage
 
     with pytest.raises(asyncio.CancelledError):
-        await loop._dispatch(
+        await run_session(loop,
             InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="work")
         )
 

@@ -43,7 +43,7 @@
 | Install nanobot with no terminal/config background | [Start Without Technical Background](./docs/start-without-technical-background.md) |
 | Install quickly and get one CLI reply | [Install](#-install) and [Quick Start](#-quick-start) |
 | Open the bundled browser UI | [WebUI](#-webui) |
-| Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [Chat Apps](./docs/chat-apps.md) |
+| Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, Linear, or another channel | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
 | Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md) |
@@ -53,7 +53,7 @@
 nanobot is a self-hosted personal AI agent runtime. It can:
 
 - run in a browser WebUI or terminal
-- connect to Telegram, Discord, Slack, WeChat, Email, Mattermost, and other chat apps
+- connect to Telegram, Discord, Slack, WeChat, Email, Mattermost, Linear, and other channels
 - use tools such as files, shell, web search, web fetch, MCP, cron, image generation, and subagents
 - keep session history and long-term memory through Dream
 - run long-horizon goals and scheduled automations
@@ -63,7 +63,7 @@ nanobot is a self-hosted personal AI agent runtime. It can:
 ## 💡 Why nanobot
 
 - **Persistent workflows**: goals, memory, tools, and chat context survive long-running work.
-- **Chat-native reach**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, email, and Mattermost.
+- **Chat-native reach**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, email, Mattermost, and Linear.
 - **Model freedom**: OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
 - **Small core**: readable internals with MCP, memory, deployment, and automation built in.
 - **Own your stack**: inspect, customize, self-host, and extend without a giant platform.
@@ -82,7 +82,7 @@ Pick **one** install method:
 | Stable | installer, `uv`, or pip | the same package tool | one released Python/WebUI/TUI version |
 | Current source | editable Git checkout | `git pull --ff-only` + editable dependency sync | Python, WebUI, and TUI from that checkout |
 
-Prerequisites: Python 3.11 or newer. Git and [Bun](https://bun.sh/) are only needed for a source install. Published packages include the WebUI and fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
+Prerequisites: Python 3.11 or newer. Git and [Bun](https://bun.sh/) are only needed for a source install. Published packages include the WebUI, and supported platform wheels also include the native TUI. A source-distribution install can fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
 
 If terminals, API keys, or config files are new to you, use the guided zero-background walkthrough in [Start Without Technical Background](./docs/start-without-technical-background.md) instead of this compact README path.
 
@@ -128,6 +128,12 @@ python -m pip install nanobot-ai
 
 If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or install inside a virtual environment.
 
+Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon
+and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2.
+Pip selects the matching wheel; opening the TUI does not need a separate GitHub download or Bun
+installation. A source-distribution install on a supported target can use the matching checksummed
+GitHub release archive. On other platforms, use `nanobot --classic` or the WebUI.
+
 **Install from source**
 
 Clone the repository and install it in editable mode. Bun is required because the source
@@ -146,7 +152,7 @@ Activate it with `source .venv/bin/activate` on macOS/Linux or
 python -m pip install -e .
 ```
 
-After that, the normal commands are identical to a stable install. `nanobot agent` runs the TUI
+After that, the normal commands are identical to a stable install. `nanobot` runs the TUI
 from this checkout, and `nanobot webui` rebuilds stale frontend assets automatically. A later
 `git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun
 `python -m pip install -e .` when Python dependencies change. Contributors should also read
@@ -206,12 +212,14 @@ Use `nanobot gateway --background` for the same direct entry point without keepi
 **Prefer to work entirely in the terminal?**
 
 ```bash
-nanobot agent
+nanobot
 ```
 
-This opens the native terminal client with the launch directory as its workspace. It shares saved conversations and the local gateway with the WebUI.
+This opens the native terminal client with the launch directory as its workspace. It shares saved conversations and the local gateway with the WebUI. The explicit `nanobot agent` form remains available for compatibility.
 
 - Type `/` to discover commands, `/sessions` to switch conversations, or `@` to mention an app, MCP server, or saved session.
+- Paste clipboard images with `Ctrl+V` or `Alt+V`, and use `$` to complete skill references.
+- Use `/diff` to inspect file changes, `/context` to inspect session context, or `/branch` to continue from a completed reply in a new session.
 - Press `Enter` to send. While nanobot is working, `Enter` sends now and `Tab` sends after the current response. Press `Shift+Enter` to add a newline (`Ctrl+J` works in terminals that cannot distinguish modified Enter keys).
 - Use `/detach` to leave the current task running, or start with `nanobot gateway --background` when nanobot should stay online after all local clients exit.
 
@@ -220,7 +228,7 @@ Each launch starts a new session by default. Use `--session` to resume one and `
 For one request and an immediate exit, use:
 
 ```bash
-nanobot agent -m "Hello!"
+nanobot -m "Hello!"
 ```
 
 The one-shot form is useful for a quick provider check, shell scripts, and local automation. If you have not configured a model yet, run `nanobot webui` and open **Settings → Models** first.
@@ -254,10 +262,14 @@ Prefer your own infrastructure? Follow the [deployment guide](./docs/deployment.
 
 ## 🌐 WebUI
 
-The WebUI ships **inside the published wheel** with no separate frontend build. It is the browser workbench for persistent topics, temporary chats, visible agent activity, workspace controls, Apps, Skills, Automations, and settings.
+The WebUI ships **inside the published wheel** with no separate frontend build. It is the browser workbench for persistent topics, temporary chats, visible agent activity, workspace controls, Apps, Skills, Automations, and settings. Start it with `nanobot webui`.
+
+The screenshots below use example conversations, illustrative token counts, and paused schedules.
 
 <p align="center">
-  <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
+  <a href="./images/nanobot_webui-source.png">
+    <img src="./images/nanobot_webui.png" alt="nanobot WebUI new-topic screen with the hero composer, workspace access, project, and model controls" width="900">
+  </a>
 </p>
 
 Use it to:
@@ -268,9 +280,51 @@ Use it to:
 - switch models and workspaces without leaving the conversation;
 - configure providers and chat channels, connect Apps, discover Skills, and manage Automations from one place.
 
+### Keep related work side by side
+
+Group up to four conversations and arrange them in columns, rows, a grid, or a main pane with supporting panes. Each topic keeps its own history. Select another topic from the `@` menu, or drag it into the composer, to let the agent read its context and coordinate work across sessions.
+
+<p align="center">
+  <img src="./images/nanobot-workbench.png" alt="Three conversations in one workbench: a release plan beside quick-start work and documentation review" width="900">
+</p>
+
+Choose a project, access mode, and model for each task. Attach documents or images, then send follow-ups immediately or queue them for the next response. [Explore topics and panes →](./docs/webui.md#conversation-groups-and-panes)
+
+### Inspect the work and its context
+
+Expand agent activity to see reasoning, tool calls, and file changes. Switch **Settings → Appearance → File edit display** to **Diff** for inline patches. The composer's context indicator shows the current context size, input tokens by round, and cache reuse when the provider reports it.
+
+<p align="center">
+  <img src="./images/nanobot-context.png" alt="An expanded file-edit diff above the context usage chart, with input tokens and cache reuse shown across four rounds" width="900">
+</p>
+
+Context compaction also appears in the conversation timeline. [Explore activity and context →](./docs/webui.md#activity-and-context-usage)
+
+### Bring your tools into the conversation
+
+Use Apps to connect MCP servers, enable Agent Plugins, and manage local CLI App adapters. Add a preset or a custom server, then attach an available tool with `@`. Skills provide reusable instructions; Settings holds model, voice, image, web, and chat-channel setup.
+
+<p align="center">
+  <img src="./images/nanobot-apps.png" alt="The Apps MCP catalog with integration presets and controls to add or import a custom MCP server" width="900">
+</p>
+
+[Explore Apps →](./docs/webui.md#apps) · [Discover Skills →](./docs/webui.md#skills) · [Connect chat apps →](./docs/chat-apps.md)
+
+### Let recurring work run on a schedule
+
+Ask for an automation from the topic that should receive its results. Use **Tasks** to review and manage schedules, or **Calendar** to scan completed and upcoming runs by date. Local triggers let a script start a saved task on demand.
+
+<p align="center">
+  <img src="./images/nanobot-automations.png" alt="The Automations calendar with completed and upcoming recurring tasks arranged by date" width="900">
+</p>
+
+Keep the gateway running for scheduled delivery. [Explore Automations →](./docs/automations.md)
+
+For a conversation that should stay out of saved topic history and long-term memory, use [Temporary chat](./docs/webui.md#temporary-chats) from the header. Temporary chats end when the connection closes and use the default workspace in Restricted mode.
+
 See the [WebUI guide](./docs/webui.md) for LAN access, background operation, workspace controls, and the full feature tour. Working on the frontend itself? Use [`webui/README.md`](./webui/README.md).
 
-## 🏗️ Architecture
+## Architecture
 
 <p align="center">
   <img src="images/nanobot_arch.png" alt="nanobot architecture" width="800">
@@ -278,7 +332,7 @@ See the [WebUI guide](./docs/webui.md) for LAN access, background operation, wor
 
 🐈 nanobot stays lightweight by centering everything around a small agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
 
-## 📚 Docs
+## Docs
 
 Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
 
@@ -298,26 +352,26 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 
 ## Releases
 
-**Latest release: [v0.3.0 - The Agency Release](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)**
+**Latest release: [v0.3.5](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5)**
 
-The Agency Release turns nanobot from a durable workbench into an agent runtime that can coordinate helpers, switch models per session, and carry authorized work through to completion.
+v0.3.5 brings the workbench to the terminal and makes conversations easier to continue across the browser, terminal, and chat apps.
 
-- Consult inline subagents without leaving the current task
-- Switch model presets per session directly from the composer
-- Start from a guided WebUI setup with clearer execution controls
-- Apply configuration changes live across a more reliable provider, channel, and tool runtime
+- Use the native terminal workbench with the same gateway and saved conversations as the WebUI.
+- Arrange up to four browser conversations side by side, mention saved sessions, or open a temporary chat.
+- Inspect per-round context usage and compaction progress, with more durable history and recovery.
+- Discover Skills, connect Apps, and manage scheduled work through expanded WebUI flows.
 
-[Read the v0.3.0 release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)
+[Read the v0.3.5 release notes and upgrade notes](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5)
 
 ## Recent Updates
 
-- **2026-07-24** Guided first-run setup, inline subagents, and model switching from the composer.
-- **2026-07-23** Grok OAuth with hosted X Search, live image settings, and clearer fallback models.
-- **2026-07-22** Parallel Search, live configuration reloads, richer app discovery, and a smoother mobile WebUI.
-- **2026-07-21** Codex fast mode, visible skill references, safer configuration saves, and sturdier task cleanup.
-- **2026-07-20** Cleaner code blocks and copy actions, self-contained channels, and steadier QQ reconnects.
+- **2026-09-19** 🔎 Searchable provider setup, consistent provider identities, and smoother Linear onboarding.
+- **2026-09-18** ♻️ Clearer recovery for interrupted work and Discord reply-context support.
+- **2026-09-16** 📦 Platform wheels bundle the version-matched native terminal UI.
+- **2026-09-15** 🚀 Released [v0.3.5](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5) with a shared terminal workbench, multi-pane WebUI, and visible context continuity.
+- **2026-09-07** 🔌 WeCom media uploads use the SDK API, and CI skips unrelated jobs.
 
-For older updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
+For earlier updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
 
 ## Open Source Partners
 
@@ -350,10 +404,11 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/Athemis"><img src="https://avatars.githubusercontent.com/u/552653?v=4&s=48" width="48" height="48" alt="Athemis"></a>
 <a href="https://github.com/axelray-dev"><img src="https://avatars.githubusercontent.com/u/110029405?v=4&s=48" width="48" height="48" alt="axelray-dev"></a>
 <a href="https://github.com/yorkhellen"><img src="https://avatars.githubusercontent.com/u/8706550?v=4&s=48" width="48" height="48" alt="yorkhellen"></a>
+<a href="https://github.com/yu-xin-c"><img src="https://avatars.githubusercontent.com/u/175149126?v=4&s=48" width="48" height="48" alt="yu-xin-c"></a>
 <a href="https://github.com/04cb"><img src="https://avatars.githubusercontent.com/u/111667698?v=4&s=48" width="48" height="48" alt="04cb"></a>
 <a href="https://github.com/santhreal"><img src="https://avatars.githubusercontent.com/u/64453045?v=4&s=48" width="48" height="48" alt="santhreal"></a>
-<a href="https://github.com/yu-xin-c"><img src="https://avatars.githubusercontent.com/u/175149126?v=4&s=48" width="48" height="48" alt="yu-xin-c"></a>
 <a href="https://github.com/xcosmosbox"><img src="https://avatars.githubusercontent.com/u/56502269?v=4&s=48" width="48" height="48" alt="xcosmosbox"></a>
+<a href="https://github.com/KDB-Wind"><img src="https://avatars.githubusercontent.com/u/271925278?v=4&s=48" width="48" height="48" alt="KDB-Wind"></a>
 <a href="https://github.com/kunalk16"><img src="https://avatars.githubusercontent.com/u/5303824?v=4&s=48" width="48" height="48" alt="kunalk16"></a>
 <a href="https://github.com/chaohuang-ai"><img src="https://avatars.githubusercontent.com/u/204865953?v=4&s=48" width="48" height="48" alt="chaohuang-ai"></a>
 <a href="https://github.com/zayfod"><img src="https://avatars.githubusercontent.com/u/1811339?v=4&s=48" width="48" height="48" alt="zayfod"></a>
@@ -362,11 +417,10 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/flobo3"><img src="https://avatars.githubusercontent.com/u/268352850?v=4&s=48" width="48" height="48" alt="flobo3"></a>
 <a href="https://github.com/hamb1y"><img src="https://avatars.githubusercontent.com/u/88080063?v=4&s=48" width="48" height="48" alt="hamb1y"></a>
 <a href="https://github.com/SergioSV96"><img src="https://avatars.githubusercontent.com/u/20419761?v=4&s=48" width="48" height="48" alt="SergioSV96"></a>
-<a href="https://github.com/KDB-Wind"><img src="https://avatars.githubusercontent.com/u/271925278?v=4&s=48" width="48" height="48" alt="KDB-Wind"></a>
 <a href="https://github.com/morandot"><img src="https://avatars.githubusercontent.com/u/274257964?v=4&s=48" width="48" height="48" alt="morandot"></a>
+<a href="https://github.com/michaelxer"><img src="https://avatars.githubusercontent.com/u/52305679?v=4&s=48" width="48" height="48" alt="michaelxer"></a>
 <a href="https://github.com/coldxiangyu163"><img src="https://avatars.githubusercontent.com/u/134986317?v=4&s=48" width="48" height="48" alt="coldxiangyu163"></a>
 <a href="https://github.com/boogieLing"><img src="https://avatars.githubusercontent.com/u/64551706?v=4&s=48" width="48" height="48" alt="boogieLing"></a>
-<a href="https://github.com/michaelxer"><img src="https://avatars.githubusercontent.com/u/52305679?v=4&s=48" width="48" height="48" alt="michaelxer"></a>
 <a href="https://github.com/aiguozhi123456"><img src="https://avatars.githubusercontent.com/u/126325311?v=4&s=48" width="48" height="48" alt="aiguozhi123456"></a>
 <a href="https://github.com/pinhua33"><img src="https://avatars.githubusercontent.com/u/251483507?v=4&s=48" width="48" height="48" alt="pinhua33"></a>
 <a href="https://github.com/pixan-ai"><img src="https://avatars.githubusercontent.com/u/218441143?v=4&s=48" width="48" height="48" alt="pixan-ai"></a>
@@ -376,6 +430,7 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/IlyaGusev"><img src="https://avatars.githubusercontent.com/u/2670295?v=4&s=48" width="48" height="48" alt="IlyaGusev"></a>
 <a href="https://github.com/T3chC0wb0y"><img src="https://avatars.githubusercontent.com/u/68530847?v=4&s=48" width="48" height="48" alt="T3chC0wb0y"></a>
 <a href="https://github.com/VITOHJL"><img src="https://avatars.githubusercontent.com/u/166518988?v=4&s=48" width="48" height="48" alt="VITOHJL"></a>
+<a href="https://github.com/KailBug"><img src="https://avatars.githubusercontent.com/u/66873219?v=4&s=48" width="48" height="48" alt="KailBug"></a>
 <a href="https://github.com/macroadster"><img src="https://avatars.githubusercontent.com/u/328366?v=4&s=48" width="48" height="48" alt="macroadster"></a>
 <a href="https://github.com/Hinotoi-agent"><img src="https://avatars.githubusercontent.com/u/275430060?v=4&s=48" width="48" height="48" alt="Hinotoi-agent"></a>
 <a href="https://github.com/kingassune"><img src="https://avatars.githubusercontent.com/u/6126851?v=4&s=48" width="48" height="48" alt="kingassune"></a>
@@ -394,20 +449,24 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/HaisamAbbas"><img src="https://avatars.githubusercontent.com/u/95044189?v=4&s=48" width="48" height="48" alt="HaisamAbbas"></a>
 <a href="https://github.com/anunay999"><img src="https://avatars.githubusercontent.com/u/16853513?v=4&s=48" width="48" height="48" alt="anunay999"></a>
 <a href="https://github.com/flaviovs"><img src="https://avatars.githubusercontent.com/u/1832699?v=4&s=48" width="48" height="48" alt="flaviovs"></a>
+<a href="https://github.com/dajiaohuang"><img src="https://avatars.githubusercontent.com/u/108231307?v=4&s=48" width="48" height="48" alt="dajiaohuang"></a>
 <a href="https://github.com/C-Li"><img src="https://avatars.githubusercontent.com/u/20661667?v=4&s=48" width="48" height="48" alt="C-Li"></a>
 <a href="https://github.com/Ho1yShif"><img src="https://avatars.githubusercontent.com/u/75815862?v=4&s=48" width="48" height="48" alt="Ho1yShif"></a>
 <a href="https://github.com/pjhoberman"><img src="https://avatars.githubusercontent.com/u/37924?v=4&s=48" width="48" height="48" alt="pjhoberman"></a>
 <a href="https://github.com/nghiahsgs"><img src="https://avatars.githubusercontent.com/u/24955327?v=4&s=48" width="48" height="48" alt="nghiahsgs"></a>
 <a href="https://github.com/Bahtya"><img src="https://avatars.githubusercontent.com/u/34988899?v=4&s=48" width="48" height="48" alt="Bahtya"></a>
+<a href="https://github.com/ZhouJ-sh"><img src="https://avatars.githubusercontent.com/u/9983860?v=4&s=48" width="48" height="48" alt="ZhouJ-sh"></a>
+<a href="https://github.com/bingqilinweimaotai"><img src="https://avatars.githubusercontent.com/u/111987281?v=4&s=48" width="48" height="48" alt="bingqilinweimaotai"></a>
+<a href="https://github.com/Shizoqua"><img src="https://avatars.githubusercontent.com/u/136805224?v=4&s=48" width="48" height="48" alt="Shizoqua"></a>
 <a href="https://github.com/tangtaizong666"><img src="https://avatars.githubusercontent.com/u/212687958?v=4&s=48" width="48" height="48" alt="tangtaizong666"></a>
 <a href="https://github.com/XJPeng12"><img src="https://avatars.githubusercontent.com/u/50786186?v=4&s=48" width="48" height="48" alt="XJPeng12"></a>
 <a href="https://github.com/yanghan-cyber"><img src="https://avatars.githubusercontent.com/u/188783428?v=4&s=48" width="48" height="48" alt="yanghan-cyber"></a>
-<a href="https://github.com/ZhouJ-sh"><img src="https://avatars.githubusercontent.com/u/9983860?v=4&s=48" width="48" height="48" alt="ZhouJ-sh"></a>
 <a href="https://github.com/Yuxin-Lou"><img src="https://avatars.githubusercontent.com/u/117000057?v=4&s=48" width="48" height="48" alt="Yuxin-Lou"></a>
 <a href="https://github.com/LeoFYH"><img src="https://avatars.githubusercontent.com/u/184173704?v=4&s=48" width="48" height="48" alt="LeoFYH"></a>
 <a href="https://github.com/claude"><img src="https://avatars.githubusercontent.com/u/81847?v=4&s=48" width="48" height="48" alt="claude"></a>
 <a href="https://github.com/chris-alexander"><img src="https://avatars.githubusercontent.com/u/2815297?v=4&s=48" width="48" height="48" alt="chris-alexander"></a>
 <a href="https://github.com/benlenarts"><img src="https://avatars.githubusercontent.com/u/131161?v=4&s=48" width="48" height="48" alt="benlenarts"></a>
+<a href="https://github.com/wzrayyy"><img src="https://avatars.githubusercontent.com/u/143233939?v=4&s=48" width="48" height="48" alt="wzrayyy"></a>
 <a href="https://github.com/outlook84"><img src="https://avatars.githubusercontent.com/u/96007761?v=4&s=48" width="48" height="48" alt="outlook84"></a>
 <a href="https://github.com/Mrart"><img src="https://avatars.githubusercontent.com/u/5235758?v=4&s=48" width="48" height="48" alt="Mrart"></a>
 <a href="https://github.com/ramonpaolo"><img src="https://avatars.githubusercontent.com/u/53312850?v=4&s=48" width="48" height="48" alt="ramonpaolo"></a>
@@ -415,7 +474,6 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/tangjiabin"><img src="https://avatars.githubusercontent.com/u/21021242?v=4&s=48" width="48" height="48" alt="tangjiabin"></a>
 <a href="https://github.com/yeyitech"><img src="https://avatars.githubusercontent.com/u/231244789?v=4&s=48" width="48" height="48" alt="yeyitech"></a>
 <a href="https://github.com/Flinn-X"><img src="https://avatars.githubusercontent.com/u/54433526?v=4&s=48" width="48" height="48" alt="Flinn-X"></a>
-<a href="https://github.com/bingqilinweimaotai"><img src="https://avatars.githubusercontent.com/u/111987281?v=4&s=48" width="48" height="48" alt="bingqilinweimaotai"></a>
 <a href="https://github.com/Qinnnnnn"><img src="https://avatars.githubusercontent.com/u/14584068?v=4&s=48" width="48" height="48" alt="Qinnnnnn"></a>
 <a href="https://github.com/HengWeiBin"><img src="https://avatars.githubusercontent.com/u/45145821?v=4&s=48" width="48" height="48" alt="HengWeiBin"></a>
 <a href="https://github.com/waelantar"><img src="https://avatars.githubusercontent.com/u/70063334?v=4&s=48" width="48" height="48" alt="waelantar"></a>
@@ -424,7 +482,6 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/masterlyj"><img src="https://avatars.githubusercontent.com/u/167326996?v=4&s=48" width="48" height="48" alt="masterlyj"></a>
 <a href="https://github.com/xgzlucario"><img src="https://avatars.githubusercontent.com/u/48748794?v=4&s=48" width="48" height="48" alt="xgzlucario"></a>
 <a href="https://github.com/dzydzydzy7"><img src="https://avatars.githubusercontent.com/u/32220064?v=4&s=48" width="48" height="48" alt="dzydzydzy7"></a>
-<a href="https://github.com/dajiaohuang"><img src="https://avatars.githubusercontent.com/u/108231307?v=4&s=48" width="48" height="48" alt="dajiaohuang"></a>
 <a href="https://github.com/concertypin"><img src="https://avatars.githubusercontent.com/u/55056558?v=4&s=48" width="48" height="48" alt="concertypin"></a>
 <a href="https://github.com/WangCheng0116"><img src="https://avatars.githubusercontent.com/u/111694270?v=4&s=48" width="48" height="48" alt="WangCheng0116"></a>
 <a href="https://github.com/yarikoptic"><img src="https://avatars.githubusercontent.com/u/39889?v=4&s=48" width="48" height="48" alt="yarikoptic"></a>
@@ -432,6 +489,8 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/gongpx20069"><img src="https://avatars.githubusercontent.com/u/21985921?v=4&s=48" width="48" height="48" alt="gongpx20069"></a>
 <a href="https://github.com/tobrien"><img src="https://avatars.githubusercontent.com/u/36787?v=4&s=48" width="48" height="48" alt="tobrien"></a>
 <a href="https://github.com/Shiniese"><img src="https://avatars.githubusercontent.com/u/135589327?v=4&s=48" width="48" height="48" alt="Shiniese"></a>
+<a href="https://github.com/zpljd258"><img src="https://avatars.githubusercontent.com/u/11162658?v=4&s=48" width="48" height="48" alt="zpljd258"></a>
+<a href="https://github.com/FanouZeng-TT"><img src="https://avatars.githubusercontent.com/u/124567600?v=4&s=48" width="48" height="48" alt="FanouZeng-TT"></a>
 <a href="https://github.com/shawnWXN"><img src="https://avatars.githubusercontent.com/u/47786182?v=4&s=48" width="48" height="48" alt="shawnWXN"></a>
 <a href="https://github.com/sbyinin"><img src="https://avatars.githubusercontent.com/u/2064038?v=4&s=48" width="48" height="48" alt="sbyinin"></a>
 <a href="https://github.com/nne998"><img src="https://avatars.githubusercontent.com/u/148901?v=4&s=48" width="48" height="48" alt="nne998"></a>
@@ -443,13 +502,11 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/who96"><img src="https://avatars.githubusercontent.com/u/44131846?v=4&s=48" width="48" height="48" alt="who96"></a>
 <a href="https://github.com/cyzlmh"><img src="https://avatars.githubusercontent.com/u/24603258?v=4&s=48" width="48" height="48" alt="cyzlmh"></a>
 <a href="https://github.com/zhuzhh"><img src="https://avatars.githubusercontent.com/u/41102272?v=4&s=48" width="48" height="48" alt="zhuzhh"></a>
-<a href="https://github.com/zpljd258"><img src="https://avatars.githubusercontent.com/u/11162658?v=4&s=48" width="48" height="48" alt="zpljd258"></a>
 <a href="https://github.com/cms19859230182-lang"><img src="https://avatars.githubusercontent.com/u/276597748?v=4&s=48" width="48" height="48" alt="cms19859230182-lang"></a>
 <a href="https://github.com/amplifierplus"><img src="https://avatars.githubusercontent.com/u/160200579?v=4&s=48" width="48" height="48" alt="amplifierplus"></a>
 <a href="https://github.com/LZDQ"><img src="https://avatars.githubusercontent.com/u/45907809?v=4&s=48" width="48" height="48" alt="LZDQ"></a>
 <a href="https://github.com/wb213"><img src="https://avatars.githubusercontent.com/u/488412?v=4&s=48" width="48" height="48" alt="wb213"></a>
 <a href="https://github.com/shaun0927"><img src="https://avatars.githubusercontent.com/u/70629228?v=4&s=48" width="48" height="48" alt="shaun0927"></a>
-<a href="https://github.com/wzrayyy"><img src="https://avatars.githubusercontent.com/u/143233939?v=4&s=48" width="48" height="48" alt="wzrayyy"></a>
 <a href="https://github.com/LHMQ878"><img src="https://avatars.githubusercontent.com/u/205284459?v=4&s=48" width="48" height="48" alt="LHMQ878"></a>
 <a href="https://github.com/Michael-lhh"><img src="https://avatars.githubusercontent.com/u/41994684?v=4&s=48" width="48" height="48" alt="Michael-lhh"></a>
 <a href="https://github.com/Mizarka"><img src="https://avatars.githubusercontent.com/u/253529828?v=4&s=48" width="48" height="48" alt="Mizarka"></a>
@@ -464,6 +521,9 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/chtangwin"><img src="https://avatars.githubusercontent.com/u/8316617?v=4&s=48" width="48" height="48" alt="chtangwin"></a>
 <a href="https://github.com/dxtime"><img src="https://avatars.githubusercontent.com/u/8173810?v=4&s=48" width="48" height="48" alt="dxtime"></a>
 <a href="https://github.com/ethanclaw"><img src="https://avatars.githubusercontent.com/u/262543029?v=4&s=48" width="48" height="48" alt="ethanclaw"></a>
+<a href="https://github.com/Naster17"><img src="https://avatars.githubusercontent.com/u/62520991?v=4&s=48" width="48" height="48" alt="Naster17"></a>
+<a href="https://github.com/L4XB"><img src="https://avatars.githubusercontent.com/u/103962359?v=4&s=48" width="48" height="48" alt="L4XB"></a>
+<a href="https://github.com/Oxygen56"><img src="https://avatars.githubusercontent.com/u/100782273?v=4&s=48" width="48" height="48" alt="Oxygen56"></a>
 <a href="https://github.com/WufeiHalf"><img src="https://avatars.githubusercontent.com/u/103879607?v=4&s=48" width="48" height="48" alt="WufeiHalf"></a>
 <a href="https://github.com/stutiredboy"><img src="https://avatars.githubusercontent.com/u/345208?v=4&s=48" width="48" height="48" alt="stutiredboy"></a>
 <a href="https://github.com/stupidloud"><img src="https://avatars.githubusercontent.com/u/56048681?v=4&s=48" width="48" height="48" alt="stupidloud"></a>
@@ -492,7 +552,6 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/honjiaxuan"><img src="https://avatars.githubusercontent.com/u/13818528?v=4&s=48" width="48" height="48" alt="honjiaxuan"></a>
 <a href="https://github.com/DeeJ4yNg"><img src="https://avatars.githubusercontent.com/u/99658722?v=4&s=48" width="48" height="48" alt="DeeJ4yNg"></a>
 <a href="https://github.com/danielphang"><img src="https://avatars.githubusercontent.com/u/1204069?v=4&s=48" width="48" height="48" alt="danielphang"></a>
-<a href="https://github.com/yanalialiuk"><img src="https://avatars.githubusercontent.com/u/193742981?v=4&s=48" width="48" height="48" alt="yanalialiuk"></a>
 <a href="https://github.com/zhouzhuojie"><img src="https://avatars.githubusercontent.com/u/658840?v=4&s=48" width="48" height="48" alt="zhouzhuojie"></a>
 <a href="https://github.com/zerone0x"><img src="https://avatars.githubusercontent.com/u/39543393?v=4&s=48" width="48" height="48" alt="zerone0x"></a>
 <a href="https://github.com/yrk111222"><img src="https://avatars.githubusercontent.com/u/185151020?v=4&s=48" width="48" height="48" alt="yrk111222"></a>
@@ -500,8 +559,6 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/suger-m"><img src="https://avatars.githubusercontent.com/u/240725677?v=4&s=48" width="48" height="48" alt="suger-m"></a>
 <a href="https://github.com/mengyhang"><img src="https://avatars.githubusercontent.com/u/148381938?v=4&s=48" width="48" height="48" alt="mengyhang"></a>
 <a href="https://github.com/Liwx1014"><img src="https://avatars.githubusercontent.com/u/186271593?v=4&s=48" width="48" height="48" alt="Liwx1014"></a>
-<a href="https://github.com/Shizoqua"><img src="https://avatars.githubusercontent.com/u/136805224?v=4&s=48" width="48" height="48" alt="Shizoqua"></a>
-<a href="https://github.com/KailBug"><img src="https://avatars.githubusercontent.com/u/66873219?v=4&s=48" width="48" height="48" alt="KailBug"></a>
 <a href="https://github.com/19emtuck"><img src="https://avatars.githubusercontent.com/u/956861?v=4&s=48" width="48" height="48" alt="19emtuck"></a>
 <a href="https://github.com/tsubasakong"><img src="https://avatars.githubusercontent.com/u/97429702?v=4&s=48" width="48" height="48" alt="tsubasakong"></a>
 <a href="https://github.com/wseng"><img src="https://avatars.githubusercontent.com/u/6572161?v=4&s=48" width="48" height="48" alt="wseng"></a>
@@ -534,6 +591,14 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/pjbakker"><img src="https://avatars.githubusercontent.com/u/1267780?v=4&s=48" width="48" height="48" alt="pjbakker"></a>
 <a href="https://github.com/luojiaaoo"><img src="https://avatars.githubusercontent.com/u/62821977?v=4&s=48" width="48" height="48" alt="luojiaaoo"></a>
 <a href="https://github.com/NearlCrews"><img src="https://avatars.githubusercontent.com/u/23341701?v=4&s=48" width="48" height="48" alt="NearlCrews"></a>
+<a href="https://github.com/Krislu1221"><img src="https://avatars.githubusercontent.com/u/258380416?v=4&s=48" width="48" height="48" alt="Krislu1221"></a>
+<a href="https://github.com/beemines"><img src="https://avatars.githubusercontent.com/u/182060364?v=4&s=48" width="48" height="48" alt="beemines"></a>
+<a href="https://github.com/Wsp030914"><img src="https://avatars.githubusercontent.com/u/134924516?v=4&s=48" width="48" height="48" alt="Wsp030914"></a>
+<a href="https://github.com/pengpengyi92"><img src="https://avatars.githubusercontent.com/u/74917296?v=4&s=48" width="48" height="48" alt="pengpengyi92"></a>
+<a href="https://github.com/LuckTerence"><img src="https://avatars.githubusercontent.com/u/156219145?v=4&s=48" width="48" height="48" alt="LuckTerence"></a>
+<a href="https://github.com/yankeguo"><img src="https://avatars.githubusercontent.com/u/52509957?v=4&s=48" width="48" height="48" alt="yankeguo"></a>
+<a href="https://github.com/nolanchic"><img src="https://avatars.githubusercontent.com/u/14110199?v=4&s=48" width="48" height="48" alt="nolanchic"></a>
+<a href="https://github.com/yanalialiuk"><img src="https://avatars.githubusercontent.com/u/193742981?v=4&s=48" width="48" height="48" alt="yanalialiuk"></a>
 <a href="https://github.com/yongPhone"><img src="https://avatars.githubusercontent.com/u/29919651?v=4&s=48" width="48" height="48" alt="yongPhone"></a>
 <a href="https://github.com/ZXGERIC"><img src="https://avatars.githubusercontent.com/u/25354180?v=4&s=48" width="48" height="48" alt="ZXGERIC"></a>
 <a href="https://github.com/erikmackinnon"><img src="https://avatars.githubusercontent.com/u/40612473?v=4&s=48" width="48" height="48" alt="erikmackinnon"></a>
@@ -641,7 +706,6 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/kamalakarrao"><img src="https://avatars.githubusercontent.com/u/15045455?v=4&s=48" width="48" height="48" alt="kamalakarrao"></a>
 <a href="https://github.com/KEEPSLAMDUNK"><img src="https://avatars.githubusercontent.com/u/155275575?v=4&s=48" width="48" height="48" alt="KEEPSLAMDUNK"></a>
 <a href="https://github.com/krisLu"><img src="https://avatars.githubusercontent.com/u/92515202?v=4&s=48" width="48" height="48" alt="krisLu"></a>
-<a href="https://github.com/Krislu1221"><img src="https://avatars.githubusercontent.com/u/258380416?v=4&s=48" width="48" height="48" alt="Krislu1221"></a>
 <a href="https://github.com/kyya"><img src="https://avatars.githubusercontent.com/u/13448248?v=4&s=48" width="48" height="48" alt="kyya"></a>
 <a href="https://github.com/rreben"><img src="https://avatars.githubusercontent.com/u/4026131?v=4&s=48" width="48" height="48" alt="rreben"></a>
 <a href="https://github.com/ATECHPCS"><img src="https://avatars.githubusercontent.com/u/125108010?v=4&s=48" width="48" height="48" alt="ATECHPCS"></a>
@@ -712,6 +776,23 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <a href="https://github.com/RohitDayanand"><img src="https://avatars.githubusercontent.com/u/66650100?v=4&s=48" width="48" height="48" alt="RohitDayanand"></a>
 <a href="https://github.com/katafractari"><img src="https://avatars.githubusercontent.com/u/1299228?v=4&s=48" width="48" height="48" alt="katafractari"></a>
 <a href="https://github.com/rudy-of-the-corner"><img src="https://avatars.githubusercontent.com/u/188991374?v=4&s=48" width="48" height="48" alt="rudy-of-the-corner"></a>
+<a href="https://github.com/fszcd"><img src="https://avatars.githubusercontent.com/u/198843689?v=4&s=48" width="48" height="48" alt="fszcd"></a>
+<a href="https://github.com/kkkhoo"><img src="https://avatars.githubusercontent.com/u/128304090?v=4&s=48" width="48" height="48" alt="kkkhoo"></a>
+<a href="https://github.com/chrischen-coder"><img src="https://avatars.githubusercontent.com/u/199752684?v=4&s=48" width="48" height="48" alt="chrischen-coder"></a>
+<a href="https://github.com/cleverLucky"><img src="https://avatars.githubusercontent.com/u/109461752?v=4&s=48" width="48" height="48" alt="cleverLucky"></a>
+<a href="https://github.com/n1uz1"><img src="https://avatars.githubusercontent.com/u/149388665?v=4&s=48" width="48" height="48" alt="n1uz1"></a>
+<a href="https://github.com/shakewingo"><img src="https://avatars.githubusercontent.com/u/42901821?v=4&s=48" width="48" height="48" alt="shakewingo"></a>
+<a href="https://github.com/Kuang-xianxin"><img src="https://avatars.githubusercontent.com/u/243476082?v=4&s=48" width="48" height="48" alt="Kuang-xianxin"></a>
+<a href="https://github.com/0717lee"><img src="https://avatars.githubusercontent.com/u/185926419?v=4&s=48" width="48" height="48" alt="0717lee"></a>
+<a href="https://github.com/loseintwilight"><img src="https://avatars.githubusercontent.com/u/247379972?v=4&s=48" width="48" height="48" alt="loseintwilight"></a>
+<a href="https://github.com/AlfredChaos"><img src="https://avatars.githubusercontent.com/u/48818977?v=4&s=48" width="48" height="48" alt="AlfredChaos"></a>
+<a href="https://github.com/BenWituka"><img src="https://avatars.githubusercontent.com/u/325817656?v=4&s=48" width="48" height="48" alt="BenWituka"></a>
+<a href="https://github.com/gary23w"><img src="https://avatars.githubusercontent.com/u/61893883?v=4&s=48" width="48" height="48" alt="gary23w"></a>
+<a href="https://github.com/tilladam"><img src="https://avatars.githubusercontent.com/u/555247?v=4&s=48" width="48" height="48" alt="tilladam"></a>
+<a href="https://github.com/DannyYTL"><img src="https://avatars.githubusercontent.com/u/125264206?v=4&s=48" width="48" height="48" alt="DannyYTL"></a>
+<a href="https://github.com/yaoruiquan"><img src="https://avatars.githubusercontent.com/u/179358755?v=4&s=48" width="48" height="48" alt="yaoruiquan"></a>
+<a href="https://github.com/GUTYL"><img src="https://avatars.githubusercontent.com/u/35319275?v=4&s=48" width="48" height="48" alt="GUTYL"></a>
+<a href="https://github.com/ZedingZhang"><img src="https://avatars.githubusercontent.com/u/50742926?v=4&s=48" width="48" height="48" alt="ZedingZhang"></a>
 </p>
 <!-- contributors:end -->
 

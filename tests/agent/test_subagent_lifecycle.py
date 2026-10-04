@@ -9,6 +9,7 @@ import pytest
 
 from nanobot.agent import SubagentManager
 from nanobot.agent.hook import AgentHookContext
+from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import (
     SubagentStatus,
@@ -28,6 +29,7 @@ def _manager(tmp_path: Path, **kw) -> SubagentManager:
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
     defaults.update(kw)
     return SubagentManager(**defaults)
@@ -102,20 +104,6 @@ class TestSubagentStatus:
         assert s.error is None
 
 
-# ---------------------------------------------------------------------------
-# Runtime ownership
-# ---------------------------------------------------------------------------
-
-
-class TestRuntimeOwnership:
-    def test_manager_has_no_provider_model_mirrors(self, tmp_path):
-        sm = _manager(tmp_path)
-        assert not hasattr(sm, "provider")
-        assert not hasattr(sm, "model")
-        assert not hasattr(sm, "context_window_tokens")
-        assert not hasattr(sm.runner, "provider")
-
-
 class TestLegacyCompatibility:
     def test_accepts_exported_legacy_constructor_positionally(self, tmp_path):
         provider = MagicMock(spec=LLMProvider)
@@ -128,12 +116,11 @@ class TestLegacyCompatibility:
                 MessageBus(),
                 16_000,
                 "legacy-model",
+                consolidator=MagicMock(spec=Consolidator),
             )
 
         assert sm.workspace == tmp_path
         assert sm.max_tool_result_chars == 16_000
-        assert not hasattr(sm, "provider")
-        assert not hasattr(sm, "model")
 
     @pytest.mark.asyncio
     async def test_legacy_spawn_captures_runtime_at_admission(self, tmp_path):
@@ -146,6 +133,7 @@ class TestLegacyCompatibility:
                 bus=MessageBus(),
                 max_tool_result_chars=16_000,
                 model="legacy-model",
+                consolidator=MagicMock(spec=Consolidator),
             )
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
@@ -226,10 +214,14 @@ class TestSpawn:
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
+        statuses = sm.runtime_statuses()
+        assert not statuses
         await sm.spawn("my task", runtime=_runtime())
+        assert len(statuses) == 1
+        assert next(iter(statuses.values())).task_description == "my task"
         await _drain_subagent_tasks(sm)
         # Status cleaned up after task completes
-        assert len(sm._task_statuses) == 0
+        assert not statuses
 
     @pytest.mark.asyncio
     async def test_registers_in_session_tasks(self, tmp_path):

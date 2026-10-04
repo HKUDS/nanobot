@@ -27,8 +27,11 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.utils.helpers import (
+    atomic_write_lines,
     content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
@@ -40,7 +43,6 @@ from nanobot.utils.helpers import (
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 SESSION_CACHE_MAX_SIZE = 128
-MIN_COMPACTED_REPLAY_MESSAGES = 8
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
@@ -89,111 +91,6 @@ def _archive_offset(data: dict[str, Any]) -> int:
         if isinstance(offset, int) and not isinstance(offset, bool):
             return offset
     return 0
-
-
-# TODO(0.3.2): Remove the write_stdin replay migration after 0.3.1.
-def _migrate_legacy_exec_arguments(container: dict[str, Any]) -> bool:
-    raw_arguments = cast(object, container.get("arguments"))
-    encoded = isinstance(raw_arguments, str)
-    if encoded:
-        try:
-            decoded: object = json.loads(raw_arguments)
-        except json.JSONDecodeError:
-            return False
-    else:
-        decoded = raw_arguments
-    if not isinstance(decoded, dict):
-        return False
-
-    arguments = cast(dict[str, Any], decoded)
-    changed = False
-    if "chars" in arguments:
-        if "input" not in arguments:
-            arguments["input"] = arguments["chars"]
-        arguments.pop("chars")
-        changed = True
-
-    wait_key = (
-        "wait_timeout_ms"
-        if arguments.get("wait_for") or arguments.get("until_exit")
-        else "yield_time_ms"
-    )
-    if "timeout_ms" not in arguments and wait_key in arguments:
-        arguments["timeout_ms"] = arguments[wait_key]
-    for key in ("yield_time_ms", "wait_timeout_ms", "max_output_chars", "max_output_tokens"):
-        if key in arguments:
-            arguments.pop(key)
-            changed = True
-
-    if changed:
-        container["arguments"] = (
-            json.dumps(arguments, ensure_ascii=False, separators=(",", ":"))
-            if encoded
-            else arguments
-        )
-    return changed
-
-
-def _migrate_legacy_exec_tool_call(value: object) -> bool:
-    if not isinstance(value, dict):
-        return False
-    tool_call = cast(dict[str, Any], value)
-    function_value = cast(object, tool_call.get("function"))
-    function = (
-        cast(dict[str, Any], function_value)
-        if isinstance(function_value, dict)
-        else tool_call
-    )
-    name = function.get("name")
-    if name not in {"write_stdin", "exec_session"}:
-        return False
-
-    changed = name == "write_stdin"
-    if changed:
-        function["name"] = "exec_session"
-    return _migrate_legacy_exec_arguments(function) or changed
-
-
-def _migrate_legacy_exec_message(message: dict[str, Any]) -> bool:
-    changed = False
-    if message.get("name") == "write_stdin":
-        message["name"] = "exec_session"
-        changed = True
-    tool_calls = cast(object, message.get("tool_calls"))
-    if isinstance(tool_calls, list):
-        for tool_call in cast(list[object], tool_calls):
-            changed = _migrate_legacy_exec_tool_call(tool_call) or changed
-    return changed
-
-
-def _migrate_legacy_exec_session_records(
-    messages: list[dict[str, Any]],
-    metadata: dict[str, Any],
-) -> bool:
-    changed = False
-    for message in messages:
-        changed = _migrate_legacy_exec_message(message) or changed
-
-    checkpoint_value = cast(object, metadata.get(_RUNTIME_CHECKPOINT_KEY))
-    if not isinstance(checkpoint_value, dict):
-        return changed
-    checkpoint = cast(dict[str, Any], checkpoint_value)
-    assistant = cast(object, checkpoint.get("assistant_message"))
-    if isinstance(assistant, dict):
-        changed = _migrate_legacy_exec_message(cast(dict[str, Any], assistant)) or changed
-    pending = cast(object, checkpoint.get("pending_tool_calls"))
-    if isinstance(pending, list):
-        for tool_call in cast(list[object], pending):
-            changed = _migrate_legacy_exec_tool_call(tool_call) or changed
-    completed = cast(object, checkpoint.get("completed_tool_results"))
-    if isinstance(completed, list):
-        for result in cast(list[object], completed):
-            if isinstance(result, dict):
-                result_data = cast(dict[str, Any], result)
-                if result_data.get("name") == "write_stdin":
-                    result_data["name"] = "exec_session"
-                    changed = True
-    return changed
 
 
 def _is_provider_state_record_line(line: str) -> bool:
@@ -262,12 +159,6 @@ def _metadata_title(metadata: object) -> str:
     return strip_think(title)
 
 
-@dataclass
-class RetentionResult:
-    dropped: list[dict[str, Any]]
-    already_consolidated_count: int
-
-
 @dataclass(frozen=True)
 class SessionPolicy:
     """Runtime rules that do not belong in durable session data."""
@@ -286,9 +177,7 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    # Legacy storage name for the Memory ingestion watermark. New code should
-    # use ``last_archived`` so this progress is not confused with model-context
-    # compaction. Keep the field while persisted sessions and SDK callers migrate.
+    # Keep the legacy storage name while persisted sessions and SDK callers migrate.
     last_consolidated: int = 0
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
@@ -309,7 +198,7 @@ class Session:
 
     @property
     def last_archived(self) -> int:
-        """Number of transcript messages already written to the Memory journal."""
+        """End of the latest committed Memory checkpoint."""
         return self.last_consolidated
 
     @last_archived.setter
@@ -327,6 +216,27 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
+    def commit_summary_checkpoint(
+        self,
+        summary: str,
+        *,
+        insert_at: int | None = None,
+        last_active: datetime | None = None,
+    ) -> None:
+        """Replace replay before a hidden boundary while preserving the transcript."""
+        boundary = len(self.messages) if insert_at is None else insert_at
+        self.messages.insert(boundary, {
+            "role": "user",
+            "content": SUMMARY_CONTINUATION_TEXT,
+            HIDDEN_HISTORY_META: True,
+            "timestamp": datetime.now().isoformat(),
+        })
+        self.metadata["_last_summary"] = {
+            "text": summary,
+            "last_active": (last_active or self.updated_at).isoformat(),
+        }
+        self.last_archived = boundary
+
     def get_history(
         self,
         max_messages: int = 0,
@@ -337,36 +247,20 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Return recent replayable messages for LLM input.
 
-        A positive ``max_messages`` applies an explicit caller-owned count
-        limit. The normal model path relies on ``max_tokens`` instead.
+        A committed summary checkpoint replaces its old prefix with the stored
+        summary and resumes replay after its hidden boundary marker. The marker
+        is not a user request and must not resume an old task on the next turn.
+        A positive ``max_messages`` applies an additional caller-owned count limit.
         """
-        replay_start = self.last_archived
-        if replay_start:
-            # ``last_archived`` is archive progress, not a replay boundary.
-            # Keep a small raw suffix for continuity, extending back to the user
-            # that started an assistant/tool sequence when necessary.
-            recent_start = recent_message_start_index(
-                self.messages,
-                MIN_COMPACTED_REPLAY_MESSAGES,
-                extend_to_user=True,
-            )
-            replay_start = min(replay_start, recent_start)
-
-        replayable = self.messages[replay_start:]
+        replayable = self.messages[self.last_archived:]
         if max_messages <= 0:
             start_idx = 0
         else:
-            unarchived_count = len(self.messages) - self.last_archived
-            if replay_start < self.last_archived and unarchived_count < max_messages:
-                # The archived replay suffix can exceed the nominal count when one
-                # tool-heavy turn spans the boundary. Preserve that complete turn.
-                start_idx = 0
-            else:
-                start_idx = recent_message_start_index(
-                    replayable,
-                    max_messages,
-                    extend_to_user=extend_to_user,
-                )
+            start_idx = recent_message_start_index(
+                replayable,
+                max_messages,
+                extend_to_user=extend_to_user,
+            )
         sliced = replayable[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive
@@ -386,7 +280,7 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for message in sliced:
-            if message.get("_command"):
+            if message.get("_command") or is_summary_checkpoint(message):
                 continue
             has_persisted_runtime_context = isinstance(
                 message.get(RUNTIME_CONTEXT_HISTORY_META),
@@ -484,110 +378,6 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
-
-    def retain_recent_legal_suffix(
-        self,
-        max_messages: int,
-        *,
-        extend_to_user: bool = False,
-    ) -> RetentionResult:
-        """Keep a legal recent suffix, optionally extending it back to a user turn.
-
-        Returns a RetentionResult with dropped messages and how many of those
-        were in the already-consolidated prefix. This method mutates
-        self.messages and self.last_archived in place.
-        """
-        if max_messages <= 0:
-            dropped = list(self.messages)
-            lc = self.last_archived
-            self.clear()
-            return RetentionResult(
-                dropped=dropped,
-                already_consolidated_count=min(lc, len(dropped)),
-            )
-        if len(self.messages) <= max_messages:
-            return RetentionResult(
-                dropped=[],
-                already_consolidated_count=0,
-            )
-
-        original = list(self.messages)
-        before_lc = self.last_archived
-
-        start_idx = max(0, len(self.messages) - max_messages)
-        if extend_to_user:
-            recovered_user = next(
-                (i for i in range(start_idx, -1, -1) if self.messages[i].get("role") == "user"),
-                None,
-            )
-            if recovered_user is not None:
-                start_idx = recovered_user
-                if start_idx > 0 and self.messages[start_idx - 1].get("_channel_delivery"):
-                    start_idx -= 1
-
-        retained = self.messages[start_idx:]
-
-        # Prefer starting at a user turn (or its preceding _channel_delivery) when one exists within the retained window.
-        first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
-        if first_user is not None:
-            if first_user > 0 and retained[first_user - 1].get("_channel_delivery"):
-                retained = retained[first_user - 1:]
-            else:
-                retained = retained[first_user:]
-        elif not extend_to_user:
-            # If the hard-capped tail is assistant/tool-only, anchor to the
-            # latest user in the full session and take a capped forward window.
-            latest_user = next(
-                (i for i in range(len(self.messages) - 1, -1, -1)
-                 if self.messages[i].get("role") == "user"),
-                None,
-            )
-            if latest_user is not None:
-                retained = self.messages[latest_user: latest_user + max_messages]
-
-        # Mirror get_history(): avoid persisting orphan tool results at the front.
-        start = find_legal_message_start(retained)
-        if start:
-            retained = retained[start:]
-
-        # Hard-cap guarantee unless the caller requested user-turn extension.
-        if not extend_to_user and len(retained) > max_messages:
-            retained = retained[-max_messages:]
-            start = find_legal_message_start(retained)
-            if start:
-                retained = retained[start:]
-
-        # Compute actually-dropped messages using identity comparison so that
-        # even when retained is a non-contiguous slice of original (the else
-        # branch above), we never duplicate or lose messages.
-        retained_ids = set(id(m) for m in retained)
-        dropped = [m for m in original if id(m) not in retained_ids]
-
-        # Count how many dropped messages were in the already-consolidated
-        # prefix of the original list.  This cannot be a simple min() because
-        # dropped may include messages from *after* the consolidated prefix
-        # (e.g. in the else branch).
-        already_consolidated = sum(
-            1 for i, m in enumerate(original)
-            if i < before_lc and id(m) not in retained_ids
-        )
-
-        # New last_archived = count of retained messages that were inside
-        # the old consolidated prefix.
-        new_lc = sum(
-            1 for i, m in enumerate(original)
-            if i < before_lc and id(m) in retained_ids
-        )
-
-        self.messages = retained
-        self.last_archived = new_lc
-        if dropped:
-            self.provider_state = None
-        self.updated_at = datetime.now()
-        return RetentionResult(
-            dropped=dropped,
-            already_consolidated_count=already_consolidated,
-        )
 
 class SessionPayload(TypedDict):
     key: str
@@ -1206,8 +996,6 @@ class JsonlSessionStore:
                 provider_state=provider_state,
             )
             self._overlay_runtime_checkpoint_unlocked(session, path)
-            if _migrate_legacy_exec_session_records(session.messages, session.metadata):
-                session.provider_state = None
             return session
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -1298,8 +1086,6 @@ class JsonlSessionStore:
                 provider_state=provider_state,
             )
             self._overlay_runtime_checkpoint_unlocked(session, path)
-            if _migrate_legacy_exec_session_records(session.messages, session.metadata):
-                session.provider_state = None
             return session
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Repair failed for session {}: {}", key, e)
@@ -1420,52 +1206,33 @@ class JsonlSessionStore:
 
     def _save_unlocked(self, session: Session, *, fsync: bool = False) -> None:
         path = self.get_session_path(session.key)
-        tmp_path = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        metadata_line = {
+            "_type": "metadata",
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "last_archived": session.last_archived,
+            # Keep old nanobot releases able to read sessions written
+            # during the field-name migration.
+            "last_consolidated": session.last_consolidated,
+        }
+        lines = [json.dumps(metadata_line, ensure_ascii=False)]
+        if session.provider_state is not None:
+            provider_state_line = {
+                "_type": _PROVIDER_STATE_RECORD_TYPE,
+                "state": session.provider_state.to_private_record(),
+            }
+            lines.append(json.dumps(provider_state_line, ensure_ascii=False))
+        for msg in session.messages:
+            lines.append(json.dumps(msg, ensure_ascii=False))
+        # fsync=False keeps the historical session-save default: publish the
+        # file without file or directory fsync unless the caller opts in.
+        atomic_write_lines(path, lines, fsync=fsync)
 
-        try:
-            with open(tmp_path, "x", encoding="utf-8") as f:
-                metadata_line = {
-                    "_type": "metadata",
-                    "key": session.key,
-                    "created_at": session.created_at.isoformat(),
-                    "updated_at": session.updated_at.isoformat(),
-                    "metadata": session.metadata,
-                    "last_archived": session.last_archived,
-                    # Keep old nanobot releases able to read sessions written
-                    # during the field-name migration.
-                    "last_consolidated": session.last_consolidated,
-                }
-                f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-                if session.provider_state is not None:
-                    provider_state_line = {
-                        "_type": _PROVIDER_STATE_RECORD_TYPE,
-                        "state": session.provider_state.to_private_record(),
-                    }
-                    f.write(json.dumps(provider_state_line, ensure_ascii=False) + "\n")
-                for msg in session.messages:
-                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-                if fsync:
-                    f.flush()
-                    os.fsync(f.fileno())
-
-            os.replace(tmp_path, path)
-
-            # The full record now contains the authoritative checkpoint state (or
-            # its removal), so an older volatile overlay is no longer needed.
-            self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
-
-            if fsync:
-                with suppress(PermissionError):
-                    fd = os.open(str(path.parent), os.O_RDONLY)
-                    try:
-                        os.fsync(fd)
-                    except OSError as exc:
-                        if exc.errno != errno.EINVAL:
-                            raise
-                    finally:
-                        os.close(fd)
-        finally:
-            tmp_path.unlink(missing_ok=True)
+        # The full record now contains the authoritative checkpoint state (or
+        # its removal), so an older volatile overlay is no longer needed.
+        self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
 
     def update_metadata(
         self,
@@ -1577,7 +1344,6 @@ class JsonlSessionStore:
                         continue
                     else:
                         messages.append(data)
-            _migrate_legacy_exec_session_records(messages, metadata)
             return {
                 "key": stored_key or key,
                 "created_at": created_at,
@@ -1966,7 +1732,7 @@ class SessionManager:
                 self.save(session, fsync=True)
                 flushed += 1
             except Exception:
-                logger.warning("Failed to flush session {}", key, exc_info=True)
+                logger.opt(exception=True).warning("Failed to flush session {}", key)
         return flushed
 
     def invalidate(self, key: str) -> None:
@@ -2010,7 +1776,7 @@ class SessionManager:
         user_index = 0
         found_target = False
         for message in source.messages:
-            if message.get("role") == "user":
+            if message.get("role") == "user" and not is_hidden_history_message(message):
                 if user_index == before_user_index:
                     found_target = True
                     break

@@ -33,6 +33,7 @@ class ChannelsConfig(Base):
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = True  # stream tool-call hints (e.g. read_file("…"))
     show_reasoning: bool = True  # surface model reasoning when channel implements it
+    show_compaction_notices: bool = False  # automatic compaction chat notices, not UI lifecycle events
     extract_document_text: bool = True  # Deprecated and ignored; documents are read on demand
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Deprecated: use top-level transcription.provider
@@ -124,7 +125,6 @@ class AgentDefaults(Base):
     )
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
-    context_block_limit: int | None = None
     temperature: float = 0.1
     fallback_models: list[FallbackCandidate] = Field(default_factory=list)
     max_tool_iterations: int = 200
@@ -329,7 +329,6 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
-    keep_recent_messages: int = 8
 
 
 class ApiConfig(Base):

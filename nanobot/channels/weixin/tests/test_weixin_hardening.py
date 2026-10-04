@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -72,6 +72,22 @@ def test_reply_progress_opt_in_enables_progress_transport() -> None:
 
     assert config.send_progress is True
     assert config.send_tool_hints is True
+
+
+@pytest.mark.asyncio
+async def test_start_suppresses_httpx_polling_logs(monkeypatch) -> None:
+    channel = _channel(token="bot-token")
+    redirect = Mock()
+    monkeypatch.setattr("nanobot.channels.weixin.runtime.redirect_lib_logging", redirect)
+    monkeypatch.setattr(channel, "_notify_lifecycle", AsyncMock())
+
+    async def poll_once() -> None:
+        channel._running = False
+
+    monkeypatch.setattr(channel, "_poll_once", poll_once)
+    await channel.start()
+
+    redirect.assert_called_once_with("httpx", level="WARNING")
 
 
 @pytest.mark.parametrize(

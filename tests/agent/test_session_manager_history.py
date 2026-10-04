@@ -1,10 +1,11 @@
-from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
 def _assert_no_orphans(history: list[dict]) -> None:
@@ -136,58 +137,6 @@ def test_legitimate_tool_pairs_preserved_after_trim():
     assert history[0]["role"] == "user"
 
 
-def test_retain_recent_legal_suffix_keeps_recent_messages():
-    session = Session(key="test:trim")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-
-    session.retain_recent_legal_suffix(4)
-
-    assert len(session.messages) == 4
-    assert session.messages[0]["content"] == "msg6"
-    assert session.messages[-1]["content"] == "msg9"
-
-
-def test_retain_recent_legal_suffix_adjusts_last_archived():
-    session = Session(key="test:trim-cons")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_archived = 7
-
-    session.retain_recent_legal_suffix(4)
-
-    assert len(session.messages) == 4
-    assert session.last_archived == 1
-
-
-def test_retain_recent_legal_suffix_zero_clears_session():
-    session = Session(key="test:trim-zero")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_archived = 5
-
-    session.retain_recent_legal_suffix(0)
-
-    assert session.messages == []
-    assert session.last_archived == 0
-
-
-def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
-    session = Session(key="test:trim-tools")
-    session.messages.append({"role": "user", "content": "old"})
-    session.messages.extend(_tool_turn("old", 0))
-    session.messages.append({"role": "user", "content": "keep"})
-    session.messages.extend(_tool_turn("keep", 0))
-    session.messages.append({"role": "assistant", "content": "done"})
-
-    session.retain_recent_legal_suffix(4)
-
-    history = session.get_history(max_messages=500)
-    _assert_no_orphans(history)
-    assert history[0]["role"] == "user"
-    assert history[0]["content"] == "keep"
-
-
 # --- last_archived > 0 ---
 
 def test_orphan_trim_with_last_archived():
@@ -208,7 +157,7 @@ def test_orphan_trim_with_last_archived():
     assert all(m.get("role") != "tool" or m["tool_call_id"].startswith("new_") for m in history)
 
 
-def test_get_history_replays_recent_messages_after_full_archive():
+def test_get_history_does_not_replay_messages_after_full_archive():
     session = Session(key="test:fully-archived")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"u{i}"})
@@ -217,19 +166,41 @@ def test_get_history_replays_recent_messages_after_full_archive():
 
     history = session.get_history(max_messages=100)
 
-    assert [message["content"] for message in history] == [
-        "u6",
-        "a6",
-        "u7",
-        "a7",
-        "u8",
-        "a8",
-        "u9",
-        "a9",
+    assert history == []
+
+
+def test_get_history_omits_persisted_summary_marker_after_reload(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("cli:compacted")
+    session.add_message("user", "finish the task")
+    session.add_message("assistant", "done")
+    session.commit_summary_checkpoint("The task is complete.")
+    manager.save(session)
+    manager.invalidate(session.key)
+
+    reloaded = manager.get_or_create(session.key)
+    assert reloaded.messages[-1]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert reloaded.messages[-1][HIDDEN_HISTORY_META] is True
+    assert reloaded.get_history() == []
+
+    reloaded.add_message("user", "hi")
+    assert reloaded.get_history() == [{"role": "user", "content": "hi"}]
+
+
+def test_get_history_keeps_real_user_continuation_and_hidden_subagent_result():
+    session = Session(key="cli:followups")
+    session.add_message("user", SUMMARY_CONTINUATION_TEXT)
+    session.add_message(
+        "user", "Subagent finished the requested check.",
+        **{HIDDEN_HISTORY_META: {"kind": "subagent_result"}},
+    )
+
+    assert [message["content"] for message in session.get_history()] == [
+        SUMMARY_CONTINUATION_TEXT, "Subagent finished the requested check.",
     ]
 
 
-def test_get_history_extends_archived_replay_to_preceding_user():
+def test_get_history_does_not_restore_archived_user_turn():
     session = Session(key="test:archived-tool-turn")
     session.messages.extend(
         [
@@ -246,12 +217,11 @@ def test_get_history_extends_archived_replay_to_preceding_user():
 
     history = session.get_history(max_messages=100)
 
-    assert history[0]["content"] == "run tools"
-    assert history[-1]["content"] == "done"
-    _assert_no_orphans(history)
+    assert history == []
+    assert len(session.messages) > 8
 
 
-def test_archived_tool_turn_can_extend_past_message_cap():
+def test_archived_tool_turn_stays_out_of_replay():
     session = Session(key="test:long-archived-tool-turn")
     session.messages.extend(
         [
@@ -267,10 +237,8 @@ def test_archived_tool_turn_can_extend_past_message_cap():
 
     history = session.get_history(max_messages=120)
 
-    assert len(history) > 120
-    assert history[0]["content"] == "run many tools"
-    assert history[-1]["content"] == "done"
-    _assert_no_orphans(history)
+    assert history == []
+    assert len(session.messages) > 8
 
 
 # --- Edge: no tool messages at all ---
@@ -635,6 +603,40 @@ def test_fork_session_allows_index_equal_to_user_count(tmp_path):
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
 
 
+def test_fork_session_user_index_ignores_hidden_checkpoint_anchor(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "round2")
+    source.add_message(
+        "user",
+        SUMMARY_CONTINUATION_TEXT,
+        **{HIDDEN_HISTORY_META: True},
+    )
+    source.add_message("assistant", "answer2")
+    source.last_archived = 3
+    source.metadata["_last_summary"] = {"text": "round1 and round2"}
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        2,
+    )
+
+    assert forked is not None
+    assert [message["content"] for message in forked.messages] == [
+        "round1",
+        "answer1",
+        "round2",
+        SUMMARY_CONTINUATION_TEXT,
+        "answer2",
+    ]
+    assert forked.last_archived == 3
+    assert forked.metadata["_last_summary"]["text"] == "round1 and round2"
+
+
 def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tmp_path):
     manager = SessionManager(tmp_path)
     source = manager.get_or_create("websocket:source")
@@ -756,44 +758,6 @@ def test_get_history_recovers_user_when_token_slice_would_be_assistant_only(monk
     assert [m["content"] for m in history] == ["u2", "a2"]
 
 
-def test_retain_recent_legal_suffix_hard_cap_with_long_non_user_chain():
-    session = Session(key="test:hard-cap-chain")
-    session.messages.append({"role": "user", "content": "u0"})
-    session.messages.append(
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
-            ],
-        }
-    )
-    for i in range(12):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-
-    session.retain_recent_legal_suffix(6)
-
-    assert len(session.messages) <= 6
-
-
-def test_retain_recent_legal_suffix_can_extend_to_user_for_long_recent_turn():
-    session = Session(key="test:extend-to-user")
-    session.messages.append({"role": "user", "content": "old"})
-    session.messages.append({"role": "assistant", "content": "old answer"})
-    session.messages.append({"role": "user", "content": "record this"})
-    for i in range(4):
-        session.messages.extend(_tool_turn("recent", i))
-    session.messages.append({"role": "assistant", "content": "done"})
-
-    session.retain_recent_legal_suffix(8, extend_to_user=True)
-
-    assert len(session.messages) > 8
-    assert session.messages[0]["content"] == "record this"
-    assert session.messages[-1]["content"] == "done"
-    history = session.get_history(max_messages=500)
-    _assert_no_orphans(history)
-
-
 def test_get_history_can_extend_to_user_for_long_recent_turn():
     session = Session(key="test:history-extend-to-user")
     session.messages.append({"role": "user", "content": "old"})
@@ -828,82 +792,3 @@ def test_get_history_extend_to_user_keeps_newer_user_inside_window():
 
     assert [m["content"] for m in history] == ["new question", "new answer"]
     _assert_no_orphans(history)
-
-
-def test_retain_recent_legal_suffix_returns_dropped_messages():
-    """retain_recent_legal_suffix returns the actually-dropped messages."""
-    session = Session(
-        key="test:return-dropped",
-        provider_state=ProviderConversationState(
-            kind="openai_responses",
-            provider="openai:test",
-            model="test-model",
-            version=1,
-            payload={"items": []},
-        ),
-    )
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-
-    result = session.retain_recent_legal_suffix(4)
-
-    assert len(result.dropped) == 6
-    assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(6)]
-    assert len(session.messages) == 4
-    assert result.already_consolidated_count == 0
-    assert session.provider_state is None
-
-
-def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
-    """No messages dropped → empty list returned."""
-    state = ProviderConversationState(
-        kind="openai_responses",
-        provider="openai:test",
-        model="test-model",
-        version=1,
-        payload={"items": []},
-    )
-    session = Session(key="test:no-drop", provider_state=state)
-    for i in range(3):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-
-    result = session.retain_recent_legal_suffix(4)
-
-    assert result.dropped == []
-    assert result.already_consolidated_count == 0
-    assert len(session.messages) == 3
-    assert session.provider_state is state
-
-
-def test_retain_recent_legal_suffix_returns_all_on_zero():
-    """max_messages=0 clears session and returns all messages."""
-    session = Session(key="test:zero-return")
-    for i in range(5):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_archived = 3
-
-    result = session.retain_recent_legal_suffix(0)
-
-    assert len(result.dropped) == 5
-    assert result.already_consolidated_count == 3
-    assert session.messages == []
-
-
-def test_retain_recent_legal_suffix_last_archived_correct_in_else_branch():
-    """last_archived should count retained messages from the old archived prefix."""
-    session = Session(key="test:else-lc-correct")
-    # 20 messages: u0..u9, a0..a9
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-    session.last_archived = 12  # u0..u9, a0, a1 archived
-
-    result = session.retain_recent_legal_suffix(4)
-
-    # Retained messages start from latest user (u9) + max_messages forward
-    # so retained = [u9, a0..a9][:4] → but these are from original indices 9..12
-    # Of those, indices 9,10,11 are < 12 (before_lc), so new_lc = 3
-    assert session.last_archived == 3
-    # already_cons should count dropped messages with original index < 12
-    assert result.already_consolidated_count == 9
