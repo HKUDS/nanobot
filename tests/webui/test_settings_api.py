@@ -138,6 +138,28 @@ def test_settings_payload_exposes_orcarouter_provider(
     assert orcarouter["model_selectable"] is True
 
 
+def test_settings_payload_exposes_cheaperinference_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.cheaperinference.api_key = "ci_live_test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    cheaperinference = next(
+        row for row in payload["providers"] if row["name"] == "cheaperinference"
+    )
+
+    assert cheaperinference["label"] == "Cheaper Inference"
+    assert cheaperinference["configured"] is True
+    assert cheaperinference["default_api_base"] == "https://api.cheaperinference.com/v1"
+    assert cheaperinference["model_catalog"] == "catalog"
+    assert cheaperinference["model_selectable"] is True
+
+
 def test_settings_payload_includes_relocated_capabilities(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

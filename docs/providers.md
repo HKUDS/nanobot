@@ -207,6 +207,42 @@ Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models)
 to choose a currently available model. The WebUI can also load that catalog
 after the Eden AI API key is saved under **Settings → Models**.
 
+### Cheaper Inference Gateway
+
+[Cheaper Inference](https://cheaperinference.com) is an OpenAI-compatible LLM gateway.
+Each model costs 15–60% less than the list price of its lab.
+Configure the built-in `cheaperinference` provider and use a bare model ID from its
+[model list](https://cheaperinference.com/#models):
+
+```json
+{
+  "providers": {
+    "cheaperinference": {
+      "apiKey": "${CHEAPERINFERENCE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "cheaperinference",
+      "model": "gpt-5.4-mini",
+      "maxTokens": 8192,
+      "contextWindowTokens": 400000
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Nanobot sends the model ID unchanged. Other IDs include `gpt-5.4`, `claude-sonnet-5`, and
+`gemini-3.1-pro`. Cheaper Inference API keys start with `ci_live_`; create one at
+[cheaperinference.com/signup](https://cheaperinference.com/signup). The gateway serves chat
+only; use another provider for voice transcription. The WebUI can load the account's model
+catalog after the API key is saved under **Settings → Models**.
+
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
