@@ -11,6 +11,7 @@ import time
 import weakref
 from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
@@ -76,7 +77,7 @@ from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
-from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
+from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
@@ -1746,6 +1747,7 @@ class AgentLoop:
         hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
         runtime: LLMRuntime | None = None,
+        session: Session | None = None,
         delivery: TurnDelivery | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
@@ -1768,7 +1770,7 @@ class AgentLoop:
         t0 = time.time()
         ctx = TurnContext(
             msg=msg,
-            session=None,
+            session=session,
             session_key=key,
             turn_id=f"{key}:{time.time_ns()}",
             runtime=runtime,
@@ -2153,7 +2155,7 @@ class AgentLoop:
                 staged_provider_state = True
         elif stored_state is not None:
             session.provider_state = None
-        if ctx.kind is TurnKind.USER and (not ctx.ephemeral or not session.policy.persist):
+        if ctx.kind is TurnKind.USER:
             ctx.input_persisted_early = self._persist_user_message_early(
                 ctx.msg,
                 session,
@@ -2229,11 +2231,6 @@ class AgentLoop:
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
         ctx.delivery.record_latency(ctx.turn_latency_ms)
-        # A per-run ephemeral SDK call must not enter the durable cache either:
-        # later ordinary turns and flush() would otherwise persist its content.
-        # Transient sessions still retain their in-memory conversation history.
-        if ctx.ephemeral and session.policy.persist:
-            return
         turn_continuation.prepare_save_boundary(ctx)
         if ctx.usage is not None and not ctx.ephemeral:
             session.metadata["_last_usage"] = ctx.usage.to_dict()
@@ -2529,6 +2526,7 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         ephemeral: bool = False,
         _run_extra_hooks_for_ephemeral: bool = False,
+        _session_policy: SessionPolicy | None = None,
         hooks: list[AgentHook] | None = None,
         hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
@@ -2537,7 +2535,11 @@ class AgentLoop:
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
     ) -> OutboundMessage | None:
-        """Process an external message directly and return the outbound payload."""
+        """Process an external message directly and return the outbound payload.
+
+        ``ephemeral`` skips Memory journaling and extra hooks. SDK temporary
+        turns also supply a non-persistent policy for a detached session.
+        """
         if channel == "system":
             raise ValueError("channel 'system' is reserved for internal messages")
         metadata: dict[str, Any] = {}
@@ -2558,6 +2560,16 @@ class AgentLoop:
                     "on_stream_end": on_stream_end,
                     "ephemeral": ephemeral,
                 }
+                if _session_policy is not None:
+                    # Isolate per-run state before any early save or checkpoint;
+                    # the cached conversation must survive a temporary SDK turn.
+                    session = deepcopy(self.sessions.get_or_create(session_key))
+                    session.policy = SessionPolicy(
+                        persist=session.policy.persist and _session_policy.persist,
+                        log_content=session.policy.log_content and _session_policy.log_content,
+                        disabled_tools=session.policy.disabled_tools | _session_policy.disabled_tools,
+                    )
+                    kwargs["session"] = session
                 if _run_extra_hooks_for_ephemeral:
                     kwargs["run_extra_hooks_for_ephemeral"] = True
                 if hooks is not None:
