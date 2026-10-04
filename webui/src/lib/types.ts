@@ -528,6 +528,17 @@ export interface BootstrapResponse {
   model_name?: string | null;
   runtime_surface?: RuntimeSurface;
   runtime_capabilities?: RuntimeCapabilities;
+  extensions?: WebUIExtensionSummary[];
+}
+
+export interface WebUIExtensionSummary {
+  id: string;
+  name: string;
+  description: string;
+  entry: string;
+  version: string;
+  enabled?: boolean;
+  config?: Record<string, unknown>;
 }
 
 interface WebUITransportLimits {

@@ -375,9 +375,20 @@
     },
     "apps": "アプリ",
     "automations": "自動タスク",
-    "skills": {
+        "skills": {
       "title": "スキル"
-    }
+    },
+    "extensions": "拡張機能"
+  },
+  "extensions": {
+    "documentTitle": "拡張機能",
+    "notFound": "拡張機能が見つかりません。",
+    "empty": "WebUI 拡張機能はインストールされていません。",
+    "installed": "{{count}} 個インストール済み",
+    "open": "開く",
+    "version": "v{{version}}",
+    "description": "WebUI 拡張機能は、拡張機能ディレクトリから配信される自己完結型のブラウザアプリです。",
+    "settingsTitle": "拡張機能"
   },
   "settings": {
     "timezoneNoMatches": "一致するタイムゾーンがありません。",

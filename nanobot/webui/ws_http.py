@@ -14,6 +14,7 @@ import hashlib
 import json
 import mimetypes
 import re
+import shutil
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -39,6 +40,8 @@ from nanobot.session.session_handles import (
 )
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.webui.automation_results import cron_run_response, trigger_run_response
+from nanobot.webui.extensions_api import WebUIExtensionError
+from nanobot.webui.extensions_services import WebUIExtensions
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
@@ -187,6 +190,7 @@ _WEBUI_MUTATION_PATHS = {
     "automation.delete": "/api/webui/automations/delete",
     "automation.run": "/api/webui/automations/run",
     "automation.update": "/api/webui/automations/update",
+    "extension.install": "/api/webui/extensions/install",
     "skill.install": "/api/webui/skills/install",
     "skill.update": "/api/webui/skills/update",
     "skill.delete": "/api/webui/skills/delete",
@@ -366,6 +370,7 @@ class GatewayHTTPHandler:
         ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
         settings: WebUISettingsServices,
+        extensions: WebUIExtensions,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
@@ -394,6 +399,7 @@ class GatewayHTTPHandler:
         self.ingress = ingress
         self.workspaces = workspaces
         self.settings = settings
+        self.extensions = extensions
         from nanobot.webui.remote_instances import RemoteInstances
 
         self.remote_instances = RemoteInstances(
@@ -549,6 +555,8 @@ class GatewayHTTPHandler:
             return True
         if re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", path):
             return True
+        if re.match(r"^/api/webui/extensions/(install|[^/]+/(toggle|config|delete))$", path):
+            return True
         if path in {"/api/webui/recovery/continue", "/api/webui/recovery/dismiss"}:
             return True
         return path in {
@@ -575,6 +583,16 @@ class GatewayHTTPHandler:
             if not isinstance(key, str) or not key.strip():
                 return _http_error(400, "missing session key")
             return f"/api/sessions/{quote(key, safe='')}/delete"
+        if action in {"extension.toggle", "extension.config", "extension.delete"}:
+            extension_id = payload.get("id")
+            if not isinstance(extension_id, str) or not extension_id.strip():
+                return _http_error(400, "missing extension id")
+            action_name = {
+                "extension.toggle": "toggle",
+                "extension.config": "config",
+                "extension.delete": "delete",
+            }[action]
+            return f"/api/webui/extensions/{quote(extension_id, safe='')}/{action_name}"
         connect_action = _WEBUI_CHANNEL_CONNECT_ACTIONS.get(action)
         if connect_action is not None:
             channel = payload.get("channel")
@@ -631,6 +649,11 @@ class GatewayHTTPHandler:
 
         # Automation routes
         response = await self._dispatch_automation_routes(request, got)
+        if response is not None:
+            return response
+
+        # WebUI extension routes
+        response = await self._dispatch_extension_routes(request, got)
         if response is not None:
             return response
 
@@ -770,6 +793,7 @@ class GatewayHTTPHandler:
                 "runtime_surface": self._runtime_surface,
                 "runtime_capabilities": self._capabilities,
                 "terminal": terminal,
+                "extensions": self.extensions.payload()["extensions"],
             }
             return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
 
@@ -805,6 +829,7 @@ class GatewayHTTPHandler:
             ),
             "runtime_surface": self._runtime_surface,
             "runtime_capabilities": self._capabilities,
+            "extensions": self.extensions.payload()["extensions"],
         }
         if api_token is not None:
             payload["api_token"] = api_token
@@ -1578,6 +1603,145 @@ class GatewayHTTPHandler:
             request=request,
         )
 
+    # -- WebUI extension routes -------------------------------------------
+
+    async def _dispatch_extension_routes(
+        self, request: WsRequest, got: str
+    ) -> Response | None:
+        if got == "/api/extensions":
+            return self._handle_extensions_list(request)
+        m = re.match(r"^/api/extensions/([^/]+)(/.*)?$", got)
+        if m:
+            return self._handle_extension_api(request, m.group(1), m.group(2) or "")
+        m = re.match(r"^/extensions/([^/]+)(/.*)?$", got)
+        if m:
+            return self._handle_extension_asset(request, m.group(1), m.group(2) or "")
+        return None
+
+    def _handle_extensions_list(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response(self.extensions.payload())
+
+    def _handle_webui_extensions(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response(self.extensions.payload())
+
+    def _handle_webui_extension_install(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _request_query(request)
+        source = (_query_first(query, "source") or "").strip()
+        if not source:
+            return _http_error(400, "missing extension source")
+        source_path = Path(source).expanduser().resolve(strict=False)
+        if not source_path.is_dir():
+            return _http_error(400, "extension source must be an installed directory")
+        self.extensions.root.mkdir(parents=True, exist_ok=True)
+        try:
+            extension = self.extensions.get(source_path.name)
+            if extension is not None:
+                return _http_error(409, f"extension {source_path.name} already exists")
+            destination = self.extensions.root / source_path.name
+            if destination.exists():
+                return _http_error(409, f"extension {source_path.name} already exists")
+            shutil.copytree(source_path, destination)
+            installed = self.extensions.get(source_path.name)
+            if installed is None:
+                return _http_error(500, "extension installation failed")
+        except OSError as exc:
+            return _http_error(500, f"extension installation failed: {exc}")
+        return _http_json_response({"extensions": self.extensions.payload()["extensions"], "installed": installed.id})
+
+    def _handle_webui_extension_manage(
+        self, request: WsRequest, extension_id: str, action: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _request_query(request)
+        if action == "toggle":
+            raw_enabled = (_query_first(query, "enabled") or "").lower()
+            if raw_enabled not in {"true", "false"}:
+                return _http_error(400, "enabled must be true or false")
+            ok = self.extensions.set_enabled(extension_id, raw_enabled == "true")
+            if not ok:
+                return _http_error(404, "extension not found")
+            return _http_json_response({"extensions": self.extensions.payload()["extensions"]})
+        if action == "config":
+            raw = (_query_first(query, "config") or "").strip()
+            if not raw:
+                return _http_error(400, "missing config")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                return _http_error(400, f"invalid JSON config: {exc.msg}")
+            if not isinstance(payload, dict):
+                return _http_error(400, "config must be a JSON object")
+            try:
+                config = self.extensions.set_config(extension_id, payload)
+            except WebUIExtensionError as exc:
+                return _http_error(exc.status, exc.message)
+            return _http_json_response({"config": config, "extensions": self.extensions.payload()["extensions"]})
+        if action == "delete":
+            if not self.extensions.remove(extension_id):
+                return _http_error(404, "extension not found")
+            return _http_json_response({"extensions": self.extensions.payload()["extensions"]})
+        return _http_error(404, "unknown extension action")
+
+    def _handle_extension_api(
+        self, request: WsRequest, extension_id: str, suffix: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        extension = self.extensions.get(extension_id)
+        if extension is None:
+            return _http_error(404, "extension not found")
+        if not suffix or suffix == "/":
+            from nanobot.webui.extensions_api import extension_payload
+
+            return _http_json_response(extension_payload(extension))
+        from nanobot.webui.extensions_api_handler import dispatch_extension_api
+
+        status, headers, body = dispatch_extension_api(
+            extension,
+            suffix,
+            _parse_query(request.path),
+            b"",
+        )
+        return _http_response(
+            body,
+            status=status,
+            content_type=headers.get("Content-Type", "application/json; charset=utf-8"),
+            extra_headers=[("Cache-Control", "no-cache")],
+        )
+
+    def _handle_extension_asset(
+        self, request: WsRequest, extension_id: str, suffix: str
+    ) -> Response:
+        # Extension assets are referenced from extension-owned HTML/JS and
+        # cannot attach the WebUI ``Authorization`` header, so they are served
+        # as public read-only files (like the SPA shell). Data access is
+        # gated separately behind the token at ``/api/extensions/...``.
+        extension = self.extensions.get(extension_id)
+        if extension is None:
+            return _http_error(404, "extension not found")
+        from nanobot.webui.extensions_api import (
+            WebUIExtensionError,
+            serve_extension_asset,
+        )
+
+        try:
+            body, content_type = serve_extension_asset(extension, suffix)
+        except WebUIExtensionError as exc:
+            return _http_error(exc.status, exc.message)
+        return _http_response(
+            body,
+            status=200,
+            content_type=content_type,
+            extra_headers=[("Cache-Control", "no-cache")],
+        )
+
     # -- Misc routes --------------------------------------------------------
 
     async def _dispatch_misc_routes(
@@ -1585,6 +1749,17 @@ class GatewayHTTPHandler:
     ) -> Response | None:
         if got == "/api/sessions":
             return await self._handle_sessions_list(request)
+        if got == "/api/webui/extensions":
+            return self._handle_webui_extensions(request)
+        if got == "/api/webui/extensions/install":
+            return self._handle_webui_extension_install(request)
+        m = re.match(r"^/api/webui/extensions/([^/]+)/(toggle|config|delete)$", got)
+        if m:
+            return self._handle_webui_extension_manage(
+                request,
+                m.group(1),
+                m.group(2),
+            )
         if got == "/api/commands":
             return self._handle_commands(request)
         if got == "/api/workspaces/pick-folder":

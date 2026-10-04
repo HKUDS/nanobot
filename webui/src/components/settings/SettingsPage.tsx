@@ -6,6 +6,7 @@ import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 
+import { ExtensionsCatalogSettings } from "@/components/settings/ExtensionsCatalogSettings";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ImageGenerationSettings } from "@/components/settings/capabilities/ImageGenerationSettings";
 import { AdvancedSettings } from "@/components/settings/capabilities/SecuritySettings";
@@ -41,7 +42,7 @@ import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfi
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import type { SessionAutomationJob, SkillSummary } from "@/lib/types";
+import type { SessionAutomationJob, SkillSummary, WebUIExtensionSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
@@ -53,6 +54,11 @@ interface SettingsPageProps {
   onToggleTheme: () => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
+  extensions: WebUIExtensionSummary[];
+  onOpenExtension?: (extensionId: string) => void;
+  onToggleExtension?: (extensionId: string, enabled: boolean) => Promise<void> | void;
+  onEditExtension?: (extensionId: string, config: Record<string, unknown>) => Promise<void> | void;
+  onDeleteExtension?: (extensionId: string) => Promise<void> | void;
   onStartAutomationChat?: (
     content: string,
     images?: SendAttachment[],
@@ -74,6 +80,11 @@ export function SettingsPage({
   onToggleTheme,
   onBackToChat,
   skills,
+  extensions = [],
+  onOpenExtension,
+  onToggleExtension,
+  onEditExtension,
+  onDeleteExtension,
   onStartAutomationChat,
   titleOverrides,
   onLogout,
@@ -604,6 +615,19 @@ export function SettingsPage({
         );
       case "skills":
         return <SkillsCatalogSettings skills={skills} />;
+      case "extensions":
+        return (
+          <ExtensionsCatalogSettings
+            extensions={extensions}
+            onOpenExtension={(extensionId) => {
+              selectSection("extensions");
+              onOpenExtension?.(extensionId);
+            }}
+            onToggleExtension={onToggleExtension}
+            onEditExtension={onEditExtension}
+            onDeleteExtension={onDeleteExtension}
+          />
+        );
       case "runtime":
         return (
           <div className="settings-stack">

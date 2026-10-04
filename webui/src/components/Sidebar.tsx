@@ -66,11 +66,12 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenApps: () => void;
   onOpenSkills: () => void;
+  onOpenExtensions?: () => void;
   onOpenAutomations: () => void;
   onOpenChannels: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "channels" | null;
+  activeUtility?: "apps" | "skills" | "automations" | "channels" | "extensions" | null;
   onToggleArchived: () => void;
   onCollapse?: () => void;
   onExpand?: () => void;
@@ -253,6 +254,16 @@ export function Sidebar(props: SidebarProps) {
           selectionRef={activeActionRef}
           icon={<MessageCircle className="h-4 w-4" />}
         />
+        {props.onOpenExtensions ? (
+          <SidebarActionButton
+            collapsed={collapsed}
+            label={t("sidebar.extensions")}
+            onClick={props.onOpenExtensions}
+            active={props.activeUtility === "extensions"}
+            selectionRef={activeActionRef}
+            icon={<Blocks className="h-4 w-4" />}
+          />
+        ) : null}
         {props.archivedCount ? (
           <SidebarActionButton
             collapsed={collapsed}

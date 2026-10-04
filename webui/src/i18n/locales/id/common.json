@@ -375,9 +375,20 @@
     },
     "apps": "Aplikasi",
     "automations": "Otomasi",
-    "skills": {
+        "skills": {
       "title": "Keterampilan"
-    }
+    },
+    "extensions": "Ekstensi"
+  },
+  "extensions": {
+    "documentTitle": "Ekstensi",
+    "notFound": "Ekstensi tidak ditemukan.",
+    "empty": "Tidak ada ekstensi WebUI yang terpasang.",
+    "installed": "{{count}} terpasang",
+    "open": "Buka",
+    "version": "v{{version}}",
+    "description": "Ekstensi WebUI adalah aplikasi browser mandiri yang disajikan dari direktori ekstensi.",
+    "settingsTitle": "Ekstensi"
   },
   "settings": {
     "timezoneNoMatches": "Tidak ada zona waktu yang cocok.",
