@@ -383,7 +383,7 @@ def _run_gateway(
     from nanobot.session.webui_turns import (
         WebuiTurnCoordinator,
         WebuiTurnRoutePolicy,
-        build_webui_fallback_model_observer,
+        build_fallback_model_observer,
     )
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -415,7 +415,7 @@ def _run_gateway(
     )
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
-    fallback_model_observer = build_webui_fallback_model_observer(bus)
+    fallback_model_observer = build_fallback_model_observer(bus)
 
     def _observe_provider(snapshot: ProviderSnapshot) -> ProviderSnapshot:
         snapshot.provider.set_llm_call_observer(record_llm_call)

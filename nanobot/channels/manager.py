@@ -21,6 +21,7 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    TurnModelUpdatedEvent,
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -69,6 +70,7 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_tool_hints": "sendToolHints",
     "show_reasoning": "showReasoning",
     "show_compaction_notices": "showCompactionNotices",
+    "notify_model_fallback": "notifyModelFallback",
 }
 
 def _default_channel_config(name: str) -> dict[str, Any] | None:
@@ -236,6 +238,9 @@ class ChannelManager:
         )
         channel.show_compaction_notices = self._resolve_bool_override(
             section, "show_compaction_notices", notice_default,
+        )
+        channel.notify_model_fallback = self._resolve_bool_override(
+            section, "notify_model_fallback", self.config.channels.notify_model_fallback,
         )
         return channel
 
@@ -837,6 +842,17 @@ class ChannelManager:
 
                 channel = self.channels.get(msg.channel)
                 if channel:
+                    # Fallback-model notices target the turn's own channel;
+                    # chat channels only render them when they opt in via
+                    # ``notify_model_fallback``. Websocket keeps its
+                    # always-on WebUI projection regardless of the flag.
+                    if (
+                        isinstance(event, TurnModelUpdatedEvent)
+                        and event.fallback
+                        and msg.channel != "websocket"
+                        and not channel.notify_model_fallback
+                    ):
+                        continue
                     # Duplicate suppression is scoped to a known source message
                     # so repeated content from separate turns is still delivered.
                     if (
