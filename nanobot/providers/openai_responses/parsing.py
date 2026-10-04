@@ -363,7 +363,7 @@ async def consume_sse_with_reasoning(
     on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     capture: ResponsesStreamCapture | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
-    """Consume a Responses API SSE stream, including visible reasoning summaries."""
+    """Consume a Responses API SSE stream, including reasoning text and summaries."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
@@ -462,6 +462,19 @@ async def consume_sse_with_reasoning(
         elif event_type == "response.reasoning_summary_part.done":
             part = _as_json_object(event.get("part")) or {}
             text = part.get("text") if part.get("type") == "summary_text" else None
+            if text and not streamed_reasoning and not reasoning_content:
+                reasoning_content = text
+                if on_reasoning_delta:
+                    await on_reasoning_delta(text)
+        elif event_type == "response.reasoning_text.delta":
+            delta_text = event.get("delta") or ""
+            if delta_text:
+                reasoning_content = (reasoning_content or "") + delta_text
+                streamed_reasoning = True
+                if on_reasoning_delta:
+                    await on_reasoning_delta(delta_text)
+        elif event_type == "response.reasoning_text.done":
+            text = event.get("text") or ""
             if text and not streamed_reasoning and not reasoning_content:
                 reasoning_content = text
                 if on_reasoning_delta:
