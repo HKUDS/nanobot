@@ -895,15 +895,21 @@ class OpenAICompatProvider(LLMProvider):
         return model_name
 
     @staticmethod
-    def _supports_temperature(model_name: str) -> bool:
+    def _supports_temperature(
+        model_name: str,
+        reasoning_effort: str | None = None,
+    ) -> bool:
         """Return True when the model accepts a temperature parameter.
 
-        Kimi K3 uses a fixed temperature that should be omitted. GPT-5 family
-        and reasoning models (o1/o3/o4) reject temperature.
+        Temperature is omitted for fixed-temperature Kimi K3, GPT-5, and
+        o-series models. GPT-6 requires explicit ``"none"`` effort; its
+        default enables reasoning.
         """
         if _model_slug(model_name) == _KIMI_K3_MODEL:
             return False
         name = model_name.lower()
+        if "gpt-6" in name:
+            return bool(reasoning_effort and reasoning_effort.lower() == "none")
         return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
 
     def _opencode_affinity_headers(
@@ -949,8 +955,7 @@ class OpenAICompatProvider(LLMProvider):
             ),
         }
 
-        # GPT-5 and reasoning models (o1/o3/o4) reject temperature.
-        if self._supports_temperature(model_name):
+        if self._supports_temperature(model_name, reasoning_effort):
             kwargs["temperature"] = temperature
 
         if (
@@ -1313,7 +1318,7 @@ class OpenAICompatProvider(LLMProvider):
                 "compact_threshold": compact_threshold,
             }]
 
-        supports_temperature = self._supports_temperature(model_name)
+        supports_temperature = self._supports_temperature(model_name, reasoning_effort)
         if supports_temperature:
             body["temperature"] = temperature
 
