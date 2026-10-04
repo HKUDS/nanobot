@@ -1,0 +1,112 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji Mattermost",
+    "officialLabel": "Otwórz poradnik botów Mattermost",
+    "fields": {
+      "serverUrl": {
+        "label": "Adres URL serwera",
+        "placeholder": "https://mattermost.example.com"
+      },
+      "token": {
+        "label": "Token bota",
+        "placeholder": "Token bota Mattermost"
+      },
+      "teamId": {
+        "label": "Identyfikator zespołu",
+        "placeholder": "Opcjonalny identyfikator zespołu"
+      },
+      "groupPolicy": {
+        "label": "Zachowanie w kanałach",
+        "choices": {
+          "mention": "Tylko wzmianki",
+          "open": "Wszystkie wiadomości",
+          "allowlist": "Lista dozwolonych"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Zachowanie w wątkach",
+        "choices": {
+          "mention": "Tylko wzmianki",
+          "open": "Wszystkie wiadomości (wzmianka niewymagana)",
+          "allowlist": "Lista dozwolonych"
+        }
+      },
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy",
+        "placeholder": "Identyfikatory użytkowników oddzielone przecinkami"
+      },
+      "allowFromMatchMode": {
+        "label": "Dopasowywanie użytkowników",
+        "choices": {
+          "email": "E-mail",
+          "id": "Identyfikator użytkownika",
+          "username": "Nazwa użytkownika"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Dozwolone kanały"
+      },
+      "replyInThread": {
+        "label": "Odpowiadaj w wątku",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Uwzględniaj kontekst wątku",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limit kontekstu wątku"
+      },
+      "streaming": {
+        "label": "Przesyłanie strumieniowe",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "reactEmoji": {
+        "label": "Emoji odczytania"
+      },
+      "doneEmoji": {
+        "label": "Emoji zakończenia"
+      },
+      "sendProgress": {
+        "label": "Wysyłaj informacje o postępie",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "sendToolHints": {
+        "label": "Wysyłaj wskazówki narzędzi",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "dm_enabled": {
+        "label": "Włącz wiadomości prywatne",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "dm_policy": {
+        "label": "Dostęp do wiadomości prywatnych",
+        "choices": {
+          "allowlist": "Lista dozwolonych",
+          "open": "Otwarty"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Dozwoleni użytkownicy wiadomości prywatnych"
+      }
+    }
+  }
+}

@@ -1,0 +1,1952 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Łączenie z nanobotem…",
+      "boot": "Ładowanie nanobota…"
+    },
+    "error": {
+      "title": "Nie udało się połączyć z nanobotem",
+      "gatewayHint": "Upewnij się, że brama działa (`nanobot gateway`), a przeglądarka ma dostęp do jej adresu WebUI."
+    },
+    "auth": {
+      "title": "Połącz z nanobotem",
+      "label": "Hasło WebUI",
+      "helpTitle": "Gdzie znajdę hasło?",
+      "helpConfig": "Na urządzeniu, na którym działa nanobot, otwórz plik konfiguracji, zwykle pod adresem:",
+      "helpSecret": "Skopiuj wartość tego pola i użyj jej jako hasła:",
+      "helpFallback": "Jeśli ta wartość jest pusta, użyj <code>channels.websocket.token</code>.",
+      "showPassword": "Pokaż hasło",
+      "hidePassword": "Ukryj hasło",
+      "submit": "Połącz",
+      "required": "Wpisz hasło",
+      "invalid": "Nieprawidłowe hasło"
+    },
+    "account": {
+      "section": "Konto",
+      "logoutHint": "Odłącz tę przeglądarkę od bramy.",
+      "logout": "Wyloguj"
+    },
+    "system": {
+      "section": "System",
+      "restartHint": "Uruchom nanobota ponownie, aby zastosować zmiany.",
+      "restartAction": "Uruchom ponownie",
+      "restart": "Uruchom nanobota ponownie",
+      "restarting": "Ponowne uruchamianie…",
+      "restartEngine": "Uruchom silnik ponownie",
+      "restartingEngine": "Ponowne uruchamianie silnika…"
+    },
+    "restart": {
+      "completed": "Ponowne uruchomienie zajęło {{seconds}} s."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "Interfejs WWW nanobota — rozmawiaj ze swoim agentem w obszarze roboczym."
+    },
+    "pairing": {
+      "title": "Sparuj konto czatu",
+      "description": "Wpisz kod parowania otrzymany na czacie.",
+      "code": "Kod parowania",
+      "matched": "Znaleziono {{channel}}. Łączenie…",
+      "expiresInline": "Kod wygasa {{expires}}.",
+      "queueCount": "Oczekujące: {{count}}",
+      "noMatch": "Brak oczekującego żądania z tym kodem."
+    }
+  },
+  "temporaryChat": {
+    "title": "Czat tymczasowy",
+    "retention": "Nie jest zapisywany w historii ani pamięci.",
+    "expiration": "Odświeżenie strony, jej zamknięcie lub utrata połączenia kończą te czaty.",
+    "externalEffects": "Żądania nadal trafiają do dostawcy modelu, a działania narzędzi mogą pozostawić zmiany.",
+    "clear": "Wyczyść czat tymczasowy",
+    "sectionTitle": "Czaty tymczasowe",
+    "closeAction": "Zamknij czat tymczasowy: {{title}}"
+  },
+  "sidebar": {
+    "resize": "Zmień szerokość paska bocznego",
+    "navigation": "Nawigacja na pasku bocznym",
+    "collapse": "Zwiń pasek boczny",
+    "newChat": "Nowy temat",
+    "searchAria": "Szukaj",
+    "searchPlaceholder": "Szukaj",
+    "searchResults": "Wyniki",
+    "noSearchResults": "Brak pasujących tematów.",
+    "recent": "Ostatnie tematy",
+    "settings": "Ustawienia",
+    "language": {
+      "label": "Język",
+      "ariaLabel": "Zmień język"
+    },
+    "apps": "Aplikacje",
+    "automations": "Automatyzacje",
+    "skills": {
+      "title": "Umiejętności"
+    }
+  },
+  "settings": {
+    "timezoneNoMatches": "Brak pasujących stref czasowych.",
+    "configure": "Konfiguruj",
+    "exit": {
+      "title": "Uruchomić ponownie przed wyjściem?",
+      "description": "Zmiany zostały zapisane. Uruchom ponownie, aby je zastosować.",
+      "later": "Uruchom ponownie później"
+    },
+    "runtimeConfig": {
+      "apiSaved": "Zapisano. Uruchom ponownie usługę API, aby zastosować zmiany.",
+      "fields": {
+        "agents_defaults_timezone_mode": {
+          "label": "Używaj systemowej strefy czasowej",
+          "help": "Wyłącz, aby ręcznie wybrać strefę czasową."
+        },
+        "agents_defaults_timezone": {
+          "label": "Strefa czasowa",
+          "help": "Wybierz strefę czasową. Przesunięcia względem UTC odpowiadają bieżącej dacie."
+        },
+        "agents_defaults_dream_enabled": {
+          "label": "Konsolidacja pamięci",
+          "help": "Automatycznie porządkuj przydatne informacje z rozmów. Wyłączenie tej funkcji nie usuwa dostępu do istniejących wspomnień."
+        },
+        "gateway_heartbeat_enabled": {
+          "label": "Heartbeat",
+          "help": "Okresowo sprawdzaj zadania w HEARTBEAT.md."
+        },
+        "gateway_heartbeat_interval_s": {
+          "label": "Sprawdzaj co (sekundy)",
+          "help": "Zaplanuj wbudowany heartbeat przy uruchamianiu bramy."
+        },
+        "agents_defaults_max_tool_iterations": {
+          "label": "Iteracje narzędzi na turę",
+          "help": "Maksymalna liczba rund wywołań modelu i narzędzi na odpowiedź."
+        },
+        "agents_defaults_max_concurrent_subagents": {
+          "label": "Równoległe podagenty",
+          "help": "Maksymalna liczba podagentów działających jednocześnie."
+        },
+        "agents_defaults_max_tool_result_chars": {
+          "label": "Długość wyniku narzędzia (znaki)",
+          "help": "Maksymalna liczba znaków z każdego wyniku narzędzia przesyłana do modelu."
+        },
+        "agents_defaults_provider_retry_mode": {
+          "label": "Ponawiaj żądania do modelu bez limitu prób",
+          "help": "Kontynuuj ponawianie żądań po błędach, które mogą ustąpić. Wyłącz, aby używać standardowych ponowień."
+        },
+        "agents_defaults_tool_hint_max_length": {
+          "label": "Długość podsumowania działania narzędzia (znaki)",
+          "help": "Maksymalna liczba znaków w podsumowaniu działania narzędzia."
+        },
+        "tools_max_session_messages_per_minute": {
+          "label": "Limit wiadomości narzędzi do sesji (na minutę)",
+          "help": "Maksymalna liczba wiadomości, które narzędzia mogą wysłać do tej samej sesji w ciągu minuty."
+        },
+        "agents_defaults_unified_session": {
+          "label": "Współdziel sesje między kanałami",
+          "help": "Współdziel historię rozmowy jednego użytkownika między kanałami czatu."
+        },
+        "tools_exec_enable": {
+          "label": "Narzędzie powłoki",
+          "help": "Zezwól agentowi na wykonywanie poleceń powłoki."
+        },
+        "tools_file_enable": {
+          "label": "Narzędzia plikowe",
+          "help": "Zezwól na używanie wbudowanych narzędzi do odczytu i edycji plików."
+        },
+        "tools_web_enable": {
+          "label": "Narzędzia internetowe",
+          "help": "Zezwól na wyszukiwanie w internecie i pobieranie stron."
+        },
+        "tools_cli_apps_enable": {
+          "label": "Narzędzie aplikacji CLI",
+          "help": "Zezwól agentowi na zarządzanie aplikacjami CLI i ich uruchamianie."
+        },
+        "tools_my_enable": {
+          "label": "Narzędzie zarządzania własną konfiguracją",
+          "help": "Zezwól agentowi na sprawdzanie własnej konfiguracji."
+        },
+        "tools_my_allow_set": {
+          "label": "Zezwól na zmiany konfiguracji",
+          "help": "Zezwól narzędziu zarządzania na aktualizowanie konfiguracji."
+        },
+        "tools_exec_timeout": {
+          "label": "Limit czasu polecenia (sekundy)",
+          "help": "Zatrzymuj polecenia po przekroczeniu tego czasu. Ustaw 0, aby wyłączyć limit."
+        },
+        "tools_exec_path_prepend": {
+          "label": "Dodaj na początku PATH",
+          "help": "Katalogi dodawane na początku PATH. Oddziel wpisy średnikami w Windows lub dwukropkami w Linux i macOS."
+        },
+        "tools_exec_path_append": {
+          "label": "Dodaj na końcu PATH",
+          "help": "Katalogi dodawane na końcu PATH. Oddziel wpisy średnikami w Windows lub dwukropkami w Linux i macOS."
+        },
+        "tools_exec_sandbox": {
+          "label": "Piaskownica poleceń",
+          "help": "Używaj bwrap w Linux lub Seatbelt w macOS. Samo sprawdzanie obszaru roboczego nie izoluje procesów."
+        },
+        "tools_exec_sandbox_ro_binds": {
+          "label": "Ścieżki piaskownicy tylko do odczytu",
+          "help": "Dodatkowe ścieżki montowane tylko do odczytu. Jedna ścieżka w wierszu."
+        },
+        "tools_exec_sandbox_rw_binds": {
+          "label": "Ścieżki piaskownicy z prawem zapisu",
+          "help": "Dodatkowe ścieżki montowane z prawem zapisu. Jedna ścieżka w wierszu."
+        },
+        "tools_exec_allowed_env_keys": {
+          "label": "Dozwolone zmienne środowiskowe",
+          "help": "Dodatkowe zmienne środowiskowe przekazywane z hosta do poleceń, obok zmiennych wymaganych. Jedna nazwa w wierszu."
+        },
+        "tools_exec_allow_patterns": {
+          "label": "Dozwolone wzorce poleceń",
+          "help": "Jedno wyrażenie regularne w wierszu. Po ich ustawieniu każdy segment polecenia musi w całości pasować do reguły zezwalającej. Dopasowanie ma pierwszeństwo przed wbudowanymi i własnymi regułami blokowania; ograniczenia obszaru roboczego i sieci nadal obowiązują."
+        },
+        "tools_exec_deny_patterns": {
+          "label": "Blokowane wzorce poleceń",
+          "help": "Jedno wyrażenie regularne w wierszu, sprawdzane razem z wbudowanymi regułami blokowania. Polecenia w całości pasujące do reguł zezwalających pomijają te kontrole."
+        },
+        "tools_web_proxy": {
+          "label": "Serwer proxy dla internetu",
+          "help": "Adres URL proxy dla narzędzi internetowych. Pozostaw puste, aby używać domyślnej konfiguracji sieci."
+        },
+        "tools_web_user_agent": {
+          "label": "User-Agent",
+          "help": "Nagłówek User-Agent wysyłany z żądaniami internetowymi. Pozostaw puste, aby używać wartości domyślnej."
+        },
+        "tools_restrict_to_workspace": {
+          "label": "Ogranicz narzędzia do obszaru roboczego",
+          "help": "Globalne zasady dostępu narzędzi. Uprawnienia poszczególnych czatów WebUI konfiguruje się osobno."
+        },
+        "tools_ssrf_whitelist": {
+          "label": "Dozwolone adresy IP i sieci",
+          "help": "Zezwól na żądania wychodzące do tych adresów, które w innym przypadku byłyby zablokowane. Jeden adres IP lub zakres CIDR w wierszu."
+        },
+        "tools_webui_allow_remote_package_install": {
+          "label": "Zdalna instalacja pakietów",
+          "help": "Zezwól przeglądarkom WebUI na innych urządzeniach na instalowanie opcjonalnych pakietów i umiejętności. To ustawienie można zmienić wyłącznie na hoście bramy."
+        },
+        "tools_cli_apps_install_timeout": {
+          "label": "Limit czasu instalacji (sekundy)",
+          "help": "Czas dozwolony na instalację aplikacji CLI."
+        },
+        "tools_cli_apps_run_timeout": {
+          "label": "Limit czasu uruchomienia (sekundy)",
+          "help": "Czas dozwolony na wykonanie polecenia aplikacji CLI."
+        },
+        "tools_cli_apps_catalog_ttl_seconds": {
+          "label": "Czas przechowywania katalogu w pamięci podręcznej (sekundy)",
+          "help": "Jak długo katalog aplikacji CLI pozostaje w pamięci podręcznej."
+        },
+        "gateway_host": {
+          "label": "Adres nasłuchiwania bramy",
+          "help": "Adres używany przez bramę. Nasłuchiwanie WebUI skonfiguruj osobno w Kanały → WebSocket."
+        },
+        "gateway_port": {
+          "label": "Port bramy",
+          "help": "Port używany przez bramę. Argumenty wiersza poleceń mają pierwszeństwo przed tym ustawieniem."
+        },
+        "gateway_restart_mode": {
+          "label": "Tryb ponownego uruchamiania",
+          "help": "Wybierz sposób ponownego uruchamiania bramy. Tryb automatyczny dobiera metodę do środowiska."
+        },
+        "api_host": {
+          "label": "Adres nasłuchiwania API",
+          "help": "Ustaw klucz API w sekcji System przed włączeniem nasłuchiwania na adresie sieciowym. Uruchom ponownie usługę API, aby zastosować zmiany."
+        },
+        "api_timeout": {
+          "label": "Limit czasu żądania API (sekundy)",
+          "help": "Maksymalny czas trwania żądania API. Uruchom ponownie usługę API, aby zastosować zmiany."
+        },
+        "tools_image_generation_save_dir": {
+          "label": "Katalog wygenerowanych obrazów",
+          "help": "Podkatalog katalogu multimediów nanobota. Użyj ścieżki względnej; istniejące obrazy nie zostaną przeniesione."
+        }
+      },
+      "groups": {
+        "chat": {
+          "title": "Uprawnienia czatów WebUI",
+          "help": "Dostęp do usług lokalnych i domyślne uprawnienia czatów WebUI."
+        },
+        "identity": {
+          "title": "Strefa czasowa",
+          "help": "Wybierz strefę czasową dla zaplanowanych zadań."
+        },
+        "memory": {
+          "title": "Pamięć",
+          "help": "Włącz lub wyłącz automatyczną konsolidację pamięci."
+        },
+        "heartbeat": {
+          "title": "Harmonogram heartbeat",
+          "help": "Skonfiguruj wbudowane okresowe sprawdzanie zadań."
+        },
+        "execution": {
+          "title": "Limity agenta",
+          "help": "Dostosuj wykonywanie narzędzi i ponawianie żądań."
+        },
+        "sessions": {
+          "title": "Sesje",
+          "help": "Współdziel rozmowy między kanałami."
+        },
+        "tools": {
+          "title": "Wbudowane narzędzia",
+          "help": "Wybierz narzędzia dostępne dla agenta."
+        },
+        "shell": {
+          "title": "Powłoka i piaskownica",
+          "help": "Limity czasu poleceń, środowisko, montowane ścieżki i filtry poleceń."
+        },
+        "network": {
+          "title": "Połączenia internetowe",
+          "help": "Ustaw proxy i nagłówek User-Agent dla żądań internetowych."
+        },
+        "safety": {
+          "title": "Globalne zasady dostępu",
+          "help": "Ograniczenia obszaru roboczego, sieci prywatnych i zdalnych instalacji."
+        },
+        "cli": {
+          "title": "Limity aplikacji CLI",
+          "help": "Ustaw limity czasu instalacji i poleceń oraz czas przechowywania katalogu aplikacji w pamięci podręcznej."
+        },
+        "gateway": {
+          "title": "Proces bramy",
+          "help": "Konfiguracja wdrożenia i ponownego uruchamiania procesu."
+        },
+        "api": {
+          "title": "Szczegóły serwera API",
+          "help": "Własny adres nasłuchiwania i limit czasu żądań."
+        },
+        "storage": {
+          "title": "Przechowywanie obrazów",
+          "help": "Wybierz miejsce zapisu wygenerowanych obrazów."
+        },
+        "maintenance": {
+          "title": "Harmonogram pamięci",
+          "help": ""
+        },
+        "web": {
+          "title": "Dostęp do internetu",
+          "help": ""
+        },
+        "applications": {
+          "title": "Aplikacje wiersza poleceń",
+          "help": ""
+        }
+      },
+      "save": "Zapisz zmiany",
+      "saving": "Zapisywanie…",
+      "discard": "Odrzuć zmiany",
+      "saved": "Zapisano.",
+      "restart": "Uruchom nanobota ponownie",
+      "restartHelp": "Uruchom ponownie, aby zastosować zmiany. Argumenty wiersza poleceń i zmienne środowiskowe mogą nadpisać te ustawienia.",
+      "search": "Znajdź ustawienie zaawansowane",
+      "noResults": "Brak pasujących ustawień.",
+      "pending": "Niezapisane zmiany",
+      "numberError": "Wpisz prawidłową liczbę z dozwolonego zakresu.",
+      "activeModel": "Użyj aktywnego modelu",
+      "none": "Brak",
+      "auto": "Automatyczny",
+      "manual": "Ręczny",
+      "standard": "Standardowy",
+      "persistent": "Stały",
+      "unavailable": "Zaktualizuj bramę, aby edytować te ustawienia.",
+      "advancedOptions": "Opcje zaawansowane"
+    },
+    "backToChat": "Wróć do czatu",
+    "sidebar": {
+      "title": "Ustawienia",
+      "ariaLabel": "Sekcje ustawień"
+    },
+    "nav": {
+      "about": "O programie",
+      "capabilities": "Możliwości",
+      "general": "Ogólne",
+      "byok": "BYOK",
+      "overview": "Przegląd",
+      "appearance": "Wygląd",
+      "models": "Modele",
+      "providers": "Dostawcy",
+      "image": "Obrazy",
+      "voice": "Głos",
+      "browser": "Internet",
+      "channels": "Kanały",
+      "cliApps": "Aplikacje CLI",
+      "mcp": "MCP",
+      "runtime": "System",
+      "advanced": "Zaawansowane",
+      "apps": "Aplikacje",
+      "automations": "Automatyzacje",
+      "skills": "Umiejętności",
+      "memory": "Pamięć"
+    },
+    "sections": {
+      "interface": "Interfejs",
+      "ai": "AI",
+      "system": "System",
+      "about": "O programie",
+      "status": "Stan",
+      "localPreferences": "Preferencje lokalne",
+      "presets": "Profile",
+      "imageGeneration": "Generowanie obrazów",
+      "imageDefaults": "Ustawienia domyślne",
+      "webSearch": "Wyszukiwanie w internecie",
+      "webBehavior": "Zachowanie",
+      "cliApps": "Aplikacje CLI",
+      "mcp": "Usługi MCP",
+      "regional": "Ustawienia regionalne",
+      "webuiSafety": "Bezpieczeństwo sieciowe",
+      "capabilities": "Możliwości",
+      "apps": "Aplikacje",
+      "nativeHost": "Host aplikacji natywnej",
+      "hostSafety": "Bezpieczeństwo aplikacji",
+      "voiceInput": "Wprowadzanie głosowe"
+    },
+    "models": {
+      "selectModel": "Wybierz model",
+      "addConfiguration": "Dodaj konfigurację",
+      "newConfiguration": "Nowa konfiguracja modelu",
+      "newConfigurationHelp": "Zapisz dostawcę, model i ustawienia generowania jako profil do ponownego użycia.",
+      "configurationName": "Nazwa konfiguracji",
+      "configurationNameHelp": "Zmień nazwę zapisanej konfiguracji modelu.",
+      "configurationNamePlaceholder": "Szybkie pisanie",
+      "callOrder": "Kolejność wywoływania modeli",
+      "primary": "Główny",
+      "fallbackNumber": "Zapasowy {{number}}",
+      "addToOrder": "Włącz profil",
+      "newPreset": "Nowy profil modelu",
+      "newPresetHelp": "Zapisz model i jego ustawienia generowania do użycia w różnych zadaniach.",
+      "presets": "Profile modeli",
+      "editPreset": "Edytuj profil",
+      "presetName": "Nazwa profilu",
+      "presetNameHelp": "Używana w interfejsie i poleceniach /model. Nazwy muszą być unikalne.",
+      "presetNameDuplicate": "Profil o tej nazwie już istnieje.",
+      "presetNamePlaceholder": "Np. Szybkie pisanie",
+      "advancedOptions": "Opcje zaawansowane",
+      "advancedSummary": "Kontekst {{context}} · Maks. {{max}} tokenów",
+      "maxTokens": "Maksymalna liczba tokenów odpowiedzi",
+      "temperature": "Temperatura",
+      "reasoningEffort": "Poziom rozumowania",
+      "convertTitle": "Przekształć bieżącą konfigurację modeli",
+      "convertHelp": "Przekształć istniejące modele główne i zapasowe w profile, aby zarządzać tutaj ich kolejnością.",
+      "converting": "Przekształcanie…",
+      "convertAction": "Przekształć w profile",
+      "dragToReorder": "Przeciągnij, aby zmienić kolejność",
+      "moveUp": "Przenieś wyżej",
+      "moveDown": "Przenieś niżej",
+      "removeFromOrder": "Wyłącz profil",
+      "inCallOrder": "W kolejności wywołań",
+      "disabled": "Wyłączony",
+      "noPresets": "Brak profili modeli",
+      "noPresetsHelp": "Utwórz profil, a następnie dodaj go do kolejności wywołań.",
+      "removeBeforeDelete": "Wybierz inny profil główny, zanim usuniesz ten profil.",
+      "providerSetupRequired": "Wymagana konfiguracja dostawcy",
+      "configureProviderBeforeSaving": "Skonfiguruj tego dostawcę przed zapisaniem profilu.",
+      "deletePresetTitle": "Usunąć profil modelu?",
+      "deletePresetHelp": "Usuń „{{name}}” i wykreśl go z listy modeli zapasowych. Dane uwierzytelniające dostawcy zostaną zachowane.",
+      "searchModels": "Wyszukaj lub wpisz identyfikator modelu",
+      "useCustomModel": "Użyj",
+      "loadingModels": "Ładowanie modeli…",
+      "searchCatalog": "Przeszukaj katalog modeli tego dostawcy.",
+      "modelsAvailable": "dostępnych",
+      "noModelResults": "Brak pasujących modeli.",
+      "loadFailed": "Lista modeli jest niedostępna.",
+      "unsupportedModelList": "Wpisz identyfikator modelu ręcznie.",
+      "providerNotConfigured": "Skonfiguruj tego dostawcę przed załadowaniem modeli.",
+      "autoProviderCustomOnly": "Przy automatycznym wyborze dostawcy wpisz identyfikator modelu ręcznie.",
+      "availableCount": "Dostępne modele: {{count}}"
+    },
+    "rows": {
+      "theme": "Motyw",
+      "language": "Język",
+      "provider": "Dostawca",
+      "model": "Model",
+      "restart": "Uruchom nanobota ponownie",
+      "configPath": "Plik konfiguracji",
+      "activePreset": "Aktywny profil",
+      "gateway": "Brama",
+      "restartState": "Stan ponownego uruchomienia",
+      "pendingChanges": "Oczekujące zmiany",
+      "currentModel": "Bieżąca konfiguracja",
+      "selectedPreset": "Wybrany profil",
+      "presetModel": "Model profilu",
+      "activityMode": "Szczegółowość aktywności",
+      "fileEditDisplay": "Wyświetlanie zmian w plikach",
+      "codeWrap": "Zawijanie kodu",
+      "brandLogos": "Logotypy marek",
+      "browserNotifications": "Powiadomienia o zadaniach",
+      "maxResults": "Maksymalna liczba wyników",
+      "timeout": "Limit czasu",
+      "jinaReader": "Czytnik Jina",
+      "imageGeneration": "Generowanie obrazów",
+      "imageProvider": "Dostawca obrazów",
+      "imageProviderStatus": "Stan dostawcy",
+      "imageProviderBase": "Adres URL dostawcy",
+      "imageModel": "Model obrazów",
+      "defaultAspectRatio": "Domyślne proporcje",
+      "defaultImageSize": "Domyślny rozmiar",
+      "maxImagesPerTurn": "Maksymalna liczba obrazów na żądanie",
+      "imageSaveDir": "Katalog zapisu",
+      "timezone": "Strefa czasowa",
+      "workspacePath": "Domyślny obszar roboczy",
+      "localServiceAccess": "Usługi lokalne",
+      "webuiDefaultAccess": "Domyślny dostęp",
+      "cliAppsCatalog": "Katalog",
+      "cliAppsFilter": "Filtr",
+      "engine": "Silnik",
+      "logs": "Dzienniki",
+      "diagnostics": "Diagnostyka",
+      "contextWindow": "Okno kontekstu",
+      "transcription": "Transkrypcja",
+      "transcriptionProvider": "Dostawca",
+      "transcriptionProviderStatus": "Stan dostawcy",
+      "transcriptionModel": "Model",
+      "transcriptionLanguage": "Język",
+      "voiceLimits": "Limity"
+    },
+    "help": {
+      "theme": "Przełączaj między jasnym a ciemnym motywem.",
+      "language": "Wybierz język interfejsu WebUI.",
+      "provider": "Wybierz dostawcę obsługującego nowe żądania do modelu.",
+      "model": "Wybierz model używany przez ten profil.",
+      "configPath": "Aktualnie używany plik konfiguracji bramy.",
+      "currentModel": "Używana do nowych odpowiedzi.",
+      "selectedModelProvider": "Określany przez wybrany model.",
+      "selectedModelValue": "Określany przez wybrany model.",
+      "selectedPreset": "Edytuj nazwane profile w sekcji Modele.",
+      "presetModel": "Wybierz profil w sekcji Modele, aby edytować jego model i dostawcę.",
+      "activityMode": "Wybierz poziom szczegółowości informacji o aktywności agenta.",
+      "fileEditDisplay": "Wybierz, czy zmiany w plikach mają pokazywać liczbę wierszy, czy rozwinięty widok różnic.",
+      "codeWrap": "Ułatwiaj czytanie długich wierszy kodu na mniejszych ekranach.",
+      "brandLogos": "Pokazuj logotypy dostawców i aplikacji CLI w ustawieniach.",
+      "browserNotifications": "Powiadamiaj tylko wtedy, gdy ta strona działa w tle. Domyślnie wyłączone.",
+      "maxResults": "Maksymalna liczba wyników zwracanych przez pojedyncze wyszukiwanie w internecie.",
+      "timeout": "Jak długo czekać na zakończenie wyszukiwania.",
+      "jinaReader": "Używaj Jina Reader do odczytu stron, gdy jest dostępny.",
+      "imageGeneration": "Generuj obrazy na czacie po skonfigurowaniu dostawcy obrazów.",
+      "imageProvider": "Wybierz dostawcę używanego do generowania obrazów.",
+      "imageProviderStatus": "Generowanie obrazów używa danych uwierzytelniających z sekcji Dostawcy.",
+      "imageModel": "Wybierz model obsługiwany przez wybranego dostawcę obrazów.",
+      "defaultAspectRatio": "Używane, gdy żądanie nie określa proporcji obrazu.",
+      "defaultImageSize": "Żądany rozmiar obrazu. Dotyczy tylko dostawców obsługujących tę opcję.",
+      "maxImagesPerTurn": "Maksymalna liczba obrazów generowanych w jednym żądaniu.",
+      "timezone": "Używana w zaplanowanych zadaniach i odpowiedziach dotyczących dat i godzin.",
+      "cliAppsCatalog": "Instaluj narzędzia wiersza poleceń dla nanobota. Nie instaluje to ani nie zmienia odpowiadających im aplikacji desktopowych.",
+      "cliAppsFilter": "Szukaj według aplikacji, kategorii lub funkcji.",
+      "localServiceAccess": "Zezwól poleceniom powłoki z pełnym dostępem na łączenie się z usługami localhost.",
+      "webuiDefaultAccess": "Używany przez czaty WWW bez uprawnień przypisanych do projektu.",
+      "securityManagedControls": "Żądania internetowe blokują adresy lokalne, prywatne i usług metadanych, chyba że wyraźnie zezwolono na dostęp. Zabezpieczenia kanałów konfiguruje się osobno.",
+      "logs": "Otwórz folder dzienników silnika aplikacji natywnej.",
+      "diagnostics": "Wyeksportuj raport diagnostyczny pomocny w rozwiązywaniu problemów.",
+      "localServiceAccessNative": "Zezwól poleceniom powłoki z pełnym dostępem na łączenie się z usługami na tym Macu.",
+      "webuiDefaultAccessNative": "Używany przez czaty aplikacji natywnej bez uprawnień przypisanych do projektu.",
+      "contextWindow": "Wybierz domyślny budżet kontekstu dla tej konfiguracji modelu.",
+      "transcription": "Przepisuj nagranie z mikrofonu przed wysłaniem. Wiadomości głosowe w kanałach czatu używają tych samych ustawień.",
+      "transcriptionProvider": "Używa danych uwierzytelniających odpowiedniego dostawcy z sekcji Dostawcy.",
+      "transcriptionProviderStatus": "Klucze API pozostają w sekcji dostawców, a nie w ustawieniach transkrypcji.",
+      "transcriptionModel": "Zachowaj model domyślny, chyba że dostawca wymaga konkretnego identyfikatora modelu.",
+      "transcriptionLanguage": "Opcjonalny kod języka, np. en dla angielskiego, zh dla chińskiego, ja dla japońskiego lub ko dla koreańskiego."
+    },
+    "timezone": {
+      "select": "Wybierz strefę czasową",
+      "search": "Szukaj strefy czasowej",
+      "empty": "Brak pasujących stref czasowych."
+    },
+    "cliApps": {
+      "allCategories": "Wszystkie kategorie",
+      "availableCount": "Liczba aplikacji: {{count}}",
+      "installedCount": "Zainstalowane CLI: {{count}}",
+      "summary": "Zainstalowane CLI: {{installed}} z {{total}}",
+      "filterAll": "Wszystkie",
+      "filterInstalled": "Zainstalowane CLI",
+      "filterNotInstalled": "Niezainstalowane",
+      "searchPlaceholder": "Szukaj CLI",
+      "loading": "Ładowanie aplikacji CLI…",
+      "empty": "Żadna aplikacja CLI nie pasuje do tego filtra.",
+      "statusInstalled": "Aplikacja gotowa",
+      "statusMissing": "Brak",
+      "statusAvailable": "Dostępna",
+      "statusUnsupported": "Nieobsługiwana",
+      "statusNotInstalled": "Aplikacja niezainstalowana",
+      "requires": "Wymaga",
+      "test": "Przetestuj aplikację",
+      "update": "Zaktualizuj aplikację",
+      "uninstall": "Odinstaluj aplikację",
+      "install": "Zainstaluj aplikację",
+      "readyTitle": "@{{name}} jest gotowe",
+      "readyStatus": "Gotowe",
+      "readyTry": "Wypróbuj @{{name}}",
+      "readyCopied": "Skopiowano",
+      "readyPrompt": "Poproś nanobota o użycie @{{name}} w tym zadaniu.",
+      "openChat": "Otwórz czat",
+      "unsupported": "Nieobsługiwana",
+      "unavailable": "Niedostępna",
+      "noDescription": "Brak opisu.",
+      "availableCount_one": "{{count}} aplikacja",
+      "availableCount_other": "Liczba aplikacji: {{count}}",
+      "installedCount_one": "Zainstalowane CLI: {{count}}",
+      "installedCount_other": "Zainstalowane CLI: {{count}}"
+    },
+    "about": {
+      "documentation": "Dokumentacja",
+      "sourceCode": "Kod źródłowy",
+      "reportIssue": "Zgłoś problem",
+      "version": "Wersja",
+      "checking": "Sprawdzanie…",
+      "checkForUpdates": "Sprawdź aktualizacje",
+      "upToDate": "Masz aktualną wersję",
+      "updateAvailable": "Dostępna aktualizacja v{{version}}"
+    },
+    "mcp": {
+      "allCategories": "Wszystkie kategorie",
+      "summary": "Włączone profile: {{installed}} z {{total}}",
+      "filterAll": "Wszystkie",
+      "filterInstalled": "Włączone",
+      "filterNotInstalled": "Niewłączone",
+      "searchPlaceholder": "Szukaj profili MCP",
+      "moreOptions": "Dodaj serwer MCP",
+      "moreOptionsSubtitle": "Połącz własny serwer MCP lub zaimportuj istniejącą konfigurację.",
+      "customTitle": "Własny MCP",
+      "customSubtitle": "Dodaj dowolny serwer MCP używający stdio, HTTP lub SSE.",
+      "customAction": "Własny",
+      "importAction": "Importuj",
+      "serverName": "Nazwa serwera",
+      "serverUrl": "URL",
+      "transport": "Transport",
+      "authentication": "Uwierzytelnianie",
+      "authNone": "Brak",
+      "authHeaders": "Nagłówki",
+      "command": "Polecenie",
+      "args": "Argumenty (JSON)",
+      "headers": "Nagłówki (JSON)",
+      "oauthAfterSave": "Zapisz serwer, a następnie wybierz Połącz, aby się zalogować.",
+      "headersHelp": "Dodaj nagłówki żądań używane przez ten serwer.",
+      "env": "Zmienne środowiskowe (JSON)",
+      "timeout": "Limit czasu narzędzia (sekundy)",
+      "advancedOptions": "Opcje zaawansowane",
+      "hideAdvanced": "Ukryj opcje zaawansowane",
+      "saveCustom": "Zapisz serwer MCP",
+      "configImport": "Importuj mcp.json",
+      "importConfig": "Importuj",
+      "restartRequired": "Uruchom nanobota ponownie, aby połączyć zaktualizowane narzędzia MCP.",
+      "toolsFound": "Liczba narzędzi: {{count}}",
+      "loading": "Ładowanie profili MCP…",
+      "empty": "Żaden profil MCP nie pasuje do tego filtra.",
+      "openDocs": "Otwórz dokumentację",
+      "test": "Testuj",
+      "remove": "Usuń",
+      "enable": "Włącz",
+      "enabled": "Włączony",
+      "setup": "Połącz",
+      "configure": "Połącz",
+      "reconnect": "Połącz ponownie",
+      "connectTitle": "Połącz {{name}}",
+      "reconnectTitle": "Połącz ponownie {{name}}",
+      "actionsTitle": "Działania dla {{name}}",
+      "connectHint": "Dodaj klucz z ustawień konta.",
+      "saveAndEnable": "Zapisz i włącz",
+      "updateSetup": "Zaktualizuj konfigurację",
+      "configured": "Skonfigurowano",
+      "keepExisting": "Pozostaw puste, aby zachować obecną wartość",
+      "statusConfigured": "Skonfigurowano",
+      "statusMissingCredentials": "Wymagany klucz",
+      "connectingAccount": "Łączenie {{name}}",
+      "connectingLabel": "Łączenie…",
+      "continueSignIn": "Kontynuuj logowanie",
+      "preparingSignIn": "Przygotowywanie bezpiecznego logowania…",
+      "openSignInToContinue": "Otwórz stronę logowania, aby kontynuować.",
+      "finishSignInInBrowser": "Dokończ logowanie w oknie przeglądarki.",
+      "manualCallbackRequired": "Dokończ logowanie, a następnie wklej adres zwrotny URL do nanobota.",
+      "manualCallbackHelp": "Po zatwierdzeniu dostępu strona localhost się nie załaduje. Skopiuj jej pełny adres z paska adresu i wklej go tutaj.",
+      "finishingConnection": "Kończenie łączenia…",
+      "activatingTools": "Aktywowanie narzędzi…",
+      "connected": "Połączono.",
+      "connectionFailed": "Połączenie nie powiodło się.",
+      "connectionCancelled": "Anulowano połączenie.",
+      "reloadFailed": "Zalogowano, ale nanobot nie mógł połączyć narzędzi. Spróbuj uruchomić nanobota ponownie.",
+      "oauthFailed": "Nie można się połączyć. Spróbuj zalogować się ponownie.",
+      "statusMissingDependency": "Wymagana zależność",
+      "statusComingSoon": "Wkrótce",
+      "comingSoon": "Wkrótce",
+      "statusNotInstalled": "Niewłączony",
+      "manage": "Zarządzaj",
+      "manageTitle": "Zarządzaj {{name}}",
+      "fixConnection": "Napraw połączenie",
+      "overviewTab": "Przegląd",
+      "connectionTab": "Połączenie",
+      "manageTabs": "Sekcje zarządzania MCP",
+      "about": "Informacje",
+      "statusLabel": "Stan",
+      "transportLabel": "Transport",
+      "endpointLabel": "Punkt końcowy",
+      "toolPreview": "Narzędzia",
+      "noToolsAvailable": "Brak dostępnych narzędzi",
+      "searchTools": "Szukaj narzędzi",
+      "searchToolsPlaceholder": "Szukaj narzędzi",
+      "selectedCount": "Włączone: {{count}}",
+      "noMatchingTools": "Brak narzędzi pasujących do wyszukiwania.",
+      "applyChanges": "Zapisz zmiany",
+      "connectionDetails": "Szczegóły połączenia",
+      "credentials": "Dane uwierzytelniające",
+      "none": "Brak",
+      "dangerZone": "Usuń połączenie",
+      "toolScope": "Narzędzia",
+      "allTools": "Włącz wszystkie",
+      "noTools": "Wyłącz wszystkie",
+      "reloadTools": "Załaduj narzędzia ponownie",
+      "presetDescriptions": {
+        "browserbase": "Automatyzuj przeglądarki w chmurze za pomocą Browserbase.",
+        "playwright": "Sprawdzaj i automatyzuj lokalne przeglądarki za pomocą Playwright.",
+        "context7": "Pobieraj aktualną dokumentację bibliotek i przykłady kodu.",
+        "firecrawl": "Pobieraj, przeszukuj i analizuj treści stron internetowych.",
+        "parallel-search": "Przeszukuj internet i czytaj istotne strony.",
+        "exa": "Przeszukuj internet i pobieraj oczyszczoną treść stron.",
+        "microsoft-learn": "Przeszukuj i czytaj dokumentację Microsoft Learn.",
+        "aws-docs": "Przeszukuj dokumentację AWS i poradniki dotyczące usług.",
+        "brave-search": "Szukaj stron, wiadomości, obrazów, filmów i wyników lokalnych za pomocą Brave Search.",
+        "postman": "Przeglądaj i zarządzaj API, kolekcjami i obszarami roboczymi Postman.",
+        "figma": "Odczytuj kontekst projektów Figma przez lokalny MCP trybu Dev Mode.",
+        "xmind": "Twórz, czytaj i edytuj mapy myśli Xmind w chmurze.",
+        "notion": "Czytaj i aktualizuj obszar roboczy Notion.",
+        "linear": "Wyszukuj i zarządzaj zgłoszeniami, projektami i komentarzami w Linear.",
+        "github": "Zarządzaj repozytoriami, zgłoszeniami i pull requestami na GitHubie.",
+        "supabase": "Przeglądaj i zarządzaj projektami Supabase."
+      },
+      "toolsFound_one": "{{count}} narzędzie",
+      "toolsFound_other": "Liczba narzędzi: {{count}}"
+    },
+    "values": {
+      "light": "Jasny",
+      "dark": "Ciemny",
+      "notAvailable": "Niedostępne",
+      "enabled": "Włączone",
+      "disabled": "Wyłączone",
+      "restartPending": "Oczekuje na ponowne uruchomienie",
+      "ready": "Gotowe",
+      "privateEngine": "Prywatny silnik",
+      "unixSocket": "Gniazdo Unix",
+      "defaultWorkspace": "Domyślny obszar roboczy",
+      "auto": "Automatycznie",
+      "default": "Domyślne",
+      "expanded": "Rozwinięte",
+      "summary": "Podsumowanie",
+      "diff": "Różnice",
+      "collapsedDiff": "Zwinięte różnice",
+      "on": "Włączone",
+      "off": "Wyłączone",
+      "defaultPermission": "Domyślne uprawnienia",
+      "fullAccess": "Pełny dostęp",
+      "configured": "Skonfigurowano",
+      "notConfigured": "Nie skonfigurowano",
+      "pending": "Oczekuje",
+      "restartingEngine": "Ponowne uruchamianie",
+      "checking": "Sprawdzanie",
+      "running": "Działa",
+      "needsSetup": "Wymaga konfiguracji"
+    },
+    "status": {
+      "loading": "Ładowanie ustawień…",
+      "loadError": "Nie udało się załadować ustawień",
+      "unsaved": "Niezapisane zmiany.",
+      "upToDate": "Aktualne.",
+      "savedRestart": "Zapisano. Uruchom nanobota ponownie, aby zastosować zmiany.",
+      "restartAfterSaving": "Zapisz zmiany, a następnie uruchom nanobota ponownie, aby je zastosować.",
+      "savedRestartApply": "Zapisano. Uruchom ponownie, aby zastosować zmiany.",
+      "imageProviderRestart": "Zapisano ustawienia obrazów. Uruchom ponownie, aby zastosować zmiany.",
+      "hostRestartAfterSaving": "Zapisz zmiany, a nanobot ponownie uruchomi swój silnik.",
+      "hostRestartPending": "Zapisano ustawienia. Oczekiwanie na ponowne uruchomienie silnika.",
+      "hostApiUnavailable": "Te działania są dostępne tylko w aplikacji desktopowej.",
+      "logsOpened": "Otwarto folder dzienników.",
+      "logsOpenFailed": "Nie udało się otworzyć folderu dzienników.",
+      "diagnosticsExported": "Wyeksportowano diagnostykę do {{path}}.",
+      "diagnosticsExportFailed": "Nie udało się wyeksportować diagnostyki."
+    },
+    "actions": {
+      "save": "Zapisz",
+      "saving": "Zapisywanie",
+      "saveOrder": "Zapisz kolejność",
+      "savePreset": "Zapisz",
+      "edit": "Edytuj",
+      "delete": "Usuń",
+      "deleting": "Usuwanie…",
+      "cancel": "Anuluj",
+      "dismiss": "Zamknij",
+      "open": "Otwórz",
+      "export": "Eksportuj",
+      "opening": "Otwieranie…",
+      "exporting": "Eksportowanie…"
+    },
+    "byok": {
+      "description": "Dodaj własne dane uwierzytelniające dostawców, aby używać ich w profilach modeli.",
+      "configured": "Skonfigurowano",
+      "notConfigured": "Nie skonfigurowano",
+      "configuredSection": "Skonfigurowane",
+      "notConfiguredSection": "Nieskonfigurowane",
+      "showMore": "Pokaż kolejne {{count}}",
+      "showLess": "Pokaż mniej",
+      "apiKey": "Klucz API",
+      "apiBase": "Bazowy adres URL API",
+      "apiKeyPlaceholder": "Wpisz klucz API",
+      "apiKeyConfiguredPlaceholder": "Pozostaw puste, aby zachować obecny klucz",
+      "configuredKeyHint": "Skonfigurowany klucz",
+      "apiBasePlaceholder": "Użyj domyślnego adresu dostawcy",
+      "apiKeyRequired": "Do skonfigurowania tego dostawcy wymagany jest klucz API.",
+      "showApiKey": "Pokaż klucz API",
+      "hideApiKey": "Ukryj klucz API",
+      "noConfiguredProviders": "Brak skonfigurowanych dostawców",
+      "configureFirst": "Najpierw skonfiguruj dostawcę w sekcji Dostawcy.",
+      "openByok": "Skonfiguruj dostawców",
+      "tabs": {
+        "ariaLabel": "Rodzaj danych uwierzytelniających",
+        "llm": "LLM",
+        "webSearch": "Wyszukiwanie w internecie"
+      },
+      "webSearch": {
+        "provider": "Dostawca wyszukiwania",
+        "providerHelp": "Wybierz usługę używaną do wyszukiwania w internecie.",
+        "selectProvider": "Wybierz dostawcę",
+        "credentials": "Dane uwierzytelniające",
+        "noCredentialRequired": "Klucz nie jest wymagany",
+        "noCredentialHelp": "DuckDuckGo działa bez zapisanego klucza API.",
+        "apiKeyHelp": "Klucz jest ukrywany po zapisaniu.",
+        "baseUrl": "Bazowy adres URL",
+        "baseUrlHelp": "SearXNG wymaga adresu URL własnej instancji.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Ten dostawca wyszukiwania wymaga klucza API.",
+        "baseUrlRequired": "SearXNG wymaga bazowego adresu URL.",
+        "missingCredential": "Dodaj wymagane dane uwierzytelniające przed zapisaniem.",
+        "saveHint": "Zmiany dotyczą nowych żądań wyszukiwania w internecie."
+      }
+    },
+    "overview": {
+      "model": "Bieżący model",
+      "providers": "Dostawcy",
+      "configuredCount": "Skonfigurowane: {{count}}",
+      "totalProviders": "Dostępne: {{count}}",
+      "webSearch": "Wyszukiwanie w internecie",
+      "imageGeneration": "Generowanie obrazów",
+      "voiceInput": "Wprowadzanie głosowe",
+      "workspace": "Obszar roboczy"
+    },
+    "usage": {
+      "title": "Zużycie tokenów",
+      "shortTitle": "Zużycie tokenów",
+      "last30Days": "Ostatnie 30 dni",
+      "viewDetails": "Pokaż szczegóły",
+      "previousPage": "Poprzednia strona",
+      "nextPage": "Następna strona",
+      "dailyAverage": "Średnia dzienna",
+      "inputTokens": "Tokeny wejściowe",
+      "cacheHitRate": "Odsetek trafień w pamięci podręcznej",
+      "requestTrend": "Żądania dziennie",
+      "cacheRateHelp": "Odsetek trafień w pamięci podręcznej nie uwzględnia danych wejściowych o nieznanym stanie pamięci podręcznej.",
+      "dailyTrend": "Dzienne zużycie tokenów",
+      "bySource": "Zużycie według źródła",
+      "byModel": "Zużycie według modelu",
+      "modelTrend": "Zużycie modeli w czasie",
+      "modelsUnavailable": "Podział według modeli jest niedostępny.",
+      "otherModels": "Inne / nieprzypisane",
+      "unclassified": "Niesklasyfikowane",
+      "unavailable": "Dane o zużyciu są niedostępne.",
+      "noActivity": "Brak zużycia tokenów w ostatnich 30 dniach.",
+      "cachedInput": "Wejście z pamięci podręcznej",
+      "cacheMiss": "Brak trafienia w pamięci podręcznej",
+      "cacheUnknown": "Nieznany stan pamięci podręcznej",
+      "outputTokens": "Wyjście",
+      "otherTokens": "Inne tokeny",
+      "subtitle": "Zużycie zgłoszone przez dostawców w ostatnich 12 miesiącach.",
+      "empty": "Dane o tokenach pojawią się po nowych odpowiedziach modeli.",
+      "totalTokens": "Łączna liczba tokenów",
+      "peakTokens": "Szczytowe zużycie tokenów",
+      "thirtyDayTokens": "Tokeny z 30 dni",
+      "currentStreak": "Bieżąca seria",
+      "longestStreak": "Najdłuższa seria",
+      "daysValue": "{{count}} d",
+      "last30": "30 dni",
+      "activeDays": "Dni aktywności",
+      "requests": "Żądania",
+      "estimated": "szacunkowe",
+      "includesEstimates": "zawiera szacunki",
+      "cellTitle": "{{date}}: tokeny: {{tokens}}, żądania: {{requests}}",
+      "sources": {
+        "user": "Czat",
+        "api": "API",
+        "cron": "Automatyzacje",
+        "dream": "Pamięć",
+        "system": "Wywołania pomocnicze"
+      },
+      "systemHelp": "Wywołania pomocnicze obejmują generowanie tytułów czatów, inne zadania wewnętrzne i wywołania bez zapisanego źródła."
+    },
+    "providers": {
+      "title": "Dostawcy modeli",
+      "searchPlaceholder": "Szukaj dostawców",
+      "noMatches": "Brak dostawców pasujących do wyszukiwania.",
+      "addOwnProvider": "Dodaj własnego dostawcę modeli",
+      "customProvider": "Własny dostawca",
+      "customProviderName": "Nazwa dostawcy",
+      "customProviderNamePlaceholder": "Mój dostawca modeli",
+      "saveProvider": "Zapisz dostawcę",
+      "advancedOptions": "Opcje zaawansowane",
+      "saveAdvancedBeforeSignIn": "Zapisz zmiany zaawansowane przed zalogowaniem.",
+      "apiType": "Typ API",
+      "proxy": "Serwer proxy",
+      "thinkingStyle": "Format parametru rozumowania",
+      "region": "Region",
+      "profile": "Profil AWS",
+      "extraHeaders": "Dodatkowe nagłówki",
+      "extraBody": "Dodatkowe parametry treści żądania",
+      "extraQuery": "Dodatkowe parametry zapytania",
+      "capabilityFastMode": "Tryb szybki",
+      "capabilityFastModeHelp": "Używaj priorytetowej obsługi OpenAI, aby otrzymywać szybsze odpowiedzi. Powoduje to szybsze zużywanie środków.",
+      "capabilityDeepSeekSearch": "Wyszukiwanie internetowe DeepSeek",
+      "capabilityDeepSeekSearchHelp": "Zezwól DeepSeek V4 Flash na wyszukiwanie w internecie przez Responses API. Wyszukiwanie będzie widoczne na czacie.",
+      "capabilityXSearch": "Wyszukiwanie w X",
+      "capabilityXSearchHelp": "Zezwól obsługiwanym modelom Grok na używanie X Search od xAI. Wyszukiwanie będzie widoczne na czacie.",
+      "capabilityOpenAISearch": "Wyszukiwanie internetowe OpenAI",
+      "capabilityOpenAISearchHelp": "Zezwól zgodnym modelom Responses API na wyszukiwanie w internecie. Wyszukiwanie będzie widoczne na czacie."
+    },
+    "legal": {
+      "thirdPartyBrands": "Nazwy produktów, logotypy i marki należą do odpowiednich właścicieli. Służą wyłącznie identyfikacji i nie oznaczają poparcia projektu."
+    },
+    "image": {
+      "selectProvider": "Wybierz dostawcę",
+      "selectAspect": "Wybierz proporcje",
+      "selectSize": "Wybierz rozmiar",
+      "selectModel": "Wybierz model obrazów",
+      "searchOrTypeModel": "Wyszukaj lub wpisz identyfikator modelu",
+      "typeModelId": "Wpisz identyfikator modelu obsługiwanego przez tego dostawcę.",
+      "configureProvider": "Skonfiguruj dostawcę",
+      "missingCredential": "Skonfiguruj tego dostawcę przed włączeniem generowania obrazów."
+    },
+    "capabilities": {
+      "providerSupport": "Zależności dostawcy",
+      "providerInstallOnSave": "Wymagane pakiety zostaną zainstalowane automatycznie po zapisaniu dostawcy.",
+      "searchSupport": "Zależności wyszukiwania",
+      "searchInstallOnSave": "Wymagane pakiety Olostep zostaną zainstalowane automatycznie podczas zapisywania.",
+      "installing": "Instalowanie wymaganych pakietów…"
+    },
+    "api": {
+      "title": "Serwer API",
+      "openaiCompatible": "API zgodne z OpenAI",
+      "description": "Łącz SDK i inne agenty z nanobotem przez jego API zgodne z OpenAI.",
+      "start": "Uruchom serwer API",
+      "starting": "Uruchamianie…",
+      "stop": "Zatrzymaj",
+      "stopping": "Zatrzymywanie…",
+      "access": "Dostęp",
+      "thisDevice": "To urządzenie",
+      "localNetwork": "Sieć lokalna",
+      "localHelp": "Tylko to urządzenie może się łączyć.",
+      "networkHelp": "Inne urządzenia mogą się łączyć; wymagany jest klucz API.",
+      "port": "Port",
+      "portHelp": "API używa tego lokalnego portu.",
+      "apiKey": "Klucz API",
+      "apiKeyHelp": "Klienci wysyłają go jako token Bearer.",
+      "apiKeyRequired": "Wymagany przed udostępnieniem API w sieci.",
+      "apiKeyPlaceholder": "Wpisz klucz API",
+      "autoInstall": "Wymagane pakiety serwera API zostaną zainstalowane automatycznie przy jego uruchamianiu."
+    },
+    "observability": {
+      "title": "Monitorowanie",
+      "configured": "Dane uwierzytelniające śledzenia są dostępne dla nanobota.",
+      "environment": "Ustaw LANGFUSE_SECRET_KEY i LANGFUSE_PUBLIC_KEY, a następnie uruchom nanobota ponownie.",
+      "enable": "Włącz obsługę śledzenia"
+    },
+    "apps": {
+      "description": "Dodaj narzędzia do nanobota, a następnie wywołuj je przez @ na czacie.",
+      "cliLabel": "Aplikacja",
+      "mcpLabel": "MCP",
+      "channelLabel": "Kanał",
+      "featureLabel": "Funkcja",
+      "filterAll": "Gotowe",
+      "filterPlugins": "Wtyczki",
+      "filterCli": "Aplikacje",
+      "filterMcp": "MCP",
+      "enabledSummary": "Gotowe: {{count}}",
+      "caption": "Aplikacje: {{cli}} · Narzędzia MCP: {{mcp}}",
+      "searchPlaceholder": "Szukaj narzędzi",
+      "featured": "Narzędzia",
+      "mcpTools": "Narzędzia MCP",
+      "loading": "Ładowanie aplikacji…",
+      "empty": "Brak narzędzi pasujących do wyszukiwania.",
+      "emptyApps": "Brak dostępnych aplikacji.",
+      "emptyIntegrations": "Brak dostępnych narzędzi MCP.",
+      "emptyReady": "Żadne narzędzia nie są jeszcze gotowe.",
+      "clearSearch": "Wyczyść wyszukiwanie",
+      "browseApps": "Przeglądaj aplikacje",
+      "browseIntegrations": "Przeglądaj narzędzia MCP",
+      "emptyIntegrationsHint": "Dodaj poniżej własny serwer MCP.",
+      "restartRequired": "Uruchom nanobota ponownie, aby zastosować zaktualizowane aplikacje i narzędzia MCP."
+    },
+    "channels": {
+      "description": "Połącz komunikatory, pocztę i WebUI z nanobotem.",
+      "caption": "Działające: {{enabled}} · Kanały: {{total}}",
+      "searchPlaceholder": "Szukaj kanałów",
+      "backToChannels": "Wszystkie kanały",
+      "catalog": "Kanały",
+      "loading": "Ładowanie kanałów…",
+      "empty": "Żaden kanał nie pasuje do tego filtra.",
+      "restartRequired": "Uruchom nanobota ponownie, aby zastosować zaktualizowaną obsługę kanałów.",
+      "requires": "Wymaga: {{requirements}}",
+      "setUp": "Skonfiguruj",
+      "setupGuide": "Instrukcja konfiguracji",
+      "configKeys": "Klucze konfiguracji",
+      "enable": "Włącz kanał",
+      "disable": "Wyłącz kanał",
+      "needsConfig": "Wymaga konfiguracji",
+      "connect": "Połącz",
+      "reconnect": "Połącz ponownie",
+      "advanced": "Zaawansowane",
+      "checkAndEnable": "Sprawdź i włącz",
+      "checkConnection": "Sprawdź połączenie",
+      "connectionChecks": "Kontrole połączenia",
+      "open": "Otwórz",
+      "checkedAndEnabled": "Sprawdzono i włączono.",
+      "checking": "Sprawdzanie…",
+      "help": "Pomoc",
+      "checkOnly": "Sprawdź",
+      "commandCopied": "Skopiowano polecenie.",
+      "commandCopyFailed": "Nie udało się skopiować polecenia.",
+      "configuredInstances": "Skonfigurowane instancje: {{count}}",
+      "connectPreview": "Uruchom poniższe polecenie w terminalu, aby się połączyć.",
+      "copyCommand": "Kopiuj polecenie",
+      "filterAll": "Wszystkie",
+      "filterOff": "Niedziałające",
+      "filterOn": "Działające",
+      "helperCopied": "Skopiowano {{name}}.",
+      "helperCopyFailed": "Nie udało się skopiować {{name}}.",
+      "hideSecret": "Ukryj sekret",
+      "instanceConfigured": "Skonfigurowano",
+      "instanceNeedsSetup": "Wymaga konfiguracji",
+      "runtimeFailed": "Błąd",
+      "runtimeStarting": "Uruchamianie",
+      "runtimeStopped": "Nie działa",
+      "managedByWebui": "Zarządzane przez WebUI",
+      "optional": "Opcjonalne",
+      "providerPreset": "Dostawca",
+      "requiredSetup": "Wymagana konfiguracja",
+      "savedSecret": "Zapisano",
+      "savedSecretPlaceholder": "Zapisany sekret",
+      "savedSettings": "Zapisano ustawienia.",
+      "saveSettings": "Zapisz ustawienia",
+      "selectChannel": "Pokaż ustawienia {{name}}",
+      "showSecret": "Pokaż sekret",
+      "toggleChannel": "Kanał {{name}}",
+      "toggleInstance": "Instancja {{name}}",
+      "validationFailed": "Sprawdź wymaganą konfigurację przed włączeniem.",
+      "completeSetupToEnable": "Uzupełnij poniższą wymaganą konfigurację, a nanobot będzie mógł włączyć ten kanał.",
+      "chooseCredentialMethod": "Wybierz jedną metodę uwierzytelniania",
+      "or": "lub",
+      "fieldRequired": "Wymagane do ukończenia konfiguracji.",
+      "secretWillBeRemoved": "Zostanie usunięte",
+      "keepSavedSecret": "Zachowaj zapisane dane uwierzytelniające",
+      "removeSavedSecret": "Usuń zapisane dane uwierzytelniające",
+      "sections": {
+        "account": "Konto",
+        "credentials": "Dane uwierzytelniające",
+        "connection": "Połączenie",
+        "access": "Dostęp",
+        "behavior": "Zachowanie",
+        "security": "Bezpieczeństwo"
+      },
+      "validation": {
+        "connected": "Połączono",
+        "configured": "Niezweryfikowane",
+        "needs_setup": "Wymaga konfiguracji",
+        "invalid": "Połączenie nie powiodło się",
+        "unsupported": "Konfiguracja ręczna"
+      },
+      "configuredInstances_one": "Skonfigurowana instancja: {{count}}",
+      "configuredInstances_other": "Skonfigurowane instancje: {{count}}",
+      "validationMessages": {
+        "connected": "Zweryfikowano połączenie.",
+        "unverified": "Nie zweryfikowano połączenia.",
+        "missing": "Uzupełnij wymagane pola.",
+        "invalid": "Sprawdzenie połączenia nie powiodło się.",
+        "unsupported": "Ten kanał nie obsługuje jeszcze testowania połączenia.",
+        "present": "Uzupełniono",
+        "required": "Wymagane",
+        "manual": "Ten kanał nie obsługuje jeszcze testowania połączenia."
+      },
+      "search": "Szukaj kanałów",
+      "filterEnabled": "Włączone",
+      "noResults": "Brak pasujących kanałów",
+      "install": "Zainstaluj",
+      "installChannel": "Zainstaluj {{name}}",
+      "noInstallNeeded": "Instalacja nie jest wymagana",
+      "installNeeded": "Wymaga zależności"
+    },
+    "nanobotFeatures": {
+      "enabled": "Włączone",
+      "enable": "Włącz",
+      "disable": "Wyłącz",
+      "ready": "Gotowe",
+      "missingDependency": "Brak obsługi",
+      "installSupport": "Zainstaluj obsługę",
+      "installConfirmTitle": "Zainstalować obsługę {{name}}?",
+      "installConfirmDescription": "nanobot doda wymagane składniki {{name}}, a następnie włączy tę funkcję. Kontynuować?",
+      "installOnlyConfirmDescription": "nanobot zainstaluje wymagane składniki {{name}}. Po instalacji będzie można nawiązać połączenie.",
+      "installConfirmAction": "Zainstaluj i włącz",
+      "installOnlyConfirmAction": "Zainstaluj obsługę",
+      "websocketRequired": "Wymagane przez WebUI",
+      "channelDisabled": "Kanał jest wyłączony",
+      "notEnabled": "Niewłączone"
+    },
+    "automations": {
+      "taskInfo": "Informacje o zadaniu",
+      "runDetails": {
+        "loading": "Ładowanie odpowiedzi…",
+        "loadError": "Nie udało się załadować odpowiedzi.",
+        "retry": "Spróbuj ponownie",
+        "emptyOutput": "Nie wygenerowano odpowiedzi.",
+        "result": "Wynik",
+        "duration": "Czas trwania",
+        "noOutput": "Ten zapis nie zawiera treści odpowiedzi."
+      },
+      "create": "Utwórz automatyzację",
+      "createPrompt": "Co nanobot ma automatyzować?",
+      "createInput": "Opisz automatyzację",
+      "errors": {
+        "legacyMissingDestination": "W tej starszej automatyzacji brakuje miejsca dostarczenia wyników. Utwórz ją ponownie z powiązanego czatu, aby kontynuować."
+      },
+      "calendar": {
+        "previousMonth": "Poprzedni miesiąc",
+        "nextMonth": "Następny miesiąc",
+        "today": "Dzisiaj",
+        "planned": "Zaplanowane",
+        "recorded": "Zarejestrowane",
+        "more": "+{{count}} więcej",
+        "less": "Pokaż mniej",
+        "noEntries": "Brak uruchomień w tym miesiącu."
+      },
+      "yourTasks": "Twoje automatyzacje",
+      "systemTasks": "Zadania systemowe",
+      "views": {
+        "label": "Widok automatyzacji",
+        "tasks": "Zadania",
+        "calendar": "Kalendarz"
+      },
+      "filter": "Filtr",
+      "filteredBy": "Filtr: {{status}}",
+      "commandCondition": "Wyzwalane poleceniem",
+      "instructions": "Instrukcje",
+      "done": "Gotowe",
+      "moreDetails": "Więcej szczegółów",
+      "moreActions": "Więcej działań",
+      "neverRun": "Jeszcze nie uruchomiono",
+      "skipped": "Pominięto",
+      "oneShotHint": "Usuwane po uruchomieniu",
+      "filters": {
+        "all": "Wszystkie",
+        "active": "Aktywne",
+        "paused": "Wyłączone",
+        "failed": "Wymagają uwagi",
+        "system": "Systemowe"
+      },
+      "sort": {
+        "next": "Następne uruchomienie",
+        "last": "Ostatnie uruchomienie",
+        "updated": "Aktualizacja",
+        "name": "Nazwa"
+      },
+      "queue": "Kolejka",
+      "loading": "Ładowanie automatyzacji…",
+      "noMatches": "Brak automatyzacji pasujących do tego widoku.",
+      "empty": "Nie ma jeszcze automatyzacji.",
+      "emptyHint": "Powiedz nanobotowi na czacie, co ma wykonywać według harmonogramu.",
+      "emptyAction": "Otwórz czat",
+      "clearFilters": "Wyczyść filtry",
+      "oneShot": "Jednorazowa",
+      "systemTask": "Automatyzacja zarządzana przez system",
+      "localTrigger": "Wyzwalacz lokalny",
+      "labels": {
+        "schedule": "Harmonogram",
+        "next": "Następne",
+        "origin": "Powiązany czat",
+        "created": "Utworzono",
+        "updated": "Zaktualizowano"
+      },
+      "runNow": "Uruchom teraz",
+      "pause": "Wyłącz",
+      "resume": "Włącz",
+      "edit": "Edytuj",
+      "delete": "Usuń",
+      "protected": "Chronione",
+      "editTitle": "Edytuj automatyzację",
+      "save": "Zapisz",
+      "commandCopied": "Skopiowano",
+      "copyCommand": "Kopiuj",
+      "deleteTitle": "Usuń automatyzację",
+      "deleteDescription": "Usuń automatyzację „{{name}}”. Istniejące wiadomości na czacie zostaną zachowane.",
+      "cancel": "Anuluj",
+      "status": {
+        "system": "System",
+        "running": "Teraz działa",
+        "paused": "Wyłączone",
+        "failed": "Błąd",
+        "completed": "Zakończono",
+        "noSchedule": "Brak harmonogramu",
+        "active": "Aktywne"
+      },
+      "origin": {
+        "system": "System",
+        "unknown": "Brak powiązanego czatu"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI"
+      },
+      "schedule": {
+        "weeklyAt": "Co tydzień: {{day}}, {{time}}",
+        "at": "O {{time}}",
+        "every": "Co {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
+        "dailyAt": "Codziennie o {{time}}",
+        "monthlyAt": "Co miesiąc, dnia {{day}} o {{time}}",
+        "weekdaysAt": "W dni robocze o {{time}}",
+        "hourlyAt": "Co godzinę, w minucie :{{minute}}",
+        "hourlyWindow": "Co godzinę od {{start}} do {{end}}, w minucie :{{minute}}",
+        "local": "Wyzwalacz lokalny",
+        "custom": "Własny harmonogram"
+      },
+      "next": {
+        "paused": "Wyłączona",
+        "pending": "Teraz działa",
+        "local": "Oczekuje na wyzwolenie",
+        "none": "Brak następnego uruchomienia"
+      },
+      "message": {
+        "showMore": "Pokaż całą wiadomość",
+        "showLess": "Pokaż mniej"
+      },
+      "fields": {
+        "name": "Nazwa",
+        "message": "Wiadomość",
+        "command": "Polecenie",
+        "scheduleType": "Rodzaj harmonogramu",
+        "every": "Co",
+        "unit": "Jednostka",
+        "cronExpression": "Wyrażenie cron",
+        "timezone": "Strefa czasowa",
+        "runAt": "Uruchom o",
+        "runDate": "Data uruchomienia",
+        "runTime": "Godzina uruchomienia",
+        "chooseDate": "Wybierz datę"
+      },
+      "scheduleTypes": {
+        "every": "Odstęp czasu",
+        "cron": "Cron",
+        "at": "Jednorazowo"
+      },
+      "everyUnits": {
+        "second": "Sekundy",
+        "minute": "Minuty",
+        "hour": "Godziny",
+        "day": "Dni"
+      },
+      "validation": {
+        "nameRequired": "Wpisz nazwę zadania.",
+        "messageRequired": "Wpisz wiadomość zadania.",
+        "intervalRequired": "Wpisz dodatnią liczbę całkowitą określającą odstęp czasu.",
+        "cronRequired": "Wpisz wyrażenie cron.",
+        "timeRequired": "Wybierz godzinę uruchomienia.",
+        "futureRequired": "Wybierz termin w przyszłości."
+      }
+    },
+    "oauth": {
+      "authentication": "Uwierzytelnianie OAuth",
+      "signIn": "Zaloguj",
+      "signingIn": "Logowanie…",
+      "signInAgain": "Zaloguj ponownie",
+      "signOut": "Wyloguj",
+      "signedInAs": "Zalogowano jako {{account}}",
+      "signInHelp": "Zaloguj się z tego urządzenia; klucz API nie jest zapisywany w konfiguracji.",
+      "remoteSignInHelp": "Wybierz Zaloguj, aby otworzyć xAI na komputerze, a następnie wklej kod autoryzacyjny wyświetlony po zalogowaniu.",
+      "codexRemoteSignInHelp": "Zaloguj się w tej przeglądarce, a następnie wklej pełny adres zwrotny localhost do nanobota.",
+      "signInRequired": "Wymagane logowanie",
+      "signInBeforeSaving": "Zaloguj się przed zapisaniem tego dostawcy w profilu.",
+      "signedIn": "Zalogowano",
+      "notSignedIn": "Niezalogowano",
+      "proxyLabel": "Serwer proxy",
+      "proxySaveBeforeSignIn": "Zapisz zmiany proxy przed zalogowaniem.",
+      "saveProxy": "Zapisz proxy",
+      "localCodeHelp": "Dokończ logowanie w przeglądarce. Jeśli nanobot nie połączy się automatycznie, wklej poniżej kod autoryzacyjny.",
+      "remoteCodeHelp": "Wybierz Zaloguj, aby otworzyć xAI na komputerze. Po zalogowaniu wklej poniżej kod autoryzacyjny wyświetlony przez xAI.",
+      "localCallbackHelp": "Dokończ logowanie w przeglądarce. Jeśli nanobot nie połączy się automatycznie, skopiuj pełny adres zwrotny localhost z paska adresu i wklej go poniżej.",
+      "remoteCallbackHelp": "Otwórz ChatGPT w tej przeglądarce i dokończ logowanie. Gdy strona localhost się nie załaduje, skopiuj pełny adres URL z paska adresu i wklej go poniżej.",
+      "authorizationCode": "Kod autoryzacyjny",
+      "callbackUrl": "Pełny adres zwrotny URL",
+      "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
+      "openChatGPT": "Otwórz ChatGPT",
+      "pasteCallbackToContinue": "Wklej adres zwrotny URL, aby kontynuować.",
+      "waitingForCallback": "Oczekiwanie na przekierowanie z przeglądarki…",
+      "finishSignIn": "Dokończ logowanie"
+    },
+    "skills": {
+      "description": "Zarządzaj umiejętnościami, których agent może używać w rozmowach.",
+      "caption": "Dostępne: {{available}} · Łącznie: {{total}}",
+      "views": "Widoki umiejętności",
+      "installedTab": "Zainstalowane",
+      "discoverTab": "Odkrywaj",
+      "customGroup": "Własne",
+      "builtinGroup": "Wbudowane",
+      "otherGroup": "Inne",
+      "searchInstalled": "Szukaj zainstalowanych umiejętności",
+      "filterAll": "Wszystkie",
+      "filterEnabled": "Włączone",
+      "filterDisabled": "Wyłączone",
+      "noMatching": "Brak pasujących umiejętności.",
+      "statusDisabled": "Wyłączona",
+      "statusEnabled": "Włączona",
+      "statusNeedsSetup": "Wymaga konfiguracji",
+      "showLess": "Pokaż mniej",
+      "showMore": "Pokaż więcej",
+      "enabledControl": "Używaj tej umiejętności",
+      "enabledDescription": "Zezwól agentowi na używanie tej umiejętności po spełnieniu jej wymagań.",
+      "enableSkill": "Włącz {{name}}",
+      "disableSkill": "Wyłącz {{name}}",
+      "updateFailed": "Nie udało się zaktualizować tej umiejętności.",
+      "deleteTitle": "Usuń umiejętność",
+      "deleteDescription": "Usuń tę umiejętność z bieżącego obszaru roboczego.",
+      "deleteAction": "Usuń",
+      "deleteFailed": "Nie udało się usunąć tej umiejętności.",
+      "deleteConfirmTitle": "Usunąć {{name}}?",
+      "deleteConfirmDescription": "Spowoduje to usunięcie plików umiejętności z bieżącego obszaru roboczego. Tej czynności nie można cofnąć.",
+      "deleteConfirmAction": "Usuń umiejętność",
+      "instructionsTitle": "Instrukcje umiejętności",
+      "setupRequired": "Wymagana konfiguracja",
+      "setupDescription": "Zainstaluj brakującą zależność na urządzeniu, na którym działa nanobot, a następnie sprawdź ponownie.",
+      "copySetupCommand": "Kopiuj polecenie konfiguracji",
+      "checkAgain": "Sprawdź ponownie",
+      "marketplaceSearchFailed": "Nie udało się przeszukać katalogów umiejętności.",
+      "marketplaceInstallFailed": "Nie udało się zainstalować tej umiejętności.",
+      "marketplaceSearchPlaceholder": "Szukaj umiejętności",
+      "marketplaceSearchLabel": "Szukaj umiejętności",
+      "marketplaceSearching": "Wyszukiwanie",
+      "marketplaceProviderFilter": "Źródło umiejętności",
+      "marketplaceProviderAll": "Wszystkie",
+      "marketplaceTrendingTitle": "Popularne według katalogu",
+      "marketplaceTrendingDescription": "Rankingi i liczby instalacji są wyświetlane osobno dla każdego katalogu.",
+      "marketplaceViewAll": "Pokaż wszystkie",
+      "marketplaceTrendingUnavailable": "Popularne umiejętności są chwilowo niedostępne.",
+      "marketplaceEmpty": "Nie znaleziono umiejętności dla „{{query}}”.",
+      "marketplaceConfirmTitle": "Zainstalować {{name}}?",
+      "marketplaceConfirmDescription": "Ta umiejętność zewnętrzna pochodzi z {{provider}} ({{source}}) i może zawierać instrukcje lub skrypty wykonywalne.",
+      "marketplaceConfirmInstall": "Zainstaluj umiejętność",
+      "marketplaceOpen": "Otwórz {{name}} w {{provider}}",
+      "marketplaceOpenProvider": "Otwórz {{provider}}",
+      "marketplaceInstalls24h": "Instalacje / 24 h: {{formattedCount}}",
+      "marketplaceInstalls": "Instalacje: {{formattedCount}}",
+      "marketplaceNpxRequired": "Wymagany jest Node.js z npx",
+      "marketplaceInstalling": "Instalowanie",
+      "marketplaceInstalled": "Zainstalowano",
+      "marketplaceInstall": "Zainstaluj",
+      "marketplaceNoTrend": "Brak danych o trendzie",
+      "marketplaceTrendLabel": "Trend instalacji z 8 tygodni",
+      "featured": "Umiejętności agenta",
+      "empty": "Brak dostępnych umiejętności.",
+      "sourceWorkspace": "Własna",
+      "sourceBuiltin": "Wbudowana",
+      "statusAvailable": "Dostępna",
+      "statusUnavailable": "Niedostępna",
+      "unavailableReason": "Brakuje: {{reason}}",
+      "openDetails": "Otwórz szczegóły {{name}}",
+      "loadingDetail": "Ładowanie szczegółów umiejętności…",
+      "loadFailed": "Nie udało się załadować szczegółów umiejętności.",
+      "descriptionTitle": "Opis",
+      "source": "Źródło",
+      "status": "Stan",
+      "requirements": "Wymagania",
+      "noRequirements": "Nie określono dodatkowych wymagań.",
+      "commands": "Polecenia",
+      "environment": "Zmienne środowiskowe",
+      "missingCommands": "Brakujące narzędzia wiersza poleceń",
+      "missingEnvironment": "Brakujące zmienne środowiskowe",
+      "unavailableReasonLabel": "Powód niedostępności",
+      "rawInstructions": "Źródłowy SKILL.md",
+      "rawInstructionsEmpty": "Treść pliku umiejętności jest niedostępna.",
+      "detailDescription": "Szczegóły {{name}}."
+    },
+    "voice": {
+      "selectProvider": "Wybierz dostawcę",
+      "configureProvider": "Skonfiguruj dostawcę",
+      "languageAuto": "Automatycznie"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Temat {{id}}",
+    "forkTitle": "Odgałęzienie: {{title}}",
+    "loading": "Ładowanie…",
+    "noSessions": "Nie ma jeszcze sesji.",
+    "showMore": "Pokaż kolejne {{count}}",
+    "collapsed": "Ukryte tematy: {{count}}",
+    "showLess": "Pokaż mniej",
+    "actions": "Działania dla tematu {{title}}",
+    "newInProject": "Rozpocznij nowy temat w {{project}}",
+    "activity": {
+      "running": "Agent pracuje",
+      "complete": "Agent zakończył pracę",
+      "updated": "Nowa aktywność",
+      "recovery": "Ta rozmowa wymaga Twojej uwagi"
+    },
+    "pin": "Przypnij",
+    "unpin": "Odepnij",
+    "rename": "Zmień nazwę",
+    "renameTitle": "Zmień nazwę tematu",
+    "renameDescription": "Wybierz lokalną nazwę tego tematu na pasku bocznym.",
+    "renamePlaceholder": "Nazwa tematu",
+    "renameProjectTitle": "Zmień nazwę projektu",
+    "renameProjectDescription": "Wybierz lokalną nazwę tego projektu na pasku bocznym.",
+    "renameProjectPlaceholder": "Nazwa projektu",
+    "renameSave": "Zapisz",
+    "archive": "Archiwizuj",
+    "unarchive": "Przywróć z archiwum",
+    "showArchived": "Pokaż zarchiwizowane",
+    "hideArchived": "Ukryj zarchiwizowane",
+    "select": "Zaznacz",
+    "cancelSelection": "Anuluj zaznaczenie",
+    "selectedCount": "Zaznaczone: {{count}}",
+    "deleteSelected": "Usuń",
+    "delete": "Usuń",
+    "newChat": "Nowy temat",
+    "groups": {
+      "pinned": "Przypięte",
+      "all": "Tematy",
+      "projects": "Projekty",
+      "today": "Dzisiaj",
+      "yesterday": "Wczoraj",
+      "earlier": "Wcześniej",
+      "archived": "Zarchiwizowane"
+    }
+  },
+  "deleteConfirm": {
+    "title": "Usunąć ten temat?",
+    "titleMany": "Usunąć zaznaczone rozmowy ({{count}})?",
+    "description": "Tej czynności nie można cofnąć.",
+    "descriptionMany": "Tej czynności nie można cofnąć.",
+    "cancel": "Anuluj",
+    "confirm": "Usuń",
+    "automationsDescription": "Ten czat ma zaplanowane automatyzacje. Usunięcie czatu usunie również te automatyzacje.",
+    "automationsDescriptionMany": "Powiązane automatyzacje również zostaną usunięte.",
+    "moreAutomations": "+ {{count}} więcej",
+    "confirmWithAutomations": "Usuń",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Co {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
+      "local": "Wyzwalacz lokalny",
+      "unknown": "Własny harmonogram"
+    },
+    "next": {
+      "label": "Następne: {{time}}",
+      "disabled": "Wstrzymane",
+      "local": "Oczekuje na wyzwolenie",
+      "none": "Brak następnego uruchomienia"
+    }
+  },
+  "connection": {
+    "idle": "Bezczynne",
+    "connecting": "Łączenie…",
+    "open": "Połączono",
+    "reconnecting": "Ponowne łączenie…",
+    "closed": "Rozłączono",
+    "error": "Błąd połączenia"
+  },
+  "thread": {
+    "compaction": {
+      "cancelled": "Anulowano kompaktowanie kontekstu",
+      "empty": "Nie ma nic do skompaktowania.",
+      "started": "Kompaktowanie kontekstu",
+      "failed": "Kompaktowanie kontekstu nie powiodło się",
+      "succeeded": "Kontekst skompaktowany"
+    },
+    "loadingConversation": "Ładowanie rozmowy…",
+    "empty": {
+      "greetings": {
+        "workOn": "Nad czym popracujemy?",
+        "start": "Od czego zaczniemy?",
+        "build": "Co dziś zbudujemy?",
+        "tackle": "Czym zajmiemy się razem?"
+      },
+      "quickActions": {
+        "plan": {
+          "title": "Stwórz plan projektu",
+          "prompt": "Stwórz zwięzły plan projektu, który warto zbudować w następnej kolejności."
+        },
+        "analyze": {
+          "title": "Przeanalizuj dane",
+          "prompt": "Pomóż mi przeanalizować te dane i wskaż najważniejsze prawidłowości."
+        },
+        "brainstorm": {
+          "title": "Zaproponuj pomysły",
+          "prompt": "Zaproponuj kilka praktycznych pomysłów na rozwiązanie tego problemu, uwzględniając ich zalety i wady."
+        },
+        "code": {
+          "title": "Napisz kod",
+          "prompt": "Pomóż mi napisać kod do tego zadania, zaczynając od najmniejszej przydatnej zmiany."
+        },
+        "summarize": {
+          "title": "Podsumuj dokument",
+          "prompt": "Podsumuj ten dokument i wymień najważniejsze wnioski."
+        },
+        "more": {
+          "title": "Więcej",
+          "prompt": "Pokaż kilka przydatnych sposobów, w jakie możesz mi pomóc w tym obszarze roboczym."
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Zaprojektuj ikonę aplikacji",
+          "prompt": "Wygeneruj przejrzystą ikonę aplikacji nanobot w proporcjach 1:1: przyjazny robot, prosty styl wektorowy, łagodne odcienie błękitu i bieli, bez tekstu."
+        },
+        "sticker": {
+          "title": "Stwórz naklejkę",
+          "prompt": "Wygeneruj uroczą ilustrację małego robota asystenta w stylu naklejki, z pozornie przezroczystym tłem, wyrazistą i zabawną."
+        },
+        "poster": {
+          "title": "Stwórz plakat",
+          "prompt": "Wygeneruj dopracowany projekt plakatu osobistego asystenta AI, z nowoczesną kompozycją i wyraźną hierarchią wizualną, odpowiedni na stronę główną produktu."
+        },
+        "product": {
+          "title": "Wizualizacja produktu",
+          "prompt": "Wygeneruj przejrzystą wizualizację produktu dla internetowej aplikacji do rozmów z AI: minimalistyczny interfejs, efektowne oświetlenie, realistyczna ramka urządzenia."
+        },
+        "portrait": {
+          "title": "Stylizowany portret",
+          "prompt": "Wygeneruj stylizowany portret przyjaznego towarzysza AI, z miękkim oświetleniem, szczegółowy i przystępny, w stylu nowoczesnej ilustracji."
+        },
+        "edit": {
+          "title": "Edytuj obraz",
+          "prompt": "Pomóż mi edytować obraz. Najpierw poproś o przesłanie lub wskazanie obrazu, a następnie wygeneruj zmodyfikowaną wersję."
+        }
+      }
+    },
+    "header": {
+      "toggleSidebar": "Przełącz pasek boczny",
+      "newChat": "Rozpocznij nowy temat",
+      "toggleTheme": "Przełącz motyw w nagłówku",
+      "settings": "Otwórz ustawienia",
+      "sessionInfo": "Szczegóły sesji"
+    },
+    "sessionInfo": {
+      "title": "Sesja",
+      "untitled": "Temat bez tytułu",
+      "automations": "Automatyzacje",
+      "count": "{{count}}",
+      "loading": "Ładowanie automatyzacji…",
+      "loadFailed": "Nie udało się załadować automatyzacji.",
+      "empty": "W tej sesji nie ma jeszcze automatyzacji.",
+      "openCalendar": "Pokaż wszystkie w kalendarzu",
+      "disabled": "Wyłączone",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "Co {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "local": "Wyzwalacz lokalny",
+        "unknown": "Własny harmonogram"
+      },
+      "next": {
+        "label": "{{time}}",
+        "pending": "Wkrótce się uruchomi",
+        "disabled": "Wstrzymane",
+        "local": "Oczekuje na wyzwolenie",
+        "none": "Brak następnego uruchomienia"
+      }
+    },
+    "composer": {
+      "placeholderThread": "Wpisz wiadomość…",
+      "placeholderHero": "Zapytaj o cokolwiek…",
+      "placeholderOpening": "Otwieranie nowego tematu…",
+      "placeholderStreaming": "Model odpowiada…",
+      "inputAria": "Pole wiadomości",
+      "sendHint": "Enter — wyślij · Shift+Enter — nowy wiersz",
+      "runRuntimeTitle": "W trakcie · {{elapsed}}",
+      "goalStateStrip": "Cel · {{label}}",
+      "goalStateFallback": "Cel",
+      "goalStateExpandAria": "Pokaż pełną treść celu",
+      "goalStateSheetTitle": "Cel",
+      "goalStateCloseAria": "Zamknij cel",
+      "send": "Wyślij wiadomość",
+      "stop": "Zatrzymaj odpowiedź",
+      "quotedContext": "Cytowany kontekst",
+      "removeQuotedContext": "Usuń cytowany kontekst",
+      "modelNotConfigured": "Model nie jest skonfigurowany",
+      "configureModel": "Skonfiguruj model",
+      "chooseAI": "Wybierz swoje AI",
+      "switchModel": "Zmień model dla tego czatu",
+      "manageModels": "Zarządzaj modelami",
+      "context": {
+        "tooltip": "Kontekst {{percent}}%",
+        "detailsLabel": "Otwórz zużycie kontekstu",
+        "panelTitle": "Zużycie kontekstu",
+        "contextTitle": "Kontekst",
+        "recentRounds": "Ostatnie rundy",
+        "inputTrend": "Tokeny wejściowe",
+        "input": "Tokeny wejściowe",
+        "cacheHitRate": "Odsetek trafień w pamięci KV",
+        "output": "Tokeny wyjściowe",
+        "duration": "Czas generowania"
+      },
+      "queued": {
+        "label": "Wskazówki w kolejce",
+        "guide": "Pokieruj",
+        "delete": "Usuń wskazówkę",
+        "edit": "Edytuj wskazówkę",
+        "drag": "Przeciągnij, aby zmienić kolejność"
+      },
+      "attachImage": "Dołącz pliki",
+      "imageMode": {
+        "label": "Generowanie obrazów",
+        "toggle": "Przełącz tryb generowania obrazów",
+        "placeholder": "Opisz lub edytuj obraz…",
+        "aspectAria": "Proporcje obrazu",
+        "aspectLabel": "Proporcje obrazu",
+        "aspect": {
+          "auto": "Automatycznie",
+          "1_1": "Kwadrat 1:1",
+          "3_4": "Portret 3:4",
+          "9_16": "Relacja 9:16",
+          "4_3": "Poziomo 4:3",
+          "16_9": "Szeroki 16:9"
+        }
+      },
+      "tools": {
+        "search": "Szukaj",
+        "reason": "Rozumuj",
+        "deepResearch": "Dogłębna analiza",
+        "voice": "Wprowadzanie głosowe"
+      },
+      "voice": {
+        "hint": "Kliknij, aby dyktować, lub przytrzymaj",
+        "stop": "Zatrzymaj nagrywanie",
+        "transcribing": "Transkrypcja…",
+        "recordingStatus": "Nagrywanie {{time}}"
+      },
+      "voiceErrors": {
+        "insecureContext": "Chrome i inne przeglądarki ze względów bezpieczeństwa blokują mikrofon na zdalnych stronach HTTP. Otwórz WebUI przez HTTPS, aby używać wprowadzania głosowego.",
+        "unsupported": "Ta przeglądarka nie obsługuje wprowadzania głosowego.",
+        "permission": "Zezwól na dostęp do mikrofonu na pasku adresu, a następnie spróbuj ponownie.",
+        "notConfigured": "Najpierw skonfiguruj dostawcę transkrypcji.",
+        "tooLong": "Nagranie jest za długie.",
+        "tooShort": "Przytrzymaj trochę dłużej, aby nagrać głos.",
+        "noInput": "Nie wykryto sygnału z mikrofonu.",
+        "noDevice": "Nie znaleziono mikrofonu. Podłącz mikrofon i spróbuj ponownie.",
+        "failed": "Nie udało się wykonać transkrypcji dźwięku."
+      },
+      "slash": {
+        "ariaLabel": "Polecenia ukośnikowe",
+        "label": "polecenia",
+        "navigateHint": "↑↓ Nawigacja",
+        "selectHint": "Enter/Tab Wybierz",
+        "closeHint": "Esc Zamknij",
+        "badges": {
+          "current": "Bieżący",
+          "recent": "Ostatnie"
+        },
+        "details": {
+          "goalActive": "Cel jest w trakcie realizacji",
+          "goalReady": "Rozpocznij realizację długoterminowego celu",
+          "history": "Pokaż ostatnie wiadomości",
+          "stopRunning": "Teraz działa"
+        },
+        "commands": {
+          "new": {
+            "title": "Nowy czat",
+            "description": "Zresetuj ten czat i rozpocznij nową rozmowę."
+          },
+          "compact": {
+            "title": "Skompaktuj kontekst",
+            "description": "Skompaktuj kontekst tego czatu i kontynuuj rozmowę."
+          },
+          "stop": {
+            "title": "Zatrzymaj bieżące zadanie",
+            "description": "Anuluj aktywną turę agenta na tym czacie."
+          },
+          "restart": {
+            "title": "Uruchom nanobota ponownie",
+            "description": "Uruchom ponownie bieżący proces bota."
+          },
+          "status": {
+            "title": "Pokaż stan",
+            "description": "Wyświetl stan środowiska uruchomieniowego, dostawcy i kanałów."
+          },
+          "model": {
+            "title": "Model",
+            "description": "Pokaż lub zmień aktywny profil modelu."
+          },
+          "history": {
+            "title": "Pokaż historię rozmowy",
+            "description": "Wyświetl ostatnie N zapisanych wiadomości z rozmowy."
+          },
+          "dream": {
+            "title": "Uruchom Dream",
+            "description": "Ręcznie uruchom konsolidację pamięci."
+          },
+          "dream_log": {
+            "title": "Pokaż dziennik Dream",
+            "description": "Pokaż zmiany z ostatniej konsolidacji Dream."
+          },
+          "dream_restore": {
+            "title": "Przywróć pamięć",
+            "description": "Przywróć pamięć z wcześniejszej migawki Dream."
+          },
+          "dream_prompt": {
+            "title": "Pamięć Dream",
+            "description": "Powiedz Dream, jak porządkować pamięć tego obszaru roboczego."
+          },
+          "goal": {
+            "title": "Długoterminowy cel",
+            "description": "Poleć agentowi traktować to jako długotrwały, wieloetapowy cel."
+          },
+          "trigger": {
+            "title": "Utwórz wyzwalacz lokalny",
+            "description": "Utwórz wyzwalacz CLI przypisany do tej sesji czatu."
+          },
+          "help": {
+            "title": "Pokaż pomoc",
+            "description": "Wyświetl dostępne polecenia ukośnikowe."
+          },
+          "pairing": {
+            "title": "Parowanie",
+            "description": "Zarządzaj żądaniami parowania."
+          }
+        }
+      },
+      "mentions": {
+        "ariaLabel": "Wzmianki",
+        "label": "Aplikacje",
+        "cliGroup": "Aplikacje CLI",
+        "mcpGroup": "Usługi MCP",
+        "sessionGroup": "Rozmowy nanobota",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "Użyj @{{name}} jako lokalnej aplikacji CLI",
+        "mcpDescription": "Użyj @{{name}} jako serwera MCP",
+        "cliTitle": "Aplikacja CLI: {{name}}",
+        "mcpTitle": "Serwer MCP: {{name}}",
+        "sessionBadge": "Rozmowa nanobota",
+        "sessionDescription": "Odwołaj się do @{{name}} jako wcześniejszego czatu"
+      },
+      "encoding": "Kodowanie…",
+      "remove": "Usuń załącznik",
+      "normalizedSizeHint": "{{orig}} → {{current}} (automatycznie)",
+      "textTooLarge": "Treść wiadomości jest za duża (maks. {{max}})",
+      "imageRejected": {
+        "unsupported_type": "Nieobsługiwany typ pliku",
+        "empty_file": "Nie można dołączać pustych plików",
+        "too_many_attachments": "Maksymalna liczba załączników na wiadomość: {{max}}",
+        "too_many_images": "Maksymalna liczba obrazów na wiadomość: {{max}}",
+        "magic_mismatch": "Plik nie wygląda na prawidłowy obraz",
+        "decode_failed": "Nie udało się zdekodować tego obrazu",
+        "too_large": "Plik jest za duży — spróbuj użyć mniejszego",
+        "total_too_large": "Załączniki są łącznie za duże — usuń część lub użyj mniejszych plików",
+        "transport_too_large": "Ten załącznik przekroczyłby limit przesyłania bramy",
+        "io": "Nie udało się odczytać tego pliku"
+      },
+      "workspace": {
+        "accessAria": "Tryb dostępu do obszaru roboczego",
+        "projectAria": "Wybierz projekt",
+        "projectPlaceholder": "Wybierz projekt",
+        "default": "Domyślne uprawnienia",
+        "defaultShort": "Domyślne",
+        "full": "Pełny dostęp",
+        "fullShort": "Pełny"
+      }
+    },
+    "scrollToBottom": "Przewiń na dół",
+    "loadEarlier": "Załaduj wcześniejsze wiadomości",
+    "forkedFromHistory": "Odgałęziono z historii",
+    "promptNavigator": {
+      "open": "Otwórz nawigację po poleceniach",
+      "title": "Polecenia",
+      "search": "Szukaj poleceń",
+      "noResults": "Brak pasujących poleceń.",
+      "jumpTo": "Przejdź do polecenia: {{label}}",
+      "railAria": "Nawigacja po poleceniach użytkownika"
+    }
+  },
+  "message": {
+    "streaming": "przesyłanie strumieniowe",
+    "delivery": {
+      "sending": "Wysyłanie…",
+      "failed": "Nie wysłano"
+    },
+    "assistantTyping": "Asystent pisze",
+    "toolSingle": "Używa narzędzia",
+    "toolMany": "Użyte narzędzia: {{count}}",
+    "toolSummary": "{{count}} narzędzie",
+    "toolSummaryMany": "Liczba narzędzi: {{count}}",
+    "reasoningTools": "Rozumowanie · Narzędzia: {{count}}",
+    "reasoningToolsSingular": "Rozumowanie · 1 narzędzie",
+    "reasoning": "Myślenie",
+    "reasoningStreaming": "Myślenie…",
+    "reasoningSummary": "Rozumowanie",
+    "agentActivitySummary": "Kroki: {{reasoning}} · Wywołania narzędzi: {{tools}}",
+    "agentActivityToolsOnly": "Wywołania narzędzi: {{tools}}",
+    "agentActivityLiveSummary": "Pracuje… · Kroki: {{reasoning}} · Wywołania narzędzi: {{tools}}",
+    "agentActivityLiveToolsOnly": "Pracuje… · Wywołania narzędzi: {{tools}}",
+    "activityThinkingFor": "Myśli od {{duration}}",
+    "activityThought": "Zakończono myślenie",
+    "activityThoughtFor": "Myślenie trwało {{duration}}",
+    "activityWorkingFor": "Pracuje od {{duration}}",
+    "activityWorked": "Zakończono pracę",
+    "activityWorkedFor": "Praca trwała {{duration}}",
+    "traceDetailsLoadFailed": "Nie udało się załadować pełnych szczegółów aktywności.",
+    "retryTraceDetails": "Spróbuj ponownie",
+    "retryConnection": "Połączenie nie powiodło się",
+    "retryTimeout": "Przekroczono limit czasu modelu",
+    "retryRateLimit": "Osiągnięto limit żądań",
+    "retryServer": "Model niedostępny",
+    "retryUnknown": "Żądanie do modelu nie powiodło się",
+    "retryWaiting": "{{error}} · ponowienie za {{seconds}} s · próba {{attempt}}",
+    "retryExhausted": "{{error}} · kończenie tury",
+    "cliActivityRunningOne": "Używa {{name}}",
+    "cliActivityRanOne": "Użyto {{name}}",
+    "cliActivityFailedOne": "Błąd {{name}}",
+    "cliActivityRunningMany": "Używa aplikacji CLI: {{count}}",
+    "cliActivityRanMany": "Użyte aplikacje CLI: {{count}}",
+    "cliActivityFailedMany": "Aplikacje CLI z błędem: {{count}}",
+    "cliRunRunning": "Używa",
+    "cliRunRan": "Użyto",
+    "cliRunFailed": "Błąd",
+    "imageAttachment": "Załączony obraz",
+    "videoAttachment": "Załączony film",
+    "fileAttachment": "Załączony plik",
+    "attachmentUnavailable": "Załącznik niedostępny",
+    "dataTable": "Tabela danych",
+    "fileEditPreparing": "Przygotowywanie edycji pliku…",
+    "openLink": "Otwórz link: {{label}}",
+    "openAttachment": "Otwórz {{name}}",
+    "skill": "Umiejętność: {{name}}",
+    "automationSourceFallback": "Automatyzacja",
+    "automationTriggered": "Uruchomiono automatycznie",
+    "askAboutSelection": "Zapytaj o to",
+    "forkFromHere": "Odgałęź",
+    "copyReply": "Kopiuj",
+    "copiedReply": "Skopiowano",
+    "turnLatencyTitle": "Całkowity czas odpowiedzi",
+    "fileEditViewDiff": "Pokaż różnice",
+    "fileEditViewLargeDiff": "Pokaż duży zestaw różnic",
+    "fileEditDiffLineCount": "Liczba wierszy: {{count}}",
+    "fileEditUnchangedLinesHidden": "Ukryte niezmienione wiersze: {{count}}",
+    "fileEditShowMoreLines": "Pokaż kolejne wiersze ({{count}})",
+    "fileEditShowFewerLines": "Pokaż mniej wierszy",
+    "fileEditOpenFile": "Otwórz plik",
+    "fileEditDiffTruncated": "Widok różnic został skrócony. Otwórz plik, aby zobaczyć pełną zmianę.",
+    "usage": {
+      "context": "Bieżący kontekst: {{tokens}}{{capacity}}",
+      "requests": "Wywołania w tej turze: {{count}}",
+      "estimated": "Uwzględnia szacunkowe zużycie"
+    }
+  },
+  "recovery": {
+    "actionFailed": "Przywracanie nie powiodło się. Spróbuj ponownie.",
+    "interrupted": "Zadanie przerwane",
+    "completed": "Zadanie zakończone",
+    "failed": "Przywracanie zadania nie powiodło się",
+    "failedHelp": "Nie udało się bezpiecznie przywrócić zapisanego zadania. Sprawdź je przed kontynuowaniem.",
+    "resuming": "Przywracanie przerwanego zadania…",
+    "review": "Sprawdź zadanie przed kontynuowaniem. Narzędzia nie zostaną uruchomione ponownie automatycznie.",
+    "safeResume": "Kontynuowanie na podstawie zapisanego kontekstu rozmowy.",
+    "dismiss": "Zamknij",
+    "continue": "Kontynuuj"
+  },
+  "lightbox": {
+    "title": "Podgląd obrazu",
+    "open": "Pokaż obraz",
+    "prev": "Poprzedni obraz",
+    "next": "Następny obraz",
+    "close": "Zamknij podgląd obrazu"
+  },
+  "filePreview": {
+    "aria": "Podgląd pliku",
+    "breadcrumb": "Ścieżka pliku",
+    "close": "Zamknij podgląd pliku",
+    "loading": "Ładowanie podglądu…",
+    "failed": "Nie udało się wyświetlić podglądu tego pliku.",
+    "routeMissing": "Podgląd pliku wymaga najnowszej bramy. Uruchom ponownie bramę nanobota i spróbuj jeszcze raz.",
+    "resize": "Zmień rozmiar podglądu pliku",
+    "truncated": "Podgląd został skrócony, ponieważ plik jest duży."
+  },
+  "code": {
+    "fallbackLanguage": "kod",
+    "copyAria": "Kopiuj kod",
+    "copy": "Kopiuj",
+    "copied": "Skopiowano"
+  },
+  "workbench": {
+    "aria": "Obszar rozmów",
+    "panes": "Panele",
+    "tabAria": "Grupa: {{title}}",
+    "panesInTab": "Panele w {{title}}",
+    "collapseTabGroup": "Zwiń panele w {{title}}",
+    "expandTabGroup": "Rozwiń panele w {{title}}",
+    "dropPane": "Przenieś {{pane}} do {{tab}}",
+    "createGroup": "Utwórz grupę",
+    "moveTo": "Przenieś do",
+    "renameGroupTitle": "Zmień nazwę grupy",
+    "renameGroupDescription": "Nadaj nazwę tej grupie.",
+    "renameGroupPlaceholder": "Nazwa grupy",
+    "dissolveTab": "Rozwiąż grupę",
+    "layout": "Układ paneli",
+    "addPane": "Dodaj panel",
+    "paneLimit": "Maksymalna liczba paneli: {{count}}",
+    "deleteConversations": "Usuń wszystkie czaty",
+    "movePane": "Przenieś panel {{title}}",
+    "movePaneHint": "Przeciągnij, aby przenieść · Możesz też użyć klawiszy strzałek",
+    "resizePaneBoundary": "Przesuń granicę panelu {{index}}",
+    "promotePane": "Ustaw {{title}} jako panel główny",
+    "paneActions": "Działania panelu {{title}}",
+    "detachPane": "Usuń",
+    "composerAria": "Napisz do {{title}}",
+    "layouts": {
+      "columns": "Kolumny",
+      "rows": "Wiersze",
+      "grid": "Siatka",
+      "bsp": "BSP",
+      "main-stack": "Główny i stos"
+    }
+  },
+  "common": {
+    "dismiss": "Zamknij",
+    "close": "Zamknij",
+    "current": "Bieżące",
+    "cancel": "Anuluj"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Wiadomość jest za duża",
+      "body": "Serwer odrzucił ostatnią wiadomość, ponieważ przekroczyła limit rozmiaru. Usuń część obrazów lub użyj mniejszych plików, a następnie wyślij ponownie."
+    },
+    "workspaceScopeRejected": {
+      "title": "Nie zmieniono obszaru roboczego",
+      "body": "Brama odrzuciła ten projekt lub tryb dostępu. Wybierz istniejący projekt albo inny tryb dostępu i spróbuj ponownie."
+    },
+    "turnRejected": {
+      "title": "Wiadomość nie została wysłana",
+      "body": "Brama odrzuciła tę wiadomość. Sprawdź jej treść lub załączniki i spróbuj ponownie."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "Limit dostawcy modelu jest niedostępny",
+      "billingBody": "Doładuj środki lub sprawdź rozliczenia konta u dostawcy, a następnie spróbuj ponownie.",
+      "connectionTitle": "Nie udało się połączyć z dostawcą modelu",
+      "timeoutTitle": "Przekroczono limit czasu żądania do dostawcy modelu",
+      "rateLimitTitle": "Osiągnięto limit żądań dostawcy modelu",
+      "serverTitle": "Błąd usługi dostawcy modelu",
+      "unknownTitle": "Żądanie do dostawcy modelu nie powiodło się",
+      "bodyWithAttempt": "Żądanie nadal kończyło się błędem przy próbie {{attempts}}, więc zatrzymano ponawianie. Sprawdź konfigurację dostawcy lub stan usługi i spróbuj ponownie.",
+      "body": "Sprawdź konfigurację dostawcy lub stan usługi i spróbuj ponownie."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Domyślny obszar roboczy",
+      "manual": "Wklej ścieżkę",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Użyj ścieżki",
+      "absolutePathRequired": "Wpisz bezwzględną ścieżkę folderu na tym urządzeniu."
+    }
+  }
+}

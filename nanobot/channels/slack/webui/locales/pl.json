@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji Slacka",
+    "officialLabel": "Otwórz aplikacje Slacka",
+    "actions": {
+      "slack-manifest": "Kopiuj manifest aplikacji"
+    },
+    "fields": {
+      "appToken": {
+        "label": "Token aplikacji",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "Token bota",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "Zachowanie w grupach",
+        "choices": {
+          "mention": "Tylko wzmianki",
+          "open": "Wszystkie wiadomości",
+          "allowlist": "Lista dozwolonych"
+        }
+      },
+      "mode": {
+        "label": "Tryb połączenia",
+        "choices": {
+          "socket": "Tryb Socket"
+        }
+      },
+      "webhookPath": {
+        "label": "Ścieżka webhooka"
+      },
+      "replyInThread": {
+        "label": "Odpowiadaj w wątku",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "reactEmoji": {
+        "label": "Emoji odczytania"
+      },
+      "doneEmoji": {
+        "label": "Emoji zakończenia"
+      },
+      "includeThreadContext": {
+        "label": "Uwzględniaj kontekst wątku",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limit kontekstu wątku"
+      },
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy"
+      },
+      "groupAllowFrom": {
+        "label": "Dozwolone kanały"
+      },
+      "groupRequireMention": {
+        "label": "Wymagaj wzmianek w kanałach",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "dm_enabled": {
+        "label": "Włącz wiadomości prywatne",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "dm_policy": {
+        "label": "Dostęp do wiadomości prywatnych",
+        "choices": {
+          "allowlist": "Lista dozwolonych",
+          "open": "Otwarty"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Dozwoleni użytkownicy wiadomości prywatnych"
+      },
+      "proxy": {
+        "label": "Serwer proxy",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}
