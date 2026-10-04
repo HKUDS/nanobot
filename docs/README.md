@@ -67,6 +67,7 @@ Use reference pages to look up an exact option after you know what you are tryin
 | WebSocket authentication and wire protocol | [WebSocket](./websocket.md) |
 | Python SDK classes, events, sessions, and hooks | [Python SDK](./python-sdk.md) |
 | OpenAI-compatible HTTP routes and payloads | [OpenAI-Compatible API](./openai-api.md) |
+| Send authenticated notifications without an LLM call | [Direct Delivery Webhook](./direct-delivery.md) |
 | Runtime self-inspection and tuning | [My Tool](./my-tool.md) |
 
 Configuration examples are usually snippets to merge into `~/.nanobot/config.json`, not complete replacement files. The docs use camelCase because nanobot writes config that way. Keep real API keys, bot tokens, and passwords out of issues and public logs.

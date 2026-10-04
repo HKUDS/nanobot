@@ -351,6 +351,35 @@ class ApiConfig(Base):
         )
 
 
+class DirectDeliveryConfig(Base):
+    """Configuration for the optional zero-model delivery webhook."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = Field(default=18791, ge=1, le=65535)
+    path: str = "/deliver"
+    secret: str = ""
+    channel: str = ""
+    chat_id: str = ""
+    max_body_bytes: int = Field(default=65_536, ge=1, le=1_048_576)
+    max_age_seconds: int = Field(default=300, ge=1, le=3600)
+    max_requests_per_minute: int = Field(default=60, ge=1, le=10_000)
+
+    @field_validator("path")
+    @classmethod
+    def normalize_path(cls, value: str) -> str:
+        value = value.strip()
+        if not value.startswith("/"):
+            value = f"/{value}"
+        return value.rstrip("/") or "/deliver"
+
+    @model_validator(mode="after")
+    def require_delivery_target(self) -> DirectDeliveryConfig:
+        if self.enabled and not all((self.secret.strip(), self.channel.strip(), self.chat_id.strip())):
+            raise ValueError("enabled direct delivery requires secret, channel, and chat_id")
+        return self
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
@@ -358,6 +387,7 @@ class GatewayConfig(Base):
     port: int = 18790
     restart_mode: Literal["auto", "exec", "spawn", "exit"] = "auto"
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    direct_delivery: DirectDeliveryConfig = Field(default_factory=DirectDeliveryConfig)
 
 
 class MCPServerConfig(Base):
