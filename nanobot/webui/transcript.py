@@ -120,10 +120,24 @@ def rewrite_local_markdown_images(
     *,
     workspace_path: Path,
     sign_path: Callable[[Path], Mapping[str, Any] | None],
+    extra_relative_roots: Sequence[Path] | None = None,
 ) -> str:
-    """Rewrite markdown media paths inside the workspace to signed WebUI media URLs."""
+    """Rewrite markdown media paths inside the workspace to signed WebUI media URLs.
+
+    ``extra_relative_roots`` adds more trusted directories (e.g. MCP server
+    working directories) whose files may also be embedded. Each candidate is
+    contained to its root exactly like the workspace lookup.
+    """
     if "![" not in text:
         return text
+
+    def resolve_within(root: Path, candidate: Path) -> Path | None:
+        try:
+            resolved = candidate.resolve(strict=False)
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            return None
+        return resolved if resolved.is_file() else None
 
     def resolve_url(raw_url: str) -> str | None:
         url = raw_url.strip()
@@ -138,14 +152,18 @@ def rewrite_local_markdown_images(
         if Path(path_text).suffix.lower() not in _INLINE_MARKDOWN_MEDIA_EXTS:
             return None
         candidate = Path(path_text).expanduser()
-        if not candidate.is_absolute():
-            candidate = workspace_path / candidate
-        try:
-            resolved = candidate.resolve(strict=False)
-            resolved.relative_to(workspace_path)
-        except (OSError, ValueError):
-            return None
-        if not resolved.is_file():
+        resolved: Path | None = None
+        if candidate.is_absolute():
+            resolved = resolve_within(workspace_path, candidate)
+        else:
+            resolved = resolve_within(workspace_path, workspace_path / candidate)
+        if resolved is None:
+            for root in extra_relative_roots or ():
+                target = candidate if candidate.is_absolute() else root / candidate
+                resolved = resolve_within(root, target)
+                if resolved is not None:
+                    break
+        if resolved is None:
             return None
         signed = sign_path(resolved)
         return str(signed.get("url")) if signed and signed.get("url") else None

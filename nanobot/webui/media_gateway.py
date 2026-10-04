@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
@@ -39,9 +39,13 @@ class WebUIMediaGateway:
         media_dir: Callable[[str | None], Path] | None = None,
         secret: bytes | None = None,
         attachment_limits: AttachmentIngressLimits | None = None,
+        extra_media_roots: Sequence[Path] = (),
     ) -> None:
         self.workspace_path = workspace_path
         self.logger = logger
+        self._extra_media_roots = tuple(
+            root.expanduser().resolve() for root in extra_media_roots
+        )
         self._media_dir: Callable[[str | None], Path] = media_dir or _default_media_dir
         self.secret = secret or secrets.token_bytes(32)
         self.attachment_limits = attachment_limits or AttachmentIngressLimits()
@@ -88,6 +92,7 @@ class WebUIMediaGateway:
             text,
             workspace_path=workspace_path or self.workspace_path,
             sign_path=self.sign_or_stage_media_path,
+            extra_relative_roots=self._extra_media_roots,
         )
 
     def augment_transcript_media(self, paths: list[str]) -> list[dict[str, Any]]:
