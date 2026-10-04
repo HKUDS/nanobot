@@ -216,6 +216,28 @@ by the summary remain in your chat history but are no longer sent to the model
 verbatim. Use `/compact` to compact the current topic's context manually.
 See [Memory](./memory.md) for compaction and Dream consolidation.
 
+### Delegated work
+
+When nanobot delegates work to subagents, a work group appears under the request
+that started it. Progress continues to update after the main reply finishes.
+Completed tasks stay available for inspection, and refreshing or reopening the
+WebUI restores saved progress and results without restarting the work.
+
+Work groups follow the browser's **Activity details** preference: **Auto** opens
+running work and folds it when all tasks finish; **Expanded** keeps it open by
+default. You can also expand or fold a group manually to check individual
+outcomes, including failures and partial results.
+
+Select a task to open its read-only conversation on the right, or across the
+screen on mobile. Read its messages, tool activity, file edits, and results,
+including formatted Markdown. Closing the details leaves the task running; its
+stop button cancels only that task. Give follow-up instructions to nanobot in
+the main conversation.
+
+These controls appear when the connected host supports subagent tasks. See
+[Subagents](./concepts.md#subagents) for cancellation, saved history, and gateway
+restart behavior.
+
 ## Temporary Chats
 
 Use a temporary chat for a conversation that should not be added to nanobot's

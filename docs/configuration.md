@@ -2265,7 +2265,7 @@ The notification gate runs on a built-in system prompt. Advanced users can overr
 
 ## Subagent Concurrency
 
-By default, nanobot allows four subagents to run at the same time. Additional tasks wait for capacity. Lower the limit to reduce load on a local model server, or raise it when the provider can handle more parallel work:
+By default, nanobot allows four subagents to run at the same time. Additional subagents wait for capacity instead of being rejected. Lower the limit if a local model server cannot hold multiple KV caches, or raise it when the provider can handle more parallel work:
 
 ```json
 {
@@ -2283,28 +2283,6 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `4` | Maximum number of subagents that may run at the same time. Additional tasks wait for capacity. |
 
-
-### Managing subagent tasks
-
-In the conversation that started a subagent, you can ask nanobot to check its progress, send it follow-up instructions, or cancel it. Cancelling one subagent leaves other tasks running.
-
-The `subagent` tool manages these tasks with four actions: `create`, `send`, `cancel`, and `check`. Use `create` with `wait=true` to wait for a result in the current turn; background tasks notify the conversation when they finish. Use `check` with a `task_id` to inspect one task, or omit it to list the current session's active and recently finished tasks. Older results remain available by their task ID. Status includes progress, message receipts, and retained results. A delivered receipt means the message entered the task's context; it does not confirm that the task acted on the instruction.
-
-Single-turn CLI and direct API calls without a running background message consumer wait for child results automatically. They return the child result to the parent instead of leaving a completion notification without a consumer.
-
-Tasks that reach their iteration limit are `incomplete`, not completed. Cancelled, failed, and incomplete tasks retain the latest completed model response when available, marked as a partial result. A stopped task may have changed files even if it did not produce a final response.
-
-In the WebUI, delegated work stays under the request that started it. Running tasks expand by default; when all tasks finish, the same block folds into a retained result entry. Expand it to check individual outcomes, including failures or partial results. Refreshing restores saved task observations without starting work again. A host must advertise `webui.subagents.v1` for these controls to appear. Hosts advertising `webui.subagents.events.v1` send task changes through the conversation's existing WebSocket subscription, including after the main reply finishes. Initial load, reconnect, and returning to a visible conversation read a saved snapshot; task revisions prevent older reads from overwriting newer events. Hosts with task controls but without the event capability retain periodic reads while the conversation is visible.
-
-Select a task to open its details on the right, or across the screen on mobile. Task descriptions and results render Markdown, including lists, links, tables, and code blocks. Execution activity and message receipts can be expanded separately. Closing details leaves the task running; its stop button cancels only that task. Continue giving instructions to the main agent in the conversation.
-
-Use `/stop` to stop the current session and its subagent tasks; other sessions are unaffected. Cancellation does not remove files already created, and some operations may take time to stop.
-
-Each subagent has a private child session in the existing session store. Its transcript uses the same JSONL format as a conversation; session metadata records its parent, task ID, initiating turn, timestamps, status, exit reason, message receipts, and bounded final or partial output. Response records also retain structured tool activity and file edits from the shared runner hooks, including errors and diffs. These display fields are excluded from model input and remain available after refresh or restart. These sessions have no public handle and do not appear as conversation topics or in general session search, reading, or messaging tools. The parent manages them through the `subagent` tool.
-
-Deleting a parent conversation stops its work and removes its child sessions. The runtime's 128-record cache does not limit saved task history. Forking a conversation does not transfer task ownership or copy child sessions. Children of temporary conversations also remain temporary.
-
-Refreshing or reopening the WebUI only reads saved task observations. After a gateway acquires execution ownership at startup, finished tasks remain available and unfinished work is marked `interrupted`, with the most recently saved partial output when available. Constructing a session reader does not change task state. Nanobot does not automatically resume tasks, repeat tool calls, or resend completion notifications. A new task must be started explicitly to continue the work.
 
 ## Auto Compact
 
