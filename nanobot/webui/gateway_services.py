@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from loguru import logger as default_logger
 
 from nanobot.config.loader import get_config_path
+from nanobot.webui.extensions_services import WebUIExtensions
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -42,6 +43,7 @@ class GatewayServices:
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
     temporary_chats: WebUITemporaryChats
+    extensions: WebUIExtensions
     session_projection: WebUISessionProjection
     session_manager: SessionManager | None
     cron_service: CronService | None
@@ -64,6 +66,7 @@ def build_gateway_services(
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
     disabled_skills: set[str] | None = None,
+    extensions_root: Path | None = None,
     cron_service: CronService | None = None,
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
@@ -112,6 +115,7 @@ def build_gateway_services(
         workspaces=workspaces,
         logger=logger,
     )
+    extensions = WebUIExtensions(extensions_root)
     session_projection = WebUISessionProjection(session_manager, log=logger)
     http = GatewayHTTPHandler(
         config=config,
@@ -128,6 +132,7 @@ def build_gateway_services(
         settings=settings,
         skills_workspace_path=workspace_path,
         disabled_skills=disabled_skills,
+        extensions=extensions,
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
@@ -151,6 +156,7 @@ def build_gateway_services(
         transcripts=transcripts,
         workspaces=workspaces,
         temporary_chats=temporary_chats,
+        extensions=extensions,
         session_projection=session_projection,
         session_manager=session_manager,
         cron_service=cron_service,

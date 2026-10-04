@@ -16,6 +16,7 @@ export type SettingsSectionKey =
   | "automations"
   | "memory"
   | "skills"
+  | "extensions"
   | "runtime"
   | "advanced";
 
