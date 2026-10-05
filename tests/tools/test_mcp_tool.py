@@ -1961,6 +1961,56 @@ async def test_connect_registers_resources_and_prompts(
     assert "mcp_test_prompt_prompt_c" in registry.tool_names
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+@pytest.mark.parametrize("failure", ["http", "rpc"])
+async def test_discovery_failure_logs_do_not_expose_credentials(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog: str,
+    failure: str,
+) -> None:
+    from mcp.shared.exceptions import McpError
+
+    secrets = ("userinfo-secret", "path-secret", "signature-secret", "message-secret")
+    url = (
+        f"https://user:{secrets[0]}@mcp.example.com/{secrets[1]}"
+        f"?signature={secrets[2]}"
+    )
+    if failure == "http":
+        response = httpx.Response(403, request=httpx.Request("POST", url))
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            error = exc
+    else:
+        error = McpError(code=-32603, message=f"Discovery failed for {url}: {secrets[3]}")
+
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    setattr(session, f"list_{catalog}", AsyncMock(side_effect=error))
+    fake_mcp_runtime["session"] = session
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
+    messages: list[str] = []
+    sink = mcp_mod.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    registry = ToolRegistry()
+    stacks = {}
+    try:
+        stacks = await connect_mcp_servers(
+            {"test": MCPServerConfig(type="streamableHttp", url=url)}, registry
+        )
+        assert set(stacks) == {"test"}
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other}
+        logs = "\n".join(messages)
+        assert not any(secret in logs for secret in secrets)
+        assert f"MCP server 'test': {catalog} not supported or failed: {type(error).__name__}" in logs
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
+        mcp_mod.logger.remove(sink)
+
+
 # ---------------------------------------------------------------------------
 # _sanitize_name tests
 # ---------------------------------------------------------------------------
