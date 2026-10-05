@@ -6,6 +6,7 @@ a focused setup path for one platform, start with a guide:
 
 | Platform | Guide |
 |---|---|
+| Sendblue (iMessage / SMS) | [Connect a phone to nanobot](./guides/sendblue-ai-agent.md) |
 | Telegram | [Build a Telegram AI Agent with nanobot](./guides/telegram-ai-agent.md) |
 | Discord | [Build a Discord AI Agent with nanobot](./guides/discord-ai-agent.md) |
 | Slack | [Build a Slack AI Agent with nanobot](./guides/slack-ai-agent.md) |
