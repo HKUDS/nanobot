@@ -75,4 +75,3 @@
 .markdown-content .math-fit + :is(ol, ul):has(+ .math-fit) {
   margin-top: 0.55em;
 }
-
