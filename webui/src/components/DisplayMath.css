@@ -3,7 +3,7 @@
   display: block;
   width: 100%;
   min-width: 0;
-  margin-block: 0.6em 0.8em;
+  margin-block: 0.45em 0.5em;
 }
 
 .math-fit-content {
@@ -30,7 +30,7 @@
 
 /* Keep each list explanation and its formula on the same reading edge. */
 .markdown-content li .math-fit {
-  margin-block: 0.3em 0.45em;
+  margin-block: 0.3em 0.35em;
 }
 
 .markdown-content li .math-fit-content,
@@ -69,9 +69,14 @@
   width: calc(100% - 1.5em);
   margin-left: 1.5em;
   margin-top: 0.3em;
-  margin-bottom: 0.45em;
+  margin-bottom: 0.35em;
 }
 
 .markdown-content .math-fit + :is(ol, ul):has(+ .math-fit) {
-  margin-top: 0.55em;
+  margin-top: 0.35em;
+}
+
+/* Typography paragraph margins otherwise add a full line after equations. */
+.markdown-content .math-fit:not([hidden]) + p {
+  margin-top: 0.5em;
 }
