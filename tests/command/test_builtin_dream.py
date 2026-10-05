@@ -29,6 +29,7 @@ class _FakeStore:
         content_diff: str = "",
     ):
         self.git = git
+        self.dream_lock = asyncio.Lock()
         self._last_dream_cursor = last_dream_cursor
         self._dream_prompt_result = dream_prompt_result
         self._content_diff = content_diff

@@ -572,56 +572,57 @@ def _run_gateway(
             prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
-            resp = None
-            diff_body = ""
-            try:
-                result = store.build_dream_prompt()
-                if result is None:
-                    logger.info("Dream: nothing to process")
-                    return None
-                prompt, last_cursor = result
-                key = dream_session_key()
-                dream_runtime = agent.dream_runtime()
-                await mcp_provider.connect()
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key=key,
-                    ephemeral=True,
-                    tools=store.build_dream_tools(),
-                    on_progress=_silent,
-                    runtime=dream_runtime,
-                )
-                # The real file delta grounds the audit record; normal completion
-                # decides whether this history batch has finished processing.
-                diff_body = store.dream_content_diff()
-                completed = MemoryStore.dream_run_completed(resp)
-                if completed:
-                    store.set_last_dream_cursor(last_cursor)
-                    if diff_body:
-                        logger.info(
-                            "Dream cron job completed, cursor advanced to {}",
-                            last_cursor,
-                        )
-                    else:
-                        logger.info(
-                            "Dream cron job completed with no memory changes; "
-                            "cursor advanced to {}",
-                            last_cursor,
-                        )
-                else:
-                    logger.warning(
-                        "Dream cron job did not complete ({}); cursor remains at {}",
-                        MemoryStore.dream_incompletion_reason(resp),
-                        store.get_last_dream_cursor(),
+            async with store.dream_lock:
+                resp = None
+                diff_body = ""
+                try:
+                    result = store.build_dream_prompt()
+                    if result is None:
+                        logger.info("Dream: nothing to process")
+                        return None
+                    prompt, last_cursor = result
+                    key = dream_session_key()
+                    dream_runtime = agent.dream_runtime()
+                    await mcp_provider.connect()
+                    resp = await agent.process_direct(
+                        prompt,
+                        session_key=key,
+                        ephemeral=True,
+                        tools=store.build_dream_tools(),
+                        on_progress=_silent,
+                        runtime=dream_runtime,
                     )
-            except Exception:
-                logger.exception("Dream cron job failed")
-            finally:
-                sha = _commit_dream_changes(store)
-                if sha:
-                    logger.info("Dream commit: {}", sha)
-                store.compact_history()
-                prune_dream_sessions(agent.sessions)
+                    # The real file delta grounds the audit record; normal completion
+                    # decides whether this history batch has finished processing.
+                    diff_body = store.dream_content_diff()
+                    completed = MemoryStore.dream_run_completed(resp)
+                    if completed:
+                        store.set_last_dream_cursor(last_cursor)
+                        if diff_body:
+                            logger.info(
+                                "Dream cron job completed, cursor advanced to {}",
+                                last_cursor,
+                            )
+                        else:
+                            logger.info(
+                                "Dream cron job completed with no memory changes; "
+                                "cursor advanced to {}",
+                                last_cursor,
+                            )
+                    else:
+                        logger.warning(
+                            "Dream cron job did not complete ({}); cursor remains at {}",
+                            MemoryStore.dream_incompletion_reason(resp),
+                            store.get_last_dream_cursor(),
+                        )
+                except Exception:
+                    logger.exception("Dream cron job failed")
+                finally:
+                    sha = _commit_dream_changes(store)
+                    if sha:
+                        logger.info("Dream commit: {}", sha)
+                    store.compact_history()
+                    prune_dream_sessions(agent.sessions)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
