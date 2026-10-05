@@ -140,8 +140,12 @@ def _update_keys(path: Path, *, add: str = "", remove: str = "") -> None:
     fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "r+") as handle:
         info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o022:
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
             raise RemoteError("pair_ssh_layout")
+        # Existing authorized_keys files are often created with a default umask of
+        # 0644. Normalize them to the SSH-safe owner-only mode before mutating the
+        # file, while preserving the original user-owned layout and contents.
+        os.fchmod(handle.fileno(), 0o600)
         fcntl.flock(handle, fcntl.LOCK_EX)
         original = handle.read(1024 * 1024 + 1)
         if len(original) > 1024 * 1024:
@@ -160,7 +164,7 @@ def _update_keys(path: Path, *, add: str = "", remove: str = "") -> None:
                     output.write(replacement)
                     output.flush()
                     os.fsync(output.fileno())
-                    os.fchmod(output.fileno(), stat.S_IMODE(info.st_mode))
+                    os.fchmod(output.fileno(), 0o600)
                 os.replace(temporary_name, path)
             finally:
                 Path(temporary_name).unlink(missing_ok=True)
