@@ -238,7 +238,9 @@ def _is_session_terminated(exc: BaseException) -> bool:
     )
 
 
-async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
+async def _probe_http_url(
+    url: str, timeout: float = 3.0, *, use_env_proxy: bool = True,
+) -> bool:
     """Quick TCP probe to check if an HTTP MCP server is reachable.
 
     Avoids entering ``streamable_http_client`` / ``sse_client`` when the port is
@@ -254,7 +256,7 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     ok, _, resolved_ips = resolve_url_target(url)
     if not ok:
         return False
-    if env_proxy_applies_to_url(url):
+    if use_env_proxy and env_proxy_applies_to_url(url):
         return True
     for target_host in resolved_ips or (host,):
         try:
@@ -290,9 +292,9 @@ def _redact_url(url: str) -> str:
         return "<redacted-url>"
 
 
-def _pinned_transport_kwargs() -> dict[str, Any]:
+def _pinned_transport_kwargs(*, use_env_proxy: bool = True) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"transport": PinnedDNSAsyncTransport()}
-    mounts = httpx_env_proxy_mounts()
+    mounts = httpx_env_proxy_mounts() if use_env_proxy else {}
     if mounts:
         kwargs["mounts"] = mounts
     return kwargs
@@ -1080,7 +1082,7 @@ async def connect_mcp_servers(
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
-                if not await _probe_http_url(cfg.url):
+                if not await _probe_http_url(cfg.url, use_env_proxy=cfg.use_env_proxy):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     return False
 
@@ -1100,7 +1102,7 @@ async def connect_mcp_servers(
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
-                        **_pinned_transport_kwargs(),
+                        **_pinned_transport_kwargs(use_env_proxy=cfg.use_env_proxy),
                     )
 
                 sse_kwargs: dict[str, Any] = {
@@ -1112,7 +1114,7 @@ async def connect_mcp_servers(
                     sse_client(cfg.url, **sse_kwargs)
                 )
             elif transport_type == "streamableHttp":
-                if not await _probe_http_url(cfg.url):
+                if not await _probe_http_url(cfg.url, use_env_proxy=cfg.use_env_proxy):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     return False
 
@@ -1121,7 +1123,7 @@ async def connect_mcp_servers(
                     "event_hooks": {"request": [_validate_mcp_request_url]},
                     "follow_redirects": True,
                     "timeout": httpx.Timeout(30.0, connect=10.0),
-                    **_pinned_transport_kwargs(),
+                    **_pinned_transport_kwargs(use_env_proxy=cfg.use_env_proxy),
                 }
                 if oauth_auth is not None:
                     http_client_kwargs["auth"] = oauth_auth

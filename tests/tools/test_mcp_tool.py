@@ -211,7 +211,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
         )
         yield object(), object(), object()
 
-    async def reachable(_url: str) -> bool:
+    async def reachable(_url: str, *, use_env_proxy: bool = True) -> bool:
         return True
 
     oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
@@ -1115,6 +1115,7 @@ def test_unexpected_connection_failure_keeps_error_trace() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("use_env_proxy", [True, False])
 @pytest.mark.parametrize(
     "config",
     [
@@ -1126,8 +1127,10 @@ def test_unexpected_connection_failure_keeps_error_trace() -> None:
 )
 async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
     config: MCPServerConfig,
+    use_env_proxy: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    config.use_env_proxy = use_env_proxy
     attempted_connections: list[tuple[object, ...]] = []
     warnings: list[str] = []
 
@@ -1177,7 +1180,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     fake_mcp_runtime["session"] = _make_fake_session(["demo"])
     client_kwargs: list[dict[str, object]] = []
 
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, use_env_proxy: bool = True) -> bool:
         return True
 
     def _validate(_url: str) -> tuple[bool, str]:
@@ -1260,6 +1263,127 @@ def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_direct_mcp_request_to_whitelisted_tailnet_domain_avoids_proxy(monkeypatch):
+    import socket
+
+    from nanobot.security.network import PinnedDNSAsyncTransport, configure_ssrf_whitelist
+
+    sent_urls: list[str] = []
+    url = "http://mcp.example.ts.net:8765/mcp"
+
+    def _resolver(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("100.64.0.5", port or 0))]
+
+    def _direct(request: httpx.Request) -> httpx.Response:
+        sent_urls.append(str(request.url))
+        return httpx.Response(200, text="direct")
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8080")
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setattr(socket, "getaddrinfo", _resolver)
+    monkeypatch.setattr(
+        mcp_mod, "PinnedDNSAsyncTransport",
+        lambda: PinnedDNSAsyncTransport(inner=httpx.MockTransport(_direct)),
+    )
+    configure_ssrf_whitelist(["100.64.0.5/32"])
+    try:
+        async with httpx.AsyncClient(
+            event_hooks={"request": [mcp_mod._validate_mcp_request_url]},
+            **mcp_mod._pinned_transport_kwargs(use_env_proxy=False),
+        ) as client:
+            response = await client.get(url)
+        assert response.text == "direct"
+        assert sent_urls == [url]
+    finally:
+        configure_ssrf_whitelist([])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["sse", "streamableHttp"])
+@pytest.mark.parametrize("use_env_proxy", [None, False], ids=["default-proxy", "direct"])
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
+async def test_mcp_http_server_can_connect_directly_with_global_proxy(
+    transport: str,
+    use_env_proxy: bool | None,
+    host: str,
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.security.network import configure_ssrf_whitelist
+
+    hits: list[tuple[str, str]] = []
+    responses: list[str] = []
+
+    @asynccontextmanager
+    async def _endpoint(label: str):
+        async def _handle(reader, writer):
+            try:
+                try:
+                    headers = await reader.readuntil(b"\r\n\r\n")
+                except asyncio.IncompleteReadError:
+                    return  # The TCP reachability probe sends no HTTP request.
+                hits.append((label, headers.split(b"\r\n", 1)[0].decode()))
+                body = label.encode()
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: "
+                    + str(len(body)).encode() + b"\r\n\r\n" + body
+                )
+                await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        server = await asyncio.start_server(_handle, "127.0.0.1", 0)
+        async with server:
+            yield server.sockets[0].getsockname()[1]
+
+    @asynccontextmanager
+    async def _sse_client(url: str, httpx_client_factory=None):
+        async with httpx_client_factory() as client:
+            response = await client.get(url)
+            responses.append(response.text)
+        yield object(), object()
+
+    @asynccontextmanager
+    async def _http_client(url: str, http_client=None):
+        response = await http_client.get(url)
+        responses.append(response.text)
+        yield object(), object(), object()
+
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _sse_client)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"], "streamable_http_client", _http_client,
+    )
+    configure_ssrf_whitelist(["127.0.0.1/32", "::1/128"])
+    try:
+        async with _endpoint("origin") as origin_port, _endpoint("proxy") as proxy_port:
+            monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy_port}")
+            monkeypatch.setenv("NO_PROXY", "")
+            raw_config: dict[str, object] = {
+                "type": transport, "url": f"http://{host}:{origin_port}/mcp",
+            }
+            if use_env_proxy is not None:
+                raw_config["useEnvProxy"] = use_env_proxy
+            config = MCPServerConfig.model_validate(raw_config)
+            registry = ToolRegistry()
+            stacks = await asyncio.wait_for(
+                connect_mcp_servers({"local": config}, registry), timeout=5,
+            )
+            try:
+                expected = "origin" if use_env_proxy is False else "proxy"
+                assert responses == [expected]
+                assert [label for label, _request in hits] == [expected]
+                assert registry.tool_names == ["mcp_local_demo"]
+            finally:
+                for stack in stacks.values():
+                    await stack.aclose()
+    finally:
+        configure_ssrf_whitelist([])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_env_proxy", [True, False])
 @pytest.mark.parametrize(
     ("config", "expected_transport"),
     [
@@ -1273,8 +1397,10 @@ def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
 async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
     config: MCPServerConfig,
     expected_transport: str,
+    use_env_proxy: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    config.use_env_proxy = use_env_proxy
     checked_urls: list[str] = []
     sent_urls: list[str] = []
     used_transports: list[str] = []
@@ -1285,7 +1411,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
             return False, "loopback blocked"
         return True, ""
 
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, use_env_proxy: bool = True) -> bool:
         return True
 
     def _handler(request: httpx.Request) -> httpx.Response:
@@ -1491,7 +1617,7 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     fake_mcp_runtime["session"] = _make_fake_session(["demo"])
     captured: dict[str, object] = {}
 
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, use_env_proxy: bool = True) -> bool:
         return True
 
     def _validate(_url: str) -> tuple[bool, str]:
@@ -1542,7 +1668,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
     oauth_handlers = object()
     captured: dict[str, object] = {}
 
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, use_env_proxy: bool = True) -> bool:
         return True
 
     def _validate(_url: str) -> tuple[bool, str]:
@@ -1626,7 +1752,7 @@ async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
 
     probe_called = False
 
-    async def _probe(_url: str) -> bool:
+    async def _probe(_url: str, *, use_env_proxy: bool = True) -> bool:
         nonlocal probe_called
         probe_called = True
         return True

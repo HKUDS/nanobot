@@ -1730,6 +1730,8 @@ nanobot uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP conne
 Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.168.1.50/32`). The whitelist is global for the shared SSRF guard; it is not limited to one tool or one MCP server.
 
 HTTP/SSE MCP connections use the same process-wide proxy environment behavior as `web_fetch`: proxied targets use the configured proxy, and URLs excluded by `NO_PROXY` remain DNS-pinned direct connections.
+Set `useEnvProxy: false` on an individual MCP server to use direct connections instead.
+`ssrfWhitelist` permits access to an address range; it does not exempt that range from proxy routing.
 
 > [!TIP]
 > Use `proxy` in `tools.web` to route web requests through a proxy:
@@ -2071,6 +2073,32 @@ callback URL from the browser address bar after authorization.
 
 > [!IMPORTANT]
 > HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request—including OAuth metadata, client registration, token exchange, and redirects—is validated again. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
+
+HTTP/SSE MCP servers use environment and system proxy settings by default. For a
+local or Tailscale server that the proxy cannot reach, set `useEnvProxy` to `false`
+on that server. This selects the DNS-pinned direct transport for its HTTP requests,
+including redirects and OAuth requests, and checks direct TCP reachability before
+connecting. Other MCP servers keep their existing proxy behavior.
+
+```json
+{
+  "tools": {
+    "ssrfWhitelist": ["100.64.0.5/32"],
+    "mcpServers": {
+      "tailnet": {
+        "url": "http://my-server.example.ts.net:8765/mcp",
+        "useEnvProxy": false
+      }
+    }
+  }
+}
+```
+
+Replace the example hostname and whitelist address with your server's actual
+values. `useEnvProxy` defaults to `true` and does not disable SSRF checks. It is
+ignored for stdio servers. Alternatively, use `NO_PROXY` to exclude individual
+hosts across clients; for a domain URL, list the domain rather than only its
+resolved IP address. The WebUI MCP JSON import preserves `useEnvProxy`.
 
 Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 
