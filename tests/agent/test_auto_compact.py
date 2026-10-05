@@ -12,8 +12,9 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
+from nanobot.command.builtin import cmd_new
 from nanobot.config.schema import AgentDefaults, Config
-from nanobot.events import NO_EVENTS
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import LLMResponse
 from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 
@@ -149,6 +150,87 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
     assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
     assert loop.bus.outbound.empty()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["delete", "new", "append"])
+async def test_idle_compaction_respects_session_lifecycle(tmp_path, change):
+    """A late summary cannot restore a deleted or reset session; appends survive."""
+    loop = _make_loop(tmp_path)
+    key = "cli:test"
+    session = loop.sessions.get_or_create(key)
+    _add_turns(session, 2, prefix="old")
+    session.updated_at = datetime.now() - timedelta(minutes=20)
+    loop.sessions.save(session)
+    summary_started = asyncio.Event()
+    release_summary = asyncio.Event()
+    events = []
+
+    async def summarize(**kwargs):
+        if not summary_started.is_set():
+            summary_started.set()
+            await release_summary.wait()
+        return LLMResponse(content="Old conversation summary.", tool_calls=[])
+
+    async def publish(event):
+        if isinstance(event, ContextCompactionEvent):
+            events.append(event)
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=summarize)
+    loop.auto_compact._bind_events = lambda _: EventSink(publish)
+    try:
+        loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
+        await asyncio.wait_for(summary_started.wait(), timeout=5)
+        if change == "delete":
+            assert loop.sessions.delete_session(key)
+            assert loop.sessions.read_session_file(key) is None
+        else:
+            if change == "new":
+                msg = InboundMessage(
+                    channel="cli", sender_id="user", chat_id="test", content="/new",
+                )
+                await cmd_new(CommandContext(
+                    msg=msg, session=loop.sessions.get_or_create(key), key=key,
+                    raw="/new", loop=loop, runtime=loop.llm_runtime(),
+                ))
+            current = loop.sessions.get_or_create(key)
+            current.add_message("user", "New request must survive.")
+            loop.sessions.save(current)
+            saved_before_summary = loop.sessions.read_session_file(key)
+            if change == "append":
+                # Active sessions retain their identity even after LRU eviction.
+                loop.sessions._max_cached_sessions = 1
+                loop.sessions.get_or_create("cli:other")
+                assert key not in loop.sessions._cache
+
+        release_summary.set()
+        await _drain_background_tasks(loop)
+
+        if change == "delete":
+            assert loop.sessions.read_session_file(key) is None
+            assert loop.sessions.get_cached(key) is None
+            assert key not in {row["key"] for row in loop.sessions.list_sessions()}
+        else:
+            if change == "new":
+                assert loop.sessions.read_session_file(key) == saved_before_summary
+            loop.sessions.invalidate(key)
+            reloaded = loop.sessions.get_or_create(key)
+            assert reloaded.get_history()[-1]["content"] == "New request must survive."
+            if change == "append":
+                assert reloaded.metadata["_last_summary"]["text"] == "Old conversation summary."
+                assert len(reloaded.messages) == 6
+            else:
+                assert "_last_summary" not in reloaded.metadata
+                assert len(reloaded.messages) == 1
+        if change != "append":
+            assert key not in loop.auto_compact._summaries
+        assert [event.phase for event in events] == [
+            "started", "succeeded" if change == "append" else "cancelled",
+        ]
+        assert len({event.compaction_id for event in events}) == 1
+    finally:
+        release_summary.set()
+        await loop.aclose()
 
 
 class TestSessionTTLConfig:

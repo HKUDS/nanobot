@@ -1275,6 +1275,16 @@ class Consolidator:
                 summary = await self.archive_session(
                     session, archive_end=archive_end, runtime=runtime,
                 )
+                # Deletion and /new invalidate this session while the model is
+                # running. Do not let their old summary overwrite the new state.
+                # Live LRU-evicted sessions retain identity in the weak cache.
+                if self.sessions.get_cached(session_key) is not session:
+                    await events.emit(
+                        ContextCompactionEvent(
+                            compaction_id=compaction_id, phase="cancelled", notify=notify,
+                        ),
+                    )
+                    return None
                 if summary:
                     # Concurrent appends remain after the captured boundary.
                     session.commit_summary_checkpoint(
