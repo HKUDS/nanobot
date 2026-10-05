@@ -1,5 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import "./DisplayMath.css";
+
 export function DisplayMath({ children }: { children: ReactNode }) {
   const frame = useRef<HTMLSpanElement>(null);
   const content = useRef<HTMLSpanElement>(null);
