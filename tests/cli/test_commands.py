@@ -4028,15 +4028,20 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     assert isinstance(hook, cli_gateway_runtime._MCPReadinessHook)
 
 
-def test_gateway_shutdown_event_exits_forever_runtime_tasks(
+@pytest.fixture
+def gateway_runtime_harness(
     monkeypatch,
     tmp_path: Path,
-) -> None:
+) -> SimpleNamespace:
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.gateway.port = 18791
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
     seen: dict[str, object] = {}
     shutdown_order: list[str] = []
+    harness = SimpleNamespace(
+        seen=seen, shutdown_order=shutdown_order, cron_start=AsyncMock(),
+    )
 
     class _FakeSessionManager:
         def flush_all(self) -> int:
@@ -4088,7 +4093,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
             self.on_job = None
 
         async def start(self) -> None:
-            return None
+            await harness.cron_start(self)
 
         def stop(self) -> None:
             seen["cron_stopped"] = True
@@ -4128,7 +4133,6 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         monkeypatch,
         config,
         message_bus=MessageBus,
-        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
@@ -4139,7 +4143,14 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         _fake_install_shutdown_handlers,
     )
 
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+    harness.invoke = lambda: runner.invoke(app, ["gateway", "--config", str(config_file)])
+    return harness
+
+
+def test_gateway_shutdown_event_exits_forever_runtime_tasks(gateway_runtime_harness) -> None:
+    seen = gateway_runtime_harness.seen
+    shutdown_order = gateway_runtime_harness.shutdown_order
+    result = gateway_runtime_harness.invoke()
 
     assert result.exit_code == 0
     assert seen["agent_stopped"] is True
@@ -4152,6 +4163,48 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     # Channel cleanup must run before cancellation drains the manager task.
     # DingTalk's stream SDK can otherwise swallow cancellation and reconnect.
     assert shutdown_order == ["channels_stopped", "channel_task_cleaned_up"]
+
+
+def test_gateway_dream_prepares_mcp_and_logs_failure(
+    gateway_runtime_harness, monkeypatch,
+) -> None:
+    from loguru import logger
+
+    from nanobot.agent.dream import DreamResult
+
+    connect = AsyncMock()
+    monkeypatch.setattr(cli_gateway_runtime.MCPProvider, "connect", connect)
+    error = RuntimeError("provider unavailable")
+
+    async def run_dream(_agent, *, kind, before_run):
+        assert kind == "scheduled"
+        await before_run()
+        return DreamResult(status="failed", error=error)
+
+    monkeypatch.setattr("nanobot.agent.dream.run_dream", run_dream)
+
+    cron_results = []
+    connection_counts = []
+
+    async def run_cron_job(cron):
+        previous_connects = connect.await_count
+        cron_results.append(await cron.on_job(CronJob(id="dream", name="dream")))
+        connection_counts.append(connect.await_count - previous_connects)
+
+    gateway_runtime_harness.cron_start = run_cron_job
+    records = []
+    sink = logger.add(lambda message: records.append(message.record))
+    try:
+        result = gateway_runtime_harness.invoke()
+    finally:
+        logger.remove(sink)
+
+    assert result.exit_code == 0
+    assert cron_results == [None]
+    assert connection_counts == [1]
+    failure, = [record for record in records if record["message"] == "Dream cron job failed"]
+    assert failure["level"].name == "ERROR"
+    assert failure["exception"].value is error
 
 
 def test_serve_uses_api_config_defaults_and_workspace_override(
