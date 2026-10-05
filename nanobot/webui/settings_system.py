@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic.alias_generators import to_snake
 
+from nanobot.build_info import COMMIT
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.connect import ChannelConnectError
 from nanobot.channels.contracts import (
@@ -138,7 +139,7 @@ def system_settings_payload(
             "exec_path_prepend_set": bool(exec_config.path_prepend),
             "exec_path_append_set": bool(exec_config.path_append),
         },
-        "version": {"current": version},
+        "version": {"current": version, "commit": COMMIT},
         "docs": docs_payload(version),
     }
 

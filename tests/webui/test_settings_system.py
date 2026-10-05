@@ -15,7 +15,8 @@ from nanobot.webui.settings_system import (
 )
 
 
-def test_system_domain_owns_runtime_dto_and_agent_updates(tmp_path) -> None:
+def test_system_domain_owns_runtime_dto_and_agent_updates(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.settings_system.COMMIT", "a" * 40)
     config = Config()
 
     changed, restart_required = update_agent_system_settings(
@@ -37,7 +38,7 @@ def test_system_domain_owns_runtime_dto_and_agent_updates(tmp_path) -> None:
     assert config.agents.defaults.timezone_mode == "manual"
     assert config.agents.defaults.tool_hint_max_length == 120
     assert payload["runtime"]["config_path"] == str(tmp_path / "config.json")
-    assert payload["version"] == {"current": "0.3.0"}
+    assert payload["version"] == {"current": "0.3.0", "commit": "a" * 40}
     assert payload["docs"]["version"] == "0.3.0"
     assert set(payload) == {"runtime", "runtime_config", "usage", "advanced", "version", "docs"}
 

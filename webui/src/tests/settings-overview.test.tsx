@@ -10,6 +10,28 @@ describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
 
 
+  it("links the host's short commit beside its version", () => {
+    const commit = "abcdef12".repeat(5);
+    renderSettingsView({
+      initialSection: "about",
+      initialSettings: { ...settingsPayload(), version: { current: "0.3.5", commit } },
+    });
+    expect(screen.getByText("v0.3.5")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "abcdef1" });
+    expect(link).toHaveAttribute("href", `https://github.com/HKUDS/nanobot/commit/${commit}`);
+    expect(link).toHaveAttribute("title", commit);
+  });
+
+  it.each([undefined, null])("keeps About usable when the host reports no commit (%s)", (commit) => {
+    renderSettingsView({
+      initialSection: "about",
+      initialSettings: { ...settingsPayload(), version: { current: "0.3.5", commit } },
+    });
+    expect(screen.getByText("v0.3.5")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+    expect(document.querySelector('a[href*="/commit/"]')).toBeNull();
+  });
+
   it("persists the file edit display local preference", async () => {
     renderSettingsView({
       initialSection: "appearance",

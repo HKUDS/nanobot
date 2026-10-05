@@ -137,7 +137,9 @@ export function OverviewSettings({
   );
 }
 
-export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
+type VersionInfoProps = { currentVersion?: string; currentCommit?: string | null };
+
+export function AboutSettings({ currentVersion, currentCommit }: VersionInfoProps) {
   const { t } = useTranslation();
   const links = [
     { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
@@ -149,7 +151,7 @@ export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
       <div className="flex flex-col items-center gap-4 py-6 text-center">
         <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
-        <VersionCheckRow currentVersion={currentVersion} />
+        <VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit} />
       </div>
       <SettingsGroup>
         {links.map(({ key, icon: Icon, href }) => (
@@ -168,7 +170,7 @@ export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
   );
 }
 
-function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
+function VersionCheckRow({ currentVersion, currentCommit }: VersionInfoProps) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const { token } = useClient();
@@ -209,6 +211,16 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
           {currentVersion ? `v${currentVersion}` : "nanobot"}
+          {currentCommit && (
+            <>
+              <span aria-hidden> · </span>
+              <a href={`https://github.com/HKUDS/nanobot/commit/${currentCommit}`}
+                target="_blank" rel="noopener noreferrer" title={currentCommit}
+                className="font-mono hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {currentCommit.slice(0, 7)}
+              </a>
+            </>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-2">
