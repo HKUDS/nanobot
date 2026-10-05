@@ -221,6 +221,30 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         note="Free anonymous access for light use; no API key is required.",
     ),
     McpPreset(
+        name="fxmacrodata",
+        display_name="FXMacroData",
+        category="data",
+        description=(
+            "Look up central-bank rates, inflation, jobs and GDP releases, release calendars "
+            "and FX rates from official sources through FXMacroData's hosted MCP server."
+        ),
+        docs_url="https://fxmacrodata.com/documentation/mcp-server",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="fxmacrodata.com",
+        brand_color="#05131D",
+        requires="Network access",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            url="https://mcp.fxmacrodata.com/mcp",
+            tool_timeout=60,
+        ),
+        note=(
+            "USD data works without an API key. Other currencies and FX rates need an "
+            "FXMacroData key, sent as an Authorization: Bearer header on a custom MCP server."
+        ),
+    ),
+    McpPreset(
         name="exa",
         display_name="Exa",
         category="web",
