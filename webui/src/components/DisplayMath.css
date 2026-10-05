@@ -45,7 +45,7 @@
 }
 
 .markdown-content li:has(.math-fit) {
-  margin-block: 0.65em;
+  margin-block: 0.35em;
 }
 
 .markdown-content li:has(.math-fit) > p:first-child:not(:has(.math-fit)) {
@@ -77,6 +77,7 @@
 }
 
 /* Typography paragraph margins otherwise add a full line after equations. */
-.markdown-content .math-fit:not([hidden]) + p {
+.markdown-content .math-fit:not([hidden]) + p,
+.markdown-content :is(ol, ul):has(> li:last-child > .math-fit:last-child) + p {
   margin-top: 0.5em;
 }
