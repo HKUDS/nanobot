@@ -7,7 +7,7 @@ import os
 import time
 import uuid
 from contextlib import suppress
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from types import EllipsisType
@@ -603,6 +603,7 @@ class CronService:
 
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
+        schedule = job.schedule
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
         result: str | CronRunResult | None = None
@@ -643,6 +644,10 @@ class CronService:
             run_id=result.run_id if isinstance(result, CronRunResult) else None,
         ))
         job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
+
+        # Completion belongs to the schedule that started this run.
+        if job.schedule is not schedule:
+            return
 
         # Handle one-shot jobs
         if job.schedule.kind == "at":
@@ -842,7 +847,8 @@ class CronService:
         schedule_changed = schedule is not None and schedule != job.schedule
         if schedule is not None:
             _validate_schedule_for_add(schedule)
-            job.schedule = schedule
+            if schedule_changed:
+                job.schedule = replace(schedule)
         if name is not None:
             job.name = name
         if message is not None:
