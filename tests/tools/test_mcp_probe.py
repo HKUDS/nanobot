@@ -101,6 +101,31 @@ async def test_probe_skips_direct_tcp_when_global_proxy_env_is_set(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_direct_probe_checks_whitelisted_domain_despite_global_proxy(monkeypatch):
+    attempts: list[tuple[str, int]] = []
+
+    def _resolver(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("100.64.0.5", 0))]
+
+    async def _open_connection(host: str, port: int):
+        attempts.append((host, port))
+        raise ConnectionRefusedError
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setattr(mcp_mod.asyncio, "open_connection", _open_connection)
+    configure_ssrf_whitelist(["100.64.0.5/32"])
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _resolver):
+            assert not await _probe_http_url(
+                "http://mcp.example.ts.net:8765/mcp", use_env_proxy=False,
+            )
+        assert attempts == [("100.64.0.5", 8765)]
+    finally:
+        configure_ssrf_whitelist([])
+
+
+@pytest.mark.asyncio
 async def test_probe_tries_next_validated_ip_when_first_is_unreachable(monkeypatch):
     attempts: list[tuple[str, int]] = []
 
@@ -145,6 +170,7 @@ def _make_http_cfg(url: str, transport: str = "streamableHttp"):
     cfg.args = []
     cfg.env = {}
     cfg.headers = None
+    cfg.use_env_proxy = True
     cfg.tool_timeout = 30
     cfg.enabled_tools = ["*"]
     return cfg
@@ -153,7 +179,7 @@ def _make_http_cfg(url: str, transport: str = "streamableHttp"):
 @pytest.mark.asyncio
 async def test_connect_skips_unreachable_streamable_http():
     """Unreachable streamableHttp server should be skipped with a warning, no crash."""
-    async def _unreachable(_url: str) -> bool:
+    async def _unreachable(_url: str, *, use_env_proxy: bool = True) -> bool:
         return False
 
     registry = ToolRegistry()
@@ -167,7 +193,7 @@ async def test_connect_skips_unreachable_streamable_http():
 @pytest.mark.asyncio
 async def test_connect_skips_unreachable_sse():
     """Unreachable SSE server should be skipped with a warning, no crash."""
-    async def _unreachable(_url: str) -> bool:
+    async def _unreachable(_url: str, *, use_env_proxy: bool = True) -> bool:
         return False
 
     registry = ToolRegistry()
@@ -183,7 +209,7 @@ async def test_connect_isolates_streamable_http_status_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A reachable endpoint returning HTTP 530 must not poison the event loop."""
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, use_env_proxy: bool = True) -> bool:
         return True
 
     def _return_http_530(request: httpx.Request) -> httpx.Response:

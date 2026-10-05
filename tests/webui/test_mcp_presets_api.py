@@ -682,6 +682,33 @@ def test_import_recognizes_known_and_explicit_oauth_servers(
     assert "Bearer secret" not in str(payload)
 
 
+@pytest.mark.parametrize("key", ["useEnvProxy", "use_env_proxy"])
+def test_import_preserves_mcp_direct_connection_setting(tmp_path, monkeypatch, key):
+    _use_config(tmp_path, monkeypatch)
+    custom_mcp_action(
+        "import",
+        {"config": [json.dumps({"mcpServers": {
+            "tailnet": {"url": "http://mcp.example.ts.net/mcp", key: False},
+            "cloud": {"url": "https://example.com/mcp"},
+        }})]},
+    )
+
+    config = load_config()
+    assert config.tools.mcp_servers["tailnet"].use_env_proxy is False
+    assert config.tools.mcp_servers["cloud"].use_env_proxy is True
+
+
+def test_import_rejects_non_boolean_mcp_proxy_setting(tmp_path, monkeypatch):
+    _use_config(tmp_path, monkeypatch)
+    with pytest.raises(McpPresetError, match="useEnvProxy must be a boolean"):
+        custom_mcp_action(
+            "import",
+            {"config": [json.dumps({"mcpServers": {
+                "tailnet": {"url": "http://mcp.example.ts.net/mcp", "useEnvProxy": "false"},
+            }})]},
+        )
+
+
 @pytest.mark.asyncio
 async def test_replacing_oauth_config_removes_its_stored_credentials(
     tmp_path,

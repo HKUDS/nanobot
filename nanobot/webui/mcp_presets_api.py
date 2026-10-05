@@ -1385,6 +1385,9 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
     cwd = str(server.get("cwd") or "").strip()
     enabled_tools_value: object = server.get("enabledTools", server.get("enabled_tools", ["*"]))
     tool_timeout: object = server.get("toolTimeout", server.get("tool_timeout", _DEFAULT_CUSTOM_TIMEOUT))
+    use_env_proxy: object = server.get("useEnvProxy", server.get("use_env_proxy", True))
+    if not isinstance(use_env_proxy, bool):
+        raise McpPresetError(f"MCP server '{server_name}' useEnvProxy must be a boolean")
     try:
         timeout_int = max(5, min(int(cast(Any, tool_timeout)), 600))
     except (TypeError, ValueError):
@@ -1427,6 +1430,7 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
         url=url if transport in {"sse", "streamableHttp"} else "",
         headers=typed_headers,
         tool_timeout=timeout_int,
+        use_env_proxy=use_env_proxy,
         enabled_tools=cast(list[str], enabled_tools_value),
     )
 
