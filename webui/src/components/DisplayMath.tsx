@@ -24,7 +24,7 @@ export function DisplayMath({ children }: { children: ReactNode }) {
   }, [children]);
   return <span ref={frame} className="math-fit" style={{ height: layout.height || undefined }}
     data-math-scale={layout.scale}>
-    <span ref={content} className="math-fit-content" style={{ transform: `translateX(var(--math-translate, -50%)) scale(${layout.scale})` }}>
+    <span ref={content} className="math-fit-content" style={{ transform: `translateX(-50%) scale(${layout.scale})` }}>
       <span className="katex-display">{children}</span>
     </span>
   </span>;

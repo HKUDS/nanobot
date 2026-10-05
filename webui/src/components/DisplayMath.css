@@ -28,16 +28,9 @@
   --cjk-line-height: 1.65;
 }
 
-/* Keep each list explanation and its formula on the same reading edge. */
+/* Keep list formulas close to their explanations. */
 .markdown-content li .math-fit {
   margin-block: 0.3em 0.35em;
-}
-
-.markdown-content li .math-fit-content,
-.markdown-content :is(ol, ul) + .math-fit .math-fit-content {
-  --math-translate: 0%;
-  left: 0;
-  transform-origin: top left;
 }
 
 .markdown-content li > p:has(.math-fit) {
