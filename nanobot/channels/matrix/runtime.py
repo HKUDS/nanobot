@@ -64,6 +64,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -615,11 +616,15 @@ class MatrixChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send outbound content; clear typing for non-progress messages."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         if not self.client:
             raise RuntimeError("Matrix client not initialized")
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
-        relates_to = self._build_thread_relates_to(msg.metadata)
+        relates_to = self._build_outbound_relates_to(msg.metadata)
         is_progress = isinstance(msg.event, ProgressEvent)
         try:
             failures: list[str] = []
@@ -657,7 +662,7 @@ class MatrixChannel(BaseChannel):
         resuming: bool = False,
         merge_next: bool = False,
     ) -> None:
-        relates_to = self._build_thread_relates_to(metadata)
+        relates_to = self._build_outbound_relates_to(metadata)
 
         if stream_end and merge_next:
             if not delta:
@@ -1200,6 +1205,25 @@ class MatrixChannel(BaseChannel):
         return {"rel_type": "m.thread", "event_id": root_id,
                 "m.in_reply_to": {"event_id": reply_to}, "is_falling_back": True}
 
+    @classmethod
+    def _build_outbound_relates_to(
+        cls, metadata: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Build Matrix relation metadata for outbound messages.
+
+        Threaded turns keep the existing ``m.thread`` relation. Non-thread
+        turns attach a plain ``m.in_reply_to`` so room-level responses link
+        back to the user event that started the agent turn (issue #5274).
+        """
+        if thread := cls._build_thread_relates_to(metadata):
+            return thread
+        if not metadata:
+            return None
+        reply_to = metadata.get("message_id") or metadata.get("event_id")
+        if not isinstance(reply_to, str) or not reply_to:
+            return None
+        return {"m.in_reply_to": {"event_id": reply_to}}
+
     def _event_attachment_type(self, event: MatrixMediaEvent) -> str:
         msgtype = self._event_source_content(event).get("msgtype")
         return _MSGTYPE_MAP.get(cast(str, msgtype), "file")
@@ -1370,10 +1394,16 @@ class MatrixChannel(BaseChannel):
         return attachment, _ATTACH_MARKER.format(path)
 
     def _base_metadata(self, room: MatrixRoom, event: RoomMessage) -> dict[str, Any]:
-        """Build common metadata for text and media handlers."""
+        """Build common metadata for text and media handlers.
+
+        ``message_id`` mirrors the Matrix event id so the agent loop and
+        message tool can round-trip a reply target the same way Telegram and
+        Discord do. ``event_id`` is kept for Matrix-specific callers.
+        """
         meta: dict[str, Any] = {"room": getattr(room, "display_name", room.room_id)}
         if isinstance(eid := getattr(event, "event_id", None), str) and eid:
             meta["event_id"] = eid
+            meta["message_id"] = eid
         if thread := self._thread_metadata(event):
             meta.update(thread)
         return meta

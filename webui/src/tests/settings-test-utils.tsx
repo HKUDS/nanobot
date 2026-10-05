@@ -4,8 +4,9 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
+import type { NanobotClient } from "@/lib/nanobot-client";
 
-export { fireEvent, screen, waitFor, within } from "@testing-library/react";
+export { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 export const requestMutationMock = vi.fn();
 
@@ -126,6 +127,7 @@ export function settingsPayload(): SettingsPayload {
 
 export function renderSettingsView(
   options: {
+    client?: NanobotClient;
     initialSection?:
       | "overview"
       | "appearance"
@@ -149,7 +151,14 @@ export function renderSettingsView(
   } = {},
 ) {
   render(
-    <ClientProvider client={{ requestMutation: requestMutationMock } as never} token="tok">
+    <ClientProvider client={options.client ?? {
+      requestMutation: requestMutationMock,
+      status: "open",
+      onStatus: (handler: (status: "open") => void) => {
+        handler("open");
+        return () => {};
+      },
+    } as never} token="tok">
       <SettingsView
         theme="light"
         initialSection={options.initialSection ?? "apps"}

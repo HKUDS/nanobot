@@ -18,7 +18,7 @@ import type {
 import { useClient } from "@/providers/ClientProvider";
 
 export type ChannelQrConnectLabels = {
-  qrAlt: string;
+  qrAlt?: string;
   scanTitle: string;
   scanDescription: string;
   waiting: string;
@@ -46,6 +46,7 @@ export function ChannelQrConnectFlow({
   connected = false,
   autoStart = false,
   minimalPending = false,
+  showQrCode = true,
   labels,
   onFeaturesUpdate,
   pausePolling,
@@ -64,6 +65,8 @@ export function ChannelQrConnectFlow({
   connected?: boolean;
   autoStart?: boolean;
   minimalPending?: boolean;
+  /** Browser-based authorization can reuse the flow without generating or showing a QR code. */
+  showQrCode?: boolean;
   labels: ChannelQrConnectLabels;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   pausePolling?: (payload: ChannelConnectPayload) => boolean;
@@ -97,7 +100,7 @@ export function ChannelQrConnectFlow({
     : undefined;
 
   useEffect(() => {
-    if (!connect?.qr_url) {
+    if (!showQrCode || !connect?.qr_url) {
       setQrDataUrl("");
       return;
     }
@@ -116,7 +119,7 @@ export function ChannelQrConnectFlow({
     return () => {
       cancelled = true;
     };
-  }, [connect?.qr_url]);
+  }, [connect?.qr_url, showQrCode]);
 
   useEffect(() => {
     if (
@@ -267,13 +270,13 @@ export function ChannelQrConnectFlow({
           <span className="sr-only">{labels.connecting}</span>
         </div>
       ) : null}
-      {pending && minimalPending ? (
+      {pending && minimalPending && showQrCode ? (
         <div className="flex min-h-[228px] flex-col items-center justify-center gap-4 py-4">
           <div className="grid h-[196px] w-[196px] place-items-center rounded-control bg-background shadow-[inset_0_0_0_1px_oklch(0_0_0/0.1)] dark:shadow-[inset_0_0_0_1px_oklch(1_0_0/0.1)]">
             {qrDataUrl ? (
               <img
                 src={qrDataUrl}
-                alt={labels.qrAlt}
+                alt={labels.qrAlt ?? labels.scanTitle}
                 className="h-[184px] w-[184px]"
               />
             ) : (
@@ -283,29 +286,29 @@ export function ChannelQrConnectFlow({
           {renderPending?.({ connect, busy, poll: submitPoll })}
         </div>
       ) : pending ? (
-        <div className="grid gap-4 rounded-control border border-border/70 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
-          <div className="grid h-[196px] w-[196px] place-items-center rounded-control border border-border/60 bg-background">
+        <div className={`grid gap-4 rounded-control border border-border/70 p-4 ${showQrCode ? "sm:grid-cols-[auto_minmax(0,1fr)]" : ""}`}>
+          {showQrCode ? <div className="grid h-[196px] w-[196px] place-items-center rounded-control border border-border/60 bg-background">
             {qrDataUrl ? (
               <img
                 src={qrDataUrl}
-                alt={labels.qrAlt}
+                alt={labels.qrAlt ?? labels.scanTitle}
                 className="h-[184px] w-[184px]"
               />
             ) : (
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
             )}
-          </div>
+          </div> : null}
           <div className="flex min-w-0 flex-col justify-center">
             <div className="text-[13px] font-semibold text-foreground">
               {labels.scanTitle}
             </div>
             <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
-              {qrDataUrl ? labels.scanDescription : null}
+              {!showQrCode || qrDataUrl ? labels.scanDescription : null}
             </p>
             {renderPending?.({ connect, busy, poll: submitPoll }) ?? (
               <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                {qrDataUrl ? labels.waiting : labels.connecting}
+                {!showQrCode || qrDataUrl ? labels.waiting : labels.connecting}
               </div>
             )}
             <div className="mt-4 flex flex-wrap justify-end gap-2">

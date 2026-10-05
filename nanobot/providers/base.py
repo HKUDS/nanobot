@@ -36,6 +36,7 @@ STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 RETRY_AFTER_BUFFER = 1
+CONTEXT_SAFETY_BUFFER = 1024
 
 RetryEventCallback = Callable[[str], Awaitable[None]]
 LLMCallObserver = Callable[["LLMCallRecord"], None]
@@ -273,6 +274,8 @@ class ProviderCallContext:
     # None opts out (auxiliary calls); an empty name denotes an unnamed preset.
     response_preset: str | None = None
     response_is_fallback: bool = False
+    # A pre-request compactor must fit this budget before sending the pending input.
+    compaction_input_budget: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -662,6 +665,7 @@ class LLMProvider(ABC):
         "quota_exhausted",
         "billing_hard_limit_reached",
         "insufficient_balance",
+        "insufficient_credits",
         "credit_balance_too_low",
         "billing_not_active",
         "payment_required",
@@ -684,6 +688,8 @@ class LLMProvider(ABC):
         "billing not active",
         "insufficient balance",
         "insufficient_balance",
+        "insufficient credits",
+        "insufficient_credits",
         "credit balance too low",
         "payment required",
         "out of credits",
@@ -818,6 +824,10 @@ class LLMProvider(ABC):
 
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Whether requests may include provider-native context compaction."""
+        return False
+
+    def supports_pre_request_compaction(self, model: str | None = None) -> bool:
+        """Whether the provider enforces compaction_input_budget before generation."""
         return False
 
     @staticmethod
@@ -1669,6 +1679,8 @@ class LLMProvider(ABC):
             r"retry[_-]?after[\"'\s:=]+(\d+(?:\.\d+)?)",
         )
         for idx, pattern in enumerate(patterns):
+            if idx == 1 and (compound := cls._extract_compound_try_again_in(text)) is not None:
+                return compound
             match = re.search(pattern, text)
             if not match:
                 continue
@@ -1676,6 +1688,16 @@ class LLMProvider(ABC):
             unit = match.group(2) if idx < 3 else "s"
             return cls._to_retry_seconds(value, unit)
         return None
+
+    @classmethod
+    def _extract_compound_try_again_in(cls, text: str) -> float | None:
+        """Sum Go-style durations such as OpenAI's ``try again in 1m30s``."""
+        match = re.search(r"try again in\s+((?:\d+(?:\.\d+)?(?:ms|h|m|s))+)(?![a-z])", text)
+        if not match:
+            return None
+        unit_seconds = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+        parts = re.findall(r"(\d+(?:\.\d+)?)(ms|h|m|s)", match.group(1))
+        return max(0.1, sum(float(value) * unit_seconds[unit] for value, unit in parts))
 
     @classmethod
     def _to_retry_seconds(cls, value: float, unit: str | None = None) -> float:

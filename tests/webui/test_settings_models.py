@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from nanobot.config.schema import Config
 from nanobot.webui.settings_models import (
+    WebUISettingsError,
     model_settings_payload,
     update_agent_model_settings,
     update_provider_settings,
@@ -57,3 +60,23 @@ def test_model_domain_owns_dto_and_config_updates() -> None:
         "providers",
     }
     assert payload["agent"]["model"] == "openai/gpt-5.4"
+
+
+@pytest.mark.parametrize("tokens", [128_000, 131_072, 1_000_000])
+def test_default_context_window_accepts_custom_tokens(tokens: int) -> None:
+    config = Config()
+    assert update_agent_model_settings(
+        config, {"context_window_tokens": [str(tokens)]}, oauth_status=_oauth_status,
+    )
+    assert config.agents.defaults.context_window_tokens == tokens
+    assert model_settings_payload(config, oauth_status=_oauth_status)["agent"]["context_window_tokens"] == tokens
+
+
+@pytest.mark.parametrize("value", ["", "0", "-1", "1.5", "abc"])
+def test_default_context_window_rejects_invalid_tokens(value: str) -> None:
+    config = Config()
+    with pytest.raises(WebUISettingsError, match="context_window_tokens must"):
+        update_agent_model_settings(
+            config, {"context_window_tokens": [value]}, oauth_status=_oauth_status,
+        )
+    assert config.agents.defaults.context_window_tokens == 200_000

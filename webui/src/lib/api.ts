@@ -8,6 +8,7 @@ import type {
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
+  FileReferenceMetadata,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   McpOAuthFlowPayload,
@@ -37,6 +38,8 @@ import type {
   SkillsTrendingPayload,
   SlashCommand,
   SlashCommandLifecycle,
+  SubagentTaskSnapshot,
+  SubagentTasksPayload,
   TranscriptionSettingsUpdate,
   ThreadProjectionEvent,
   WebSearchSettingsUpdate,
@@ -46,6 +49,7 @@ import type {
   WorkspaceScopePayload,
 } from "./types";
 import { fetchWithTimeout } from "./http";
+import { isSubagentTask } from "./subagent-tasks";
 
 const API_READ_TIMEOUT_MS = 20_000;
 const API_MUTATION_TIMEOUT_MS = 20_000;
@@ -368,7 +372,7 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
   throw new Error(`Invalid WebUI thread projection event: ${value.event}`);
 }
 
-function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPayload {
+export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPayload {
   if (!isRecord(value) || typeof value.schemaVersion !== "number") {
     throw new Error("Invalid WebUI thread response");
   }
@@ -455,7 +459,21 @@ export async function fetchFilePreview(
   return request<FilePreviewPayload>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
-    undefined,
+    { cache: "no-store" },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchFileReferenceMetadata(
+  token: string,
+  key: string,
+  path: string,
+): Promise<FileReferenceMetadata> {
+  const query = new URLSearchParams({ path, metadata: "1" });
+  return request<FileReferenceMetadata>(
+    `/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    { cache: "no-store" },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -472,7 +490,7 @@ export async function fetchFilePreviewAvailability(
   const payload = await request<{ available?: boolean }>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
-    undefined,
+    { cache: "no-store" },
     API_READ_TIMEOUT_MS,
   );
   return payload.available !== false;
@@ -530,6 +548,37 @@ export async function updateAutomation(
   values: AutomationUpdatePayload,
 ): Promise<AutomationsPayload> {
   return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
+}
+
+export async function fetchSubagentTasks(token: string, sessionKey: string): Promise<SubagentTasksPayload> {
+  const payload = await request<unknown>(
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`, token, undefined, API_READ_TIMEOUT_MS,
+  );
+  if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)
+    || new Set(payload.tasks.map((task) => task.task_id)).size !== payload.tasks.length) {
+    throw new Error("Invalid subagent tasks response");
+  }
+  return { tasks: payload.tasks };
+}
+
+export async function fetchSubagentThread(
+  token: string, sessionKey: string, taskId: string, signal?: AbortSignal,
+): Promise<WebuiThreadPersistedPayload> {
+  const payload = await request<unknown>(
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents/${encodeURIComponent(taskId)}/webui-thread`,
+    token, { signal, cache: "no-store" }, API_READ_TIMEOUT_MS,
+  );
+  return parseWebuiThreadPayload(payload);
+}
+
+export async function cancelSubagentTask(
+  transport: WebUIMutationTransport, sessionKey: string, taskId: string,
+): Promise<SubagentTaskSnapshot> {
+  const result = await mutation<unknown>(transport, "subagent.cancel", {
+    session_key: sessionKey, task_id: taskId,
+  });
+  if (!isSubagentTask(result) || result.task_id !== taskId) throw new Error("Invalid subagent cancellation response");
+  return result;
 }
 
 export async function fetchSkills(
@@ -815,12 +864,12 @@ export async function runPairingAction(
   return mutation<PairingPayload>(transport, `settings.pairing.${action}`, { code });
 }
 
-export async function startChannelConnect(
+export async function startChannelConnect<T = ChannelConnectPayload>(
   transport: WebUIMutationTransport,
   channel: string,
   params: Readonly<Record<string, string | boolean>> = {},
-): Promise<ChannelConnectPayload> {
-  return mutation<ChannelConnectPayload>(
+): Promise<T> {
+  return mutation<T>(
     transport,
     "settings.channel.connect.start",
     {
@@ -1073,13 +1122,6 @@ export async function fetchSidebarState(
   );
 }
 
-export async function updateSidebarState(
-  transport: WebUIMutationTransport,
-  state: SidebarStatePayload,
-): Promise<SidebarStatePayload> {
-  return mutation<SidebarStatePayload>(transport, "sidebar.update", { state });
-}
-
 function modelGenerationSettingsPayload(
   configuration: Pick<
     ModelConfigurationCreate,
@@ -1295,4 +1337,11 @@ export async function updateRuntimeConfigSettings(
   values: Record<string, import("@/lib/types").RuntimeConfigValue>,
 ): Promise<SettingsPayload> {
   return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
+}
+
+export function starPromptAction(
+  transport: WebUIMutationTransport,
+  action: "claim" | "dismiss",
+): Promise<{ show: boolean }> {
+  return mutation<{ show: boolean }>(transport, `star_prompt.${action}`);
 }

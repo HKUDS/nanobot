@@ -9,6 +9,16 @@ bun run --cwd tui test
 bun run --cwd tui build
 ```
 
+## Source layout
+
+Code under `src/` is grouped by responsibility: `app/` coordinates the retained UI, `client/`
+owns gateway transport and API projections, `composer/` owns draft and queue state, `menus/` and
+`views/` own interactive surfaces, `rendering/` owns transcript presentation, and `platform/`
+contains host-specific integration. Unit and component tests stay beside the feature they cover;
+cross-module behavior tests live with the owning `app/` or `client/` boundary. The production
+build still starts from `src/index.ts`, so colocated `*.test.ts` files are not part of the compiled
+executable.
+
 `nanobot` (or the explicit `nanobot agent` form) launches this client, leases the shared local gateway or starts it on demand, and passes the local bootstrap endpoint through environment variables. The client paints before gateway readiness, retries bootstrap in the background, and obtains fresh WebSocket and REST credentials for each connection. Other terminals and the WebUI keep that gateway alive; the final interactive launcher to exit releases the on-demand process. `/detach` closes the TUI after promoting the gateway to persistent background mode, keeping any active agent turn running without clients; the restored terminal prints the exact stop command for that config and explicit workspace. `nanobot gateway --background` can start or promote it persistently before opening a client. Source checkouts automatically align dependencies with `bun.lock` before launch; released installs use a version-matched, checksum-verified archive that keeps the executable together with its licenses, notices, corresponding application source, source offer, and relinking instructions. Startup fails explicitly if the native client is unavailable. The legacy Python prompt is selected with `nanobot --classic` or `nanobot agent --classic`.
 
 The TUI uses OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
@@ -16,6 +26,11 @@ The TUI uses OpenTUI's retained full-screen layout: the transcript reflows with 
 Assistant math written with `$...$`, `$$...$$`, `\\(...\\)`, or `\\[...\\]` is presented as
 Unicode plain text so formulas remain readable in terminals without a math renderer. Currency and
 LaTeX inside inline or fenced code remain literal.
+
+Automatic theme selection follows the terminal's OSC 10/11 responses. Until a response
+arrives, the TUI uses the terminal's default foreground and background without semantic
+colors or color animations. Terminals that do not answer keep this readable fallback.
+Use `nanobot --theme light` or `nanobot --theme dark` to select a color palette explicitly.
 
 ## Herdr pane titles
 
@@ -44,7 +59,8 @@ Type `@` to complete installed CLI apps, configured MCP servers, or saved sessio
 same gateway metadata used by the WebUI. While nanobot is working, `Enter` sends immediately,
 `Tab` waits until the current response is finished, and `Option+Up` on macOS (`Alt+Up` on
 Windows/Linux) returns the latest waiting message to the composer for editing. Waiting messages
-stay visible above the composer.
+stay visible above the composer. `/goal <task>` follows the same keys: `Enter` sends the goal
+into the running conversation, while `Tab` waits for the current response to finish.
 Use `Shift+Enter` for a newline; `Ctrl+J` is the universal fallback when a terminal cannot
 distinguish modified Enter keys. `Alt+Enter` and `Ctrl+Enter` are also accepted when distinguishable.
 Unsent prompts return to the composer if the turn stops or fails.

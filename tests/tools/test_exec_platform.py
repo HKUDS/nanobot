@@ -6,6 +6,7 @@ platform-specific binaries (all subprocess calls are mocked).
 """
 
 import asyncio
+import os
 import shutil
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -101,6 +102,29 @@ class TestBuildEnvWindows:
         with patch("nanobot.agent.tools.shell._IS_WINDOWS", True):
             env = ExecTool()._build_env()
         assert env["SYSTEMROOT"] == r"D:\Windows"
+
+
+# ---------------------------------------------------------------------------
+# argument-vector PATH
+# ---------------------------------------------------------------------------
+
+class TestArgumentVectorPath:
+
+    def test_uses_parent_path_for_executable_lookup(self):
+        parent_path = os.pathsep.join(("parent-bin", "system-bin"))
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+            patch.dict(
+                "os.environ",
+                {"PATH": parent_path, "NANOBOT_SECRET_TOKEN": "super-secret-value"},
+                clear=True,
+            ),
+        ):
+            prepared = ExecTool()._prepare_command(["rg", "--version"])
+
+        assert not isinstance(prepared, str)
+        assert prepared.env["PATH"] == parent_path
+        assert "NANOBOT_SECRET_TOKEN" not in prepared.env
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +316,21 @@ class TestSpawnWindows:
         """PowerShell needs & before quoted executable paths with arguments."""
         env = {"PATH": ""}
         command = r'"D:\Program Files\Python\python.exe" -u -c "print(1)"'
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_exec.return_value = AsyncMock()
+            await ExecTool._spawn(command, r"C:\work", env)
+
+        powershell_command = mock_exec.call_args[0][-1]
+        assert f"\n& {command}\n" in powershell_command
+
+    @pytest.mark.asyncio
+    async def test_powershell_invokes_quoted_windows_executable_without_arguments(self):
+        """A quoted executable path is still a command when it has no arguments."""
+        env = {"PATH": ""}
+        command = r'"D:\Program Files\Git\cmd\git.exe"'
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,

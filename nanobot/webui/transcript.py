@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Sequence, cast
 from urllib.parse import unquote, urlparse
@@ -23,8 +24,10 @@ from nanobot.config.paths import get_webui_dir
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.helpers import atomic_write_lines
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from nanobot.webui.outbound_wire import project_tool_events
 from nanobot.webui.session_identity import webui_chat_id, webui_session_key
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
@@ -443,20 +446,13 @@ def _records_with_replay_identity(
 
 def _write_records_to_path(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            for row in rows:
-                raw = _record_json_line(row)
-                if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
-                    raise ValueError("webui transcript line too large")
-                f.write(raw + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    lines: list[str] = []
+    for row in rows:
+        raw = _record_json_line(row)
+        if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
+            raise ValueError("webui transcript line too large")
+        lines.append(raw)
+    atomic_write_lines(path, lines)
 
 
 def _segment_file_path(session_key: str, segment_id: str) -> Path:
@@ -603,9 +599,7 @@ def _read_segment_manifest_entries(
     *,
     stats: TranscriptReplayStats | None = None,
 ) -> list[dict[str, Any]]:
-    entries = _load_segment_manifest_entries(session_key)
-    if entries is not None:
-        return entries
+    # Windows requires readers to close the manifest before atomic replacement.
     with _manifest_rebuild_lock(session_key):
         entries = _load_segment_manifest_entries(session_key)
         if entries is not None:
@@ -1382,36 +1376,8 @@ def write_session_messages_as_transcript(
     messages: list[dict[str, Any]],
 ) -> None:
     """Write a minimal WebUI transcript from already-truncated session messages."""
-    target_chat_id = _chat_id_from_session_key(target_key)
-    rows: list[dict[str, Any]] = []
-    for msg in messages:
-        if is_hidden_history_message(msg):
-            continue
-        msg = public_history_message(msg)
-        role = msg.get("role")
-        content = msg.get("content")
-        text = content if isinstance(content, str) else ""
-        if role == "user":
-            row: dict[str, Any] = {"event": "user", "chat_id": target_chat_id, "text": text}
-            media = msg.get("media")
-            if isinstance(media, list) and media:
-                row["media_paths"] = [
-                    str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
-                ]
-            for key in ("cli_apps", "mcp_presets", "session_mentions"):
-                value = msg.get(key)
-                if isinstance(value, list) and value:
-                    row[key] = json.loads(json.dumps(value, ensure_ascii=False))
-        elif role == "assistant" and text.strip():
-            row = {"event": "message", "chat_id": target_chat_id, "text": text}
-            media = msg.get("media")
-            if isinstance(media, list) and media:
-                row["media"] = [
-                    str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
-                ]
-        else:
-            continue
-        rows.append(row)
+    rows = [row for msg in messages
+            if (row := _session_user_event(target_key, msg) or _session_assistant_event(target_key, msg)) is not None]
     _write_transcript_lines(target_key, rows)
 
 
@@ -2454,6 +2420,76 @@ def _client_projection_events(
             deferred_until = group.stop
         events.append(event)
     return events, fork_boundary_event_index
+
+
+def build_session_thread_response(
+    session: Session,
+    *,
+    active: bool = False,
+    latency_ms: int | None = None,
+    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+    augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+    augment_assistant_text: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    """Project a Session snapshot without creating a second display transcript."""
+    rows: list[dict[str, Any]] = []
+    chat_id = session.key.split(":", 1)[-1]
+    turn_id = f"session:{session.key}:0"
+    created_at_ms = int(session.created_at.timestamp() * 1000)
+    for index, message in enumerate(session.messages):
+        if is_hidden_history_message(message):
+            continue
+        if message.get("role") == "user":
+            turn_id = f"session:{session.key}:{index}"
+        timestamp = message.get("timestamp")
+        if isinstance(timestamp, str):
+            try:
+                created_at_ms = int(datetime.fromisoformat(timestamp).timestamp() * 1000)
+            except ValueError:
+                pass
+        records: list[dict[str, Any]] = []
+        row = _session_user_event(session.key, message) or _session_assistant_event(session.key, message)
+        reasoning = message.get("reasoning_content")
+        if message.get("role") == "assistant" and isinstance(reasoning, str) and reasoning:
+            records.append({"event": "message", "text": reasoning, "kind": "reasoning"})
+        calls = message.get("tool_calls")
+        has_calls = isinstance(calls, list) and len(cast(list[object], calls)) > 0
+        if row is not None and has_calls:
+            row["kind"] = "progress"
+            records.append(row)
+        if message.get("role") == "assistant":
+            tools = project_tool_events(_normalize_tool_events(message.get("tool_events")))
+            if tools:
+                records.append({"event": "message", "kind": "tool_hint",
+                                "text": "\n".join(tool_trace_lines_from_events(tools)),
+                                "tool_events": tools})
+            edits = message.get("file_edit_events")
+            if isinstance(edits, list) and edits:
+                records.append({"event": "file_edit", "edits": edits})
+        if row is not None and not has_calls:
+            records.append(row)
+        for offset, record in enumerate(records):
+            record.update({
+                "chat_id": chat_id, "turn_id": turn_id,
+                "turn_phase": "user" if record["event"] == "user" else
+                    "reasoning" if record.get("kind") == "reasoning" else
+                    "activity" if record["event"] == "file_edit" or record.get("kind") in {"progress", "tool_hint"}
+                    else "answer",
+                "created_at_ms": created_at_ms,
+                _WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:{index}:{offset}",
+            })
+            rows.append(record)
+    if not active and rows:
+        rows.append({"event": "turn_end", "chat_id": chat_id,
+                     "turn_id": turn_id, "latency_ms": latency_ms,
+                     _WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:end"})
+    events = [event for record in rows if (event := _client_projection_event(
+        record, augment_user_media=augment_user_media, augment_assistant_media=augment_assistant_media,
+        augment_assistant_text=augment_assistant_text,
+    )) is not None]
+    return {"schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION, "sessionKey": session.key,
+            "projection": "events", "events": events,
+            "active_turn_id": turn_id if active else None}
 
 
 def build_webui_thread_response(

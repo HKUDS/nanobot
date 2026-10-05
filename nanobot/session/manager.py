@@ -30,7 +30,9 @@ from nanobot.runtime_context import (
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
+from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionTypes
 from nanobot.utils.helpers import (
+    atomic_write_lines,
     content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
@@ -58,6 +60,8 @@ _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 _RUNTIME_CHECKPOINT_VERSION = 1
 _RUNTIME_CHECKPOINT_SUFFIX = ".checkpoint.json"
 _FORK_VOLATILE_METADATA_KEYS = {
+    PARENT_SESSION_KEY,
+    SESSION_TYPE_KEY,
     "goal_state",
     "pending_user_turn",
     "pending_user_followups",
@@ -169,9 +173,9 @@ class SessionPolicy:
 
 @dataclass
 class Session:
-    """A conversation session."""
+    """Message history, runtime state, and metadata for one agent session."""
 
-    key: str  # channel:chat_id
+    key: str  # namespace:identity
     messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -1205,52 +1209,33 @@ class JsonlSessionStore:
 
     def _save_unlocked(self, session: Session, *, fsync: bool = False) -> None:
         path = self.get_session_path(session.key)
-        tmp_path = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        metadata_line = {
+            "_type": "metadata",
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "last_archived": session.last_archived,
+            # Keep old nanobot releases able to read sessions written
+            # during the field-name migration.
+            "last_consolidated": session.last_consolidated,
+        }
+        lines = [json.dumps(metadata_line, ensure_ascii=False)]
+        if session.provider_state is not None:
+            provider_state_line = {
+                "_type": _PROVIDER_STATE_RECORD_TYPE,
+                "state": session.provider_state.to_private_record(),
+            }
+            lines.append(json.dumps(provider_state_line, ensure_ascii=False))
+        for msg in session.messages:
+            lines.append(json.dumps(msg, ensure_ascii=False))
+        # fsync=False keeps the historical session-save default: publish the
+        # file without file or directory fsync unless the caller opts in.
+        atomic_write_lines(path, lines, fsync=fsync)
 
-        try:
-            with open(tmp_path, "x", encoding="utf-8") as f:
-                metadata_line = {
-                    "_type": "metadata",
-                    "key": session.key,
-                    "created_at": session.created_at.isoformat(),
-                    "updated_at": session.updated_at.isoformat(),
-                    "metadata": session.metadata,
-                    "last_archived": session.last_archived,
-                    # Keep old nanobot releases able to read sessions written
-                    # during the field-name migration.
-                    "last_consolidated": session.last_consolidated,
-                }
-                f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-                if session.provider_state is not None:
-                    provider_state_line = {
-                        "_type": _PROVIDER_STATE_RECORD_TYPE,
-                        "state": session.provider_state.to_private_record(),
-                    }
-                    f.write(json.dumps(provider_state_line, ensure_ascii=False) + "\n")
-                for msg in session.messages:
-                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-                if fsync:
-                    f.flush()
-                    os.fsync(f.fileno())
-
-            os.replace(tmp_path, path)
-
-            # The full record now contains the authoritative checkpoint state (or
-            # its removal), so an older volatile overlay is no longer needed.
-            self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
-
-            if fsync:
-                with suppress(PermissionError):
-                    fd = os.open(str(path.parent), os.O_RDONLY)
-                    try:
-                        os.fsync(fd)
-                    except OSError as exc:
-                        if exc.errno != errno.EINVAL:
-                            raise
-                    finally:
-                        os.close(fd)
-        finally:
-            tmp_path.unlink(missing_ok=True)
+        # The full record now contains the authoritative checkpoint state (or
+        # its removal), so an older volatile overlay is no longer needed.
+        self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
 
     def update_metadata(
         self,
@@ -1552,6 +1537,7 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._delete_observer: Callable[[str], None] | None = None
+        self.types = SessionTypes()
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -1648,6 +1634,32 @@ class SessionManager:
 
         self._remember(session)
         return session
+
+    def get_existing(self, key: str) -> Session | None:
+        """Load an existing session without creating a deleted conversation."""
+        session = self._cached(key) or self._load(key)
+        if session is not None:
+            self._remember(session)
+        return session
+
+    def child_session_keys(self, parent_key: str) -> list[str]:
+        """Find persisted and active children through their declared parent."""
+        return [key for key, parent in self._session_parents().items() if parent == parent_key]
+
+    def _session_parents(self) -> dict[str, str]:
+        keys = {row["key"] for row in self.list_sessions()}
+        cached = {**self._overflow_cache, **self._cache}
+        keys.update(cached)
+        parents: dict[str, str] = {}
+        for key in sorted(keys):
+            session = cached.get(key)
+            metadata = session.metadata if session is not None else (
+                (self.read_session_metadata(key) or {}).get("metadata", {})
+            )
+            parent = metadata.get(PARENT_SESSION_KEY)
+            if isinstance(parent, str):
+                parents[key] = parent
+        return parents
 
     def get_or_create_transient(
         self,
@@ -1759,12 +1771,28 @@ class SessionManager:
         self._overflow_cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
-        """Delete a persisted session and invalidate its cache entry."""
-        self.invalidate(key)
-        deleted = self._store.delete(key)
-        if self._delete_observer is not None:
-            self._delete_observer(key)
-        return deleted
+        """Delete a session and its descendants, invalidating their cache entries."""
+        # Collect descendants before deletion; the common file lock also keeps
+        # handle allocation and child-session saves outside this boundary.
+        with self.locked_session_files():
+            children: dict[str, list[str]] = {}
+            for child, parent in self._session_parents().items():
+                children.setdefault(parent, []).append(child)
+            pending = [key]
+            collected: set[str] = set()
+            while pending:
+                current = pending.pop()
+                if current in collected:
+                    continue
+                collected.add(current)
+                pending.extend(children.get(current, ()))
+            deleted = False
+            for current in collected:
+                self.invalidate(current)
+                deleted = self._store.delete(current) or deleted
+                if self._delete_observer is not None:
+                    self._delete_observer(current)
+            return deleted
 
     def restore_sessions_to_workspace(self) -> SessionRestoreResult:
         """Restore session files to the pre-relocation path for an explicit rollback."""

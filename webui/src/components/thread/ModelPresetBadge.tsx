@@ -138,6 +138,8 @@ export function ModelPresetBadge({
       : modelPresets.map((preset, index) => index === listedIndex ? activePreset : preset);
   const opensSetup = Boolean(onClick);
   const canSwitch = !opensSetup && Boolean(onPresetChange) && activeName !== "" && presets.length > 1;
+  const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels));
+  const pickerPresets = activeName && onPresetChange ? presets : [activePreset];
   const currentIndex = Math.max(0, presets.findIndex((preset) => preset.name === activeName));
   const pillHeight = isHero ? 32 : 36;
   const pillStride = pillHeight + PILL_GAP_PX;
@@ -250,6 +252,7 @@ export function ModelPresetBadge({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (!canSwitch) return;
     const targetByKey: Record<string, number> = {
       ArrowUp: currentIndex - 1,
       ArrowDown: currentIndex + 1,
@@ -276,7 +279,7 @@ export function ModelPresetBadge({
   );
 
   const Container = opensSetup ? "button" : "span";
-  const badge = !canSwitch ? (
+  const badge = !canOpenPicker ? (
     <TooltipTrigger asChild>
       <Container
         aria-label={label}
@@ -334,7 +337,7 @@ export function ModelPresetBadge({
             className={cn(
               "thread-composer-model-badge group relative inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] cursor-pointer appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
               motion && "z-10 cursor-grabbing",
-              !motion && "cursor-grab",
+              canSwitch && !motion && "cursor-grab",
               isHero ? "h-8" : "h-9",
             )}
           >
@@ -388,6 +391,7 @@ export function ModelPresetBadge({
         align="end"
         side="top"
         sideOffset={10}
+        collisionPadding={12}
         role="dialog"
         aria-label={switchModelLabel}
         onOpenAutoFocus={(event) => {
@@ -407,12 +411,24 @@ export function ModelPresetBadge({
         <div
           role="listbox"
           aria-label={switchModelLabel}
+          onKeyDown={(event) => {
+            const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+            const index = options.indexOf(document.activeElement as HTMLButtonElement);
+            const targets: Record<string, number> = {
+              ArrowUp: index - 1, ArrowDown: index + 1, Home: 0, End: options.length - 1,
+            };
+            const target = targets[event.key];
+            if (target === undefined || options.length === 0) return;
+            event.preventDefault();
+            options[wrapIndex(target, options.length)].focus();
+          }}
           className="max-h-[min(16rem,var(--radix-popover-content-available-height))] overflow-y-auto py-1 scrollbar-thin scrollbar-track-transparent"
         >
-          {presets.map((preset) => (
+          {pickerPresets.map((preset) => (
             <PresetOption
               key={preset.name}
               preset={preset}
+              label={preset.name || label}
               selected={preset.name === activeName}
               onSelect={selectPreset}
             />
@@ -450,10 +466,12 @@ export function ModelPresetBadge({
 
 function PresetOption({
   preset,
+  label,
   selected,
   onSelect,
 }: {
   preset: ModelPresetOption;
+  label: string;
   selected: boolean;
   onSelect: (name: string) => void;
 }) {
@@ -462,7 +480,7 @@ function PresetOption({
     <button
       type="button"
       role="option"
-      aria-label={preset.name}
+      aria-label={label}
       aria-selected={selected}
       onClick={() => onSelect(preset.name)}
       className={cn(
@@ -473,14 +491,14 @@ function PresetOption({
       )}
     >
       <PresetProviderIcon
-        label={preset.name}
+        label={label}
         modelDetail={detail}
         provider={preset.provider}
         isHero={false}
       />
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden whitespace-nowrap max-sm:flex-col max-sm:items-start max-sm:gap-0.5 max-sm:whitespace-normal">
-        <span className="shrink-0 text-[13px] font-medium text-foreground max-sm:max-w-full max-sm:break-words">{preset.name}</span>
-        {detail && detail !== preset.name ? (
+        <span className="shrink-0 text-[13px] font-medium text-foreground max-sm:max-w-full max-sm:break-words">{label}</span>
+        {detail && detail !== label ? (
           <span className="truncate text-[12px] text-muted-foreground">{detail}</span>
         ) : null}
       </span>
@@ -611,6 +629,16 @@ export function PresetProviderIcon({
       )}
       aria-hidden
     >
+      <span
+        className={cn(
+          "col-start-1 row-start-1 grid h-full w-full place-items-center rounded-[5px] text-white",
+          isHero ? "text-[7.5px]" : "text-[8px]",
+          logoLoaded ? "opacity-0" : "opacity-100",
+        )}
+        style={brand ? { backgroundColor: brand.color } : undefined}
+      >
+        {brand ? brand.initials.slice(0, 2) : <Sparkles className="h-3 w-3 text-muted-foreground/65" />}
+      </span>
       {logoUrl ? (
         <img
           src={logoUrl}
@@ -620,26 +648,14 @@ export function PresetProviderIcon({
           loading="lazy"
           referrerPolicy="no-referrer"
           className={cn(
-            "object-contain",
+            "col-start-1 row-start-1 object-contain",
             isLogoTile ? "h-full w-full" : "h-3.5 w-3.5",
             logoLoaded ? "opacity-100" : "opacity-0",
           )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />
-      ) : brand ? (
-        <span
-          className={cn(
-            "grid h-full w-full place-items-center rounded-full text-white",
-            isHero ? "text-[7.5px]" : "text-[8px]",
-          )}
-          style={{ backgroundColor: brand.color }}
-        >
-          {brand.initials.slice(0, 2)}
-        </span>
-      ) : (
-        <Sparkles className="h-3 w-3 text-muted-foreground/65" />
-      )}
+      ) : null}
     </span>
   );
 }

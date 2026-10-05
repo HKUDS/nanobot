@@ -2638,8 +2638,11 @@ def test_optional_dependency_metadata_for_enable():
 
     assert "boto3>=1.43.0" not in data["project"]["dependencies"]
     assert deps["bedrock"] == ["boto3>=1.43.0"]
+    # The built-in remote WebUI proxy now needs aiohttp even without channels.
+    # Keep the historical API extra installable for existing deployment commands.
+    assert "aiohttp>=3.14.3,<4.0.0" in required
+    assert deps["api"] == ["aiohttp>=3.9.0,<4.0.0"]
     for dep_name in (
-        "aiohttp",
         "dingtalk-stream",
         "lark-oapi",
         "msgpack",

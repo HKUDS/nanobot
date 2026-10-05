@@ -25,6 +25,7 @@ export type ChannelPluginPanelProps = {
   showBrandLogos: boolean;
   onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  onConfigureMcp?: (name: string) => void;
   onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
 };
 
@@ -36,10 +37,15 @@ export type ChannelPluginConnectFlowProps = {
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 };
 
+export type ChannelPluginHelpProps = {
+  feature: NanobotFeatureInfo;
+};
+
 export type ChannelUiContribution = {
   presentation: ChannelPresentation;
   aliases?: Record<string, Partial<ChannelPresentation>>;
   Panel?: ComponentType<ChannelPluginPanelProps>;
+  HelpContent?: ComponentType<ChannelPluginHelpProps>;
   ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   canConnectBeforeConfigured?: boolean;
 };

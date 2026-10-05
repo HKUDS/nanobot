@@ -24,6 +24,32 @@ function feature(overrides: Partial<NanobotFeatureInfo>): NanobotFeatureInfo {
 }
 
 describe("channelSetup", () => {
+  it("offers a localized inherited option without changing ordinary booleans", () => {
+    const setup = channelSetup(feature({ setup: { fields: [
+      {
+        key: "channels.plugin-chat.showCompactionNotices",
+        field: "showCompactionNotices",
+        kind: "bool",
+        choices: [],
+        required: false,
+        inheritable: true,
+      },
+      {
+        key: "channels.plugin-chat.sendProgress",
+        field: "sendProgress",
+        kind: "bool",
+        choices: [],
+        required: false,
+      },
+    ] } }), "zh-CN");
+    expect(setup.fields?.[0]?.options).toEqual([
+      { value: "", label: "默认" },
+      { value: "true", label: "True" },
+      { value: "false", label: "False" },
+    ]);
+    expect(setup.fields?.[1]?.options?.map((option) => option.value)).toEqual(["true", "false"]);
+  });
+
   it("builds editable fields for a plugin-owned backend contract", () => {
     const setup = channelSetup(feature({
       setup: {

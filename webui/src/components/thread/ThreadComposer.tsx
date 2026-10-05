@@ -121,6 +121,8 @@ import {
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
+import { composerMentionText } from "@/lib/composer-mention-text";
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
@@ -211,6 +213,7 @@ interface ThreadComposerProps {
   recentRoundUsage?: readonly ComposerRoundUsage[];
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
+  onMentionSearch?: () => void;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   sessions?: ChatSummary[];
@@ -229,6 +232,9 @@ interface ThreadComposerProps {
   onPickWorkspaceFolder?: () => Promise<string | null>;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
+  draftKey?: string;
+  draftStore?: ComposerDraftStore;
+  persistDraft?: boolean;
   transcriptionProvider?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
   quotedContext?: string | null;
@@ -301,7 +307,7 @@ function VoiceRecordingMeter({
   );
 }
 
-type SlashPalettePlacement = "above" | "below";
+type SlashPalettePlacement = "above" | "below" | "beside";
 
 interface SlashPaletteLayout {
   placement: SlashPalettePlacement;
@@ -608,7 +614,13 @@ function visualViewportBounds(): { top: number; bottom: number; height: number }
 }
 
 function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
-  const viewport = visualViewportBounds();
+  // The app already follows the visual viewport on touch browsers. Measure
+  // its frame in the same coordinates as the composer, not WebKit's pan offset.
+  // During pinch zoom the app stops fitting, so use the zoomed viewport again.
+  const fittedRoot = window.visualViewport?.scale === 1
+    ? el.closest("#root.visual-viewport")
+    : null;
+  const viewport = fittedRoot?.getBoundingClientRect() ?? visualViewportBounds();
   let top = viewport.top;
   let bottom = viewport.bottom;
   let parent = el.parentElement;
@@ -912,6 +924,7 @@ export function ThreadComposer({
   recentRoundUsage = [],
   variant = "thread",
   slashCommands = [],
+  onMentionSearch,
   cliApps = [],
   mcpPresets = [],
   sessions = [],
@@ -929,6 +942,9 @@ export function ThreadComposer({
   onPickWorkspaceFolder,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
+  draftKey,
+  draftStore,
+  persistDraft = false,
   transcriptionProvider = null,
   ingressLimits = null,
   quotedContext = null,
@@ -936,10 +952,13 @@ export function ThreadComposer({
   onQuotedContextChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
-  const [value, setValue] = useState("");
+  const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey, persistDraft) : undefined);
+  const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
   const blurFrame = useRef<number | null>(null);
-  const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
+  const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>(
+    initialDraft?.sessionMentions ?? [],
+  );
   const [sessionDragPreview, setSessionDragPreview] = useState<{
     mention: SessionMention;
     start: number;
@@ -958,6 +977,9 @@ export function ThreadComposer({
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
+  // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
+  // keyboard still get the newline-on-Enter behavior.
+  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1036,6 +1058,14 @@ export function ThreadComposer({
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
   const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
     useAttachedImages({ ingressLimits });
+  const restoredDraftAttachments = useRef(false);
+  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.files.length);
+  useLayoutEffect(() => {
+    if (restoredDraftAttachments.current) return;
+    restoredDraftAttachments.current = true;
+    if (initialDraft?.files.length) enqueue(initialDraft.files);
+    setDraftAttachmentsReady(true);
+  }, [enqueue, initialDraft]);
 
   const formatRejection = useCallback(
     (reason: AttachmentError): string => {
@@ -1301,6 +1331,11 @@ export function ThreadComposer({
     };
   }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
 
+  const mentionSearchActive = cliAppMention !== null;
+  useEffect(() => {
+    if (mentionSearchActive) onMentionSearch?.();
+  }, [mentionSearchActive, onMentionSearch]);
+
   const availableSessionMentions = useMemo(
     () => sessionMentionOptions(sessions),
     [sessions],
@@ -1323,6 +1358,20 @@ export function ThreadComposer({
     resetKey: pendingQueueKey,
   });
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
+  const draftText = composerMentionText(mentionInput.segments).raw;
+  useLayoutEffect(() => {
+    if (!draftKey || !draftStore || !draftAttachmentsReady) return;
+    if (!draftText && images.length === 0 && !quotedContext) {
+      draftStore.delete(draftKey);
+      return;
+    }
+    draftStore.set(draftKey, {
+      text: draftText,
+      files: images.map((image) => image.file),
+      sessionMentions: selectedSessionMentions,
+      quotedContext,
+    }, persistDraft);
+  }, [draftAttachmentsReady, draftKey, draftStore, images, persistDraft, quotedContext, selectedSessionMentions, draftText]);
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
         value,
@@ -1504,11 +1553,18 @@ export function ThreadComposer({
       const bounds = getVisibleBounds(form);
       const spaceAbove = Math.max(0, rect.top - bounds.top - SLASH_PALETTE_GAP_PX);
       const spaceBelow = Math.max(0, bounds.bottom - rect.bottom - SLASH_PALETTE_GAP_PX);
+      // A landscape keyboard can leave less height than one input and option.
+      // Use the available width instead of clipping an absolute menu in the
+      // short viewport's scrollable composer footer.
+      const beside = rect.width >= 640
+        && !!form.closest("#root.short-visual-viewport");
       const placement: SlashPalettePlacement =
-        spaceAbove >= SLASH_PALETTE_MIN_HEIGHT_PX || spaceAbove >= spaceBelow
+        beside ? "beside" : spaceAbove >= SLASH_PALETTE_MIN_HEIGHT_PX || spaceAbove >= spaceBelow
           ? "above"
           : "below";
-      const available = placement === "above" ? spaceAbove : spaceBelow;
+      const available = beside
+        ? Math.max(0, bounds.bottom - bounds.top)
+        : placement === "above" ? spaceAbove : spaceBelow;
       const maxHeight = Math.min(SLASH_PALETTE_MAX_HEIGHT_PX, available);
 
       setSlashPaletteLayout((current) =>
@@ -1524,7 +1580,10 @@ export function ThreadComposer({
     viewport?.addEventListener("scroll", updateLayout);
     window.addEventListener("resize", updateLayout);
     document.addEventListener("scroll", updateLayout, true);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateLayout);
+    if (formRef.current) observer?.observe(formRef.current);
     return () => {
+      observer?.disconnect();
       viewport?.removeEventListener("resize", updateLayout);
       viewport?.removeEventListener("scroll", updateLayout);
       window.removeEventListener("resize", updateLayout);
@@ -2028,9 +2087,14 @@ export function ThreadComposer({
     const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
+    const submittedDraft = draftKey ? draftStore?.get(draftKey) : undefined;
     const finishSend = () => {
+      // A pending send can finish after this composer unmounts and a newer draft is started.
+      if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
+      if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      setQueuedPrompts([]);
+      // Sending new guidance must not discard other messages still waiting.
+      if (!isStreaming || finalizeActiveTurn) setQueuedPrompts([]);
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2046,7 +2110,7 @@ export function ThreadComposer({
             sideChannel: true,
             ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
           }
-        : options,
+        : isStreaming ? { ...options, continueActiveTurn: true } : options,
     );
     if (result instanceof Promise) {
       setSendPending(true);
@@ -2066,6 +2130,8 @@ export function ThreadComposer({
     activeMcpPresetMentions,
     activeSessionMentions,
     canSend,
+    draftKey,
+    draftStore,
     clear,
     clearComposerText,
     hasTouchPrimaryPointer,
@@ -2134,6 +2200,19 @@ export function ThreadComposer({
         setSlashMenuDismissed(true);
         return;
       }
+    }
+    // Touch keyboards: a plain Enter inserts a newline; sending stays on the
+    // send button. The select-on-Enter menu branches above take precedence.
+    if (
+      e.key === "Enter"
+      && !e.shiftKey
+      && !e.altKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && !e.nativeEvent.isComposing
+      && hasCoarsePointer
+    ) {
+      return;
     }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
@@ -2223,7 +2302,8 @@ export function ThreadComposer({
       : voiceRecorder.state === "transcribing"
         ? t("thread.composer.voice.transcribing")
         : t("thread.composer.voice.hint");
-  const showStopButton = isStreaming && !!onStop;
+  // Touch users need an explicit send action; keep Stop while sending is unavailable.
+  const showStopButton = isStreaming && !!onStop && !canSend;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
@@ -2290,11 +2370,13 @@ export function ThreadComposer({
           )
         : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[16px] leading-5 sm:px-4",
   );
+  const paletteBeside = showAnyPalette && slashPaletteLayout.placement === "beside";
 
   return (
     <form
       ref={formRef}
       data-compact-controls={compactControls ? "true" : undefined}
+      data-palette-beside={paletteBeside || undefined}
       onFocusCapture={() => {
         if (!compactWhenIdle) return;
         // Portaled model controls belong to this composer too: keep its layout
@@ -2336,6 +2418,7 @@ export function ThreadComposer({
         "relative w-full",
         isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0",
         compactWhenIdle && "thread-composer-collapsible-layout",
+        paletteBeside && "grid grid-cols-2 items-start gap-2 p-0",
       )}
     >
       {showSlashMenu ? (
@@ -2361,8 +2444,10 @@ export function ThreadComposer({
       <div
         ref={surfaceRef}
         data-compact={compactIdle || undefined}
+        style={paletteBeside ? { maxHeight: slashPaletteLayout.maxHeight, overflowY: "auto" } : undefined}
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
+          paletteBeside && "col-start-1 row-start-1",
           isHero
             ? "max-w-[58rem] rounded-prominent bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]"
             : "max-w-[49.5rem] rounded-panel bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]",
@@ -2487,6 +2572,7 @@ export function ThreadComposer({
             }}
             onPaste={onPaste}
             rows={1}
+            enterKeyHint={hasCoarsePointer ? "enter" : undefined}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={interactionDisabled}
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
@@ -2642,10 +2728,10 @@ export function ThreadComposer({
             >
               {showStopButton ? (
                 <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
-              ) : isStreaming ? (
-                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
-              ) : (
+              ) : canSend || !isStreaming ? (
                 <ArrowUp className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
+              ) : (
+                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
               )}
             </Button>
           </div>
@@ -2713,7 +2799,10 @@ function QueuedPromptStack({
   onDragEnd: () => void;
   onDrop: (targetId: string) => void;
 }) {
-  const stripMaxHeight = Math.min(240, 14 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4);
+  const stripMaxHeight = Math.min(
+    320,
+    96 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4,
+  );
 
   return (
     <div
@@ -2729,6 +2818,9 @@ function QueuedPromptStack({
       style={{ "--composer-strip-max-height": `${stripMaxHeight}px` } as CSSProperties}
       aria-label={label}
     >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-2 pb-1">
+        <span className="text-[11.5px] font-semibold text-foreground/75">{label}</span>
+      </div>
       <div className="flex max-h-[216px] flex-col gap-1 overflow-y-auto">
         {prompts.map((prompt) => (
           <QueuedPromptRow
@@ -2995,8 +3087,11 @@ function CliAppMentionPalette({
       style={{ maxHeight: layout.maxHeight }}
       className={cn(
         floatingSurfaceVisualClassName,
-        "absolute left-1/2 z-30 w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden",
-        layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2",
+        "z-30 overflow-hidden",
+        layout.placement === "beside"
+          ? "relative col-start-2 row-start-1 w-full"
+          : cn("absolute left-1/2 w-[calc(100%-0.5rem)] -translate-x-1/2",
+            layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2"),
         isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
       )}
     >
@@ -3034,7 +3129,7 @@ function CliAppMentionPalette({
                   }}
                   className={cn(
                     floatingItemClassName,
-                    "flex min-h-10 w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors",
+                    "touch-target flex min-h-10 w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors",
                     selected
                       ? "bg-foreground/[0.055] text-foreground"
                       : "text-foreground/90 hover:bg-foreground/[0.04]",
@@ -3148,8 +3243,11 @@ function SlashCommandPalette({
       style={{ maxHeight: layout.maxHeight }}
       className={cn(
         floatingSurfaceVisualClassName,
-        "absolute left-1/2 z-30 w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden",
-        layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2",
+        "z-30 overflow-hidden",
+        layout.placement === "beside"
+          ? "relative col-start-2 row-start-1 w-full"
+          : cn("absolute left-1/2 w-[calc(100%-0.5rem)] -translate-x-1/2",
+            layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2"),
         isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
       )}
     >

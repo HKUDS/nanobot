@@ -532,7 +532,7 @@ async def test_injected_followup_starts_new_length_recovery_chain():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("max_iterations", [1, 3])
-async def test_followup_interrupts_truncated_answer_before_next_request(max_iterations):
+async def test_truncated_answer_followup_requires_remaining_iteration(max_iterations):
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunner
 
@@ -571,12 +571,20 @@ async def test_followup_interrupts_truncated_answer_before_next_request(max_iter
         injection_callback=_make_injection_callback(queue),
     ))
 
-    assert result.final_content == "4"
     assert len(requests) == 2
-    assert endings[0] == (True, False)
     second_request = "\n".join(str(message.get("content", "")) for message in requests[1])
-    assert "Never mind. What is 2+2?" in second_request
-    assert "Continue the same response from its exact endpoint" not in second_request
+    if max_iterations == 1:
+        assert "Never mind. What is 2+2?" not in second_request
+        assert queue.get_nowait()["content"] == "Never mind. What is 2+2?"
+        assert result.had_injections is False
+        assert result.final_content == "Unfinished old answer:\n\n4"
+        assert "Continue the same response from its exact endpoint" in second_request
+    else:
+        assert result.final_content == "4"
+        assert endings[0] == (True, False)
+        assert "Never mind. What is 2+2?" in second_request
+        assert queue.empty()
+        assert "Continue the same response from its exact endpoint" not in second_request
 
 
 @pytest.mark.asyncio
@@ -1514,11 +1522,21 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(tmp_path):
+@pytest.mark.parametrize("log_content", [True, False])
+async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
+    tmp_path, request, log_content,
+):
     """Messages accumulated during a model call share its next request snapshot."""
+    from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
+    from nanobot.session.manager import SessionPolicy
+
+    records = []
+    sink = logger.add(lambda message: records.append(message.record))
+    request.addfinalizer(lambda: logger.remove(sink))
 
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -1544,6 +1562,7 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(t
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.sessions.get_or_create("cli:c").policy = SessionPolicy(log_content=log_content)
     followups = [f"follow-up-{index:02}" for index in range(12)]
 
     run_task = asyncio.create_task(loop.run())
@@ -1584,6 +1603,17 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(t
     positions = [second_request.index(content) for content in followups]
     assert positions == sorted(positions)
     assert loop.bus.inbound_size == 0
+
+    injections = [r for r in records if r["message"].startswith("Injected ")]
+    assert len(injections) == 1
+    record = injections[0]
+    preview = "\n\n".join(followups)[:80] + "..." if log_content else "[content hidden]"
+    assert record["message"] == (
+        f"Injected {len(followups)} follow-up message(s) after final response (snapshot 1): {preview}"
+    )
+    assert record["level"].name == "INFO"
+    assert record["extra"]["session_key"] == "cli:c"
+    assert record["extra"]["turn_id"]
 
 
 @pytest.mark.asyncio
@@ -1804,6 +1834,86 @@ async def test_drain_injections_on_empty_final_response():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failed_stop_reason", ["error", "empty_final_response"])
+async def test_late_injection_recovery_completes_and_delivers_reply(failed_stop_reason):
+    """Input arriving after failure bookkeeping must not poison a recovered turn."""
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import _MAX_EMPTY_RETRIES, AgentRunner
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.agent.turn_delivery import TurnDeliveryFactory
+    from nanobot.bus.events import InboundMessage, OutboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.bus.runtime_events import TurnCompleted
+    from nanobot.providers.base import LLMProvider
+
+    failed_responses = (
+        [LLMResponse(content="temporary failure", finish_reason="error")]
+        if failed_stop_reason == "error"
+        else [LLMResponse(content="") for _ in range(_MAX_EMPTY_RETRIES + 1)]
+    )
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        *failed_responses,
+        LLMResponse(content="recovered answer"),
+    ])
+    injection_queue = asyncio.Queue()
+    observed_failures = []
+
+    class InjectAfterFailureHook(AgentHook):
+        async def after_iteration(self, context) -> None:
+            if context.stop_reason == failed_stop_reason and context.error is not None:
+                observed_failures.append(context.error)
+                # The earlier final-response drain has already run. Inject at
+                # the late drain, after the runner has recorded the failure.
+                await injection_queue.put(InboundMessage(
+                    channel="websocket",
+                    sender_id="user",
+                    chat_id="chat",
+                    content="Please retry now",
+                ))
+
+    hook = InjectAfterFailureHook()
+    hook.on_error = AsyncMock()
+    result = await AgentRunner().run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=ToolRegistry(),
+        model="test-model",
+        max_iterations=_MAX_EMPTY_RETRIES + 2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=_make_injection_callback(injection_queue),
+        hook=hook,
+    ))
+
+    bus = MessageBus()
+    completions: list[TurnCompleted] = []
+    bus.subscribe(completions.append, TurnCompleted)
+    msg = InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="hello",
+    )
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery.record_stop_reason(result.stop_reason, failure_error_kind=result.failure_error_kind)
+    await delivery.complete(
+        OutboundMessage(channel="websocket", chat_id="chat", content=result.final_content),
+        publish_completion=True,
+    )
+
+    assert len(observed_failures) == 1
+    assert provider.chat_stream_with_retry.await_count == len(failed_responses) + 1
+    assert result.had_injections is True
+    assert result.final_content == "recovered answer"
+    assert bus.outbound_size == 1
+    assert bus.outbound.get_nowait().content == "recovered answer"
+    assert result.stop_reason == "completed"
+    assert result.error is None
+    assert result.failure_error_kind is None
+    hook.on_error.assert_not_awaited()
+    assert len(completions) == 1
+    assert completions[0].outcome == "completed"
+    assert completions[0].failure_kind is None
+    assert completions[0].failure_error_kind is None
+
+
+@pytest.mark.asyncio
 async def test_max_iterations_without_finalization_keeps_late_injection_queued():
     """Never consume a user message when no later model request can observe it."""
     from nanobot.agent.hook import AgentHook
@@ -1858,8 +1968,8 @@ async def test_max_iterations_without_finalization_keeps_late_injection_queued()
 
 
 @pytest.mark.asyncio
-async def test_max_iterations_finalization_consumes_late_injection():
-    """The finalization model request receives the snapshot after the last iteration."""
+async def test_max_iterations_finalization_keeps_late_injection_queued():
+    """New input waits for a turn with tools instead of entering no-tools finalization."""
     from nanobot.agent.hook import AgentHook
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
@@ -1913,18 +2023,18 @@ async def test_max_iterations_finalization_consumes_late_injection():
     ))
 
     assert result.stop_reason == "max_iterations"
-    assert result.had_injections is True
-    assert injection_queue.empty()
+    assert result.had_injections is False
+    assert injection_queue.get_nowait().content == "late follow-up after max iters"
     assert call_count["n"] == 3
     finalization_request = "\n".join(
         str(message.get("content", "")) for message in captured_messages[-1]
     )
-    assert "late follow-up after max iters" in finalization_request
+    assert "late follow-up after max iters" not in finalization_request
     injected = [
         m for m in result.messages
         if m.get("role") == "user" and m.get("content") == "late follow-up after max iters"
     ]
-    assert len(injected) == 1
+    assert injected == []
 
 
 @pytest.mark.asyncio

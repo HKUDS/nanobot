@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useMemo, useState, type ReactNode } from "react";
+import { Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -16,6 +16,7 @@ interface CodeBlockProps {
   highlight?: boolean;
   showLineNumbers?: boolean;
   wrapLongLines?: boolean;
+  viewportHighlight?: boolean;
 }
 
 interface HighlightedCodeProps {
@@ -25,6 +26,7 @@ interface HighlightedCodeProps {
   chrome: "default" | "none";
   showLineNumbers: boolean;
   wrapLongLines: boolean;
+  viewportHighlight: boolean;
 }
 
 const CODE_FONT_STACK = [
@@ -46,10 +48,12 @@ const LazyHighlightedCode = lazy(async () => {
     { default: SyntaxHighlighter },
     { default: oneDark },
     { default: oneLight },
+    { ViewportCodeRows },
   ] = await Promise.all([
     import("react-syntax-highlighter/dist/esm/prism-async-light"),
     import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
     import("react-syntax-highlighter/dist/esm/styles/prism/one-light"),
+    import("@/components/ViewportCodeRows"),
   ]);
 
   return {
@@ -60,6 +64,7 @@ const LazyHighlightedCode = lazy(async () => {
       chrome,
       showLineNumbers,
       wrapLongLines,
+      viewportHighlight,
     }: HighlightedCodeProps) {
       const theme = isDark ? oneDark : oneLight;
       const transparentTheme = chrome === "none" ? {
@@ -86,11 +91,15 @@ const LazyHighlightedCode = lazy(async () => {
             fontSize: "13px",
             lineHeight: chrome === "none" ? 1.55 : 1.6,
             tabSize: 2,
+            // FilePreviewPanel owns both scroll axes. Replacing this <pre>
+            // during progressive highlighting must not reset horizontal scroll.
+            ...(viewportHighlight ? { overflow: "visible" } : {}),
           }}
           codeTagProps={{
             style: {
               background: "transparent",
               fontFamily: CODE_FONT_STACK,
+              ...(viewportHighlight ? { lineHeight: "inherit" } : {}),
             },
           }}
           lineNumberStyle={{
@@ -101,8 +110,9 @@ const LazyHighlightedCode = lazy(async () => {
             userSelect: "none",
           }}
           PreTag="pre"
-          showLineNumbers={showLineNumbers}
+          showLineNumbers={showLineNumbers && !viewportHighlight}
           wrapLongLines={wrapLongLines}
+          renderer={viewportHighlight ? props => <ViewportCodeRows {...props} /> : undefined}
         >
           {code}
         </SyntaxHighlighter>
@@ -130,6 +140,7 @@ function CodeTextBlock({
   testId,
   className,
   renderText = renderPlainText,
+  compact = false,
 }: {
   code: string;
   chrome: "default" | "none";
@@ -137,22 +148,31 @@ function CodeTextBlock({
   testId: string;
   className?: string;
   renderText?: (value: string) => ReactNode;
+  compact?: boolean;
 }) {
   const lines = showLineNumbers ? code.split("\n") : [];
   return (
     <pre
       className={cn(
-        "m-0 overflow-x-auto bg-transparent font-mono text-[13px] text-foreground/90",
+        "m-0 bg-transparent font-mono text-[13px] text-foreground/90",
+        compact ? "overflow-visible" : "overflow-x-auto",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
         chrome === "default"
           ? "py-4 pl-5 pr-14 leading-[1.6]"
-          : "p-3 leading-[1.55]",
+          : compact ? "px-4 py-3 leading-[1.55]" : "p-3 leading-[1.55]",
         className,
       )}
       data-testid={testId}
+      style={compact ? { fontFamily: CODE_FONT_STACK } : undefined}
     >
       <code className="text-inherit">
-        {showLineNumbers ? (
+        {showLineNumbers && compact ? (
+          <span className="flex min-w-max">
+            <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground/60"
+              style={{ minWidth: "4.25em" }}>{lines.map((_, index) => index + 1).join("\n")}</span>
+            <span>{renderText(code)}</span>
+          </span>
+        ) : showLineNumbers ? (
           lines.map((line, index) => (
             <span key={index} className="flex min-w-max">
               <span className="w-10 shrink-0 select-none pr-4 text-right text-muted-foreground/60">
@@ -173,7 +193,7 @@ function shouldRenderAnsi(language: string | undefined, code: string): boolean {
   return Boolean((normalized && ANSI_LANGUAGES.has(normalized)) || hasAnsi(code));
 }
 
-export function CodeBlock({
+export const CodeBlock = memo(function CodeBlock({
   language,
   code,
   className,
@@ -181,14 +201,55 @@ export function CodeBlock({
   highlight = true,
   showLineNumbers = false,
   wrapLongLines = true,
+  viewportHighlight = false,
 }: CodeBlockProps) {
   const { t } = useTranslation();
+  const rootRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [highlightedSource, setHighlightedSource] = useState<string | null>(null);
   const renderAnsi = useMemo(() => shouldRenderAnsi(language, code), [language, code]);
   const plainCode = useMemo(() => renderAnsi ? stripAnsi(code) : code, [renderAnsi, code]);
   const isDark = useThemeValue() === "dark";
   const hasChrome = chrome === "default";
   const syntaxLanguage = normalizeCodeLanguage(language);
+  const useViewportHighlight = viewportHighlight && showLineNumbers && !wrapLongLines;
+  // Minified/very large previews must not monopolize the main thread in Prism.
+  // Plain text still contains the entire preview, with normal selection and find.
+  const withinHighlightBudget = useMemo(() => {
+    if (!useViewportHighlight) return true;
+    if (code.length > 100_000) return false;
+    const lines = code.split("\n");
+    return lines.length <= 2_000 && !lines.some(line => line.length > 2_000);
+  }, [code, useViewportHighlight]);
+  const deferHighlight = highlight && !renderAnsi && useViewportHighlight
+    && withinHighlightBudget && code.length > 8_000;
+  useEffect(() => {
+    if (!deferHighlight) return;
+    // Paint the tab and full plain source first. Color is a progressive enhancement,
+    // not a reason to hold up switching tabs (including an already cached file).
+    let readyToEnhance = false;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        readyToEnhance = true;
+        enhance();
+      });
+    });
+    function enhance() {
+      // A tab click may clear a selection before the first frame. Only resume
+      // selection-blocked work here after the initial paint opportunity.
+      if (!readyToEnhance) return;
+      const selection = document.getSelection();
+      if (rootRef.current && selection && !selection.isCollapsed && selection.rangeCount
+        && selection.getRangeAt(0).intersectsNode(rootRef.current)) return;
+      document.removeEventListener("selectionchange", enhance);
+      startTransition(() => setHighlightedSource(code));
+    }
+    document.addEventListener("selectionchange", enhance);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("selectionchange", enhance);
+    };
+  }, [code, deferHighlight]);
   const copyLabel = copied ? t("code.copied") : t("code.copyAria");
 
   const onCopy = useCallback(() => {
@@ -201,8 +262,10 @@ export function CodeBlock({
 
   return (
     <div
+      ref={rootRef}
       className={cn(
-        "not-prose relative overflow-hidden",
+        "not-prose relative",
+        useViewportHighlight ? "overflow-visible" : "overflow-hidden",
         hasChrome && "rounded-floating bg-secondary/70",
         className,
       )}
@@ -215,8 +278,9 @@ export function CodeBlock({
           showLineNumbers={showLineNumbers}
           testId="ansi-code"
           renderText={renderAnsiText}
+          compact={useViewportHighlight}
         />
-      ) : highlight ? (
+      ) : highlight && withinHighlightBudget && (!deferHighlight || highlightedSource === code) ? (
         <Suspense
           fallback={
             <CodeTextBlock
@@ -224,6 +288,7 @@ export function CodeBlock({
               chrome={chrome}
               showLineNumbers={showLineNumbers}
               testId="plain-code-fallback"
+              compact={useViewportHighlight}
             />
           }
         >
@@ -234,6 +299,7 @@ export function CodeBlock({
             chrome={chrome}
             showLineNumbers={showLineNumbers}
             wrapLongLines={wrapLongLines}
+            viewportHighlight={useViewportHighlight}
           />
         </Suspense>
       ) : (
@@ -242,6 +308,7 @@ export function CodeBlock({
           chrome={chrome}
           showLineNumbers={showLineNumbers}
           testId="plain-code-fallback"
+          compact={useViewportHighlight}
         />
       )}
       {hasChrome ? (
@@ -265,4 +332,4 @@ export function CodeBlock({
       ) : null}
     </div>
   );
-}
+});

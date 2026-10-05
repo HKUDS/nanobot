@@ -7,10 +7,18 @@ import ssl
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from threading import Thread
 
 import certifi
 import pytest
 from loguru import logger
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tokenizer_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests deterministic and out of the user's tokenizer cache and network."""
+    monkeypatch.setattr("nanobot.utils.token_encoding._encoding", None)
+    monkeypatch.setattr("nanobot.utils.token_encoding._warmup_thread", Thread())
 
 
 @pytest.fixture(autouse=True)

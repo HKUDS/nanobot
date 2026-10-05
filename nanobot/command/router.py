@@ -8,16 +8,20 @@ from dataclasses import dataclass, field
 from difflib import get_close_matches
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.events import InboundMessage
     from nanobot.session.manager import Session
     from nanobot.utils.llm_runtime import LLMRuntime
 
-Handler = Callable[["CommandContext"], Awaitable["OutboundMessage | None"]]
+Handler = Callable[["CommandContext"], Awaitable["InboundMessage | OutboundMessage | None"]]
 _BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def command_text(message: InboundMessage) -> str:
+    """Return routable text; command-generated agent input must not be dispatched again."""
+    return "" if message.metadata.get("original_command") else message.content.strip()
 
 
 def normalize_command_text(text: str) -> str:
@@ -99,7 +103,7 @@ class CommandRouter:
                 return True
         return cmd.startswith("/")
 
-    async def dispatch_priority(self, ctx: CommandContext) -> OutboundMessage | None:
+    async def dispatch_priority(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
         ctx.raw = normalize_command_text(ctx.raw)
         handler = self._priority.get(ctx.raw.lower())
@@ -107,8 +111,10 @@ class CommandRouter:
             return await handler(ctx)
         return None
 
-    async def dispatch(self, ctx: CommandContext) -> OutboundMessage | None:
+    async def dispatch(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
         """Try exact and prefix handlers, then reject invalid slash commands."""
+        if ctx.msg.metadata.get("original_command"):
+            return None
         ctx.raw = normalize_command_text(ctx.raw)
         cmd = ctx.raw.lower()
 

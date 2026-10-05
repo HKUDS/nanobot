@@ -83,7 +83,7 @@ export function PromptNavigator({
                 aria-label={t("thread.promptNavigator.search")}
                 placeholder={t("thread.promptNavigator.search")}
                 className={cn(
-                  "h-10 w-full rounded-full border border-border bg-background pl-9 pr-3 text-sm",
+                  "touch-text-input h-10 w-full rounded-full border border-border bg-background pl-9 pr-3 text-sm",
                   "transition-colors",
                   formControlFocusClassName,
                 )}

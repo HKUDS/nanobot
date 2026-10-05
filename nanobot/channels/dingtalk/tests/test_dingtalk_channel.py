@@ -1,6 +1,7 @@
 import asyncio
 import json
 import zipfile
+from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -45,6 +46,9 @@ class _FakeResponse:
         self.headers = headers or {"content-type": "application/json"}
         self.url = httpx.URL(url)
 
+    async def aiter_bytes(self):
+        yield self.content
+
     def json(self) -> dict:
         return self._json_body
 
@@ -58,6 +62,11 @@ class _FakeHttp:
         if self._responses:
             return self._responses.pop(0)
         return _FakeResponse()
+
+    @asynccontextmanager
+    async def stream(self, method, url, **kwargs):
+        assert method == "GET"
+        yield await self.get(url, **kwargs)
 
     async def post(self, url: str, json=None, headers=None, **kwargs):
         self.calls.append(
@@ -981,8 +990,22 @@ async def test_read_media_bytes_follows_safe_redirect_when_explicitly_enabled() 
 
 
 @pytest.mark.asyncio
-async def test_read_media_bytes_blocks_cross_host_redirect_without_allowlist() -> None:
-    """Redirect opt-in should not allow arbitrary cross-host redirects by default."""
+@pytest.mark.parametrize(
+    "response_body, redirect_url",
+    [
+        pytest.param(
+            b'cross-host media',
+            "https://example.org/final.txt",
+            id="cross_host_redirect_without_allowlist",
+        ),
+        pytest.param(
+            b'internal secret',
+            "http://127.0.0.1/metadata",
+            id="private_redirect_even_when_redirects_enabled",
+        ),
+    ],
+)
+async def test_read_media_bytes_blocks_untrusted_redirects(response_body, redirect_url) -> None:
     channel = DingTalkChannel(
         DingTalkConfig(
             client_id="app",
@@ -996,14 +1019,14 @@ async def test_read_media_bytes_blocks_cross_host_redirect_without_allowlist() -
         responses=[
             _FakeResponse(
                 302,
-                headers={"location": "https://example.org/final.txt"},
+                headers={"location": redirect_url},
                 url="https://example.com/redirect.txt",
             ),
             _FakeResponse(
                 200,
-                content=b"cross-host media",
+                content=response_body,
                 headers={"content-type": "text/plain"},
-                url="https://example.org/final.txt",
+                url=redirect_url,
             ),
         ]
     )
@@ -1050,40 +1073,6 @@ async def test_read_media_bytes_allows_cross_host_redirect_when_allowlisted() ->
         "https://example.com/redirect.txt",
         "https://example.org/final.txt",
     ]
-
-
-@pytest.mark.asyncio
-async def test_read_media_bytes_blocks_private_redirect_even_when_redirects_enabled() -> None:
-    """Redirect opt-in must still validate each hop before fetching it."""
-    channel = DingTalkChannel(
-        DingTalkConfig(
-            client_id="app",
-            client_secret="secret",
-            allow_from=["*"],
-            allow_remote_media_redirects=True,
-        ),
-        MessageBus(),
-    )
-    channel._http = _FakeHttp(
-        responses=[
-            _FakeResponse(
-                302,
-                headers={"location": "http://127.0.0.1/metadata"},
-                url="https://example.com/redirect.txt",
-            ),
-            _FakeResponse(
-                200,
-                content=b"internal secret",
-                headers={"content-type": "text/plain"},
-                url="http://127.0.0.1/metadata",
-            ),
-        ]
-    )
-
-    data, filename, content_type = await channel._read_media_bytes("https://example.com/redirect.txt")
-
-    assert (data, filename, content_type) == (None, None, None)
-    assert [call["url"] for call in channel._http.calls] == ["https://example.com/redirect.txt"]
 
 
 def test_normalize_upload_payload_zips_html_attachment() -> None:
@@ -1267,7 +1256,7 @@ async def test_send_media_ref_short_circuits_on_download_transport_error() -> No
     channel = DingTalkChannel(config, MessageBus())
 
     # First POST (sampleImageMsg) returns API error → False, then GET (download) raises transport error
-    class _MixedHttp:
+    class _MixedHttp(_FakeHttp):
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
@@ -1299,7 +1288,7 @@ async def test_send_media_ref_short_circuits_on_upload_transport_error() -> None
 
     image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # minimal JPEG-ish data
 
-    class _UploadFailsHttp:
+    class _UploadFailsHttp(_FakeHttp):
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
@@ -1326,3 +1315,29 @@ async def test_send_media_ref_short_circuits_on_upload_transport_error() -> None
     # POST (image URL), GET (download), POST (upload) attempted — no further sends
     methods = [c["method"] for c in channel._http.calls]
     assert methods == ["POST", "GET", "POST"]
+
+
+async def test_remote_media_stops_reading_at_limit_and_closes_stream(monkeypatch):
+    monkeypatch.setattr(dingtalk_module, "DINGTALK_MAX_REMOTE_MEDIA_BYTES", 8)
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    class BoundedStream(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield b"12345"
+            yield b"6789"
+            raise AssertionError("must stop consuming when the size limit is exceeded")
+
+        async def aclose(self):
+            self.closed = True
+
+    body = BoundedStream()
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=body))
+    async with httpx.AsyncClient(transport=transport) as client:
+        channel._http = client
+        assert await channel._fetch_remote_media_bytes("https://example.com/large") == (None, None)
+    assert body.closed

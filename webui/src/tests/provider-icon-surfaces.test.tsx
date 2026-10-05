@@ -39,9 +39,13 @@ describe.each(["picker", "overview", "composer", "hero"] as const)("%s provider 
     expectFrame(icon);
     expect(icon).toHaveClass("bg-muted");
     expect(image).toHaveClass("h-3.5", "w-3.5", "opacity-0");
+    const fallback = icon.querySelector("span")!;
+    expect(fallback).toHaveTextContent(providerBrand(provider)!.initials);
+    expect(fallback).toHaveClass("opacity-100");
     fireEvent.load(image);
     expect(icon).toHaveClass("bg-white");
     expect(image).toHaveClass("opacity-100");
+    expect(fallback).toHaveClass("opacity-0");
   });
 
   it("avoids the Moonshot halo, and insets unknown fallback images", () => {

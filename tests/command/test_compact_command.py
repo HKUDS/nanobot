@@ -71,6 +71,8 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert started.phase == "started"
     assert completed.phase == "succeeded"
     assert started.compaction_id == completed.compaction_id
+    assert started.notify is True
+    assert completed.notify is True
 
     loop.sessions.invalidate("cli:test")
     reloaded = loop.sessions.get_or_create("cli:test")
@@ -363,6 +365,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
 
 @pytest.mark.asyncio
 async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
+    loop.provider.estimate_prompt_tokens.return_value = (100, "test")
     key = "cli:test"
     session = loop.sessions.get_or_create(key)
     session.add_message("user", "large tool turn")

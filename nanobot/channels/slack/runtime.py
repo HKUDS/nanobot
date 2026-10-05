@@ -20,6 +20,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import is_approved
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -86,6 +87,7 @@ class SlackConfig(Base):
 
 
 SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
+SLACK_SECTION_TEXT_MAX_LEN = 3_000  # Block Kit section text limit
 SLACK_DOWNLOAD_TIMEOUT = 30.0
 # Abort Socket Mode WSS handshake after this many seconds. REST auth_test can still
 # succeed while WSS blocks (firewall / region). slack-sdk does not apply HTTP(S)_PROXY
@@ -201,6 +203,10 @@ class SlackChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         if not self._web_client:
             self.logger.warning("client not running")
             return
@@ -734,8 +740,12 @@ class SlackChannel(BaseChannel):
     @staticmethod
     def _build_button_blocks(text: str, buttons: list[list[str]]) -> list[dict[str, Any]]:
         """Build Slack Block Kit blocks with action buttons."""
+        # Slack renders ``blocks`` instead of ``text`` and caps each section's
+        # text at 3000 chars, so split the chunk across sections rather than
+        # dropping everything past the first 3000 chars.
         blocks: list[dict[str, Any]] = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": text[:3000]}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": part}}
+            for part in split_message(text, SLACK_SECTION_TEXT_MAX_LEN)
         ]
         elements: list[dict[str, Any]] = []
         for row in buttons:

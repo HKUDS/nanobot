@@ -52,7 +52,6 @@ import {
   pollChannelConnect,
   startChannelConnect,
   updateAutomation,
-  updateSidebarState,
   updateImageGenerationSettings,
   updateModelCallOrder,
   updateModelConfiguration,
@@ -1158,7 +1157,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("reads and writes persisted sidebar state", async () => {
+  it("reads persisted sidebar state", async () => {
     const state = {
       schema_version: 1,
       pinned_keys: ["websocket:chat-1"],
@@ -1188,13 +1187,6 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
-    );
-
-    await updateSidebarState(mutationTransport, state);
-    expect(requestMutation).toHaveBeenCalledWith(
-      "sidebar.update",
-      { state },
-      20_000,
     );
   });
 

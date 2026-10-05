@@ -312,6 +312,7 @@ export function WorkspaceAccessMenu({
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
   const { t } = useTranslation();
+  const dismissedByPointerRef = useRef(false);
   const mode = scope.access_mode;
   const isFull = mode === "full";
   const accessLabel = t(
@@ -358,7 +359,15 @@ export function WorkspaceAccessMenu({
           <ChevronDown className={cn("thread-composer-access-chevron ml-1.5 shrink-0", isHero ? "h-3 w-3" : "h-3 w-3")} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent
+        align="start"
+        className="w-56"
+        onPointerDownOutside={() => { dismissedByPointerRef.current = true; }}
+        onCloseAutoFocus={(event) => {
+          if (dismissedByPointerRef.current) event.preventDefault();
+          dismissedByPointerRef.current = false;
+        }}
+      >
         <AccessMenuItem
           icon={<Hand className="h-4 w-4" />}
           label={t("thread.composer.workspace.default")}

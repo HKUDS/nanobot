@@ -117,6 +117,7 @@ _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
     "kimi-k2.6",
 })
 _DEEPSEEK_MULTIMODAL_MODELS: frozenset[str] = frozenset({
+    "deepseek-flash",
     "deepseek-v4-flash-vision-exp",
 })
 _TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
@@ -900,15 +901,15 @@ class OpenAICompatProvider(LLMProvider):
     ) -> bool:
         """Return True when the model accepts a temperature parameter.
 
-        Kimi K3 uses a fixed temperature that should be omitted. GPT-5 family
-        and reasoning models (o1/o3/o4) reject temperature when
-        reasoning_effort is set to anything other than ``"none"``.
+        Temperature is omitted for fixed-temperature Kimi K3, GPT-5, and
+        o-series models. GPT-6 requires explicit ``"none"`` effort; its
+        default enables reasoning.
         """
         if _model_slug(model_name) == _KIMI_K3_MODEL:
             return False
-        if reasoning_effort and reasoning_effort.lower() != "none":
-            return False
         name = model_name.lower()
+        if "gpt-6" in name:
+            return bool(reasoning_effort and reasoning_effort.lower() == "none")
         return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
 
     def _opencode_affinity_headers(
@@ -954,8 +955,6 @@ class OpenAICompatProvider(LLMProvider):
             ),
         }
 
-        # GPT-5 and reasoning models (o1/o3/o4) reject temperature when
-        # reasoning_effort is active.  Only include it when safe.
         if self._supports_temperature(model_name, reasoning_effort):
             kwargs["temperature"] = temperature
 
@@ -1072,7 +1071,7 @@ class OpenAICompatProvider(LLMProvider):
 
         # Backfill reasoning_content="" on assistants missing it: DeepSeek
         # thinking mode rejects history otherwise (#3554, #3584); "" reads
-        # as "no thinking that turn". DeepSeek-V4/reasoner reason natively,
+        # as "no thinking that turn". DeepSeek Flash/V4/reasoner reason natively,
         # so backfill even without explicit reasoning_effort.
         explicit_thinking = (
             reasoning_effort is not None
@@ -1086,7 +1085,10 @@ class OpenAICompatProvider(LLMProvider):
             spec is not None
             and spec.name == "deepseek"
             and semantic_effort not in ("none", "minimal", "minimum")
-            and any(t in model_name.lower() for t in ("deepseek-v4", "deepseek-reasoner"))
+            and (
+                slug == "deepseek-flash"
+                or any(t in model_name.lower() for t in ("deepseek-v4", "deepseek-reasoner"))
+            )
         )
         if explicit_thinking or implicit_deepseek_thinking:
             for msg in kwargs["messages"]:
@@ -1316,10 +1318,12 @@ class OpenAICompatProvider(LLMProvider):
                 "compact_threshold": compact_threshold,
             }]
 
-        if self._supports_temperature(model_name, reasoning_effort):
+        supports_temperature = self._supports_temperature(model_name, reasoning_effort)
+        if supports_temperature:
             body["temperature"] = temperature
 
-        if not self._supports_temperature(model_name, reasoning_effort) and not preserve_reasoning:
+        reasoning_enabled = bool(reasoning_effort and reasoning_effort.lower() != "none")
+        if (not supports_temperature or reasoning_enabled) and not preserve_reasoning:
             body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and (reasoning_effort.lower() != "none" or is_deepseek):
             body["reasoning"] = {"effort": reasoning_effort}
@@ -2056,19 +2060,20 @@ class OpenAICompatProvider(LLMProvider):
                                 break
 
                     capture = ResponsesStreamCapture()
-                    (
-                        content,
-                        tool_calls,
-                        finish_reason,
-                        usage,
-                        reasoning_content,
-                    ) = await consume_sdk_stream(
-                        _timed_stream(),
-                        on_content_delta,
-                        on_tool_call_delta=on_tool_call_delta,
-                        on_reasoning_delta=on_thinking_delta,
-                        capture=capture,
-                    )
+                    async with responses_stream:
+                        (
+                            content,
+                            tool_calls,
+                            finish_reason,
+                            usage,
+                            reasoning_content,
+                        ) = await consume_sdk_stream(
+                            _timed_stream(),
+                            on_content_delta,
+                            on_tool_call_delta=on_tool_call_delta,
+                            on_reasoning_delta=on_thinking_delta,
+                            capture=capture,
+                        )
                     self._record_responses_success(model, reasoning_effort)
                     result = LLMResponse(
                         content=content or None,

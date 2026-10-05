@@ -37,6 +37,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
+from nanobot.utils.logging_bridge import redirect_lib_logging
 
 # ---------------------------------------------------------------------------
 # Protocol constants (from openclaw-weixin types.ts)
@@ -675,23 +677,6 @@ class WeixinChannel(BaseChannel):
             return WeixinChannel._is_retryable_http_status(status_code)
         return False
 
-    async def _api_get(
-        self,
-        endpoint: str,
-        params: dict[str, Any] | None = None,
-        *,
-        auth: bool = True,
-        extra_headers: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-        assert self._client is not None
-        url = f"{self.config.base_url}/{endpoint}"
-        hdrs = self._make_headers(auth=auth)
-        if extra_headers:
-            hdrs.update(extra_headers)
-        return await self._request_json(
-            "GET", url, endpoint=endpoint, params=params, headers=hdrs,
-        )
-
     async def _api_get_with_base(
         self,
         *,
@@ -996,6 +981,7 @@ class WeixinChannel(BaseChannel):
                 self._client = None
 
     async def start(self) -> None:
+        redirect_lib_logging("httpx", level="WARNING")
         self._running = True
         self._next_poll_timeout_s = self.config.poll_timeout
         self._client = self._new_http_client(
@@ -1881,13 +1867,17 @@ class WeixinChannel(BaseChannel):
         self._record_context_send(context_token)
 
     async def send(self, msg: OutboundMessage) -> None:
+        event = getattr(msg, "event", None)
+        if isinstance(event, ContextCompactionEvent) and not (
+            event.notify or self.show_compaction_notices
+        ):
+            return
         if not self._client or not self._token:
             raise RuntimeError("WeChat client not initialized or not authenticated")
         self._assert_session_active()
 
         delivery_id = self._delivery_id(msg)
         delivery_state = self._delivery_state(delivery_id)
-        event = getattr(msg, "event", None)
         progress_event = event if isinstance(event, ProgressEvent) else None
         is_progress = progress_event is not None
 

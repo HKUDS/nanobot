@@ -7,7 +7,9 @@ import os
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from collections.abc import Generator
+from contextlib import closing, contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,6 +26,8 @@ class LinearInstallation:
     expires_at: float
     scope: tuple[str, ...] = ()
     organization_name: str = ""
+    # Store-owned lifecycle metadata, separate from the credential value's equality.
+    authorized_at: float = field(default=0, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,12 +51,16 @@ class LinearStateStore:
         except OSError:
             pass
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=FULL")
-        return connection
+    @contextmanager
+    def _connect(self) -> Generator[sqlite3.Connection, None, None]:
+        # SQLite's transaction context commits/rolls back but does not close.
+        # Release file descriptors on every operation, including setup failures.
+        with closing(sqlite3.connect(self.path, timeout=10)) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+            with connection:
+                yield connection
 
     def _initialize(self) -> None:
         with self._guard, self._connect() as connection:
@@ -82,6 +90,13 @@ class LinearStateStore:
                     delivery_id TEXT PRIMARY KEY,
                     received_at REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS member_access (
+                    oauth_client_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    allowed INTEGER NOT NULL CHECK (allowed IN (0, 1)),
+                    PRIMARY KEY (oauth_client_id, organization_id, user_id)
+                );
                 """
             )
             columns = {
@@ -91,6 +106,10 @@ class LinearStateStore:
             if "oauth_client_id" not in columns:
                 connection.execute(
                     "ALTER TABLE installations ADD COLUMN oauth_client_id TEXT NOT NULL DEFAULT ''"
+                )
+            if "authorized_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE installations ADD COLUMN authorized_at REAL NOT NULL DEFAULT 0"
                 )
             connection.execute(
                 "DELETE FROM webhook_receipts WHERE received_at < ?",
@@ -108,14 +127,17 @@ class LinearStateStore:
                 ).fetchone()
         return row is not None
 
-    def save_installation(self, installation: LinearInstallation) -> None:
+    def save_installation(
+        self, installation: LinearInstallation, *, reauthorize: bool = False,
+    ) -> None:
+        now = time.time()
         with self._guard, self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO installations (
                     organization_id, oauth_client_id, app_user_id, access_token, refresh_token,
-                    expires_at, scope_json, organization_name, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    expires_at, scope_json, organization_name, updated_at, authorized_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(organization_id) DO UPDATE SET
                     oauth_client_id=excluded.oauth_client_id,
                     app_user_id=excluded.app_user_id,
@@ -124,7 +146,10 @@ class LinearStateStore:
                     expires_at=excluded.expires_at,
                     scope_json=excluded.scope_json,
                     organization_name=excluded.organization_name,
-                    updated_at=excluded.updated_at
+                    updated_at=excluded.updated_at,
+                    authorized_at=CASE
+                        WHEN ? OR installations.oauth_client_id != excluded.oauth_client_id
+                        THEN excluded.authorized_at ELSE installations.authorized_at END
                 """,
                 (
                     installation.organization_id,
@@ -135,9 +160,33 @@ class LinearStateStore:
                     installation.expires_at,
                     json.dumps(installation.scope),
                     installation.organization_name,
-                    time.time(),
+                    now,
+                    now,
+                    reauthorize,
                 ),
             )
+
+    def refresh_installation(
+        self, previous: LinearInstallation, refreshed: LinearInstallation,
+    ) -> bool:
+        """Rotate only the credentials read before the request, never insert a grant."""
+        if (refreshed.organization_id != previous.organization_id
+                or refreshed.oauth_client_id != previous.oauth_client_id):
+            raise ValueError("A token refresh cannot change the Linear workspace or app")
+        with self._guard, self._connect() as connection:
+            result = connection.execute(
+                """
+                UPDATE installations
+                SET access_token = ?, refresh_token = ?, expires_at = ?, scope_json = ?, updated_at = ?
+                WHERE organization_id = ? AND oauth_client_id = ? AND authorized_at = ?
+                    AND access_token = ? AND refresh_token = ?
+                """,
+                (refreshed.access_token, refreshed.refresh_token, refreshed.expires_at,
+                 json.dumps(refreshed.scope), time.time(), previous.organization_id,
+                 previous.oauth_client_id, previous.authorized_at,
+                 previous.access_token, previous.refresh_token),
+            )
+            return result.rowcount == 1
 
     def installation(self, organization_id: str) -> LinearInstallation | None:
         with self._guard, self._connect() as connection:
@@ -147,11 +196,96 @@ class LinearStateStore:
             ).fetchone()
         return _installation_from_row(row) if row is not None else None
 
-    def delete_installation(self, organization_id: str) -> None:
+    def list_installations(
+        self,
+        oauth_client_id: str | None = None,
+    ) -> list[LinearInstallation]:
+        """Return installations, optionally restricted to one OAuth client."""
         with self._guard, self._connect() as connection:
+            if oauth_client_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM installations ORDER BY organization_name, organization_id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM installations
+                    WHERE oauth_client_id = ?
+                    ORDER BY organization_name, organization_id
+                    """,
+                    (oauth_client_id,),
+                ).fetchall()
+        return [_installation_from_row(row) for row in rows]
+
+    def delete_installation(
+        self, organization_id: str, *, oauth_client_id: str | None = None,
+        revoked_at: float | None = None, expected: LinearInstallation | None = None,
+    ) -> bool:
+        """Remove an installation, ignoring revocations from an older authorization."""
+        with self._guard, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT * FROM installations WHERE organization_id = ?",
+                (organization_id,),
+            ).fetchone()
+            if current is None:
+                return False
+            if expected is not None and (
+                _installation_from_row(current) != expected
+                or float(current["authorized_at"]) != expected.authorized_at
+            ):
+                return False
+            if oauth_client_id is not None and current["oauth_client_id"] != oauth_client_id:
+                return False
+            if revoked_at is not None and revoked_at < float(current["authorized_at"]):
+                return False
+            connection.execute(
+                "DELETE FROM member_access WHERE organization_id = ? "
+                "AND oauth_client_id IN (SELECT oauth_client_id FROM installations "
+                "WHERE organization_id = ?)",
+                (organization_id, organization_id),
+            )
             connection.execute(
                 "DELETE FROM installations WHERE organization_id = ?",
                 (organization_id,),
+            )
+        return True
+
+    def member_access(self, client_id: str, organization_id: str, user_id: str) -> bool | None:
+        """An explicit choice overrides legacy pairing and allowFrom, including '*'."""
+        with self._guard, self._connect() as connection:
+            row = connection.execute(
+                "SELECT allowed FROM member_access "
+                "WHERE oauth_client_id = ? AND organization_id = ? AND user_id = ?",
+                (client_id, organization_id, user_id),
+            ).fetchone()
+        return bool(row["allowed"]) if row is not None else None
+
+    def set_member_access(
+        self, client_id: str, organization_id: str, user_id: str, *, allowed: bool,
+        expected_authorized_at: float | None = None,
+    ) -> None:
+        """Save a choice, rejecting network results from an older authorization."""
+        with self._guard, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            installed = connection.execute(
+                "SELECT authorized_at FROM installations "
+                "WHERE oauth_client_id = ? AND organization_id = ?",
+                (client_id, organization_id),
+            ).fetchone()
+            if installed is None:
+                raise ValueError("Linear workspace is not connected")
+            if (expected_authorized_at is not None
+                    and float(installed["authorized_at"]) != expected_authorized_at):
+                raise ValueError(
+                    "Linear workspace authorization changed while updating member access. "
+                    "Refresh and try again."
+                )
+            connection.execute(
+                "INSERT INTO member_access (oauth_client_id, organization_id, user_id, allowed) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(oauth_client_id, organization_id, user_id) "
+                "DO UPDATE SET allowed = excluded.allowed",
+                (client_id, organization_id, user_id, int(allowed)),
             )
 
     def enqueue_webhook(self, delivery_id: str, payload: dict[str, Any]) -> bool:
@@ -261,6 +395,7 @@ def _installation_from_row(row: sqlite3.Row) -> LinearInstallation:
         expires_at=float(row["expires_at"]),
         scope=scope,
         organization_name=str(row["organization_name"]),
+        authorized_at=float(row["authorized_at"]),
     )
 
 

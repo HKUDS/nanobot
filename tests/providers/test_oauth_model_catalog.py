@@ -142,7 +142,12 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
 
 @pytest.mark.parametrize(
     ("model_id", "label"),
-    [("gpt-new", "GPT New"), ("gpt-6-astra", "GPT-6-Astra")],
+    [
+        ("gpt-new", "GPT New"),
+        ("gpt-6-astra", "GPT-6-Astra"),
+        ("gpt-6-sol", "GPT-6-Sol"),
+        ("gpt-6-luna", "GPT-6-Luna"),
+    ],
 )
 def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     monkeypatch: pytest.MonkeyPatch,
@@ -225,8 +230,8 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     request = captured["request"]
     assert isinstance(request, httpx.Request)
     assert request.url.copy_with(query=None) == httpx.URL(DEFAULT_OPENAI_CODEX_MODELS_URL)
-    # Assert the validated wire version, not the same constant used by the request.
-    assert request.url.params["client_version"] == "0.153.4"
+    # Assert the release-independent wire version, not the constant used by the request.
+    assert request.url.params["client_version"] == "99.99.99"
     assert request.headers["Authorization"] == "Bearer secret"
     assert request.headers["chatgpt-account-id"] == "account-42"
 

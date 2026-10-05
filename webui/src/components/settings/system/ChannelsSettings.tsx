@@ -19,7 +19,7 @@ type ChannelFilter = "all" | "enabled";
 export function ChannelsSettings({
   token, nanobotFeatures, loading, actionKey, chatAppsDocsUrl, showBrandLogos,
   error, requiresRestartPending, onAction, onFeaturesUpdate, onDismissStatus,
-  onRestart, isRestarting,
+  onRestart, isRestarting, onConfigureMcp,
 }: {
   token: string;
   nanobotFeatures: NanobotFeaturesPayload | null;
@@ -32,6 +32,7 @@ export function ChannelsSettings({
   onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   onDismissStatus: () => void;
+  onConfigureMcp?: (name: string) => void;
   onRestart?: () => void;
   isRestarting?: boolean;
 }) {
@@ -176,6 +177,7 @@ export function ChannelsSettings({
               {selectedChannel ? <ChannelSetupPanel token={token} feature={selectedChannel} actionKey={actionKey}
                 showBrandLogos={showBrandLogos}
                 onAction={onAction} onFeaturesUpdate={onFeaturesUpdate} connectRequestId={connectRequestId}
+                onConfigureMcp={onConfigureMcp}
                 onBeforeCloseChange={setBeforeChannelClose} /> : null}
             </div>
           </div>

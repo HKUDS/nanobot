@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useCallback, useRef, type ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -12,41 +12,50 @@ export function LinearConnectFlow({
   feature,
   idleLabel,
   connectRequestId,
+  connected = feature.runtime_status === "running",
   onFeaturesUpdate,
   onActiveChange,
   renderActions,
 }: ChannelPluginConnectFlowProps & {
   onActiveChange?: (active: boolean) => void;
+  connected?: boolean;
   renderActions?: (connectButton: ReactNode) => ReactNode;
 }) {
   const { t } = useTranslation();
   const tx = channelTranslator(t, "linear");
+  const flowRef = useRef<HTMLDivElement | null>(null);
+  const revealAuthorization = useCallback((link: HTMLAnchorElement | null) => {
+    if (!link) return;
+    flowRef.current?.scrollIntoView({ block: "nearest" });
+    link.focus({ preventScroll: true });
+  }, []);
 
   return (
-    <div className="mt-3 space-y-3">
+    <div ref={flowRef} className="mt-3 space-y-3">
       <ChannelQrConnectFlow
         token={token}
         channelName="linear"
         idleLabel={idleLabel}
         connectRequestId={connectRequestId}
+        startParams={connectRequestId ? { force: true } : undefined}
         forceOnRepeat
-        connected={feature.runtime_status === "running"}
-        suppressSucceeded={feature.runtime_status === "running"}
+        showQrCode={false}
+        connected={connected}
+        suppressSucceeded={feature.runtime_status === "running" || feature.runtime_status === "failed"}
         onFeaturesUpdate={onFeaturesUpdate}
         onActiveChange={onActiveChange}
         renderActions={renderActions}
         labels={{
-          qrAlt: tx("custom.qrAlt", "Linear authorization QR code"),
           scanTitle: tx("custom.authorizeTitle", "Authorize in Linear"),
           scanDescription: tx(
             "custom.authorizeDescription",
-            "Open Linear in this browser or scan the QR code. nanobot enables the channel after authorization.",
+            "Continue in Linear to choose a workspace and authorize nanobot. Return here when you're done.",
           ),
           waiting: tx("custom.waiting", "Waiting for Linear authorization..."),
           connected: tx("custom.connected", "Linear is connected."),
           stopped: tx("custom.stopped", "Authorization stopped."),
           connecting: tx("custom.connecting", "Connecting..."),
-          scanAgain: tx("custom.reconnect", "Connect another workspace"),
+          scanAgain: tx("custom.reauthorize", "Reauthorize"),
           connect: tx("custom.connect", "Connect Linear"),
         }}
         renderPending={({ connect }) => (
@@ -61,7 +70,7 @@ export function LinearConnectFlow({
                 size="sm"
                 className="h-8 rounded-full px-3 text-[12px] font-semibold"
               >
-                <a href={connect.qr_url} target="_blank" rel="noreferrer">
+                <a ref={revealAuthorization} href={connect.qr_url} target="_blank" rel="noreferrer">
                   <ExternalLink className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                   {tx("custom.openLinear", "Continue in Linear")}
                 </a>

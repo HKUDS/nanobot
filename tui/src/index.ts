@@ -1,5 +1,5 @@
 import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
-import { desktopConnectionSource } from "./desktop"
+import { desktopConnectionSource } from "./platform/desktop"
 
 if (process.argv.slice(2).join(" ") === "--desktop-protocol") {
   process.stdout.write("1\n")

@@ -173,6 +173,37 @@ Tools are discovered automatically from built-in modules and plugin entry points
 
 Security-sensitive controls live in [`configuration.md#security`](./configuration.md#security). For production or shared chat apps, also configure channel access controls such as `allowFrom`, pairing, or WebSocket tokens.
 
+## Subagents
+
+Nanobot can delegate parts of a request to subagents while remaining responsible
+for the final answer. In the conversation that started the work, you can ask it
+to check progress, send follow-up instructions, wait for results, or cancel a
+task. Cancelling one task leaves the others running. A delivered instruction
+means the subagent received it, not that it has acted on it yet.
+
+Background tasks return their results to the conversation that started them.
+Single-turn CLI and SDK calls wait for results when background delivery is
+unavailable. Tasks that reach their iteration limit are marked incomplete;
+cancelled, failed, and incomplete tasks retain available partial results.
+
+Use `/stop` to stop the current session and its subagents. Other sessions are
+unaffected. Some operations may take time to stop, and cancellation does not
+undo file changes or other actions already taken.
+
+Subagents belong to their original conversation. They do not appear as separate
+topics or in general conversation searches. Deleting the conversation stops its
+subagents and removes their saved history; forking it does not copy them.
+
+Saved task history and results remain available after a gateway restart.
+Unfinished tasks are marked interrupted, with saved partial results when
+available. Nanobot does not automatically resume them or resend completion
+notifications; ask it to start a new task to continue the work.
+
+See [Delegated work in the WebUI](./webui.md#delegated-work) for progress and
+task details. WebUI temporary chats do not support subagents. SDK calls with
+`ephemeral=True` wait for delegated results without saving the temporary
+conversation or its subagent history.
+
 ## Background Jobs
 
 When `nanobot gateway` starts, it runs workspace-scoped automations and

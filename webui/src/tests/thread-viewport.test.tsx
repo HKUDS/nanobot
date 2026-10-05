@@ -40,6 +40,23 @@ function dispatchUserScroll(scroller: HTMLElement): void {
   scroller.dispatchEvent(new Event("scroll"));
 }
 
+function dispatchHistoryInput(scroller: HTMLElement, input: "wheel" | "touch" | "keyboard") {
+  if (input === "wheel") fireEvent.wheel(scroller, { deltaY: -100 });
+  if (input === "keyboard") fireEvent.keyDown(scroller, { key: "PageUp" });
+  if (input === "touch") {
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
+  }
+}
+
+function mockScrollGeometry(scroller: HTMLElement, height: number, viewport: number, top = 0) {
+  Object.defineProperties(scroller, {
+    scrollHeight: { configurable: true, value: height },
+    clientHeight: { configurable: true, value: viewport },
+    scrollTop: { configurable: true, writable: true, value: top },
+  });
+}
+
 interface ResizeObserverInstance {
   elements: Element[];
   callback: ResizeObserverCallback;
@@ -266,6 +283,27 @@ describe("ThreadViewport", () => {
     expect(takeUserControl).toHaveBeenCalledTimes(1);
   });
 
+  it("yields scroll control before expanding activity from a portaled message menu", () => {
+    const takeUserControl = vi.spyOn(ThreadMotionCoordinator.prototype, "takeUserControl");
+    render(
+      <ThreadViewport
+        messages={[
+          { id: "reasoning", role: "assistant", content: "", reasoning: "A completed thought", createdAt: 1 },
+          { id: "answer", role: "assistant", content: "Finished answer", createdAt: 2 },
+        ]}
+        isStreaming={false}
+        composer={<div>composer</div>}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    const disclosure = screen.getByRole("button", { name: "Worked" });
+    expect(screen.getByTestId("thread-message-region")).not.toContainElement(disclosure);
+    takeUserControl.mockClear();
+    fireEvent.click(disclosure);
+    expect(takeUserControl).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Collapse activity details/ })).toBeInTheDocument();
+  });
+
   it("top-aligns short threads in the message rendering area", () => {
     render(
       <ThreadViewport
@@ -305,12 +343,16 @@ describe("ThreadViewport", () => {
     expect(screen.getByTestId("thread-message-region")).toHaveClass("min-w-0");
   });
 
-  it("uses the shared content-column width for conversation messages", () => {
+  it("keeps message hit rows full width and constrains content inside each row", () => {
     render(<ThreadViewport messages={messages} isStreaming={false} composer={<div>composer</div>} />);
 
-    expect(screen.getByTestId("thread-message-region").firstElementChild).toHaveClass(
-      "mx-auto", "w-full", "max-w-[var(--content-column-width)]",
-    );
+    const region = screen.getByTestId("thread-message-region");
+    expect(region.firstElementChild).toHaveClass("w-full");
+    expect(region.firstElementChild).not.toHaveClass("max-w-[var(--content-column-width)]");
+    expect(region.parentElement).not.toHaveClass("max-w-[64rem]");
+    const rows = region.querySelectorAll("[data-thread-display-unit]");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row).toHaveClass("thread-message-row");
   });
 
   it("top-aligns a short active turn while the agent is responding", () => {
@@ -895,7 +937,7 @@ describe("ThreadViewport", () => {
 
     followTo.mockClear();
     act(() => {
-      fireEvent.touchStart(scroller, { touches: [{ clientY: 300 }] });
+      fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
       fireEvent.touchMove(scroller, { touches: [{ clientY: 324 }] });
       scroller.scrollTop = 1_380;
       scroller.dispatchEvent(new Event("scroll"));
@@ -906,7 +948,7 @@ describe("ThreadViewport", () => {
     expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
 
     act(() => {
-      fireEvent.touchMove(scroller, { touches: [{ clientY: 300 }] });
+      fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
       scroller.scrollTop = 1_404;
       scroller.dispatchEvent(new Event("scroll"));
       fireEvent.touchEnd(scroller);
@@ -1242,6 +1284,22 @@ describe("ThreadViewport", () => {
         visualViewport.viewport.dispatchEvent(new Event("resize"));
       });
       expect(viewportFrame).toHaveStyle({ bottom: "320px" });
+    } finally {
+      visualViewport.restore();
+    }
+  });
+
+  it("does not apply the keyboard inset twice when the App shell owns the viewport", () => {
+    const visualViewport = stubVisualViewport({ innerHeight: 800, height: 480 });
+    try {
+      const { container } = render(
+        <div id="root" className="visual-viewport">
+          <ThreadViewport messages={messages} isStreaming={false}
+            composer={<textarea aria-label="Message input" />} />
+        </div>,
+      );
+      act(() => { screen.getByLabelText("Message input").focus(); });
+      expect(container.querySelector(".thread-viewport-frame")).not.toHaveStyle({ bottom: "320px" });
     } finally {
       visualViewport.restore();
     }
@@ -1614,6 +1672,39 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it.each(["wheel", "touch", "keyboard"] as const)(
+    "requests older history on %s intent when the initial page does not overflow",
+    (input) => {
+      const onLoadOlder = vi.fn();
+      const { container } = render(
+        <ThreadViewport messages={messages} isStreaming={false}
+          hasMoreBefore onLoadOlder={onLoadOlder} />,
+      );
+      const scroller = getScroller(container);
+      mockScrollGeometry(scroller, 746, 746);
+      expect(onLoadOlder).not.toHaveBeenCalled();
+      dispatchHistoryInput(scroller, input);
+      expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  describe.each(["wheel", "touch"] as const)("%s history boundary", (input) => {
+    it.each([
+      { loadingOlder: true },
+      { olderError: "offline" },
+      { conversationReady: false },
+      { hasMoreBefore: false },
+    ])("keeps history blocked: %o", (blocked) => {
+      const onLoadOlder = vi.fn();
+      const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
+        hasMoreBefore onLoadOlder={onLoadOlder} {...blocked} />);
+      const scroller = getScroller(container);
+      dispatchHistoryInput(scroller, input);
+      expect(onLoadOlder).not.toHaveBeenCalled();
+      expect(scroller.style.transform).toBe("");
+    });
+  });
+
   it("automatically requests older transcript pages near the top", () => {
     const onLoadOlder = vi.fn();
 
@@ -1628,17 +1719,119 @@ describe("ThreadViewport", () => {
     );
 
     const scroller = getScroller(container);
-    Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1800 },
-      clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, writable: true, value: 0 },
-    });
+    mockScrollGeometry(scroller, 1800, 600);
 
     act(() => {
       dispatchUserScroll(scroller);
     });
 
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("pauses automatic history requests after a failure and exposes retry", () => {
+    const onLoadOlder = vi.fn();
+
+    const { container } = render(
+      <ThreadViewport
+        messages={makeLongMessages(20)}
+        isStreaming={false}
+        composer={<div />}
+        hasMoreBefore
+        olderError="offline"
+        onLoadOlder={onLoadOlder}
+      />,
+    );
+
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 1800, 600);
+
+    act(() => {
+      dispatchUserScroll(scroller);
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides history feedback away from the top without fetching again", async () => {
+    const onLoadOlder = vi.fn();
+    const { container, rerender } = render(
+      <ThreadViewport messages={messages} isStreaming={false}
+        hasMoreBefore loadingOlder onLoadOlder={onLoadOlder} />,
+    );
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 1800, 600, 200);
+    act(() => dispatchUserScroll(scroller));
+    expect(await screen.findByText("Loading earlier messages…")).toBeVisible();
+    expect(scroller.scrollTop).toBe(200);
+    expect(onLoadOlder).not.toHaveBeenCalled();
+
+    act(() => {
+      scroller.scrollTop = 800;
+      dispatchUserScroll(scroller);
+    });
+    expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
+    rerender(<ThreadViewport messages={messages} isStreaming={false}
+      conversationKey="another" hasMoreBefore onLoadOlder={onLoadOlder} />);
+    expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
+  });
+
+  it("reveals touch feedback before fetching, cancels short pulls, and fetches once per gesture", () => {
+    const onLoadOlder = vi.fn();
+    const props = { messages, isStreaming: false, hasMoreBefore: true, onLoadOlder };
+    const { container, rerender } = render(<ThreadViewport {...props} />);
+    const scroller = getScroller(container);
+    const touch = (y: number) => ({ touches: [{ clientX: 100, clientY: y }] });
+    fireEvent.touchStart(scroller, touch(200));
+    fireEvent.touchMove(scroller, touch(240));
+    expect(scroller).toHaveStyle({ transform: "translateY(20px)" });
+    expect(screen.getByRole("status").querySelector("svg")).not.toBeNull();
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    fireEvent.touchEnd(scroller);
+    expect(scroller.style.transform).toBe("");
+
+    fireEvent.touchStart(scroller, touch(200));
+    fireEvent.touchMove(scroller, touch(300));
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    rerender(<ThreadViewport {...props} loadingOlder />);
+    fireEvent.touchMove(scroller, touch(350));
+    fireEvent.scroll(scroller);
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status").querySelector("svg")).toHaveClass("animate-spin");
+    fireEvent.touchEnd(scroller);
+    expect(scroller).toHaveStyle({ transform: "translateY(48px)" });
+    rerender(<ThreadViewport {...props} />);
+    expect(scroller.style.transform).toBe("");
+  });
+
+  it("does not fetch on touch scroll alone or horizontal gestures and clears pull on session change", () => {
+    const onLoadOlder = vi.fn();
+    const props = { messages, isStreaming: false, hasMoreBefore: true, onLoadOlder };
+    const { container, rerender } = render(<ThreadViewport {...props} conversationKey="a" />);
+    const scroller = getScroller(container);
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 300, clientY: 220 }] });
+    fireEvent.scroll(scroller);
+    expect(scroller.style.transform).toBe("");
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    fireEvent.touchEnd(scroller);
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 240 }] });
+    rerender(<ThreadViewport {...props} conversationKey="b" />);
+    expect(scroller.style.transform).toBe("");
+    expect(onLoadOlder).not.toHaveBeenCalled();
+  });
+
+  it("leaves completed history quiet", () => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
+      onLoadOlder={onLoadOlder} />);
+    fireEvent.wheel(getScroller(container), { deltaY: -100 });
+    expect(screen.getByText("hello")).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(onLoadOlder).not.toHaveBeenCalled();
   });
 
   it("renders a prompt rail that jumps to user messages", async () => {
@@ -1728,8 +1921,8 @@ describe("ThreadViewport", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
 
     restartNavigation();
-    fireEvent.touchStart(scroller, { touches: [{ clientY: 300 }] });
-    fireEvent.touchMove(scroller, { touches: [{ clientY: 200 }] });
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
     expect(cancel).toHaveBeenCalledTimes(1);
 
     restartNavigation();

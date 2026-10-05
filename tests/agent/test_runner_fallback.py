@@ -1459,6 +1459,56 @@ class TestFailoverOnArrearageError:
         factory.assert_called_once_with(fallback_preset)
 
     @pytest.mark.asyncio
+    async def test_insufficient_credits_on_400_tries_configured_fallback(self) -> None:
+        """Some OpenAI-compatible gateways report exhausted credits as HTTP 400."""
+        arrearage = _make_response(
+            "[400]: You have insufficient credits to make this request.",
+            finish_reason="error",
+            error_status_code=400,
+            error_code="BAD_REQUEST",
+            error_type="invalid_request_error",
+            error_should_retry=False,
+        )
+        primary = _FakeProvider("primary", arrearage)
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fallback_preset = _fallback("fallback-a")
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[fallback_preset],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(fallback_preset)
+
+    @pytest.mark.asyncio
+    async def test_plain_bad_request_still_does_not_fall_back(self) -> None:
+        """A 400 with no billing semantics stays non-fallbackable."""
+        bad_request = _make_response(
+            "invalid parameter: temperature must be <= 2",
+            finish_reason="error",
+            error_status_code=400,
+            error_code="BAD_REQUEST",
+            error_type="invalid_request_error",
+            error_should_retry=False,
+        )
+        primary = _FakeProvider("primary", bad_request)
+        factory = MagicMock()
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result is bad_request
+        factory.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_without_fallback_presets_returns_original_error(self) -> None:
         arrearage = _make_response(
             "payment required",

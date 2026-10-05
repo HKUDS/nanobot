@@ -177,7 +177,6 @@ def _resolve_webui_config_path(config: str | None) -> Path:
         return get_config_path()
     config_path = Path(config).expanduser().resolve(strict=False)
     set_config_path(config_path)
-    console.print(f"[dim]Using config: {config_path}[/dim]")
     return config_path
 
 
