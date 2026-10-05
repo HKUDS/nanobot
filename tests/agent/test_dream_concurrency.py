@@ -128,8 +128,9 @@ async def test_dream_waiter_uses_fresh_history_and_preserves_corrections(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["error", "cancelled"])
+@pytest.mark.parametrize("trigger", ["manual", "cron"])
 async def test_dream_retries_pending_history_after_interrupted_run(
-    dream_loop, monkeypatch, failure,
+    dream_loop, tmp_path, monkeypatch, failure, trigger,
 ):
     loop = dream_loop
     store = loop.context.memory
@@ -152,9 +153,16 @@ async def test_dream_retries_pending_history_after_interrupted_run(
         )
 
     monkeypatch.setattr(loop, "process_direct", process_direct)
+    callback = _cron_callback(loop, tmp_path, monkeypatch) if trigger == "cron" else None
+
+    async def start():
+        if callback is None:
+            return await _start_manual(loop)
+        return asyncio.create_task(callback(CronJob(id="dream", name="dream")))
+
     tasks = []
     try:
-        first = await _start_manual(loop)
+        first = await start()
         tasks.append(first)
         if failure == "cancelled":
             await asyncio.wait_for(started.wait(), timeout=5)
@@ -164,7 +172,7 @@ async def test_dream_retries_pending_history_after_interrupted_run(
         else:
             await first
         assert store.get_last_dream_cursor() == 0
-        second = await _start_manual(loop)
+        second = await start()
         tasks.append(second)
         await asyncio.wait_for(second, timeout=5)
         assert attempts == 2
