@@ -66,23 +66,6 @@ WebUI beyond localhost or want a browser password:
 The WebUI is served by the WebSocket channel on port `8765` by default. The
 gateway health endpoint, `18790` by default, is not the browser UI.
 
-## Installation version
-
-**Settings → About** shows the connected gateway's package version and, when
-available, a seven-character commit link. Hover over the link to see the full
-revision, or open it to view the source on GitHub. Source checkouts report their
-HEAD at gateway startup; wheels and source distributions record the revision at
-build time. Local uncommitted edits are not reflected in the commit hash.
-Installations without revision metadata, including older hosts, show only the
-package version. **Report an issue** opens the GitHub bug report form with the
-package version and available full commit hash prefilled in **nanobot Version**.
-The form also includes the gateway's Python version and operating system, with
-WebSocket as the platform. Additional Context records the gateway OS version and
-architecture, browser user agent, connection mode, and configured default model
-and provider. Gateway details belong to the connected host; browser details
-belong to the client. Hosts without environment metadata leave those fields
-empty. You can edit the form before submitting it.
-
 ## First 10 Minutes
 
 Use the WebUI as the primary setup surface:
