@@ -68,9 +68,9 @@ export function OverviewSettings({
     ? settings.agent.model
     : tx("settings.values.notConfigured", "Not configured");
   const activeModelCaption = activeProviderConfigured
-    ? [activeProvider, activePreset].filter(Boolean).join(" · ")
+    ? [activeProvider, activePreset].filter(Boolean).join(" ")
     : activeProviderLabel || settings.agent.model
-      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" · ")
+      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" ")
       : tx("settings.byok.noConfiguredProviders", "No configured providers");
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
@@ -143,8 +143,8 @@ export function AboutSettings({ currentVersion, currentCommit }: VersionInfoProp
   const { t } = useTranslation();
   const reportIssueUrl = new URL("https://github.com/HKUDS/nanobot/issues/new");
   reportIssueUrl.searchParams.set("template", "bug_report.yml");
-  const reportedVersion = [currentVersion, currentCommit && `commit ${currentCommit}`]
-    .filter(Boolean).join(" · ");
+  const reportedVersion = [currentVersion, currentCommit && `(commit ${currentCommit})`]
+    .filter(Boolean).join(" ");
   if (reportedVersion) reportIssueUrl.searchParams.set("version", reportedVersion);
   const links = [
     { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
@@ -218,12 +218,13 @@ function VersionCheckRow({ currentVersion, currentCommit }: VersionInfoProps) {
           {currentVersion ? `v${currentVersion}` : "nanobot"}
           {currentCommit && (
             <>
-              <span aria-hidden> · </span>
+              <span aria-hidden> (</span>
               <a href={`https://github.com/HKUDS/nanobot/commit/${currentCommit}`}
                 target="_blank" rel="noopener noreferrer" title={currentCommit}
                 className="font-mono hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 {currentCommit.slice(0, 7)}
               </a>
+              <span aria-hidden>)</span>
             </>
           )}
         </div>

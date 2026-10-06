@@ -23,7 +23,7 @@ describe("Settings overview and appearance", () => {
     const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
     expect(reportUrl.origin + reportUrl.pathname).toBe("https://github.com/HKUDS/nanobot/issues/new");
     expect(reportUrl.searchParams.get("template")).toBe("bug_report.yml");
-    expect(reportUrl.searchParams.get("version")).toBe(`0.3.5 · commit ${commit}`);
+    expect(reportUrl.searchParams.get("version")).toBe(`0.3.5 (commit ${commit})`);
   });
 
   it.each([undefined, null])("keeps About usable when the host reports no commit (%s)", (commit) => {
