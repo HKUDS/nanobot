@@ -211,6 +211,57 @@ def _checkpoint_tool_call_ids(
     return ids if len(ids) == len(set(ids)) else None
 
 
+def _checkpoint_turn_messages(checkpoint: Mapping[str, Any]) -> list[dict[str, Any]] | None:
+    """Parse the cumulative replay rows at the persisted checkpoint boundary."""
+    value = cast(object, checkpoint.get("turn_messages"))
+    if not isinstance(value, list) or not value:
+        return None
+    rows: list[dict[str, Any]] = []
+    outstanding: set[str] = set()
+    for raw in cast(list[object], value):
+        if not isinstance(raw, dict):
+            return None
+        row = cast(dict[str, Any], raw)
+        role = row.get("role")
+        if role == "tool":
+            call_id = cast(object, row.get("tool_call_id"))
+            if not isinstance(call_id, str) or call_id not in outstanding:
+                return None
+            outstanding.remove(call_id)
+        elif role == "user" or role == "assistant":
+            if outstanding:
+                return None
+            if role == "assistant":
+                calls = cast(object, row.get("tool_calls"))
+                call_ids = _checkpoint_tool_call_ids([] if calls is None else calls)
+                if call_ids is None:
+                    return None
+                outstanding.update(call_ids)
+        else:
+            return None
+        rows.append(row)
+    pending_ids = _checkpoint_tool_call_ids(checkpoint.get("pending_tool_calls"))
+    if pending_ids is None or outstanding != set(pending_ids):
+        return None
+    completed = cast(object, checkpoint.get("completed_tool_results"))
+    if not isinstance(completed, list):
+        return None
+    tail: list[object] = [checkpoint.get("assistant_message"), *cast(list[object], completed)]
+    if len(rows) < len(tail):
+        return None
+    for row, expected in zip(rows[-len(tail):], tail):
+        if not isinstance(expected, dict):
+            return None
+        if _checkpoint_message_key(row) != _checkpoint_message_key(cast(dict[str, Any], expected)):
+            return None
+    followup_ids = cast(object, checkpoint.get("acknowledged_followup_ids", []))
+    if not isinstance(followup_ids, list) or any(
+        not isinstance(item, str) for item in cast(list[object], followup_ids)
+    ):
+        return None
+    return rows
+
+
 def _runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
     """Return whether a checkpoint is safe to offer for continuation.
 
@@ -218,6 +269,8 @@ def _runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
     Continue is stricter: silently dropping a malformed tool result could make
     the model repeat an external side effect.
     """
+    if "turn_messages" in checkpoint and _checkpoint_turn_messages(checkpoint) is None:
+        return False
     assistant_value = cast(object, checkpoint.get("assistant_message"))
     if not isinstance(assistant_value, dict):
         return False
@@ -291,15 +344,18 @@ def restore_runtime_checkpoint(session: Session) -> bool:
     pending = cast(list[object], pending_value) if isinstance(pending_value, list) else []
 
     restored: list[dict[str, Any]] = []
+    turn_messages = _checkpoint_turn_messages(data) if "turn_messages" in data else None
     if isinstance(assistant, dict):
         assistant_row = cast(dict[str, Any], assistant)
     else:
         assistant_row = {}
-    if assistant_row.get("role") == "assistant":
+    if turn_messages is not None:
+        restored.extend(dict(row) for row in turn_messages)
+    elif assistant_row.get("role") == "assistant":
         row = dict(assistant_row)
         row.setdefault("timestamp", datetime.now().isoformat())
         restored.append(row)
-    for value in completed:
+    for value in ([] if turn_messages is not None else completed):
         if not isinstance(value, dict):
             continue
         tool_result = cast(dict[str, Any], value)
@@ -342,6 +398,11 @@ def restore_runtime_checkpoint(session: Session) -> bool:
             overlap = size
             break
     session.messages.extend(restored[overlap:])
+    if turn_messages is not None:
+        # These inputs now belong to history, so startup must not enqueue them again.
+        acknowledge_pending_followups(
+            session, cast(list[str], data.get("acknowledged_followup_ids", [])),
+        )
 
     assistant_data = cast(dict[str, Any], assistant) if isinstance(assistant, dict) else None
     synchronized = (
@@ -362,7 +423,8 @@ def restore_runtime_checkpoint(session: Session) -> bool:
         and assistant_data.get("role") == "assistant"
         and not data.get("pending_tool_calls")
     )
-    if not (synchronized and (exact_final or exact_tools)):
+    complete_transcript = "turn_messages" not in data or turn_messages is not None
+    if not (synchronized and complete_transcript and (exact_final or exact_tools)):
         session.provider_state = None
 
     session.metadata.pop(PENDING_USER_TURN_KEY, None)
