@@ -80,22 +80,34 @@ body:
     validations:
       required: true
 
-  - type: dropdown
+  - type: input
     id: llm_provider
     attributes:
       label: LLM Provider
-      description: Which LLM provider are you using?
-      options:
-        - OpenAI
-        - Anthropic (Claude)
-        - DeepSeek
-        - Google (Gemini)
-        - Ollama (Local)
-        - OpenRouter
-        - Azure OpenAI
-        - Other (specify below)
+      description: Configured default provider. Edit if the affected conversation uses another provider.
+      placeholder: e.g., openai, openai_codex, anthropic, deepseek
     validations:
       required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Configured default model. Edit if the affected conversation uses another model.
+      placeholder: e.g., openai/gpt-4o
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: Browser version or user agent, for WebUI issues.
+
+  - type: input
+    id: connection
+    attributes:
+      label: Connection
+      description: How the WebUI connects to the gateway.
+      placeholder: e.g., Local host, Remote host, Direct WebUI
 
   - type: textarea
     id: config

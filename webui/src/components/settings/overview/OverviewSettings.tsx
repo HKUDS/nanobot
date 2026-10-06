@@ -154,21 +154,17 @@ export function AboutSettings({ settings }: { settings: SettingsPayload }) {
   reportIssueUrl.searchParams.set("channel", "WebSocket");
   if (environment) {
     reportIssueUrl.searchParams.set("python_version", environment.python_version);
-    reportIssueUrl.searchParams.set("os", environment.os === "Darwin" ? "macOS" : environment.os);
+    const osName = environment.os === "Darwin" ? "macOS" : environment.os;
+    const osVersion = [osName, environment.os_version].filter(Boolean).join(" ");
+    reportIssueUrl.searchParams.set("os", environment.architecture
+      ? `${osVersion} (${environment.architecture})` : osVersion);
   }
-  const context = [
-    ...(environment ? [
-      `Gateway OS: ${environment.os} ${environment.os_version}`,
-      `Gateway architecture: ${environment.architecture}`,
-    ] : []),
-    `Browser: ${navigator.userAgent}`,
-    `Connection: ${hostPicker?.kind === "embedded" ? "Remote host" : hostPicker ? "Local host" : "Direct WebUI"}`,
-    ...(settings.agent.model ? [`Default model: ${settings.agent.model}`] : []),
-    ...(settings.agent.resolved_provider || settings.agent.provider ? [
-      `Default provider: ${settings.agent.resolved_provider || settings.agent.provider}`,
-    ] : []),
-  ];
-  reportIssueUrl.searchParams.set("additional", context.join("\n"));
+  if (settings.agent.model) reportIssueUrl.searchParams.set("model", settings.agent.model);
+  const provider = settings.agent.resolved_provider || settings.agent.provider;
+  if (provider) reportIssueUrl.searchParams.set("llm_provider", provider);
+  reportIssueUrl.searchParams.set("browser", navigator.userAgent);
+  reportIssueUrl.searchParams.set("connection", hostPicker?.kind === "embedded"
+    ? "Remote host" : hostPicker ? "Local host" : "Direct WebUI");
   const links = [
     { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
     { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },

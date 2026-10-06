@@ -43,6 +43,9 @@ describe("Settings overview and appearance", () => {
     expect(reportUrl.searchParams.get("python_version")).toBeNull();
     expect(reportUrl.searchParams.get("os")).toBeNull();
     expect(reportUrl.searchParams.get("channel")).toBe("WebSocket");
+    expect(reportUrl.searchParams.get("llm_provider")).toBe("openai");
+    expect(reportUrl.searchParams.get("model")).toBe("openai/gpt-4o");
+    expect(reportUrl.searchParams.get("additional")).toBeNull();
   });
 
   it("prefills the remote gateway environment separately from the browser", () => {
@@ -60,17 +63,15 @@ describe("Settings overview and appearance", () => {
     );
     const url = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
     expect(url.searchParams.get("python_version")).toBe("3.14.2");
-    expect(url.searchParams.get("os")).toBe("macOS");
+    expect(url.searchParams.get("os")).toBe("macOS 24.4.0 (arm64)");
     expect(url.searchParams.get("channel")).toBe("WebSocket");
-    const additional = url.searchParams.get("additional");
-    expect(additional).toContain("Gateway OS: Darwin 24.4.0");
-    expect(additional).toContain("Gateway architecture: arm64");
-    expect(additional).toContain("Browser: Browser on Windows");
-    expect(additional).toContain("Connection: Remote host");
-    expect(additional).toContain("Default model: openai/gpt-4o");
-    expect(additional).toContain("Default provider: openai");
-    expect(additional).not.toContain(payload.runtime.config_path);
-    expect(additional).not.toContain("private-host");
+    expect(url.searchParams.get("browser")).toBe("Browser on Windows");
+    expect(url.searchParams.get("connection")).toBe("Remote host");
+    expect(url.searchParams.get("model")).toBe("openai/gpt-4o");
+    expect(url.searchParams.get("llm_provider")).toBe("openai");
+    expect(url.searchParams.get("additional")).toBeNull();
+    expect(url.href).not.toContain(encodeURIComponent(payload.runtime.config_path));
+    expect(url.href).not.toContain("private-host");
   });
 
   it("persists the file edit display local preference", async () => {

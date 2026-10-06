@@ -132,7 +132,9 @@ def test_feedback_template_accepts_environment_prefills() -> None:
     root = Path(__file__).resolve().parents[2]
     template = yaml.safe_load((root / ".github/ISSUE_TEMPLATE/bug_report.yml").read_text())
     fields = {field["id"]: field for field in template["body"] if "id" in field}
-    for field_id in ("version", "python_version", "os", "channel"):
+    for field_id in ("version", "python_version", "os", "channel", "llm_provider"):
         assert fields[field_id]["type"] == "input"
         assert fields[field_id]["validations"]["required"] is True
+    for field_id in ("model", "browser", "connection"):
+        assert fields[field_id]["type"] == "input"
     assert fields["additional"]["type"] == "textarea"
