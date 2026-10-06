@@ -141,10 +141,15 @@ type VersionInfoProps = { currentVersion?: string; currentCommit?: string | null
 
 export function AboutSettings({ currentVersion, currentCommit }: VersionInfoProps) {
   const { t } = useTranslation();
+  const reportIssueUrl = new URL("https://github.com/HKUDS/nanobot/issues/new");
+  reportIssueUrl.searchParams.set("template", "bug_report.yml");
+  const reportedVersion = [currentVersion, currentCommit && `commit ${currentCommit}`]
+    .filter(Boolean).join(" · ");
+  if (reportedVersion) reportIssueUrl.searchParams.set("version", reportedVersion);
   const links = [
     { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
     { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
-    { key: "reportIssue", icon: MessageCircle, href: "https://github.com/HKUDS/nanobot/issues" },
+    { key: "reportIssue", icon: MessageCircle, href: reportIssueUrl.href },
   ];
   return (
     <div className="flex flex-1 flex-col gap-5">

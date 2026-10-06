@@ -74,7 +74,9 @@ revision, or open it to view the source on GitHub. Source checkouts report their
 HEAD at gateway startup; wheels and source distributions record the revision at
 build time. Local uncommitted edits are not reflected in the commit hash.
 Installations without revision metadata, including older hosts, show only the
-package version.
+package version. **Report an issue** opens the GitHub bug report form with the
+package version and available full commit hash prefilled in **nanobot Version**.
+You can edit the form before submitting it.
 
 ## First 10 Minutes
 

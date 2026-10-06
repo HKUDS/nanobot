@@ -20,6 +20,10 @@ describe("Settings overview and appearance", () => {
     const link = screen.getByRole("link", { name: "abcdef1" });
     expect(link).toHaveAttribute("href", `https://github.com/HKUDS/nanobot/commit/${commit}`);
     expect(link).toHaveAttribute("title", commit);
+    const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(reportUrl.origin + reportUrl.pathname).toBe("https://github.com/HKUDS/nanobot/issues/new");
+    expect(reportUrl.searchParams.get("template")).toBe("bug_report.yml");
+    expect(reportUrl.searchParams.get("version")).toBe(`0.3.5 · commit ${commit}`);
   });
 
   it.each([undefined, null])("keeps About usable when the host reports no commit (%s)", (commit) => {
@@ -30,6 +34,8 @@ describe("Settings overview and appearance", () => {
     expect(screen.getByText("v0.3.5")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
     expect(document.querySelector('a[href*="/commit/"]')).toBeNull();
+    const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(reportUrl.searchParams.get("version")).toBe("0.3.5");
   });
 
   it("persists the file edit display local preference", async () => {
