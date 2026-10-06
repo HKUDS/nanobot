@@ -476,6 +476,13 @@ def _merge_chat_extra_body(
     if "tools" in extra_body:
         current_tools = kwargs.get("tools")
         configured_tools = extra_body["tools"]
+        if isinstance(configured_tools, list):
+            # Hosted web_search is a Responses-only tool; Chat Completions rejects it.
+            configured_tools = [
+                tool for tool in configured_tools if not _is_hosted_web_search_tool(tool)
+            ]
+            if not configured_tools:
+                return merged
         if isinstance(current_tools, list) and isinstance(configured_tools, list):
             merged["tools"] = [*current_tools, *configured_tools]
         else:

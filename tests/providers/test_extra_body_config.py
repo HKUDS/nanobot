@@ -141,6 +141,38 @@ class TestBuildKwargsExtraBody:
         assert kwargs["tools"] == [function_tool, server_tool]
         assert kwargs["extra_body"] == {"custom_param": "value"}
 
+    def test_chat_completions_drops_hosted_web_search_tool(self) -> None:
+        """Hosted web_search is Responses-only; Chat Completions rejects it."""
+        function_tool = {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Write a local file",
+                "parameters": {"type": "object"},
+            },
+        }
+        provider = OpenAICompatProvider(
+            api_key="test-key",
+            default_model="deepseek-flash",
+            spec=find_by_name("deepseek"),
+            extra_body={"tools": [{"type": "web_search"}]},
+        )
+
+        kwargs = provider._build_kwargs(
+            messages=_simple_messages(),
+            tools=[function_tool], model=None, max_tokens=100,
+            temperature=0.1, reasoning_effort=None, tool_choice=None,
+        )
+
+        assert [t["type"] for t in kwargs["tools"]] == ["function"]
+
+        kwargs = provider._build_kwargs(
+            messages=_simple_messages(),
+            tools=None, model=None, max_tokens=100,
+            temperature=0.1, reasoning_effort=None, tool_choice=None,
+        )
+        assert "tools" not in kwargs
+
     def test_extra_body_merges_with_thinking(self) -> None:
         """Config extra_body should merge with (and override) thinking params."""
         from nanobot.providers.registry import ProviderSpec
