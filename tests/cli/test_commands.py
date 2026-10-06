@@ -2168,6 +2168,139 @@ def test_heartbeat_empty_response_is_not_evaluated(
     assert response is None
 
 
+@pytest.mark.parametrize(
+    ("evaluator_preset", "expected_model"),
+    [
+        pytest.param(None, "main-model", id="default-runtime"),
+        pytest.param("evaluator", "evaluator-model", id="configured-preset"),
+    ],
+)
+def test_heartbeat_evaluator_model_preset_uses_an_isolated_runtime(
+    monkeypatch,
+    tmp_path: Path,
+    evaluator_preset: str | None,
+    expected_model: str,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    heartbeat_config = (
+        {"evaluatorModelPreset": evaluator_preset} if evaluator_preset else {}
+    )
+    config = Config.model_validate({
+        "modelPresets": {
+            "evaluator": {"model": "evaluator-model", "provider": "openai"},
+        },
+        "gateway": {"heartbeat": heartbeat_config},
+    })
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.agents.defaults.dream.enabled = True
+    config.workspace_path.mkdir(parents=True)
+    (config.workspace_path / "HEARTBEAT.md").write_text(
+        "## Active Tasks\n\n- Check repository health\n",
+        encoding="utf-8",
+    )
+
+    main_provider = _fake_provider()
+    evaluator_provider = object()
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {}
+
+    class _FakeSessionManager:
+        def __init__(self, _workspace: Path) -> None:
+            pass
+
+        @staticmethod
+        def safe_key(key: str) -> str:
+            return key.replace(":", "_")
+
+        def list_sessions(self) -> list[dict[str, str]]:
+            return [{"key": "telegram:u1"}]
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job: CronJob) -> None:
+            raise _StopGatewayError("stop")
+
+    class _FakeRuntimeResolver:
+        def __init__(self) -> None:
+            self.names: list[str | None] = []
+
+        def resolve_preset(self, name: str | None) -> SimpleNamespace:
+            self.names.append(name)
+            return SimpleNamespace(provider=evaluator_provider, model="evaluator-model")
+
+    class _FakeAgentLoop(_GatewayAgentContractStub):
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "main-model"
+            self.provider = main_provider
+            self.runtime_resolver = _FakeRuntimeResolver()
+            self.sessions = kwargs["session_manager"]
+            self.tools = {}
+            seen["agent"] = self
+
+        async def process_direct(self, *_args, **_kwargs):
+            return SimpleNamespace(content="Repository is healthy.")
+
+        async def aclose(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.enabled_channels = ["telegram"]
+
+    async def _capture_evaluator(**kwargs) -> bool:
+        seen["evaluator_kwargs"] = kwargs
+        return False
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        make_provider=lambda _config: main_provider,
+        message_bus=lambda: bus,
+        session_manager=_FakeSessionManager,
+        cron_service=_FakeCron,
+    )
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.read_webui_sidebar_state", lambda: {})
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _capture_evaluator)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    cron = seen["cron"]
+    assert isinstance(cron, _FakeCron)
+    asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
+
+    evaluator_kwargs = seen["evaluator_kwargs"]
+    assert isinstance(evaluator_kwargs, dict)
+    assert evaluator_kwargs["provider"] is (
+        evaluator_provider if evaluator_preset else main_provider
+    )
+    assert evaluator_kwargs["model"] == expected_model
+    agent = seen["agent"]
+    assert isinstance(agent, _FakeAgentLoop)
+    assert agent.provider is main_provider
+    assert agent.model == "main-model"
+    assert agent.runtime_resolver.names == ([] if evaluator_preset is None else ["evaluator"])
+
+
 def test_webui_yes_creates_config_and_enables_local_websocket(
     monkeypatch,
     tmp_path: Path,

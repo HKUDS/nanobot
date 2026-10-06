@@ -669,17 +669,26 @@ def _run_gateway(
             response = resp.content
 
             evaluator_prompt = resolve_evaluator_prompt(config.workspace_path)
-
-            # Fail closed: stay silent on evaluator failure instead of notifying.
-            with llm_usage_source("cron"):
-                should_notify = await evaluate_response(
-                    response=response,
-                    task_context=prompt,
-                    provider=agent.provider,
-                    model=agent.model,
-                    evaluator_prompt=evaluator_prompt,
-                    default_notify=False,
+            try:
+                evaluator_runtime = (
+                    agent.runtime_resolver.resolve_preset(config.gateway.heartbeat.evaluator_model_preset)
+                    if config.gateway.heartbeat.evaluator_model_preset
+                    else None
                 )
+
+                # Fail closed: stay silent on evaluator failure instead of notifying.
+                with llm_usage_source("cron"):
+                    should_notify = await evaluate_response(
+                        response=response,
+                        task_context=prompt,
+                        provider=evaluator_runtime.provider if evaluator_runtime else agent.provider,
+                        model=evaluator_runtime.model if evaluator_runtime else agent.model,
+                        evaluator_prompt=evaluator_prompt,
+                        default_notify=False,
+                    )
+            except Exception:
+                logger.exception("Heartbeat evaluator setup failed; silencing response")
+                should_notify = False
 
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")

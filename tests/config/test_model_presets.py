@@ -355,6 +355,33 @@ def test_validator_rejects_unknown_dream_model_preset() -> None:
         })
 
 
+def test_validator_accepts_heartbeat_evaluator_model_preset() -> None:
+    config = Config.model_validate({
+        "modelPresets": {
+            "evaluator": {"model": "openai/gpt-4.1-mini", "provider": "openai"},
+        },
+        "gateway": {"heartbeat": {"evaluatorModelPreset": "evaluator"}},
+    })
+
+    assert config.gateway.heartbeat.evaluator_model_preset == "evaluator"
+    assert config.model_dump(by_alias=True)["gateway"]["heartbeat"]["evaluatorModelPreset"] == "evaluator"
+
+
+def test_validator_rejects_unknown_heartbeat_evaluator_model_preset() -> None:
+    with pytest.raises(ValueError, match="Heartbeat evaluator model preset 'unknown' not found"):
+        Config.model_validate({
+            "gateway": {"heartbeat": {"evaluatorModelPreset": "unknown"}},
+        })
+
+
+def test_validator_accepts_default_heartbeat_evaluator_model_preset() -> None:
+    config = Config.model_validate({
+        "gateway": {"heartbeat": {"evaluatorModelPreset": "default"}},
+    })
+
+    assert config.gateway.heartbeat.evaluator_model_preset == "default"
+
+
 def test_model_preset_accepts_explicit_default_name() -> None:
     config = Config.model_validate({
         "agents": {
