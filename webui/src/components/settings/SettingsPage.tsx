@@ -326,7 +326,7 @@ export function SettingsPage({
           />
         );
       case "about":
-        return <AboutSettings currentVersion={settings.version?.current} currentCommit={settings.version?.commit} />;
+        return <AboutSettings settings={settings} />;
       case "appearance":
         return (
           <AppearanceSettings

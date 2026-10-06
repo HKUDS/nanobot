@@ -4,7 +4,7 @@ import {
   ImageGenerationIcon,
   VoiceIcon,
 } from "@/components/icons/product-icons";
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useContext, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ArrowUpCircle,
   BookOpen,
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { HostNavigationContext } from "@/components/remote/HostSwitcher";
 import { StarLink } from "@/components/StarPrompt";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
@@ -139,13 +140,35 @@ export function OverviewSettings({
 
 type VersionInfoProps = { currentVersion?: string; currentCommit?: string | null };
 
-export function AboutSettings({ currentVersion, currentCommit }: VersionInfoProps) {
+export function AboutSettings({ settings }: { settings: SettingsPayload }) {
   const { t } = useTranslation();
+  const hostPicker = useContext(HostNavigationContext);
+  const currentVersion = settings.version?.current;
+  const currentCommit = settings.version?.commit;
+  const environment = settings.environment;
   const reportIssueUrl = new URL("https://github.com/HKUDS/nanobot/issues/new");
   reportIssueUrl.searchParams.set("template", "bug_report.yml");
   const reportedVersion = [currentVersion, currentCommit && `(commit ${currentCommit})`]
     .filter(Boolean).join(" ");
   if (reportedVersion) reportIssueUrl.searchParams.set("version", reportedVersion);
+  reportIssueUrl.searchParams.set("channel", "WebSocket");
+  if (environment) {
+    reportIssueUrl.searchParams.set("python_version", environment.python_version);
+    reportIssueUrl.searchParams.set("os", environment.os === "Darwin" ? "macOS" : environment.os);
+  }
+  const context = [
+    ...(environment ? [
+      `Gateway OS: ${environment.os} ${environment.os_version}`,
+      `Gateway architecture: ${environment.architecture}`,
+    ] : []),
+    `Browser: ${navigator.userAgent}`,
+    `Connection: ${hostPicker?.kind === "embedded" ? "Remote host" : hostPicker ? "Local host" : "Direct WebUI"}`,
+    ...(settings.agent.model ? [`Default model: ${settings.agent.model}`] : []),
+    ...(settings.agent.resolved_provider || settings.agent.provider ? [
+      `Default provider: ${settings.agent.resolved_provider || settings.agent.provider}`,
+    ] : []),
+  ];
+  reportIssueUrl.searchParams.set("additional", context.join("\n"));
   const links = [
     { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
     { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },

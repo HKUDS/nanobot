@@ -909,6 +909,12 @@ export interface SettingsPayload {
     current: string;
     commit?: string | null;
   };
+  environment?: {
+    python_version: string;
+    os: string;
+    os_version: string;
+    architecture: string;
+  };
   docs?: {
     version: string;
     base_url: string;

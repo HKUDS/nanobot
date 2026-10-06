@@ -53,53 +53,30 @@ body:
     validations:
       required: true
 
-  - type: dropdown
+  - type: input
     id: python_version
     attributes:
       label: Python Version
-      description: What Python version are you using?
-      options:
-        - "3.11"
-        - "3.12"
-        - "3.13"
-        - Other (specify below)
+      description: Python version running the nanobot gateway.
+      placeholder: e.g., 3.12.10
     validations:
       required: true
 
-  - type: dropdown
+  - type: input
     id: os
     attributes:
       label: Operating System
-      options:
-        - Windows
-        - macOS
-        - Linux
-        - Docker
-        - Other (specify below)
+      description: Operating system running the nanobot gateway (including container OS).
+      placeholder: e.g., Windows, macOS, Linux, Docker
     validations:
       required: true
 
-  - type: dropdown
+  - type: input
     id: channel
     attributes:
       label: Channel / Platform
       description: Which messaging platform are you using?
-      options:
-        - Weixin (Personal WeChat)
-        - WeCom (Enterprise WeChat)
-        - Feishu (Lark)
-        - DingTalk
-        - Telegram
-        - Discord
-        - Slack
-        - QQ
-        - WhatsApp
-        - Email
-        - MS Teams
-        - Matrix
-        - WebSocket
-        - API Server
-        - Other (specify below)
+      placeholder: e.g., WebSocket, Telegram, Feishu (Lark), API Server
     validations:
       required: true
 

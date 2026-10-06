@@ -1,5 +1,9 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { HostNavigationContext } from "@/components/remote/HostSwitcher";
+import { AboutSettings } from "@/components/settings/overview/OverviewSettings";
+import { NanobotClient } from "@/lib/nanobot-client";
+import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
@@ -36,6 +40,37 @@ describe("Settings overview and appearance", () => {
     expect(document.querySelector('a[href*="/commit/"]')).toBeNull();
     const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
     expect(reportUrl.searchParams.get("version")).toBe("0.3.5");
+    expect(reportUrl.searchParams.get("python_version")).toBeNull();
+    expect(reportUrl.searchParams.get("os")).toBeNull();
+    expect(reportUrl.searchParams.get("channel")).toBe("WebSocket");
+  });
+
+  it("prefills the remote gateway environment separately from the browser", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Browser on Windows");
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      environment: { python_version: "3.14.2", os: "Darwin", os_version: "24.4.0", architecture: "arm64" },
+    };
+    render(
+      <ClientProvider client={new NanobotClient({ url: "ws://localhost:8765" })} token="tok">
+        <HostNavigationContext.Provider value={{ kind: "embedded", name: "Remote", hostname: "private-host", open: vi.fn() }}>
+          <AboutSettings settings={payload} />
+        </HostNavigationContext.Provider>
+      </ClientProvider>,
+    );
+    const url = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(url.searchParams.get("python_version")).toBe("3.14.2");
+    expect(url.searchParams.get("os")).toBe("macOS");
+    expect(url.searchParams.get("channel")).toBe("WebSocket");
+    const additional = url.searchParams.get("additional");
+    expect(additional).toContain("Gateway OS: Darwin 24.4.0");
+    expect(additional).toContain("Gateway architecture: arm64");
+    expect(additional).toContain("Browser: Browser on Windows");
+    expect(additional).toContain("Connection: Remote host");
+    expect(additional).toContain("Default model: openai/gpt-4o");
+    expect(additional).toContain("Default provider: openai");
+    expect(additional).not.toContain(payload.runtime.config_path);
+    expect(additional).not.toContain("private-host");
   });
 
   it("persists the file edit display local preference", async () => {
