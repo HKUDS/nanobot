@@ -240,7 +240,7 @@ export function CredentialForm({
                   }
                   onClick={() => onToggleSecret(field.key)}
                   disabled={disabled}
-                  className="absolute right-0 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground sm:right-1 sm:h-8 sm:w-8"
+                  className="absolute right-0 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:text-foreground sm:right-1 sm:h-8 sm:w-8"
                 >
                   {visible ? (
                     <EyeOff className="h-3.5 w-3.5" aria-hidden />

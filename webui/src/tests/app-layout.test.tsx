@@ -840,7 +840,7 @@ describe("App layout", () => {
     const newTopicButton = within(sidebar).getByRole("button", { name: "New topic" });
 
     expect(newTopicButton).toHaveAttribute("aria-current", "page");
-    expect(newTopicButton).toHaveClass("transition-[width,padding,color]");
+    expect(newTopicButton).toHaveClass("transition-[width,padding,color,background-color]");
     expect(newTopicButton).toBeEnabled();
   });
 
@@ -986,11 +986,11 @@ describe("App layout", () => {
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     const temporaryToggle = screen.getByRole("button", { name: "Temporary chat" });
-    expect(temporaryToggle).toHaveClass("h-8", "w-8", "rounded-full");
+    expect(temporaryToggle).toHaveClass("h-8", "w-8", "rounded-xl");
     expect(within(temporaryToggle).queryByText("Temporary chat")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
-    expect(temporaryToggle).toHaveClass("bg-transparent", "shadow-none", "hover:bg-transparent");
+    expect(temporaryToggle).toHaveClass("icon-action");
     expect(within(temporaryToggle).getByTestId("temporary-chat-icon")).toHaveClass(
       "motion-safe:duration-150",
       "text-[var(--temporary-control-active)]",
@@ -1775,9 +1775,13 @@ describe("App layout", () => {
     expect(within(screen.getByRole("dialog", { name: "Daily repo check" })).getByText("Check the repo status")).toBeVisible();
     const detail = within(screen.getByRole("dialog", { name: "Daily repo check" }));
     expect(detail.queryByText("Release prep")).not.toBeInTheDocument();
-    expect(detail.getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+    const user = userEvent.setup();
+    await user.click(detail.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
       "href", "#/chat/websocket%3Achat-a",
     );
+    await user.keyboard("{Escape}");
+    expect(detail.getByRole("button", { name: "More actions" })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /WeChat quiz/ }));
@@ -1829,7 +1833,9 @@ describe("App layout", () => {
     const dialog = screen.getByRole("dialog", { name: "Drink water" });
     expect(within(dialog).queryByText("推特大战场")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Stored title")).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+    const user = userEvent.setup();
+    await user.click(within(dialog).getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
       "href", "#/chat/websocket%3Alinked-chat",
     );
     for (const title of ["新会话名称", ""]) {
@@ -1841,10 +1847,12 @@ describe("App layout", () => {
       const expected = title || "Stored title";
       expect(within(sidebar).getByText(expected)).toBeInTheDocument();
       expect(within(dialog).queryByText(expected)).not.toBeInTheDocument();
-      expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+      expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
         "href", "#/chat/websocket%3Alinked-chat",
       );
     }
+    await user.keyboard("{Escape}");
+    expect(within(dialog).getByRole("button", { name: "More actions" })).toHaveFocus();
     expect(requestMutationSpy).not.toHaveBeenCalled();
   });
 
@@ -2977,7 +2985,7 @@ describe("App layout", () => {
 
     expect(overviewButton).toHaveAttribute("aria-current", "page");
     expect(overviewButton).not.toHaveClass("bg-sidebar-accent");
-    expect(overviewButton).toHaveClass("transition-[color]");
+    expect(overviewButton).toHaveClass("transition-[color,background-color]");
     expect(settingsHighlight).toHaveAttribute("data-active-id", "overview");
 
     fireEvent.click(modelsButton);

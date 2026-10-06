@@ -204,7 +204,8 @@ class TestMessageToolSchema:
     def test_schema_discourages_current_chat_replies(self) -> None:
         tool = MessageTool()
 
-        assert "Do not use this for the normal reply in the current chat" in tool.description
+        assert "For a normal reply, including a scheduled reminder or report, answer naturally instead" in tool.description
+        assert "nanobot delivers the final reply to the current chat" in tool.description
         assert "generate_image creates images in the current chat" in tool.description
         assert (
             "Do not use this for a normal reply in the current chat"

@@ -755,7 +755,6 @@ describe("ThreadMessages", () => {
       "h-[var(--message-block-control-size)]",
       "w-[var(--message-block-action-width)]",
       "rounded-control",
-      "group-hover:bg-muted/70",
     );
     expect(disclosure.querySelector("svg")).toBeInTheDocument();
     const toolbar = menu.querySelector("[data-message-block-toolbar]");

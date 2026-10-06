@@ -87,7 +87,11 @@ describe("SessionInfoPopover", () => {
   });
 
   it("manages a session task through the shared detail dialog", async () => {
-    const pausedJob = { ...automationJob(), enabled: false };
+    const boundJob = { ...automationJob(), origin: {
+      session_key: "websocket:chat-1", channel: "websocket", chat_id: "chat-1",
+    } };
+    vi.mocked(fetch).mockResolvedValue(automationsResponse([boundJob]));
+    const pausedJob = { ...boundJob, enabled: false };
     requestMutation.mockResolvedValue({ jobs: [pausedJob] });
     const user = userEvent.setup();
 
@@ -103,14 +107,26 @@ describe("SessionInfoPopover", () => {
     await user.click(screen.getByRole("button", { name: "Session details" }));
     await user.click(await screen.findByRole("button", { name: /Morning check/ }));
     const detail = screen.getByRole("dialog", { name: "Morning check" });
-    await user.click(within(detail).getByRole("button", { name: "Disable" }));
+    await user.click(within(detail).getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Disable" }));
 
     expect(requestMutation).toHaveBeenCalledWith(
       "automation.disable",
       { id: "job-1" },
       20_000,
     );
-    await waitFor(() => expect(within(detail).getByRole("button", { name: "Enable" })).toBeVisible());
+    await waitFor(() => expect(within(detail).getByRole("button", { name: "More actions" })).toBeEnabled());
+    await user.click(within(detail).getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Enable" })).toBeVisible();
+    requestMutation.mockResolvedValue({ jobs: [boundJob] });
+    await user.click(screen.getByRole("menuitem", { name: "Enable" }));
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "automation.enable", { id: "job-1" }, 20_000,
+    );
+    await user.click(within(detail).getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Disable" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(within(detail).getByRole("button", { name: "More actions" })).toHaveFocus();
   });
 
   it("returns from the shared editor to the same task detail", async () => {

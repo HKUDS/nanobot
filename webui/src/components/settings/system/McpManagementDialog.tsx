@@ -1,15 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Check,
-  ExternalLink,
-  Loader2,
-  RotateCcw,
-  Search,
-  Server,
-  SlidersHorizontal,
-  Trash2,
-  X,
-} from "lucide-react";
+  AppActionsIcon,
+} from "@/components/icons/product-icons";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, ExternalLink, Loader2, RotateCcw, Search, Server, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -383,7 +376,7 @@ function ToolsPanel({
             {testBusy ? (
               <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
             ) : (
-              <SlidersHorizontal className="h-4 w-4" aria-hidden />
+              <AppActionsIcon className="h-4 w-4" aria-hidden />
             )}
           </div>
           <p

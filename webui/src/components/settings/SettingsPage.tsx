@@ -41,7 +41,7 @@ import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfi
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import type { SessionAutomationJob, SkillSummary } from "@/lib/types";
+import type { ChatSummary, SessionAutomationJob, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
@@ -60,6 +60,7 @@ interface SettingsPageProps {
     modelPreset?: string | null,
   ) => boolean | void | Promise<boolean | void>;
   titleOverrides?: Record<string, string>;
+  sessions?: ChatSummary[];
   onLogout?: () => void;
   isRestarting: boolean;
   hostChromeInset: boolean;
@@ -76,6 +77,7 @@ export function SettingsPage({
   skills,
   onStartAutomationChat,
   titleOverrides,
+  sessions,
   onLogout,
   isRestarting,
   hostChromeInset,
@@ -121,6 +123,7 @@ export function SettingsPage({
     handleApiServiceAction,
     handleAutomationAction,
     handleAutomationEdit,
+    handleAutomationChat,
     handleCliAppAction,
     handleDeleteModelConfiguration,
     handleImportMcpConfig,
@@ -326,7 +329,7 @@ export function SettingsPage({
           />
         );
       case "about":
-        return <AboutSettings currentVersion={settings.version?.current} />;
+        return <AboutSettings settings={settings} />;
       case "appearance":
         return (
           <AppearanceSettings
@@ -583,6 +586,7 @@ export function SettingsPage({
               token={token}
               payload={automations}
               titleOverrides={titleOverrides}
+              sessions={sessions}
               settingsSnapshot={controller.settings}
               onStartChat={onStartAutomationChat}
               loading={automationsLoading}
@@ -596,6 +600,7 @@ export function SettingsPage({
                 setAutomationPendingEdit(job);
               }}
               onRequestDelete={setAutomationPendingDelete}
+              onChangeChat={handleAutomationChat}
               onManageModels={() => selectSection("models")}
               returnToDetailJob={automationDetailReturn}
               onReturnToDetailHandled={() => setAutomationDetailReturn(null)}

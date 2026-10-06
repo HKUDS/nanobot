@@ -1,5 +1,8 @@
+import {
+  ResumeIcon,
+} from "@/components/icons/product-icons";
 import { useEffect, useState } from "react";
-import { AlertTriangle, LoaderCircle, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, LoaderCircle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -97,7 +100,7 @@ export function RecoveryNotice({ state, onContinue, onDismiss }: RecoveryNoticeP
               disabled={pending !== null}
               onClick={() => run("continue")}
             >
-              <RotateCcw className="mr-1 h-3.5 w-3.5" aria-hidden />
+              <ResumeIcon className="mr-1 h-3.5 w-3.5" aria-hidden />
               {t("recovery.continue", { defaultValue: "Continue" })}
             </Button>
           ) : null}

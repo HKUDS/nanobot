@@ -8,12 +8,14 @@ import {
   Clipboard,
   ListFilter,
   Loader2,
+  MoreHorizontal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
 import { channelUiOwner, channelUiPresentation } from "@/channel-plugins/registry";
 import { AutomationCalendar } from "@/components/settings/system/AutomationCalendar";
+import { AutomationChatBinding, type AutomationChatNames, type ChangeAutomationChat } from "@/components/settings/system/AutomationChatBinding";
 import { AutomationRunAtPicker, parseAutomationRunAt } from "@/components/settings/system/AutomationRunAtPicker";
 import {
   modelPresetOptionsFromSettings,
@@ -23,7 +25,7 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ExpandableText } from "@/components/ui/expandable-text";
 import {
   Dialog,
@@ -44,6 +46,7 @@ import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import type {
   AutomationsPayload,
   AutomationUpdatePayload,
+  ChatSummary,
   SessionAutomationJob,
   SettingsPayload,
 } from "@/lib/types";
@@ -53,19 +56,23 @@ export type AutomationFilter = "all" | "active" | "paused" | "failed" | "system"
 export type AutomationAction = "enable" | "disable" | "delete" | "run";
 
 const EMPTY_TITLE_OVERRIDES: Record<string, string> = {};
+const EMPTY_SESSIONS: ChatSummary[] = [];
 
 export function AutomationsSettings({
   token = "",
   payload, loading, filter, actionKey, error,
   titleOverrides = EMPTY_TITLE_OVERRIDES,
+  sessions = EMPTY_SESSIONS,
   settingsSnapshot = null,
   onFilterChange, onAction,
   onRequestEdit, onRequestDelete, onStartChat, onManageModels,
   returnToDetailJob = null, onReturnToDetailHandled,
+  onChangeChat,
 }: {
   token?: string;
   payload: AutomationsPayload | null;
   titleOverrides?: Record<string, string>;
+  sessions?: ChatSummary[];
   settingsSnapshot?: SettingsPayload | null;
   loading: boolean;
   filter: AutomationFilter;
@@ -84,10 +91,18 @@ export function AutomationsSettings({
   onManageModels?: () => void;
   returnToDetailJob?: SessionAutomationJob | null;
   onReturnToDetailHandled?: () => void;
+  onChangeChat?: ChangeAutomationChat;
 }) {
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
+  // Join display names by the server-owned handle ID, never by a mutable title.
+  const chatNames: AutomationChatNames = useMemo(() => new Map(sessions.flatMap(session => (
+    session.handle ? [[session.handle.id, {
+      title: displayTitle(session, titleOverrides, t("chat.newChat")),
+      handle: session.handle.name,
+    }] as const] : []
+  ))), [sessions, titleOverrides, t]);
   const jobs = useMemo(() => (payload?.jobs ?? []).map((job) => {
     const origin = job.origin;
     if (origin?.channel !== "websocket") return job;
@@ -187,7 +202,7 @@ export function AutomationsSettings({
   const filters = visibleJobs.length ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" aria-label={filterLabel} title={filterLabel}
+        <Button variant="ghost" size="sm" aria-label={filterLabel} title={filter === "all" ? filterLabel : undefined}
           className={cn("h-8 text-[12px]", filter === "all" ? "w-8 p-0 text-muted-foreground" : "gap-1.5 bg-background text-foreground")}>
           <ListFilter className="h-4 w-4" strokeWidth={1.5} aria-hidden />
           {filter !== "all" ? filterLabel : null}
@@ -362,6 +377,9 @@ export function AutomationsSettings({
       </div>
 
       <AutomationDetailDialog
+        token={token}
+        chatNames={chatNames}
+        onChangeChat={onChangeChat}
         job={selectedJob}
         open={detailOpen}
         locale={locale}
@@ -388,6 +406,9 @@ export function AutomationsSettings({
 }
 
 export function AutomationDetailDialog({
+  token = "",
+  chatNames,
+  onChangeChat,
   job,
   open,
   locale,
@@ -399,6 +420,9 @@ export function AutomationDetailDialog({
   onRequestDelete,
   onCloseAutoFocus,
 }: {
+  token?: string;
+  chatNames?: AutomationChatNames;
+  onChangeChat?: ChangeAutomationChat;
   job: SessionAutomationJob | null;
   open: boolean;
   locale: string;
@@ -410,6 +434,11 @@ export function AutomationDetailDialog({
   onRequestDelete: (job: SessionAutomationJob) => void;
   onCloseAutoFocus?: (event: Event) => void;
 }) {
+  const panel = (chatPicker?: ReactNode) => job ? <AutomationDetailPanel
+    key={job.id} job={job} locale={locale} actionKey={actionKey} error={error}
+    onAction={onAction} onRequestEdit={onRequestEdit} onRequestDelete={onRequestDelete}
+    chatPicker={chatPicker}
+  /> : null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {job ? (
@@ -422,16 +451,9 @@ export function AutomationDetailDialog({
           )}
           onCloseAutoFocus={onCloseAutoFocus}
         >
-          <AutomationDetailPanel
-            key={job.id}
-            job={job}
-            locale={locale}
-            actionKey={actionKey}
-            error={error}
-            onAction={onAction}
-            onRequestEdit={onRequestEdit}
-            onRequestDelete={onRequestDelete}
-          />
+          {job.chat_binding_revision && onChangeChat ? (
+            <AutomationChatBinding key={job.id} job={job} token={token} chatNames={chatNames} onSave={onChangeChat}>{panel}</AutomationChatBinding>
+          ) : panel()}
         </DialogContent>
       ) : null}
     </Dialog>
@@ -441,7 +463,9 @@ export function AutomationDetailDialog({
 
 function AutomationDetailPanel({
   job, locale, actionKey, error, onAction, onRequestEdit, onRequestDelete,
+  chatPicker,
 }: {
+  chatPicker?: ReactNode;
   job: SessionAutomationJob;
   locale: string;
   actionKey: string | null;
@@ -552,44 +576,28 @@ function AutomationDetailPanel({
         </section> : null}
         {job.state.last_error ? <AutomationError message={job.state.last_error} /> : null}
         {error ? <AutomationError message={error} /> : null}
-        <dl>
+        {chatPicker ?? <dl>
           {!job.protected && job.origin?.channel && job.origin.channel !== "websocket" ? (
             <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")}>
               {automationChannelLabel(job.origin.channel, t)}
             </AutomationDetail>
           ) : null}
-        </dl>
+        </dl>}
       </div>
       {canManage ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-t border-border/45 px-6 py-3">
-          <div className="flex max-w-full flex-wrap gap-2">
-            <Button variant="ghost" size="sm" className="font-normal text-muted-foreground" disabled={busy || !canToggle}
-              onClick={() => void onAction(job.enabled ? "disable" : "enable", job)}>
-              {actionKey === `enable:${job.id}` || actionKey === `disable:${job.id}`
-                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-              {job.enabled ? tx("settings.automations.pause", "Disable") : tx("settings.automations.resume", "Enable")}
-            </Button>
-            {!localTrigger ? (
-              <Button variant="ghost" size="sm" className="font-normal text-muted-foreground" disabled={!canRun || busy} onClick={() => void onAction("run", job)}>
-                {actionKey === `run:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-                {tx("settings.automations.runNow", "Run now")}
-              </Button>
-            ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="font-normal text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:text-destructive"
-              disabled={busy}
-              onClick={() => onRequestDelete(job)}
-            >
-              {tx("settings.automations.delete", "Delete")}
-            </Button>
-          </div>
-          <div className="ms-auto flex max-w-full flex-wrap justify-end gap-2">
-            <Button variant="ghost" size="sm" className="font-normal text-muted-foreground" disabled={busy} onClick={() => onRequestEdit(job)}>
-              {tx("settings.automations.edit", "Edit")}
-            </Button>
-            {originHref ? <Button asChild variant="ghost" size="sm" className="font-normal text-muted-foreground"><a href={originHref}>{tx("settings.automations.emptyAction", "Open a chat")}</a></Button> : null}
+        <div className="flex shrink-0 items-center gap-2 border-t border-border/45 px-6 py-3">
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" disabled={busy} aria-label={tx("settings.automations.moreActions", "More actions")} className="h-11 w-11 text-muted-foreground sm:h-9 sm:w-9"><MoreHorizontal className="h-4 w-4" aria-hidden /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start">
+              <DropdownMenuItem disabled={busy || !canToggle} onSelect={() => void onAction(job.enabled ? "disable" : "enable", job)}>{job.enabled ? tx("settings.automations.pause", "Disable") : tx("settings.automations.resume", "Enable")}</DropdownMenuItem>
+              {originHref ? <DropdownMenuItem asChild><a href={originHref}>{tx("settings.automations.emptyAction", "Open a chat")}</a></DropdownMenuItem> : null}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem tone="destructive" disabled={busy} onSelect={() => onRequestDelete(job)}>{tx("settings.automations.delete", "Delete")}</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <div className="ml-auto flex gap-2">
+            <Button variant="ghost" size="sm" className="h-11 font-normal sm:h-9" disabled={busy} onClick={() => onRequestEdit(job)}>{tx("settings.automations.edit", "Edit")}</Button>
+            {!localTrigger ? <Button variant="secondary" size="sm" className="h-11 font-normal sm:h-9" disabled={busy || !canRun} onClick={() => void onAction("run", job)}>{tx("settings.automations.runNow", "Run now")}</Button> : null}
           </div>
         </div>
       ) : null}
