@@ -2381,6 +2381,22 @@ describe("NanobotClient", () => {
 
 
 describe("binary attachment transport", () => {
+  it("rejects an oversized message envelope without waiting for an ACK and retains the draft", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ reference: "ref" }, { status: 201 })));
+    const client = new NanobotClient({ url: "ws://test", reconnect: false, maxFrameBytes: 256,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    try {
+      client.connect();
+      const socket = lastSocket(); socket.fakeOpen();
+      socket.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test",
+        upload: { path: "/api/attachments", token: "cap" } });
+      const draft = [{ data_url: "data:text/plain;base64,eA==", name: "note.txt" }];
+      await expect(client.sendAttachments("chat", "x".repeat(400), draft)).rejects.toThrow("frame limit");
+      expect(socket.sent.filter((value) => JSON.parse(value).type === "message")).toHaveLength(0);
+      expect(draft[0].data_url).toBe("data:text/plain;base64,eA==");
+    } finally { client.close(); vi.unstubAllGlobals(); }
+  });
+
   it("uploads >1 MiB as HTTP bytes and waits for a small WS reference ACK", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ reference: "opaque-ref" }, { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);

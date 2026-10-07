@@ -115,4 +115,3 @@ class _BridgeConnection(ServerConnection):
             self._http_protocol.resume_writing()
         elif self._selected:
             super().resume_writing()
-

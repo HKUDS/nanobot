@@ -55,8 +55,7 @@ class WebUIIngressPolicy:
         }
 
     def minimum_full_policy_frame_bytes(self) -> int:
-        """Conservative frame size needed for every policy-valid message."""
-        # Only bounded opaque references travel in the WebSocket envelope.
+        """Conservative frame capacity for messages using HTTP attachments."""
         return self.message.max_text_bytes + self.envelope_reserve_bytes
 
 

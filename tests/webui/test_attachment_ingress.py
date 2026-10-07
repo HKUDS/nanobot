@@ -125,30 +125,6 @@ async def test_inline_payload_rejected_and_failed_validation_keeps_upload(gatewa
         assert (await bus.consume_inbound()).media
 
 
-def test_removed_websocket_options_are_ignored_with_temporary_warning(monkeypatch):
-    from unittest.mock import MagicMock
-
-    warning = MagicMock()
-    monkeypatch.setattr("nanobot.channels.websocket.runtime.logger.warning", warning)
-    # Only option names are logged; obsolete values are not validated or leaked.
-    config = WebSocketConfig.model_validate({
-        "host": "127.0.0.1", "port": 12345, "token": "configured-secret",
-        "maxMessageBytes": 1048576,
-        "legacyAttachmentLimit": {"obsolete": "not a number"},
-        "legacy_attachment_limit": -1,
-    })
-    assert warning.call_count == 2
-    assert all("0.5.0" in call.args[0] for call in warning.call_args_list)
-    assert "configured-secret" not in str(warning.call_args_list)
-    assert "not a number" not in str(warning.call_args_list)
-    assert config.port == 12345
-    assert config.token == "configured-secret"
-    assert config.max_message_bytes == 1048576
-    assert "legacyAttachmentLimit" not in config.model_dump(by_alias=True)
-    assert "legacy_attachment_limit" not in config.model_dump()
-    with pytest.raises(ValueError):
-        WebSocketConfig.model_validate({"host": "0.0.0.0"})
-
 
 @pytest.mark.parametrize("mime,body", [
     ("image/svg+xml", b"<svg/>"), ("text/javascript", b"alert(1)"),

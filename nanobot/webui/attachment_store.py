@@ -17,7 +17,6 @@ from pathlib import Path
 from nanobot.utils.media_decode import media_destination
 from nanobot.webui.attachment_ingress import (
     DOCUMENT_MIME_ALLOWED,
-    IMAGE_MIME_ALLOWED,
     MAX_VIDEO_BYTES,
     MAX_VIDEOS_PER_MESSAGE,
     UPLOAD_MIME_ALLOWED,
@@ -155,8 +154,7 @@ class AttachmentStore:
                 raise AttachmentUploadError("Invalid attachment reference")
             entries.append(entry)
         videos = sum(entry.mime in VIDEO_MIME_ALLOWED for entry in entries)
-        images = sum(entry.mime in IMAGE_MIME_ALLOWED for entry in entries)
-        if videos > MAX_VIDEOS_PER_MESSAGE or images > self.limits.max_count:
+        if videos > MAX_VIDEOS_PER_MESSAGE:
             raise AttachmentUploadError("Too many attachments")
         if len(entries) - videos > self.limits.max_count:
             raise AttachmentUploadError("Too many attachments")

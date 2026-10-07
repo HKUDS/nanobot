@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING, Any, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
 from weakref import WeakSet
 
-from loguru import logger
-from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import Server, ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
@@ -195,28 +194,6 @@ class WebSocketConfig(Base):
       shared filesystem or an HTTP file server to access these files.
     """
 
-    # Removed channel options may remain in existing user configuration. They
-    # aren't runtime settings and must not validate or be re-emitted.
-    model_config = ConfigDict(extra="ignore")
-
-    # TODO(0.5.0): remove this compatibility warning/validator; keep extra="ignore".
-    @model_validator(mode="before")
-    @classmethod
-    def warn_ignored_options(cls, value: Any) -> Any:
-        if isinstance(value, dict):
-            known = set(cls.model_fields)
-            known.update(field.alias for field in cls.model_fields.values() if field.alias)
-            options = cast(dict[str, Any], value)
-            for key in options:
-                if key not in known:
-                    logger.warning(
-                        "WebSocket configuration option {!r} is deprecated and ignored; "
-                        "this compatibility warning will also be removed in 0.5.0.",
-                        key,
-                    )
-            return options
-        return value
-
     enabled: bool = True
     host: str = "127.0.0.1"
     port: int = 8765
@@ -232,7 +209,7 @@ class WebSocketConfig(Base):
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
     # Keep the existing configurable guard (also used for non-attachment
-    # frames). Binary attachments now upload over HTTP, not inside this limit.
+    # frames and older clients). HTTP attachments are outside this limit.
     max_message_bytes: int = Field(default=37_748_736, ge=1024, le=41_943_040)
     ping_interval_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)

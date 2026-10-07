@@ -1024,11 +1024,18 @@ export class NanobotClient {
     const socket = this.socket;
     const capability = this.upload;
     const turnId = options?.turnId ?? crypto.randomUUID();
+    const stillConnected = () => this.socket === socket
+      && socket?.readyState === WS_OPEN && this.upload === capability;
     try {
       const references = await uploadAttachments(media, capability,
         typeof window !== "undefined" ? window.location.href : this.currentUrl,
-        () => this.socket === socket && socket?.readyState === WS_OPEN && this.upload === capability);
-      await this.receipts.wait(turnId, () => this.sendMessage(chatId, content, references, { ...options, turnId }));
+        stillConnected);
+      if (!stillConnected()) throw new Error("Connection changed during attachment send");
+      await this.receipts.wait(turnId, () => {
+        if (!this.sendMessage(chatId, content, references, { ...options, turnId })) {
+          throw new Error("Message exceeds the gateway's WebSocket frame limit; draft retained");
+        }
+      });
     } catch (error) {
       this.emitError({ kind: "turn_rejected", chatId, turnId, detail: "attachment_rejected",
         reason: error instanceof Error ? error.message : "Attachment send failed" });
@@ -1051,7 +1058,7 @@ export class NanobotClient {
       /** False for side-channel or injected messages that do not own a lifecycle. */
       startsNewRun?: boolean;
     },
-  ): void {
+  ): boolean {
     const temporary = this.temporaryChatIds.has(chatId);
     if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
@@ -1079,7 +1086,7 @@ export class NanobotClient {
         chatId,
         ...(options?.turnId ? { turnId: options.turnId } : {}),
       });
-      return;
+      return false;
     }
     if (options?.turnId && !isSystemCommandTurnId(options.turnId)) {
       const startsNewRun = options.startsNewRun !== false;
@@ -1087,6 +1094,7 @@ export class NanobotClient {
       this.trackPendingMessageSend(chatId, options.turnId, startsNewRun);
     }
     this.queueSend(frame);
+    return true;
   }
 
   sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<void> {

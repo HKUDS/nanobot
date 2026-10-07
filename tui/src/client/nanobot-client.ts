@@ -178,8 +178,11 @@ export class NanobotClient {
     const socket = this.socket
     const chatId = this.chatId
     const upload = this.upload
+    const stillConnected = () => this.socket === socket
+      && socket?.readyState === WebSocket.OPEN && this.upload === upload && this.chatId === chatId
     const references = await uploadAttachments(options.media ?? [], upload, this.uploadBase,
-      () => this.socket === socket && socket?.readyState === WebSocket.OPEN && this.upload === upload && this.chatId === chatId)
+      stillConnected)
+    if (!stillConnected()) throw new Error("Connection changed during attachment send")
     const turnId = crypto.randomUUID()
     await this.receipts.wait(turnId, () => this.send(content, options, references, turnId))
     return turnId

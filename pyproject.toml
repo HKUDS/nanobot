@@ -29,8 +29,6 @@ dependencies = [
     "pydantic-settings>=2.12.0,<3.0.0",
     # Feishu's lark-oapi currently requires websockets<16; core supports 15 and 16.
     "websockets>=15.0,<17.0",
-    # The default WebUI listener also accepts streaming binary HTTP uploads.
-    "aiohttp>=3.13.3,<4.0.0",
     "httpx[socks]>=0.28.0,<1.0.0",
     "aiohttp>=3.14.3,<4.0.0",
     "cryptography>=46.0.0",

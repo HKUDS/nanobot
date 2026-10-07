@@ -206,8 +206,9 @@ See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
 
 ### Binary attachments (WebUI and TUI)
 
-Files are uploaded over HTTP on the same gateway listener; they do not travel as
-Base64 inside a WebSocket frame. After a successful, authorized handshake, `ready`
+The gateway advertises `webui.attachments.binary.v1`. WebUI protocol 1 and the
+terminal protocol are unchanged. Bundled clients and their gateway use HTTP on
+the same listener for attachment uploads. After an authorized handshake, `ready`
 includes an `upload` object with `path: "/api/attachments"` and an opaque `token`.
 This token is a short-lived capability tied to that live connection, not the
 one-time handshake token, API token, or client-selected `client_id`.
@@ -243,12 +244,18 @@ Reverse proxies must forward `POST /api/attachments` (including its authorizatio
 header) to the gateway and permit the configured file sizes. Do not enable public
 CORS for this capability endpoint.
 
+For a remote host opened through the local WebUI, the local proxy streams this
+upload over the existing SSH transport. It replaces the host's upload token with
+a capability tied to the browser's live WebSocket and revokes that capability on
+disconnect. API tokens cannot authorize uploads, and other HTTP API routes remain
+read-only. Update the local installation and the remote gateway together to use
+binary attachments; an older host's text chats and HTTP reads remain available.
+
 ## Configuration Reference
 
 All fields go under `channels.websocket` in `config.json`.
-Removed/unrecognized options are ignored without preventing startup. A temporary
-compatibility warning names each ignored option (never its value) and states that
-the warning itself will be removed in **0.5.0**. Active options below remain validated.
+Unrecognized options retain the existing behavior: they are ignored without
+preventing startup. Active options below remain validated.
 
 ### Connection
 
