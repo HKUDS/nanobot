@@ -166,8 +166,7 @@ async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_
         assert "input_image" in json.dumps(initial["input"])
         assert continued["previous_response_id"] == "resp_1"
         assert "input_image" not in json.dumps(continued["input"])
-        assert "[Attachment:" in json.dumps(continued["input"])
-        assert str(pdf) in json.dumps(continued["input"])
+        assert f"[Attachment: {pdf}]" in continued["input"][0]["content"][0]["text"]
         assert not server.http_requests
     finally:
         await agent.aclose()
