@@ -212,8 +212,69 @@ class TestReadDedupSessionIsolation:
 class TestReadPdf:
 
     @pytest.fixture()
-    def tool(self, tmp_path):
+    def tool(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
         return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("page_count", [2, 3])
+    async def test_pdf_character_limit_preserves_pages_across_continuation(
+        self, tool, tmp_path, monkeypatch, page_count,
+    ):
+        import re
+
+        fitz = pytest.importorskip("pymupdf")
+        pdf_path = tmp_path / "report.pdf"
+        doc = fitz.open()
+        markers = []
+        for number in range(1, page_count + 1):
+            marker = f"END_OF_PAGE_{number}"
+            markers.append(marker)
+            page = doc.new_page()
+            page.insert_text((72, 72), "Report details " * 4 + "\n" + marker)
+        doc.save(pdf_path)
+        doc.close()
+        monkeypatch.setattr(tool, "_MAX_CHARS", 130)
+
+        outputs = []
+        pages = None
+        for _ in range(page_count):
+            result = await tool.execute(path=str(pdf_path), pages=pages)
+            outputs.append(result)
+            continuation = re.search(r"Use pages='([^']+)'", result)
+            if continuation is None:
+                break
+            pages = continuation[1]
+
+        combined = "\n".join(outputs)
+        for marker in markers:
+            assert combined.count(marker) == 1
+        assert "truncated" not in combined
+        assert "Use pages=" not in outputs[-1]
+
+    @pytest.mark.asyncio
+    async def test_pdf_oversized_page_reports_unreturned_text(
+        self, tool, tmp_path, monkeypatch,
+    ):
+        fitz = pytest.importorskip("pymupdf")
+        pdf_path = tmp_path / "dense.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "\n".join(["Dense page content " * 3] * 8))
+        page = doc.new_page()
+        page.insert_text((72, 72), "Second page complete")
+        doc.save(pdf_path)
+        doc.close()
+        monkeypatch.setattr(tool, "_MAX_CHARS", 130)
+
+        result = await tool.execute(path=str(pdf_path))
+
+        assert "Page 1 was truncated" in result
+        assert "remaining text on this page is not shown" in result
+        assert "Use pages='2-2'" in result
+        second = await tool.execute(path=str(pdf_path), pages="2")
+        assert "Second page complete" in second
+        assert "truncated" not in second
 
     @pytest.mark.asyncio
     async def test_pdf_returns_text_content(self, tool, tmp_path):
