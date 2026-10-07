@@ -454,7 +454,7 @@ function MessageBlockMenu({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogTrigger asChild>
           <button ref={triggerRef} type="button" data-message-block-menu-trigger aria-label={label}
-            className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           </button>
         </DialogTrigger>
@@ -487,8 +487,7 @@ function MessageBlockMenu({
             data-message-block-menu-highlight
             className={cn(
               "inline-flex h-4 w-7 items-center justify-center rounded-full",
-              "transition-[background-color,box-shadow,scale]",
-              "group-hover:bg-muted/70 group-active:scale-[0.96]",
+              "transition-colors",
               "group-focus-visible:ring-2 group-focus-visible:ring-ring",
               "motion-reduce:transform-none motion-reduce:transition-none",
             )}

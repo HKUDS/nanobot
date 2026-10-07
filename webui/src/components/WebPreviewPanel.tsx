@@ -15,7 +15,7 @@ export function WebPreviewPanel({ url: value }: WebPreviewPanelProps) {
   const [revision, setRevision] = useState(0);
   const url = parseWebLink(value);
   const restriction = currentWebPreviewRestriction(url);
-  const buttonClass = "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const buttonClass = "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
   return (
     <section aria-label={t("webPreview.title")} data-testid="web-preview-panel" className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border/40 px-2">

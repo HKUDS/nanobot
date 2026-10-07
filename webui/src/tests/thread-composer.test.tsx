@@ -6,7 +6,7 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
-import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
+import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand, WorkspaceScopePayload } from "@/lib/types";
 
 vi.mock("@/lib/imageEncode", () => ({
   encodeImage: vi.fn(async (file: File) => ({
@@ -801,7 +801,6 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-panel");
     expect(input.parentElement?.parentElement?.className).not.toContain("shadow-");
-    expect(screen.getByRole("button", { name: "Attach files" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
@@ -1093,7 +1092,7 @@ describe("ThreadComposer", () => {
     );
 
     const voiceButton = screen.getByRole("button", { name: "Voice input" });
-    expect(voiceButton).toHaveAttribute("title", "Click to dictate or hold");
+    expect(voiceButton).not.toHaveAttribute("title");
     expect(voiceButton).toHaveAttribute("aria-keyshortcuts", "Control+Shift+D");
     fireEvent.keyDown(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
     expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
@@ -1343,33 +1342,37 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("progressbar", { name: "Context 50%" })).toBeVisible();
   });
 
-  it("renders and changes workspace access mode", async () => {
+  it("toggles workspace access directly by click and keyboard", async () => {
+    const user = userEvent.setup();
     const onWorkspaceScopeChange = vi.fn();
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        workspaceScope={{
-          project_path: "/tmp/project",
-          project_name: "project",
-          access_mode: "restricted",
-          restrict_to_workspace: true,
-        }}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
-        onWorkspaceScopeChange={onWorkspaceScopeChange}
-      />,
+    const restricted: WorkspaceScopePayload = {
+      project_path: "/tmp/project", project_name: "project",
+      access_mode: "restricted", restrict_to_workspace: true,
+    };
+    const composer = (workspaceScope: WorkspaceScopePayload, canUseFullAccess = true) => (
+      <ThreadComposer onSend={vi.fn()} placeholder="Type your message..."
+        workspaceScope={workspaceScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: canUseFullAccess }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange} />
     );
-
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Workspace access mode/ }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Full Access/ }));
-
-    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        project_path: "/tmp/project",
-        access_mode: "full",
-        restrict_to_workspace: false,
-      }),
-    );
+    const { rerender } = render(composer(restricted));
+    const access = screen.getByRole("button", { name: /Workspace access mode/ });
+    expect(access).toHaveAttribute("aria-pressed", "false");
+    await user.click(access);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    const full = { ...restricted, access_mode: "full" as const, restrict_to_workspace: false };
+    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(full);
+    rerender(composer(full));
+    expect(access).toHaveAttribute("aria-pressed", "true");
+    expect(access).toHaveAccessibleName("Workspace access mode: Full Access");
+    expect(access).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(restricted);
+    rerender(composer(restricted, false));
+    expect(access).toBeDisabled();
+    onWorkspaceScopeChange.mockClear();
+    await user.click(access);
+    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
   });
 
   it("exposes full and compact workspace labels for container-driven compression", () => {
@@ -1394,7 +1397,7 @@ describe("ThreadComposer", () => {
     });
     const fullLabel = within(accessButton).getByText("Full Access");
     const shortLabel = within(accessButton).getByText("Full");
-    expect(accessButton).toHaveAttribute("title", "Full Access");
+    expect(accessButton).not.toHaveAttribute("title");
     expect(fullLabel).toHaveClass("thread-composer-access-label-full");
     expect(shortLabel).toHaveClass("thread-composer-access-label-short");
     expect(shortLabel).toHaveClass("hidden");

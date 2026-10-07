@@ -60,8 +60,27 @@ Scheduled automations normally deliver the result back to the session where they
 were created. Use them for work that should run on a predictable schedule and
 report each run.
 
+Write what the task should do, such as "Remind me to drink water". nanobot sends
+the final reply to the task's saved chat. You do not need to put a channel, chat
+ID, or a `message` tool call in the instructions for that reply.
+
+For separate sends, specify the recipients in the instructions. The agent can
+still use `message` to send to other chats, send to several recipients, or attach
+files. Existing tasks that explicitly request this tool remain supported.
+
 For background checks that should stay quiet unless there is something useful to
 report, use heartbeat instead of a user-created scheduled automation.
+
+Repetition alone does not select heartbeat. "Every day at 8am, remind me to
+drink water" needs a cron schedule. "Keep an eye on open issues and tell me
+when one needs attention" can use heartbeat if the check time is flexible.
+Heartbeat does not guarantee a requested time or interval.
+
+An upgrade does not overwrite your workspace's `AGENTS.md` or convert existing
+heartbeat entries into cron jobs. The current scheduling rules are included in
+the system prompt. If an old workspace rule directs all recurring tasks to
+heartbeat, update that rule too. To correct an existing reminder, remove its old
+heartbeat entry and create the cron task once. Check the task list to avoid duplicates.
 
 ## Local Triggers
 
@@ -131,6 +150,70 @@ Use the WebUI Automations view to:
 Local triggers do not have a WebUI "Run now" action because each run needs a
 message. Copy the `nanobot trigger ...` command from the WebUI and replace
 `"message"` with the content that should be delivered.
+
+### Change the Chat for a Scheduled Task
+
+Open a scheduled task in **Automations**. **Run and reply in** shows its saved chat,
+with the channel logo and name. WebUI chats use the same display names as the
+sidebar. A renamed chat keeps its identity and task binding. Chats with the same
+name show an `@handle` to help you tell them apart.
+
+To change the chat:
+
+1. Select another chat from **Run and reply in**.
+2. Review the task instructions, which are read-only by default. If they need
+   changes, select **Edit instructions**. Remove recipients you no longer want,
+   but keep intended separate sends. Members of the new chat can see future task messages and results.
+3. Select **Confirm change**. Wait for the saved confirmation.
+
+If you edit the instructions, the button becomes **Save and change**. Both
+changes are saved together; nothing is saved when you select **Edit instructions**.
+To change the task name or schedule, use **Edit** in the task details instead.
+
+Select **Cancel** before saving to return to the task without changes. After a
+successful save, select **Change back to** to review a return to the previous
+chat. You must confirm this change too. You can also select a previous chat from
+the list later. This changes future runs; it does not recall messages already sent.
+
+Future runs use the new chat's history and reply there by default. Previous
+messages stay in their original chat. Previous run results remain available.
+Changing the chat does not run the task, enable it, or change its schedule.
+
+You can discuss each new result in that same chat. Background task results also
+return there. If you delete that chat, nanobot asks you to confirm deletion of
+its scheduled tasks as well. Cancelling the deletion keeps the chat and tasks.
+
+The list contains existing chats on the same gateway with the same effective
+workspace and access mode. Chat-app targets need a running channel and a saved
+reply route from an earlier incoming message. If a chat is missing, send nanobot
+a message there and check that its channel is running. Raw recipient IDs,
+cross-host moves, unified sessions, system jobs, and local triggers are not
+supported by this selector. An older gateway keeps the existing read-only view.
+
+If a scheduled turn is running or queued, wait for it to finish before changing
+the chat. The current scheduler also rejects a change while another scheduled
+turn is active. If another editor changes the task, reopen the task and review
+the latest instructions. A rejected save leaves the draft visible.
+
+This changes the whole task chat, not a separate forwarding address. Explicit
+`message` tool instructions can still send elsewhere. Shared workspace files
+and memory remain shared; changing the chat does not create a new security boundary.
+The confirmation screen lets you edit instructions such as "send to the original
+chat" before you save. nanobot does not silently rewrite those instructions.
+
+### Back Up Before Downgrading
+
+Chat changes store a binding version and the session used by each previous run.
+Existing jobs do not need a manual migration when upgrading. Older nanobot
+versions can discard these new fields when they write the cron store. After a
+chat change, that can make old run results unavailable in the WebUI and remove
+protection against stale CLI updates.
+
+Before trying this feature, stop the gateway and other cron writers, then back
+up the complete cron directory in the active instance's data directory. For a
+downgrade after changing a chat, stop those processes again and restore that
+coherent pre-change cron backup. This also restores the old schedules and task
+settings; later changes are not included. Chat messages are not moved or deleted.
 
 ## Delivery and Reliability
 

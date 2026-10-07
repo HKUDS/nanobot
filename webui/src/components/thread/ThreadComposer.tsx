@@ -1,4 +1,31 @@
 import {
+  NewChatIcon,
+  CompactIcon,
+  StatusIcon,
+  ModelsIcon,
+  TriggerIcon,
+  DreamLogIcon,
+  PromptTemplateIcon,
+  PairingIcon,
+  ToolRunIcon,
+  ActivityIcon,
+  ArchiveIcon,
+  SkillsIcon,
+  MemoryIcon,
+  HelpIcon,
+  HistoryIcon,
+  ConversationIcon,
+  VoiceIcon,
+  AttachIcon,
+  RestartIcon,
+  RestrictedAccessIcon,
+  DreamIcon,
+  StopIcon,
+  EditIcon,
+  GoalIcon,
+  RestoreMemoryIcon,
+} from "@/components/icons/product-icons";
+import {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -20,32 +47,16 @@ import {
 } from "@/components/CliAppMentionText";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
-  Activity,
-  Archive,
   ArrowUp,
-  BookOpen,
-  Brain,
   ChevronDown,
   ChevronUp,
-  CircleHelp,
   CornerDownRight,
   FileText,
   GripVertical,
-  History,
   ImageIcon,
   Loader2,
-  MessageCircle,
-  Mic,
-  Plus,
   Quote,
-  RotateCw,
-  Shield,
-  Sparkles,
-  Square,
-  SquarePen,
-  Target,
   Trash2,
-  Undo2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -64,7 +75,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  WorkspaceAccessMenu,
+  WorkspaceAccessToggle,
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
 import {
@@ -243,18 +254,30 @@ interface ThreadComposerProps {
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
-  activity: Activity,
-  archive: Archive,
-  "book-open": BookOpen,
-  brain: Brain,
-  "circle-help": CircleHelp,
-  history: History,
-  "rotate-cw": RotateCw,
-  shield: Shield,
-  sparkles: Sparkles,
-  square: Square,
-  "square-pen": SquarePen,
-  "undo-2": Undo2,
+  activity: ActivityIcon,
+  archive: ArchiveIcon,
+  "book-open": SkillsIcon,
+  brain: MemoryIcon,
+  "circle-help": HelpIcon,
+  history: HistoryIcon,
+  "rotate-cw": RestartIcon,
+  shield: RestrictedAccessIcon,
+  sparkles: DreamIcon,
+  square: StopIcon,
+  "square-pen": EditIcon,
+  "undo-2": RestoreMemoryIcon,
+  zap: TriggerIcon,
+  "file-text": PromptTemplateIcon,
+  wrench: ToolRunIcon,
+};
+
+const BUILTIN_COMMAND_ICONS: Record<string, LucideIcon> = {
+  "/new": NewChatIcon, "/compact": CompactIcon, "/stop": StopIcon,
+  "/restart": RestartIcon, "/status": StatusIcon, "/model": ModelsIcon,
+  "/history": HistoryIcon, "/goal": GoalIcon, "/trigger": TriggerIcon,
+  "/dream": DreamIcon, "/dream-log": DreamLogIcon, "/dream-restore": RestoreMemoryIcon,
+  "/dream-prompt": PromptTemplateIcon, "/evaluator-prompt": PromptTemplateIcon,
+  "/skill": SkillsIcon, "/help": HelpIcon, "/pairing": PairingIcon,
 };
 
 const SLASH_PALETTE_GAP_PX = 8;
@@ -840,7 +863,7 @@ function GoalStateStrip({
               type="button"
               className={cn(
                 "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
+                "text-muted-foreground transition-colors hover:text-foreground",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
               aria-label={t("thread.composer.goalStateCloseAria")}
@@ -866,7 +889,7 @@ function GoalStateStrip({
             role="status"
             aria-label={ariaLabel}
           >
-            <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
+            <GoalIcon className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
             <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
               {displayStripLabel ? (
                 <span className="truncate">
@@ -880,7 +903,7 @@ function GoalStateStrip({
                 type="button"
                 className={cn(
                   "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                  "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
+                  "text-muted-foreground transition-colors hover:text-foreground",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
                 aria-expanded={goalPanelOpen}
@@ -2331,7 +2354,7 @@ export function ThreadComposer({
     return () => observer?.disconnect();
   }, [compactControls, compactWhenIdle, modelLabel, voiceRecorder.isRecording, workspaceScope]);
   const accessControl = workspaceScope && !workspaceControlsHidden ? (
-    <WorkspaceAccessMenu
+    <WorkspaceAccessToggle
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
       canUseFullAccess={workspaceControls?.can_use_full_access !== false}
@@ -2523,7 +2546,7 @@ export function ThreadComposer({
             </p>
             <button
               type="button"
-              className="touch-target -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="touch-target -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t("thread.composer.removeQuotedContext")}
               onClick={() => {
                 onQuotedContextChange?.(null);
@@ -2625,18 +2648,18 @@ export function ThreadComposer({
             <Button
               type="button"
               size="icon"
-              variant="ghost"
+              variant="icon"
               disabled={attachButtonDisabled}
               aria-label={t("thread.composer.attachImage")}
               onClick={() => fileInputRef.current?.click()}
               className={cn(
-                "thread-composer-action thread-composer-round-action touch-target rounded-full text-muted-foreground hover:text-foreground",
+                "thread-composer-action thread-composer-round-action touch-target rounded-xl text-muted-foreground hover:text-foreground",
                 isHero
-                  ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
-                  : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
+                  ? "h-8 w-8"
+                  : "h-9 w-9",
               )}
             >
-              <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+              <AttachIcon className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
             </Button>
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
@@ -2667,24 +2690,23 @@ export function ThreadComposer({
                       disabled={voiceRecorder.buttonDisabled}
                       aria-label={voiceButtonLabel}
                       aria-keyshortcuts={VOICE_SHORTCUT_ARIA}
-                      title={voiceButtonTooltip}
                       onPointerDown={voiceRecorder.beginPress}
                       onPointerUp={voiceRecorder.endPress}
                       onPointerCancel={voiceRecorder.endPress}
                       onClick={voiceRecorder.handleClick}
                       className={cn(
-                        "thread-composer-action touch-target rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
+                        "thread-composer-action touch-target rounded-xl border border-transparent text-muted-foreground hover:text-foreground",
                         isHero ? "h-8 w-8" : "h-9 w-9",
                         voiceRecorder.isRecording &&
-                          "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
+                          "bg-red-500 text-white hover:text-white",
                       )}
                     >
                       {voiceRecorder.state === "transcribing" ? (
                         <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
                       ) : voiceRecorder.isRecording ? (
-                        <Square className={cn(isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} fill="currentColor" />
+                        <StopIcon className={cn(isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} fill="currentColor" />
                       ) : (
-                        <Mic className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
+                        <VoiceIcon className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
                       )}
                     </Button>
                   </TooltipTrigger>
@@ -2716,18 +2738,19 @@ export function ThreadComposer({
               }
               onClick={showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
               className={cn(
-                "thread-composer-action thread-composer-round-action touch-target rounded-full transition-transform",
+                "thread-composer-action thread-composer-round-action touch-target rounded-full",
                 showStopButton
-                  ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
+                  ? "border border-border/70 bg-card text-foreground/85 hover:text-foreground disabled:text-muted-foreground/50"
                   : isHero
-                    ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground disabled:bg-foreground disabled:text-background"
-                    : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground disabled:bg-foreground disabled:text-background",
+                    ? "border border-foreground bg-foreground text-background disabled:border-foreground disabled:bg-foreground disabled:text-background"
+                    : "border border-foreground bg-foreground text-background disabled:border-foreground disabled:bg-foreground disabled:text-background",
                 isHero ? "h-8 w-8" : "h-9 w-9",
-                (canSend || canOpenModelSettings || showStopButton) && "hover:scale-[1.03] active:scale-95",
               )}
             >
               {showStopButton ? (
-                <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
+                <StopIcon className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
+              ) : modelNeedsSetup ? (
+                <ModelsIcon className="h-4 w-4" />
               ) : canSend || !isStreaming ? (
                 <ArrowUp className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
               ) : (
@@ -2909,8 +2932,8 @@ function QueuedPromptRow({
         onDragEnd={onDragEnd}
         className={cn(
           "inline-flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-lg",
-          "text-muted-foreground/45 transition-colors hover:bg-background/80 hover:text-muted-foreground",
-          "active:cursor-grabbing dark:hover:bg-white/[0.06]",
+          "text-muted-foreground/45 transition-colors hover:text-muted-foreground",
+          "active:cursor-grabbing",
         )}
       >
         <GripVertical className="pointer-events-none h-3.5 w-3.5" aria-hidden />
@@ -2942,17 +2965,17 @@ function QueuedPromptRow({
         size="icon"
         aria-label={editLabel}
         title={editLabel}
-        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background/85 hover:text-foreground dark:hover:bg-white/[0.07]"
+        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
         onClick={() => onEdit(prompt)}
       >
-        <SquarePen className="h-3.5 w-3.5" aria-hidden />
+        <EditIcon className="h-3.5 w-3.5" aria-hidden />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="icon"
         aria-label={deleteLabel}
-        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background/85 hover:text-destructive dark:hover:bg-white/[0.07]"
+        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-destructive"
         onClick={() => onDelete(prompt.id)}
       >
         <Trash2 className="h-3 w-3" aria-hidden />
@@ -3188,7 +3211,7 @@ function MentionCandidateLogo({
         className="flex h-5 w-5 shrink-0 items-center justify-center"
         style={{ color }}
       >
-        <MessageCircle className="h-4 w-4" aria-hidden />
+        <ConversationIcon className="h-4 w-4" aria-hidden />
       </span>
     );
   }
@@ -3253,7 +3276,7 @@ function SlashCommandPalette({
     >
       <div ref={listRef} className="overflow-y-auto pr-0.5" style={{ maxHeight: listMaxHeight }}>
         {commands.map((command, index) => {
-          const Icon = COMMAND_ICONS[command.icon] ?? CircleHelp;
+          const Icon = command.kind === "skill" ? SkillsIcon : BUILTIN_COMMAND_ICONS[command.command] ?? COMMAND_ICONS[command.icon] ?? HelpIcon;
           const selected = index === selectedIndex;
           const isSkill = command.kind === "skill";
           const commandKey = slashCommandI18nKey(command.command);
@@ -3413,7 +3436,7 @@ function AttachmentChip({
         aria-label={labelRemove}
         className={cn(
           "ml-1 grid h-5 w-5 flex-none place-items-center rounded-full",
-          "text-muted-foreground/80 hover:bg-foreground/8 hover:text-foreground",
+          "text-muted-foreground/80 hover:text-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30",
         )}
       >

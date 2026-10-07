@@ -1,4 +1,10 @@
 import {
+  CompletedTaskIcon,
+  WebSearchIcon,
+  McpIcon,
+  ToolRunIcon,
+} from "@/components/icons/product-icons";
+import {
   Fragment,
   memo,
   useCallback,
@@ -8,16 +14,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  CheckCircle2,
-  Clock3,
-  Layers,
-  Search,
-  Server,
-  Terminal,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+import { Clock3, Layers, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText } from "@/components/MarkdownText";
@@ -43,7 +40,6 @@ import { ThinkingReasoningShell } from "@/components/thread/activity/ThinkingRea
 import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
 import {
   describeTraceLine,
-  type TraceDescription,
 } from "@/components/thread/activity/trace-activity-model";
 import { WebSearchRun } from "@/components/thread/activity/WebSearchRun";
 import { webSearchRunsByTraceLine } from "@/components/thread/activity/web-search-model";
@@ -809,11 +805,11 @@ function ActivityTraceRow({
   const trace = describeTraceLine(line, status, t, state?.result);
   const rowActive = status === "running" && active;
   const Icon = trace.icon === "clock" ? Clock3 : (trace.kind === "search"
-    ? Search
+    ? WebSearchIcon
     : trace.kind === "done"
-      ? CheckCircle2
+      ? CompletedTaskIcon
       : trace.kind === "tool"
-        ? Wrench
+        ? ToolRunIcon
         : Layers);
   if (trace.url && trace.host) {
     return (
@@ -829,7 +825,7 @@ function ActivityTraceRow({
   }
   return (
     <ActivityStep
-      marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={rowActive} />}
+      icon={Icon}
       active={rowActive && trace.kind !== "done"}
       tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
       label={formatActivityTarget(t, trace.label, trace.detail)}
@@ -879,30 +875,6 @@ function toolProgressError(error: unknown): string | undefined {
     }
   }
   return undefined;
-}
-
-function TraceIconMark({
-  trace,
-  fallbackIcon: FallbackIcon,
-  active,
-}: {
-  trace: TraceDescription;
-  fallbackIcon: LucideIcon;
-  active: boolean;
-}) {
-  return (
-    <FallbackIcon
-      className={cn(
-        "h-3.5 w-3.5 shrink-0",
-        trace.kind === "done"
-          ? "text-emerald-500/75"
-          : active
-            ? "text-muted-foreground/75"
-            : "text-muted-foreground/45",
-      )}
-      aria-hidden
-    />
-  );
 }
 
 const CLI_RUN_TOOL_NAMES = new Set(["run_cli_app", "cli_anything_run"]);
@@ -1396,7 +1368,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
           ) : preset ? (
             mcpPresetInitials(preset).slice(0, 2)
           ) : (
-            <Server className="h-3 w-3" aria-hidden />
+            <McpIcon className="h-3 w-3" aria-hidden />
           )}
         </span>
       )}

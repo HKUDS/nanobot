@@ -1,4 +1,7 @@
-import { AlertCircle, Search } from "lucide-react";
+import {
+  WebSearchIcon,
+} from "@/components/icons/product-icons";
+import { AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
@@ -17,7 +20,7 @@ export function WebSearchRun({ run, turnActive }: { run: WebSearchRunModel; turn
   return (
     <>
       <ActivityStep
-        icon={status === "error" ? AlertCircle : Search}
+        icon={status === "error" ? AlertCircle : WebSearchIcon}
         active={active}
         tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
         label={label}
