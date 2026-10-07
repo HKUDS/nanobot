@@ -251,8 +251,8 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
         extracted_line = 0
         wrote_document_content = False
         try:
-            for sheet_name in workbook.sheetnames:
-                worksheet = workbook[sheet_name]
+            for worksheet in workbook.worksheets:
+                sheet_name = worksheet.title
                 # Producer-supplied dimensions can omit cells that are present in the XML.
                 worksheet.reset_dimensions()
                 wrote_header = False
