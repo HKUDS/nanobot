@@ -15,7 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { PanelLeftClose } from "lucide-react";
+import { Blocks, PanelLeftClose } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
