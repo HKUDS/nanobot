@@ -72,7 +72,7 @@ def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
 
 def _fake_provider():
     """Return a minimal fake provider that satisfies AgentLoop.__init__."""
-    p = MagicMock()
+    p = MagicMock(aclose=AsyncMock())
     p.generation.max_tokens = 4096
     return p
 

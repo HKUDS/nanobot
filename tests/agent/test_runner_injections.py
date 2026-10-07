@@ -33,7 +33,7 @@ def _make_loop(tmp_path, *, recovery_admission=None):
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
@@ -1373,7 +1373,7 @@ async def test_pending_snapshot_rolls_back_before_later_arrivals(tmp_path, cance
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
 
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="answer"))
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
@@ -1431,7 +1431,7 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import TurnCompleted
 
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -1538,7 +1538,7 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
     sink = logger.add(lambda message: records.append(message.record))
     request.addfinalizer(lambda: logger.remove(sink))
 
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     first_request_started = asyncio.Event()
     release_first_request = asyncio.Event()

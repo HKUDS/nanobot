@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import ssl
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
@@ -33,6 +34,7 @@ from nanobot.providers.oauth_model_catalog import (
     OAuthModelCatalogSnapshot,
     oauth_catalog_auth_rejected,
 )
+from nanobot.providers.openai_codex_websocket import CodexWebSocketError, CodexWebSocketSession
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
     build_responses_compaction_state,
@@ -56,6 +58,7 @@ DEFAULT_OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
 OPENAI_CODEX_CATALOG_CLIENT_VERSION = "99.99.99"
 DEFAULT_ORIGINATOR = "nanobot"
 _COMPACTION_RETAINED_CHAR_BUDGET = 256_000
+_MAX_WEBSOCKET_SESSIONS = 32
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -75,6 +78,44 @@ class OpenAICodexProvider(LLMProvider):
         self._extra_body = dict(extra_body or {})
         self._native_compaction_available = True
         self._ssl_contexts: dict[bool, ssl.SSLContext] = {}
+        self._websocket_sessions: OrderedDict[str, CodexWebSocketSession] = OrderedDict()
+        self._websocket_sessions_lock = asyncio.Lock()
+
+    async def aclose(self) -> None:
+        sessions = list(self._websocket_sessions.values())
+        self._websocket_sessions.clear()
+        await asyncio.gather(*(session.aclose() for session in sessions))
+
+    async def _websocket_request(
+        self,
+        session_id: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        *,
+        on_content_delta: Callable[[str], Awaitable[None]] | None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None,
+    ) -> LLMResponse | None:
+        async with self._websocket_sessions_lock:
+            session = self._websocket_sessions.get(session_id)
+            if session is None:
+                if len(self._websocket_sessions) >= _MAX_WEBSOCKET_SESSIONS:
+                    idle_id = next((
+                        key for key, value in self._websocket_sessions.items() if not value.lock.locked()
+                    ), None)
+                    if idle_id is None:
+                        return None
+                    await self._websocket_sessions.pop(idle_id).aclose()
+                session = CodexWebSocketSession()
+                self._websocket_sessions[session_id] = session
+            self._websocket_sessions.move_to_end(session_id)
+        return await session.request(
+            DEFAULT_CODEX_URL, headers, body,
+            verify=self._ssl_context(verify=True), proxy=self.proxy,
+            on_content_delta=on_content_delta,
+            on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
+        )
 
     def _ssl_context(self, *, verify: bool) -> ssl.SSLContext:
         """Reuse synchronous TLS setup across requests on the shared event loop."""
@@ -186,6 +227,15 @@ class OpenAICodexProvider(LLMProvider):
                 emit_deltas: bool,
             ) -> LLMResponse:
                 wire_body = _without_response_item_ids(request_body)
+                if session_id:
+                    websocket_result = await self._websocket_request(
+                        session_id, headers, wire_body,
+                        on_content_delta=on_content_delta if emit_deltas else None,
+                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                    )
+                    if websocket_result is not None:
+                        return websocket_result
                 try:
                     return await _request_codex(
                         DEFAULT_CODEX_URL,
@@ -717,7 +767,7 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
         error_kind = "connection"
         default_detail = "network connection failed"
         should_retry = True if should_retry is None else should_retry
-    elif isinstance(exc, _CodexHTTPError):
+    elif isinstance(exc, (_CodexHTTPError, CodexWebSocketError)):
         error_kind = "http"
         default_detail = "HTTP request failed"
 

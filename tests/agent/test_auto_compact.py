@@ -24,7 +24,7 @@ def _make_loop(
 ) -> AgentLoop:
     """Create a minimal AgentLoop for testing."""
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.estimate_prompt_tokens.return_value = (10_000, "test")
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))

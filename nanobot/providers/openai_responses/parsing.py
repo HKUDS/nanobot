@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, cast
 
@@ -364,6 +364,25 @@ async def consume_sse_with_reasoning(
     capture: ResponsesStreamCapture | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
     """Consume a Responses API SSE stream, including visible reasoning summaries."""
+    return await consume_responses_events(
+        iter_sse(response),
+        on_content_delta=on_content_delta,
+        on_tool_call_delta=on_tool_call_delta,
+        on_reasoning_delta=on_reasoning_delta,
+        on_response_event=on_response_event,
+        capture=capture,
+    )
+
+
+async def consume_responses_events(
+    events: AsyncIterable[dict[str, Any]],
+    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    capture: ResponsesStreamCapture | None = None,
+) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
+    """Consume the Responses event protocol independently of its transport."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
@@ -376,7 +395,7 @@ async def consume_sse_with_reasoning(
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
-    async for event in iter_sse(response):
+    async for event in events:
         if on_response_event:
             await on_response_event(event)
         event_type = event.get("type")

@@ -9,6 +9,7 @@ from nanobot.providers.openai_responses.converters import (
 from nanobot.providers.openai_responses.parsing import (
     FINISH_REASON_MAP,
     ResponsesStreamCapture,
+    consume_responses_events,
     consume_sdk_stream,
     consume_sse,
     consume_sse_with_reasoning,
@@ -36,6 +37,7 @@ __all__ = [
     "iter_sse",
     "consume_sse",
     "consume_sse_with_reasoning",
+    "consume_responses_events",
     "consume_sdk_stream",
     "ResponsesStreamCapture",
     "is_replayable_finish_reason",

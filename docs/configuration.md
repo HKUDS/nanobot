@@ -735,6 +735,22 @@ from Codex's online catalog. Context-window and reasoning-effort metadata come
 from that response; if discovery is unavailable, nanobot keeps a small built-in
 fallback instead of emptying the selector.
 
+Codex conversations use a WebSocket connection per session. When the local
+history extends the last completed response and the request settings match,
+nanobot sends `previous_response_id` with only new messages or tool results.
+Historical images and encrypted reasoning stay in the local session state for
+recovery, without being uploaded again on each continued request.
+
+Continuation is tied to the authenticated connection. After a restart,
+disconnect, cancellation, account change, or history rewrite, nanobot sends the
+full local context again. Model, prompt, or tool changes also require full
+context. Connections are bounded; evicting an idle session uses the same recovery
+path. Requests keep `store: false`.
+
+If the endpoint rejects the WebSocket upgrade or a proxy cannot establish it,
+nanobot uses HTTP/SSE for that session. Auxiliary calls without a session, such
+as title generation, use HTTP/SSE directly.
+
 Codex Fast mode can be enabled from the WebUI provider settings, or with:
 
 ```json

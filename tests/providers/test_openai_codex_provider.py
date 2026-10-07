@@ -474,6 +474,10 @@ async def test_codex_prompt_cache_key_prefers_stable_session_id(monkeypatch) -> 
         headers_seen.append(headers)
         return provider_base.LLMResponse(content="ok")
 
+    async def http_only(_self, *_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_websocket.CodexWebSocketSession.request", http_only)
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
     provider = OpenAICodexProvider()
 
