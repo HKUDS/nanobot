@@ -25,7 +25,7 @@ export function HostCompatibilityDialog({ profile, clientVersion, onClose }: {
     <DialogContent className="remote-dialog max-w-md overflow-y-auto outline-none">
       <DialogHeader className="pr-5 text-left">
         <DialogTitle className="text-balance leading-snug">{t("remote.compatibility.title")}</DialogTitle>
-        <DialogDescription className="text-pretty [overflow-wrap:anywhere]">{displayedProfile?.name} · {displayedProfile?.host}</DialogDescription>
+        <DialogDescription className="text-pretty [overflow-wrap:anywhere]"><span className="block font-medium">{displayedProfile?.name}</span>{" "}<span className="block font-mono text-xs">{displayedProfile?.host}</span></DialogDescription>
       </DialogHeader>
       <SettingsGroup>
         <dl className="space-y-3 px-4 py-3 text-[13px] leading-5">

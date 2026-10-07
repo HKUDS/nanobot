@@ -1642,7 +1642,7 @@ function MoveToGroupSubmenu({
           >
             <span className="min-w-0 max-w-56 flex-1 truncate">{target.title}</span>
             <span className="shrink-0 tabular-nums text-sidebar-muted-foreground">
-              · {target.paneCount}/{MAX_WORKBENCH_PANES}
+              {target.paneCount}/{MAX_WORKBENCH_PANES}
             </span>
           </DropdownMenuItem>
         ))}

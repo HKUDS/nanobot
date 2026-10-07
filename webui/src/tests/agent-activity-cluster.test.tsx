@@ -160,8 +160,8 @@ describe("AgentActivityCluster", () => {
 
     expect(screen.getByText(`Searched files “${query}”`)).toBeInTheDocument();
     expect(screen.getByText(`Reading file ${path}`)).toBeInTheDocument();
-    expect(screen.getByText("Using Blender · --json --background scene.blend")).toBeInTheDocument();
-    expect(screen.getByText("Opening example.com · Browserbase")).toBeInTheDocument();
+    expect(screen.getByLabelText("Using Blender, --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByLabelText("Opening example.com, Browserbase")).toBeInTheDocument();
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
 
@@ -169,19 +169,19 @@ describe("AgentActivityCluster", () => {
 
     expect(screen.getByText(`文件搜索完成 “${query}”`)).toBeInTheDocument();
     expect(screen.getByText(`正在读取文件 ${path}`)).toBeInTheDocument();
-    expect(screen.getByText("正在使用 Blender · --json --background scene.blend")).toBeInTheDocument();
-    expect(screen.getByText("正在打开 example.com · Browserbase")).toBeInTheDocument();
+    expect(screen.getByLabelText("正在使用 Blender, --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByLabelText("正在打开 example.com, Browserbase")).toBeInTheDocument();
     expect(screen.getByText("编辑")).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
 
     await act(async () => setAppLanguage("ja"));
 
-    expect(screen.getByText(`“${query}” · ファイル検索完了`)).toBeInTheDocument();
-    expect(screen.getByText(`${path} · ファイルを読み取り中`)).toBeInTheDocument();
-    expect(screen.getByText("Blender を使用中 · --json --background scene.blend")).toBeInTheDocument();
-    expect(screen.getByText("example.com · 開いています · Browserbase")).toBeInTheDocument();
+    expect(screen.getByText(`“${query}” ファイル検索完了`)).toBeInTheDocument();
+    expect(screen.getByText(`${path} ファイルを読み取り中`)).toBeInTheDocument();
+    expect(screen.getByLabelText("Blender を使用中, --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByLabelText("example.com 開いています, Browserbase")).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference").closest('[data-testid="activity-step"]'))
-      .toHaveTextContent(`${path} · 編集`);
+      .toHaveTextContent(`${path} 編集`);
   });
 
   it("loads deferred trace details only after completed activity is expanded", async () => {
@@ -231,7 +231,7 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(
-      screen.getByText("Connection failed · retrying in 5s · attempt 1/4"),
+      screen.getByText("Connection failed. Retrying in 5s (attempt 1/4)."),
     ).toBeInTheDocument();
   });
 
@@ -618,7 +618,7 @@ describe("AgentActivityCluster", () => {
             retryStatus={{ state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection" }}
           />,
         );
-        expect(screen.getByRole("status", { name: "Connection failed · retrying in 0s · attempt 1/4" }))
+        expect(screen.getByRole("status", { name: "Connection failed. Retrying in 0s (attempt 1/4)." }))
           .toBeVisible();
         unmount();
         render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
@@ -1117,7 +1117,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Using Blender · --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByLabelText("Using Blender, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByTestId("activity-cli-logo-blender")).toBeInTheDocument();
     expect(screen.queryByText(/run_cli_app/)).not.toBeInTheDocument();
   });
@@ -1165,8 +1165,8 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    const searchRow = screen.getByText("Searched nanobot architecture").closest('[data-testid="activity-step"]');
-    const cliRow = screen.getByText("Used Blender · --json project new").closest('[data-testid="activity-step"]');
+    const searchRow = screen.getByLabelText("Searched the web, nanobot architecture").closest('[data-testid="activity-step"]');
+    const cliRow = screen.getByLabelText("Used Blender, --json project new").closest('[data-testid="activity-step"]');
     const fetchRow = screen.getByText("example.com/diagram").closest('[data-testid="activity-step"]');
 
     expect(searchRow).not.toBeNull();
@@ -1211,7 +1211,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Searched agent frameworks")).toBeInTheDocument();
+    expect(screen.getByLabelText("Searched the web, agent frameworks")).toBeInTheDocument();
     expect(screen.queryByText("2 sources")).not.toBeInTheDocument();
 
     const openAiLink = screen.getByText("OpenAI Agents SDK").closest("a");
@@ -1231,7 +1231,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByTestId("activity-web-favicon-anthropic.com")).toBeInTheDocument();
     expect(screen.queryByText("Internal dashboard")).not.toBeInTheDocument();
     expect(screen.queryByText("Build and deploy agentic applications.")).not.toBeInTheDocument();
-    const searchStep = screen.getByText("Searched agent frameworks").closest(
+    const searchStep = screen.getByLabelText("Searched the web, agent frameworks").closest(
       '[data-testid="activity-step"]',
     );
     const openAiStep = openAiLink!.closest('[data-testid="activity-step"]');
@@ -1273,7 +1273,7 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByText("Searched X · nanobot oauth")).toBeInTheDocument();
+    expect(screen.getByLabelText("Searched X, nanobot oauth")).toBeInTheDocument();
     expect(screen.queryByText(/Completed X search/i)).not.toBeInTheDocument();
     expect(screen.getAllByTestId("activity-step")).toHaveLength(1);
   });
@@ -1308,7 +1308,7 @@ describe("AgentActivityCluster", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.queryByText(/signed-secret|secret1234|url-secret/)).not.toBeInTheDocument();
-    expect(screen.getByText("Searched release notes access_token=<redacted>")).toBeInTheDocument();
+    expect(screen.getByLabelText("Searched the web, release notes access_token=<redacted>")).toBeInTheDocument();
     expect(screen.getByText("Release <redacted>")).toBeInTheDocument();
     expect(screen.getByText("Release <redacted>").closest("a")).toHaveAttribute(
       "href",
@@ -1357,7 +1357,7 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(screen.getAllByTestId("activity-step")).toHaveLength(1);
-    expect(screen.getByText("Could not search LinkedIn · Evomap startup")).toBeInTheDocument();
+    expect(screen.getByLabelText("Could not search LinkedIn, Evomap startup")).toBeInTheDocument();
     expect(screen.queryByText(/site:linkedin/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Web research")).not.toBeInTheDocument();
   });
@@ -1411,7 +1411,7 @@ describe("AgentActivityCluster", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Worked" }));
 
-    const row = screen.getByText("Could not use GitHub · --json repo view").closest(
+    const row = screen.getByLabelText("Could not use GitHub, --json repo view").closest(
       '[data-testid="activity-step"]',
     );
     expect(row).toBeInTheDocument();
@@ -1445,7 +1445,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Opening example.com · Browserbase")).toBeInTheDocument();
+    expect(screen.getByLabelText("Opening example.com, Browserbase")).toBeInTheDocument();
     expect(screen.queryByText("Using")).not.toBeInTheDocument();
     expect(screen.queryByText(/browser_navigate/)).not.toBeInTheDocument();
     expect(screen.getByTestId("activity-mcp-logo-browserbase")).toBeInTheDocument();
@@ -1606,7 +1606,7 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    const run = screen.getByText(/Reviewed sources.*2 files/).closest('[data-testid="activity-step"]');
+    const run = screen.getByLabelText(/Reviewed sources.*2 files/).closest('[data-testid="activity-step"]');
     expect(run).toBeInTheDocument();
     expect(screen.queryByText(firstPath)).not.toBeInTheDocument();
     expect(screen.queryByText(secondPath)).not.toBeInTheDocument();
@@ -1708,7 +1708,7 @@ describe("AgentActivityCluster", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Worked" }));
 
-    expect(screen.getByText("Ran command cat << 'EOF' | bash · script, 6 lines")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ran command cat << 'EOF' | bash, script, 6 lines")).toBeInTheDocument();
     expect(screen.queryByText(/SECRET_TOKEN/)).not.toBeInTheDocument();
     expect(screen.queryByText(/for id in/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Done$/)).not.toBeInTheDocument();

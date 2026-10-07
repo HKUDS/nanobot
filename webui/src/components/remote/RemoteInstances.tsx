@@ -134,7 +134,7 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
     manage,
     cancel: hosts.cancel, clearError: hosts.clearError, restoreFocus: () => { if (!managing) restoreFocus(); },
   };
-  useEffect(() => { if (selected) document.title = `${selected.name} · nanobot`; }, [selected]);
+  useEffect(() => { if (selected) document.title = selected.name; }, [selected]);
   useEffect(() => {
     const rememberFocus = (event: FocusEvent) => {
       if (!managementOpen.current && event.target instanceof HTMLElement && localPanel.current?.contains(event.target)
@@ -190,9 +190,10 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
               <RemoteConnectionsPage onBackToChat={() => changeManagement(false)} mainNavigationExpanded={!!bridge.surface?.left} />
             </ThemeProvider>
           </main>}
-          {!managing && selected && (offline || !activeFrame?.loaded) && <div className="absolute inset-0 overflow-y-auto bg-background p-6 text-center"><div className="flex min-h-full flex-col items-center justify-center gap-3">
+          {!managing && selected && (offline || !activeFrame?.loaded) && <div role="region" aria-label={t(offline ? recoveryTitle : "remote.opening")} className="absolute inset-0 overflow-y-auto bg-background p-6 text-center"><div className="flex min-h-full flex-col items-center justify-center gap-3">
             {offline ? <PlugZap className="h-7 w-7 text-muted-foreground" /> : <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />}
-            <p className="max-w-full text-pretty text-xs text-muted-foreground [overflow-wrap:anywhere]">{selected.name} · {selected.hostname}</p>
+            <p className="max-w-full text-pretty text-xs text-muted-foreground [overflow-wrap:anywhere]"><span className="block font-medium">{selected.name}</span>{" "}
+              {selected.hostname !== selected.name ? <span className="block">{selected.hostname}</span> : null}</p>
             <p className="font-medium">{t(offline ? recoveryTitle : "remote.opening")}</p>
             <p className="max-w-sm text-pretty text-sm text-muted-foreground">{recoveryMessage}</p>
             <div className="flex max-w-full flex-wrap items-stretch justify-center gap-2 [&>button]:h-auto [&>button]:min-h-10 [&>button]:min-w-0 [&>button]:max-w-full [&>button]:whitespace-normal">

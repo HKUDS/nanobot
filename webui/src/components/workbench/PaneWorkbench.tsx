@@ -776,7 +776,7 @@ export function PaneWorkbench({
                       {active ? (
                         <TooltipContent side="top">
                           {t("workbench.movePaneHint", {
-                            defaultValue: "Drag to move · Arrow keys also work",
+                            defaultValue: "Drag to move, or use the arrow keys.",
                           })}
                         </TooltipContent>
                       ) : null}

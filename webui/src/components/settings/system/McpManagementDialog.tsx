@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, ExternalLink, Loader2, RotateCcw, Search, Server, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -363,6 +364,29 @@ function ToolsPanel({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  if (!toolNames.length && testBusy) {
+    return (
+      <SkeletonStatus label={tx("settings.mcp.loadingTools", "Loading tools…")} className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="h-10 min-w-0 rounded-full bg-muted-foreground/20 sm:flex-1" />
+          <div className="flex h-8 items-center justify-between gap-4 sm:justify-end">
+            <div className="mr-auto h-3 w-20 rounded bg-muted-foreground/20 sm:mr-1" />
+            <div className="h-3 w-6 rounded bg-muted-foreground/20" />
+            <div className="h-3 w-9 rounded bg-muted-foreground/20" />
+          </div>
+        </div>
+        <div className="overflow-hidden rounded-floating border border-border/55">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="flex min-h-11 items-center gap-3 border-b border-border/45 px-3.5 py-2.5 last:border-b-0">
+              <div className="h-5 w-5 shrink-0 rounded-compact bg-muted-foreground/20" />
+              <div className={cn("h-3.5 max-w-[70%] rounded bg-muted-foreground/20", index % 2 ? "w-40" : "w-52")} />
+            </div>
+          ))}
+        </div>
+      </SkeletonStatus>
+    );
+  }
+
   if (!toolNames.length) {
     return (
       <div
@@ -373,39 +397,31 @@ function ToolsPanel({
       >
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-background text-muted-foreground">
-            {testBusy ? (
-              <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
-            ) : (
-              <AppActionsIcon className="h-4 w-4" aria-hidden />
-            )}
+            <AppActionsIcon className="h-4 w-4" aria-hidden />
           </div>
           <p
             role={preset.error ? "alert" : undefined}
             className={cn("min-w-0 text-[14px] font-medium", preset.error ? "text-destructive" : "text-foreground")}
           >
-            {testBusy
-              ? tx("common.loading", "Loading…")
-              : preset.error || tx("settings.mcp.noToolsAvailable", "No tools available")}
+            {preset.error || tx("settings.mcp.noToolsAvailable", "No tools available")}
           </p>
         </div>
-        {!testBusy ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={configuredInstalled ? onTest : onOpenConnection}
-            className="h-9 shrink-0 rounded-full px-4 text-[13px] font-semibold"
-          >
-            {configuredInstalled ? (
-              <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            ) : (
-              <Server className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            )}
-            {configuredInstalled
-              ? tx("settings.mcp.reloadTools", "Reload tools")
-              : tx("settings.mcp.setup", "Connect")}
-          </Button>
-        ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={configuredInstalled ? onTest : onOpenConnection}
+          className="h-9 shrink-0 rounded-full px-4 text-[13px] font-semibold"
+        >
+          {configuredInstalled ? (
+            <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Server className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          )}
+          {configuredInstalled
+            ? tx("settings.mcp.reloadTools", "Reload tools")
+            : tx("settings.mcp.setup", "Connect")}
+        </Button>
       </div>
     );
   }
@@ -535,7 +551,6 @@ function ConnectionPanel({
             preset.connection_summary && "mt-3 border-t border-border/45 pt-3",
           )}>
             <span>{formatTransport(preset.transport)}</span>
-            <span aria-hidden>·</span>
             <span>{authentication}</span>
             <div className="ml-auto flex items-center gap-1.5">
               {preset.docs_url ? (
@@ -587,11 +602,11 @@ function ConnectionPanel({
               const inputId = `mcp-manage-${preset.name}-${field.name}`;
               return (
                 <label key={field.name} htmlFor={inputId} className="min-w-0">
-                  <span className="mb-1.5 flex items-center gap-1 text-[12.5px] font-medium text-muted-foreground">
+                  <span className="mb-1.5 flex items-center gap-2 text-[12.5px] font-medium text-muted-foreground">
                     {field.label}
                     {field.configured ? (
                       <span className="font-normal text-emerald-600 dark:text-emerald-300">
-                        · {tx("settings.mcp.configured", "Configured")}
+                        {tx("settings.mcp.configured", "Configured")}
                       </span>
                     ) : null}
                   </span>

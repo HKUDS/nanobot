@@ -1,10 +1,11 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { Loader2, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SETTINGS_SEARCH_INPUT_CLASS } from "@/components/settings/shared/SettingsControls";
+import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
 import type { ChannelFeatureAction } from "@/channel-plugins/types";
 import { ChannelCatalogRow } from "@/components/settings/channels/ChannelCatalogRow";
 import { localizedChannelDisplayName } from "@/components/settings/channels/ChannelIdentity";
@@ -120,10 +121,9 @@ export function ChannelsSettings({
           onRestart={onRestart} isRestarting={isRestarting} />
       ) : null}
       {loading && !nanobotFeatures ? (
-        <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-          {t("settings.channels.loading")}
-        </div>
+        <SettingsGroup>
+          <CatalogSkeleton label={t("settings.channels.loading")} layout="channels" />
+        </SettingsGroup>
       ) : visibleChannels.length ? (
         channelGroups.map((group) => (
         <section
@@ -151,11 +151,11 @@ export function ChannelsSettings({
           </SettingsGroup>
         </section>
         ))
-      ) : (
+      ) : !error ? (
         <div className="px-3 py-12 text-center text-sm text-muted-foreground">
           {t(channels.length ? "settings.channels.noResults" : "settings.channels.empty")}
         </div>
-      )}
+      ) : null}
       <Dialog open={Boolean(selectedChannel)} onOpenChange={(open) => { if (!open) requestChannelClose(); }}>
         <DialogContent ref={dialogRef} showCloseButton={false} aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-hidden p-0 outline-none"
           onOpenAutoFocus={(event) => {

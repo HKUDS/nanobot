@@ -54,7 +54,9 @@ interface SettingsPageProps {
   onToggleTheme: () => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
-  extensions: WebUIExtensionSummary[];
+  skillsLoading?: boolean;
+  skillsError?: boolean;
+  extensions?: WebUIExtensionSummary[];
   onOpenExtension?: (extensionId: string) => void;
   onToggleExtension?: (extensionId: string, enabled: boolean) => Promise<void> | void;
   onEditExtension?: (extensionId: string, config: Record<string, unknown>) => Promise<void> | void;
@@ -81,6 +83,8 @@ export function SettingsPage({
   onToggleTheme,
   onBackToChat,
   skills,
+  skillsLoading = false,
+  skillsError = false,
   extensions = [],
   onOpenExtension,
   onToggleExtension,
@@ -619,7 +623,7 @@ export function SettingsPage({
           </div>
         );
       case "skills":
-        return <SkillsCatalogSettings skills={skills} />;
+        return <SkillsCatalogSettings skills={skills} loading={skillsLoading} error={skillsError} />;
       case "extensions":
         return (
           <ExtensionsCatalogSettings

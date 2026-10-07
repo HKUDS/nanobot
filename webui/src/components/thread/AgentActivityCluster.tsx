@@ -346,14 +346,14 @@ function FoldedAgentActivity({
   const activityLabel = retryStatus?.state === "exhausted"
     ? t("message.retryExhausted", {
         error: retryError,
-        defaultValue: "{{error}} · ending turn",
+        defaultValue: "{{error}}. Ending turn.",
       })
     : retryStatus?.state === "waiting"
       ? t("message.retryWaiting", {
           error: retryError,
           seconds: retrySeconds,
           attempt: retryAttempt,
-          defaultValue: "{{error}} · retrying in {{seconds}}s · attempt {{attempt}}",
+          defaultValue: "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
         })
       : isTurnStreaming
     ? t("message.activityWorkingFor", {
@@ -828,7 +828,9 @@ function ActivityTraceRow({
       icon={Icon}
       active={rowActive && trace.kind !== "done"}
       tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
-      label={formatActivityTarget(t, trace.label, trace.detail)}
+      label={trace.kind === "search" ? trace.label : formatActivityTarget(t, trace.label, trace.detail)}
+      detail={trace.kind === "search" ? trace.detail : trace.aside}
+      detailClassName={trace.kind === "search" ? "whitespace-pre-line" : undefined}
     />
   );
 }
@@ -1251,16 +1253,18 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const displayName = app?.display_name || titleFromPresetName(run.name);
-  const label = `${t(
+  const label = t(
     `message.${failed ? "cliActivityFailedOne" : rowActive ? "cliActivityRunningOne" : "cliActivityRanOne"}`,
     { name: displayName },
-  )}${args ? ` · ${args}` : ""}`;
+  );
 
   return (
     <ActivityStep
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
+      detail={args}
+      detailClassName="font-mono text-[12px]"
       marker={(
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
@@ -1334,13 +1338,14 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
     failed ? "error" : rowActive ? "running" : "done",
     t,
   );
-  const label = `${formatActivityTarget(t, activity.action, activity.target ?? "")} · ${displayName}`;
+  const label = formatActivityTarget(t, activity.action, activity.target ?? "");
 
   return (
     <ActivityStep
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
+      detail={displayName}
       marker={(
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}

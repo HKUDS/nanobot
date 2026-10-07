@@ -344,10 +344,9 @@ export function ModelIdPicker({
             {model.label ?? model.id}
           </span>
           {model.description || (model.label && model.label !== model.id) ? (
-            <span className="mt-0.5 block truncate text-[10.5px] text-muted-foreground">
-              {[model.label && model.label !== model.id ? model.id : null, model.description]
-                .filter(Boolean)
-                .join(" · ")}
+            <span className="mt-0.5 flex min-w-0 flex-wrap gap-x-2 text-[10.5px] text-muted-foreground">
+              {model.label && model.label !== model.id ? <span className="truncate font-mono">{model.id}</span> : null}{" "}
+              {model.description ? <span className="truncate">{model.description}</span> : null}
             </span>
           ) : null}
         </span>

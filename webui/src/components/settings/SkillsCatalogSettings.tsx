@@ -31,14 +31,19 @@ import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
-import { notifySkillsChanged } from "@/lib/skill-events";
+import { notifySkillsChanged, requestSkillsRefresh } from "@/lib/skill-events";
 import type { SkillDetail, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
+export function SkillsCatalogSettings({ skills, loading = false, error = false }: {
+  skills: SkillSummary[];
+  loading?: boolean;
+  error?: boolean;
+}) {
   const { t } = useTranslation();
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const [view, setView] = useState<"installed" | "discover">("installed");
@@ -140,14 +145,23 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                 value,
                 label: (
                   <>
-                    {label} <span className="ml-0.5 tabular-nums opacity-65">{count}</span>
+                    {label} <span className="ml-0.5 tabular-nums opacity-65">{loading || error ? "—" : count}</span>
                   </>
                 ),
               }))}
               onChange={setInstalledFilter}
             />
           </div>
-          {groupedSkills.length ? (
+          {loading ? (
+            <CatalogSkeleton label={t("settings.skills.loading")} layout="skills" />
+          ) : error ? (
+            <div className="space-y-3 px-4 py-8 text-center text-sm">
+              <p role="alert" className="text-destructive">{t("settings.skills.catalogLoadFailed")}</p>
+              <Button type="button" variant="outline" size="sm" onClick={requestSkillsRefresh}>
+                {t("settings.skills.retry")}
+              </Button>
+            </div>
+          ) : groupedSkills.length ? (
             <div className="space-y-5 px-3 pb-3 pt-2 sm:px-4">
               {groupedSkills.map((group) => (
                 <section key={group.key} className="space-y-1">
@@ -173,9 +187,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
             </div>
           ) : (
             <div className="px-3 py-12 text-center text-sm text-muted-foreground">
-              {t("settings.skills.noMatching", {
-                defaultValue: "No matching skills.",
-              })}
+              {t(skills.length ? "settings.skills.noMatching" : "settings.skills.empty")}
             </div>
           )}
         </section>
