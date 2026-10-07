@@ -42,8 +42,7 @@ import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfi
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import type { SessionAutomationJob, SkillSummary, WebUIExtensionSummary } from "@/lib/types";
-import type { ChatSummary, SessionAutomationJob, SkillSummary } from "@/lib/types";
+import type { ChatSummary, SessionAutomationJob, SkillSummary, WebUIExtensionSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {

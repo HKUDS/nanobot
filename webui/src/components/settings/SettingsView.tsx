@@ -2,8 +2,7 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 import type { SettingsExitGuard, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import type { SettingsPayload, SkillSummary, WebUIExtensionSummary } from "@/lib/types";
-import type { ChatSummary, SettingsPayload, SkillSummary } from "@/lib/types";
+import type { ChatSummary, SettingsPayload, SkillSummary, WebUIExtensionSummary } from "@/lib/types";
 
 export type { SettingsSectionKey } from "@/components/settings/contracts";
 
