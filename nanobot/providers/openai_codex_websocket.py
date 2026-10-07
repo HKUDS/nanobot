@@ -171,7 +171,7 @@ class CodexWebSocketSession:
                                 raise CodexWebSocketError(
                                     {
                                         **(cast(dict[str, Any], raw) if isinstance(raw, dict) else {}),
-                                        "headers": dict(exc.response.headers),
+                                        "headers": dict(exc.response.headers.raw_items()),
                                     },
                                     exc.response.status_code,
                                 ) from None

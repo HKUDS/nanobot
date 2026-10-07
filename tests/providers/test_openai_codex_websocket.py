@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -11,8 +12,11 @@ from typing import Any
 
 import pytest
 from aiohttp import web
+from pypdf import PdfWriter
 
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.model_runtime import ModelRuntimeResolver
+from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ProviderCallContext
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.providers.openai_codex_provider import OpenAICodexProvider
@@ -58,6 +62,8 @@ class _ResponsesServer:
         self.http_requests: list[dict[str, Any]] = []
         self.upgrade_attempts = 0
         self.reject_upgrade = False
+        self.upgrade_status = 426
+        self.upgrade_headers = []
         self.respond = self._respond
 
     async def _respond(self, peer, _body):
@@ -71,7 +77,10 @@ class _ResponsesServer:
             return web.Response(text=data, content_type="text/event-stream")
         self.upgrade_attempts += 1
         if self.reject_upgrade:
-            return web.Response(status=426)
+            return web.json_response(
+                {"error": {"code": "token_revoked", "message": "PRIVATE INPUT"}},
+                status=self.upgrade_status, headers=self.upgrade_headers,
+            )
         socket = web.WebSocketResponse(max_msg_size=0)
         await socket.prepare(request)
         peer = _Peer(socket, dict(request.headers))
@@ -125,6 +134,44 @@ def _context(result: LLMResponse | None = None, pending=None, session="session-a
             pending if pending is not None else [{"role": "user", "content": "next"}],
         )
     return ProviderCallContext(session_id=session, conversation_state=state, **kwargs)
+
+
+async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_path):
+    provider, server, _ = codex_peer
+    image = tmp_path / "image.png"
+    image.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP1kAAAAASUVORK5CYII="
+    ))
+    pdf = tmp_path / "report.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.write(pdf)
+    agent = AgentLoop(
+        bus=MessageBus(), provider=provider, workspace=tmp_path,
+        model=provider.get_default_model(), context_window_tokens=128_000,
+    )
+    try:
+        first = await agent.process_direct(
+            "Describe this image.", session_key="websocket:attachments",
+            channel="websocket", chat_id="attachments", media=[str(image)],
+        )
+        second = await agent.process_direct(
+            "Summarize this PDF.", session_key="websocket:attachments",
+            channel="websocket", chat_id="attachments", media=[str(pdf)],
+        )
+        assert first.content == second.content == "answer"
+        assert len(server.peers) == 1
+        assert len(server.requests) == 2
+        initial, continued = [body for _, body in server.requests]
+        assert "input_image" in json.dumps(initial["input"])
+        assert continued["previous_response_id"] == "resp_1"
+        assert "input_image" not in json.dumps(continued["input"])
+        assert "[Attachment:" in json.dumps(continued["input"])
+        assert str(pdf) in json.dumps(continued["input"])
+        assert not server.http_requests
+    finally:
+        await agent.aclose()
+    await asyncio.wait_for(server.peers[0].closed.wait(), 2)
 
 
 async def test_codex_continues_attachment_and_tool_turns_without_replaying_history(codex_peer):
@@ -332,6 +379,20 @@ async def test_codex_unsupported_upgrade_uses_sticky_http_full_replay(codex_peer
     assert len(server.http_requests) == 2
     assert len(server.http_requests[1]["input"]) == 3
     assert all("previous_response_id" not in body for body in server.http_requests)
+
+
+async def test_codex_rejected_handshake_accepts_repeated_response_headers(codex_peer):
+    provider, server, _ = codex_peer
+    server.reject_upgrade = True
+    server.upgrade_status = 401
+    server.upgrade_headers = [("Set-Cookie", "first=fixture"), ("Set-Cookie", "second=fixture")]
+    result = await provider.chat(_messages(), provider_context=_context())
+    assert result.finish_reason == "error"
+    assert result.error_status_code == 401
+    assert result.error_code == "token_revoked"
+    assert result.error_should_retry is False
+    assert "PRIVATE INPUT" not in result.content
+    assert not server.http_requests
 
 
 @pytest.mark.parametrize("code, retry", [("insufficient_quota", False), ("rate_limit_exceeded", True)])
