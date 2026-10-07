@@ -11,9 +11,6 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.config.paths import get_media_dir
-from nanobot.webui.attachment_http import AttachmentHTTP
-from nanobot.webui.attachment_store import AttachmentStore
-from nanobot.webui.ingress_policy import AttachmentIngressLimits
 from nanobot.webui.media_api import (
     serve_signed_media,
     sign_or_stage_media_path,
@@ -36,30 +33,11 @@ class WebUIMediaGateway:
         logger: Any,
         media_dir: Callable[[str | None], Path] | None = None,
         secret: bytes | None = None,
-        attachment_limits: AttachmentIngressLimits | None = None,
     ) -> None:
         self.workspace_path = workspace_path
         self.logger = logger
         self._media_dir: Callable[[str | None], Path] = media_dir or _default_media_dir
         self.secret = secret or secrets.token_bytes(32)
-        self.attachment_limits = attachment_limits or AttachmentIngressLimits()
-
-        self._attachments: AttachmentStore | None = None
-        self._uploads: AttachmentHTTP | None = None
-
-    @property
-    def attachments(self) -> AttachmentStore:
-        if self._attachments is None:
-            self._attachments = AttachmentStore(
-                self._media_dir("websocket"), limits=self.attachment_limits,
-            )
-        return self._attachments
-
-    @property
-    def uploads(self) -> AttachmentHTTP:
-        if self._uploads is None:
-            self._uploads = AttachmentHTTP(self.attachments)
-        return self._uploads
 
     def serve_signed_media(
         self,

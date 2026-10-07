@@ -8,7 +8,7 @@ from weakref import WeakKeyDictionary
 from aiohttp import web
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.webui.attachment_store import AttachmentStore, AttachmentUploadError
+from nanobot.channels.websocket.attachment_store import AttachmentStore, AttachmentUploadError
 
 UPLOAD_PATH = "/api/attachments"
 

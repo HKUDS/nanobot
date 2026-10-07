@@ -206,6 +206,9 @@ See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
 
 ### Binary attachments (WebUI and TUI)
 
+The WebSocket channel owns the HTTP bridge, upload capabilities, attachment
+policy and staging. WebUI message handling uses these injected gateway services.
+
 The gateway advertises `webui.attachments.binary.v1`. WebUI protocol 1 and the
 terminal protocol are unchanged. Bundled clients and their gateway use HTTP on
 the same listener for attachment uploads. After an authorized handshake, `ready`

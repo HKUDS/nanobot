@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger as default_logger
 
+from nanobot.channels.websocket.attachment_http import AttachmentHTTP
+from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
+from nanobot.config.paths import get_media_dir
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -39,6 +42,7 @@ class GatewayServices:
     settings: WebUISettingsServices
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
+    uploads: AttachmentHTTP
     ingress: WebUIIngressPolicy
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
@@ -101,8 +105,10 @@ def build_gateway_services(
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
-        attachment_limits=ingress.attachments,
     )
+    uploads = AttachmentHTTP(AttachmentStore(
+        get_media_dir("websocket"), limits=ingress.attachments,
+    ))
     transcripts = WebUITranscriptRecorder(log=logger)
     workspaces = WebUIWorkspaceController(
         session_manager=session_manager,
@@ -152,6 +158,7 @@ def build_gateway_services(
         settings=settings,
         tokens=tokens,
         media=media,
+        uploads=uploads,
         ingress=ingress,
         transcripts=transcripts,
         workspaces=workspaces,

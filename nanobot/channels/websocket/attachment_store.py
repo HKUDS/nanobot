@@ -14,15 +14,15 @@ from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.utils.media_decode import media_destination
-from nanobot.webui.attachment_ingress import (
+from nanobot.channels.websocket.attachment_policy import (
     DOCUMENT_MIME_ALLOWED,
     MAX_VIDEO_BYTES,
     MAX_VIDEOS_PER_MESSAGE,
     UPLOAD_MIME_ALLOWED,
     VIDEO_MIME_ALLOWED,
+    AttachmentIngressLimits,
 )
-from nanobot.webui.ingress_policy import AttachmentIngressLimits
+from nanobot.utils.media_decode import media_destination
 
 
 class AttachmentUploadError(ValueError):

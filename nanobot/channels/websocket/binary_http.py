@@ -1,4 +1,4 @@
-"""Body-capable HTTP bridge for the existing websockets listener.
+"""Body-capable HTTP bridge for the WebSocket channel listener.
 
 GET (including WebSocket upgrades) remains on websockets' existing parser and
 handshake path. Other methods go directly to aiohttp's bounded streaming HTTP

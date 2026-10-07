@@ -20,9 +20,9 @@ from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Request
 
+from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.webui import remote_ssh
-from nanobot.webui.binary_http import BinaryHTTPBridge
 from nanobot.webui.client_contract import webui_contract
 from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.local_client_assets import LocalClientAssets
@@ -35,7 +35,7 @@ MEDIA = "/api/media/AAAAAAAAAAAAAAAAAAAAAA/remoteFilePayload"
 
 @pytest.fixture
 async def remote(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", lambda _: tmp_path / "media")
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     assets = tmp_path / "local-dist"
     assets.mkdir()
     (assets / "index.html").write_text("<!doctype html><title>Local nanobot</title>", encoding="utf-8")
@@ -105,16 +105,16 @@ async def remote(tmp_path, monkeypatch):
         try:
             await ws.send(json.dumps({"ready": True, "media": MEDIA,
                                       "query": parse_qs(urlsplit(ws.request.path).query).get("client_id"),
-                                      **({"event": "ready", "upload": services.media.uploads.issue(ws)}
+                                      **({"event": "ready", "upload": services.uploads.issue(ws)}
                                          if state.binary_upload else {})}))
             async for message in ws:
                 await ws.send(message)
         finally:
-            services.media.uploads.revoke(ws)
+            services.uploads.revoke(ws)
 
     real_spawn = asyncio.create_subprocess_exec
     monkeypatch.setattr(remote_ssh.shutil, "which", lambda _: "fixture-ssh")
-    bridge = BinaryHTTPBridge(services.media.uploads.handle)
+    bridge = BinaryHTTPBridge(services.uploads.handle)
     async with serve(messages, "127.0.0.1", 0, process_request=process,
                      create_connection=bridge.connection_factory, max_size=64 * 1024 * 1024) as server:
         port = server.sockets[0].getsockname()[1]
@@ -147,7 +147,7 @@ while data := upstream.recv(65536):
             state.block.set()
             await proxy.close()
             await bridge.shutdown()
-            services.media.attachments.clear()
+            services.uploads.store.clear()
             assert all(child.returncode is not None for child in children)
 
 
@@ -306,9 +306,9 @@ async def test_binary_http_upload_uses_a_live_local_capability(remote):
                                             content=raw, headers=headers)
         assert response.status_code == 201, response.text
         assert response.headers["cache-control"] == "no-store"
-        assert capability["token"] not in remote.services.media.uploads._tokens
-        owner = next(iter(remote.services.media.uploads._tokens))
-        paths = remote.services.media.attachments.resolve([response.json()["reference"]], owner=owner)
+        assert capability["token"] not in remote.services.uploads._tokens
+        owner = next(iter(remote.services.uploads._tokens))
+        paths = remote.services.uploads.store.resolve([response.json()["reference"]], owner=owner)
         assert Path(paths[0]).read_bytes() == raw
         assert (await remote.client.post(remote.proxy.origin + "/api/attachments", content=raw,
             headers={**headers, "Authorization": "Bearer " + issued["api_token"]})).status_code == 401
@@ -317,11 +317,11 @@ async def test_binary_http_upload_uses_a_live_local_capability(remote):
         assert (await remote.client.post(remote.proxy.origin + capability["path"], content=raw,
             headers={**headers, "Origin": "https://foreign.test"})).status_code == 403
     async with asyncio.timeout(5):
-        while remote.services.media.uploads._tokens:
+        while remote.services.uploads._tokens:
             await asyncio.sleep(.01)
     assert (await remote.client.post(remote.proxy.origin + capability["path"],
                                     content=raw, headers=headers)).status_code == 401
-    assert not remote.services.media.attachments._entries
+    assert not remote.services.uploads.store._entries
 
 
 @pytest.mark.parametrize("encoded", [False, True], ids=["chunked", "compressed"])
@@ -340,7 +340,7 @@ async def test_binary_upload_rejects_changed_body_framing(remote, encoded):
                 **({"Content-Encoding": "gzip"} if encoded else {}),
             })
         assert response.status_code == 400
-        assert not remote.services.media.attachments._entries
+        assert not remote.services.uploads.store._entries
 
 
 async def test_signed_media_wrapped_over_http_and_websocket_and_range_preserved(remote):

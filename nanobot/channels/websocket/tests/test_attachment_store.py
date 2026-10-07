@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.channels.websocket.attachment_policy import AttachmentIngressLimits
+from nanobot.channels.websocket.attachment_store import AttachmentStore, AttachmentUploadError
 from nanobot.utils.media_decode import save_base64_data_url
-from nanobot.webui.attachment_store import AttachmentStore, AttachmentUploadError
-from nanobot.webui.ingress_policy import AttachmentIngressLimits
 
 
 async def chunks(raw: bytes):
@@ -123,7 +123,7 @@ async def test_timeout_cleans_partial_upload(tmp_path):
 
 
 async def test_expiry_cleans_only_staged_files(tmp_path, monkeypatch):
-    import nanobot.webui.attachment_store as module
+    import nanobot.channels.websocket.attachment_store as module
     monkeypatch.setattr(module.time, "monotonic", lambda: 100)
     store = AttachmentStore(tmp_path, ttl_seconds=10)
     committed = await upload(store)
@@ -155,7 +155,7 @@ async def test_batch_limits_leave_all_references_retryable(tmp_path):
 
 
 async def test_filename_collision_never_unlinks_existing_file(tmp_path, monkeypatch):
-    import nanobot.webui.attachment_store as module
+    import nanobot.channels.websocket.attachment_store as module
     existing = tmp_path / "existing.png"
     existing.write_bytes(b"keep")
     monkeypatch.setattr(module, "media_destination", lambda *args, **kwargs: existing)
@@ -221,7 +221,7 @@ async def test_filename_collision_preserves_another_uploads_crash_marker(tmp_pat
     store = AttachmentStore(tmp_path)
     ref = await upload(store)
     path = Path(store.resolve([ref], owner="owner")[0])
-    monkeypatch.setattr("nanobot.webui.attachment_store.media_destination", lambda *args, **kwargs: path)
+    monkeypatch.setattr("nanobot.channels.websocket.attachment_store.media_destination", lambda *args, **kwargs: path)
     with pytest.raises(FileExistsError):
         await upload(store)
     assert (tmp_path / ".pending-attachments" / path.name).exists()

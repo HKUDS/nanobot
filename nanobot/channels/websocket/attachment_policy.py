@@ -1,4 +1,14 @@
-"""MIME and count policy for binary HTTP attachment ingress."""
+"""File, MIME and batch policy for WebSocket channel binary uploads."""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class AttachmentIngressLimits:
+    max_count: int = 4
+    max_file_bytes: int = 6 * 1024 * 1024
+    max_total_bytes: int = 24 * 1024 * 1024
+
 
 MAX_VIDEOS_PER_MESSAGE = 1
 MAX_VIDEO_BYTES = 20 * 1024 * 1024

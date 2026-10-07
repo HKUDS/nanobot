@@ -15,7 +15,7 @@ from nanobot.webui.gateway_services import build_gateway_services
 
 @pytest.fixture
 async def gateway(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", lambda _: tmp_path / "media")
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     bus = MessageBus()
     config = WebSocketConfig(port=0, path="/ws", token="test-secret", max_message_bytes=1048576)
     services = build_gateway_services(
@@ -71,13 +71,13 @@ async def test_real_listener_large_binary_and_reference_delivery(gateway, mime, 
         inbound = await asyncio.wait_for(bus.consume_inbound(), 2)
         path = Path(inbound.media[0])
         assert path.read_bytes() == raw
-        assert path.parent == channel.gateway.media.attachments.media_dir
+        assert path.parent == channel.gateway.uploads.store.media_dir
         # Lost ACK retry must not resolve a consumed reference or dispatch twice.
         await ws.send(json.dumps(frame))
         await event(ws, "message_accepted")
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(bus.consume_inbound(), .03)
-        channel.gateway.media.attachments.clear()
+        channel.gateway.uploads.store.clear()
         assert path.exists()
 
 
@@ -98,7 +98,7 @@ async def test_capability_is_required_owner_scoped_and_revoked(gateway):
                 "content": "steal", "media": [{"reference": reference}], "turn_id": "foreign"}))
             assert (await event(other, "error"))["detail"] == "attachment_rejected"
         async with asyncio.timeout(5):
-            while capability["token"] in channel.gateway.media.uploads._tokens:
+            while capability["token"] in channel.gateway.uploads._tokens:
                 await asyncio.sleep(.01)
         async with http.post(http_url + capability["path"], data=b"image", headers=headers) as response:
             assert response.status == 401
@@ -139,7 +139,7 @@ async def test_http_policy_rejection_does_not_leave_files(gateway, mime, body):
             expect100=True,
         ) as response:
             assert response.status == 400
-        assert not [p for p in channel.gateway.media.attachments.media_dir.rglob("*") if p.is_file()]
+        assert not [p for p in channel.gateway.uploads.store.media_dir.rglob("*") if p.is_file()]
 
 
 async def test_one_shot_handshake_token_is_not_an_upload_credential(gateway):

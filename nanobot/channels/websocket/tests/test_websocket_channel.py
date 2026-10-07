@@ -418,8 +418,8 @@ async def test_temporary_chat_is_transient_and_discarded(bus, tmp_path) -> None:
     chat_id = await _new_temporary_chat(channel, connection)
     upload = tmp_path / "temporary-upload.txt"
     upload.write_text("private attachment", encoding="utf-8")
-    channel.gateway.media.attachments.resolve = MagicMock(return_value=[str(upload)])
-    channel.gateway.media.attachments.commit = MagicMock(return_value=[str(upload)])
+    channel.gateway.uploads.store.resolve = MagicMock(return_value=[str(upload)])
+    channel.gateway.uploads.store.commit = MagicMock(return_value=[str(upload)])
 
     await channel._dispatch_envelope(
         connection,

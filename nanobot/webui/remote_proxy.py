@@ -27,7 +27,7 @@ from websockets.exceptions import WebSocketException
 from websockets.typing import Origin
 from yarl import URL
 
-from nanobot.webui.attachment_http import UPLOAD_PATH
+from nanobot.channels.websocket.attachment_http import UPLOAD_PATH
 from nanobot.webui.client_contract import assess_webui_contract, compatibility_error
 from nanobot.webui.local_client_assets import LocalClientAssets
 from nanobot.webui.remote_ssh import (

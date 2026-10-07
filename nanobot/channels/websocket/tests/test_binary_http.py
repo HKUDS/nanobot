@@ -8,8 +8,8 @@ from aiohttp import web
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
-from nanobot.webui.attachment_store import AttachmentStore
-from nanobot.webui.binary_http import BinaryHTTPBridge
+from nanobot.channels.websocket.attachment_store import AttachmentStore
+from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_request_body_is_not_automatically_decompressed():
 
 @pytest.mark.asyncio
 async def test_incomplete_http_headers_have_a_deadline(monkeypatch):
-    monkeypatch.setattr("nanobot.webui.binary_http._HTTP_CONNECTION_TIMEOUT_S", .05)
+    monkeypatch.setattr("nanobot.channels.websocket.binary_http._HTTP_CONNECTION_TIMEOUT_S", .05)
 
     async def upload(request):
         pytest.fail("Incomplete headers must not invoke the upload handler")

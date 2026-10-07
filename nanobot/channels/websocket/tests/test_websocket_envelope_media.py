@@ -284,11 +284,11 @@ async def test_non_string_content_still_rejected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reference_attachments_are_projected_to_other_clients(tmp_path):
+async def test_reference_attachments_are_projected_to_other_clients(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     channel = _make_channel()
     origin, peer = AsyncMock(), AsyncMock()
-    channel.gateway.media._media_dir = lambda _: tmp_path
-    owner = channel.gateway.media.uploads.issue(origin)["token"]
+    owner = channel.gateway.uploads.issue(origin)["token"]
     channel._attach(origin, "reference-chat")
     channel._attach(peer, "reference-chat")
     channel._webui_connections.add(origin)
@@ -296,7 +296,7 @@ async def test_reference_attachments_are_projected_to_other_clients(tmp_path):
     async def body():
         yield b"image"
 
-    reference = await channel.gateway.media.attachments.upload(
+    reference = await channel.gateway.uploads.store.upload(
         body(), owner=owner, mime="image/png", size=5,
     )
     await channel._dispatch_envelope(origin, "client", {

@@ -16,6 +16,7 @@ from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
 from nanobot.bus.events import INBOUND_META_USER_SHELL
+from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
@@ -36,7 +37,6 @@ from nanobot.session.webui_turns import (
 )
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
-from nanobot.webui.attachment_store import AttachmentUploadError
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
@@ -140,6 +140,7 @@ class WebUICommandRouter:
         self.gateway = gateway
         self._http_router = gateway.http
         self._media = gateway.media
+        self._uploads = gateway.uploads
         self._ingress = gateway.ingress
         self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
@@ -219,7 +220,6 @@ class WebUICommandRouter:
             await self.discard_owned_chat(connection, chat_id)
         self._transport.webui_clear_connection_default(connection)
         self.gateway.endpoint.discard_connection(connection)
-        self._media.uploads.revoke(connection)
         self.discard_request_lock_if_idle(connection)
 
     async def broadcast_webui_event(self, event: str, **fields: Any) -> None:
@@ -582,12 +582,12 @@ class WebUICommandRouter:
         media_paths: list[str] = []
         media_names: list[str | None] = []
         references: list[str] = []
-        upload_owner = self._media.uploads.owner(connection) if raw_media else ""
+        upload_owner = self._uploads.owner(connection) if raw_media else ""
         try:
             if not isinstance(raw_media, list):
                 raise AttachmentUploadError("malformed")
             attachments = cast(list[Any], raw_media)
-            if len(attachments) > self._media.attachment_limits.max_count + 1:
+            if len(attachments) > self._uploads.store.limits.max_count + 1:
                 raise AttachmentUploadError("Too many attachments")
             for item in attachments:
                 if not isinstance(item, dict):
@@ -600,7 +600,7 @@ class WebUICommandRouter:
                 name = attachment.get("name")
                 media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
             if references:
-                media_paths = self._media.attachments.resolve(references, owner=upload_owner)
+                media_paths = self._uploads.store.resolve(references, owner=upload_owner)
         except AttachmentUploadError as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),
@@ -689,7 +689,7 @@ class WebUICommandRouter:
         # files referenced by the canonical transcript.
         try:
             if references:
-                media_paths = self._media.attachments.commit(references, owner=upload_owner)
+                media_paths = self._uploads.store.commit(references, owner=upload_owner)
         except AttachmentUploadError as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),

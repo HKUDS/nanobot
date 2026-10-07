@@ -27,13 +27,13 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.config.schema import Base
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
     websocket_turn_transcript_persistence_failed,
 )
-from nanobot.webui.binary_http import BinaryHTTPBridge
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -393,6 +393,7 @@ class WebSocketChannel(BaseChannel):
 
         self.gateway = gateway
         self._media = gateway.media
+        self._uploads = gateway.uploads
         self._transcripts = gateway.transcripts
         self._temporary_chats = gateway.temporary_chats
         self._session_projection = gateway.session_projection
@@ -508,6 +509,7 @@ class WebSocketChannel(BaseChannel):
     async def _cleanup_connection(self, connection: ServerConnection) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
         self._retired_connections.add(connection)
+        self._uploads.revoke(connection)
         state = self._connection_outbound.get(connection)
         if state is not None:
             state.closing = True
@@ -696,11 +698,11 @@ class WebSocketChannel(BaseChannel):
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
-        bridge = BinaryHTTPBridge(self._media.uploads.handle)
+        bridge = BinaryHTTPBridge(self._uploads.handle)
 
         async def prune_uploads() -> None:
             while not stop_event.is_set():
-                self._media.attachments.prune()
+                self._uploads.store.prune()
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=30)
                 except TimeoutError:
@@ -804,7 +806,7 @@ class WebSocketChannel(BaseChannel):
             prune_task.cancel()
             await asyncio.gather(prune_task, return_exceptions=True)
             await bridge.shutdown()
-            self._media.attachments.clear()
+            self._uploads.store.clear()
             self._running = False
             if self._server_task is task:
                 self._server_task = None
@@ -832,7 +834,7 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
-                        **({"upload": self._media.uploads.issue(connection)}
+                        **({"upload": self._uploads.issue(connection)}
                            if self.is_allowed(client_id) else {}),
                         **({"terminal": gateway_identity(self.gateway.tokens.instance_id)}
                            if _query_first(query, "terminal_protocol") == "1" else {}),
