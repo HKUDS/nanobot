@@ -90,7 +90,7 @@ export function TokenUsageModelTrend({ days, modelDays, models }: {
           const tokens = columns.reduce((sum, column) => sum + column.values[index], 0);
           const rate = model?.cache_read_observed_input_tokens ? percent.format(model.cache_read_tokens / model.cache_read_observed_input_tokens) : "—";
           const parts = [
-            [t("settings.usage.totalTokens"), `${number.format(tokens)} · ${percent.format(tokens / total)}`],
+            [t("settings.usage.totalTokens"), `${number.format(tokens)} (${percent.format(tokens / total)})`],
             [t("settings.usage.cacheHitRate"), rate],
           ];
           return <Tooltip key={index}>

@@ -371,7 +371,7 @@ describe("NanobotTui composer", () => {
     setup.mockInput.pressKey("v", { ctrl: true })
     await waitUntil(() => ui.composer.plainText === "/model [Image #1] ")
     ui.composer.submit()
-    await waitUntil(() => ui.status.plainText.includes("Images cannot be used with commands"))
+    await waitUntil(() => ui.status.plainText.includes("Remove the image before running a command."))
 
     expect(sent).toEqual([])
     expect(ui.composer.plainText).toBe("/model [Image #1] ")
@@ -485,7 +485,7 @@ describe("NanobotTui composer", () => {
     ui.composer.setText("first")
     ui.composer.submit()
     await waitUntil(() => sent.length === 1)
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
 
     ui.composer.setText("one more detail")
     await setup.flush()
@@ -495,7 +495,7 @@ describe("NanobotTui composer", () => {
     ui.composer.submit()
     await waitUntil(() => sent.length === 2)
     expect(ui.status.plainText).not.toContain("Steering")
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
     expect(sentOptions[1]).toEqual({
       cliApps: [{ name: "github" }],
       mcpPresets: [],

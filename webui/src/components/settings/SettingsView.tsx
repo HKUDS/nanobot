@@ -18,6 +18,8 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   skills?: SkillSummary[];
+  skillsLoading?: boolean;
+  skillsError?: boolean;
   extensions?: WebUIExtensionSummary[];
   onOpenExtension?: (extensionId: string) => void;
   onToggleExtension?: (extensionId: string, enabled: boolean) => Promise<void> | void;
@@ -51,6 +53,8 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   skills = [],
+  skillsLoading = false,
+  skillsError = false,
   extensions = [],
   onOpenExtension,
   onToggleExtension,
@@ -86,6 +90,8 @@ export function SettingsView({
       onToggleTheme={onToggleTheme}
       onBackToChat={onBackToChat}
       skills={skills}
+      skillsLoading={skillsLoading}
+      skillsError={skillsError}
       extensions={extensions}
       onOpenExtension={onOpenExtension}
       onToggleExtension={onToggleExtension}

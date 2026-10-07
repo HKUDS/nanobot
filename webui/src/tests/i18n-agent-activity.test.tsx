@@ -60,8 +60,8 @@ describe("localized agent activity contracts", () => {
       expect(generic.detail).toBe("src/app.tsx");
       expect(command.detail).toBe("bun run test");
       expect(browser.target).toBe("Enter");
-      expect(search).toContain("release notes");
-      expect([generic.label, command.label, browser.action, search].join(" "))
+      expect(search.detail).toBe("release notes");
+      expect([generic.label, command.label, browser.action, search.label].join(" "))
         .not.toMatch(/message\.agentActivity|{{/);
     }
     for (const count of [0, 1, 2]) {
@@ -105,13 +105,13 @@ describe("localized agent activity contracts", () => {
     const original = JSON.stringify(messages);
     render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow expanded />);
     expect(screen.getByText("Ran command bun run test")).toBeInTheDocument();
-    expect(screen.getByText("Could not search release notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Could not search the web, release notes")).toBeInTheDocument();
 
     await act(async () => setAppLanguage("zh-CN"));
     expect(screen.getByText("已运行命令 bun run test")).toBeInTheDocument();
-    expect(screen.getByText("无法搜索 release notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("无法搜索 网页, release notes")).toBeInTheDocument();
     await act(async () => setAppLanguage("en"));
-    expect(screen.getByText("Could not search release notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Could not search the web, release notes")).toBeInTheDocument();
     expect(JSON.stringify(messages)).toBe(original);
   });
 

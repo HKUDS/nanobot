@@ -37,14 +37,14 @@ export function GenericToolRun({ items }: { items: GenericToolRunItem[] }) {
   const { t } = useTranslation();
   const model = useMemo(() => buildModel(items, t), [items, t]);
   const action = formatActivityTarget(t, model.label, model.detail);
-  const label = model.aside ? `${action} · ${model.aside}` : action;
 
   return (
     <ActivityStep
       icon={model.status === "error" ? AlertCircle : model.icon}
       active={model.status === "running"}
       tone={model.status === "error" ? "error" : model.status === "done" ? "success" : "active"}
-      label={label}
+      label={action}
+      detail={model.aside}
     />
   );
 }

@@ -118,7 +118,7 @@ def _hosted_web_search_event(
         if isinstance(raw_queries, list)
         else []
     )
-    query = " · ".join(queries)
+    query = "\n".join(queries)
     if not query:
         query = next(
             (

@@ -129,11 +129,11 @@ export function ModelPresetBadge({
     model: modelDetail ?? modelPresets[listedIndex]?.model,
     provider: provider || modelPresets[listedIndex]?.provider,
   };
-  const tooltipLabel = needsSetup ? label : [...new Set([
+  const tooltipParts = needsSetup ? [label] : [...new Set([
     label,
     modelDetail,
     providerLabel,
-  ].filter(Boolean))].join(" · ");
+  ].filter((part): part is string => Boolean(part)))];
   const presets = !activeName
     ? modelPresets
     : listedIndex < 0
@@ -459,9 +459,11 @@ export function ModelPresetBadge({
 
   return (
     <TooltipProvider>
-      <Tooltip open={tooltipLabel !== label && tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
+      <Tooltip open={tooltipParts.length > 1 && tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
         {badge}
-        <TooltipContent side="top">{tooltipLabel}</TooltipContent>
+        <TooltipContent side="top" className="max-w-[min(24rem,calc(100vw-2rem))] space-y-1 break-words">
+          {tooltipParts.map((part, index) => <p key={part} className={index === 0 ? "font-medium" : "text-xs text-muted-foreground"}>{part}{index < tooltipParts.length - 1 ? " " : ""}</p>)}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

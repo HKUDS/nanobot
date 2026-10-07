@@ -511,15 +511,13 @@ export function ModelsSettings({
           <span className="block text-[14px] font-medium text-foreground">
             {tx("settings.models.advancedOptions", "Advanced options")}
           </span>
-          <span className="mt-0.5 block text-[12px] text-muted-foreground">
-            {tx(
-              "settings.models.advancedSummary",
-              "Context {{context}} · Max {{max}} tokens",
-              {
-                context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
-                max: formatContextWindow(form.maxTokens),
-              },
-            )}
+          <span className="mt-0.5 flex flex-wrap gap-x-3 text-[12px] tabular-nums text-muted-foreground">
+            <span>{tx("settings.models.contextSummary", "Context {{context}}", {
+              context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
+            })}</span>{" "}
+            <span>{tx("settings.models.outputSummary", "Max {{max}} tokens", {
+              max: formatContextWindow(form.maxTokens),
+            })}</span>
           </span>
         </span>
         <ChevronDown

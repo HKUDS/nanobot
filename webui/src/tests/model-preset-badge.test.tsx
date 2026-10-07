@@ -157,7 +157,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(container.querySelector("[title]")).toBeNull();
     await user.hover(trigger);
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("zhipu · glm-5");
+    expect(tooltip).toHaveTextContent("zhipu glm-5");
     expect(tooltip).not.toHaveTextContent("codex");
     await user.click(trigger);
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
@@ -179,7 +179,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(trigger).toHaveAttribute("tabindex", "0");
     fireEvent.focus(trigger);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "zhipu · glm-5",
+      "zhipu glm-5",
     );
     fireEvent.keyDown(trigger, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());

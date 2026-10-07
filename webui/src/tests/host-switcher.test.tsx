@@ -35,11 +35,13 @@ describe("host switcher", () => {
   it("announces the host only once when its display name is the hostname", async () => {
     const value = { ...picker(1), name: "team-host", hostname: "team-host" };
     render(<HostNavigationContext.Provider value={value}><HostSwitcher /></HostNavigationContext.Provider>);
-    expect(screen.getByRole("status").textContent).toBe("team-host · Connected");
+    expect(screen.getByRole("status").textContent).toBe("team-host, Connected");
     const trigger = screen.getByRole("button", { name: "Switch host" });
     expect(trigger).not.toHaveAttribute("title");
     await userEvent.hover(trigger);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("team-host · Connected");
+    const tooltip = await screen.findByRole("tooltip");
+    expect(within(tooltip).getByText("team-host")).toBeVisible();
+    expect(within(tooltip).getByText("Connected")).toBeVisible();
   });
 
   it("does not borrow the local socket's Connected status while restoring a remote", () => {
@@ -61,7 +63,7 @@ describe("host switcher", () => {
     expect(within(trigger).getByText("Local", { exact: true })).toBeVisible();
     await userEvent.hover(trigger);
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Connecting to Server 1");
-    expect(within(trigger).getByRole("status")).toHaveTextContent("Local · My-Mac · Connected · Connecting to Server 1");
+    expect(within(trigger).getByRole("status")).toHaveTextContent("Local, My-Mac, Connected. Connecting to Server 1");
     await userEvent.click(trigger);
     expect(screen.getByRole("menuitem", { name: "Local nanobot My-Mac" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("menuitem", { name: "Server 1 ubuntu@host-1.test" })).not.toHaveAttribute("aria-current");
@@ -71,7 +73,7 @@ describe("host switcher", () => {
     const value = { ...picker(2), error: "Destination SSH is unreachable" };
     render(<HostNavigationContext.Provider value={value}><HostSwitcher /></HostNavigationContext.Provider>);
     const trigger = screen.getByRole("button", { name: "Switch host" });
-    expect(within(trigger).getByRole("status")).toHaveTextContent("Local · My-Mac · Connected");
+    expect(within(trigger).getByRole("status")).toHaveTextContent("Local, My-Mac, Connected");
     await userEvent.hover(trigger);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(value.error);
     expect(trigger).not.toHaveTextContent("Offline");
@@ -82,7 +84,7 @@ describe("host switcher", () => {
   it("keeps a truly disconnected host offline independently of switch errors", () => {
     const value = { ...picker(2), offline: true, name: "Team server", hostname: "team-host" };
     render(<HostNavigationContext.Provider value={value}><HostSwitcher /></HostNavigationContext.Provider>);
-    expect(screen.getByRole("status")).toHaveTextContent("Team server · team-host · Server connection lost");
+    expect(screen.getByRole("status")).toHaveTextContent("Team server, team-host, Server connection lost");
   });
 
   it("keeps remote sidebar identity and connection status separate from pending or failed switches", async () => {
@@ -90,9 +92,9 @@ describe("host switcher", () => {
     const view = render(<HostNavigationContext.Provider value={value}><HostSwitcher /></HostNavigationContext.Provider>);
     const trigger = screen.getByRole("button", { name: "Switch host" });
     expect(within(trigger).getByText("Team server", { exact: true })).toBeVisible();
-    expect(within(trigger).getByRole("status")).toHaveTextContent("Team server · team-host · Connected · Connecting to Another server");
+    expect(within(trigger).getByRole("status")).toHaveTextContent("Team server, team-host, Connected. Connecting to Another server");
     view.rerender(<HostNavigationContext.Provider value={{ ...value, pendingName: undefined, error: "Destination SSH is unreachable" }}><HostSwitcher /></HostNavigationContext.Provider>);
-    expect(within(trigger).getByRole("status")).toHaveTextContent("Team server · team-host · Connected");
+    expect(within(trigger).getByRole("status")).toHaveTextContent("Team server, team-host, Connected");
     await userEvent.hover(trigger);
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Destination SSH is unreachable");
   });

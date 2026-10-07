@@ -1172,7 +1172,7 @@ describe("ThreadShell", () => {
     );
 
     fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByLabelText("Default")).not.toBeInTheDocument();
   });
@@ -1199,7 +1199,7 @@ describe("ThreadShell", () => {
     );
 
     fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
@@ -1237,7 +1237,7 @@ describe("ThreadShell", () => {
       "preset-order",
       "/model fast",
     );
-    expect(await screen.findByText("fast")).toBeInTheDocument();
+    expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "fast" }));
     fireEvent.click(await screen.findByRole("option", { name: /^extra\b/i }));
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
@@ -1247,7 +1247,7 @@ describe("ThreadShell", () => {
     expect(await screen.findByText("extra")).toBeInTheDocument();
 
     rerender(view("fast"));
-    expect(await screen.findByText("fast")).toBeInTheDocument();
+    expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
   });
 
   it("uses the backend-resolved provider for an auto session preset", async () => {
@@ -1283,7 +1283,7 @@ describe("ThreadShell", () => {
     );
 
     fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-4 · Company Proxy");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-4 Company Proxy");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
@@ -1335,7 +1335,7 @@ describe("ThreadShell", () => {
     expect(configuredBadge).not.toHaveAttribute("data-fallback");
     fireEvent.focus(screen.getByLabelText("Default"));
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "Default · gpt-5.5 · OpenAI Codex",
+      "Default gpt-5.5 OpenAI Codex",
     );
     fireEvent.blur(screen.getByLabelText("Default"));
 
@@ -1832,7 +1832,7 @@ describe("ThreadShell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Default" }));
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
-    expect(await screen.findByText("fast")).toBeInTheDocument();
+    expect(await within(screen.getByTestId("thread-welcome-layout")).findByText("fast")).toBeInTheDocument();
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Message input"), {
@@ -1850,7 +1850,7 @@ describe("ThreadShell", () => {
       rerender(view(session("chat-new", "fast")));
     });
     fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();

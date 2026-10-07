@@ -690,7 +690,7 @@ describe("MessageBubble", () => {
     const timestamp = document.querySelector("[data-message-timestamp]")!;
     const automation = document.querySelector("[data-automation-trigger]")!;
     expect(timestamp).toHaveTextContent(formatMessageEndTime(completedAt));
-    expect(automation).toHaveTextContent("Triggered automatically · drink water");
+    expect(automation).toHaveTextContent("Triggered automatically drink water");
     expect(timestamp.compareDocumentPosition(automation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

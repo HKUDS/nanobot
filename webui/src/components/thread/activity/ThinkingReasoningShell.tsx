@@ -70,7 +70,7 @@ export function ThinkingReasoningShell({
             onClick={onToggle}
             aria-expanded={expanded}
             aria-controls={contentId}
-            aria-label={expanded && collapseLabel ? `${label} · ${collapseLabel}` : label}
+            aria-label={expanded && collapseLabel ? `${label}, ${collapseLabel}` : label}
             aria-live={active ? "polite" : undefined}
           >
             {headerContent}

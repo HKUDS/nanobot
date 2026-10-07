@@ -289,9 +289,10 @@ export function MessageBlockMenuActions({
             {automationSourceLabel ? (
               <span
                 data-automation-trigger
-                className="flex min-h-[var(--message-block-control-size)] items-center break-words"
+                className="flex min-h-[var(--message-block-control-size)] flex-wrap items-baseline gap-x-2 break-words"
               >
-                {t("message.automationTriggered")} · {automationSourceLabel}
+                <span>{t("message.automationTriggered")}</span>{" "}
+                <span>{automationSourceLabel}</span>
               </span>
             ) : null}
           </div>

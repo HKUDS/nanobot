@@ -15,7 +15,7 @@ export function WebSearchRun({ run, turnActive }: { run: WebSearchRunModel; turn
   const { t } = useTranslation();
   const active = run.status === "running" && turnActive;
   const status = run.status === "running" && !turnActive ? "done" : run.status;
-  const label = presentWebSearchAction(run.query, status, run.target, t);
+  const presentation = presentWebSearchAction(run.query, status, run.target, t);
 
   return (
     <>
@@ -23,7 +23,9 @@ export function WebSearchRun({ run, turnActive }: { run: WebSearchRunModel; turn
         icon={status === "error" ? AlertCircle : WebSearchIcon}
         active={active}
         tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
-        label={label}
+        label={presentation.label}
+        detail={presentation.detail}
+        detailClassName="whitespace-pre-line"
       />
       {run.sources.map((source) => (
         <WebActivityRow
