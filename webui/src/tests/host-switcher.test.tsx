@@ -32,11 +32,14 @@ beforeEach(() => window.localStorage.clear());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("host switcher", () => {
-  it("announces the host only once when its display name is the hostname", () => {
+  it("announces the host only once when its display name is the hostname", async () => {
     const value = { ...picker(1), name: "team-host", hostname: "team-host" };
     render(<HostNavigationContext.Provider value={value}><HostSwitcher /></HostNavigationContext.Provider>);
     expect(screen.getByRole("status").textContent).toBe("team-host · Connected");
-    expect(screen.getByRole("button", { name: "Switch host" })).toHaveAttribute("title", "team-host · Connected");
+    const trigger = screen.getByRole("button", { name: "Switch host" });
+    expect(trigger).not.toHaveAttribute("title");
+    await userEvent.hover(trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("team-host · Connected");
   });
 
   it("does not borrow the local socket's Connected status while restoring a remote", () => {
@@ -56,7 +59,8 @@ describe("host switcher", () => {
     render(<HostNavigationContext.Provider value={value}><HostSwitcher /></HostNavigationContext.Provider>);
     const trigger = screen.getByRole("button", { name: "Switch host" });
     expect(within(trigger).getByText("Local", { exact: true })).toBeVisible();
-    expect(trigger).toHaveAttribute("title", expect.stringContaining("Connecting to Server 1"));
+    await userEvent.hover(trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Connecting to Server 1");
     expect(within(trigger).getByRole("status")).toHaveTextContent("Local · My-Mac · Connected · Connecting to Server 1");
     await userEvent.click(trigger);
     expect(screen.getByRole("menuitem", { name: "Local nanobot My-Mac" })).toHaveAttribute("aria-current", "true");
@@ -68,7 +72,8 @@ describe("host switcher", () => {
     render(<HostNavigationContext.Provider value={value}><HostSwitcher /></HostNavigationContext.Provider>);
     const trigger = screen.getByRole("button", { name: "Switch host" });
     expect(within(trigger).getByRole("status")).toHaveTextContent("Local · My-Mac · Connected");
-    expect(trigger).toHaveAttribute("title", expect.stringContaining(value.error));
+    await userEvent.hover(trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(value.error);
     expect(trigger).not.toHaveTextContent("Offline");
     await userEvent.click(trigger);
     expect(screen.getByRole("alert")).toHaveTextContent(value.error);
@@ -80,7 +85,7 @@ describe("host switcher", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Team server · team-host · Server connection lost");
   });
 
-  it("keeps remote sidebar identity and connection status separate from pending or failed switches", () => {
+  it("keeps remote sidebar identity and connection status separate from pending or failed switches", async () => {
     const value = { kind: "embedded" as const, name: "Team server", hostname: "team-host", pendingName: "Another server", open: vi.fn() };
     const view = render(<HostNavigationContext.Provider value={value}><HostSwitcher /></HostNavigationContext.Provider>);
     const trigger = screen.getByRole("button", { name: "Switch host" });
@@ -88,7 +93,8 @@ describe("host switcher", () => {
     expect(within(trigger).getByRole("status")).toHaveTextContent("Team server · team-host · Connected · Connecting to Another server");
     view.rerender(<HostNavigationContext.Provider value={{ ...value, pendingName: undefined, error: "Destination SSH is unreachable" }}><HostSwitcher /></HostNavigationContext.Provider>);
     expect(within(trigger).getByRole("status")).toHaveTextContent("Team server · team-host · Connected");
-    expect(trigger).toHaveAttribute("title", expect.stringContaining("Destination SSH is unreachable"));
+    await userEvent.hover(trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Destination SSH is unreachable");
   });
   it.each([0, 1, 5])("keeps %i saved hosts simple without search", async (count) => {
     await openMenu(picker(count));
