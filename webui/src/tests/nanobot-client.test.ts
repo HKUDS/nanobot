@@ -1619,6 +1619,18 @@ describe("NanobotClient", () => {
 
     expect(chatHandler).toHaveBeenCalledTimes(deliveredBeforeLateFrames);
     expect(client.getRunStartedAt("chat-canonical")).toBeNull();
+    const otherChat = vi.fn();
+    client.onChat("other-chat", otherChat);
+    const taskUpdate = {
+      event: "subagent_task", chat_id: "chat-canonical",
+      task: { task_id: "child", origin_turn_id: "turn-canonical", state: "done", revision: 4 },
+    };
+    lastSocket().fakeMessage(taskUpdate);
+    expect(chatHandler).toHaveBeenLastCalledWith(taskUpdate);
+    expect(chatHandler).toHaveBeenCalledTimes(deliveredBeforeLateFrames + 1);
+    expect(otherChat).not.toHaveBeenCalled();
+    expect(client.hasUnsettledRun("chat-canonical")).toBe(false);
+    expect(client.getRunStartedAt("chat-canonical")).toBeNull();
   });
 
   it("notifies run status subscribers and replays running chats", () => {

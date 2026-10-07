@@ -64,6 +64,34 @@ interface TurnUsage {
 
 export type RoundUsage = TurnUsage;
 
+export type SubagentTaskState = "queued" | "running" | "stopping" | "done" | "incomplete" | "error" | "cancelled" | "interrupted";
+
+export interface SubagentTaskSnapshot {
+  task_id: string;
+  revision?: number;
+  origin_message_id: string | null;
+  origin_turn_id: string | null;
+  created_at: number;
+  completed_at: number | null;
+  label: string;
+  task_description: string;
+  state: SubagentTaskState;
+  phase: string;
+  elapsed_seconds: number;
+  iteration: number;
+  tool_events: { name: string; status: string }[];
+  usage: Record<string, number | string | null> | null;
+  receipts: Record<string, "accepted" | "delivered" | "undelivered">;
+  result: string | null;
+  partial: boolean;
+  stop_reason: string | null;
+  error: string | null;
+}
+
+export interface SubagentTasksPayload {
+  tasks: SubagentTaskSnapshot[];
+}
+
 export interface ResponseSource {
   provider: string;
   model: string;
@@ -192,6 +220,7 @@ interface UISessionMessage {
 }
 
 export interface SessionAutomationJob {
+  chat_binding_revision?: string;
   id: string;
   name: string;
   enabled: boolean;
@@ -223,6 +252,7 @@ export interface SessionAutomationJob {
       status: "ok" | "error" | "skipped" | string;
       duration_ms?: number;
       error?: string | null;
+      webui_session_key?: string | null; // null: external chat; absent: older host.
     }>;
   };
   origin?: {
@@ -240,6 +270,13 @@ export interface SessionAutomationJob {
 
 export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
 export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
+export interface AutomationChat { id: string; title: string; channel: string; unavailable?: boolean; }
+export interface AutomationChatsPayload {
+  revision: string;
+  current: AutomationChat | null;
+  chats: AutomationChat[];
+}
+export interface AutomationChatUpdate { target_id: string; revision: string; message: string; }
 export interface AutomationUpdatePayload {
   name?: string;
   message?: string;
@@ -389,7 +426,7 @@ export interface UIFileEdit {
   deleted: number;
   approximate?: boolean;
   status: "editing" | "done" | "error";
-  operation?: "edit" | "delete" | string;
+  operation?: "create" | "edit" | "delete" | string;
   binary?: boolean;
   error?: string;
   pending?: boolean;
@@ -488,6 +525,9 @@ export interface SidebarStatePayload {
 }
 
 export interface BootstrapResponse {
+  terminal?: {
+    webui?: { capabilities?: string[] };
+  };
   token?: string;
   api_token?: string;
   ws_path: string;
@@ -876,6 +916,13 @@ export interface SettingsPayload {
   restart_required_sections?: Array<"runtime" | "browser" | "image">;
   version?: {
     current: string;
+    commit?: string | null;
+  };
+  environment?: {
+    python_version: string;
+    os: string;
+    os_version: string;
+    architecture: string;
   };
   docs?: {
     version: string;
@@ -1353,6 +1400,7 @@ interface InboundTurnMetadata {
 }
 
 export type InboundEvent =
+  | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
   | { event: "ready"; chat_id: string; client_id: string }
   | {
       event: "attached";

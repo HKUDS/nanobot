@@ -319,7 +319,7 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
                 }}>
                   {busy === profile.id ? <Loader2 className="h-[18px] w-[18px] shrink-0 animate-spin text-muted-foreground" /> : <Server className="h-[18px] w-[18px] shrink-0 text-muted-foreground" />}
                   <span className="min-w-0 flex-1"><span className="block truncate text-[14px] font-medium">{profile.name}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{profile.host}</span>
-                    {groups.some((other) => other.id !== groupId && other.profile.name === profile.name && other.profile.host === profile.host) && <span className="mt-0.5 block truncate text-xs text-muted-foreground" title={profile.config_path}>{profile.port ? `:${profile.port} · ` : ""}{profile.config_path}</span>}
+                    {groups.some((other) => other.id !== groupId && other.profile.name === profile.name && other.profile.host === profile.host) && <span className="mt-0.5 block truncate text-xs text-muted-foreground" title={profile.config_path}>{profile.port ? <span className="mr-2">:{profile.port}</span> : null}{profile.config_path}</span>}
                     <span id={`${statusId}-${profile.id}`} className="mt-1 block"><HostConnectionStatus state={connections.hostStates[profile.id] || "closed"} /></span>
                     {profile.compatibility && profile.compatibility.status !== "compatible" && <span className="mt-1 block text-xs text-muted-foreground">
                       {t(`remote.compatibility.${profile.compatibility.status}`)}
@@ -510,7 +510,7 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
           {busy.startsWith("pick-") && <p role="status" className="text-xs text-muted-foreground">{t("remote.setup.pickingFile")}</p>}
           <div className="remote-dialog-actions">
             <Button type="button" variant="ghost" onClick={closeEditor}>{t("common.cancel")}</Button>
-            <Button type="submit" className="min-w-0" title={t(editorLabel)} aria-label={t(editorLabel)} aria-busy={!!busy} disabled={!!busy || !form.host.trim() || (locationStep && !form.config_path.trim())}>
+            <Button type="submit" className="min-w-0" aria-label={t(editorLabel)} aria-busy={!!busy} disabled={!!busy || !form.host.trim() || (locationStep && !form.config_path.trim())}>
               {busy && !busy.startsWith("pick-") && <Loader2 aria-hidden className="mr-2 h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" />}
               <span role={busy && !busy.startsWith("pick-") ? "status" : undefined} className="min-w-0">{t(editorLabel)}</span>
             </Button>

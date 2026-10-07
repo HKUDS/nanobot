@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import platform
+from pathlib import Path
+
 import pytest
+import yaml
 
 from nanobot.channels.contracts import channel_default_config, channel_instance_specs
 from nanobot.channels.manager import ChannelManager
@@ -15,7 +19,8 @@ from nanobot.webui.settings_system import (
 )
 
 
-def test_system_domain_owns_runtime_dto_and_agent_updates(tmp_path) -> None:
+def test_system_domain_owns_runtime_dto_and_agent_updates(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.settings_system.COMMIT", "a" * 40)
     config = Config()
 
     changed, restart_required = update_agent_system_settings(
@@ -37,9 +42,15 @@ def test_system_domain_owns_runtime_dto_and_agent_updates(tmp_path) -> None:
     assert config.agents.defaults.timezone_mode == "manual"
     assert config.agents.defaults.tool_hint_max_length == 120
     assert payload["runtime"]["config_path"] == str(tmp_path / "config.json")
-    assert payload["version"] == {"current": "0.3.0"}
+    assert payload["version"] == {"current": "0.3.0", "commit": "a" * 40}
+    assert payload["environment"] == {
+        "python_version": platform.python_version(),
+        "os": platform.system(),
+        "os_version": platform.release(),
+        "architecture": platform.machine(),
+    }
     assert payload["docs"]["version"] == "0.3.0"
-    assert set(payload) == {"runtime", "runtime_config", "usage", "advanced", "version", "docs"}
+    assert set(payload) == {"runtime", "runtime_config", "usage", "advanced", "version", "environment", "docs"}
 
 
 def test_system_domain_validates_channel_field_values() -> None:
@@ -115,3 +126,15 @@ def test_saving_other_qq_settings_does_not_pin_the_global_notice_policy():
         config, "qq", {"appId": "a", "secret": "s"}, load_channel_plugin=load_channel_plugin,
     )
     assert config.channels.qq.get("showCompactionNotices") is None
+
+
+def test_feedback_template_accepts_environment_prefills() -> None:
+    root = Path(__file__).resolve().parents[2]
+    template = yaml.safe_load((root / ".github/ISSUE_TEMPLATE/bug_report.yml").read_text())
+    fields = {field["id"]: field for field in template["body"] if "id" in field}
+    for field_id in ("version", "python_version", "os", "channel", "llm_provider"):
+        assert fields[field_id]["type"] == "input"
+        assert fields[field_id]["validations"]["required"] is True
+    for field_id in ("model", "browser", "connection"):
+        assert fields[field_id]["type"] == "input"
+    assert fields["additional"]["type"] == "textarea"

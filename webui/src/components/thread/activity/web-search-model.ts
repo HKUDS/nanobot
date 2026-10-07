@@ -78,12 +78,13 @@ function presentWebSearchQuery(query: string): WebSearchQueryPresentation {
   const scopes: string[] = [];
   const safeQuery = redactActivityText(query);
   const cleanQuery = safeQuery
-    .replace(/(?:^|\s)site:([^\s]+)/gi, (_match, rawSite: string) => {
+    .replace(/(^|\s)site:([^\s]+)/gi, (_match, prefix: string, rawSite: string) => {
       const scope = webSearchScope(rawSite);
       if (scope && !scopes.includes(scope)) scopes.push(scope);
-      return " ";
+      return prefix;
     })
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ *\n */g, "\n")
     .trim();
 
   return {
@@ -97,14 +98,16 @@ export function presentWebSearchAction(
   status: WebSearchStatus,
   target: WebSearchTarget = "web",
   t: TFunction,
-): string {
+): { label: string; detail: string } {
   const presentation = presentWebSearchQuery(query);
-  const queryTarget = [presentation.scope, presentation.query].filter(Boolean).join(" · ");
   const key = status === "error" ? "searchFailed" : status === "running" ? "searching" : "searched";
   const searchTarget = target === "x"
-    ? (queryTarget ? `X · ${queryTarget}` : "X")
-    : queryTarget || t("message.agentActivity.web");
-  return t(`message.agentActivity.${key}`, { target: searchTarget });
+    ? ["X", presentation.scope].filter(Boolean).join(" ")
+    : presentation.scope || t("message.agentActivity.web");
+  return {
+    label: t(`message.agentActivity.${key}`, { target: searchTarget }),
+    detail: presentation.query,
+  };
 }
 
 function mergeWebSearchRun(

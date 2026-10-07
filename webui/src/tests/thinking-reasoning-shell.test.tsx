@@ -46,7 +46,7 @@ describe("ThinkingReasoningShell", () => {
       </ThinkingReasoningShell>
     );
     const view = render(shell(true));
-    const button = screen.getByRole("button", { name: "Working · Collapse activity details" });
+    const button = screen.getByRole("button", { name: "Working, Collapse activity details" });
     const content = screen.getByTestId("agent-activity-content");
     const headerClass = button.className;
     const contentClass = content.className;
@@ -55,7 +55,7 @@ describe("ThinkingReasoningShell", () => {
 
     view.rerender(shell(false));
 
-    expect(screen.getByRole("button", { name: "Worked · Collapse activity details" })).toBe(button);
+    expect(screen.getByRole("button", { name: "Worked, Collapse activity details" })).toBe(button);
     expect(button.className).toBe(headerClass);
     expect(screen.getByTestId("agent-activity-content")).toBe(content);
     expect(content.className).toBe(contentClass);

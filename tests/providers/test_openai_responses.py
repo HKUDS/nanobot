@@ -1683,7 +1683,7 @@ class TestConsumeSdkStream:
                 "call_id": "ws_1",
                 "name": "web_search",
                 "arguments": {
-                    "query": "nanobot DeepSeek · nanobot latest release",
+                    "query": "nanobot DeepSeek\nnanobot latest release",
                 },
                 "result": {
                     "status": "completed",

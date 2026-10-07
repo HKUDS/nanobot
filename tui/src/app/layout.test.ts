@@ -103,7 +103,7 @@ describe("NanobotTui layout and themes", () => {
     expect(frame).toContain("✓ Read  config.json")
     expect(frame).not.toContain("› Read")
     expect(frame).not.toContain("private chain of thought")
-    expect(frame).toContain("Ready · 1.2s")
+    expect(frame).toContain("Ready  1.2s")
   })
 
   test("keeps model and access details in the composer controls only", async () => {
@@ -191,9 +191,9 @@ describe("NanobotTui layout and themes", () => {
       expect(frame).not.toContain("Steer this turn…")
       expect(frame).not.toContain("Ask a follow-up…")
       if (width >= 40 && height >= 9) {
-        expect(occurrences(frame, "Enter send now · Tab send next")).toBe(1)
+        expect(occurrences(frame, "Enter send now  Tab send next")).toBe(1)
       } else if (width >= 28 && height >= 9) {
-        expect(occurrences(frame, "Enter now · Tab next")).toBe(1)
+        expect(occurrences(frame, "Enter now  Tab next")).toBe(1)
       }
       expect(occurrences(frame, "default ▾")).toBe(height >= 14 ? 1 : 0)
     }
@@ -616,8 +616,8 @@ describe("NanobotTui layout and themes", () => {
     })
     await setup.flush()
 
-    const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
-    expect(footer).toContain("Ready · 1.7s")
+    const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready  1.7s")) || ""
+    expect(footer).toContain("Ready  1.7s")
     expect(footer).toContain("11% context")
   })
 

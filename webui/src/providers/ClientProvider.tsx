@@ -16,6 +16,7 @@ interface ClientContextValue {
   getToken: () => string;
   modelName: string | null;
   ingressLimits: WebUIIngressLimits | null;
+  webuiCapabilities: string[];
 }
 
 const ClientContext = createContext<ClientContextValue | null>(null);
@@ -25,20 +26,22 @@ export function ClientProvider({
   token,
   modelName = null,
   ingressLimits = null,
+  webuiCapabilities = [],
   children,
 }: {
   client: NanobotClient;
   token: string;
   modelName?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
+  webuiCapabilities?: string[];
   children: ReactNode;
 }) {
   const tokenRef = useRef(token);
   tokenRef.current = token;
   const getToken = useCallback(() => tokenRef.current, []);
   const value = useMemo(
-    () => ({ client, token, getToken, modelName, ingressLimits }),
-    [client, getToken, ingressLimits, modelName, token],
+    () => ({ client, token, getToken, modelName, ingressLimits, webuiCapabilities }),
+    [client, getToken, ingressLimits, modelName, token, webuiCapabilities],
   );
 
   return (

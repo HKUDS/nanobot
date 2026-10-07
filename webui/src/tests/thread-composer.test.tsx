@@ -6,7 +6,7 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
-import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
+import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand, WorkspaceScopePayload } from "@/lib/types";
 
 vi.mock("@/lib/imageEncode", () => ({
   encodeImage: vi.fn(async (file: File) => ({
@@ -801,7 +801,6 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-panel");
     expect(input.parentElement?.parentElement?.className).not.toContain("shadow-");
-    expect(screen.getByRole("button", { name: "Attach files" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
@@ -1093,7 +1092,7 @@ describe("ThreadComposer", () => {
     );
 
     const voiceButton = screen.getByRole("button", { name: "Voice input" });
-    expect(voiceButton).toHaveAttribute("title", "Click to dictate or hold");
+    expect(voiceButton).not.toHaveAttribute("title");
     expect(voiceButton).toHaveAttribute("aria-keyshortcuts", "Control+Shift+D");
     fireEvent.keyDown(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
     expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
@@ -1343,33 +1342,37 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("progressbar", { name: "Context 50%" })).toBeVisible();
   });
 
-  it("renders and changes workspace access mode", async () => {
+  it("toggles workspace access directly by click and keyboard", async () => {
+    const user = userEvent.setup();
     const onWorkspaceScopeChange = vi.fn();
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        workspaceScope={{
-          project_path: "/tmp/project",
-          project_name: "project",
-          access_mode: "restricted",
-          restrict_to_workspace: true,
-        }}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
-        onWorkspaceScopeChange={onWorkspaceScopeChange}
-      />,
+    const restricted: WorkspaceScopePayload = {
+      project_path: "/tmp/project", project_name: "project",
+      access_mode: "restricted", restrict_to_workspace: true,
+    };
+    const composer = (workspaceScope: WorkspaceScopePayload, canUseFullAccess = true) => (
+      <ThreadComposer onSend={vi.fn()} placeholder="Type your message..."
+        workspaceScope={workspaceScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: canUseFullAccess }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange} />
     );
-
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Workspace access mode/ }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Full Access/ }));
-
-    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        project_path: "/tmp/project",
-        access_mode: "full",
-        restrict_to_workspace: false,
-      }),
-    );
+    const { rerender } = render(composer(restricted));
+    const access = screen.getByRole("button", { name: /Workspace access mode/ });
+    expect(access).toHaveAttribute("aria-pressed", "false");
+    await user.click(access);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    const full = { ...restricted, access_mode: "full" as const, restrict_to_workspace: false };
+    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(full);
+    rerender(composer(full));
+    expect(access).toHaveAttribute("aria-pressed", "true");
+    expect(access).toHaveAccessibleName("Workspace access mode: Full Access");
+    expect(access).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(restricted);
+    rerender(composer(restricted, false));
+    expect(access).toBeDisabled();
+    onWorkspaceScopeChange.mockClear();
+    await user.click(access);
+    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
   });
 
   it("exposes full and compact workspace labels for container-driven compression", () => {
@@ -1394,7 +1397,7 @@ describe("ThreadComposer", () => {
     });
     const fullLabel = within(accessButton).getByText("Full Access");
     const shortLabel = within(accessButton).getByText("Full");
-    expect(accessButton).toHaveAttribute("title", "Full Access");
+    expect(accessButton).not.toHaveAttribute("title");
     expect(fullLabel).toHaveClass("thread-composer-access-label-full");
     expect(shortLabel).toHaveClass("thread-composer-access-label-short");
     expect(shortLabel).toHaveClass("hidden");
@@ -2436,6 +2439,9 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
     const gimp = screen.getByRole("option", { name: /GIMP @gimp .* CLI/i });
     const browserbase = screen.getByRole("option", { name: /Browserbase @browserbase .* MCP/i });
+    // Reuse the app's 44px coarse-pointer targets without changing desktop density.
+    expect(gimp).toHaveClass("touch-target");
+    expect(browserbase).toHaveClass("touch-target");
     expect(within(gimp).getByText("CLI")).toBeInTheDocument();
     expect(within(browserbase).getByText("MCP")).toBeInTheDocument();
     expect(within(gimp).getByText("@gimp")).toBeInTheDocument();
@@ -2738,6 +2744,95 @@ describe("ThreadComposer", () => {
       expect(palette.className).toContain("bottom-full");
       expect(palette).toHaveStyle({ maxHeight: "112px" });
     });
+  });
+
+  it.each(["/", "@"]) ("fits %s suggestions in the app frame while iOS pans the keyboard", (trigger) => {
+    stubVisualViewport({ height: 396, offsetTop: 350 });
+    let formTop = 274;
+    let frameHeight = 396;
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => rect({ top: formTop, width: 388, height: 112 }),
+    );
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => rect({ top: 0, width: 420, height: frameHeight }),
+    );
+    render(
+      <div id="root" className="visual-viewport" style={{ overflowY: "hidden" }}>
+        <ThreadComposer onSend={vi.fn()} slashCommands={COMMANDS} cliApps={CLI_APPS} />
+      </div>,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: trigger, selectionStart: 1 } });
+    const palette = screen.getByRole("listbox");
+    expect(palette).toHaveClass("bottom-full");
+    expect(palette).toHaveStyle({ maxHeight: "266px" });
+
+    // Keyboard dismissal moves the composer; keep measuring the same frame.
+    formTop = 620;
+    frameHeight = 746;
+    Object.assign(window.visualViewport!, { height: 746, offsetTop: 0 });
+    act(() => window.visualViewport!.dispatchEvent(new Event("resize")));
+    expect(palette).toHaveStyle({ maxHeight: "288px" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).not.toHaveValue(trigger);
+  });
+
+  it.each(["/", "@"]) ("keeps %s selectable beside the input in a short landscape frame", (trigger) => {
+    stubVisualViewport({ height: 128, offsetTop: 208 });
+    let landscape = true;
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => rect({ top: landscape ? 44 : 274, width: landscape ? 744 : 388, height: 112 }),
+    );
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      return this.id === "root"
+        ? rect({ top: 0, width: landscape ? 776 : 420, height: landscape ? 128 : 396 })
+        : rect({ top: landscape ? 44 : 0, width: landscape ? 776 : 420, height: landscape ? 84 : 396 });
+    });
+    const onSend = vi.fn();
+    render(
+      <div id="root" className="visual-viewport short-visual-viewport" style={{ overflowY: "hidden" }}>
+        <div style={{ overflowY: "auto" }}>
+          <ThreadComposer onSend={onSend} slashCommands={COMMANDS} cliApps={CLI_APPS} />
+        </div>
+      </div>,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: trigger, selectionStart: 1 } });
+    const palette = screen.getByRole("listbox");
+    expect(palette).toHaveClass("col-start-2");
+    expect(palette).not.toHaveClass("absolute");
+    expect(palette).toHaveStyle({ maxHeight: "84px" });
+    expect(input.closest("form")).toHaveAttribute("data-palette-beside", "true");
+
+    // Rotation restores the ordinary floating menu, without changing the draft.
+    landscape = false;
+    document.getElementById("root")!.classList.remove("short-visual-viewport");
+    Object.assign(window.visualViewport!, { height: 396, offsetTop: 350 });
+    act(() => window.visualViewport!.dispatchEvent(new Event("resize")));
+    expect(palette).toHaveClass("bottom-full");
+    expect(palette).toHaveStyle({ maxHeight: "266px" });
+    expect(input).toHaveValue(trigger);
+    fireEvent.mouseDown(screen.getAllByRole("option")[0]!);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input.closest("form")).not.toHaveAttribute("data-palette-beside");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("uses visual bounds outside fitting (pinch zoom: %s)", (zoomed) => {
+    stubVisualViewport({ height: 300, offsetTop: 100 });
+    if (zoomed) Object.assign(window.visualViewport!, { scale: 2 });
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(
+      rect({ top: 220, width: 390, height: 100 }),
+    );
+    render(
+      <div id="root" className={zoomed ? "visual-viewport" : undefined}>
+        <ThreadComposer onSend={vi.fn()} slashCommands={COMMANDS} />
+      </div>,
+    );
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/" } });
+    expect(screen.getByRole("listbox")).toHaveStyle({ maxHeight: "112px" });
+    expect(screen.getByRole("listbox")).toHaveClass("bottom-full");
   });
 
   it("dismisses the slash command palette on outside click", () => {

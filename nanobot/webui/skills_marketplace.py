@@ -935,4 +935,4 @@ def _safe_output_tail(output: bytes | None) -> str:
         return ""
     text = _ANSI_RE.sub("", output.decode("utf-8", errors="replace"))
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return " · ".join(lines[-3:])[-600:]
+    return "\n".join(lines[-3:])[-600:]

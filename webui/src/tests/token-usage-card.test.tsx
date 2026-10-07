@@ -109,7 +109,7 @@ describe("Token usage card", () => {
     expect(column).toHaveAccessibleName(/2026-09-09: 2,200 tokens/);
     expect(column).toHaveAccessibleName(/model-5: 600/);
     expect(column).toHaveAccessibleName(/Other \/ unattributed: 200/);
-    const legend = screen.getByLabelText("model-5: Total tokens: 600 · 27.3%, Cache hit rate: 80%");
+    const legend = screen.getByLabelText("model-5: Total tokens: 600 (27.3%), Cache hit rate: 80%");
     expect(legend).toHaveAttribute("tabindex", "0");
   });
 });

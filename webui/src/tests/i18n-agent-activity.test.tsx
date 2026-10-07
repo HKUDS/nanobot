@@ -28,6 +28,21 @@ describe("localized agent activity contracts", () => {
     expect(translated.actionTargetRich).toContain("<target></target>");
 
     await setAppLanguage(locale);
+    for (const [action, keys] of [
+      ["create", ["delegatingTask", "delegatedTask", "delegateTaskFailed"]],
+      ["check", ["checkingSubtask", "checkedSubtask", "checkSubtaskFailed"]],
+      ["send", ["messagingSubtask", "queuedSubtaskMessage", "messageSubtaskFailed"]],
+      ["cancel", ["stoppingSubtask", "requestedSubtaskStop", "stopSubtaskFailed"]],
+    ] as const) {
+      for (const line of [`subagent("${action}")`, `subagent({"action":"${action}","task_id":"private-id","message":"private instructions"})`]) {
+        const subtask = parseGenericToolTrace(line)!;
+        for (const [index, status] of (["running", "done", "error"] as const).entries()) {
+          expect(describeGenericToolRun([{ trace: subtask, status }], i18n.t)).toMatchObject({
+            label: translated[keys[index]], detail: "", status,
+          });
+        }
+      }
+    }
     const trace = parseGenericToolTrace('read_file({"path":"src/app.tsx"})')!;
     const rg = parseGenericToolTrace('rg({"args":["-n","hello world","src"]})')!;
     for (const status of ["running", "done", "error"] as const) {
@@ -45,8 +60,8 @@ describe("localized agent activity contracts", () => {
       expect(generic.detail).toBe("src/app.tsx");
       expect(command.detail).toBe("bun run test");
       expect(browser.target).toBe("Enter");
-      expect(search).toContain("release notes");
-      expect([generic.label, command.label, browser.action, search].join(" "))
+      expect(search.detail).toBe("release notes");
+      expect([generic.label, command.label, browser.action, search.label].join(" "))
         .not.toMatch(/message\.agentActivity|{{/);
     }
     for (const count of [0, 1, 2]) {
@@ -90,13 +105,33 @@ describe("localized agent activity contracts", () => {
     const original = JSON.stringify(messages);
     render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow expanded />);
     expect(screen.getByText("Ran command bun run test")).toBeInTheDocument();
-    expect(screen.getByText("Could not search release notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Could not search the web, release notes")).toBeInTheDocument();
 
     await act(async () => setAppLanguage("zh-CN"));
     expect(screen.getByText("已运行命令 bun run test")).toBeInTheDocument();
-    expect(screen.getByText("无法搜索 release notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("无法搜索 网页, release notes")).toBeInTheDocument();
     await act(async () => setAppLanguage("en"));
-    expect(screen.getByText("Could not search release notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Could not search the web, release notes")).toBeInTheDocument();
+    expect(JSON.stringify(messages)).toBe(original);
+  });
+
+  it("renders recorded subtask actions in Chinese and English without implying execution is complete", async () => {
+    const messages: UIMessage[] = [{
+      id: "subtask-replay", role: "tool", kind: "trace", createdAt: 1,
+      content: 'subagent("create")',
+      traces: ['subagent("create")', 'subagent("check")', 'subagent("send")', 'subagent("cancel")'],
+    }];
+    const original = JSON.stringify(messages);
+    await setAppLanguage("zh-CN");
+    render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow expanded />);
+    for (const label of ["子任务已创建", "已获取子任务状态", "消息已加入子任务队列", "已处理停止请求"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("已完成 Subagent")).not.toBeInTheDocument();
+    await act(async () => setAppLanguage("en"));
+    for (const label of ["Subtask created", "Subtask status retrieved", "Message queued for subtask", "Stop request processed"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
     expect(JSON.stringify(messages)).toBe(original);
   });
 });

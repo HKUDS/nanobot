@@ -103,8 +103,8 @@ describe("remote instance UX", () => {
       compatibility: { status, client_version: "1.0.0", host_version: "2.0.0" } }] });
     mocks.request.mockRejectedValue(new Error(code));
     view();
-    await screen.findByText(i18n.t(`remote.compatibility.${status}`));
-    expect(screen.queryByText("Server connection lost", { exact: true })).not.toBeInTheDocument();
+    await screen.findByRole("region", { name: i18n.t(`remote.compatibility.${status}`) });
+    expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Version & compatibility" }));
     expect(within(await screen.findByRole("dialog")).getByRole("status")).toHaveTextContent(i18n.t(`remote.compatibility.${status}`));
     expect(screen.queryByRole("textbox", { name: "SSH address" })).not.toBeInTheDocument();
@@ -182,7 +182,7 @@ describe("remote instance UX", () => {
     expect(screen.getByTitle("nanobot on 腾讯云 nanobot")).toBe(frame);
     expect(frame).toHaveAttribute("src", connection.url);
     expect(readSelectedRemote()).toMatchObject({ id: profile.id, name: "腾讯云 nanobot" });
-    expect(document.title).toBe("腾讯云 nanobot · nanobot");
+    expect(document.title).toBe("腾讯云 nanobot");
     expect(source.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ type: "init", name: "腾讯云 nanobot" }), "http://127.0.0.1:23456");
     expect(mocks.request.mock.calls.map(([action]) => action)).toEqual(["remote.connect", "remote.rename"]);
     fireEvent.click(screen.getByRole("button", { name: "腾讯云 nanobot ubuntu@example.test" }));
@@ -672,7 +672,7 @@ describe("remote instance UX", () => {
       : action === "remote.fingerprint" ? { fingerprint: "SHA256:verified-test", challenge: "nonce" } : {});
     await addAndInspect();
     await screen.findByText("SHA256:verified-test");
-    fireEvent.click(screen.getByRole("button", { name: "Fingerprint matches · Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect to verified host" }));
     expect(await screen.findByText("No nanobot configuration found")).toBeVisible();
     expect(mocks.inspect).toHaveBeenCalledTimes(2);
     expect(mocks.request.mock.calls.some(([action]) => action === "remote.connect")).toBe(false);
@@ -710,7 +710,7 @@ describe("remote instance UX", () => {
     const switcher = await screen.findByRole("button", { name: "Switch host" });
     expect(screen.queryByRole("button", { name: "Remote connections" })).not.toBeInTheDocument();
     expect(switcher).toHaveClass("w-8", "h-8");
-    expect(switcher).toHaveAttribute("title", expect.stringContaining("Xubin-Mac"));
+    expect(within(switcher).getByRole("status")).toHaveTextContent("Xubin-Mac");
     await openDirectory();
   });
 
@@ -801,7 +801,7 @@ describe("remote instance UX", () => {
     expect(frame).toHaveAttribute("src", connection.url);
     expect(frame).toHaveAttribute("sandbox", expect.not.stringContaining("allow-top-navigation"));
     expect(document.querySelector('[data-host-view="local"]')).toHaveAttribute("inert");
-    expect(screen.getByRole("button", { name: "Switch host" })).toHaveAttribute("title", expect.stringContaining("Team server · team-host"));
+    expect(within(screen.getByRole("button", { name: "Switch host" })).getByRole("status")).toHaveTextContent("Team server, team-host");
     expect(mocks.request).toHaveBeenCalledWith("remote.connect", { id: profile.id }, 65_000);
     expect(window.sessionStorage.getItem("nanobot.remote-instance")).not.toContain("secret");
     expect(readRecentRemotes()).toEqual([profile.id]);
@@ -900,7 +900,7 @@ describe("remote instance UX", () => {
     rememberSelectedRemote(connection);
     mocks.request.mockRejectedValue(new Error("ssh_unreachable"));
     view();
-    await screen.findByText("Server connection lost");
+    await screen.findByRole("region", { name: "Server connection lost" });
     expect(screen.queryByText("Local conversations")).not.toBeVisible();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to local nanobot" }));
@@ -927,7 +927,7 @@ describe("remote instance UX", () => {
     rememberSelectedRemote(connection);
     mocks.request.mockRejectedValue(new Error("ssh_unreachable"));
     view();
-    await screen.findByText("Server connection lost");
+    await screen.findByRole("region", { name: "Server connection lost" });
     fireEvent.click(screen.getByRole("button", { name: "Back to local nanobot" }));
     await screen.findByText("Local conversations");
     mocks.request.mockResolvedValue(connection);
@@ -1022,7 +1022,9 @@ describe("remote instance UX", () => {
     fireEvent.submit(address.closest("form")!);
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(i18n.t("remote.errors.ssh_agent_refused"));
-    expect(alert.closest(".overflow-y-auto")).toBeNull();
+    // Errors stay outside the form's field scroller. The outer dialog frame
+    // may itself scroll when a mobile keyboard leaves less room than the form.
+    expect(address.closest("form")!.querySelector(".overflow-y-auto")).not.toContainElement(alert);
     expect(address).toHaveValue("ubuntu@example.test");
     fireEvent.click(screen.getByRole("button", { name: "Connection options" }));
     expect(screen.getByRole("spinbutton", { name: "SSH port" })).toHaveValue(2222);
@@ -1198,7 +1200,7 @@ describe("remote instance UX", () => {
     view();
     const identity = await screen.findByRole("button", { name: "Switch host" });
     expect(identity).toHaveTextContent("Local");
-    expect(identity).toHaveAttribute("title", expect.stringContaining("Xubin-Mac"));
+    expect(within(identity).getByRole("status")).toHaveTextContent("Xubin-Mac");
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toContainElement(identity);
     expect(document.querySelector("header")).toBeNull();
     fireEvent.pointerDown(identity, { button: 0, ctrlKey: false });
@@ -1302,7 +1304,7 @@ describe("remote instance UX", () => {
     await screen.findByText("SHA256:example");
     expect(mocks.request.mock.calls.some(([action]) => action === "remote.trust")).toBe(false);
     mocks.request.mockImplementation(async (action: string) => action === "remote.connect" ? connection : {});
-    fireEvent.click(screen.getByRole("button", { name: "Fingerprint matches · Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect to verified host" }));
     await readyRemote();
     expect(mocks.request).toHaveBeenCalledWith("remote.trust", { id: profile.id, challenge: "one-use" }, 65_000);
   });
@@ -1315,14 +1317,14 @@ describe("remote instance UX", () => {
     const frame = await readyRemote();
     fireEvent.load(frame);
     await act(async () => { tick?.(); });
-    expect(screen.queryByText("Server connection lost")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
     await act(async () => { tick?.(); });
-    await screen.findByText("Server connection lost");
+    await screen.findByRole("region", { name: "Server connection lost" });
     expect(screen.getByTitle("nanobot on Team server")).toBeInTheDocument();
     expect(frame.parentElement).toHaveAttribute("inert");
     expect(document.querySelector('[data-host-view="local"]')).toHaveAttribute("inert");
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
-    await waitFor(() => expect(screen.queryByText("Server connection lost")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument());
     expect(screen.queryByText("Opening your server…")).not.toBeInTheDocument();
     expect(screen.getByTitle("nanobot on Team server")).toBe(frame);
     expect(frame.parentElement).not.toHaveAttribute("inert");
@@ -1338,11 +1340,11 @@ describe("remote instance UX", () => {
     expect(mocks.read).toHaveBeenCalledTimes(1);
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
     expect(mocks.read).toHaveBeenCalledTimes(2);
-    await screen.findByText("Server connection lost");
+    await screen.findByRole("region", { name: "Server connection lost" });
     mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true }] });
     await act(async () => { window.dispatchEvent(new Event("pageshow")); });
     expect(mocks.read).toHaveBeenCalledTimes(3);
-    expect(screen.queryByText("Server connection lost")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
     expect(screen.getByTitle("nanobot on Team server")).toBe(frame);
     expect(readSelectedRemote()?.id).toBe(profile.id);
     expect(mocks.request.mock.calls.filter(([action]) => action === "remote.connect")).toHaveLength(1);
@@ -1390,11 +1392,11 @@ describe("remote instance UX", () => {
     rememberSelectedRemote(connection);
     mocks.request.mockRejectedValue(new Error("ssh_unreachable"));
     view();
-    await screen.findByText("Server connection lost");
+    await screen.findByRole("region", { name: "Server connection lost" });
     fireEvent.pointerDown(screen.getByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("button", { name: "Close" }));
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
-    expect(screen.getByText("Server connection lost")).toBeVisible();
+    expect(screen.getByRole("region", { name: "Server connection lost" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeVisible();
     expect(screen.queryByText("Opening your server…")).not.toBeInTheDocument();
   });

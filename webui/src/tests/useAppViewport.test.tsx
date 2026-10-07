@@ -39,38 +39,38 @@ describe("app visual viewport", () => {
     input.focus();
     resize(396, 350);
     expect(root).toHaveClass("visual-viewport");
-    expect(root.style.getPropertyValue("--app-viewport-height")).toBe("396px");
-    expect(root.style.getPropertyValue("--app-viewport-top")).toBe("350px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("396px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-top")).toBe("350px");
     act(() => {
       viewport.offsetTop = 320;
       viewport.dispatchEvent(new Event("scroll"));
     });
-    expect(root.style.getPropertyValue("--app-viewport-top")).toBe("320px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-top")).toBe("320px");
     expect(document.activeElement).toBe(input);
     expect(input).toHaveValue("中文草稿");
     resize(746, 0);
-    expect(root.style.getPropertyValue("--app-viewport-height")).toBe("746px");
-    expect(root.style.getPropertyValue("--app-viewport-top")).toBe("0px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("746px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-top")).toBe("0px");
   });
 
   it("does not reflow or chase the viewport during pinch zoom, then resumes on reset", () => {
     render(<AppSurface />, { container: root });
     resize(373, 120, 2);
-    expect(root.style.getPropertyValue("--app-viewport-height")).toBe("746px");
-    expect(root.style.getPropertyValue("--app-viewport-top")).toBe("0px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("746px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-top")).toBe("0px");
     resize(320, 0);
-    expect(root.style.getPropertyValue("--app-viewport-height")).toBe("320px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("320px");
   });
 
   it("keeps navigation below the top edge when a focused PWA rotates with negative WebKit overscroll", () => {
     render(<AppSurface />, { container: root });
     resize(128, -68);
     expect(root).toHaveClass("short-visual-viewport");
-    expect(root.style.getPropertyValue("--app-viewport-height")).toBe("128px");
-    expect(root.style.getPropertyValue("--app-viewport-top")).toBe("0px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("128px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-top")).toBe("0px");
     resize(428, 416);
     expect(root).not.toHaveClass("short-visual-viewport");
-    expect(root.style.getPropertyValue("--app-viewport-top")).toBe("416px");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-top")).toBe("416px");
   });
 
   it.each(["desktop", "native", "unsupported"])("leaves %s layout ownership unchanged", (kind) => {
@@ -80,7 +80,7 @@ describe("app visual viewport", () => {
     render(<AppSurface />, { container: root });
     resize(396, 350);
     expect(root).not.toHaveClass("visual-viewport");
-    expect(root.style.getPropertyValue("--app-viewport-height")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("");
   });
 
   it("releases listeners and owned styles when touch layout is disabled or the app unmounts", () => {
@@ -89,7 +89,7 @@ describe("app visual viewport", () => {
     rerender(<AppSurface />);
     resize(396, 350);
     expect(root).not.toHaveClass("visual-viewport");
-    expect(root.style.getPropertyValue("--app-viewport-height")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("");
     touch = true;
     rerender(<AppSurface />);
     expect(root).toHaveClass("visual-viewport");
@@ -97,6 +97,6 @@ describe("app visual viewport", () => {
     resize(746, 0);
     expect(root).not.toHaveClass("visual-viewport");
     expect(root).not.toHaveClass("short-visual-viewport");
-    expect(root.style.getPropertyValue("--app-viewport-top")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-top")).toBe("");
   });
 });

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import run_session
+from agent.session_helpers import run_session, save_completed_subagent
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
@@ -869,6 +869,7 @@ class TestToolEventProgress:
         session.add_message("user", "Run this in the background")
         session.metadata.update({"webui": True, "title": "Existing title"})
         loop.sessions.save(session)
+        save_completed_subagent(loop, "sub-1", session_key)
         dispatch = asyncio.create_task(run_session(loop, InboundMessage(
             channel="system",
             sender_id="subagent",
@@ -881,7 +882,7 @@ class TestToolEventProgress:
             },
         )))
 
-        await asyncio.wait_for(first_request_started.wait(), timeout=1)
+        await asyncio.wait_for(first_request_started.wait(), timeout=5)
         await loop._pending_queues[session_key].put(InboundMessage(
             channel="websocket",
             sender_id="user",
@@ -890,7 +891,8 @@ class TestToolEventProgress:
             session_key_override=session_key,
         ))
         release_first_request.set()
-        await asyncio.wait_for(dispatch, timeout=2)
+        # Events synchronize injection; the deadline only guards against a stuck worker.
+        await asyncio.wait_for(dispatch, timeout=5)
 
         outbound = []
         while bus.outbound_size > 0:

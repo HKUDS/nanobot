@@ -75,7 +75,7 @@ describe("NanobotTui with a Herdr pane title reporter", () => {
     expect(activeFrame).toContain("default ▾")
     expect(occurrences(activeFrame, "› Ship the Herdr integration")).toBe(1)
     expect(occurrences(activeFrame, "app.ts")).toBe(1)
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
     expect(ui.composerFrame.height).toBe(3)
     expect(titles).toEqual(["Ship the Herdr integration"])
 

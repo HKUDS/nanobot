@@ -120,6 +120,19 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     overflow: hidden;
+    text-autospace: normal;
+  }
+
+  /* Keep source text and editable values visually literal. */
+  pre,
+  code,
+  kbd,
+  samp,
+  .font-mono,
+  input,
+  textarea,
+  [contenteditable="true"] {
+    text-autospace: no-autospace;
   }
 
   #root.visual-viewport {
@@ -139,6 +152,25 @@
   #root.short-visual-viewport .workbench-composer-footer {
     max-height: max(0px, calc(var(--app-viewport-height) - 2.75rem));
     overflow-y: auto;
+  }
+
+  /* Body portals share the viewport owner's short-frame state. A landscape
+     keyboard needs input and results beside each other, not stacked. */
+  @media (min-width: 640px) {
+    body:has(> #root.short-visual-viewport) .session-search-dialog {
+      flex-direction: row;
+    }
+
+    body:has(> #root.short-visual-viewport) .session-search-input {
+      width: 40%;
+      height: auto;
+      border-bottom-width: 0;
+      border-right-width: 1px;
+    }
+
+    body:has(> #root.short-visual-viewport) .session-search-label {
+      @apply sr-only;
+    }
   }
 
   * {
@@ -345,19 +377,21 @@
     @apply list-none pl-0;
   }
 
-  /* CJK-friendly line-height: prose paragraphs default to 1.625 which is
-     tight for Chinese/Japanese/Korean characters. Bump to 1.8 for better
-     readability when the browser detects a CJK primary font. */
+  /* Set the default before locale overrides: html also matches :lang(). */
+  :root {
+    --cjk-line-height: 1.625;
+  }
+
   :lang(zh),
-  :lang(zh-CN),
-  :lang(zh-TW),
-  :lang(zh-HK),
   :lang(ja),
   :lang(ko) {
     --cjk-line-height: 1.8;
   }
-  :root {
-    --cjk-line-height: 1.625;
+
+  /* Balance short headings; preserve explicit line breaks in chat prose. */
+  .markdown-content :is(h1, h2, h3, h4, h5, h6),
+  .settings-section-title {
+    text-wrap: balance;
   }
 
   /* L→R sheen clipped to live activity labels. The highlight lives inside
@@ -866,6 +900,14 @@
 }
 
 @media (pointer: coarse) {
+  /* Readable form text avoids Safari's focus zoom without disabling the user's
+     pinch zoom. Keep this after utilities so compact desktop overrides cannot
+     shrink shared form fields on touch devices. Larger chat/search text stays
+     on its own typography; this is not a blanket rule for every input. */
+  .touch-text-input {
+    font-size: max(16px, 1rem);
+  }
+
   .thread-message-row,
   .message-block-menu-trigger,
   [data-message-block-menu] {
@@ -880,6 +922,11 @@
   }
 
   .touch-target.preview-tab-close {
+    opacity: 1;
+  }
+
+  /* Touch users cannot hover a sidebar row to discover its actions. */
+  .sidebar-action-trigger {
     opacity: 1;
   }
 }
@@ -920,38 +967,22 @@
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
 }
 
-.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
-  transform: scale(0.98);
-}
-
 .composer-model-pill-setup {
   border-color: hsl(var(--border) / 0.72);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.62),
-    0 1px 2px hsl(var(--foreground) / 0.035);
-  transition-property: color, background-color, border-color, box-shadow, transform;
-  transition-duration: 180ms;
-  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.dark .composer-model-pill-setup {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.045),
-    0 1px 2px rgb(0 0 0 / 0.12);
+  transition: color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out;
 }
 
 .thread-composer-model-badge:hover > .composer-model-pill-setup {
   border-color: hsl(var(--border));
-  background-color: hsl(var(--accent) / 0.7);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.72),
-    0 2px 5px hsl(var(--foreground) / 0.06);
+  background-color: hsl(var(--foreground) / 0.045);
 }
 
 .dark .thread-composer-model-badge:hover > .composer-model-pill-setup {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.07),
-    0 2px 5px rgb(0 0 0 / 0.16);
+  background-color: rgb(255 255 255 / 0.065);
+}
+
+.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
+  background-color: hsl(var(--foreground) / 0.085);
 }
 
 @keyframes composer-model-pill-setup-attention {
@@ -1089,7 +1120,7 @@
   align-items: center;
 }
 
-/* Keep a 44px hit area around the quieter 36px attachment/send circles.
+/* Keep a 44px hit area around the quieter 36px attachment/send controls.
  * The transparent pseudo-element belongs to the button, including its disabled
  * state; margins reserve its space so adjacent controls never overlap it. */
 [data-compact-controls] .thread-composer-round-action.touch-target {
@@ -1360,9 +1391,64 @@
     text-align: justify;
     text-align-last: justify;
   }
+  .icon-action[aria-pressed="true"], .icon-action[data-state="open"] {
+    color: hsl(var(--foreground));
+  }
+  .icon-action[aria-pressed="true"]::after, .icon-action[data-state="open"]::after {
+    content: "";
+    position: absolute;
+    bottom: 3px;
+    left: calc(50% - 4px);
+    width: 8px;
+    height: 2px;
+    border-radius: 1px;
+    background-color: currentColor;
+    pointer-events: none;
+  }
+  .icon-action svg {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .icon-action [data-product-icon="settings"] {
+      transform: rotate(0deg);
+      transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .icon-action:not(:disabled):hover [data-product-icon="settings"] {
+      transform: rotate(90deg);
+    }
+  }
+  .activity-current-trace { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .activity-current > path:first-child { opacity: 0.35; }
+    .activity-current-trace {
+      display: block;
+      stroke-dasharray: 16 84;
+      animation: activity-current-flow 1800ms linear infinite;
+    }
+  }
+  @keyframes activity-current-flow {
+    0% { stroke-dashoffset: 16; opacity: 0; }
+    10% { opacity: 1; }
+    65% { stroke-dashoffset: 116; opacity: 1; }
+    75%, 100% { stroke-dashoffset: 116; opacity: 0; }
+  }
+  .quiet-control, .settings-hover {
+    --control-hover-fill: hsl(var(--foreground) / 0.045);
+    --control-active-fill: hsl(var(--foreground) / 0.085);
+  }
+  .dark .quiet-control, .dark .settings-hover {
+    --control-hover-fill: rgb(255 255 255 / 0.065);
+    --control-active-fill: rgb(255 255 255 / 0.105);
+  }
   @media (hover: hover) {
-    .settings-hover:hover { background-color: hsl(var(--sidebar-foreground) / 0.055); }
-    .dark .settings-hover:hover { background-color: rgb(255 255 255 / 0.07); }
+    .quiet-control:hover, .settings-hover:hover {
+      background-color: var(--control-hover-fill);
+    }
+  }
+  .quiet-control:active, .settings-hover:active,
+  .quiet-control[data-state="open"], .quiet-control[aria-pressed="true"] {
+    background-color: var(--control-active-fill);
   }
   .settings-editor { padding: 16px var(--settings-inset, 16px); }
   @media (min-width: 640px) {

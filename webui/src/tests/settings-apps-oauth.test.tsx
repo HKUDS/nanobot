@@ -336,7 +336,6 @@ describe("SettingsView Apps catalog", () => {
     ));
     const connected = await screen.findByRole("button", { name: "Manage team-docs" });
     expect(connected).toHaveTextContent("Manage");
-    expect(connected.querySelector(".lucide-check")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Ready" }));
     const readyHeading = await screen.findByRole("heading", { name: "team-docs" });
     expect(within(readyHeading.closest("article") as HTMLElement).getByText("MCP"))

@@ -76,7 +76,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.sections.capabilities",
   "settings.sections.apps",
   "settings.apps.description",
-  "settings.apps.caption",
   "settings.apps.restartRequired",
   "settings.mcp.connectingAccount",
   "settings.mcp.continueSignIn",

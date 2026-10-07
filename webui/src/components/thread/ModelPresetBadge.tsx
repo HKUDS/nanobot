@@ -1,4 +1,7 @@
 import {
+  ModelsIcon,
+} from "@/components/icons/product-icons";
+import {
   useEffect,
   useLayoutEffect,
   useRef,
@@ -6,7 +9,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
-import { Check, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -126,11 +129,11 @@ export function ModelPresetBadge({
     model: modelDetail ?? modelPresets[listedIndex]?.model,
     provider: provider || modelPresets[listedIndex]?.provider,
   };
-  const tooltipLabel = needsSetup ? label : [...new Set([
+  const tooltipParts = needsSetup ? [label] : [...new Set([
     label,
     modelDetail,
     providerLabel,
-  ].filter(Boolean))].join(" · ");
+  ].filter((part): part is string => Boolean(part)))];
   const presets = !activeName
     ? modelPresets
     : listedIndex < 0
@@ -445,7 +448,7 @@ export function ModelPresetBadge({
                 "flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground",
               )}
             >
-              <SlidersHorizontal className="size-4 shrink-0" strokeWidth={1.75} />
+              <ModelsIcon className="size-4 shrink-0" strokeWidth={1.75} />
               <span>{t("thread.composer.manageModels")}</span>
             </button>
           </div>
@@ -456,9 +459,11 @@ export function ModelPresetBadge({
 
   return (
     <TooltipProvider>
-      <Tooltip open={tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
+      <Tooltip open={tooltipParts.length > 1 && tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
         {badge}
-        <TooltipContent side="top">{tooltipLabel}</TooltipContent>
+        <TooltipContent side="top" className="max-w-[min(24rem,calc(100vw-2rem))] space-y-1 break-words">
+          {tooltipParts.map((part, index) => <p key={part} className={index === 0 ? "font-medium" : "text-xs text-muted-foreground"}>{part}{index < tooltipParts.length - 1 ? " " : ""}</p>)}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -637,7 +642,7 @@ export function PresetProviderIcon({
         )}
         style={brand ? { backgroundColor: brand.color } : undefined}
       >
-        {brand ? brand.initials.slice(0, 2) : <Sparkles className="h-3 w-3 text-muted-foreground/65" />}
+        {brand ? brand.initials.slice(0, 2) : <ModelsIcon className="h-3 w-3 text-muted-foreground/65" />}
       </span>
       {logoUrl ? (
         <img
