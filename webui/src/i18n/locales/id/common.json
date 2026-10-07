@@ -1891,7 +1891,6 @@
         "decode_failed": "Tidak dapat mendekode gambar ini",
         "too_large": "File terlalu besar — coba yang lebih kecil",
         "total_too_large": "Total lampiran terlalu besar — hapus beberapa atau gunakan file yang lebih kecil",
-        "transport_too_large": "Lampiran ini akan melebihi batas transport gateway",
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {

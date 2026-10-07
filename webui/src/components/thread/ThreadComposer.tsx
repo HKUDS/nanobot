@@ -1099,11 +1099,9 @@ export function ThreadComposer({
           ? "Empty files cannot be attached"
           : reason === "total_too_large"
             ? "Attachments are too large together — remove some or use smaller files"
-            : reason === "transport_too_large"
-              ? "This attachment would exceed the gateway transport limit"
-              : reason === "too_large"
-                ? "File is too large"
-                : "Unsupported file type";
+            : reason === "too_large"
+              ? "File is too large"
+              : "Unsupported file type";
       return t(key, { max: maxAttachments, defaultValue: fallback });
     },
     [maxAttachments, t],

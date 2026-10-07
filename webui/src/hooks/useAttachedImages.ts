@@ -45,10 +45,9 @@ export type RestoredReadyImage = RestoredReadyAttachment;
  * Callers localize these via the ``composer.imageRejected.*`` i18n table. */
 export type AttachmentError =
   | "unsupported_type"   // server whitelist excludes this MIME
-  | "empty_file"         // backend data-URL decoder rejects empty payloads
+  | "empty_file"         // attachments must contain bytes
   | "too_many_attachments" // per-message cap (4) reached before enqueue
   | "total_too_large"    // decoded attachments exceed the business-policy total
-  | "transport_too_large" // projected JSON frame exceeds the transport guard
   | "magic_mismatch"     // extension lies about the real content
   | "decode_failed"      // Worker couldn't decode / re-encode
   | "too_large"          // even after normalization we exceed the budget
@@ -356,7 +355,7 @@ export function useAttachedImages({
       }
       return { rejected };
     },
-    [ingressLimits, maxAttachments, maxFileBytes, maxTotalBytes, setEntry],
+    [maxAttachments, maxFileBytes, maxTotalBytes, setEntry],
   );
 
   const remove = useCallback((id: string) => {

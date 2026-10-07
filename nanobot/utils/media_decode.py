@@ -1,8 +1,6 @@
-"""Shared helpers for decoding ``data:...;base64,...`` URLs to disk.
+"""Data-URL persistence for API uploads and audio transcription.
 
-Historically lived in ``nanobot.api.server``; now shared by the WebSocket
-channel so the ``api`` + ``websocket`` ingress paths apply the same parsing,
-size guard, and filesystem layout.
+Binary WebUI uploads share the media filename layout through ``media_destination``.
 """
 
 from __future__ import annotations
