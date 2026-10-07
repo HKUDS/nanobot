@@ -420,6 +420,78 @@ def test_remove_custom_mcp_server_preserves_user_cwd(tmp_path, monkeypatch: pyte
     assert "internal-docs" not in config.tools.mcp_servers
 
 
+def test_mnemosyne_preset_lists_uninstalled_and_keyless(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    row = next(item for item in mcp_presets_payload()["presets"] if item["name"] == "mnemosyne")
+
+    assert row["installed"] is False
+    assert row["configured"] is False
+    assert row["status"] == "not_installed"
+    assert row["category"] == "database"
+    assert row["transport"] == "stdio"
+    assert row["install_supported"] is True
+    assert row["required_fields"] == []
+    assert row["docs_url"] == "https://github.com/ashmoonori-afk/birkin-mnemosyne"
+    assert "mnemosyne" not in load_config().tools.mcp_servers
+
+
+def test_enable_mnemosyne_uses_uvx_from_args_and_managed_cwd(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    payload = mcp_presets_action("enable", {"name": ["mnemosyne"]})
+
+    row = next(item for item in payload["presets"] if item["name"] == "mnemosyne")
+    assert row["installed"] is True
+    assert row["configured"] is True
+    server = load_config().tools.mcp_servers["mnemosyne"]
+    assert server.type == "stdio"
+    assert server.command == "uvx"
+    assert server.args == ["--from", "birkin-mnemosyne[mcp]", "mnemosyne-mcp"]
+    assert server.tool_timeout == 60
+    assert server.cwd == str(tmp_path / "mcp" / "mnemosyne")
+    assert (tmp_path / "mcp" / "mnemosyne").is_dir()
+
+
+def test_remove_mnemosyne_preset_keeps_home_vault_and_other_servers(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    home = tmp_path / "home"
+    note = home / ".birkin-mnemosyne" / "vault" / "note.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("# note", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["team-docs"],
+            "transport": ["streamableHttp"],
+            "url": ["https://mcp.example.com/mcp"],
+        },
+    )
+    mcp_presets_action("enable", {"name": ["mnemosyne"]})
+    managed_cwd = tmp_path / "mcp" / "mnemosyne"
+    (managed_cwd / "cache.txt").write_text("managed runtime data", encoding="utf-8")
+
+    payload = mcp_presets_action("remove", {"name": ["mnemosyne"]})
+
+    assert payload["last_action"]["ok"] is True
+    assert payload["last_action"]["managed_paths_removed"] == ["runtime:mcp/mnemosyne"]
+    assert not managed_cwd.exists()
+    assert note.read_text(encoding="utf-8") == "# note"
+    config = load_config()
+    assert "mnemosyne" not in config.tools.mcp_servers
+    assert "team-docs" in config.tools.mcp_servers
+
+
 def test_test_mcp_preset_reports_missing_dependency(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

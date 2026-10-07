@@ -466,6 +466,31 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         ),
         note="MVP config starts read-only by default.",
     ),
+    McpPreset(
+        name="mnemosyne",
+        display_name="Mnemosyne",
+        category="database",
+        description=(
+            "Search a local Markdown vault with multilingual BM25, including Korean, "
+            "through the Mnemosyne MCP server."
+        ),
+        docs_url="https://github.com/ashmoonori-afk/birkin-mnemosyne",
+        transport="stdio",
+        install_supported=True,
+        brand_domain="github.com",
+        brand_color="#6D28D9",
+        requires="Python 3.10+ and uv/uvx",
+        server=MCPServerConfig(
+            type="stdio",
+            command="uvx",
+            args=["--from", "birkin-mnemosyne[mcp]", "mnemosyne-mcp"],
+            tool_timeout=60,
+        ),
+        note=(
+            "Reads and writes the local Markdown vault at ~/.birkin-mnemosyne/vault by "
+            "default; the first run downloads the MCP extra. No API key is required."
+        ),
+    ),
 )
 
 
