@@ -77,6 +77,7 @@ class PdfExtraction:
     total_pages: int
     start_page: int
     end_page: int
+    truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,10 +479,17 @@ def extract_pdf_pages(
                     f"{_MAX_PDF_CONTENT_STREAM_SIZE // (1024 * 1024)} MB limit"
                 )
         text = (page.extract_text() or "").strip()
-        if text and not collector.add(f"--- Page {index + 1} ---\n{text}", separator="\n\n"):
+        if not text:
+            continue
+        page_text = f"--- Page {index + 1} ---\n{text}"
+        if collector.parts and collector.length + 2 + len(page_text) > max_chars:
+            # Leave this page for the next read instead of returning only its prefix.
+            end = index - 1
+            break
+        if not collector.add(page_text, separator="\n\n"):
             end = index
             break
-    return PdfExtraction(collector.render(), total_pages, start, end)
+    return PdfExtraction(collector.render(), total_pages, start, end, truncated=collector.truncated)
 
 
 def _parse_pdf_page_range(pages: str | None, total_pages: int) -> tuple[int, int]:
