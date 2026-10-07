@@ -413,7 +413,7 @@ describe("PaneWorkbench", () => {
     expect(screen.queryByTestId("workbench-pane-gamma")).not.toBeInTheDocument();
   });
 
-  it("explains why the desktop add-pane control is disabled", async () => {
+  it("explains why the desktop add-pane control is disabled", () => {
     render(
       <PaneWorkbench
         panes={[{ key: "alpha", title: "Alpha" }]}
@@ -430,11 +430,8 @@ describe("PaneWorkbench", () => {
       />,
     );
 
-    const addPane = screen.getByRole("button", { name: "Add pane" });
-    expect(addPane).toBeDisabled();
-    expect(addPane).not.toHaveAttribute("title");
-    fireEvent.pointerMove(addPane.parentElement!, { pointerType: "mouse" });
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Maximum 4 panes");
+    expect(screen.getByRole("button", { name: "Add pane" }))
+      .toHaveAttribute("title", "Maximum 4 panes");
   });
 
   it("fills the workbench through alternating binary splits", () => {

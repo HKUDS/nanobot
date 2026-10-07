@@ -710,7 +710,7 @@ describe("remote instance UX", () => {
     const switcher = await screen.findByRole("button", { name: "Switch host" });
     expect(screen.queryByRole("button", { name: "Remote connections" })).not.toBeInTheDocument();
     expect(switcher).toHaveClass("w-8", "h-8");
-    expect(within(switcher).getByRole("status")).toHaveTextContent("Xubin-Mac");
+    expect(switcher).toHaveAttribute("title", expect.stringContaining("Xubin-Mac"));
     await openDirectory();
   });
 
@@ -801,7 +801,7 @@ describe("remote instance UX", () => {
     expect(frame).toHaveAttribute("src", connection.url);
     expect(frame).toHaveAttribute("sandbox", expect.not.stringContaining("allow-top-navigation"));
     expect(document.querySelector('[data-host-view="local"]')).toHaveAttribute("inert");
-    expect(within(screen.getByRole("button", { name: "Switch host" })).getByRole("status")).toHaveTextContent("Team server · team-host");
+    expect(screen.getByRole("button", { name: "Switch host" })).toHaveAttribute("title", expect.stringContaining("Team server · team-host"));
     expect(mocks.request).toHaveBeenCalledWith("remote.connect", { id: profile.id }, 65_000);
     expect(window.sessionStorage.getItem("nanobot.remote-instance")).not.toContain("secret");
     expect(readRecentRemotes()).toEqual([profile.id]);
@@ -1200,7 +1200,7 @@ describe("remote instance UX", () => {
     view();
     const identity = await screen.findByRole("button", { name: "Switch host" });
     expect(identity).toHaveTextContent("Local");
-    expect(within(identity).getByRole("status")).toHaveTextContent("Xubin-Mac");
+    expect(identity).toHaveAttribute("title", expect.stringContaining("Xubin-Mac"));
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toContainElement(identity);
     expect(document.querySelector("header")).toBeNull();
     fireEvent.pointerDown(identity, { button: 0, ctrlKey: false });

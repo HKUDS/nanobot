@@ -145,8 +145,8 @@ export function DismissibleStatusMessage({
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
           isError
-            ? "text-destructive/70 hover:text-destructive"
-            : "text-muted-foreground/70 hover:text-foreground",
+            ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+            : "text-muted-foreground/70 settings-hover hover:text-foreground",
         )}
       >
         <X className="h-3.5 w-3.5" aria-hidden />

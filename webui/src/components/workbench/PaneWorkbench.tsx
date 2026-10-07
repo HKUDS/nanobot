@@ -183,8 +183,9 @@ function HeaderIconButton({
             size="icon"
             disabled={disabled}
             aria-label={label}
+            title={disabled ? disabledLabel : undefined}
             onClick={onClick}
-            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:text-foreground"
+            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
           >
             <Icon className="h-4 w-4" aria-hidden />
           </Button>
@@ -631,7 +632,7 @@ export function PaneWorkbench({
               aria-label={t("workbench.layout", {
                 defaultValue: "Pane layout",
               })}
-              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:text-foreground"
+              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
             >
               <currentLayout.icon className="h-4 w-4" aria-hidden />
             </Button>

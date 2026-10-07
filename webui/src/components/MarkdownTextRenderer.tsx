@@ -16,7 +16,6 @@ import remend from "remend";
 
 import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
 
-import { DisplayMath } from "@/components/DisplayMath";
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
 import { WebLink } from "@/components/WebLink";
@@ -689,13 +688,6 @@ export default function MarkdownTextRenderer({
             {markdownChildren}
           </WebLink>
         );
-      },
-      span({ children: spanChildren, className: spanClassName, node: _node, ...props }) {
-        void _node;
-        if (spanClassName?.split(" ").includes("katex-display")) {
-          return <DisplayMath>{spanChildren}</DisplayMath>;
-        }
-        return <span className={spanClassName} {...props}>{spanChildren}</span>;
       },
       // Streamdown decorates emphasis with spans by default. Preserve native
       // semantics for accessibility and predictable typography.

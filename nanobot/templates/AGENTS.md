@@ -8,8 +8,8 @@ Use this file for project-specific preferences, recurring workflow conventions, 
 
 - Before scheduling reminders, check available skills and follow skill guidance first.
 - Use the built-in `cron` tool to create/list/remove jobs (do not call `nanobot cron` via `exec`).
-- Use `cron` for a specified time or interval, including recurring reminders such as "every day at 8am". Repetition alone does not make a task a heartbeat task.
-- The tool captures the current chat. Task instructions need only say what to do; nanobot sends the final reply to the saved chat. Include other recipients only when the user requests separate sends.
+- Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegram` from `telegram:8281248569`).
+- Cron jobs run as scheduled turns in the origin chat/session and normally deliver the result back to that channel. Do not use cron for background checks that should stay silent when there is nothing useful to report; use `HEARTBEAT.md` instead.
 
 **Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
 
@@ -21,4 +21,4 @@ Use this file for project-specific preferences, recurring workflow conventions, 
 - Use `edit_file` only for small exact replacements copied from the current `HEARTBEAT.md`.
 - Use `write_file` for first creation or intentional full-file rewrites.
 
-Use `HEARTBEAT.md` for background checks with flexible timing that should notify only on actionable changes. Heartbeat does not guarantee a requested time or interval. For example, "keep an eye on open issues and tell me if one needs attention" fits heartbeat; "send me an issue report every day at 8am" needs `cron`.
+When the user asks for a recurring/periodic heartbeat task, or for a periodic background check that should only notify on actionable changes, update `HEARTBEAT.md` instead of creating a one-time reminder. Use the built-in `cron` tool for explicit reminders, scheduled tasks that should report every run, or custom schedules that should not be part of the heartbeat task list.

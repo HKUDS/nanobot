@@ -198,7 +198,7 @@ export function WebSettings({
                       aria-label={
                         keyVisible ? t("settings.byok.hideApiKey") : t("settings.byok.showApiKey")
                       }
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
                     >
                       {keyVisible ? (
                         <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -218,7 +218,7 @@ export function WebSettings({
                       size="icon"
                       onClick={onToggleKeyEditing}
                       aria-label={t("settings.actions.edit")}
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
                     >
                       <Pencil className="h-3.5 w-3.5" aria-hidden />
                     </Button>

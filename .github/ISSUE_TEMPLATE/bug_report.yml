@@ -53,61 +53,72 @@ body:
     validations:
       required: true
 
-  - type: input
+  - type: dropdown
     id: python_version
     attributes:
       label: Python Version
-      description: Python version running the nanobot gateway.
-      placeholder: e.g., 3.12.10
+      description: What Python version are you using?
+      options:
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - Other (specify below)
     validations:
       required: true
 
-  - type: input
+  - type: dropdown
     id: os
     attributes:
       label: Operating System
-      description: Operating system running the nanobot gateway (including container OS).
-      placeholder: e.g., Windows, macOS, Linux, Docker
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Docker
+        - Other (specify below)
     validations:
       required: true
 
-  - type: input
+  - type: dropdown
     id: channel
     attributes:
       label: Channel / Platform
       description: Which messaging platform are you using?
-      placeholder: e.g., WebSocket, Telegram, Feishu (Lark), API Server
+      options:
+        - Weixin (Personal WeChat)
+        - WeCom (Enterprise WeChat)
+        - Feishu (Lark)
+        - DingTalk
+        - Telegram
+        - Discord
+        - Slack
+        - QQ
+        - WhatsApp
+        - Email
+        - MS Teams
+        - Matrix
+        - WebSocket
+        - API Server
+        - Other (specify below)
     validations:
       required: true
 
-  - type: input
+  - type: dropdown
     id: llm_provider
     attributes:
       label: LLM Provider
-      description: Configured default provider. Edit if the affected conversation uses another provider.
-      placeholder: e.g., openai, openai_codex, anthropic, deepseek
+      description: Which LLM provider are you using?
+      options:
+        - OpenAI
+        - Anthropic (Claude)
+        - DeepSeek
+        - Google (Gemini)
+        - Ollama (Local)
+        - OpenRouter
+        - Azure OpenAI
+        - Other (specify below)
     validations:
       required: true
-
-  - type: input
-    id: model
-    attributes:
-      label: Model
-      description: Configured default model. Edit if the affected conversation uses another model.
-      placeholder: e.g., openai/gpt-4o
-
-  - type: input
-    id: browser
-    attributes:
-      label: Browser
-      description: Browser version or user agent, for WebUI issues.
-
-  - type: input
-    id: connection
-    attributes:
-      label: Connection
-      description: How the WebUI connects to the gateway.
-      placeholder: e.g., Local host, Remote host, Direct WebUI
 
   - type: textarea
     id: config

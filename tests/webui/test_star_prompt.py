@@ -8,11 +8,9 @@ from nanobot.webui import star_prompt
 
 
 @pytest.fixture
-def state_path(tmp_path, tmp_path_factory):
-    webui_dir = star_prompt.get_webui_dir()
-    assert webui_dir.is_relative_to(tmp_path_factory.getbasetemp())
-    assert not webui_dir.is_relative_to(tmp_path)
-    return webui_dir / "star-prompt.json"
+def state_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(star_prompt, "get_webui_dir", lambda: tmp_path)
+    return tmp_path / "star-prompt.json"
 
 
 def seed_eligible(path: Path):

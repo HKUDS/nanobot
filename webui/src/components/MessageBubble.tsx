@@ -7,7 +7,17 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Link2, Quote, Wrench } from "lucide-react";
+import {
+  Activity,
+  Check,
+  ChevronRight,
+  CircleAlert,
+  Clock3,
+  Copy,
+  Link2,
+  Quote,
+  Wrench,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
@@ -129,7 +139,7 @@ export function MessageCopyButton({ message, className }: { message: UIMessage; 
     onClick={onCopy} aria-label={label}
     className={cn(
       "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
-      "text-muted-foreground transition-[color] hover:text-foreground",
+      "text-muted-foreground transition-[color,background-color,scale] hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
       className,
     )}>
@@ -209,8 +219,8 @@ export function MessageBlockMenuActions({
                         aria-label={t("message.forkFromHere")}
                         className={cn(
                           "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
-                          "text-muted-foreground transition-colors",
-                          "hover:text-foreground",
+                          "text-muted-foreground transition-[color,background-color,scale]",
+                          "hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                           "motion-reduce:transform-none",
                           sheet && "w-full justify-start gap-2 px-2 text-sm",
@@ -246,7 +256,8 @@ export function MessageBlockMenuActions({
                   data-message-block-activity-icon
                   className={cn(
                     "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] shrink-0 items-center justify-center rounded-control",
-                    "transition-colors",
+                    "transition-[background-color,box-shadow,scale]",
+                    "group-hover:bg-muted/70 group-active:scale-[0.96]",
                     "group-focus-visible:ring-2 group-focus-visible:ring-ring",
                     "motion-reduce:transform-none",
                     sheet && "w-3.5",

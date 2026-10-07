@@ -56,9 +56,8 @@ export function AutomationRunDialog({ token = "", job, run, locale, open, onOpen
       : run.status === "skipped" ? t("settings.automations.skipped")
         : t("settings.automations.calendar.recorded");
   const duration = run.duration_ms;
-  const chatKey = run.webui_session_key !== undefined ? run.webui_session_key
-    : job.origin?.channel === "websocket" ? job.origin.session_key : null;
-  const chatHref = chatKey ? `#/chat/${encodeURIComponent(chatKey)}` : null;
+  const chatHref = job.origin?.channel === "websocket" && job.origin.session_key
+    ? `#/chat/${encodeURIComponent(job.origin.session_key)}` : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

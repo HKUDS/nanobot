@@ -120,10 +120,10 @@ class MessageTool(Tool):
     def description(self) -> str:
         return (
             "Proactively send a message to a user/channel, optionally with file attachments. "
-            "Use this for separate sends requested by the user or task, including sends to multiple chats. "
-            "For a normal reply, including a scheduled reminder or report, answer naturally instead: "
-            "nanobot delivers the final reply to the current chat. "
-            "Follow explicit task instructions that require this tool or name other recipients. "
+            "Use this for reminders, cross-channel delivery, or explicit proactive sends. "
+            "Do not use this for the normal reply in the current chat: answer naturally instead. "
+            "If channel/chat_id would target the current runtime conversation, do not call this tool "
+            "unless the user explicitly asked you to proactively send an existing file attachment. "
             "When generate_image creates images in the current chat, use the message tool "
             "with the artifact paths in the media parameter to deliver the images to the user. "
             "For proactive attachment delivery, use the 'media' parameter with file paths. "

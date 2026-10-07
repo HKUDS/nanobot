@@ -1,8 +1,5 @@
-import {
-  PromptNavigationIcon,
-} from "@/components/icons/product-icons";
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { ListTree, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -56,13 +53,13 @@ export function PromptNavigator({
         variant="ghost"
         size="icon"
         className={cn(
-          "host-no-drag h-8 w-8 rounded-xl text-muted-foreground/80",
-          "hover:text-foreground",
+          "host-no-drag h-8 w-8 rounded-full text-muted-foreground/80",
+          "hover:bg-accent/40 hover:text-foreground",
         )}
         aria-label={t("thread.promptNavigator.open")}
         onClick={() => setOpen(true)}
       >
-        <PromptNavigationIcon className="h-4 w-4" />
+        <ListTree className="h-4 w-4" />
       </Button>
 
       <Sheet open={open} onOpenChange={setOpen}>

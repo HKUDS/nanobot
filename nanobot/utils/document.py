@@ -253,8 +253,6 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
         try:
             for sheet_name in workbook.sheetnames:
                 worksheet = workbook[sheet_name]
-                # Producer-supplied dimensions can omit cells that are present in the XML.
-                worksheet.reset_dimensions()
                 wrote_header = False
                 for row_index, row in enumerate(worksheet.iter_rows(values_only=True), 1):
                     row_text = "\t".join(

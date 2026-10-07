@@ -58,14 +58,6 @@ class WebUIBuildHook(BuildHookInterface):
             )
             return
 
-        from nanobot.build_info import read_commit
-
-        commit = read_commit(root)
-        if commit:
-            commit_file = root / "nanobot" / "_build_commit.txt"
-            commit_file.write_text(commit + "\n", encoding="utf-8")
-            build_data.setdefault("force_include", {})[str(commit_file)] = "nanobot/_build_commit.txt"
-
         if os.environ.get("NANOBOT_SKIP_WEBUI_BUILD") == "1":
             self.app.display_info("[webui-build] skipped via NANOBOT_SKIP_WEBUI_BUILD=1")
             return

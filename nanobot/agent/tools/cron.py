@@ -28,10 +28,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
     ),
     message=StringSchema(
         "REQUIRED when action='add'. Instruction for the agent to execute when the job triggers "
-        "(e.g., 'Remind me to drink water' or 'Check system status and report'). "
-        "The final reply goes to the task's saved chat automatically. "
-        "Do not copy the current channel/chat ID or require a message tool call for that reply. "
-        "Include other recipients only when the user requests separate sends. "
+        "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report'). "
         "Not used for action='list' or action='remove'."
     ),
     every_seconds=IntegerSchema(

@@ -168,7 +168,7 @@ export function ChannelsSettings({
             <div className="relative">
               <div className="absolute end-6 top-6 z-10 flex h-10 items-center gap-1">
                 {selectedChannel ? <ChannelHelpMenu feature={selectedChannel} chatAppsDocsUrl={chatAppsDocsUrl} /> : null}
-                <DialogClose className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                <DialogClose className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
                   <X className="h-4 w-4" aria-hidden />
                   <span className="sr-only">{t("common.close")}</span>
                 </DialogClose>

@@ -1484,18 +1484,9 @@ async def test_connect_mcp_servers_rolls_back_completed_batch_on_cancellation(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("tool_timeout", "expected_read"),
-    [
-        (30, 300.0),  # default: match the MCP SDK's SSE read timeout
-        (600, 600.0),  # long-running tools: read must not cut the call short
-    ],
-)
 async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     fake_mcp_runtime: dict[str, object | None],
     monkeypatch: pytest.MonkeyPatch,
-    tool_timeout: int,
-    expected_read: float,
 ) -> None:
     fake_mcp_runtime["session"] = _make_fake_session(["demo"])
     captured: dict[str, object] = {}
@@ -1526,11 +1517,7 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
 
     registry = ToolRegistry()
     stacks = await connect_mcp_servers(
-        {
-            "test": MCPServerConfig(
-                url="https://mcp.example.com/mcp", tool_timeout=tool_timeout
-            )
-        },
+        {"test": MCPServerConfig(url="https://mcp.example.com/mcp")},
         registry,
     )
     for stack in stacks.values():
@@ -1538,7 +1525,7 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
 
     timeout = captured["timeout"]
     assert timeout.connect == 10.0
-    assert timeout.read == expected_read
+    assert timeout.read == 30.0
     assert timeout.write == 30.0
     assert timeout.pool == 30.0
 

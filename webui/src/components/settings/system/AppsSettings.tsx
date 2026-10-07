@@ -1,10 +1,4 @@
 import {
-  ImportIcon,
-  UpdateIcon,
-  McpIcon,
-  AppActionsIcon,
-} from "@/components/icons/product-icons";
-import {
   forwardRef,
   useEffect,
   useId,
@@ -20,12 +14,16 @@ import {
   ChevronDown,
   ChevronRight,
   Clipboard,
+  Database,
   ExternalLink,
   Loader2,
   PauseCircle,
   PlayCircle,
   Plus,
+  RotateCcw,
   Search,
+  Server,
+  SlidersHorizontal,
   TriangleAlert,
   Trash2,
 } from "lucide-react";
@@ -442,7 +440,7 @@ function CliAppsCatalogRow({
                   disabled={busy}
                   tone="installed"
                 >
-                  <AppActionsIcon className="h-4 w-4" aria-hidden />
+                  <Check className="h-4 w-4" aria-hidden />
                 </AppsActionButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -451,7 +449,7 @@ function CliAppsCatalogRow({
                   {tx("settings.cliApps.test", "Test CLI")}
                 </DropdownMenuItem>
                 <DropdownMenuItem disabled={busy} onClick={() => onAction("update", app.name)}>
-                  <UpdateIcon aria-hidden />
+                  <RotateCcw aria-hidden />
                   {tx("settings.cliApps.update", "Update CLI")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -676,7 +674,7 @@ function McpAppsCatalogRow({
               disabled={anotherOAuthBusy}
               onClick={() => openManagement("connection")}
             >
-              <AppActionsIcon className="h-4 w-4" aria-hidden />
+              <SlidersHorizontal className="h-4 w-4" aria-hidden />
             </AppsActionButton>
           ) : readyInstalled ? (
             toggleable ? (
@@ -689,7 +687,7 @@ function McpAppsCatalogRow({
                     disabled={busy}
                     tone="installed"
                   >
-                    <AppActionsIcon className="h-4 w-4" aria-hidden />
+                    <Check className="h-4 w-4" aria-hidden />
                   </AppsActionButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -714,7 +712,7 @@ function McpAppsCatalogRow({
                 tone={runtimeConnected ? "installed" : "default"}
                 onClick={() => openManagement("overview")}
               >
-                <AppActionsIcon className="h-4 w-4" aria-hidden />
+                <Check className="h-4 w-4" aria-hidden />
               </AppsActionButton>
             )
           ) : preset.enabled === false ? (
@@ -929,18 +927,18 @@ const AppsActionButton = forwardRef<HTMLButtonElement, AppsActionButtonProps>(
         ref={ref}
         type="button"
         size={visibleLabel ? "sm" : "icon"}
-        variant={visibleLabel ? "ghost" : "icon"}
+        variant="ghost"
         aria-label={ariaLabel}
-        title={visibleLabel ? undefined : ariaLabel}
+        title={ariaLabel}
         disabled={disabled || busy}
         className={cn(
           "rounded-full text-muted-foreground transition-colors",
           visibleLabel
             ? "h-8 w-auto gap-1.5 px-3 text-[12px] font-semibold"
             : "h-9 w-9",
-          tone === "installed" && "bg-transparent hover:text-foreground",
-          tone === "danger" && "bg-transparent hover:text-destructive",
-          tone === "default" && "bg-muted/70 hover:text-foreground",
+          tone === "installed" && "bg-transparent settings-hover hover:text-foreground",
+          tone === "danger" && "bg-transparent hover:bg-destructive/10 hover:text-destructive",
+          tone === "default" && "bg-muted/70 settings-hover hover:text-foreground",
           className,
         )}
       >
@@ -1040,7 +1038,7 @@ function McpCustomServerPanel({
       <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
-            <McpIcon className="h-4 w-4" aria-hidden />
+            <Server className="h-4 w-4" aria-hidden />
           </span>
           <div className="min-w-0">
             <h3 className="text-[13px] font-semibold leading-5 text-foreground">
@@ -1062,7 +1060,7 @@ function McpCustomServerPanel({
             onClick={() => setActiveMode((mode) => (mode === "custom" ? null : "custom"))}
             className="h-8 rounded-full px-3 text-[12px] font-semibold"
           >
-            <McpIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            <Server className="mr-1.5 h-3.5 w-3.5" aria-hidden />
             {tx("settings.mcp.customAction", "Custom")}
           </Button>
           <Button
@@ -1072,7 +1070,7 @@ function McpCustomServerPanel({
             onClick={() => setActiveMode((mode) => (mode === "import" ? null : "import"))}
             className="h-8 rounded-full px-3 text-[12px] font-semibold"
           >
-            <ImportIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            <Database className="mr-1.5 h-3.5 w-3.5" aria-hidden />
             {tx("settings.mcp.importAction", "Import")}
           </Button>
         </div>
@@ -1277,7 +1275,7 @@ function McpCustomServerPanel({
               disabled={!configImport.trim() || importBusy}
               className="h-9 shrink-0 rounded-full px-4 text-[12.5px] font-semibold"
             >
-              {importBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <ImportIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
+              {importBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Database className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
               {tx("settings.mcp.importConfig", "Import")}
             </Button>
           </div>

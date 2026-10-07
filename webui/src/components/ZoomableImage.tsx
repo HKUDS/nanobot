@@ -89,7 +89,7 @@ export function ZoomableImage({ src, alt }: { src: string; alt: string }) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     setDragging(pointers.current.size > 0);
   };
-  const buttonClass = "grid size-9 shrink-0 place-items-center rounded-full text-white/90 transition-colors hover:text-white disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70";
+  const buttonClass = "grid size-9 shrink-0 place-items-center rounded-full text-white/90 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70";
 
   return <>
     <div ref={viewport} data-testid="image-zoom-viewport" tabIndex={0} role="group" aria-label={t("lightbox.gestures")}
@@ -110,7 +110,7 @@ export function ZoomableImage({ src, alt }: { src: string; alt: string }) {
     <div className="absolute bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-black/55 p-1 backdrop-blur-sm">
       <button type="button" aria-label={t("lightbox.zoomOut")} title={t("lightbox.zoomOut")} disabled={view.scale <= 1} className={buttonClass} onClick={() => zoom(view.scale / 1.5)}><Minus className="size-4" aria-hidden /></button>
       <button type="button" aria-label={t("lightbox.resetZoom")} title={t("lightbox.resetZoom")}
-        className="h-9 min-w-14 rounded-full px-2 text-xs font-medium tabular-nums text-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70" onClick={() => apply(FIT)}>
+        className="h-9 min-w-14 rounded-full px-2 text-xs font-medium tabular-nums text-white/90 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70" onClick={() => apply(FIT)}>
         {Math.round(view.scale * 100)}%
       </button>
       <button type="button" aria-label={t("lightbox.zoomIn")} title={t("lightbox.zoomIn")} disabled={view.scale >= MAX_SCALE} className={buttonClass} onClick={() => zoom(view.scale * 1.5)}><Plus className="size-4" aria-hidden /></button>

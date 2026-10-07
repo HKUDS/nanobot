@@ -882,7 +882,7 @@ class TestToolEventProgress:
             },
         )))
 
-        await asyncio.wait_for(first_request_started.wait(), timeout=5)
+        await asyncio.wait_for(first_request_started.wait(), timeout=1)
         await loop._pending_queues[session_key].put(InboundMessage(
             channel="websocket",
             sender_id="user",
@@ -891,8 +891,7 @@ class TestToolEventProgress:
             session_key_override=session_key,
         ))
         release_first_request.set()
-        # Events synchronize injection; the deadline only guards against a stuck worker.
-        await asyncio.wait_for(dispatch, timeout=5)
+        await asyncio.wait_for(dispatch, timeout=2)
 
         outbound = []
         while bus.outbound_size > 0:

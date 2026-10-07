@@ -10,7 +10,7 @@ const presets = [
 ];
 
 describe("ModelPresetBadge setup tooltip", () => {
-  it.each([true, false])("keeps setup actionable without repeating its prompt in a tooltip (hero: %s)", async (isHero) => {
+  it.each([true, false])("hides model details on hover and focus (hero: %s)", async (isHero) => {
     const user = userEvent.setup();
     const onClick = vi.fn();
     render(
@@ -27,12 +27,12 @@ describe("ModelPresetBadge setup tooltip", () => {
 
     const trigger = screen.getByRole("button", { name: "Choose your AI" });
     await user.hover(trigger);
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Choose your AI$/);
     await user.unhover(trigger);
     fireEvent.keyDown(trigger, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
     fireEvent.focus(trigger);
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Choose your AI$/);
     await user.click(trigger);
     expect(onClick).toHaveBeenCalledTimes(1);
   });
@@ -56,7 +56,7 @@ describe("ModelPresetBadge setup tooltip", () => {
       expect(trigger).toHaveTextContent("选择你的 AI");
       expect(trigger.querySelector("[data-fallback]")).toBeNull();
       fireEvent.focus(trigger);
-      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(/^选择你的 AI$/);
     },
   );
 });

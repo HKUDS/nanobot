@@ -1450,7 +1450,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByText(/This response used a fallback model/)).not.toBeInTheDocument();
   });
 
-  it.each([false, true])("keeps model setup actionable without a repeated tooltip (existing history: %s)", async (hasHistory) => {
+  it.each([false, true])("hides unconfigured model details in setup tooltips (existing history: %s)", async (hasHistory) => {
     const client = makeClient();
     const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
     settings.agent.has_api_key = false;
@@ -1479,7 +1479,7 @@ describe("ThreadShell", () => {
     await screen.findByText(hasHistory ? "Previous message" : HERO_GREETING_PATTERN);
     const badge = screen.getByRole("button", { name: "Choose your AI" });
     fireEvent.focus(badge);
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Choose your AI$/);
     fireEvent.click(badge);
     expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
     expect(client.sendMessage).not.toHaveBeenCalled();

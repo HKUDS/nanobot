@@ -510,7 +510,7 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
           {busy.startsWith("pick-") && <p role="status" className="text-xs text-muted-foreground">{t("remote.setup.pickingFile")}</p>}
           <div className="remote-dialog-actions">
             <Button type="button" variant="ghost" onClick={closeEditor}>{t("common.cancel")}</Button>
-            <Button type="submit" className="min-w-0" aria-label={t(editorLabel)} aria-busy={!!busy} disabled={!!busy || !form.host.trim() || (locationStep && !form.config_path.trim())}>
+            <Button type="submit" className="min-w-0" title={t(editorLabel)} aria-label={t(editorLabel)} aria-busy={!!busy} disabled={!!busy || !form.host.trim() || (locationStep && !form.config_path.trim())}>
               {busy && !busy.startsWith("pick-") && <Loader2 aria-hidden className="mr-2 h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" />}
               <span role={busy && !busy.startsWith("pick-") ? "status" : undefined} className="min-w-0">{t(editorLabel)}</span>
             </Button>

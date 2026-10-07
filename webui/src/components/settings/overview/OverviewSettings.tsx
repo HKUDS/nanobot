@@ -1,24 +1,21 @@
-import {
-  ModelsIcon,
-  WebSearchIcon,
-  ImageGenerationIcon,
-  VoiceIcon,
-} from "@/components/icons/product-icons";
-import { useContext, useState, type Dispatch, type SetStateAction } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   ArrowUpCircle,
+  Bot,
   BookOpen,
   MessageCircle,
   Check,
   ChevronRight,
   ExternalLink,
+  Globe2,
   Github,
+  ImageIcon,
   Loader2,
+  Mic,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { HostNavigationContext } from "@/components/remote/HostSwitcher";
 import { StarLink } from "@/components/StarPrompt";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
@@ -69,9 +66,9 @@ export function OverviewSettings({
     ? settings.agent.model
     : tx("settings.values.notConfigured", "Not configured");
   const activeModelCaption = activeProviderConfigured
-    ? [activeProvider, activePreset].filter(Boolean).join(" ")
+    ? [activeProvider, activePreset].filter(Boolean).join(" · ")
     : activeProviderLabel || settings.agent.model
-      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" ")
+      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" · ")
       : tx("settings.byok.noConfiguredProviders", "No configured providers");
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
@@ -93,7 +90,7 @@ export function OverviewSettings({
         <SettingsSectionTitle>{tx("settings.sections.ai", "AI")}</SettingsSectionTitle>
         <SettingsGroup>
           <OverviewListRow
-            icon={ModelsIcon}
+            icon={Bot}
             valueLogoProvider={activeProvider}
             title={tx("settings.overview.model", "Current model")}
             value={activeModelValue}
@@ -108,7 +105,7 @@ export function OverviewSettings({
         <SettingsSectionTitle>{tx("settings.sections.capabilities", "Capabilities")}</SettingsSectionTitle>
         <SettingsGroup>
           <OverviewListRow
-            icon={WebSearchIcon}
+            icon={Globe2}
             valueLogoProvider={settings.web_search.provider}
             title={tx("settings.overview.webSearch", "Web search")}
             value={webStatus}
@@ -116,7 +113,7 @@ export function OverviewSettings({
             onClick={() => onSelectSection("browser")}
           />
           <OverviewListRow
-            icon={ImageGenerationIcon}
+            icon={ImageIcon}
             valueLogoProvider={settings.image_generation.provider}
             title={tx("settings.overview.imageGeneration", "Image generation")}
             value={imageStatus}
@@ -124,7 +121,7 @@ export function OverviewSettings({
             onClick={() => onSelectSection("image")}
           />
           <OverviewListRow
-            icon={VoiceIcon}
+            icon={Mic}
             valueLogoProvider={transcription.provider}
             title={tx("settings.overview.voiceInput", "Voice input")}
             value={voiceStatus}
@@ -138,44 +135,19 @@ export function OverviewSettings({
   );
 }
 
-type VersionInfoProps = { currentVersion?: string; currentCommit?: string | null };
-
-export function AboutSettings({ settings }: { settings: SettingsPayload }) {
+export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
   const { t } = useTranslation();
-  const hostPicker = useContext(HostNavigationContext);
-  const currentVersion = settings.version?.current;
-  const currentCommit = settings.version?.commit;
-  const environment = settings.environment;
-  const reportIssueUrl = new URL("https://github.com/HKUDS/nanobot/issues/new");
-  reportIssueUrl.searchParams.set("template", "bug_report.yml");
-  const reportedVersion = [currentVersion, currentCommit && `(commit ${currentCommit})`]
-    .filter(Boolean).join(" ");
-  if (reportedVersion) reportIssueUrl.searchParams.set("version", reportedVersion);
-  reportIssueUrl.searchParams.set("channel", "WebSocket");
-  if (environment) {
-    reportIssueUrl.searchParams.set("python_version", environment.python_version);
-    const osName = environment.os === "Darwin" ? "macOS" : environment.os;
-    const osVersion = [osName, environment.os_version].filter(Boolean).join(" ");
-    reportIssueUrl.searchParams.set("os", environment.architecture
-      ? `${osVersion} (${environment.architecture})` : osVersion);
-  }
-  if (settings.agent.model) reportIssueUrl.searchParams.set("model", settings.agent.model);
-  const provider = settings.agent.resolved_provider || settings.agent.provider;
-  if (provider) reportIssueUrl.searchParams.set("llm_provider", provider);
-  reportIssueUrl.searchParams.set("browser", navigator.userAgent);
-  reportIssueUrl.searchParams.set("connection", hostPicker?.kind === "embedded"
-    ? "Remote host" : hostPicker ? "Local host" : "Direct WebUI");
   const links = [
     { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
     { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
-    { key: "reportIssue", icon: MessageCircle, href: reportIssueUrl.href },
+    { key: "reportIssue", icon: MessageCircle, href: "https://github.com/HKUDS/nanobot/issues" },
   ];
   return (
     <div className="flex flex-1 flex-col gap-5">
       <div className="flex flex-col items-center gap-4 py-6 text-center">
         <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
-        <VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit} />
+        <VersionCheckRow currentVersion={currentVersion} />
       </div>
       <SettingsGroup>
         {links.map(({ key, icon: Icon, href }) => (
@@ -194,7 +166,7 @@ export function AboutSettings({ settings }: { settings: SettingsPayload }) {
   );
 }
 
-function VersionCheckRow({ currentVersion, currentCommit }: VersionInfoProps) {
+function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const { token } = useClient();
@@ -235,17 +207,6 @@ function VersionCheckRow({ currentVersion, currentCommit }: VersionInfoProps) {
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
           {currentVersion ? `v${currentVersion}` : "nanobot"}
-          {currentCommit && (
-            <>
-              <span aria-hidden> (</span>
-              <a href={`https://github.com/HKUDS/nanobot/commit/${currentCommit}`}
-                target="_blank" rel="noopener noreferrer" title={currentCommit}
-                className="font-mono hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {currentCommit.slice(0, 7)}
-              </a>
-              <span aria-hidden>)</span>
-            </>
-          )}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-2">
@@ -452,7 +413,7 @@ function OverviewRowIcon({
   icon: LucideIcon;
 }) {
   return (
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 transition-colors dark:bg-muted/70">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 transition-colors group-hover:bg-muted/80 dark:bg-muted/70">
       <Icon className="h-4 w-4" aria-hidden />
     </span>
   );

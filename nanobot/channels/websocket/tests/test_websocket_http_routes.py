@@ -4276,11 +4276,13 @@ def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
 
 @pytest.mark.asyncio
 async def test_star_prompt_requires_authenticated_mutation_and_persists_dismissal(
-    bus: MagicMock,
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.star_prompt import StarPromptState, get_webui_dir
+    from nanobot.webui.star_prompt import StarPromptState
 
-    state_path = get_webui_dir() / "star-prompt.json"
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    state_path = tmp_path / "webui" / "star-prompt.json"
+    state_path.parent.mkdir()
     state_path.write_text(StarPromptState(
         completed_replies=10, active_days=["2026-09-20", "2026-09-21", "2026-09-22"]
     ).model_dump_json(), encoding="utf-8")

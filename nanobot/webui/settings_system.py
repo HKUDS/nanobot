@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import platform
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -16,7 +15,6 @@ from zoneinfo import ZoneInfo
 
 from pydantic.alias_generators import to_snake
 
-from nanobot.build_info import COMMIT
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.connect import ChannelConnectError
 from nanobot.channels.contracts import (
@@ -68,20 +66,12 @@ class SystemSettingsOperations:
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None
 
 
-class GatewayEnvironmentPayload(TypedDict):
-    python_version: str
-    os: str
-    os_version: str
-    architecture: str
-
-
 class SystemSettingsPayload(TypedDict):
     runtime_config: dict[str, Any]
     runtime: dict[str, Any]
     usage: dict[str, Any]
     advanced: dict[str, Any]
     version: dict[str, Any]
-    environment: GatewayEnvironmentPayload
     docs: dict[str, Any]
 
 
@@ -148,13 +138,7 @@ def system_settings_payload(
             "exec_path_prepend_set": bool(exec_config.path_prepend),
             "exec_path_append_set": bool(exec_config.path_append),
         },
-        "version": {"current": version, "commit": COMMIT},
-        "environment": {
-            "python_version": platform.python_version(),
-            "os": platform.system(),
-            "os_version": platform.release(),
-            "architecture": platform.machine(),
-        },
+        "version": {"current": version},
         "docs": docs_payload(version),
     }
 

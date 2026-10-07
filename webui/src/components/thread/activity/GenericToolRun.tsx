@@ -1,18 +1,12 @@
 import {
-  DelegationIcon,
-  TaskInspectIcon,
-  TaskMessageIcon,
-  StopIcon,
-  ImageGenerationIcon,
-  ConversationIcon,
-  AutomationsIcon,
-  GoalIcon,
-  FileReadIcon,
-  FileListIcon,
-  MemoryIcon,
-  ToolRunIcon,
-} from "@/components/icons/product-icons";
-import { AlertCircle, FileSearch, type LucideIcon } from "lucide-react";
+  AlertCircle,
+  FileSearch,
+  FolderOpen,
+  ListTree,
+  MemoryStick,
+  Play,
+  type LucideIcon,
+} from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -54,27 +48,14 @@ function buildModel(items: GenericToolRunItem[], t: ReturnType<typeof useTransla
   const presentation = describeGenericToolRun(items, t);
   return {
     ...presentation,
-    icon: activityIcon(family, items[0]),
+    icon: activityIcon(family),
   };
 }
 
-function activityIcon(family: ToolFamily, item: GenericToolRunItem | undefined): LucideIcon {
-  const name = item?.trace.name;
-  const action = item?.trace.fields.find((field) => field.key === "action")?.value.toLowerCase();
-  if (name === "spawn") return DelegationIcon;
-  if (name === "subagent") {
-    if (action === "check") return TaskInspectIcon;
-    if (action === "send") return TaskMessageIcon;
-    if (action === "cancel") return StopIcon;
-    return DelegationIcon;
-  }
-  if (name === "generate_image") return ImageGenerationIcon;
-  if (name === "message") return ConversationIcon;
-  if (name === "cron") return AutomationsIcon;
-  if (name === "create_goal") return GoalIcon;
+function activityIcon(family: ToolFamily): LucideIcon {
   if (family === "content-search" || family === "file-search") return FileSearch;
-  if (family === "list") return FileListIcon;
-  if (family === "read") return FileReadIcon;
-  if (family === "memory") return MemoryIcon;
-  return ToolRunIcon;
+  if (family === "list") return ListTree;
+  if (family === "read") return FolderOpen;
+  if (family === "memory") return MemoryStick;
+  return Play;
 }

@@ -3185,7 +3185,6 @@ function Shell({
                     onDeleteExtension={handleDeleteExtension}
                     onStartAutomationChat={onStartAutomationChat}
                     titleOverrides={sidebarState.title_overrides}
-                    sessions={topicSessions}
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}
                     onRestart={onRestart}
