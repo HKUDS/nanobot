@@ -2381,6 +2381,35 @@ describe("NanobotClient", () => {
 
 
 describe("binary attachment transport", () => {
+  it("keeps a progressing HTTP upload alive beyond the old 65-second limit", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), milliseconds);
+      return controller.signal;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url, request: RequestInit) => new Promise((resolve, reject) => {
+      request.signal?.addEventListener("abort", () => reject(new Error("Upload timed out")));
+      setTimeout(() => resolve(Response.json({ reference: "slow-ref" }, { status: 201 })), 80_000);
+    })));
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    try {
+      client.connect();
+      const socket = lastSocket(); socket.fakeOpen();
+      socket.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test",
+        upload: { path: "/api/attachments", token: "cap" } });
+      const delivery = client.sendAttachments("chat", "look", [
+        { data_url: "data:text/plain;base64,eA==", name: "note.txt" },
+      ], { turnId: "slow-upload" });
+      await vi.advanceTimersByTimeAsync(80_000);
+      expect(socket.sent.some((frame) => frame.includes("slow-ref"))).toBe(true);
+      socket.fakeMessage({ event: "message_accepted", chat_id: "chat", turn_id: "slow-upload" });
+      await delivery;
+    } finally {
+      client.close(); vi.unstubAllGlobals(); timeout.mockRestore();
+    }
+  });
+
   it("rejects an oversized message envelope without waiting for an ACK and retains the draft", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ reference: "ref" }, { status: 201 })));
     const client = new NanobotClient({ url: "ws://test", reconnect: false, maxFrameBytes: 256,

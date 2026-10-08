@@ -155,3 +155,24 @@ async def test_one_shot_handshake_token_is_not_an_upload_credential(gateway):
                 headers={"Authorization": f"Bearer {token}", "Content-Type": "image/png"},
             ) as response:
                 assert response.status == expected
+
+
+async def test_stalled_upload_reports_timeout_and_keeps_connection_retryable(gateway):
+    channel, _, http_url, ws_url = gateway
+    channel.gateway.uploads.store.upload_idle_timeout = .05
+
+    async def stalled():
+        yield b"x"
+        await asyncio.sleep(.15)
+        yield b"y"
+
+    async with connect(ws_url) as ws, aiohttp.ClientSession() as http:
+        capability = (await event(ws, "ready"))["upload"]
+        headers = {"Authorization": f"Bearer {capability['token']}",
+                   "Content-Type": "image/png", "Content-Length": "2"}
+        async with http.post(http_url + capability["path"], data=stalled(), headers=headers) as response:
+            assert response.status == 400
+            assert (await response.json())["error"] == "Attachment upload timed out"
+        assert not [p for p in channel.gateway.uploads.store.media_dir.rglob("*") if p.is_file()]
+        async with http.post(http_url + capability["path"], data=b"xy", headers=headers) as response:
+            assert response.status == 201

@@ -13,6 +13,12 @@ class AttachmentIngressLimits:
 MAX_VIDEOS_PER_MESSAGE = 1
 MAX_VIDEO_BYTES = 20 * 1024 * 1024
 
+# A 20 MiB upload takes about 168 seconds at 1 Mbps. Keep a finite total
+# budget with room for contention, but release stalled uploads promptly.
+UPLOAD_TIMEOUT_SECONDS = 300.0
+UPLOAD_IDLE_TIMEOUT_SECONDS = 30.0
+UPLOAD_REQUEST_TIMEOUT_SECONDS = 315.0
+
 IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
     "image/png", "image/jpeg", "image/webp", "image/gif",
 })

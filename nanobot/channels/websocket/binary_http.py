@@ -15,7 +15,10 @@ from aiohttp import web
 from aiohttp.web_protocol import RequestHandler
 from websockets.asyncio.server import ServerConnection
 
-_HTTP_CONNECTION_TIMEOUT_S = 75.0
+from nanobot.channels.websocket.attachment_policy import UPLOAD_REQUEST_TIMEOUT_SECONDS
+
+_HTTP_HEADER_TIMEOUT_S = 75.0
+_HTTP_CONNECTION_TIMEOUT_S = UPLOAD_REQUEST_TIMEOUT_SECONDS
 
 
 class BinaryHTTPBridge:
@@ -28,7 +31,15 @@ class BinaryHTTPBridge:
     """
 
     def __init__(self, handler: Callable[[web.BaseRequest], Awaitable[web.StreamResponse]]) -> None:
-        self.http_server = web.Server(handler, auto_decompress=False, keepalive_timeout=5)
+        async def request_started(request: web.BaseRequest) -> web.StreamResponse:
+            if request.transport is not None:
+                # This bridge remains the transport protocol while delegating
+                # HTTP parsing to RequestHandler on the same transport.
+                connection = cast(_BridgeConnection, request.transport.get_protocol())
+                connection.request_started()
+            return await handler(request)
+
+        self.http_server = web.Server(request_started, auto_decompress=False, keepalive_timeout=5)
         self.pending_connections: set[_BridgeConnection] = set()
 
         bridge = self
@@ -76,10 +87,10 @@ class _BridgeConnection(ServerConnection):
             if data.startswith(b"GET "):
                 super().connection_made(self.transport)
             else:
-                # Bound incomplete HTTP headers as well as slow request bodies.
-                # The store's tighter 60s body timeout starts only after headers.
+                # Incomplete headers retain their own short deadline. A parsed
+                # request receives the longer bounded upload budget below.
                 self._prefix_timeout = asyncio.get_running_loop().call_later(
-                    _HTTP_CONNECTION_TIMEOUT_S, self.transport.close,
+                    _HTTP_HEADER_TIMEOUT_S, self.transport.close,
                 )
                 self._http_protocol = self._bridge.http_server()
                 self._http_protocol.connection_made(self.transport)
@@ -87,6 +98,13 @@ class _BridgeConnection(ServerConnection):
             self._http_protocol.data_received(data)
         else:
             super().data_received(data)
+
+    def request_started(self) -> None:
+        if self._prefix_timeout is not None:
+            self._prefix_timeout.cancel()
+        self._prefix_timeout = asyncio.get_running_loop().call_later(
+            _HTTP_CONNECTION_TIMEOUT_S, self.transport.close,
+        )
 
     def eof_received(self) -> None:
         if self._http_protocol is not None:

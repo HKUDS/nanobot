@@ -18,7 +18,9 @@ from nanobot.channels.websocket.attachment_policy import (
     DOCUMENT_MIME_ALLOWED,
     MAX_VIDEO_BYTES,
     MAX_VIDEOS_PER_MESSAGE,
+    UPLOAD_IDLE_TIMEOUT_SECONDS,
     UPLOAD_MIME_ALLOWED,
+    UPLOAD_TIMEOUT_SECONDS,
     VIDEO_MIME_ALLOWED,
     AttachmentIngressLimits,
 )
@@ -55,9 +57,10 @@ class AttachmentStore:
         max_pending: int = 128,
         max_pending_bytes: int = 128 * 1024 * 1024,
         ttl_seconds: float = 600,
-        upload_timeout: float = 60,
+        upload_timeout: float = UPLOAD_TIMEOUT_SECONDS,
+        upload_idle_timeout: float = UPLOAD_IDLE_TIMEOUT_SECONDS,
     ) -> None:
-        if min(max_pending, max_pending_bytes, ttl_seconds, upload_timeout) <= 0:
+        if min(max_pending, max_pending_bytes, ttl_seconds, upload_timeout, upload_idle_timeout) <= 0:
             raise ValueError("Attachment store bounds must be positive")
         self.media_dir = media_dir
         self.limits = limits or AttachmentIngressLimits()
@@ -65,6 +68,7 @@ class AttachmentStore:
         self.max_pending_bytes = max_pending_bytes
         self.ttl_seconds = ttl_seconds
         self.upload_timeout = upload_timeout
+        self.upload_idle_timeout = upload_idle_timeout
         self._entries: dict[str, _Attachment] = {}
         self._reserved_bytes = 0
         self._active = 0
@@ -117,7 +121,13 @@ class AttachmentStore:
             with path.open("xb") as output:
                 created = True
                 async with asyncio.timeout(self.upload_timeout):
-                    async for chunk in chunks:
+                    iterator = aiter(chunks)
+                    while True:
+                        async with asyncio.timeout(self.upload_idle_timeout):
+                            try:
+                                chunk = await anext(iterator)
+                            except StopAsyncIteration:
+                                break
                         received += len(chunk)
                         if received > size:
                             raise AttachmentUploadError("Attachment exceeds declared size")

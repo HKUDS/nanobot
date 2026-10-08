@@ -171,7 +171,7 @@ async def test_request_body_is_not_automatically_decompressed():
 
 @pytest.mark.asyncio
 async def test_incomplete_http_headers_have_a_deadline(monkeypatch):
-    monkeypatch.setattr("nanobot.channels.websocket.binary_http._HTTP_CONNECTION_TIMEOUT_S", .05)
+    monkeypatch.setattr("nanobot.channels.websocket.binary_http._HTTP_HEADER_TIMEOUT_S", .05)
 
     async def upload(request):
         pytest.fail("Incomplete headers must not invoke the upload handler")
@@ -193,3 +193,46 @@ async def test_incomplete_http_headers_have_a_deadline(monkeypatch):
         server.close()
         await server.wait_closed()
         await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_parsed_request_outlasts_header_deadline(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.websocket.binary_http._HTTP_HEADER_TIMEOUT_S", .1)
+    monkeypatch.setattr("nanobot.channels.websocket.binary_http._HTTP_CONNECTION_TIMEOUT_S", 1)
+    store = AttachmentStore(tmp_path, upload_timeout=1, upload_idle_timeout=.1)
+    started = asyncio.Event()
+
+    async def upload(request):
+        started.set()
+        ref = await store.upload(
+            request.content.iter_chunked(65536), owner="owner", mime="image/png", size=3,
+        )
+        response = web.json_response({"ref": ref})
+        response.force_close()
+        return response
+
+    async def echo(connection):
+        await connection.wait_closed()
+
+    bridge = BinaryHTTPBridge(upload)
+    server = await serve(echo, "127.0.0.1", 0, create_connection=bridge.connection_factory)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(b"POST /api/attachments HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\n")
+        await writer.drain()
+        await asyncio.wait_for(started.wait(), 1)
+        for _ in range(3):
+            await asyncio.sleep(.05)
+            writer.write(b"x")
+            await writer.drain()
+        response = await asyncio.wait_for(reader.read(), 1)
+        assert b"200 OK" in response
+        assert [p.read_bytes() for p in tmp_path.glob("*.png")] == [b"xxx"]
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        server.close()
+        await server.wait_closed()
+        await bridge.shutdown()
+        store.clear()

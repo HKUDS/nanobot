@@ -122,6 +122,34 @@ async def test_timeout_cleans_partial_upload(tmp_path):
     assert not [path for path in tmp_path.rglob("*") if path.is_file()]
 
 
+async def test_progressing_upload_can_outlast_idle_timeout(tmp_path):
+    store = AttachmentStore(tmp_path, upload_timeout=1, upload_idle_timeout=.1)
+
+    async def slow():
+        for _ in range(3):
+            await asyncio.sleep(.05)
+            yield b"x"
+
+    ref = await store.upload(slow(), owner="owner", mime="image/png", size=3)
+    assert Path(store.commit([ref], owner="owner")[0]).read_bytes() == b"xxx"
+
+
+async def test_stalled_upload_releases_file_and_capacity(tmp_path):
+    store = AttachmentStore(
+        tmp_path, upload_timeout=1, upload_idle_timeout=.01,
+        max_pending=1, max_pending_bytes=2,
+    )
+
+    async def stalled():
+        yield b"x"
+        await asyncio.Event().wait()
+
+    with pytest.raises(TimeoutError):
+        await store.upload(stalled(), owner="owner", mime="image/png", size=2)
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
+    assert await upload(store, b"xx")
+
+
 async def test_expiry_cleans_only_staged_files(tmp_path, monkeypatch):
     import nanobot.channels.websocket.attachment_store as module
     monkeypatch.setattr(module.time, "monotonic", lambda: 100)

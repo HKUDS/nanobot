@@ -3,6 +3,9 @@ export interface DraftAttachment { data_url: string; name?: string }
 export interface AttachmentReference { reference: string; name?: string }
 export interface UploadCapability { path: string; token: string }
 
+// Allow the gateway's five-minute body budget plus request/response overhead.
+const UPLOAD_REQUEST_TIMEOUT_MS = 315_000;
+
 export function uploadCapability(value: unknown): UploadCapability | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
@@ -36,7 +39,7 @@ export async function uploadAttachments(
         ...(draft.name ? { "X-Attachment-Name": encodeURIComponent(draft.name) } : {}),
       },
       body: new Blob([bytes], { type: match[1] }),
-      signal: AbortSignal.timeout(65_000),
+      signal: AbortSignal.timeout(UPLOAD_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`Attachment upload failed (${response.status})`);
     const result: unknown = await response.json();

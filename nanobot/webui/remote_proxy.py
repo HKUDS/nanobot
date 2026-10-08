@@ -28,6 +28,10 @@ from websockets.typing import Origin
 from yarl import URL
 
 from nanobot.channels.websocket.attachment_http import UPLOAD_PATH
+from nanobot.channels.websocket.attachment_policy import (
+    UPLOAD_IDLE_TIMEOUT_SECONDS,
+    UPLOAD_REQUEST_TIMEOUT_SECONDS,
+)
 from nanobot.webui.client_contract import assess_webui_contract, compatibility_error
 from nanobot.webui.local_client_assets import LocalClientAssets
 from nanobot.webui.remote_ssh import (
@@ -374,9 +378,21 @@ class RemoteProxy:
             headers["X-Attachment-Name"] = request.headers["X-Attachment-Name"]
         # Only this connection-scoped upload route accepts HTTP writes. Stream
         # the declared bytes without decoding or buffering the browser's file.
-        async with asyncio.timeout(75), httpx.AsyncClient(trust_env=False, timeout=65) as client:
+        async def upload_body():
+            iterator = aiter(request.content.iter_chunked(64 * 1024))
+            while True:
+                async with asyncio.timeout(UPLOAD_IDLE_TIMEOUT_SECONDS):
+                    try:
+                        chunk = await anext(iterator)
+                    except StopAsyncIteration:
+                        return
+                yield chunk
+
+        async with asyncio.timeout(UPLOAD_REQUEST_TIMEOUT_SECONDS), httpx.AsyncClient(
+            trust_env=False, timeout=httpx.Timeout(UPLOAD_IDLE_TIMEOUT_SECONDS, connect=20),
+        ) as client:
             async with client.stream("POST", self._upstream(UPLOAD_PATH), headers=headers,
-                                     content=request.content.iter_chunked(64 * 1024)) as upstream:
+                                     content=upload_body()) as upstream:
                 if upstream.is_redirect:
                     raise web.HTTPBadGateway(text="Unexpected remote redirect")
                 body = bytearray()

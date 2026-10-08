@@ -238,6 +238,12 @@ The upload path accepts the existing image, document, and video MIME whitelist.
 Existing file/count/total limits still apply independently of `maxMessageBytes`.
 Pending uploads are bounded by count, bytes, and lifetime; timeout, disconnect,
 shutdown, and expired crash-remnant cleanup never remove committed session media.
+Each upload body has a five-minute total deadline and a 30-second deadline for
+the next body chunk. This allows a 20 MiB video to upload over a 1 Mbps connection
+while releasing stalled uploads. Incomplete HTTP headers retain a separate
+75-second deadline. Bundled clients and the remote proxy allow up to 315 seconds
+per upload request, including request/response overhead. Slower transfers may
+still time out; uploads are not resumable, so a retry sends the whole file.
 Persisted sessions still contain local media paths and replay through signed
 `/api/media/` URLs. No history migration is needed. Old internal `media.data_url`
 message uploads are no longer accepted; update both clients with the gateway.

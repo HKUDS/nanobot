@@ -68,7 +68,9 @@ class AttachmentHTTP:
                         self.store.discard([reference], owner=owner)
                         raise AttachmentUploadError("Connection closed during upload")
                     response = web.json_response({"reference": reference}, status=201)
-                except (AttachmentUploadError, TimeoutError, OSError) as exc:
+                except TimeoutError:
+                    response = web.json_response({"error": "Attachment upload timed out"}, status=400)
+                except (AttachmentUploadError, OSError) as exc:
                     response = web.json_response({"error": str(exc)}, status=400)
         response.headers["Cache-Control"] = "no-store"
         # A POST connection cannot later switch to the GET/WS parser. Closing
