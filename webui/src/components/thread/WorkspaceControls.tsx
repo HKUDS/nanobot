@@ -111,7 +111,8 @@ function WorkspaceDirectoryColumn({ options, activeIndex, selectedPath, initialS
     <div className="flex h-full min-h-0 min-w-0 shrink-0 flex-col justify-center" style={style}>
     <div {...props} ref={viewportRef} className={cn("snap-y snap-proximity", className)} style={{ height: options.length ? visibleRows * DIRECTORY_ROW_HEIGHT : "100%" }} onScroll={event => setFirstRow(Math.floor(event.currentTarget.scrollTop / DIRECTORY_ROW_HEIGHT))}>
       <SidebarSelectionHighlight role="presentation" className="relative" style={{ height: options.length * DIRECTORY_ROW_HEIGHT }}
-        scope="workspace-directory" activeId={selectedPath} targetSelector='[aria-selected="true"]'>
+        scope="workspace-directory" activeId={activeIndex === null ? selectedPath : options[activeIndex]?.path ?? null}
+        targetSelector={activeIndex === null ? '[aria-selected="true"]' : '[data-keyboard-active]'}>
         {options.slice(start, end).map((option, offset) => {
           const index = start + offset;
           return <div key={`${option.kind}-${option.path}`} role="presentation" className="absolute inset-x-0 snap-start" style={{ top: index * DIRECTORY_ROW_HEIGHT }}>
@@ -679,8 +680,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                     onPointerMove={() => { setHighlightActive(false); setActiveColumn(columnIndex); setActiveIndex(index); }}
                     onMouseDown={event => event.preventDefault()} onClick={() => activate(option, columnIndex)}
                     className={cn(floatingItemClassName, floatingItemFocusClassName, "flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left hover:bg-foreground/[0.055] dark:hover:bg-white/[0.08] disabled:opacity-50", canFavorite && "pr-12",
-                      sameWorkspacePath(column.selectedPath, option.path) && "font-medium text-foreground hover:bg-transparent dark:hover:bg-transparent focus:bg-transparent dark:focus:bg-transparent",
-                      highlightActive && columnIndex === activeColumn && index === activeOption && "ring-1 ring-inset ring-ring")}>
+                      sameWorkspacePath(column.selectedPath, option.path) && "font-medium text-foreground hover:bg-transparent dark:hover:bg-transparent focus:bg-transparent dark:focus:bg-transparent")}>
                     {option.kind === "directory" ? <span className="min-w-0 flex-1 truncate">{option.name}</span> : <WorkspacePickerPath path={option.path} />}
                     {sameWorkspacePath(option.path, scope?.project_path ?? defaultScope.project_path) && <Check className="h-4 w-4 shrink-0 text-muted-foreground" />}
                   </button>
