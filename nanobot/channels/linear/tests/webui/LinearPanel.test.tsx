@@ -480,7 +480,7 @@ describe("Linear channel UI", () => {
     expect(await screen.findByRole("link", { name: "Continue in Linear" })).toHaveAttribute(
       "href", "https://linear.app/oauth/authorize?client_id=test",
     );
-    expect(screen.getByText("Continue in Linear to choose a workspace and authorize nanobot. Return here when you're done.")).toBeVisible();
+    expect(screen.getByText("Authorize in Linear, then return here. Continue in Linear to choose a workspace and authorize nanobot. Return here when you're done.")).toBeVisible();
     expect(screen.queryByRole("img", { name: /QR/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/scan the QR code/i)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toBeDisabled();
@@ -488,7 +488,7 @@ describe("Linear channel UI", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(await screen.findByText("Authorization stopped.")).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toBeEnabled());
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.connect.cancel", { channel: "linear", session_id: "linear-oauth" }, 20_000,
     );

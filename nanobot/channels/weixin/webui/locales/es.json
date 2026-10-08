@@ -16,28 +16,28 @@
         "label": "Enviar progreso"
       },
       "sendToolHints": {
-        "label": "Enviar resúmenes de actividad de las herramientas"
+        "label": "Indicaciones de herramientas"
       },
       "streaming": {
         "label": "Usar API de streaming"
       },
       "replyProgressMessages": {
-        "label": "Enviar progreso estructurado"
+        "label": "Progreso detallado"
       },
       "replyProgressMaxMessages": {
-        "label": "Límite de progreso estructurado"
+        "label": "Límite de mensajes de progreso"
       },
       "contextMessageBudget": {
-        "label": "Máximo de mensajes de contexto"
+        "label": "Límite de mensajes de contexto"
       },
       "blockStreaming": {
-        "label": "Enviar respuestas por bloques"
+        "label": "Responder por bloques"
       },
       "blockStreamingMinChars": {
-        "label": "Mínimo de caracteres por bloque"
+        "label": "Longitud mínima de bloque (caracteres)"
       },
       "blockStreamingMaxMessages": {
-        "label": "Límite de mensajes por bloques"
+        "label": "Límite de bloques"
       },
       "baseUrl": {
         "label": "URL de la API"

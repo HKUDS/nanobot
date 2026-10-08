@@ -679,7 +679,8 @@ class WhatsAppChannel(BaseChannel):
         if chat_jid == "status@broadcast":
             return
 
-        timestamp = float(_safe_attr(info, "Timestamp", 0) or 0)
+        # Neonize encodes MessageInfo.Timestamp as Unix milliseconds.
+        timestamp = float(_safe_attr(info, "Timestamp", 0) or 0) / 1000
         if self._started_at and timestamp and timestamp < self._started_at:
             return
 

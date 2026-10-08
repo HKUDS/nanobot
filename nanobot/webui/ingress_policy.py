@@ -7,9 +7,10 @@ for a text or attachment policy.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Literal
+
+from nanobot.channels.websocket.attachment_policy import AttachmentIngressLimits
 
 MessageRejection = Literal["text_too_large"]
 
@@ -17,13 +18,6 @@ MessageRejection = Literal["text_too_large"]
 @dataclass(frozen=True)
 class MessageIngressLimits:
     max_text_bytes: int = 64 * 1024
-
-
-@dataclass(frozen=True)
-class AttachmentIngressLimits:
-    max_count: int = 4
-    max_file_bytes: int = 6 * 1024 * 1024
-    max_total_bytes: int = 24 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -56,15 +50,8 @@ class WebUIIngressPolicy:
         }
 
     def minimum_full_policy_frame_bytes(self) -> int:
-        """Conservative frame size needed for every policy-valid message."""
-        encoded_attachments = 4 * math.ceil(self.attachments.max_total_bytes / 3)
-        data_url_allowance = self.attachments.max_count * 128
-        return (
-            encoded_attachments
-            + data_url_allowance
-            + self.message.max_text_bytes
-            + self.envelope_reserve_bytes
-        )
+        """Conservative frame capacity for messages using HTTP attachments."""
+        return self.message.max_text_bytes + self.envelope_reserve_bytes
 
 
 DEFAULT_WEBUI_INGRESS_POLICY = WebUIIngressPolicy()

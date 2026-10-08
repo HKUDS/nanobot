@@ -1,7 +1,6 @@
 # How to Configure Langfuse Observability for nanobot
 
-nanobot can trace supported OpenAI-compatible provider calls through Langfuse's
-OpenAI SDK wrapper.
+nanobot can trace supported OpenAI-compatible provider calls through Langfuse's OpenAI SDK wrapper.
 
 ## What you will build
 
@@ -11,8 +10,7 @@ OpenAI SDK wrapper.
 
 ## When to use this
 
-Use Langfuse when you need observability for model requests, latency, errors,
-cost, or prompt behavior during development or production operation.
+Use Langfuse when you need observability for model requests, latency, errors, cost, or prompt behavior during development or production operation.
 
 ## Install
 
@@ -55,20 +53,17 @@ nanobot agent -m "Hello!"
 - Langfuse is configured with environment variables, not `config.json`.
 - Start services from an environment that exports the same variables.
 - Add tracing after the provider works; it should not be the first setup step.
-- Native providers that do not use the OpenAI-compatible client path may not
-  produce Langfuse OpenAI-wrapper traces.
+- Native providers that do not use the OpenAI-compatible client path may not produce Langfuse OpenAI-wrapper traces.
 
 ## Security notes
 
-- Treat Langfuse projects as observability stores for sensitive prompts and
-  outputs.
+- Treat Langfuse projects as observability stores for sensitive prompts and outputs.
 - Use separate projects for personal, staging, and production traffic.
 - Keep Langfuse keys out of committed service files.
 
 ## Troubleshooting
 
-- If no traces appear, confirm the service process sees the environment
-  variables.
+- If no traces appear, confirm the service process sees the environment variables.
 - Confirm the provider path is OpenAI-compatible.
 - Run one local `nanobot agent -m "Hello!"` call before debugging service logs.
 

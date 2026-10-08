@@ -27,6 +27,12 @@ from nanobot.providers.image_generation import (
 )
 from nanobot.providers.registry import find_by_name
 from nanobot.security.network import is_loopback_host
+from nanobot.webui.request_settings import (
+    parse_request_object,
+    redact_request_secrets,
+    restore_request_secrets,
+    validate_request_config,
+)
 from nanobot.webui.settings_contracts import (
     QueryParams,
     SettingsRequest,
@@ -35,6 +41,7 @@ from nanobot.webui.settings_contracts import (
     parse_bool,
     query_first,
     query_first_alias,
+    query_has_alias,
 )
 from nanobot.webui.settings_models import (
     OAuthStatusReader,
@@ -94,19 +101,20 @@ def _image_generation_provider_rows(
     oauth_status: OAuthStatusReader,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for name in image_gen_provider_names():
-        image_provider = get_image_gen_provider(name)
+    for name in image_gen_provider_names(config.providers):
         spec = find_by_name(name)
         provider_config = getattr(config.providers, name, None)
+        image_provider = get_image_gen_provider(name, provider_config)
         configured = (
             provider_configured_for_settings(spec, provider_config, oauth_status)
             if spec is not None and provider_config is not None
-            else bool(getattr(provider_config, "api_key", None))
+            else bool(provider_config and provider_config.api_base)
         )
         rows.append(
             {
                 "name": name,
-                "label": spec.label if spec is not None else name,
+                "label": spec.label if spec is not None else getattr(provider_config, "display_name", None) or name,
+                "uses_images_api": spec is None or name == "custom",
                 "configured": configured,
                 "auth_type": "oauth" if spec is not None and spec.is_oauth else "api_key",
                 "api_key_hint": mask_secret_hint(getattr(provider_config, "api_key", None)),
@@ -214,6 +222,9 @@ def capability_settings_payload(
             "default_image_size": image_config.default_image_size,
             "max_images_per_turn": image_config.max_images_per_turn,
             "save_dir": image_config.save_dir,
+            "request_overrides_supported": True,
+            "extra_headers": redact_request_secrets(image_config.extra_headers),
+            "extra_body": redact_request_secrets(image_config.extra_body),
             "providers": image_providers,
         },
         "transcription": {
@@ -406,13 +417,31 @@ def update_image_generation_settings(
 
     provider_name = query_first(query, "provider")
     if provider_name is not None:
-        provider_name = provider_name.strip().lower()
+        provider_name = provider_name.strip()
+        if provider_name.lower() in image_gen_provider_names():
+            provider_name = provider_name.lower()
         if not provider_name:
             raise WebUISettingsError("image generation provider is required")
-        if get_image_gen_provider(provider_name) is None:
+        if get_image_gen_provider(provider_name, getattr(config.providers, provider_name, None)) is None:
             raise WebUISettingsError("unknown image generation provider")
         if image_config.provider != provider_name:
             image_config.provider = provider_name
+            image_config.extra_headers = None
+            image_config.extra_body = None
+            changed = True
+
+    overrides = {
+        snake: restore_request_secrets(
+            parse_request_object(query, snake, camel), getattr(image_config, snake),
+        )
+        for snake, camel in (("extra_headers", "extraHeaders"), ("extra_body", "extraBody"))
+        if query_has_alias(query, snake, camel)
+    }
+    validated = validate_request_config(None, overrides)
+    for field in overrides:
+        value = getattr(validated, field)
+        if getattr(image_config, field) != value:
+            setattr(image_config, field, value)
             changed = True
 
     enabled = query_first(query, "enabled")

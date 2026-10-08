@@ -29,7 +29,7 @@ import {
   SidebarSelectionHighlight,
 } from "@/components/SidebarSelectionHighlight";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverHint } from "@/components/ui/tooltip";
 import type {
   ChatSummary,
   SidebarViewState,
@@ -150,7 +150,6 @@ export function Sidebar(props: SidebarProps) {
 
 
   return (
-    <TooltipProvider>
     <nav
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}
@@ -175,7 +174,7 @@ export function Sidebar(props: SidebarProps) {
           onClick={collapsed ? props.onExpand : undefined}
           tabIndex={collapsed ? 0 : -1}
           className={cn(
-            "host-no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors",
+            "host-no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors",
             props.hostChromeInset && "mt-5",
             !collapsed && "pointer-events-none",
           )}
@@ -344,7 +343,6 @@ export function Sidebar(props: SidebarProps) {
         <HostSwitcher collapsed={collapsed} portalContainer={props.containActionMenus ? menuPortalContainer : undefined} />
       </div>
     </nav>
-    </TooltipProvider>
   );
 }
 
@@ -387,11 +385,11 @@ function SidebarActionButton({
       onFocus={onIntent}
       onPointerEnter={onIntent}
       className={cn(
-        "touch-target group h-8 min-w-0 gap-2 overflow-hidden rounded-xl font-normal",
+        "touch-target group h-8 min-w-0 gap-2 overflow-hidden rounded-control font-normal",
         SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
         collapsed
           ? "w-8 justify-center gap-0 px-0"
-          : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-xl px-0"
+          : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-control px-0"
           : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]",
         active
           ? "text-sidebar-accent-foreground"
@@ -410,12 +408,11 @@ function SidebarActionButton({
     </Button>
   );
   return compact || shortcut ? (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side={collapsed ? "right" : "bottom"} className="flex items-center gap-4">
-        <span>{label}</span>
-        {shortcut ? <kbd className="whitespace-nowrap font-sans text-muted-foreground">{shortcut}</kbd> : null}
-      </TooltipContent>
-    </Tooltip>
+    <HoverHint side={collapsed ? "right" : "bottom"} contentClassName="flex items-center gap-4" content={<>
+      <span>{label}</span>
+      {shortcut ? <kbd className="whitespace-nowrap font-sans text-muted-foreground">{shortcut}</kbd> : null}
+    </>}>
+      {button}
+    </HoverHint>
   ) : button;
 }

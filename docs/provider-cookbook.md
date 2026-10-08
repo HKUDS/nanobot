@@ -97,9 +97,7 @@ If this fails with `401` or `unauthorized`, check that `OPENROUTER_API_KEY` is v
 
 ## Recipe: OpenCode Zen or Go
 
-This recipe applies when your credential comes from OpenCode Zen or OpenCode Go.
-Both providers use `OPENCODE_API_KEY`; pick the provider block that matches the
-subscription or balance you want to use.
+This recipe applies when your credential comes from OpenCode Zen or OpenCode Go. Both providers use `OPENCODE_API_KEY`; pick the provider block that matches the subscription or balance you want to use.
 
 OpenCode Zen:
 
@@ -160,11 +158,7 @@ nanobot status
 nanobot agent -m "Hello!"
 ```
 
-OpenCode's docs list models across multiple endpoint types. The `opencode_zen`
-and `opencode_go` providers in nanobot use the OpenAI-compatible
-`chat/completions` path. If a model fails with `model not found` or an endpoint
-shape error, choose a model that OpenCode lists under `chat/completions` for the
-matching Zen or Go endpoint.
+OpenCode's docs list models across multiple endpoint types. The `opencode_zen` and `opencode_go` providers in nanobot use the OpenAI-compatible `chat/completions` path. If a model fails with `model not found` or an endpoint shape error, choose a model that OpenCode lists under `chat/completions` for the matching Zen or Go endpoint.
 
 ## Recipe: OpenAI Direct
 
@@ -200,7 +194,7 @@ Verify:
 OPENAI_API_KEY="sk-..." nanobot agent -m "Hello!"
 ```
 
-If your shell cannot use inline environment variables, set `OPENAI_API_KEY` first and then run `nanobot agent -m "Hello!"`. If the provider rejects `apiType`, remove `apiType` unless you are using a documented OpenAI-specific mode.
+If your shell cannot use inline environment variables, set `OPENAI_API_KEY` first and then run `nanobot agent -m "Hello!"`. Leave API selection on Auto unless you need a specific API in the preset's **Advanced options**; see [preset API settings](./configuration.md#preset-request-api). If your configuration still uses `apiType`, follow the [migration instructions](./configuration.md#legacy-openai-api-selector-migration).
 
 ## Recipe: Anthropic Direct
 
@@ -378,7 +372,7 @@ For multiple custom endpoints, do not overload the single `custom` block. Name e
 }
 ```
 
-These custom names behave like direct OpenAI-compatible providers: `apiBase` is required, `apiKey` is optional when the endpoint allows anonymous or placeholder credentials, and `apiType` should be left unset. They do not support Anthropic-compatible endpoints; use the `anthropic` provider with `apiBase` for that case.
+These custom names define direct connections: `apiBase` is required and `apiKey` is optional when the endpoint allows anonymous or placeholder credentials. Declare accepted protocols and a default with [`providers.<name>.api`](./configuration.md#custom-connection-apis). An Anthropic-compatible endpoint uses `supportedApis: ["anthropic_messages"]`; model presets can select any protocol within the connection declaration.
 
 ## Recipe: Ollama Local Model
 
@@ -422,11 +416,7 @@ nanobot agent -m "Hello!"
 
 If you see `connection refused`, Ollama is not running or `apiBase` points to the wrong port. If every response is slow, try a smaller local model or lower `contextWindowTokens`.
 
-If direct Ollama responses are fast but tool-using nanobot turns repeatedly evaluate
-thousands of prompt tokens, the model's chat template may be moving its tool
-definitions between requests. See
-[Improve Ollama Tool-Calling Prompt Cache Reuse](./guides/configure-ollama-prompt-cache.md)
-for a diagnostic procedure and an optional model-specific workaround.
+If direct Ollama responses are fast but tool-using nanobot turns repeatedly evaluate thousands of prompt tokens, the model's chat template may be moving its tool definitions between requests. See [Improve Ollama Tool-Calling Prompt Cache Reuse](./guides/configure-ollama-prompt-cache.md) for a diagnostic procedure and an optional model-specific workaround.
 
 ## Recipe: vLLM or LM Studio
 
@@ -592,9 +582,7 @@ In chat:
 /model fast
 ```
 
-`/model` stores the selection in the current session without rewriting `config.json`.
-The selection survives restarts, does not affect other sessions, and an in-progress
-turn keeps using the model it started with.
+`/model` stores the selection in the current session without rewriting `config.json`. The selection survives restarts, does not affect other sessions, and an in-progress turn keeps using the model it started with.
 
 ## Quick Failure Map
 

@@ -4,7 +4,7 @@
     "officialLabel": "Mở danh sách ứng dụng Matrix",
     "fields": {
       "homeserver": {
-        "label": "Máy chủ tài khoản",
+        "label": "Homeserver",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -24,7 +24,7 @@
         "placeholder": "Bắt buộc khi dùng token"
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Quy tắc nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
@@ -49,19 +49,19 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "Thời gian gia hạn dừng đồng bộ hóa"
+        "label": "Chờ dừng đồng bộ (giây)"
       },
       "maxMediaBytes": {
-        "label": "Kích thước phương tiện tối đa"
+        "label": "Giới hạn media (byte)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "Tải xuống phương tiện đồng thời"
+        "label": "Tải xuống đồng thời"
       },
       "groupAllowFrom": {
         "label": "Nhóm được phép"
       },
       "allowRoomMentions": {
-        "label": "Cho phép đề cập đến phòng",
+        "label": "Nhắc cả phòng",
         "choices": {
           "true": "Bật",
           "false": "Tắt"

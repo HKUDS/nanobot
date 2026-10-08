@@ -18,7 +18,7 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
-from nanobot.runtime_context import RuntimeContextBlock
+from nanobot.runtime_context import RuntimeContextBlock, public_history_message
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionPolicy
 from nanobot.webui.temporary_chats import WebUITemporaryChats
@@ -37,7 +37,7 @@ def _message(key: str, content: str) -> InboundMessage:
 
 
 def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.chat_stream_with_retry = AsyncMock(
@@ -282,7 +282,7 @@ async def test_transient_session_stays_outside_unified_session(tmp_path) -> None
 
     await run_session(loop, _message(key, "private question"))
 
-    assert [message["content"] for message in transient.messages] == [
+    assert [public_history_message(message)["content"] for message in transient.messages] == [
         "private question",
         "private answer",
     ]

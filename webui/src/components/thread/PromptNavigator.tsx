@@ -6,7 +6,7 @@ import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import { formControlFocusClassName } from "@/components/ui/form-control";
+import { SearchInput } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -56,7 +56,7 @@ export function PromptNavigator({
         variant="ghost"
         size="icon"
         className={cn(
-          "host-no-drag h-8 w-8 rounded-xl text-muted-foreground/80",
+          "host-no-drag h-8 w-8 rounded-control text-muted-foreground/80",
           "hover:text-foreground",
         )}
         aria-label={t("thread.promptNavigator.open")}
@@ -80,16 +80,12 @@ export function PromptNavigator({
                 aria-hidden
                 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
               />
-              <input
+              <SearchInput
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 aria-label={t("thread.promptNavigator.search")}
                 placeholder={t("thread.promptNavigator.search")}
-                className={cn(
-                  "touch-text-input h-10 w-full rounded-full border border-border bg-background pl-9 pr-3 text-sm",
-                  "transition-colors",
-                  formControlFocusClassName,
-                )}
+                className="h-10 rounded-full border-border bg-background pl-9 pr-3 text-sm transition-colors"
               />
             </div>
           </div>
@@ -135,7 +131,7 @@ function PromptNavigatorRow({
     <button
       type="button"
       className={cn(
-        "w-full rounded-xl px-3 py-3 text-left transition",
+        "w-full rounded-control px-3 py-3 text-left transition",
         "hover:bg-accent focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
       )}
       aria-label={t("thread.promptNavigator.jumpTo", { label: prompt.label })}

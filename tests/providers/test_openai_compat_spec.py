@@ -2,7 +2,7 @@
 
 Validates that:
 - OpenRouter (no strip) keeps model names intact.
-- AiHubMix (strip_model_prefix=True) strips provider prefixes.
+- AiHubMix strips provider prefixes declared by its spec.
 - Standard providers pass model names through as-is.
 """
 
@@ -16,7 +16,7 @@ import pytest
 
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 
 
 def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
@@ -320,8 +320,8 @@ async def test_openai_compat_chat_stream_forwards_reasoning_deltas_deepseek_styl
             api_key="sk-test",
             default_model="deepseek-v4-pro",
             spec=spec,
+            model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
         )
-        provider._api_type = "chat_completions"
         result = await provider.chat_stream(
             messages=[{"role": "user", "content": "hi"}],
             model="deepseek-v4-pro",
@@ -364,7 +364,7 @@ async def test_deepseek_v4_pro_uses_responses_api() -> None:
     call_kwargs = mock_responses.call_args.kwargs
     assert call_kwargs["model"] == "deepseek-v4-pro"
     assert call_kwargs["reasoning"] == {"effort": "none"}
-    assert call_kwargs["tools"] == [{"type": "web_search"}]
+    assert "tools" not in call_kwargs
     assert "include" not in call_kwargs
 
 
@@ -614,7 +614,7 @@ async def test_openrouter_keeps_model_name_intact() -> None:
 
 @pytest.mark.asyncio
 async def test_aihubmix_strips_model_prefix() -> None:
-    """AiHubMix strips the provider prefix (strip_model_prefix=True)."""
+    """AiHubMix strips provider prefixes declared by its spec."""
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("aihubmix")
 
@@ -1074,7 +1074,7 @@ async def test_gpt6_temperature_requires_explicit_none_effort(
             api_key="sk-test-key",
             default_model=model,
             spec=find_by_name("openai"),
-            api_type=api_type,
+            model_api=ModelAPICapabilities((api_type,), api_type),
         )
         result = await provider.chat(
             messages=[{"role": "user", "content": "hello"}],
@@ -1485,6 +1485,26 @@ def _build_kwargs_for(provider_name: str, model: str, reasoning_effort=None):
     )
 
 
+@pytest.mark.parametrize("provider, model, effort, thinking_type", [
+    ("zhipu", "glm-4.6", "none", "disabled"),
+    ("zhipu", "glm-4.7", "none", "disabled"),
+    ("zhipu", "glm-5", "none", "disabled"),
+    ("zhipu", "glm-5.1", "none", "disabled"),
+    ("zhipu", "glm-5.2", "none", "disabled"),
+    ("zhipu", "glm-5.2", "minimal", "disabled"),
+    ("zhipu", "glm-4.7", "high", "enabled"),
+    ("zhipu", "glm-4.7", None, None),
+    ("zhipu", "glm-5.3", "none", None),
+    ("zhipu", "glm-5.3-flash", "none", None),
+    ("custom", "glm-4.7", "none", None),
+])
+def test_zhipu_glm_thinking_controls(provider, model, effort, thinking_type) -> None:
+    kw = _build_kwargs_for(provider, model, reasoning_effort=effort)
+    assert kw.get("extra_body", {}).get("thinking", {}).get("type") == thinking_type
+    if effort == "none":
+        assert "reasoning_effort" not in kw
+
+
 def test_dashscope_thinking_enabled_with_reasoning_effort() -> None:
     kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="medium")
     assert kw["extra_body"] == {"enable_thinking": True}
@@ -1577,10 +1597,28 @@ def test_deepseek_thinking_enabled() -> None:
     assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
 
 
-def test_deepseek_thinking_disabled_for_minimal() -> None:
-    """reasoning_effort='minimal' must send thinking.type=disabled to DeepSeek."""
-    kw = _build_kwargs_for("deepseek", "deepseek-v4-pro", reasoning_effort="minimal")
-    assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
+@pytest.mark.parametrize(
+    "effort, wire_effort, thinking_type",
+    [
+        ("minimal", "low", "enabled"),
+        ("low", "low", "enabled"),
+        ("none", None, "disabled"),
+        (None, None, None),
+    ],
+)
+def test_deepseek_reasoning_effort_controls(
+    effort: str | None, wire_effort: str | None, thinking_type: str | None,
+) -> None:
+    """DeepSeek's minimal alias enables low-effort thinking; none disables it."""
+    kw = _build_kwargs_for("deepseek", "deepseek-flash", reasoning_effort=effort)
+    if wire_effort is None:
+        assert "reasoning_effort" not in kw
+    else:
+        assert kw["reasoning_effort"] == wire_effort
+    if thinking_type is None:
+        assert "extra_body" not in kw
+    else:
+        assert kw["extra_body"] == {"thinking": {"type": thinking_type}}
 
 
 def test_deepseek_backfills_reasoning_content_on_legacy_tool_call_messages() -> None:
@@ -1623,15 +1661,14 @@ def test_backfill_does_not_touch_messages_when_thinking_explicitly_off() -> None
         {"role": "tool", "tool_call_id": "tc1", "content": "result"},
         {"role": "user", "content": "thanks"},
     ]
-    for effort in ("minimal", "none"):
-        kw = p._build_kwargs(
-            messages=list(messages), tools=None, model="deepseek-v4-pro",
-            max_tokens=1024, temperature=0.7,
-            reasoning_effort=effort, tool_choice=None,
-        )
-        for msg in kw["messages"]:
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                assert "reasoning_content" not in msg
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-v4-pro",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort="none", tool_choice=None,
+    )
+    for msg in kw["messages"]:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            assert "reasoning_content" not in msg
 
 
 def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit() -> None:
@@ -1704,7 +1741,7 @@ def test_deepseek_flash_backfills_missing_tool_history_reasoning(
     sent_assistant = kwargs["messages"][1]
     if history_reasoning is not None:
         assert sent_assistant["reasoning_content"] == history_reasoning
-    elif effort in ("none", "minimal"):
+    elif effort == "none":
         assert "reasoning_content" not in sent_assistant
     else:
         assert sent_assistant["reasoning_content"] == ""

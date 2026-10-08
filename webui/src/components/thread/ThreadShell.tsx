@@ -41,6 +41,8 @@ import {
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
+  fetchWorkspaces,
+  fetchWorkspaceDirectories,
   fetchWebuiThreadTraceDetail,
   listSlashCommands,
 } from "@/lib/api";
@@ -66,6 +68,7 @@ import type {
   UIMessage,
   WorkspaceScopePayload,
   WorkspacesPayload,
+  ProjectDirectory,
 } from "@/lib/types";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
@@ -538,6 +541,7 @@ function randomHeroGreetingKey(): (typeof HERO_GREETING_KEYS)[number] {
 }
 
 interface PendingFirstMessage {
+  finish?: (accepted: boolean) => void;
   content: string;
   images?: SendAttachment[];
   options?: SendOptions;
@@ -698,14 +702,23 @@ export function ThreadShell({
     forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
   const { client, getToken, ingressLimits, modelName, token, webuiCapabilities } = useClient();
-  const pickWorkspaceFolder = useCallback(async (): Promise<string | null> => {
-    const response = await client.requestMutation<{ path: unknown }>(
-      "workspace.pick_folder",
-      {},
-      300_000,
-    );
-    return typeof response.path === "string" ? response.path : null;
-  }, [client]);
+  const favoriteWorkspaceProject = useCallback(
+    async (path: string, pinned: boolean) => {
+      const response = await client.requestMutation<{ favorite_projects: ProjectDirectory[] }>("workspace.favorite", { path, pinned });
+      return response.favorite_projects;
+    },
+    [client],
+  );
+  const resolveWorkspaceProject = useCallback(
+    (path: string) => client.requestMutation<ProjectDirectory>("workspace.resolve_project", { path }),
+    [client],
+  );
+  const loadWorkspaceProjects = useCallback(() => fetchWorkspaces(getToken()), [getToken]);
+  const browseWorkspaceDirectories = useCallback(
+    (path: string, query: string, showHidden: boolean, allowPartial = false) =>
+      fetchWorkspaceDirectories(getToken(), path, query, showHidden, allowPartial),
+    [getToken],
+  );
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [mentionCatalogRequestCount, setMentionCatalogRequestCount] = useState(0);
@@ -755,6 +768,7 @@ export function ThreadShell({
   }, [draftKey]);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
+  const [conversationElement, setConversationElement] = useState<HTMLDivElement | null>(null);
   const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
@@ -1442,6 +1456,9 @@ export function ThreadShell({
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
       setSubmittedViewportTurnId(submitted.turnId);
     }
+    if (submitted?.delivery) {
+      void submitted.delivery.then(() => pending.finish?.(true), () => pending.finish?.(false));
+    } else pending.finish?.(submitted !== null);
     setBooting(false);
   }, [chatId, pendingFirstTargetChatId, send]);
 
@@ -1489,7 +1506,9 @@ export function ThreadShell({
     async (content: string, images?: SendAttachment[], options?: SendOptions) => {
       if (booting) return false;
       setBooting(true);
-      pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
+      let finish!: (accepted: boolean) => void;
+      const delivery = new Promise<boolean>((resolve) => { finish = resolve; });
+      pendingFirstRef.current = { content, images, options: withWorkspaceScope(options), finish };
       setPendingFirstTargetChatId(null);
       const newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
       if (!newId) {
@@ -1502,7 +1521,7 @@ export function ThreadShell({
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
       }
       setPendingFirstTargetChatId(newId);
-      return true;
+      return delivery;
     },
     [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
   );
@@ -1519,7 +1538,7 @@ export function ThreadShell({
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
         setSubmittedViewportTurnId(submitted.turnId);
       }
-      return submitted !== null;
+      return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
     [chatId, send, withWorkspaceScope],
   );
@@ -1764,15 +1783,17 @@ export function ThreadShell({
           onStop={stop}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
+          onFavoriteWorkspaceProject={favoriteWorkspaceProject}
+          onResolveWorkspaceProject={resolveWorkspaceProject}
+          onLoadWorkspaceProjects={loadWorkspaceProjects}
+          workspacePickerLayoutAnchor={conversationElement}
+          onBrowseWorkspaceDirectories={browseWorkspaceDirectories}
           workspaceScope={workspaceScope}
           workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
-          onPickWorkspaceFolder={
-            workspaceControls?.can_pick_folder ? pickWorkspaceFolder : undefined
-          }
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={temporary ? null : chatId}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
@@ -1818,15 +1839,17 @@ export function ThreadShell({
           surfaceRef={composerSurfaceRef}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
+          onFavoriteWorkspaceProject={favoriteWorkspaceProject}
+          onResolveWorkspaceProject={resolveWorkspaceProject}
+          onLoadWorkspaceProjects={loadWorkspaceProjects}
+          workspacePickerLayoutAnchor={conversationElement}
+          onBrowseWorkspaceDirectories={browseWorkspaceDirectories}
           workspaceScope={workspaceScope}
           workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
-          onPickWorkspaceFolder={
-            workspaceControls?.can_pick_folder ? pickWorkspaceFolder : undefined
-          }
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
@@ -1887,7 +1910,7 @@ export function ThreadShell({
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
     <section ref={shellRef} data-preview-open={previewOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
-      <div className={cn(
+      <div ref={setConversationElement} className={cn(
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
         headerPortalTarget === undefined && !hideHeader && "thread-workspace",
       )}>

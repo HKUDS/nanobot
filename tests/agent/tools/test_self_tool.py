@@ -300,11 +300,11 @@ class TestModifyBlocked:
 # set — free tier (setattr priority)
 # ---------------------------------------------------------------------------
 
-class TestModifyFree:
+class TestRuntimeSettingsAndScratchpad:
 
     @pytest.mark.asyncio
-    async def test_modify_existing_attr_setattr(self):
-        """Modifying an existing loop attribute should use setattr."""
+    async def test_set_updates_runtime_setting(self):
+        """Set a runtime setting through the runtime-control capability."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="provider_retry_mode", value="persistent")
         assert "Set provider_retry_mode" in result
@@ -395,7 +395,7 @@ class TestModifyFree:
 # set — previously BLOCKED/READONLY now open
 # ---------------------------------------------------------------------------
 
-class TestModifyOpen:
+class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_tools_blocked(self):

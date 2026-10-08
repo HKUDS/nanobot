@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
 
 from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
+from nanobot.config.home import get_home_path
 from nanobot.config.schema import (
     Config,
     _resolve_tool_config_refs,  # pyright: ignore[reportPrivateUsage]
@@ -36,7 +37,7 @@ def get_config_path() -> Path:
     """Get the configuration file path."""
     if _current_config_path:
         return _current_config_path
-    return Path.home() / ".nanobot" / "config.json"
+    return get_home_path() / "config.json"
 
 
 def load_config(config_path: Path | None = None) -> Config:

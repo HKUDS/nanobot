@@ -8,7 +8,7 @@ The feature is disabled by default. Open **Settings → Image**, choose a config
 
 **WebUI**
 
-1. Add the image provider credential under **Settings → Models** if it is not already configured.
+1. Add the image provider credential under **Settings → Models → Manage providers** if it is not already configured.
 2. Open **Settings → Image**.
 3. Select the provider and image model, then enable image generation.
 4. Save and ask for a simple test image. If the gateway cannot apply the change live, WebUI will prompt you to restart it.
@@ -51,6 +51,18 @@ Generated images are rendered as assistant media in the chat. Follow-up prompts 
 The WebUI hides provider storage details from the user. The agent sees the saved artifact path internally and can pass it back to `generate_image` as `reference_images` for iterative edits.
 
 ## Configuration Reference
+
+### Named custom connections
+
+You can select a custom connection created in **Settings → Models → Manage providers**. Image generation uses its saved connection ID, URL, key, and proxy. Renaming the connection does not change its identity. You do not need a second connection named `custom`.
+
+Selecting a custom connection uses the **OpenAI Images API** at its URL. Check that the endpoint supports `/images/generations`; support for chat alone does not imply image support. Existing built-in image adapters and the legacy `custom` connection keep their behavior. An unknown or removed connection is not replaced with another provider.
+
+In the image settings' **Advanced options**, use **Headers** and **Body parameters** for image-only request differences. These fields are also available as `tools.imageGeneration.extraHeaders` and `extraBody`. Empty fields inherit provider defaults. Header names match without case sensitivity; each body key replaces its complete value, including nested objects and arrays. Adapter-specific request assembly runs afterward. Use only options documented by your image provider; watermark controls do not have one universal name or location.
+
+Changing the image provider in WebUI clears these overrides so credentials do not follow the selection to another endpoint. Saved changes use the existing live image-tool reload. Chat model settings, prompts, and the tool schema are unchanged. Provider request headers are not added to generated-image downloads.
+
+Existing installations need no migration. Older releases ignore the new image-only fields and do not resolve named custom image connections. Before downgrading, select a provider supported by that release and check any required request settings.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -95,6 +107,26 @@ OpenRouter uses a chat-completions style image response. Configure:
 ```
 
 Use a model that supports image generation and image editing if you want reference-image edits.
+
+### OpenAI Codex
+
+Log in with `nanobot provider login openai-codex`, then select **OpenAI Codex** and `gpt-image-2` under **Settings → Image**. Image generation uses your Codex subscription.
+
+For manual configuration:
+
+```json
+{
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "openai_codex",
+      "model": "gpt-image-2"
+    }
+  }
+}
+```
+
+Use Codex to generate images from text or edit existing images with reference images.
 
 ### Custom (OpenAI-compatible)
 

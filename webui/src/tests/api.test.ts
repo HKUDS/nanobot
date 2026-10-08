@@ -1218,7 +1218,6 @@ describe("webui API helpers", () => {
       },
       controls: {
         can_change_project: true,
-        can_use_full_access: true,
       },
     };
     vi.mocked(fetch).mockResolvedValueOnce({

@@ -95,7 +95,7 @@ describe("McpManagementDialog", () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith("test", "docs"));
     expect(within(dialog).queryByText("Not inspected")).not.toBeInTheDocument();
     expect(within(dialog).getByText("No tools available")).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Reload tools" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh tools" }));
     expect(onAction).toHaveBeenCalledTimes(2);
   });
 
@@ -145,7 +145,7 @@ describe("McpManagementDialog", () => {
     expect(within(dialog).queryByRole("status", { name: "Loading tools…" })).not.toBeInTheDocument();
     expect(within(dialog).getByText(message)).toBeInTheDocument();
     if (error) expect(within(dialog).getByRole("alert")).toHaveTextContent(error);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Reload tools" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh tools" }));
     expect(onAction).toHaveBeenLastCalledWith("test", "docs");
   });
 });

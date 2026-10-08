@@ -142,6 +142,10 @@ class MyTool(Tool):
             "Scratchpad keys persist across turns but not restarts.\n"
             "Current routing metadata is available read-only via request.channel, "
             "request.chat_id, and request.sender_id.\n"
+            "For path access, check workspace_sandbox for the current project and "
+            "workspace restriction. Check exec_config for shell sandbox settings and extra binds. "
+            "Shell binds do not grant file-tool access. OS permissions still apply.\n"
+            "workspace is the legacy agent-directory display, not the current project or an access grant.\n"
             "Use model_preset for session-scoped model or context changes; direct "
             "model/context_window_tokens writes are disabled during active sessions.\n"
             "Note: web_config and exec_config are readable but read-only.\n"
@@ -206,7 +210,7 @@ class MyTool(Tool):
         for part in parts:
             if part in self._DENIED_ATTRS or part.startswith("__"):
                 return None, f"'{part}' is not accessible"
-            if part in self.BLOCKED:
+            if part in self.BLOCKED and path != "workspace_sandbox.restrict_to_workspace":
                 return None, f"'{part}' is not accessible"
             if part.lower() in self._SENSITIVE_NAMES:
                 return None, f"'{part}' is not accessible"
@@ -238,6 +242,8 @@ class MyTool(Tool):
         # Mapping — small: show content; large: show keys for dot-path navigation
         if isinstance(val, Mapping):
             value_mapping = cast(Mapping[object, object], val)
+            if key == "workspace_sandbox":
+                return f"{key}: {dict(value_mapping)!r}"
             ks = list(value_mapping.keys())
             if not ks:
                 return f"{key}: {{}}" if key else "{}"
@@ -344,6 +350,7 @@ class MyTool(Tool):
         ))
         for k in (
             "workspace",
+            "workspace_sandbox",
             "provider_retry_mode",
             "max_tool_result_chars",
             "web_config",

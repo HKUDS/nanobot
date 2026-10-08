@@ -9,9 +9,9 @@
         "placeholder": "Phone numbers or WhatsApp IDs"
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Group rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }

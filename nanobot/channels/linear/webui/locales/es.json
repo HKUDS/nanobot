@@ -16,7 +16,7 @@
       "clientId": {
         "label": "ID de cliente OAuth",
         "placeholder": "ID de cliente OAuth de Linear",
-        "help": "Cópialo de la aplicación OAuth privada en Linear."
+        "help": "Copia de la app OAuth privada.\n\nCópialo de la aplicación OAuth privada en Linear."
       },
       "clientSecret": {
         "label": "Secreto de cliente OAuth",
@@ -26,12 +26,12 @@
       "webhookSigningSecret": {
         "label": "Secreto de firma del webhook",
         "placeholder": "••••••",
-        "help": "Se usa para verificar Linear-Signature antes de analizar el cuerpo del webhook."
+        "help": "Verifica la firma Webhook.\n\nSe usa para verificar Linear-Signature antes de analizar el cuerpo del webhook."
       },
       "publicBaseUrl": {
         "label": "URL HTTPS pública",
         "placeholder": "https://nanobot.example.com",
-        "help": "Un origen HTTPS estable dirigido al listener indicado abajo; no incluyas una ruta."
+        "help": "Introduce una URL HTTPS sin ruta.\n\nUn origen HTTPS estable dirigido al listener indicado abajo; no incluyas una ruta."
       },
       "host": {
         "label": "Host de escucha",
@@ -52,11 +52,11 @@
       "allowFrom": {
         "label": "Usuarios de Linear permitidos",
         "placeholder": "ID de usuarios de Linear separados por comas",
-        "help": "Déjalo vacío para usar el emparejamiento de nanobot, o usa * para permitir a todos los usuarios de los espacios conectados."
+        "help": "Elige quién puede usar esta conexión.\n\nDéjalo vacío para usar el emparejamiento de nanobot, o usa * para permitir a todos los usuarios de los espacios conectados."
       },
       "showReasoning": {
         "label": "Mostrar razonamiento",
-        "help": "Publica el razonamiento del modelo como actividades de pensamiento en Linear. Desactívalo para una sesión más limpia."
+        "help": "Publica el razonamiento como actividad de pensamiento.\n\nPublica el razonamiento del modelo como actividades de pensamiento en Linear. Desactívalo para una sesión más limpia."
       }
     }
   },
@@ -67,7 +67,7 @@
     "enterSecret": "Introduce el secreto",
     "secretSaveFailed": "No se pudo confirmar el guardado. Reintenta o cancela.",
     "authorizeTitle": "Autorizar en Linear",
-    "authorizeDescription": "Continúa en Linear para elegir un espacio de trabajo y autorizar a nanobot. Vuelve aquí cuando termines.",
+    "authorizeDescription": "Autoriza en Linear y vuelve aquí.\n\nContinúa en Linear para elegir un espacio de trabajo y autorizar a nanobot. Vuelve aquí cuando termines.",
     "waiting": "Esperando la autorización de Linear...",
     "connected": "Linear está conectado.",
     "stopped": "La autorización se detuvo.",
@@ -94,7 +94,7 @@
     "workspaceActions": "Administrar {{name}}",
     "reauthorize": "Volver a autorizar",
     "disconnectTitle": "¿Eliminar {{name}}?",
-    "disconnectDescription": "Revoca la autorización y borra los ajustes de acceso de este espacio en nanobot. Se conservan las incidencias, los comentarios y el historial de nanobot. No afecta a otros espacios. Puedes volver a autorizarlo después.",
+    "disconnectDescription": "Retira el acceso al espacio; conserva el historial.\n\nRevoca la autorización y borra los ajustes de acceso de este espacio en nanobot. Se conservan las incidencias, los comentarios y el historial de nanobot. No afecta a otros espacios. Puedes volver a autorizarlo después.",
     "disconnectLast": "Es el último espacio de trabajo conectado, por lo que también se desactivará el canal de Linear.",
     "disconnecting": "Eliminando…",
     "addWorkspace": "Conectar espacio de trabajo",

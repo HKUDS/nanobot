@@ -176,6 +176,7 @@ export class NanobotTui {
   private ready = false
   private shimmerFrame = 0
   private shimmerTimer: ReturnType<typeof setInterval> | null = null
+  private attachmentSendPending = false
   private submitPending = false
   private submitGeneration = 0
   private unsentSubmit = false
@@ -584,10 +585,25 @@ export class NanobotTui {
     this.sendPrompt(prompt)
   }
 
-  private sendPrompt(prompt: QueuedPrompt, steering = false): boolean {
+  private sendPrompt(prompt: QueuedPrompt, steering = false, acceptedTurnId?: string): boolean {
+    if (!acceptedTurnId && prompt.options.media?.length) {
+      if (this.attachmentSendPending) return false
+      this.attachmentSendPending = true
+      const originalText = this.composer.plainText
+      const chatId = this.client.activeChatId
+      this.status.content = "Uploading attachments…"
+      void this.client.sendAttachments(prompt.content, prompt.options).then((turnId) => {
+        if (this.client.activeChatId !== chatId || this.composer.plainText !== originalText) return
+        this.sendPrompt(prompt, steering, turnId)
+      }).catch((error: unknown) => {
+        this.unsentSubmit = true
+        this.status.content = error instanceof Error ? error.message : "Attachment send failed · draft retained"
+      }).finally(() => { this.attachmentSendPending = false })
+      return true
+    }
     let turnId: string
     try {
-      turnId = this.client.send(prompt.content, prompt.options)
+      turnId = acceptedTurnId ?? this.client.send(prompt.content, prompt.options)
     } catch {
       this.markSubmitUnsent(true)
       return false

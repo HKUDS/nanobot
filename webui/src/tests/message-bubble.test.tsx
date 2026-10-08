@@ -540,7 +540,7 @@ describe("MessageBubble", () => {
     );
 
     menuActions(container);
-    fireEvent.click(screen.getByRole("button", { name: "Fork" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat from here" }));
     expect(onForkFromHere).toHaveBeenCalledTimes(1);
   });
 
@@ -575,7 +575,7 @@ describe("MessageBubble", () => {
     />);
     const actions = menuActions(container);
     const copy = screen.getByRole("button", { name: "Copy" });
-    const fork = screen.getByRole("button", { name: "Fork" });
+    const fork = screen.getByRole("button", { name: "New chat from here" });
     const metadata = actions.querySelector("[data-message-block-metadata]")!;
     expect(actions.querySelector("[data-message-block-toolbar]")).toContainElement(copy);
     expect(actions.querySelector("[data-message-block-toolbar]")).toContainElement(fork);

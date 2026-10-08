@@ -84,7 +84,7 @@ describe("session-owned task UI", () => {
       : response([task({ state: "done", completed_at: 102 })])));
     const user = userEvent.setup();
     const view = render(layout({ historyEnabled: true }));
-    const work = await screen.findByRole("button", { name: /Delegated work/ });
+    const work = await screen.findByRole("button", { name: /Subtasks/ });
     expect(work).toHaveAttribute("aria-expanded", "false");
 
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
@@ -134,7 +134,7 @@ describe("session-owned task UI", () => {
     fetcher.mockImplementation(async (url) => url.endsWith("/webui-thread") ? childThread("## Findings\n\nVerified the full session", false)
       : response([task({ revision: 2, state: "done", completed_at: 102 })]));
     render(layout({ historyEnabled: true }));
-    await user.click(await screen.findByRole("button", { name: /Delegated work/ }));
+    await user.click(await screen.findByRole("button", { name: /Subtasks/ }));
     await user.click(screen.getByRole("button", { name: /Config check Completed/ }));
     expect(await within(screen.getByRole("dialog")).findByRole("heading", { name: "Findings" })).toBeVisible();
   });
@@ -195,7 +195,7 @@ describe("session-owned task UI", () => {
     const view = render(layout());
     const runningRow = await screen.findByRole("button", { name: /Config check Running/ });
     const work = runningRow.closest("section");
-    const header = within(work!).getByRole("button", { name: /Delegated work/ });
+    const header = within(work!).getByRole("button", { name: /Subtasks/ });
     expect(screen.getByTestId("messages")).toContainElement(runningRow);
     expect(header).toHaveAttribute("aria-expanded", "true");
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: 2, state: "done", result: "Verified", completed_at: 102 })]));
@@ -206,10 +206,10 @@ describe("session-owned task UI", () => {
     expect(row).toBe(runningRow);
     expect(row.closest("section")).toBe(work);
     expect(within(screen.getByTestId("composer")).queryByText("Config check")).not.toBeInTheDocument();
-    expect(work).toHaveAccessibleName("Delegated work");
+    expect(work).toHaveAccessibleName("Subtasks");
     view.unmount();
     render(layout());
-    fireEvent.click(await screen.findByRole("button", { name: /Delegated work Finished: 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Finished: 1/ }));
     expect(screen.getByRole("button", { name: /Config check Completed/ })).toBeVisible();
     expect(requestMutation).not.toHaveBeenCalled();
   });
@@ -221,7 +221,7 @@ describe("session-owned task UI", () => {
     })]));
     const user = userEvent.setup();
     render(layout());
-    await user.click(await screen.findByRole("button", { name: /Delegated work/ }));
+    await user.click(await screen.findByRole("button", { name: /Subtasks/ }));
     const row = await screen.findByRole("button", { name: /Config check Interrupted/ });
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
@@ -229,7 +229,7 @@ describe("session-owned task UI", () => {
     expect(detail).toHaveFocus();
     expect(within(detail).getByText("Interrupted")).toBeVisible();
     expect(within(detail).getByText("Found a conflicting setting")).toBeVisible();
-    await user.click(within(detail).getByText("Message delivery"));
+    await user.click(within(detail).getByText("Message status"));
     expect(within(detail).getByText("Delivered: 1")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -249,7 +249,7 @@ describe("session-owned task UI", () => {
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     await act(async () => { resolveStop(task({ revision: 3, state: "cancelled", completed_at: 102 })); });
-    await user.click(screen.getByRole("button", { name: /Delegated work Finished: 1/ }));
+    await user.click(screen.getByRole("button", { name: /Subtasks Finished: 1/ }));
     await screen.findByRole("button", { name: /Config check Cancelled/ });
     await act(async () => { resolveRefresh(response([task()])); });
     expect(screen.queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
@@ -329,7 +329,7 @@ describe("session-owned task UI", () => {
     expect(within(detail).getByRole("link", { name: /Evidence/ })).toHaveAttribute("href", "https://example.com/review");
     expect(detail).toBeVisible();
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.getByRole("button", { name: /Delegated work/ })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Subtasks/ })).toHaveFocus());
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
@@ -343,7 +343,7 @@ describe("session-owned task UI", () => {
     ]));
     render(layout({ threadMessages: replay }));
     await screen.findByRole("button", { name: /Config check Running/ });
-    expect(screen.getAllByRole("region", { name: "Delegated work" })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "Subtasks" })).toHaveLength(1);
     const rows = screen.getAllByRole("button", { name: /check Running/ });
     expect(rows.map((row) => row.dataset.subagentId)).toEqual(["task-1", "second"]);
     vi.mocked(fetch).mockImplementation(async () => response([
@@ -361,7 +361,7 @@ describe("session-owned task UI", () => {
     vi.mocked(fetch).mockImplementation(async () => response([task({ origin_message_id: "followup" })]));
     render(layout({ threadMessages: [...messages, { id: "followup", role: "user", content: "Check more", turnId: "turn-a" }] }));
     await screen.findByRole("button", { name: /Config check Running/ });
-    const group = screen.getByRole("region", { name: "Delegated work" });
+    const group = screen.getByRole("region", { name: "Subtasks" });
     expect(screen.getByText("Check more").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -374,11 +374,11 @@ describe("session-owned task UI", () => {
     const user = userEvent.setup();
     const view = render(layout());
     await screen.findByRole("button", { name: /Config check Running/ });
-    const otherWork = screen.getByRole("region", { name: "Other delegated work" });
-    const header = within(otherWork).getByRole("button", { name: /Other delegated work/ });
+    const otherWork = screen.getByRole("region", { name: "Other tasks" });
+    const header = within(otherWork).getByRole("button", { name: /Other tasks/ });
     expect(header).toHaveAttribute("aria-expanded", "false");
     expect(otherWork.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Delegated work" })).queryByText("Nanjing weather")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Subtasks" })).queryByText("Nanjing weather")).not.toBeInTheDocument();
     await user.click(header);
     expect(within(otherWork).getByText("These tasks have no matching request in the displayed messages.")).toBeVisible();
     await user.click(within(otherWork).getByRole("button", { name: /Nanjing weather Completed/ }));
@@ -388,8 +388,8 @@ describe("session-owned task UI", () => {
     await user.keyboard("{Escape}");
     view.unmount();
     render(layout());
-    const restored = await screen.findByRole("region", { name: "Other delegated work" });
-    expect(within(restored).getByRole("button", { name: /Other delegated work/ })).toHaveAttribute("aria-expanded", "false");
+    const restored = await screen.findByRole("region", { name: "Other tasks" });
+    expect(within(restored).getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "false");
     expect(restored.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(requestMutation).not.toHaveBeenCalled();
   });
@@ -401,7 +401,7 @@ describe("session-owned task UI", () => {
     ]));
     const user = userEvent.setup();
     const view = render(layout());
-    const otherWork = await screen.findByRole("region", { name: "Other delegated work" });
+    const otherWork = await screen.findByRole("region", { name: "Other tasks" });
     await user.click(within(otherWork).getByRole("button", { name: /Earlier check Running/ }));
     const detail = screen.getByRole("dialog", { name: "Earlier check" });
     view.rerender(layout({ threadMessages: [
@@ -410,7 +410,7 @@ describe("session-owned task UI", () => {
     ] }));
     expect(detail).toBeVisible();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "Other delegated work" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
     const row = screen.getByRole("button", { name: /Earlier check Running/ });
     expect(screen.getAllByRole("button", { name: /Earlier check Running/ })).toHaveLength(1);
     expect(screen.getByText("Inspect earlier work").compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -427,7 +427,7 @@ describe("session-owned task UI", () => {
     await screen.findByRole("button", { name: /Sibling check Running/ });
     await act(async () => { resolveRead(response([task()])); });
     expect(screen.getByRole("button", { name: /Config check Completed/ })).toBeVisible();
-    expect(screen.getAllByRole("region", { name: "Delegated work" })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "Subtasks" })).toHaveLength(1);
     vi.useFakeTimers();
     await act(async () => { vi.advanceTimersByTime(10_000); });
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -475,7 +475,7 @@ describe("session-owned task UI", () => {
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined, state: "done", completed_at: 102 })]));
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-    expect(screen.getByRole("button", { name: /Delegated work Finished: 1/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
     expect(client.onChat).not.toHaveBeenCalled();
     view.rerender(layout({ liveEvents: false, visible: false }));
     const reads = vi.mocked(fetch).mock.calls.length;

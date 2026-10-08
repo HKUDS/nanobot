@@ -4,7 +4,7 @@
     "officialLabel": "Buka daftar klien Matrix",
     "fields": {
       "homeserver": {
-        "label": "Server akun",
+        "label": "Homeserver",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -24,15 +24,15 @@
         "placeholder": "Wajib dengan token akses"
       },
       "groupPolicy": {
-        "label": "Perilaku grup",
+        "label": "Aturan grup",
         "choices": {
-          "mention": "Hanya saat disebut",
+          "mention": "Hanya mention",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan"
+        "label": "Pengguna diizinkan"
       },
       "e2eeEnabled": {
         "label": "Enkripsi ujung ke ujung",
@@ -49,19 +49,19 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "Sinkronisasi menghentikan masa tenggang"
+        "label": "Tunggu henti sync (detik)"
       },
       "maxMediaBytes": {
-        "label": "Ukuran media maksimum"
+        "label": "Batas media (byte)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "Pengunduhan media secara bersamaan"
+        "label": "Unduhan bersamaan"
       },
       "groupAllowFrom": {
-        "label": "Grup yang diizinkan"
+        "label": "Grup diizinkan"
       },
       "allowRoomMentions": {
-        "label": "Izinkan penyebutan ruangan",
+        "label": "Mention ruang",
         "choices": {
           "true": "Aktif",
           "false": "Mati"

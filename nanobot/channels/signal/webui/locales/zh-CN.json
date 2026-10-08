@@ -16,15 +16,15 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "允许私信的用户",
+        "label": "私聊用户",
         "placeholder": "电话号码或 UUID"
       },
       "group_allowFrom": {
-        "label": "允许的群组",
+        "label": "允许群组",
         "placeholder": "群组 ID"
       },
       "groupMessageBufferSize": {
-        "label": "群组上下文消息数"
+        "label": "上下文条数"
       },
       "attachmentsDir": {
         "label": "附件目录"
@@ -58,7 +58,7 @@
         }
       },
       "group_requireMention": {
-        "label": "群组中需要提及",
+        "label": "提及回复",
         "choices": {
           "true": "开启",
           "false": "关闭"

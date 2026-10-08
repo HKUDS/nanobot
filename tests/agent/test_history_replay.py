@@ -116,5 +116,6 @@ async def test_runner_checkpoint_keeps_current_user_as_replay_boundary(tmp_path:
     sent_text = "\n".join(str(message.get("content")) for message in sent_messages)
     assert "new question" in sent_text
     assert [message["role"] for message in sent_messages] == ["system", "user"]
-    assert sent_messages[1]["content"] == "new question"
+    assert sent_messages[1]["content"].startswith("new question\n\n")
+    assert "File access:" in sent_messages[1]["content"]
     assert any(message.get("content") == "long older turn" for message in session.messages)

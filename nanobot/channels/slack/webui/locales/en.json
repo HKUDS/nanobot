@@ -15,9 +15,9 @@
         "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Group rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }
@@ -32,7 +32,7 @@
         "label": "Webhook path"
       },
       "replyInThread": {
-        "label": "Reply in thread",
+        "label": "Thread replies",
         "choices": {
           "true": "On",
           "false": "Off"
@@ -45,14 +45,14 @@
         "label": "Done emoji"
       },
       "includeThreadContext": {
-        "label": "Include thread context",
+        "label": "Thread context",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "threadContextLimit": {
-        "label": "Thread context limit"
+        "label": "Context limit"
       },
       "allowFrom": {
         "label": "Allowed users"
@@ -61,7 +61,7 @@
         "label": "Allowed channels"
       },
       "groupRequireMention": {
-        "label": "Require mentions in channels",
+        "label": "Require channel mention",
         "choices": {
           "true": "On",
           "false": "Off"
@@ -82,7 +82,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Allowed direct-message users"
+        "label": "Allowed DM users"
       },
       "proxy": {
         "label": "Network proxy",
