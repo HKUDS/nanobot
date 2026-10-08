@@ -30,7 +30,7 @@ from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
 @pytest.fixture
 async def loop(tmp_path):
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = False

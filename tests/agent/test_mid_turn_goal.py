@@ -27,7 +27,7 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
     release = asyncio.Event()
     calls = []
     permissions = []
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")
@@ -98,7 +98,7 @@ async def test_scheduled_goal_command_cannot_generate_internal_input(tmp_path):
         channel="cli", sender_id="user", chat_id="test", content="/goal execute",
         metadata={"_cron_trigger": {"job_id": "job"}},
     )
-    loop = AgentLoop(bus=MessageBus(), provider=MagicMock(), workspace=tmp_path, model="test-model")
+    loop = AgentLoop(bus=MessageBus(), provider=MagicMock(aclose=AsyncMock()), workspace=tmp_path, model="test-model")
     try:
         await loop._dispatch_command_inline(msg, msg.session_key, msg.content, loop.commands.dispatch)
         response = loop.bus.outbound.get_nowait()
@@ -114,7 +114,7 @@ async def test_scheduled_goal_command_cannot_generate_internal_input(tmp_path):
 async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_path, boundary):
     from agent.session_helpers import run_session
 
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")
@@ -175,7 +175,7 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
     from nanobot.command.router import CommandContext
     from nanobot.session.recovery import pending_followups, record_pending_followup
 
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")
@@ -236,7 +236,7 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
 
 
 async def test_internal_continuation_cannot_inherit_goal_permission(tmp_path):
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")

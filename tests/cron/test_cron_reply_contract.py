@@ -1,7 +1,7 @@
 """Scheduled replies and explicit sends share the normal agent delivery path."""
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -37,7 +37,7 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
         "Reminder", CronSchedule(kind="every", every_ms=86400000), instructions[delivery],
         session_key="telegram:old", origin_channel="telegram", origin_chat_id="old",
     )
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = False

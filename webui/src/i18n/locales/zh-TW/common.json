@@ -1906,7 +1906,6 @@
         "decode_failed": "無法解碼這張圖片",
         "too_large": "檔案太大，請改用較小的檔案",
         "total_too_large": "附件總大小過大，請移除部分檔案或改用較小的檔案",
-        "transport_too_large": "此附件會超過閘道的傳輸上限",
         "io": "無法讀取這個檔案"
       },
       "mentions": {

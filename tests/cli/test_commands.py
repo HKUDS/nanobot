@@ -45,6 +45,13 @@ from nanobot.webui.metadata import (
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def mock_webui_bundle(monkeypatch) -> MagicMock:
+    prepare_bundle = MagicMock()
+    monkeypatch.setattr(cli_webui, "_prepare_webui_bundle_for_gateway", prepare_bundle)
+    return prepare_bundle
+
+
 def _without_rendered_line_breaks(output: str) -> str:
     return "".join(output.splitlines())
 
@@ -72,7 +79,7 @@ def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
 
 def _fake_provider():
     """Return a minimal fake provider that satisfies AgentLoop.__init__."""
-    p = MagicMock()
+    p = MagicMock(aclose=AsyncMock())
     p.generation.max_tokens = 4096
     return p
 
@@ -2861,7 +2868,9 @@ def test_attach_to_background_gateway_checks_owned_sidecar(tmp_path: Path) -> No
         )
 
 
-def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path: Path) -> None:
+def test_webui_foreground_does_not_claim_unmanaged_gateway(
+    monkeypatch, tmp_path: Path, mock_webui_bundle: MagicMock,
+) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
     _patch_webui_provider_ready(monkeypatch)
@@ -2887,6 +2896,8 @@ def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path
 
     assert result.exit_code == 0
     assert "controlled by another foreground command" in result.stdout
+    mock_webui_bundle.assert_called_once()
+    assert mock_webui_bundle.call_args.kwargs == {"mode": "auto"}
 
 
 def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Path) -> None:

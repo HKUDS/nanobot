@@ -1,3 +1,5 @@
+import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments";
+import { DeliveryReceipts } from "../../../packages/client-events/delivery";
 import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
   ConnectionStatus,
@@ -54,6 +56,7 @@ function wsInboundDebugEnabled(): boolean {
 /** Shorten streaming text fields so logging stays usable for huge deltas. */
 function summarizeInboundWsPayload(ev: InboundEvent): unknown {
   const kind = (ev as { event?: string }).event;
+  if (kind === "ready") return { ...ev, upload: "[redacted]" };
   if (kind !== "delta" && kind !== "reasoning_delta") return ev;
   const row = { ...(ev as object) } as Record<string, unknown>;
   const text = typeof row.text === "string" ? row.text : "";
@@ -188,6 +191,8 @@ interface PendingMessageSend {
  */
 export class NanobotClient {
   private socket: WebSocket | null = null;
+  private upload: UploadCapability | null = null;
+  private receipts = new DeliveryReceipts();
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
@@ -837,6 +842,8 @@ export class NanobotClient {
   }
 
   close(): void {
+    this.upload = null;
+    this.receipts.close();
     this.intentionallyClosed = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -1010,10 +1017,36 @@ export class NanobotClient {
     }
   }
 
+  async sendAttachments(
+    chatId: string, content: string, media: OutboundMedia[],
+    options?: Parameters<NanobotClient["sendMessage"]>[3],
+  ): Promise<void> {
+    const socket = this.socket;
+    const capability = this.upload;
+    const turnId = options?.turnId ?? crypto.randomUUID();
+    const stillConnected = () => this.socket === socket
+      && socket?.readyState === WS_OPEN && this.upload === capability;
+    try {
+      const references = await uploadAttachments(media, capability,
+        typeof window !== "undefined" ? window.location.href : this.currentUrl,
+        stillConnected);
+      if (!stillConnected()) throw new Error("Connection changed during attachment send");
+      await this.receipts.wait(turnId, () => {
+        if (!this.sendMessage(chatId, content, references, { ...options, turnId })) {
+          throw new Error("Message exceeds the gateway's WebSocket frame limit; draft retained");
+        }
+      });
+    } catch (error) {
+      this.emitError({ kind: "turn_rejected", chatId, turnId, detail: "attachment_rejected",
+        reason: error instanceof Error ? error.message : "Attachment send failed" });
+      throw error;
+    }
+  }
+
   sendMessage(
     chatId: string,
     content: string,
-    media?: OutboundMedia[],
+    media?: AttachmentReference[],
     options?: {
       cliApps?: OutboundCliAppMention[];
       mcpPresets?: OutboundMcpPresetMention[];
@@ -1025,7 +1058,7 @@ export class NanobotClient {
       /** False for side-channel or injected messages that do not own a lifecycle. */
       startsNewRun?: boolean;
     },
-  ): void {
+  ): boolean {
     const temporary = this.temporaryChatIds.has(chatId);
     if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
@@ -1053,7 +1086,7 @@ export class NanobotClient {
         chatId,
         ...(options?.turnId ? { turnId: options.turnId } : {}),
       });
-      return;
+      return false;
     }
     if (options?.turnId && !isSystemCommandTurnId(options.turnId)) {
       const startsNewRun = options.startsNewRun !== false;
@@ -1061,6 +1094,7 @@ export class NanobotClient {
       this.trackPendingMessageSend(chatId, options.turnId, startsNewRun);
     }
     this.queueSend(frame);
+    return true;
   }
 
   sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<void> {
@@ -1176,6 +1210,7 @@ export class NanobotClient {
       if (fallbackTurnId) parsed = { ...parsed, turn_id: fallbackTurnId };
     }
 
+    this.receipts.event(parsed);
     const turnId = "turn_id" in parsed && typeof parsed.turn_id === "string"
       ? parsed.turn_id
       : null;
@@ -1228,6 +1263,7 @@ export class NanobotClient {
     }
 
     if (parsed.event === "ready") {
+      this.upload = uploadCapability(parsed.upload);
       this.readyChatId = parsed.chat_id;
       this.knownChats.add(parsed.chat_id);
       return;
@@ -1361,6 +1397,8 @@ export class NanobotClient {
   }
 
   private handleClose(event?: { code?: number }): void {
+    this.upload = null;
+    this.receipts.close();
     this.socket = null;
     this.clearTemporaryChats();
     const willReconnect = !this.intentionallyClosed && this.shouldReconnect;

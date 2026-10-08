@@ -1906,7 +1906,6 @@
         "decode_failed": "Impossible de décoder cette image",
         "too_large": "Fichier trop volumineux — essayez-en un plus petit",
         "total_too_large": "Les pièces jointes sont trop volumineuses ensemble — supprimez-en ou utilisez des fichiers plus petits",
-        "transport_too_large": "Cette pièce jointe dépasserait la limite de transport de la passerelle",
         "io": "Impossible de lire ce fichier"
       },
       "mentions": {

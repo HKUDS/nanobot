@@ -1907,7 +1907,6 @@
         "decode_failed": "No se pudo decodificar esta imagen",
         "too_large": "Archivo demasiado grande — prueba uno más pequeño",
         "total_too_large": "Los archivos adjuntos son demasiado grandes en conjunto; elimina algunos o usa archivos más pequeños",
-        "transport_too_large": "Este archivo adjunto superaría el límite de transporte de la puerta de enlace",
         "io": "No se pudo leer este archivo"
       },
       "mentions": {

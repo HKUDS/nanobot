@@ -21,6 +21,7 @@ def test_current_producer_remains_acceptable_to_initial_client():
     contract = webui_contract()
     assert contract["min_protocol"] <= 1 <= contract["max_protocol"]
     assert "webui.core.v1" in contract["capabilities"]
+    assert "webui.attachments.binary.v1" in contract["capabilities"]
 
 
 @pytest.mark.parametrize("version", ["0.0.1", "9.99.0", "0.3.5.dev17", "custom-build"])
