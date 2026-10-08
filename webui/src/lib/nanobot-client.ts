@@ -1537,14 +1537,16 @@ export class NanobotClient {
     const delay = Math.min(500 * 2 ** attempt, this.maxBackoffMs);
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
+      let refreshedUrl: string | null = null;
       if (this.options.onReauth) {
         try {
-          const refreshed = await this.options.onReauth();
-          if (refreshed) this.currentUrl = refreshed;
+          refreshedUrl = await this.options.onReauth();
         } catch {
           // fall through to retry with current URL
         }
       }
+      if (this.intentionallyClosed) return;
+      if (refreshedUrl) this.currentUrl = refreshedUrl;
       this.connect();
     }, delay);
   }
