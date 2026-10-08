@@ -1596,6 +1596,12 @@ class SessionManager:
         """Get the collision-resistant workspace path for a session."""
         return self._jsonl_store.get_session_path(key)
 
+    def canonical_session_path(self, key: str) -> Path | None:
+        """Return the canonical JSONL path, or None for a custom session store."""
+        if self._store is not self._jsonl_store:
+            return None
+        return self._jsonl_store.get_session_path(key)
+
     def _get_runtime_checkpoint_path(self, key: str) -> Path:
         """Get the private in-flight checkpoint path for a session."""
         return self._jsonl_store.get_runtime_checkpoint_path(key)
