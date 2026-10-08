@@ -138,6 +138,8 @@ jobs:
     if: needs.changes.outputs.python_required == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed"
     strategy:
       fail-fast: false
       matrix:
