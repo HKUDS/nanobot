@@ -620,7 +620,7 @@ class MattermostChannel(BaseChannel):
             self._clear_stream_state(stream_id)
             return
 
-        if not delta.strip():
+        if not delta:
             return
 
         mm_meta = (
