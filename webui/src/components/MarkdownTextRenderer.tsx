@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Globe2 } from "lucide-react";
+import { decodeString } from "micromark-util-decode-string";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -257,33 +258,34 @@ const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{S
 function normalizeCjkStrongBoundaries(node: MarkdownAstNode, source: string): void {
   if (!node.children) return;
   node.children = node.children.flatMap((child) => {
-    if (child.type !== "text" || !child.value?.includes("**")) {
+    if (child.type !== "text" || !child.value?.includes("**") || !child.position) {
       normalizeCjkStrongBoundaries(child, source);
       return [child];
     }
 
-    // Escapes and character references deliberately produce literal markers.
-    if (child.position && source.slice(child.position.start.offset, child.position.end.offset) !== child.value) {
-      return [child];
-    }
+    // Match source delimiters before decoding escapes and character references.
+    // Paragraph continuation indentation is not part of the parsed text value.
+    const textSource = source.slice(child.position.start.offset, child.position.end.offset)
+      .replace(/(\r\n?|\n)[\t ]+/g, "$1");
 
     const replacement: MarkdownAstNode[] = [];
     let cursor = 0;
-    for (const match of child.value.matchAll(STRONG_BEFORE_WORD)) {
+    for (const match of textSource.matchAll(STRONG_BEFORE_WORD)) {
       const start = match.index;
       const end = start + match[0].length;
-      if (!CJK_CHARACTER.test(match[1] + child.value.slice(end, end + 1))) continue;
-      const label = match[1].trimEnd();
-      if (start > cursor) replacement.push(safeText(child.value.slice(cursor, start)));
+      const content = decodeString(match[1]);
+      if (!CJK_CHARACTER.test(content + textSource.slice(end, end + 1))) continue;
+      const label = content.trimEnd();
+      if (start > cursor) replacement.push(safeText(decodeString(textSource.slice(cursor, start))));
       replacement.push({
         type: "strong",
         children: [safeText(label)],
       });
-      if (label.length < match[1].length) replacement.push(safeText(match[1].slice(label.length)));
+      if (label.length < content.length) replacement.push(safeText(content.slice(label.length)));
       cursor = end;
     }
     if (cursor === 0) return [child];
-    if (cursor < child.value.length) replacement.push(safeText(child.value.slice(cursor)));
+    if (cursor < textSource.length) replacement.push(safeText(decodeString(textSource.slice(cursor))));
     return replacement;
   });
 }
@@ -295,11 +297,11 @@ function remarkCjkStrongBoundaries() {
 }
 
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
+  remarkCjkStrongBoundaries,
   remarkBreaks,
   remarkGfm,
   [remarkMath, { singleDollarTextMath: false }],
   remarkTexMath,
-  remarkCjkStrongBoundaries,
   remarkSafeHtmlSubset,
 ];
 type MathPlugin = typeof import("@/lib/markdown-math").default;

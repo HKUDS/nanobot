@@ -630,6 +630,24 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("p:last-child")?.textContent).toBe("**边界说明：**issue");
   });
 
+  it.each([
+    ["**结论：**继续 &amp; 其他说明。", "结论：继续 & 其他说明。"],
+    ["**边界说明：**issue &amp; details", "边界说明：issue & details"],
+    ["先写转义标点 \\#，然后 **结论：**继续说明。", "先写转义标点 #，然后 结论：继续说明。"],
+    ["\\*\\*字面符号：\\*\\*issue 和 **结论：**继续说明。", "**字面符号：**issue 和 结论：继续说明。"],
+    ["&#42;&#42;字面符号：&#42;&#42;issue 和 **结论：**继续说明。", "**字面符号：**issue 和 结论：继续说明。"],
+    ["- 第一行\n  **结论：**继续 &amp; 其他说明。", "第一行\n结论：继续 & 其他说明。"],
+  ])("recovers CJK bold labels without reinterpreting decoded text: %s", (source, text) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    expect(container.textContent?.trim()).toBe(text);
+    rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    expect(container.textContent?.trim()).toBe(text);
+  });
+
   it("adds line numbers to multiline fenced code without changing inline code", () => {
     render(
       <MarkdownTextRenderer highlightCode={false}>
