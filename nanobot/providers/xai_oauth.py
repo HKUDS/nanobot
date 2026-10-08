@@ -166,7 +166,25 @@ class XAIOAuthLoginFlow:
 
         callback: _CallbackResult | None
         if authorization_code is not None:
-            callback = _CallbackResult(code=authorization_code.strip())
+            pasted = authorization_code.strip()
+            if "://" in pasted:
+                parsed = urlsplit(pasted)
+                redirect = urlsplit(self.redirect_uri)
+                if (parsed.scheme, parsed.netloc, parsed.path) != (
+                    redirect.scheme, redirect.netloc, redirect.path,
+                ):
+                    raise XAIOAuthError("Paste the callback URL for this xAI sign-in flow.")
+                params = parse_qs(parsed.query)
+                received_state = _first(params, "state")
+                if not received_state or not hmac.compare_digest(received_state, self._state):
+                    raise XAIOAuthError("xAI sign-in failed because the OAuth state did not match.")
+                callback = _CallbackResult(
+                    code=_first(params, "code"),
+                    state=received_state,
+                    error=_first(params, "error_description") or _first(params, "error"),
+                )
+            else:
+                callback = _CallbackResult(code=pasted)
         else:
             try:
                 callback = self._result_queue.get_nowait()
