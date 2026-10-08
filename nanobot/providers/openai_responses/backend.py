@@ -17,6 +17,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
     resolve_stream_idle_timeout_s,
 )
+from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.openai_responses.compaction import (
     retained_compaction_messages,
     split_compaction_input,
@@ -244,6 +245,7 @@ class ResponsesBackend:
         on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         options: dict[str, Any] = {"timeout": resolve_stream_idle_timeout_s()}
+        body = await prepare_inline_images(body)
         if verify is not None:
             options["verify"] = verify
         if proxy:
@@ -271,6 +273,7 @@ class ResponsesBackend:
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         options: dict[str, Any] = {}
+        body = await prepare_inline_images(body)
         if extra_headers is not None:
             options["extra_headers"] = extra_headers
         idle_timeout = resolve_stream_idle_timeout_s()

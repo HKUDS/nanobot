@@ -1,4 +1,4 @@
-"""Prepare inline image copies within a shared Responses request byte budget."""
+"""Prepare inline image copies within a shared provider request byte budget."""
 
 from __future__ import annotations
 
@@ -19,23 +19,45 @@ INLINE_IMAGE_BYTE_BUDGET = 1_000_000
 _SMALL_IMAGE_BYTES = 64_000
 
 
-def _inline_images(body: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    for item in cast(list[dict[str, Any]], body["input"]):
+@dataclass(frozen=True)
+class _InlineImage:
+    container: dict[str, Any]
+    key: str
+    detail: object
+
+    @property
+    def url(self) -> str:
+        return cast(str, self.container[self.key])
+
+
+def _inline_images(body: dict[str, Any]) -> Iterator[_InlineImage]:
+    items = body.get("input", body.get("messages"))
+    # Responses also accepts a plain-text input string.
+    if not isinstance(items, list):
+        return
+    for item in cast(list[dict[str, Any]], items):
         content = item.get("output") if item.get("type") == "function_call_output" else item.get("content")
         if not isinstance(content, list):
             continue
         for block in cast(list[dict[str, Any]], content):
-            url = block.get("image_url")
+            container = block
+            key = "image_url"
+            if block.get("type") == "image_url" and isinstance(block.get("image_url"), dict):
+                container = cast(dict[str, Any], block["image_url"])
+                key = "url"
+            elif block.get("type") != "input_image":
+                continue
+            url = container.get(key)
             if (
-                block.get("type") == "input_image" and isinstance(url, str)
+                isinstance(url, str)
                 and url.startswith("data:image/") and ";base64," in url
             ):
-                yield block
+                yield _InlineImage(container, key, container.get("detail"))
 
 
 @dataclass
 class _ImageCopy:
-    block: dict[str, Any]
+    target: _InlineImage
     source: Image.Image
     format: str
     original_bytes: int
@@ -46,7 +68,7 @@ class _ImageCopy:
         if self.format == "PNG" and scale == 1 and quality != 85:
             return
         image = self.source
-        if scale < 1 and self.block.get("detail") != "original":
+        if scale < 1 and self.target.detail != "original":
             image = image.resize(  # pyright: ignore[reportUnknownMemberType]
                 (ceil(image.width * scale), ceil(image.height * scale)),
                 Image.Resampling.LANCZOS,
@@ -58,15 +80,21 @@ class _ImageCopy:
             self.sent_bytes = len(raw)
             self.sent_size = image.size
             mime = "image/png" if self.format == "PNG" else "image/jpeg"
-            self.block["image_url"] = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+            self.target.container[self.target.key] = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
 async def prepare_inline_images(body: dict[str, Any]) -> dict[str, Any]:
     """Keep small requests unchanged and prepare large image batches off the event loop."""
-    total_bytes = sum(len(block["image_url"]) for block in _inline_images(body))
+    total_bytes = sum(len(image.url) for image in _inline_images(body))
     if total_bytes <= INLINE_IMAGE_BYTE_BUDGET:
         return body
     return await asyncio.to_thread(_prepare_copies, body, total_bytes)
+
+
+async def prepare_message_images(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prepare public image_url messages before provider-specific conversion."""
+    prepared = await prepare_inline_images({"messages": messages})
+    return cast(list[dict[str, Any]], prepared["messages"])
 
 
 def _prepare_copies(body: dict[str, Any], total_bytes: int) -> dict[str, Any]:
@@ -75,10 +103,10 @@ def _prepare_copies(body: dict[str, Any], total_bytes: int) -> dict[str, Any]:
     copies: list[_ImageCopy] = []
     try:
         for block in blocks:
-            if len(block["image_url"]) <= _SMALL_IMAGE_BYTES:
+            if len(block.url) <= _SMALL_IMAGE_BYTES:
                 continue
             try:
-                raw = base64.b64decode(block["image_url"].split(";base64,", 1)[1], validate=True)
+                raw = base64.b64decode(block.url.split(";base64,", 1)[1], validate=True)
                 with Image.open(io.BytesIO(raw)) as original:
                     if getattr(original, "is_animated", False) is True:
                         continue
@@ -100,15 +128,15 @@ def _prepare_copies(body: dict[str, Any], total_bytes: int) -> dict[str, Any]:
         sent_bytes = total_bytes
         for quality, scale in ((85, 1.0), (75, 1.0), (65, 1.0), (65, 0.85), (65, 0.75)):
             for image in copies:
-                before_bytes = len(image.block["image_url"])
+                before_bytes = len(image.target.url)
                 image.encode(quality, scale)
-                sent_bytes += len(image.block["image_url"]) - before_bytes
+                sent_bytes += len(image.target.url) - before_bytes
                 if sent_bytes <= INLINE_IMAGE_BYTE_BUDGET:
                     break
             if sent_bytes <= INLINE_IMAGE_BYTE_BUDGET:
                 break
         logger.info(
-            "Codex inline images prepared: count={} encoded_bytes_before={} "
+            "Inline images prepared: count={} encoded_bytes_before={} "
             "encoded_bytes_after={} budget={} budget_met={} images={}",
             len(blocks), total_bytes, sent_bytes, INLINE_IMAGE_BYTE_BUDGET,
             sent_bytes <= INLINE_IMAGE_BYTE_BUDGET,

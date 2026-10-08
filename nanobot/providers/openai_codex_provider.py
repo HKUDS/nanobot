@@ -26,6 +26,7 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
 )
+from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.oauth_model_catalog import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
@@ -37,7 +38,6 @@ from nanobot.providers.openai_responses import (
     ResponsesWebSocketOptions,
     responses_state_matches,
 )
-from nanobot.providers.openai_responses.images import prepare_inline_images
 from nanobot.providers.openai_responses.state import without_response_item_ids
 from nanobot.providers.openai_responses.websocket import ResponsesWebSocketError
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
