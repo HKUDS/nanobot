@@ -62,8 +62,11 @@ function PickerToolButton({ label, disabled, onClick, children }: {
 
 const DIRECTORY_ROW_HEIGHT = 44;
 const DIRECTORY_OVERSCAN = 4;
+const DIRECTORY_NAVIGATION_KEYS: Record<string, string> = {
+  h: "ArrowLeft", j: "ArrowDown", k: "ArrowUp", l: "ArrowRight",
+};
 
-function WorkspaceDirectoryColumn({ options, activeIndex, selectedPath, initialScrollTop, visitRevision, renderOption, children, ...props }: {
+function WorkspaceDirectoryColumn({ options, activeIndex, selectedPath, initialScrollTop, visitRevision, renderOption, children, style, className, ...props }: {
   options: PickerOption[];
   activeIndex: number | null;
   selectedPath: string | null;
@@ -77,10 +80,13 @@ function WorkspaceDirectoryColumn({ options, activeIndex, selectedPath, initialS
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const measure = () => setVisibleRows(Math.max(1, Math.ceil(viewport.clientHeight / DIRECTORY_ROW_HEIGHT)));
+    // Measure the available slot so rounding the viewport cannot feed back into
+    // its own measurement. Whole rows fit at both edges when scrolling settles.
+    const slot = viewport.parentElement!;
+    const measure = () => setVisibleRows(Math.floor(slot.clientHeight / DIRECTORY_ROW_HEIGHT));
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(viewport);
+    observer.observe(slot);
     return () => observer.disconnect();
   }, []);
   useLayoutEffect(() => {
@@ -92,7 +98,7 @@ function WorkspaceDirectoryColumn({ options, activeIndex, selectedPath, initialS
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || activeIndex === null) return;
-    const top = activeIndex * DIRECTORY_ROW_HEIGHT + 4;
+    const top = activeIndex * DIRECTORY_ROW_HEIGHT;
     const bottom = top + DIRECTORY_ROW_HEIGHT;
     if (top < viewport.scrollTop) viewport.scrollTop = top;
     else if (bottom > viewport.scrollTop + viewport.clientHeight) viewport.scrollTop = Math.max(0, bottom - viewport.clientHeight);
@@ -100,18 +106,21 @@ function WorkspaceDirectoryColumn({ options, activeIndex, selectedPath, initialS
   }, [activeIndex, visibleRows, options]);
   const start = Math.max(0, firstRow - DIRECTORY_OVERSCAN);
   const end = Math.min(options.length, firstRow + visibleRows + DIRECTORY_OVERSCAN);
+  // Proximity snapping allows jumps to rows before their virtual DOM mounts.
   return (
-    <div {...props} ref={viewportRef} onScroll={event => setFirstRow(Math.floor(event.currentTarget.scrollTop / DIRECTORY_ROW_HEIGHT))}>
+    <div className="flex h-full min-h-0 min-w-0 shrink-0 flex-col justify-center" style={style}>
+    <div {...props} ref={viewportRef} className={cn("snap-y snap-proximity", className)} style={{ height: options.length ? visibleRows * DIRECTORY_ROW_HEIGHT : "100%" }} onScroll={event => setFirstRow(Math.floor(event.currentTarget.scrollTop / DIRECTORY_ROW_HEIGHT))}>
       <SidebarSelectionHighlight role="presentation" className="relative" style={{ height: options.length * DIRECTORY_ROW_HEIGHT }}
         scope="workspace-directory" activeId={selectedPath} targetSelector='[aria-selected="true"]'>
         {options.slice(start, end).map((option, offset) => {
           const index = start + offset;
-          return <div key={`${option.kind}-${option.path}`} role="presentation" className="absolute inset-x-0" style={{ top: index * DIRECTORY_ROW_HEIGHT }}>
+          return <div key={`${option.kind}-${option.path}`} role="presentation" className="absolute inset-x-0 snap-start" style={{ top: index * DIRECTORY_ROW_HEIGHT }}>
             {renderOption(option, index)}
           </div>;
         })}
       </SidebarSelectionHighlight>
       {children}
+    </div>
     </div>
   );
 }
@@ -549,10 +558,10 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   }
 
   const filterToolbar = canBrowse && !(compact && editingPath) && <div className={cn("flex shrink-0 items-center gap-2", compact ? "bg-[#fcfcfc] px-3 py-2 dark:bg-muted" : "w-56 max-w-[40%]")}>
-    {compact && <Button variant="ghost" size="sm" aria-expanded={showLocations} onClick={() => setShowLocations(value => !value)} className="h-11 shrink-0 gap-1.5 rounded-control px-2 text-[12px]"><Star className="h-3.5 w-3.5" />{t("workspace.picker.shortcuts")}</Button>}
+    {compact && <Button variant="ghost" size="sm" aria-expanded={showLocations} onClick={() => setShowLocations(value => !value)} className="h-11 shrink-0 gap-1.5 rounded-control px-2 text-[13px] leading-5"><Star className="h-3.5 w-3.5" />{t("workspace.picker.shortcuts")}</Button>}
     <div className="relative min-w-0 flex-1">
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input aria-label={t("workspace.picker.filter")} placeholder={t("workspace.picker.filter")} value={filterQuery} disabled={pickingFolder || editingPath || compact && showLocations} onChange={event => { setFilterQuery(event.target.value); setActiveIndex(0); setActiveColumn(currentColumnIndex); setHighlightActive(false); }} className={cn("h-11 rounded-[var(--picker-field-radius)] border-transparent focus-visible:ring-0 pl-8 text-[16px] shadow-none sm:h-9 sm:text-[12px]", compact ? "bg-muted/60" : "bg-background/80")} />
+      <Input aria-label={t("workspace.picker.filter")} placeholder={t("workspace.picker.filter")} value={filterQuery} disabled={pickingFolder || editingPath || compact && showLocations} onChange={event => { setFilterQuery(event.target.value); setActiveIndex(0); setActiveColumn(currentColumnIndex); setHighlightActive(false); }} className={cn("h-11 rounded-[var(--picker-field-radius)] border-transparent focus-visible:ring-0 pl-8 text-[16px] leading-5 shadow-none sm:h-9 sm:text-[13px]", compact ? "bg-muted/60" : "bg-background/80")} />
     </div>
   </div>;
 
@@ -569,7 +578,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             </button>
           </DialogTrigger>
         </WorkspacePickerTooltip>
-        <DialogContent showCloseButton={false} layoutAnchor={layoutAnchor} centerInLayoutAnchor className="flex h-[min(37rem,calc(100%-2rem))] max-w-5xl flex-col gap-0 overflow-hidden p-0 [--picker-toolbar-inset:0.75rem] [--picker-field-radius:calc(var(--radius-modal)_-_var(--picker-toolbar-inset))] sm:[--picker-toolbar-inset:1rem] dark:bg-background"
+        <DialogContent showCloseButton={false} layoutAnchor={layoutAnchor} centerInLayoutAnchor className="flex h-[min(37rem,calc(100%-2rem))] max-w-5xl flex-col gap-0 overflow-hidden p-0 text-[13px] leading-5 [--picker-sidebar-width:15rem] [--picker-toolbar-inset:0.75rem] [--picker-field-radius:calc(var(--radius-modal)_-_var(--picker-toolbar-inset))] sm:[--picker-toolbar-inset:1rem] dark:bg-background"
           onOpenAutoFocus={event => { event.preventDefault(); if (canBrowse) focusDirectory(); else inputRef.current?.focus(); }}
           onPointerDownCapture={() => setKeyboardInteraction(false)}
           onKeyDownCapture={event => {
@@ -585,14 +594,14 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
           <DialogTitle className="sr-only">{t("workspace.picker.title")}</DialogTitle>
           <DialogDescription className="sr-only">{t("workspace.picker.description")}</DialogDescription>
           <div className="flex shrink-0 items-center gap-1 bg-muted px-[var(--picker-toolbar-inset)] pt-[var(--picker-toolbar-inset)] pb-3">
-            {canBrowse && <div className="flex shrink-0 items-center">
+            {canBrowse && <div className={cn("flex shrink-0 items-center", !compact && "w-[calc(var(--picker-sidebar-width)-var(--picker-toolbar-inset)-0.25rem)]")}>
               <PickerToolButton label={t("workspace.picker.back")} disabled={pickingFolder || history.index === 0} onClick={() => moveHistory(-1)}><ArrowLeft className="h-4 w-4" /></PickerToolButton>
               {!compact && <PickerToolButton label={t("workspace.picker.forward")} disabled={pickingFolder || history.index >= history.visits.length - 1} onClick={() => moveHistory(1)}><ArrowRight className="h-4 w-4" /></PickerToolButton>}
               <PickerToolButton label={t("workspace.picker.history")} disabled={pickingFolder || !history.previous}
                 onClick={() => history.previous && visitDirectory(history.previous)}><History className="h-4 w-4" /></PickerToolButton>
             </div>}
             <div className="flex min-w-0 flex-1 items-center rounded-[var(--picker-field-radius)] bg-background/80">
-            {editingPath || !canBrowse ? <Input ref={inputRef} role="combobox" aria-expanded={open} aria-controls={`${optionsId}-${activeColumn}`} aria-activedescendant={highlightActive && activeOptions.length ? `${optionsId}-${activeColumn}-${activeOption}` : undefined} aria-autocomplete="list" aria-busy={loading} value={pathDraft} disabled={disabled || pickingFolder} onChange={event => changeDraft(event.target.value)} onBlur={event => { if (canBrowse && !keyboardInteraction && event.relatedTarget !== confirmRef.current) cancelPathEditing(false); }} placeholder={t("workspace.dialog.manual")} aria-label={t("workspace.dialog.manual")} aria-invalid={displayedError ? true : undefined} aria-describedby={displayedError ? errorId : undefined} className="h-9 min-w-0 flex-1 rounded-[var(--picker-field-radius)] border-transparent shadow-none focus-visible:ring-0 text-[16px] sm:text-[13px]" onKeyDown={event => {
+            {editingPath || !canBrowse ? <Input ref={inputRef} role="combobox" aria-expanded={open} aria-controls={`${optionsId}-${activeColumn}`} aria-activedescendant={highlightActive && activeOptions.length ? `${optionsId}-${activeColumn}-${activeOption}` : undefined} aria-autocomplete="list" aria-busy={loading} value={pathDraft} disabled={disabled || pickingFolder} onChange={event => changeDraft(event.target.value)} onBlur={event => { if (canBrowse && !keyboardInteraction && event.relatedTarget !== confirmRef.current) cancelPathEditing(false); }} placeholder={t("workspace.dialog.manual")} aria-label={t("workspace.dialog.manual")} aria-invalid={displayedError ? true : undefined} aria-describedby={displayedError ? errorId : undefined} className="h-9 min-w-0 flex-1 rounded-[var(--picker-field-radius)] border-transparent shadow-none focus-visible:ring-0 text-[16px] leading-5 sm:text-[13px]" onKeyDown={event => {
               if (event.nativeEvent.isComposing) return;
               if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !event.altKey && activeOptions.length) {
                 event.preventDefault();
@@ -612,7 +621,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
               {breadcrumbs.map((crumb, index) => <span key={crumb.path} className="flex shrink-0 items-center">
                 {index > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/60" />}
                   <button type="button" disabled={pickingFolder} aria-current={index === breadcrumbs.length - 1 ? "location" : undefined} onClick={() => navigate(crumb.path)}
-                    className="h-11 max-w-48 cursor-pointer truncate rounded-[var(--picker-field-radius)] px-2 text-[12px] text-muted-foreground outline-none hover:bg-foreground/[0.055] focus-visible:ring-2 focus-visible:ring-ring aria-[current=location]:font-medium aria-[current=location]:text-foreground sm:h-9">{crumb.name}</button>
+                    className="h-11 max-w-48 cursor-pointer truncate rounded-[var(--picker-field-radius)] px-2 text-muted-foreground outline-none hover:bg-foreground/[0.055] focus-visible:ring-2 focus-visible:ring-ring aria-[current=location]:font-medium aria-[current=location]:text-foreground sm:h-9">{crumb.name}</button>
               </span>)}
               <WorkspacePickerTooltip label={t("workspace.picker.editPath")}>
                 <button type="button" disabled={pickingFolder} aria-label={`${t("workspace.picker.editPath")}: ${currentPath}`} onClick={editPath}
@@ -625,13 +634,13 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
           {compact && filterToolbar}
           <div className="flex min-h-0 flex-1 bg-muted">
             {(!compact || showLocations || !canBrowse) && <nav aria-label={t("workspace.picker.shortcuts")}
-              className={cn("sidebar-scrollbar flex shrink-0 flex-col overflow-auto bg-muted p-2", compact && canBrowse ? "w-full" : "w-60", compact && !canBrowse && "w-40")}>
-              {hostName && <p className="shrink-0 truncate px-3 pt-2 pb-1 text-[11px] leading-4 text-muted-foreground">{hostName}</p>}
-              <SidebarSelectionHighlight scope="workspace-saved-location" activeId={currentPath} targetSelector='button[aria-current="location"]' className="relative flex shrink-0 flex-col gap-4"
+              className={cn("sidebar-scrollbar flex shrink-0 flex-col overflow-auto bg-muted p-2", compact && canBrowse ? "w-full" : "w-[var(--picker-sidebar-width)]", compact && !canBrowse && "w-40")}>
+              {hostName && <p className="shrink-0 truncate px-3 py-2 text-xs leading-4 text-muted-foreground">{hostName}</p>}
+              <SidebarSelectionHighlight scope="workspace-saved-location" activeId={currentPath} targetSelector='button[aria-current="location"]' className="relative flex shrink-0 flex-col gap-3"
                 highlightClassName={savedSelectionJoin === "top" ? "rounded-t-none" : savedSelectionJoin === "bottom" ? "rounded-b-none" : undefined}>
               {[{ label: t("workspace.picker.favorites"), projects: favorites, favorite: true }, { label: t("workspace.picker.recent"), projects: recentProjects, favorite: false }].map(section => (
                 <section key={section.label} className="min-w-0 shrink-0">
-                  <h3 className="px-3 py-2 text-[11px] font-medium text-muted-foreground">{section.label}</h3>
+                  <h3 className="px-3 py-2 text-xs font-medium leading-4 text-muted-foreground">{section.label}</h3>
                   {section.projects.map(project => <div key={project.path} className={cn("workspace-picker-row group/workspace-saved-row", SIDEBAR_SELECTION_ITEM_CLASS)}
                     onPointerEnter={() => setHoveredLocation(project.path)} onPointerLeave={() => setHoveredLocation(null)}>
                       <button type="button" aria-label={project.path} aria-current={sameWorkspacePath(currentPath, project.path) ? "location" : undefined}
@@ -639,12 +648,12 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                         className={cn(floatingItemClassName, "flex h-11 min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left group-hover/workspace-saved-row:bg-foreground/[0.055] dark:group-hover/workspace-saved-row:bg-white/[0.08] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring", canFavorite && "pr-12",
                           sameWorkspacePath(currentPath, project.path) && "font-medium text-foreground group-hover/workspace-saved-row:bg-transparent dark:group-hover/workspace-saved-row:bg-transparent",
                           sameWorkspacePath(hoveredLocation, project.path) && (savedSelectionJoin === "top" ? "rounded-b-none" : savedSelectionJoin === "bottom" ? "rounded-t-none" : undefined))}>
-                        <span className="min-w-0 flex-1 truncate text-[13px] leading-4">{projectNameFromPath(project.path)}</span>
+                        <span className="min-w-0 flex-1 truncate">{projectNameFromPath(project.path)}</span>
                         {sameWorkspacePath(project.path, scope?.project_path ?? defaultScope.project_path) && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                       </button>
                     {favoriteButton(project.path)}
                   </div>)}
-                  {section.favorite && !favorites.length && canFavorite && <p className="px-3 text-[11px] leading-relaxed text-muted-foreground">{t("workspace.picker.favoriteHint")}</p>}
+                  {section.favorite && !favorites.length && canFavorite && <p className="px-3 text-xs leading-5 text-muted-foreground">{t("workspace.picker.favoriteHint")}</p>}
                 </section>
               ))}
               </SidebarSelectionHighlight>
@@ -652,17 +661,18 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             <div className={cn("mr-[var(--picker-toolbar-inset)] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--picker-field-radius)] bg-[#fcfcfc] dark:bg-muted", compact && showLocations && canBrowse && "hidden")}>
             <div ref={attachColumns} data-workspace-columns className="sidebar-scrollbar flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain">
               {columns.map((column, columnIndex) => (!compact || columnIndex === currentColumnIndex) && <WorkspaceDirectoryColumn key={columnIndex} options={column.options} selectedPath={column.selectedPath} initialScrollTop={previewingPath ? 0 : currentVisit.scrollTops[columnIndex] ?? 0} visitRevision={history.revision} activeIndex={highlightActive && columnIndex === activeColumn ? activeOption : null}
-                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className={cn("sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 pt-1 pb-2 outline-none", keyboardInteraction && "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring")}
+                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className="sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 outline-none"
                 onFocus={event => { if (event.target === event.currentTarget) { setActiveColumn(columnIndex); setActiveIndex(0); } }}
                 onKeyDown={event => {
                   if (event.target !== event.currentTarget || event.altKey || event.metaKey || event.ctrlKey || pickingFolder) return;
+                  const key = DIRECTORY_NAVIGATION_KEYS[event.key] ?? event.key;
                   const count = column.options.length;
-                  if (count && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+                  if (count && ["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) {
                     event.preventDefault(); setHighlightActive(true); setActiveColumn(columnIndex);
-                    setActiveIndex(event.key === "Home" ? 0 : event.key === "End" ? count - 1 : highlightActive ? (activeIndex + (event.key === "ArrowDown" ? 1 : -1) + count) % count : event.key === "ArrowDown" ? 0 : count - 1);
-                  } else if (count && (event.key === "Enter" || event.key === "ArrowRight")) {
+                    setActiveIndex(key === "Home" ? 0 : key === "End" ? count - 1 : highlightActive ? (activeIndex + (key === "ArrowDown" ? 1 : -1) + count) % count : key === "ArrowDown" ? 0 : count - 1);
+                  } else if (count && (key === "Enter" || key === "ArrowRight")) {
                     event.preventDefault(); activate(column.options[Math.min(activeIndex, count - 1)], columnIndex);
-                  } else if (event.key === "ArrowLeft" && column.parent) { event.preventDefault(); navigate(column.parent); }
+                  } else if (key === "ArrowLeft" && column.parent) { event.preventDefault(); navigate(column.parent); }
                 }}
                 renderOption={(option, index) => <div role="presentation" className={cn("workspace-picker-row", SIDEBAR_SELECTION_ITEM_CLASS)} data-keyboard-active={highlightActive && columnIndex === activeColumn && index === activeOption ? "" : undefined}>
                   <button id={`${optionsId}-${columnIndex}-${index}`} type="button" role="option" tabIndex={-1} aria-label={option.path} aria-selected={sameWorkspacePath(column.selectedPath, option.path)} aria-posinset={index + 1} aria-setsize={column.options.length} disabled={pickingFolder}
@@ -671,23 +681,23 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                     className={cn(floatingItemClassName, floatingItemFocusClassName, "flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left hover:bg-foreground/[0.055] dark:hover:bg-white/[0.08] disabled:opacity-50", canFavorite && "pr-12",
                       sameWorkspacePath(column.selectedPath, option.path) && "font-medium text-foreground hover:bg-transparent dark:hover:bg-transparent focus:bg-transparent dark:focus:bg-transparent",
                       highlightActive && columnIndex === activeColumn && index === activeOption && "ring-1 ring-inset ring-ring")}>
-                    {option.kind === "directory" ? <span className="min-w-0 flex-1 truncate text-[13px] leading-4">{option.name}</span> : <WorkspacePickerPath path={option.path} />}
+                    {option.kind === "directory" ? <span className="min-w-0 flex-1 truncate">{option.name}</span> : <WorkspacePickerPath path={option.path} />}
                     {sameWorkspacePath(option.path, scope?.project_path ?? defaultScope.project_path) && <Check className="h-4 w-4 shrink-0 text-muted-foreground" />}
                   </button>
                   {favoriteButton(option.path)}
               </div>}>
               {columnIndex === currentColumnIndex && loading && <WorkspaceDirectorySkeleton />}
-              {columnIndex === currentColumnIndex && canBrowse && !loading && directory && !column.options.length && !displayedError && <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 py-10 text-center text-[12px] text-muted-foreground"><FolderSearch className="h-6 w-6 opacity-50" /><p>{t(folderQuery || directory.partial ? "workspace.picker.noMatches" : "workspace.picker.empty")}</p></div>}
-              {columnIndex === currentColumnIndex && directory?.truncated && <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("workspace.picker.truncated")}</p>}
-              {columnIndex === currentColumnIndex && displayedError && <div className="px-3 py-3"><p id={errorId} role="alert" className="text-[12px] text-destructive">{displayedError}</p>{directoryError && <Button variant="ghost" size="sm" onClick={() => setRevision(value => value + 1)} className="mt-2">{t("workspace.picker.retry")}</Button>}</div>}
+              {columnIndex === currentColumnIndex && canBrowse && !loading && directory && !column.options.length && !displayedError && <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 py-10 text-center text-xs leading-4 text-muted-foreground"><FolderSearch className="h-6 w-6 opacity-50" /><p>{t(folderQuery || directory.partial ? "workspace.picker.noMatches" : "workspace.picker.empty")}</p></div>}
+              {columnIndex === currentColumnIndex && directory?.truncated && <p className="px-3 py-2 text-xs leading-4 text-muted-foreground">{t("workspace.picker.truncated")}</p>}
+              {columnIndex === currentColumnIndex && displayedError && <div className="px-3 py-3"><p id={errorId} role="alert" className="text-xs leading-5 text-destructive">{displayedError}</p>{directoryError && <Button variant="ghost" size="sm" onClick={() => setRevision(value => value + 1)} className="mt-2 text-[13px] leading-5">{t("workspace.picker.retry")}</Button>}</div>}
               </WorkspaceDirectoryColumn>)}
             </div>
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-3 bg-muted px-4 py-3">
-            {canBrowse && <label className="mr-auto flex w-full items-center gap-2 text-[12px] text-muted-foreground sm:w-auto"><ToggleButton checked={showHidden} onChange={setShowHidden} label={t("workspace.picker.hidden")} />{t("workspace.picker.hidden")}</label>}
-            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} className="h-11 rounded-control px-4 sm:h-10">{t("workspace.picker.cancel")}</Button>
-            <Button ref={confirmRef} size="sm" className="h-11 rounded-control px-4 sm:h-10" disabled={!selectionPath || pickingFolder || (editingPath && !absoluteDraft)} onClick={() => selectionPath && void chooseProject(selectionPath)}>{t("workspace.picker.select")}</Button>
+            {canBrowse && <label className="mr-auto flex w-full items-center gap-2 text-muted-foreground sm:w-auto"><ToggleButton checked={showHidden} onChange={setShowHidden} label={t("workspace.picker.hidden")} />{t("workspace.picker.hidden")}</label>}
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} className="h-11 rounded-control px-4 text-[13px] leading-5 sm:h-10">{t("workspace.picker.cancel")}</Button>
+            <Button ref={confirmRef} size="sm" className="h-11 rounded-control px-4 text-[13px] leading-5 sm:h-10" disabled={!selectionPath || pickingFolder || (editingPath && !absoluteDraft)} onClick={() => selectionPath && void chooseProject(selectionPath)}>{t("workspace.picker.select")}</Button>
           </div>
         </DialogContent>
       </Dialog>
