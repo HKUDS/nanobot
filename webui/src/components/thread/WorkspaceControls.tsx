@@ -634,7 +634,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
           {compact && filterToolbar}
           <div className="flex min-h-0 flex-1 bg-muted">
             {(!compact || showLocations || !canBrowse) && <nav aria-label={t("workspace.picker.shortcuts")}
-              className={cn("flex shrink-0 flex-col overflow-auto bg-muted p-2", compact && canBrowse ? "w-full" : "w-60", compact && !canBrowse && "w-40")}>
+              className={cn("sidebar-scrollbar flex shrink-0 flex-col overflow-auto bg-muted p-2", compact && canBrowse ? "w-full" : "w-60", compact && !canBrowse && "w-40")}>
               {hostName && <p className="shrink-0 truncate px-3 pt-2 pb-1 text-[11px] leading-4 text-muted-foreground">{hostName}</p>}
               <SidebarSelectionHighlight scope="workspace-saved-location" activeId={currentPath} targetSelector='button[aria-current="location"]' className="relative flex shrink-0 flex-col gap-4"
                 highlightClassName={savedSelectionJoin === "top" ? "rounded-t-none" : savedSelectionJoin === "bottom" ? "rounded-b-none" : undefined}>
@@ -660,9 +660,9 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
               </SidebarSelectionHighlight>
             </nav>}
             <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-l-control bg-[#fcfcfc] dark:bg-muted", compact && showLocations && canBrowse && "hidden")}>
-            <div ref={attachColumns} data-workspace-columns className="flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain">
+            <div ref={attachColumns} data-workspace-columns className="sidebar-scrollbar flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain">
               {columns.map((column, columnIndex) => (!compact || columnIndex === currentColumnIndex) && <WorkspaceDirectoryColumn key={columnIndex} options={column.options} selectedPath={column.selectedPath} initialScrollTop={previewingPath ? 0 : currentVisit.scrollTops[columnIndex] ?? 0} visitRevision={history.revision} activeIndex={highlightActive && columnIndex === activeColumn ? activeOption : null}
-                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className={cn("relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 pt-1 pb-2 outline-none", keyboardInteraction && "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring")}
+                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className={cn("sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 pt-1 pb-2 outline-none", keyboardInteraction && "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring")}
                 onFocus={event => { if (event.target === event.currentTarget) { setActiveColumn(columnIndex); setActiveIndex(0); } }}
                 onKeyDown={event => {
                   if (event.target !== event.currentTarget || event.altKey || event.metaKey || event.ctrlKey || pickingFolder) return;
