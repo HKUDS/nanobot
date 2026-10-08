@@ -477,7 +477,9 @@ async def test_temporary_chat_is_transient_and_discarded(bus, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", ["/goal private", "/trigger later", "/dream"])
+@pytest.mark.parametrize("content", [
+    "/goal private", "/trigger later", "/dream", "/NEW@nanobot", "/__shell pwd",
+])
 async def test_temporary_chat_rejects_persistent_commands(bus, tmp_path, content) -> None:
     sessions = SessionManager(tmp_path)
     channel = WebSocketChannel(
@@ -501,6 +503,29 @@ async def test_temporary_chat_rejects_persistent_commands(bus, tmp_path, content
     assert json.loads(connection.send.await_args.args[0])["detail"] == (
         "temporary_chat_command_rejected"
     )
+
+
+@pytest.mark.parametrize("content", ["/tmp", "/new/file.txt", "/model@nanobot fast"])
+async def test_temporary_chat_accepts_paths_and_allowed_commands(bus, tmp_path, content) -> None:
+    sessions = SessionManager(tmp_path)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    connection = AsyncMock()
+    connection.remote_address = ("127.0.0.1", 5000)
+    chat_id = await _new_temporary_chat(channel, connection)
+
+    await channel._dispatch_envelope(connection, "webui-client", {
+        "type": "message", "chat_id": chat_id, "content": content, "webui": True,
+    })
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.content == content
+    assert inbound.require_existing_session is True
+    assert read_transcript_lines(inbound.session_key) == []
+    session = sessions.get_cached(inbound.session_key)
+    assert session is not None and not session.policy.persist
 
 
 @pytest.mark.asyncio

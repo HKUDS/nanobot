@@ -290,7 +290,10 @@ async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> N
 @pytest.mark.parametrize(
     ("content", "expected"),
     [
-        ("/neaw", 'Unknown command "/neaw". Did you mean "/new"?'),
+        (
+            "/stop now",
+            'Command "/stop" does not accept arguments. Did you mean "/stop"?',
+        ),
         (
             "/status now",
             'Command "/status" does not accept arguments. Did you mean "/status"?',
@@ -325,6 +328,32 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
         ("user", content, True),
         ("assistant", response.content, True),
     ]
+
+
+@pytest.mark.parametrize(("channel", "content"), [
+    ("websocket", "/tmp 看看这个目录"),
+    ("weixin", "/home/user/project"),
+    ("cli", "/new/file.txt"),
+])
+async def test_absolute_path_reaches_provider_as_chat(tmp_path, channel, content) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.aclose = AsyncMock()
+    try:
+        response = await loop._process_message(InboundMessage(
+            channel=channel, sender_id="user", chat_id="path", content=content,
+        ))
+
+        assert response is not None and response.content == "Test title"
+        request = loop.provider.chat_stream_with_retry.await_args.kwargs
+        assert any(
+            message["role"] == "user" and content in message["content"]
+            for message in request["messages"]
+        )
+        session = loop.sessions.get_or_create(f"{channel}:path")
+        assert session.get_history()[0]["content"] == content
+        assert not session.messages[0].get("_command")
+    finally:
+        await loop.aclose()
 
 
 def test_clean_generated_title_strips_reasoning_tags() -> None:
