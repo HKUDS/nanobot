@@ -601,6 +601,35 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByText(/如果你之后不想再用/)).toBeInTheDocument();
   });
 
+  it.each([
+    ["**边界说明：**issue 只有截图，没有原始消息。", "issue 只有截图，没有原始消息。"],
+    ["**边界说明： **issue 只有截图，没有原始消息。", " issue 只有截图，没有原始消息。"],
+  ])("renders CJK bold labels before Latin text through stream completion: %s", (source, following) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    expect(container.textContent).toBe(`边界说明：${following}`);
+
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    expect(container.textContent).toBe(`边界说明：${following}`);
+  });
+
+  it("keeps literal bold markers in code and escaped text", () => {
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {"`**边界说明：**issue`\n\n```text\n**边界说明： **issue\n```\n\n\\*\\*边界说明：\\*\\*issue"}
+      </MarkdownTextRenderer>,
+    );
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container).toHaveTextContent("**边界说明：**issue");
+    expect(container).toHaveTextContent("**边界说明： **issue");
+    expect(container.querySelector("p:last-child")?.textContent).toBe("**边界说明：**issue");
+  });
+
   it("adds line numbers to multiline fenced code without changing inline code", () => {
     render(
       <MarkdownTextRenderer highlightCode={false}>

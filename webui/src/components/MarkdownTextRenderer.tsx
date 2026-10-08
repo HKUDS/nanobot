@@ -54,6 +54,10 @@ type MarkdownAstNode = {
   type: string;
   value?: string;
   children?: MarkdownAstNode[];
+  position?: {
+    start: { offset: number };
+    end: { offset: number };
+  };
   data?: {
     hName?: string;
   };
@@ -245,29 +249,38 @@ function remarkSafeHtmlSubset() {
   };
 }
 
-// Recover a common model-output edge case that CommonMark leaves as literal
-// text: `**结论。**如果`, with no separator after the closing delimiter.
-const CJK_AFTER_STRONG =
-  /(?<!\\)\*\*([^*\r\n]+?)(?<!\\)\*\*(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/gu;
+// Model output can put CJK punctuation or whitespace before a closing `**`
+// followed immediately by a word, which CommonMark leaves as literal text.
+const STRONG_BEFORE_WORD = /(?<!\\)\*\*([^\s*][^*\r\n]*?)(?<!\\)\*\*(?=[\p{L}\p{N}])/gu;
+const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
-function normalizeCjkStrongBoundaries(node: MarkdownAstNode): void {
+function normalizeCjkStrongBoundaries(node: MarkdownAstNode, source: string): void {
   if (!node.children) return;
   node.children = node.children.flatMap((child) => {
     if (child.type !== "text" || !child.value?.includes("**")) {
-      normalizeCjkStrongBoundaries(child);
+      normalizeCjkStrongBoundaries(child, source);
+      return [child];
+    }
+
+    // Escapes and character references deliberately produce literal markers.
+    if (child.position && source.slice(child.position.start.offset, child.position.end.offset) !== child.value) {
       return [child];
     }
 
     const replacement: MarkdownAstNode[] = [];
     let cursor = 0;
-    for (const match of child.value.matchAll(CJK_AFTER_STRONG)) {
+    for (const match of child.value.matchAll(STRONG_BEFORE_WORD)) {
       const start = match.index;
+      const end = start + match[0].length;
+      if (!CJK_CHARACTER.test(match[1] + child.value.slice(end, end + 1))) continue;
+      const label = match[1].trimEnd();
       if (start > cursor) replacement.push(safeText(child.value.slice(cursor, start)));
       replacement.push({
         type: "strong",
-        children: [safeText(match[1])],
+        children: [safeText(label)],
       });
-      cursor = start + match[0].length;
+      if (label.length < match[1].length) replacement.push(safeText(match[1].slice(label.length)));
+      cursor = end;
     }
     if (cursor === 0) return [child];
     if (cursor < child.value.length) replacement.push(safeText(child.value.slice(cursor)));
@@ -276,8 +289,8 @@ function normalizeCjkStrongBoundaries(node: MarkdownAstNode): void {
 }
 
 function remarkCjkStrongBoundaries() {
-  return (tree: MarkdownAstNode) => {
-    normalizeCjkStrongBoundaries(tree);
+  return (tree: MarkdownAstNode, file: { toString(): string }) => {
+    normalizeCjkStrongBoundaries(tree, file.toString());
   };
 }
 
