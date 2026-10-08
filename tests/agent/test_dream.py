@@ -507,6 +507,50 @@ class TestEphemeralDirect:
         assert resp.metadata["_stop_reason"] == "error"
         assert MemoryStore.dream_run_completed(resp) is False
 
+    @pytest.mark.parametrize(
+        ("finish_reason", "empty_retries"),
+        [("refusal", 0), ("content_filter", 0), ("refusal", 2), ("stop", 0)],
+    )
+    async def test_dream_cursor_respects_provider_terminal_reason(
+        self, _make_loop, finish_reason, empty_retries,
+    ):
+        import asyncio
+
+        from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_dream
+        from nanobot.command.router import CommandContext
+
+        loop, _ = _make_loop
+        store = loop.context.memory
+        cursor = store.append_history("The user prefers concise Chinese answers.")
+        batch = store.build_dream_prompt()
+        memory_before = store.read_memory()
+        loop.provider.chat_stream_with_retry.side_effect = [
+            *[LLMResponse(content="", finish_reason="stop") for _ in range(empty_retries)],
+            LLMResponse(
+                content="No changes needed." if finish_reason == "stop" else "Request blocked.",
+                finish_reason=finish_reason,
+            ),
+        ]
+        msg = InboundMessage(channel="cli", sender_id="test", chat_id="direct", content="/dream")
+
+        await cmd_dream(CommandContext(
+            msg=msg, session=None, key=msg.session_key, raw="/dream", loop=loop,
+        ))
+        report = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=5)
+
+        assert loop.provider.chat_stream_with_retry.await_count == empty_retries + 1
+        assert store.read_memory() == memory_before
+        if finish_reason == "stop":
+            assert store.get_last_dream_cursor() == cursor
+            assert store.build_dream_prompt() is None
+            assert "Dream completed" in report.content
+        else:
+            assert store.get_last_dream_cursor() == 0
+            assert store.build_dream_prompt() == batch
+            assert "Dream did not complete" in report.content
+            assert finish_reason in report.content
+
     async def test_completed_response_after_tool_error_is_success(self, _make_loop):
         """A soft tool error is model input, not a second run-level failure state."""
         from unittest.mock import AsyncMock
