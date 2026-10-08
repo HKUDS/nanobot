@@ -35,6 +35,37 @@ def test_append_and_read_roundtrip(tmp_path, monkeypatch) -> None:
     assert lines[0]["text"] == "hello"
 
 
+@pytest.mark.parametrize("rotate", [False, True])
+def test_rejected_user_receipt_preserves_other_inputs_with_same_turn_id(
+    tmp_path, monkeypatch, rotate,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript.time.time", lambda: 1_700_000_000.0)
+    if rotate:
+        _force_small_transcript_budget(monkeypatch, limit=500, target=250)
+    recorder = transcript_module.WebUITranscriptRecorder()
+    metadata = recorder.client_turn_metadata("same-client-turn")
+    rejected = recorder.append_user_message("rollback", "same text", metadata=metadata)
+    retained = recorder.append_user_message("rollback", "same text", metadata=metadata)
+    assert rejected is not None and retained is not None
+    if rotate:
+        for _ in range(3):
+            recorder.prepare_and_append(
+                "rollback", {"event": "message", "text": "x" * 100}, metadata=metadata,
+            )
+        recorder.prepare_and_append("rollback", {"event": "turn_end"}, metadata=metadata)
+        next_metadata = recorder.client_turn_metadata("next-client-turn")
+        recorder.append_user_message("rollback", "next input", metadata=next_metadata)
+        recorder.prepare_and_append("rollback", {"event": "turn_end"}, metadata=next_metadata)
+        assert list(webui_transcript_segments_dir("websocket:rollback").glob("*.jsonl"))
+    before = read_transcript_lines("websocket:rollback")
+
+    recorder.discard_user_message("rollback", rejected)
+
+    assert read_transcript_lines("websocket:rollback") == [row for row in before if row != rejected]
+    assert retained in read_transcript_lines("websocket:rollback")
+
+
 def test_append_stamps_created_at_ms(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr("nanobot.webui.transcript.time.time", lambda: 1_700_000_000.0)

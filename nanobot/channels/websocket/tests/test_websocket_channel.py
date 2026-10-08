@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -2099,6 +2100,14 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
     default_workspace = tmp_path / "default"
     default_workspace.mkdir()
     sessions = SessionManager(tmp_path / "sessions")
@@ -2130,6 +2139,7 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
                 "chat_id": chat_id,
                 "content": "hello",
                 "webui": True,
+                "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
                 "workspace_scope": {
                     "project_path": str(default_workspace),
                     "access_mode": "full",
@@ -2162,6 +2172,9 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
     assert payload["event"] == "error"
     assert payload["detail"] == "workspace_scope_rejected"
     bus.publish_inbound.assert_not_awaited()
+    assert message_conn not in channel._subs.get(chat_id, set())
+    assert chat_id not in channel._conn_chats.get(message_conn, set())
+    assert list((media_root / "websocket").iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -5023,7 +5036,17 @@ async def test_open_connection_rejects_revoked_webui_turn_without_acceptance_ack
 @pytest.mark.asyncio
 async def test_midflight_allowlist_revocation_rejects_turn_without_ack(
     bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
     channel = _ch(bus)
     channel.is_allowed = MagicMock(side_effect=[True, False])
     conn = AsyncMock()
@@ -5036,6 +5059,7 @@ async def test_midflight_allowlist_revocation_rejects_turn_without_ack(
             "type": "message",
             "chat_id": "chat-midflight-revoked",
             "content": "must not be acknowledged",
+            "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
             "webui": True,
             "turn_id": "turn-midflight-revoked",
         },
@@ -5050,6 +5074,328 @@ async def test_midflight_allowlist_revocation_rejects_turn_without_ack(
     }
     assert all(payload["event"] != "message_accepted" for payload in payloads)
     bus.publish_inbound.assert_not_awaited()
+    assert conn not in channel._subs.get("chat-midflight-revoked", set())
+    assert "chat-midflight-revoked" not in channel._conn_chats.get(conn, set())
+    assert list((media_root / "websocket").iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_rejected_message_rolls_back_side_effects_when_hydration_fails(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50124)
+    monkeypatch.setattr(
+        channel,
+        "webui_hydrate",
+        AsyncMock(side_effect=RuntimeError("hydrate failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="hydrate failed"):
+        await channel._dispatch_envelope(
+            conn,
+            "webui-client",
+            {
+                "type": "message",
+                "chat_id": "chat-hydrate-rollback",
+                "content": "hello",
+                "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+                "webui": True,
+            },
+        )
+
+    bus.publish_inbound.assert_not_awaited()
+    assert conn not in channel._subs.get("chat-hydrate-rollback", set())
+    assert "chat-hydrate-rollback" not in channel._conn_chats.get(conn, set())
+    assert list((media_root / "websocket").iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_session_mention_normalization_rolls_back_side_effects(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=SessionManager(tmp_path / "sessions"),
+            workspace_path=tmp_path,
+        ),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50127)
+    channel._webui_connections.add(conn)
+    session_access = channel._commands._session_access
+    assert session_access is not None
+
+    def cancel_normalization(
+        _raw: object,
+        *,
+        exclude_session_key: str | None = None,
+    ) -> list[dict[str, str]]:
+        _ = exclude_session_key
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(session_access, "normalize_mentions", cancel_normalization)
+
+    with pytest.raises(asyncio.CancelledError):
+        await channel._dispatch_envelope(
+            conn,
+            "webui-client",
+            {
+                "type": "message",
+                "chat_id": "chat-mention-cancel",
+                "content": "hello",
+                "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+                "session_mentions": [{"session_key": "telegram:other"}],
+                "webui": True,
+            },
+        )
+
+    bus.publish_inbound.assert_not_awaited()
+    assert conn not in channel._subs.get("chat-mention-cancel", set())
+    assert "chat-mention-cancel" not in channel._conn_chats.get(conn, set())
+    assert list((media_root / "websocket").iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_rejected_message_rolls_back_side_effects_when_dispatch_fails(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50125)
+    monkeypatch.setattr(
+        channel,
+        "webui_dispatch_message",
+        AsyncMock(side_effect=RuntimeError("dispatch failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        await channel._dispatch_envelope(
+            conn,
+            "webui-client",
+            {
+                "type": "message",
+                "chat_id": "chat-dispatch-rollback",
+                "content": "hello",
+                "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+                "webui": True,
+                "turn_id": "turn-dispatch-rollback",
+            },
+        )
+
+    bus.publish_inbound.assert_not_awaited()
+    assert conn not in channel._subs.get("chat-dispatch-rollback", set())
+    assert "chat-dispatch-rollback" not in channel._conn_chats.get(conn, set())
+    assert list((media_root / "websocket").iterdir()) == []
+    assert read_transcript_lines("websocket:chat-dispatch-rollback") == []
+
+
+@pytest.mark.asyncio
+async def test_published_message_keeps_resources_and_owner_when_scope_persistence_fails(
+    bus: MagicMock, tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50125)
+    monkeypatch.setattr(
+        channel.gateway.workspaces, "persist_scope",
+        MagicMock(side_effect=OSError("scope persistence failed")),
+    )
+
+    with pytest.raises(OSError, match="scope persistence failed"):
+        await channel._dispatch_envelope(conn, "webui-client", {
+            "type": "message", "chat_id": "chat-published-scope-failure",
+            "content": "hello", "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+            "webui": True, "turn_id": "turn-published-scope-failure",
+        })
+
+    bus.publish_inbound.assert_awaited_once()
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert all(Path(path).is_file() for path in inbound.media)
+    assert conn in channel._subs.get(inbound.chat_id, set())
+    assert wth.websocket_turn_owner_is_registered(
+        inbound.chat_id, inbound.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY],
+        "turn-published-scope-failure",
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_transcript_is_ready_when_bus_consumer_receives_message() -> None:
+    bus = MessageBus()
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50125)
+
+    async def consume():
+        inbound = await bus.consume_inbound()
+        return read_transcript_lines(inbound.session_key)
+
+    consumer = asyncio.create_task(consume())
+    try:
+        await channel._dispatch_envelope(conn, "webui-client", {
+            "type": "message", "chat_id": "chat-transcript-before-consumer",
+            "content": "hello", "webui": True, "turn_id": "turn-before-consumer",
+        })
+        records = await asyncio.wait_for(consumer, timeout=2)
+    finally:
+        if not consumer.done():
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+
+    assert records[0]["event"] == "user"
+    assert records[0]["text"] == "hello"
+    assert records[0]["turn_id"] == "turn-before-consumer"
+
+
+@pytest.mark.asyncio
+async def test_disconnected_temporary_message_cleans_unregistered_attachment(
+    bus: MagicMock, tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50126)
+    chat_id = await _new_temporary_chat(channel, conn)
+    normalizing = threading.Event()
+    release = threading.Event()
+    original = channel._commands._session_access.normalize_mentions
+
+    def blocked_normalize(raw: object, *, exclude_session_key: str | None = None):
+        normalizing.set()
+        if not release.wait(timeout=10):
+            raise TimeoutError("test normalization was not released")
+        return original(raw, exclude_session_key=exclude_session_key)
+
+    monkeypatch.setattr(channel._commands._session_access, "normalize_mentions", blocked_normalize)
+    message_task = asyncio.create_task(channel._dispatch_envelope(conn, "webui-client", {
+        "type": "message", "chat_id": chat_id, "content": "hello", "webui": True,
+        "turn_id": "turn-disconnected-attachment",
+        "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+    }))
+    try:
+        assert await asyncio.to_thread(normalizing.wait, 10)
+        # The outbound writer retires connections independently of the recv loop.
+        # Its cleanup can discard an owned chat while normalization is awaiting.
+        await channel._cleanup_connection(conn)
+    finally:
+        release.set()
+        await message_task
+
+    assert sessions.get_cached(f"websocket:{chat_id}") is None
+    assert list((media_root / "websocket").iterdir()) == []
+    assert bus.publish_inbound.await_count == 1
+    assert bus.publish_inbound.await_args.args[0].metadata[INBOUND_META_RUNTIME_CONTROL] == (
+        RUNTIME_CONTROL_SESSION_DISCARD
+    )
+    assert wth.websocket_turn_wall_started_at(chat_id) is None
+
+
+@pytest.mark.asyncio
+async def test_rejected_temporary_chat_message_discards_registered_media(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    default_workspace = tmp_path / "default"
+    default_workspace.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50126)
+    chat_id = await _new_temporary_chat(channel, conn)
+    retained_path = media_root / "websocket" / "retained.txt"
+    retained_path.parent.mkdir(parents=True, exist_ok=True)
+    retained_path.write_text("keep", encoding="utf-8")
+    channel.gateway.temporary_chats.register_media(conn, chat_id, [str(retained_path)])
+    monkeypatch.setattr(
+        channel,
+        "webui_dispatch_message",
+        AsyncMock(side_effect=RuntimeError("dispatch failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        await channel._dispatch_envelope(
+            conn,
+            "webui-client",
+            {
+                "type": "message",
+                "chat_id": chat_id,
+                "content": "hello",
+                "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+                "webui": True,
+            },
+        )
+
+    bus.publish_inbound.assert_not_awaited()
+    assert list((media_root / "websocket").iterdir()) == [retained_path]
+    assert channel.gateway.temporary_chats._media_paths.get(chat_id) == {str(retained_path)}
+    assert conn in channel._subs.get(chat_id, set())
 
 
 @pytest.mark.asyncio
