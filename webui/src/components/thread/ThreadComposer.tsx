@@ -124,6 +124,7 @@ import {
 import { sessionHandleColor } from "@/lib/session-handle";
 import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
+  isRegisteredSlashCommand,
   isSideChannelLifecycle,
   slashCommandLifecycle,
 } from "@/lib/slash-command";
@@ -1199,7 +1200,7 @@ export function ThreadComposer({
     && !encoding
     && !hasErrors
     && hasComposerContent
-    && !value.trimStart().startsWith("/");
+    && !isRegisteredSlashCommand(value, slashCommands);
 
   const slashQuery = useMemo(() => {
     if (interactionDisabled || slashMenuDismissed || !value.startsWith("/")) return null;

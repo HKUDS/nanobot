@@ -3207,6 +3207,43 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("keep the UI minimal")).not.toBeInTheDocument();
   });
 
+  it.each(["/tmp", "/home/user/project", "/stop/config.json", "/neaw"])(
+    "queues ordinary slash-prefixed text %s until the response finishes",
+    (content) => {
+      const onSend = vi.fn();
+      const composer = (isStreaming: boolean) => (
+        <ThreadComposer onSend={onSend} isStreaming={isStreaming} slashCommands={COMMANDS} />
+      );
+      const { rerender } = render(composer(true));
+      const input = screen.getByLabelText("Message input");
+      fireEvent.change(input, { target: { value: content } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onSend).not.toHaveBeenCalled();
+      expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent(content);
+
+      rerender(composer(false));
+
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend).toHaveBeenCalledWith(content);
+      expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["/history 5", "/stop now", "/STOP@nanobot now"])(
+    "sends registered command %s to the gateway without queuing it",
+    (content) => {
+      const onSend = vi.fn();
+      render(<ThreadComposer onSend={onSend} isStreaming slashCommands={COMMANDS} />);
+      fireEvent.change(screen.getByLabelText("Message input"), { target: { value: content } });
+      fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend.mock.calls[0][0]).toBe(content);
+      expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    },
+  );
+
   it("guides queued guidance when Enter is pressed again", () => {
     const onSend = vi.fn();
     render(

@@ -39,6 +39,9 @@ Other text goes to the agent unchanged. This includes `/tmp`,
 also go to the agent; the gateway no longer returns a spelling suggestion.
 Use `/help` or the command menu to find a command.
 
+In the WebUI, Enter queues ordinary text while a response is running. Paths
+follow the same rule. Registered commands still go to the gateway immediately.
+
 A path can have the same name as a command. For example, `/new` starts a new
 conversation. To discuss that directory, write `/new/` or `Look at /new`.
 Chat platforms can apply their own command rules before a message reaches the gateway.
