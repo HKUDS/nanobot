@@ -2016,7 +2016,7 @@ export function ThreadComposer({
 
   const sendNextQueuedPrompt = useCallback(() => {
     if (queuedPrompts.length === 0) return;
-    const nextPrompt = queuedPrompts.find((prompt) => prompt.text.trim());
+    const nextPrompt = queuedPrompts.find((prompt) => prompt.text.trim() || prompt.images?.length);
     if (!nextPrompt) {
       setQueuedPrompts([]);
       return;
