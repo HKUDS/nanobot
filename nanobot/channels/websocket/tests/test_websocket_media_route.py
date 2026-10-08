@@ -44,6 +44,7 @@ def _ch(
     *,
     session_manager: SessionManager | None = None,
     workspace_path: Path | None = None,
+    extra_media_roots: list[Path] | None = None,
     port: int,
 ) -> WebSocketChannel:
     cfg = {
@@ -65,6 +66,7 @@ def _ch(
         runtime_model_name=None,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
+        extra_media_roots=extra_media_roots or (),
     )
     return InProcessHttpChannel(cfg, bus, gateway=gateway)
 
@@ -219,6 +221,64 @@ def test_local_markdown_image_rejects_workspace_escape(
     outside.write_bytes(_PNG_BYTES)
     media = tmp_path / "media"
     channel = _ch(bus, workspace_path=workspace, port=0)
+    text = "![nope](../outside.png)"
+
+    with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
+        assert channel.gateway.media.rewrite_local_markdown_images(text) == text
+
+    assert not (media / "websocket").exists()
+
+
+def test_local_markdown_image_resolves_extra_media_root(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """MCP servers write artifacts (screenshots, snapshots) into their own
+    configured cwd, not the workspace. A relative markdown image link must
+    still resolve so the WebUI renders it inline instead of a dead chip."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    mcp_cwd = tmp_path / "mcp-playwright"
+    mcp_cwd.mkdir()
+    (mcp_cwd / "shot.png").write_bytes(_PNG_BYTES)
+    media = tmp_path / "media"
+    channel = _ch(
+        bus,
+        workspace_path=workspace,
+        extra_media_roots=[mcp_cwd],
+        port=0,
+    )
+
+    with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
+        rewritten = channel.gateway.media.rewrite_local_markdown_images(
+            "Signed in:\n![feed](shot.png)"
+        )
+
+    assert "![feed](/api/media/" in rewritten
+    staged = list((media / "websocket").iterdir())
+    assert len(staged) == 1
+    assert staged[0].read_bytes() == _PNG_BYTES
+
+
+def test_local_markdown_image_extra_root_stays_contained(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """``..`` traversal out of an extra root is rejected exactly like the
+    workspace escape: the link stays literal and nothing is staged."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    mcp_cwd = tmp_path / "mcp-playwright"
+    mcp_cwd.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(_PNG_BYTES)
+    media = tmp_path / "media"
+    channel = _ch(
+        bus,
+        workspace_path=workspace,
+        extra_media_roots=[mcp_cwd],
+        port=0,
+    )
     text = "![nope](../outside.png)"
 
     with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):

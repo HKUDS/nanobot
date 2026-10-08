@@ -200,6 +200,11 @@ class ChannelManager:
                 static_dist_path=static_path,
                 workspace_path=workspace,
                 default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
+                extra_media_roots=[
+                    Path(server.cwd).expanduser()
+                    for server in self.config.tools.mcp_servers.values()
+                    if server.cwd
+                ],
                 config_path=self._config_path,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,

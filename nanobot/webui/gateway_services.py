@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from loguru import logger as default_logger
 
@@ -64,6 +64,7 @@ def build_gateway_services(
     refresh_runtime_config: Callable[[], None] | None = None,
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
+    extra_media_roots: Sequence[Path] = (),
     disabled_skills: set[str] | None = None,
     cron_service: CronService | None = None,
     local_trigger_store: LocalTriggerStore | None = None,
@@ -102,6 +103,7 @@ def build_gateway_services(
         workspace_path=workspace_path,
         logger=logger,
         attachment_limits=ingress.attachments,
+        extra_media_roots=extra_media_roots,
     )
     transcripts = WebUITranscriptRecorder(log=logger)
     workspaces = WebUIWorkspaceController(
