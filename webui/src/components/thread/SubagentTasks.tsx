@@ -1,5 +1,17 @@
+import {
+  DelegationIcon,
+  StopIcon,
+  QueuedTaskIcon,
+  RunningTaskIcon,
+  StoppingTaskIcon,
+  CompletedTaskIcon,
+  CancelledTaskIcon,
+  IncompleteTaskIcon,
+  InterruptedTaskIcon,
+  ErrorTaskIcon,
+} from "@/components/icons/product-icons";
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import { Bot, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, CircleMinus, LoaderCircle, Square } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -155,7 +167,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
         <SheetContent ref={detailPanel} tabIndex={-1}
           className="w-full gap-0 overflow-hidden border-l p-0 outline-none sm:w-[min(32rem,calc(100vw-1rem))] sm:max-w-none"
           overlayClassName="bg-black/20 backdrop-blur-[8px]"
-          closeButtonClassName="right-3 top-3 grid h-9 w-9 place-items-center rounded-full hover:bg-muted"
+          closeButtonClassName="right-3 top-3 grid h-9 w-9 place-items-center rounded-full"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             detailPanel.current?.focus({ preventScroll: true });
@@ -174,7 +186,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
             <SheetDescription className="flex items-center gap-2">
               {selected ? <><TaskStateIcon task={selected} />
                 <span className={selected.state === "done" ? "sr-only" : undefined}>{t(`thread.subagents.states.${selected.state}`)}</span>
-                <span className="tabular-nums">{selected.state !== "done" ? "· " : null}<TaskElapsed task={selected} /></span></> : null}
+                <span className="tabular-nums"><TaskElapsed task={selected} /></span></> : null}
             </SheetDescription>
           </div>
           {selected && sessionKey ? <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-5">
@@ -195,7 +207,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
           </div> : null}
           {selected && (selected.state === "queued" || selected.state === "running") ? <div className="shrink-0 border-t px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <Button type="button" variant="outline" size="sm" disabled={stoppingId !== null}
-              onClick={() => void stop(selected)}><Square className="mr-2 h-3 w-3" aria-hidden />{t("thread.subagents.stopTask", { label: selected.label })}</Button>
+              onClick={() => void stop(selected)}><StopIcon className="mr-2 h-3 w-3" aria-hidden />{t("thread.subagents.stopTask", { label: selected.label })}</Button>
             {stopError ? <p role="alert" className="mt-2 text-xs text-destructive">{stopError}</p> : null}
           </div> : null}
         </SheetContent>
@@ -205,10 +217,14 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
 
 function TaskStateIcon({ task }: { task: SubagentTaskSnapshot }) {
   const className = "h-3.5 w-3.5 shrink-0";
-  if (isActive(task)) return <LoaderCircle className={`${className} animate-spin motion-reduce:animate-none text-muted-foreground`} aria-hidden />;
-  if (task.state === "done") return <CheckCircle2 className={`${className} text-emerald-600 dark:text-emerald-400`} aria-hidden />;
-  if (task.state === "cancelled") return <CircleMinus className={`${className} text-muted-foreground`} aria-hidden />;
-  return <CircleAlert className={`${className} text-destructive`} aria-hidden />;
+  const Icon = {
+    queued: QueuedTaskIcon, running: RunningTaskIcon, stopping: StoppingTaskIcon,
+    done: CompletedTaskIcon, cancelled: CancelledTaskIcon, incomplete: IncompleteTaskIcon,
+    interrupted: InterruptedTaskIcon, error: ErrorTaskIcon,
+  }[task.state];
+  const tone = task.state === "done" ? "text-emerald-600 dark:text-emerald-400"
+    : task.state === "error" || task.state === "incomplete" ? "text-destructive" : "text-muted-foreground";
+  return <Icon className={`${className} ${tone} ${task.state === "running" ? "animate-spin motion-reduce:animate-none" : ""}`} aria-hidden />;
 }
 
 function TaskElapsed({ task }: { task: ObservedSubagentTask }) {
@@ -295,11 +311,12 @@ function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask
       <button type="button" aria-expanded={open} aria-controls={rowsId}
         onClick={() => setExpanded(!open)}
         className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-        <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <DelegationIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span className="font-medium">{title}</span>
-        <span className="ml-auto min-w-0 text-right">
-          {summary}{activeCount ? ` · ${t("thread.subagents.running", { count: activeCount })}` : ""}
-          {failedCount ? <span className="ml-2 text-destructive">{t("thread.subagents.needsReview", { count: failedCount })}</span> : null}
+        <span className="ml-auto flex min-w-0 flex-wrap justify-end gap-x-2 text-right">
+          <span>{summary}</span>{" "}
+          {activeCount ? <span>{t("thread.subagents.running", { count: activeCount })}</span> : null}
+          {failedCount ? <span className="text-destructive">{t("thread.subagents.needsReview", { count: failedCount })}</span> : null}
         </span>
         <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
       </button>
@@ -309,7 +326,7 @@ function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask
           <TaskButton task={task} />
           {task.state === "queued" || task.state === "running" ? <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0"
             aria-label={t("thread.subagents.stopTask", { label: task.label })} disabled={context.stoppingId !== null}
-            onClick={() => void context.stop(task)}><Square className="h-3 w-3" aria-hidden /></Button> : null}
+            onClick={() => void context.stop(task)}><StopIcon className="h-3 w-3" aria-hidden /></Button> : null}
         </div>)}
       </div>
     </div>

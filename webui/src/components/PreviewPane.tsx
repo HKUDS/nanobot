@@ -51,7 +51,7 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
       ? remaining[Math.min(index, remaining.length - 1)]?.id ?? null : activeId;
     onCloseTab(tab.id);
   };
-  const iconButton = "touch-target inline-flex size-8 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const iconButton = "touch-target inline-flex size-8 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
   return <aside aria-label={t("previewTabs.title")} data-testid="preview-pane" data-file-preview-panel
     style={{
       "--file-preview-width": `${width}px`,
@@ -100,7 +100,7 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
               </button>
               <button type="button" tabIndex={selected ? 0 : -1} aria-label={t("previewTabs.closeTab", { name })} title={t("previewTabs.closeTab", { name })}
                 onClick={() => closeTab(tab, index)}
-                className={cn("touch-target preview-tab-close mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-compact text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !selected && "sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100")}>
+                className={cn("touch-target preview-tab-close mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-compact text-muted-foreground transition-colors hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !selected && "sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100")}>
                 <X className="size-3" aria-hidden />
               </button>
             </div>;

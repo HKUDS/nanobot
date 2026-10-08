@@ -14,7 +14,7 @@ describe("trace activity semantics", () => {
   });
 
   it.each([
-    ['web_search({"query":"nanobot latest release"})', "done", "Searched nanobot latest release", ""],
+    ['web_search({"query":"nanobot latest release"})', "done", "Searched the web", "nanobot latest release"],
     ['web_fetch({"url":"https://example.com/docs?token=private"})', "done", "Read", "example.com/docs"],
     ['read_file({"path":"/Users/alice/project/README.md"})', "done", "Read", "~/project/README.md"],
     ['exec({"command":"date +%Y-%m-%d"})', "done", "Checked current time", ""],
@@ -30,19 +30,27 @@ describe("trace activity semantics", () => {
   });
 
   it.each([
-    ["running", "Searching status test"],
-    ["done", "Searched status test"],
-    ["error", "Could not search status test"],
+    ["running", "Searching the web"],
+    ["done", "Searched the web"],
+    ["error", "Could not search the web"],
   ] as const)("uses status-aware search copy for %s", (status, label) => {
-    expect(describeTrace('web_search({"query":"status test"})', status).label).toBe(label);
+    expect(describeTrace('web_search({"query":"status test"})', status)).toMatchObject({ label, detail: "status test" });
   });
 
   it.each([
-    ["running", "Searching X · status test"],
-    ["done", "Searched X · status test"],
-    ["error", "Could not search X · status test"],
+    ["running", "Searching X"],
+    ["done", "Searched X"],
+    ["error", "Could not search X"],
   ] as const)("identifies hosted X search activity for %s", (status, label) => {
-    expect(describeTrace('x_search({"query":"status test"})', status).label).toBe(label);
+    expect(describeTrace('x_search({"query":"status test"})', status)).toMatchObject({ label, detail: "status test" });
+  });
+
+  it("preserves query lines when extracting a search scope", () => {
+    const query = "site:linkedin.com/company Evomap startup\nsite:linkedin.com/company Evomap funding";
+    expect(describeTrace(`web_search(${JSON.stringify({ query })})`)).toMatchObject({
+      label: "Searched LinkedIn",
+      detail: "Evomap startup\nEvomap funding",
+    });
   });
 
   it("never exposes URL credentials, query secrets, or private-network links", () => {
@@ -63,7 +71,8 @@ describe("trace activity semantics", () => {
     );
     expect(result).toMatchObject({
       label: "Ran command",
-      detail: "npm test · script, 3 lines",
+      detail: "npm test",
+      aside: "script, 3 lines",
     });
     expect(result.detail).not.toContain("second-secret-line");
   });

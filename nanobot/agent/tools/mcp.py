@@ -52,6 +52,10 @@ _TRANSIENT_EXC_NAMES: frozenset[str] = frozenset((
 
 _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yarn", "bunx"))
 
+# Mirror the MCP SDK's httpx defaults (MCP_DEFAULT_TIMEOUT / MCP_DEFAULT_SSE_READ_TIMEOUT).
+_HTTP_TIMEOUT = 30.0
+_HTTP_READ_TIMEOUT = 300.0
+
 # Characters allowed in tool names by model providers (Anthropic, OpenAI, etc.).
 # Replace anything outside [a-zA-Z0-9_-] with underscore and collapse runs.
 _SANITIZE_RE = re.compile(r"_+")
@@ -1147,7 +1151,13 @@ async def connect_mcp_servers(
                     "headers": cfg.headers or None,
                     "event_hooks": {"request": [_validate_mcp_request_url]},
                     "follow_redirects": True,
-                    "timeout": httpx.Timeout(30.0, connect=10.0),
+                    # Read must outlast the tool call itself; otherwise a slow tool
+                    # fails with ReadTimeout before tool_timeout is reached.
+                    "timeout": httpx.Timeout(
+                        _HTTP_TIMEOUT,
+                        connect=10.0,
+                        read=max(_HTTP_READ_TIMEOUT, cfg.tool_timeout),
+                    ),
                     **_pinned_transport_kwargs(),
                 }
                 if oauth_auth is not None:

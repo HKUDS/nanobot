@@ -372,12 +372,12 @@ describe("ChatList", () => {
     expect(screen.queryByRole("menuitem", { name: "Target pane" }))
       .not.toBeInTheDocument();
     const fullTarget = await screen.findByRole("menuitem", {
-      name: "Existing group · 4/4",
+      name: "Existing group 4/4",
     });
     expect(fullTarget).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(fullTarget);
     expect(onAttachPane).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Fine group · 1/4" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Fine group 1/4" }));
     expect(onAttachPane).toHaveBeenCalledWith("websocket:solo", "tab:fine");
   });
 
@@ -635,7 +635,7 @@ describe("ChatList", () => {
     }), { button: 0, ctrlKey: false });
     const moveTo = await screen.findByRole("menuitem", { name: "Move to" });
     fireEvent.pointerMove(moveTo, { pointerType: "mouse" });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Target tab · 2/4" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Target tab 2/4" }));
     expect(onAttachPane).toHaveBeenCalledWith("websocket:child", "websocket:target");
 
     fireEvent.pointerDown(screen.getByRole("button", {

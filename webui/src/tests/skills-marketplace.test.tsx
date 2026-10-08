@@ -2,6 +2,7 @@ import { act, fireEvent, render, renderHook, screen } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import {
   fetchSkills,
@@ -38,6 +39,52 @@ function marketplace(token: string) {
 }
 
 describe("useSkills", () => {
+  it("shows loading, retries a failed first read, and preserves an empty catalog during refresh", async () => {
+    let rejectInitial!: (error: Error) => void;
+    let resolveRetry!: (value: Awaited<ReturnType<typeof fetchSkills>>) => void;
+    let resolveRefresh!: (value: Awaited<ReturnType<typeof fetchSkills>>) => void;
+    vi.mocked(fetchSkills).mockReset()
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectInitial = reject; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
+    const getToken = () => "tok";
+    function Catalog() {
+      const state = useSkills(getToken);
+      return <SkillsCatalogSettings {...state} />;
+    }
+    render(<ClientProvider client={client} token="tok"><Catalog /></ClientProvider>);
+
+    expect(screen.getByRole("status", { name: "Loading skills…" })).toHaveAttribute("aria-busy", "true");
+    fireEvent.change(screen.getByRole("textbox", { name: "Search installed skills" }), {
+      target: { value: "cron" },
+    });
+    await act(async () => { rejectInitial(new Error("Offline")); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not load skills.");
+    expect(screen.queryByText("No skills are available.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(screen.getByRole("status", { name: "Loading skills…" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await act(async () => { resolveRetry({ skills: [] }); });
+    expect(screen.getByText("No skills are available.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All 0" })).toBeInTheDocument();
+
+    act(() => { requestSkillsRefresh(); });
+    expect(screen.getByText("No skills are available.")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading skills…" })).not.toBeInTheDocument();
+    await act(async () => {
+      resolveRefresh({ skills: [{
+        name: "weather", description: "Get the weather.", source: "builtin", available: true,
+      }] });
+    });
+    expect(screen.getByText("No matching skills.")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search installed skills" }), {
+      target: { value: "" },
+    });
+    expect(screen.getByRole("button", { name: "Open details for weather" })).toBeInTheDocument();
+    expect(fetchSkills).toHaveBeenCalledTimes(3);
+  });
+
   it("discovers skills added after page load when opening the $ menu, not on each keystroke", async () => {
     const installed = {
       name: "simple-pr-review",
@@ -50,7 +97,7 @@ describe("useSkills", () => {
       .mockResolvedValue({ skills: [installed] });
     const getToken = () => "tok";
     function Composer() {
-      const skills = useSkills(getToken);
+      const { skills } = useSkills(getToken);
       return <ThreadComposer onSend={vi.fn()} skills={skills} />;
     }
     render(<Composer />);
@@ -105,7 +152,7 @@ describe("useSkills", () => {
     });
     // The old response was captured before installation; it cannot satisfy the new opens.
     expect(fetchSkills).toHaveBeenCalledTimes(2);
-    expect(result.current).toEqual([installed]);
+    expect(result.current.skills).toEqual([installed]);
 
     unmount();
     requestSkillsRefresh();
@@ -126,19 +173,19 @@ describe("useSkills", () => {
     const getToken = () => "tok";
     const { result } = renderHook(() => useSkills(getToken));
     await act(async () => {});
-    expect(result.current).toEqual([installed]);
+    expect(result.current.skills).toEqual([installed]);
 
     await act(async () => {
       requestSkillsRefresh();
     });
     expect(fetchSkills).toHaveBeenCalledTimes(2);
-    expect(result.current).toEqual([installed]);
+    expect(result.current).toEqual({ skills: [installed], loading: false, error: false });
 
     await act(async () => {
       requestSkillsRefresh();
     });
     expect(fetchSkills).toHaveBeenCalledTimes(3);
-    expect(result.current).toEqual([]);
+    expect(result.current).toEqual({ skills: [], loading: false, error: false });
   });
 
   it.each([false, true])("does not start a queued refresh after unmount (failure: %s)", async (fails) => {
@@ -162,11 +209,11 @@ describe("useSkills", () => {
     expect(fetchSkills).toHaveBeenCalledTimes(1);
   });
 
-  it("does not let an older request overwrite a newer skill event", async () => {
-    let resolveSkills!: (value: Awaited<ReturnType<typeof fetchSkills>>) => void;
+  it.each([false, true])("does not let an older request overwrite a newer skill event (failure: %s)", async (fails) => {
+    let settle!: () => void;
     vi.mocked(fetchSkills).mockReset().mockImplementationOnce(
-      () => new Promise((resolve) => {
-        resolveSkills = resolve;
+      () => new Promise((resolve, reject) => {
+        settle = () => fails ? reject(new Error("Offline")) : resolve({ skills: [] });
       }),
     );
     const installed = {
@@ -184,13 +231,13 @@ describe("useSkills", () => {
         detail: { skills: [installed] },
       }));
     });
-    expect(result.current).toEqual([installed]);
+    expect(result.current).toEqual({ skills: [installed], loading: false, error: false });
 
     await act(async () => {
-      resolveSkills({ skills: [] });
+      settle();
     });
 
-    expect(result.current).toEqual([installed]);
+    expect(result.current).toEqual({ skills: [installed], loading: false, error: false });
   });
 });
 
@@ -215,6 +262,54 @@ describe("SkillsMarketplace", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("shows discovery skeletons while trending or the first search is pending and keeps loaded search results", async () => {
+    const skill = {
+      id: "skillhub:react-testing", skill_id: "react-testing", name: "React Testing",
+      source: "react-testing", provider: "skillhub" as const, installs: 42,
+      url: "https://skillhub.cn/react-testing", installed: false, install_supported: true,
+      metric: "installs_total" as const, rank: 1,
+    };
+    let resolveTrending!: (value: Awaited<ReturnType<typeof fetchTrendingMarketplaceSkills>>) => void;
+    let resolveSearch!: (value: Awaited<ReturnType<typeof searchMarketplaceSkills>>) => void;
+    let resolveNextSearch!: (value: Awaited<ReturnType<typeof searchMarketplaceSkills>>) => void;
+    vi.mocked(fetchTrendingMarketplaceSkills).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveTrending = resolve; }),
+    );
+    vi.mocked(searchMarketplaceSkills)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSearch = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNextSearch = resolve; }));
+    render(marketplace("tok"));
+
+    expect(screen.getByRole("status", { name: "Loading skills…" })).toHaveAttribute("aria-busy", "true");
+    await act(async () => {
+      resolveTrending({ period: "mixed", provider: "all", install_supported: true, skills: [skill] });
+    });
+    expect(screen.getByRole("button", { name: "Install React Testing" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search skills" }), {
+      target: { value: "React" },
+    });
+    expect(screen.getByRole("status", { name: "Loading skills…" })).toHaveAttribute("aria-busy", "true");
+    expect(searchMarketplaceSkills).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(searchMarketplaceSkills).toHaveBeenCalledWith("tok", "React");
+    expect(screen.getByRole("status", { name: "Loading skills…" })).toBeInTheDocument();
+    await act(async () => {
+      resolveSearch({ query: "React", provider: "all", install_supported: true, skills: [skill] });
+    });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search skills" }), {
+      target: { value: "Vue" },
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(screen.getByRole("button", { name: "Install React Testing" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading skills…" })).not.toBeInTheDocument();
+    await act(async () => {
+      resolveNextSearch({ query: "Vue", provider: "all", install_supported: true, skills: [] });
+    });
+    expect(screen.getByText("No skills found for “Vue”.")).toBeInTheDocument();
   });
 
   it("keeps loaded marketplace data stable when the auth token rotates", async () => {

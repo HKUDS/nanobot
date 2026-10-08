@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Check, ChevronUp, CircleAlert, Laptop, Loader2, Search, Server, Settings2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useClient } from "@/providers/ClientProvider";
@@ -103,7 +104,7 @@ function HostMenuItems({ picker }: { picker: HostPicker }) {
     {showLocal && !!profiles.length && <DropdownMenuSeparator />}
     {profiles.map((profile) => <DropdownMenuItem key={profile.id} onSelect={() => picker.select(profile.id)} className="gap-2.5"
       aria-label={`${profile.name} ${profile.host}`} aria-describedby={`host-state-${profile.id}`}
-      title={`${profile.name} · ${profile.host}`} aria-current={picker.currentId === profile.id || undefined}>
+      title={`${profile.name}\n${profile.host}`} aria-current={picker.currentId === profile.id || undefined}>
       <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1"><span className="block truncate">{profile.name}</span><span className="block truncate text-xs text-muted-foreground">{profile.host}</span></span>
       <span id={`host-state-${profile.id}`}><HostConnectionStatus state={profile.state} compact /></span>
@@ -144,12 +145,11 @@ export function HostSwitcher({ collapsed = false, portalContainer }: { collapsed
   // visible; progress belongs to the target's row and the accessible status.
   const label = picker.name;
   const currentLabel = failed ? shell?.offlineLabel || t("remote.offline") : t(`connection.${currentStatus}`);
-  const identity = picker.name === picker.hostname ? picker.name : `${picker.name} · ${picker.hostname}`;
-  const current = `${identity} · ${currentLabel}`;
-  const detail = pendingName ? `${current} · ${t("remote.preparing", { name: pendingName })}` : current;
-  const title = picker.error ? `${detail} — ${picker.error}` : detail;
-  const button = <Button ref={buttonRef} variant="ghost" size="sm" aria-label={t("remote.switchHost")} title={title}
-    data-host-switcher className={cn("host-no-drag h-8 min-w-0 gap-2 rounded-xl px-2 text-xs font-normal text-sidebar-content/75 hover:bg-sidebar-accent/65 hover:text-sidebar-content",
+  const identity = picker.name === picker.hostname ? picker.name : `${picker.name}, ${picker.hostname}`;
+  const current = `${identity}, ${currentLabel}`;
+  const detail = pendingName ? `${current}. ${t("remote.preparing", { name: pendingName })}` : current;
+  const button = <Button ref={buttonRef} variant="ghost" size="sm" aria-label={t("remote.switchHost")}
+    data-host-switcher className={cn("host-no-drag touch-target h-8 min-w-0 gap-2 rounded-xl px-2 text-xs font-normal text-sidebar-content/75 hover:text-sidebar-content",
       collapsed ? "w-8 justify-center px-0" : "max-w-full flex-1 justify-start")}
     onClick={picker.kind === "embedded" ? () => {
       const rect = buttonRef.current?.getBoundingClientRect();
@@ -163,9 +163,18 @@ export function HostSwitcher({ collapsed = false, portalContainer }: { collapsed
     {!collapsed && <><span className="truncate">{label}</span><ChevronUp className="ml-auto h-3 w-3 shrink-0 opacity-60" /></>}
     <span className="sr-only" role="status">{detail}</span>
   </Button>;
-  if (!shell) return button;
+  const trigger = <TooltipTrigger asChild>{button}</TooltipTrigger>;
   // The mobile sidebar already owns the modal lock; a nested lock can outlive it on navigation.
-  return <DropdownMenu modal={!portalContainer}><DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger><HostMenuContent picker={shell} portalContainer={portalContainer} /></DropdownMenu>;
+  return <TooltipProvider><Tooltip>
+    {shell ? <DropdownMenu modal={!portalContainer}><DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger><HostMenuContent picker={shell} portalContainer={portalContainer} /></DropdownMenu> : trigger}
+    <TooltipContent side="top" className="max-w-[min(24rem,calc(100vw-2rem))] space-y-1 break-words">
+      <p className="font-medium">{picker.name}</p>
+      {picker.hostname !== picker.name ? <p className="font-mono text-xs text-muted-foreground">{picker.hostname}</p> : null}
+      <p>{currentLabel}</p>
+      {pendingName ? <p>{t("remote.preparing", { name: pendingName })}</p> : null}
+      {picker.error ? <p className="text-destructive">{picker.error}</p> : null}
+    </TooltipContent>
+  </Tooltip></TooltipProvider>;
 }
 
 /** Parent-owned menu anchored to the active remote sidebar, never inside its DOM. */

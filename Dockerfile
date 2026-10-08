@@ -23,9 +23,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN uv venv --seed "$VIRTUAL_ENV"
 
 # Install Python dependencies first (cached layer). Hatch reads the custom build
-# hook from hatch_build.py even for this metadata-only install.
+# hook and its revision helper even for this metadata-only install.
 ARG NANOBOT_EXTRAS=
 COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
+COPY nanobot/build_info.py nanobot/
 RUN mkdir -p nanobot && touch nanobot/__init__.py && \
     if [ -n "$NANOBOT_EXTRAS" ]; then \
         NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \

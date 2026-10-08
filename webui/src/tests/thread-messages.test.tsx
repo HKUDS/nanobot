@@ -755,7 +755,6 @@ describe("ThreadMessages", () => {
       "h-[var(--message-block-control-size)]",
       "w-[var(--message-block-action-width)]",
       "rounded-control",
-      "group-hover:bg-muted/70",
     );
     expect(disclosure.querySelector("svg")).toBeInTheDocument();
     const toolbar = menu.querySelector("[data-message-block-toolbar]");
@@ -1103,7 +1102,7 @@ describe("ThreadMessages", () => {
     const answer = screen.getByText("automated answer").closest<HTMLElement>("[data-thread-display-unit]")!;
     const { menu } = openMessageBlockMenu(answer);
     const metadata = menu.querySelector<HTMLElement>("[data-message-block-metadata]")!;
-    expect(metadata).toHaveTextContent("Triggered automatically · Review schedule");
+    expect(metadata).toHaveTextContent("Triggered automatically Review schedule");
     expect(metadata.querySelector("time[datetime]")).toBeInTheDocument();
     expect(metadata.querySelector("button, svg, [tabindex]")).toBeNull();
     expect(metadata).toBe(menu.querySelector("[data-message-block-menu-actions]")?.lastElementChild);

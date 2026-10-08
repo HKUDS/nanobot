@@ -1082,7 +1082,7 @@ export const ChatList = memo(function ChatList({
                             <DropdownMenuTrigger
                               className={cn(
                                 "sidebar-action-trigger touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
-                                "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100",
+                                "media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100",
                                 "focus-visible:opacity-100 data-[state=open]:opacity-100",
                               )}
                               aria-label={t("chat.actions", { title })}
@@ -1190,7 +1190,7 @@ export const ChatList = memo(function ChatList({
               aria-label={t("chat.cancelSelection", {
                 defaultValue: "Cancel selection",
               })}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted-foreground transition-colors media-hover:hover:bg-accent/60 media-hover:hover:text-foreground"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted-foreground transition-colors media-hover:hover:text-foreground"
             >
               <X className="h-4 w-4" aria-hidden />
             </button>
@@ -1275,10 +1275,10 @@ function WorkbenchTabHeader({
               onClick={onToggle}
               className={cn(
                 "relative inline-flex h-6 w-3.5 shrink-0 items-center justify-center rounded-md before:absolute before:-inset-x-1 before:inset-y-0",
-                "text-sidebar-muted-foreground transition-[background-color,color,transform] duration-150 ease-out",
-                "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground active:scale-[0.96]",
+                "text-sidebar-muted-foreground transition-[color] duration-150 ease-out",
+                "media-hover:hover:text-sidebar-foreground",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                "motion-reduce:transition-none motion-reduce:active:scale-100",
+                "motion-reduce:transition-none ",
               )}
             >
               <ChevronDown
@@ -1327,7 +1327,7 @@ function WorkbenchTabHeader({
               className={cn(
                 "sidebar-action-trigger touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
                 "text-sidebar-muted-foreground opacity-0 transition-opacity",
-                "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover/tab:opacity-100",
+                "media-hover:hover:text-sidebar-foreground media-hover:group-hover/tab:opacity-100",
                 "focus-visible:opacity-100 data-[state=open]:opacity-100",
               )}
               aria-label={t("chat.actions", { title })}
@@ -1519,7 +1519,7 @@ function ActivePaneRows({
                 <DropdownMenuTrigger
                   className={cn(
                     "sidebar-action-trigger touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
-                    "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover/pane:opacity-100",
+                    "media-hover:hover:text-sidebar-foreground media-hover:group-hover/pane:opacity-100",
                     "focus-visible:opacity-100 data-[state=open]:opacity-100",
                   )}
                   aria-label={paneActionsLabel}
@@ -1642,7 +1642,7 @@ function MoveToGroupSubmenu({
           >
             <span className="min-w-0 max-w-56 flex-1 truncate">{target.title}</span>
             <span className="shrink-0 tabular-nums text-sidebar-muted-foreground">
-              · {target.paneCount}/{MAX_WORKBENCH_PANES}
+              {target.paneCount}/{MAX_WORKBENCH_PANES}
             </span>
           </DropdownMenuItem>
         ))}
@@ -1706,7 +1706,7 @@ function TemporaryChatSection({
                     type="button"
                     aria-label={t("temporaryChat.closeAction", { title })}
                     onClick={() => onClose(session.key)}
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground transition-colors media-hover:hover:bg-destructive/10 media-hover:hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground transition-colors media-hover:hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     <X className="h-3.5 w-3.5" aria-hidden />
                   </button>
@@ -1776,10 +1776,10 @@ function ProjectGroupHeader({
             onClick={onToggle}
             className={cn(
               "relative inline-flex h-6 w-3.5 shrink-0 items-center justify-center rounded-md before:absolute before:-inset-x-1 before:inset-y-0",
-              "text-sidebar-muted-foreground transition-[background-color,color,transform] duration-150 ease-out",
-              "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground active:scale-[0.96]",
+              "text-sidebar-muted-foreground transition-[color] duration-150 ease-out",
+              "media-hover:hover:text-sidebar-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-              "motion-reduce:transition-none motion-reduce:active:scale-100",
+              "motion-reduce:transition-none ",
             )}
           >
             <ChevronDown
@@ -1814,7 +1814,7 @@ function ProjectGroupHeader({
             <DropdownMenuTrigger
               className={cn(
                 "sidebar-action-trigger touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
-                "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100 focus-visible:opacity-100",
+                "media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100 focus-visible:opacity-100",
                 "data-[state=open]:opacity-100",
               )}
               aria-label={t("chat.actions", { title: label })}

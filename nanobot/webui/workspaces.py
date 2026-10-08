@@ -16,6 +16,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScope,
     WorkspaceScopeError,
+    WorkspaceScopeResolver,
     build_workspace_scope,
     default_workspace_scope,
     validate_workspace_scope_payload,
@@ -196,6 +197,18 @@ class WebUIWorkspaceController:
         return default_scope_for_webui(
             self._default_workspace,
             self._default_restrict_to_workspace,
+        )
+
+    def automation_scope(
+        self, session_key: str, channel: str, message_metadata: dict[str, Any],
+    ) -> WorkspaceScope:
+        """Use the runtime's policy, not the browser's draft project selection."""
+        data = self._sessions.read_session_metadata(session_key) if self._sessions else None
+        return WorkspaceScopeResolver(
+            self._default_workspace, self._default_restrict_to_workspace,
+        ).for_turn(
+            channel=channel, message_metadata=message_metadata,
+            session_metadata=data.get("metadata", {}) if data else {},
         )
 
     def restricted_default_scope(self) -> WorkspaceScope:

@@ -43,7 +43,7 @@ export function SettingsTextEditor({ id, title, description, value, placeholder,
   }}>
     <TooltipProvider><Tooltip>
       <TooltipTrigger asChild><DialogTrigger asChild>
-        <Button id={id} type="button" variant="ghost" disabled={disabled} aria-label={title}
+        <Button size="icon" id={id} type="button" variant="ghost" disabled={disabled} aria-label={title}
           className="ml-auto flex h-9 w-9 shrink-0 rounded-full p-0 text-muted-foreground">
           <SquarePen className="h-4 w-4" aria-hidden />
         </Button>

@@ -1093,7 +1093,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             size="icon"
             onClick={() => scrollToBottom(true, { force: true })}
             className={cn(
-              "h-8 w-8 rounded-full shadow-md",
+              "h-8 w-8 rounded-full",
               "bg-background/90 backdrop-blur",
               "animate-in fade-in-0 zoom-in-95",
             )}

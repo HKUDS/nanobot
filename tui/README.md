@@ -48,7 +48,7 @@ is focused to attach an image from the system clipboard. Image bytes stay behind
 deleting it removes its image.
 
 While nanobot is working, the composer prompt becomes
-`Enter send now · Tab send next`; narrow terminals shorten it to `Enter now · Tab next`.
+`Enter send now  Tab send next`; narrow terminals shorten it to `Enter now  Tab next`.
 The footer shows progress and elapsed time without repeating the latest tool activity already
 visible in the transcript.
 

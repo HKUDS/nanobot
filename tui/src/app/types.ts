@@ -32,6 +32,7 @@ export interface ChatClient {
   connect(): void
   close(): void
   send(content: string, options?: MessageOptions): string
+  sendAttachments(content: string, options: MessageOptions): Promise<string>
   attach(chatId: string): void
   newChat(scope?: WorkspaceScopePayload): void
   forkChat?(sourceChatId: string, beforeUserIndex: number, title?: string): void

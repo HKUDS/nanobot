@@ -1,5 +1,7 @@
 import type {
   ApiServicePayload,
+  AutomationChatsPayload,
+  AutomationChatUpdate,
   AutomationsPayload,
   AutomationUpdatePayload,
   ChannelConfigurePayload,
@@ -520,6 +522,14 @@ export async function fetchAutomations(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export async function fetchAutomationChats(token: string, id: string, signal?: AbortSignal): Promise<AutomationChatsPayload> {
+  return request(`/api/webui/automations/chats?id=${encodeURIComponent(id)}`, token, { signal }, API_READ_TIMEOUT_MS);
+}
+
+export async function changeAutomationChat(transport: WebUIMutationTransport, id: string, values: AutomationChatUpdate): Promise<AutomationsPayload> {
+  return mutation(transport, "automation.change_chat", { id, values });
 }
 
 export async function fetchAutomationRunResult(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, cast
 
@@ -12,8 +12,8 @@ from loguru import logger
 
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest, parse_tool_arguments
 from nanobot.providers.openai_responses.state import (
-    build_responses_compaction_state,
-    build_responses_state,
+    REPLAYABLE_FINISH_REASONS,
+    attach_responses_state,
 )
 
 FINISH_REASON_MAP = {
@@ -22,7 +22,6 @@ FINISH_REASON_MAP = {
     "failed": "error",
     "cancelled": "error",
 }
-REPLAYABLE_FINISH_REASONS = frozenset({"stop", "tool_calls", "function_call"})
 
 
 @dataclass(slots=True)
@@ -118,7 +117,7 @@ def _hosted_web_search_event(
         if isinstance(raw_queries, list)
         else []
     )
-    query = " · ".join(queries)
+    query = "\n".join(queries)
     if not query:
         query = next(
             (
@@ -364,9 +363,29 @@ async def consume_sse_with_reasoning(
     capture: ResponsesStreamCapture | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
     """Consume a Responses API SSE stream, including visible reasoning summaries."""
+    return await consume_responses_events(
+        iter_sse(response),
+        on_content_delta=on_content_delta,
+        on_tool_call_delta=on_tool_call_delta,
+        on_reasoning_delta=on_reasoning_delta,
+        on_response_event=on_response_event,
+        capture=capture,
+    )
+
+
+async def consume_responses_events(
+    events: AsyncIterable[dict[str, Any]],
+    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    capture: ResponsesStreamCapture | None = None,
+) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
+    """Consume the Responses event protocol independently of its transport."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
+    tool_call_ids: dict[str, str] = {}
     tool_call_args_emitted: set[str] = set()
     finish_reason: str | None = None
     usage: LLMUsage | None = None
@@ -376,7 +395,7 @@ async def consume_sse_with_reasoning(
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
-    async for event in iter_sse(response):
+    async for event in events:
         if on_response_event:
             await on_response_event(event)
         event_type = event.get("type")
@@ -391,6 +410,9 @@ async def consume_sse_with_reasoning(
                 if not call_id:
                     continue
                 arguments = item.get("arguments")
+                item_id = item.get("id")
+                if isinstance(item_id, str) and isinstance(call_id, str):
+                    tool_call_ids[item_id] = call_id
                 tool_call_buffers[call_id] = {
                     "id": item.get("id") or "fc_0",
                     "name": item.get("name"),
@@ -434,7 +456,7 @@ async def consume_sse_with_reasoning(
                 emitted_refusal_text += remaining_text
                 if on_content_delta and remaining_text:
                     await on_content_delta(remaining_text)
-        elif event_type == "response.reasoning_summary_text.delta":
+        elif event_type in {"response.reasoning_summary_text.delta", "response.reasoning_text.delta"}:
             delta_text = event.get("delta") or ""
             if delta_text:
                 summary_key = _reasoning_summary_event_key(
@@ -453,7 +475,7 @@ async def consume_sse_with_reasoning(
                 streamed_reasoning = True
                 if on_reasoning_delta:
                     await on_reasoning_delta(delta_text)
-        elif event_type == "response.reasoning_summary_text.done":
+        elif event_type in {"response.reasoning_summary_text.done", "response.reasoning_text.done"}:
             text = event.get("text") or ""
             if text and not streamed_reasoning and not reasoning_content:
                 reasoning_content = text
@@ -467,7 +489,7 @@ async def consume_sse_with_reasoning(
                 if on_reasoning_delta:
                     await on_reasoning_delta(text)
         elif event_type == "response.function_call_arguments.delta":
-            call_id = event.get("call_id")
+            call_id = event.get("call_id") or tool_call_ids.get(event.get("item_id") or "")
             if call_id and call_id in tool_call_buffers:
                 delta = event.get("delta") or ""
                 current = tool_call_buffers[call_id].get("arguments")
@@ -481,7 +503,7 @@ async def consume_sse_with_reasoning(
                         "arguments_delta": str(delta),
                     })
         elif event_type == "response.function_call_arguments.done":
-            call_id = event.get("call_id")
+            call_id = event.get("call_id") or tool_call_ids.get(event.get("item_id") or "")
             if call_id and call_id in tool_call_buffers:
                 arguments = event.get("arguments")
                 tool_call_buffers[call_id]["arguments"] = arguments
@@ -652,212 +674,37 @@ def parse_response_output(
         and state_model is not None
         and state_input_items is not None
         and (status is None or status == "completed")
-        and is_replayable_finish_reason(finish_reason)
     ):
-        result.provider_state = build_responses_state(
-            provider=state_provider,
-            model=state_model,
-            input_items=state_input_items,
-            output_items=output,
-            usage=usage,
+        attach_responses_state(
+            result, provider=state_provider, model=state_model,
+            input_items=state_input_items, output_items=output,
         )
-        result.provider_compaction_state = build_responses_compaction_state(
-            provider=state_provider,
-            model=state_model,
-            output_items=output,
-        )
-        result.provider_compaction_applied = result.provider_compaction_state is not None
-        if result.provider_compaction_applied:
-            result.provider_compaction_scope = "current_request"
     return result
 
 
+async def iter_sdk_events(stream: AsyncIterable[object]) -> AsyncGenerator[dict[str, Any], None]:
+    """Normalize SDK models at the transport boundary before protocol handling."""
+    async for raw in stream:
+        event = _response_object(raw)
+        if event is None:
+            raise ConnectionError("Invalid Responses SDK event")
+        event = dict(event)
+        for key in ("item", "response"):
+            if key in event:
+                event[key] = _response_object(event[key])
+        yield event
+
+
 async def consume_sdk_stream(
-    stream: Any,
+    stream: AsyncIterable[object],
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     capture: ResponsesStreamCapture | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
-    """Consume an SDK async stream from ``client.responses.create(stream=True)``."""
-    content = ""
-    tool_calls: list[ToolCallRequest] = []
-    tool_call_buffers: dict[str, dict[str, Any]] = {}
-    tool_call_args_emitted: set[str] = set()
-    finish_reason: str | None = None
-    usage: LLMUsage | None = None
-    reasoning_content: str | None = None
-    streamed_reasoning = False
-    refusal_seen = False
-    refusal_deltas: dict[tuple[str | None, int | None], str] = {}
-    emitted_refusal_text = ""
-    async for raw_event in stream:
-        event: Any = raw_event
-        event_type = getattr(event, "type", None)
-        if on_tool_call_delta and (
-            hosted_event := _hosted_web_search_event(event, event_type)
-        ):
-            await on_tool_call_delta(hosted_event)
-        if event_type == "response.output_item.added":
-            item = getattr(event, "item", None)
-            if item and getattr(item, "type", None) == "function_call":
-                call_id = getattr(item, "call_id", None)
-                if not call_id:
-                    continue
-                arguments = getattr(item, "arguments", None)
-                tool_call_buffers[call_id] = {
-                    "id": getattr(item, "id", None) or "fc_0",
-                    "name": getattr(item, "name", None),
-                    "arguments": "" if arguments is None else arguments,
-                }
-                if on_tool_call_delta:
-                    await on_tool_call_delta({
-                        "call_id": str(call_id),
-                        "name": str(getattr(item, "name", None) or ""),
-                        "arguments_delta": "",
-                    })
-        elif event_type == "response.output_text.delta":
-            delta_text = getattr(event, "delta", "") or ""
-            content += delta_text
-            if on_content_delta and delta_text:
-                await on_content_delta(delta_text)
-        elif event_type == "response.reasoning_text.delta":
-            delta_text = getattr(event, "delta", "") or ""
-            if delta_text:
-                reasoning_content = (reasoning_content or "") + delta_text
-                streamed_reasoning = True
-                if on_reasoning_delta:
-                    await on_reasoning_delta(delta_text)
-        elif event_type == "response.reasoning_text.done":
-            text = getattr(event, "text", "") or ""
-            if text and not streamed_reasoning and not reasoning_content:
-                reasoning_content = text
-                if on_reasoning_delta:
-                    await on_reasoning_delta(text)
-        elif event_type == "response.refusal.delta":
-            refusal_seen = True
-            delta_text = getattr(event, "delta", None)
-            if isinstance(delta_text, str) and delta_text:
-                key = _refusal_event_key(
-                    getattr(event, "item_id", None),
-                    getattr(event, "content_index", None),
-                )
-                refusal_deltas[key] = refusal_deltas.get(key, "") + delta_text
-                content += delta_text
-                emitted_refusal_text += delta_text
-                if on_content_delta:
-                    await on_content_delta(delta_text)
-        elif event_type == "response.refusal.done":
-            refusal_seen = True
-            refusal_text = getattr(event, "refusal", None)
-            key = _refusal_event_key(
-                getattr(event, "item_id", None),
-                getattr(event, "content_index", None),
-            )
-            streamed_text = refusal_deltas.pop(key, "")
-            if isinstance(refusal_text, str) and refusal_text:
-                remaining_text = _remaining_refusal_text(streamed_text, refusal_text)
-                content += remaining_text
-                emitted_refusal_text += remaining_text
-                if on_content_delta and remaining_text:
-                    await on_content_delta(remaining_text)
-        elif event_type == "response.function_call_arguments.delta":
-            call_id = getattr(event, "call_id", None)
-            if call_id and call_id in tool_call_buffers:
-                delta = getattr(event, "delta", "") or ""
-                current = tool_call_buffers[call_id].get("arguments")
-                if not isinstance(current, str):
-                    current = ""
-                tool_call_buffers[call_id]["arguments"] = current + delta
-                if on_tool_call_delta and delta:
-                    await on_tool_call_delta({
-                        "call_id": str(call_id),
-                        "name": str(tool_call_buffers[call_id].get("name") or ""),
-                        "arguments_delta": str(delta),
-                    })
-        elif event_type == "response.function_call_arguments.done":
-            call_id = getattr(event, "call_id", None)
-            if call_id and call_id in tool_call_buffers:
-                arguments = getattr(event, "arguments", None)
-                tool_call_buffers[call_id]["arguments"] = arguments
-                if on_tool_call_delta:
-                    tool_call_args_emitted.add(str(call_id))
-                    await on_tool_call_delta({
-                        "call_id": str(call_id),
-                        "name": str(tool_call_buffers[call_id].get("name") or ""),
-                        "arguments": "" if arguments is None else str(arguments),
-                    })
-        elif event_type == "response.output_item.done":
-            item = getattr(event, "item", None)
-            if capture is not None:
-                capture.record_output_item(getattr(event, "output_index", None), item)
-            if item and getattr(item, "type", None) == "function_call":
-                call_id = getattr(item, "call_id", None)
-                if not call_id:
-                    continue
-                buf = tool_call_buffers.get(call_id) or {}
-                args_raw = _tool_arguments_source(
-                    buf.get("arguments"),
-                    getattr(item, "arguments", None),
-                )
-                if on_tool_call_delta and str(call_id) not in tool_call_args_emitted:
-                    tool_call_args_emitted.add(str(call_id))
-                    await on_tool_call_delta({
-                        "call_id": str(call_id),
-                        "name": str(buf.get("name") or getattr(item, "name", None) or ""),
-                        "arguments": str(args_raw),
-                    })
-                args = _parse_tool_call_arguments(
-                    args_raw,
-                    buf.get("name") or getattr(item, "name", None),
-                )
-                tool_calls.append(
-                    ToolCallRequest(
-                        id=f"{call_id}|{buf.get('id') or getattr(item, 'id', None) or 'fc_0'}",
-                        name=buf.get("name") or getattr(item, "name", None) or "",
-                        arguments=args,
-                    )
-                )
-        elif event_type in {"response.completed", "response.incomplete"}:
-            resp = getattr(event, "response", None)
-            response_obj = _response_object(resp) or {}
-            if capture is not None:
-                capture.record_completed(resp)
-            finish_reason = _response_finish_reason(
-                resp,
-                fallback_status=event_type.removeprefix("response."),
-            )
-            terminal_output = response_obj.get("output")
-            if terminal_output is None:
-                terminal_output = getattr(resp, "output", None)
-            terminal_refusal, terminal_refusal_text = _extract_refusal_text_from_output(
-                terminal_output
-            )
-            if terminal_refusal:
-                refusal_seen = True
-                remaining_text = _remaining_refusal_text(
-                    emitted_refusal_text,
-                    terminal_refusal_text,
-                )
-                content += remaining_text
-                emitted_refusal_text += remaining_text
-                if on_content_delta and remaining_text:
-                    await on_content_delta(remaining_text)
-            if resp:
-                usage = _usage_from_response_obj(resp) or usage
-                if not reasoning_content:
-                    reasoning_content = _extract_reasoning_summary_from_output(
-                        getattr(resp, "output", None)
-                    )
-                    if reasoning_content and on_reasoning_delta:
-                        await on_reasoning_delta(reasoning_content)
-            break
-        elif event_type in {"error", "response.failed"}:
-            detail = getattr(event, "error", None) or getattr(event, "message", None) or event
-            raise RuntimeError(f"Response failed: {str(detail)[:500]}")
-
-    if finish_reason is None:
-        raise ConnectionError("Model stream ended before a terminal response event was received")
-    if refusal_seen:
-        finish_reason = "refusal"
-    return content, tool_calls, finish_reason, usage, reasoning_content
+    """Consume SDK events with the same protocol handler as SSE and WebSocket."""
+    return await consume_responses_events(
+        iter_sdk_events(stream), on_content_delta=on_content_delta,
+        on_tool_call_delta=on_tool_call_delta, on_reasoning_delta=on_reasoning_delta,
+        capture=capture,
+    )

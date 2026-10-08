@@ -1232,7 +1232,7 @@ function Shell({
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
-  const skills = useSkills(getToken);
+  const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -3092,8 +3092,11 @@ function Shell({
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
                     skills={skills}
+                    skillsLoading={skillsLoading}
+                    skillsError={skillsError}
                     onStartAutomationChat={onStartAutomationChat}
                     titleOverrides={sidebarState.title_overrides}
+                    sessions={topicSessions}
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}
                     onRestart={onRestart}

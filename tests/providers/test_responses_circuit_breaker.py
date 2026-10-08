@@ -17,7 +17,7 @@ from nanobot.providers.registry import find_by_name
 @pytest.fixture()
 def provider():
     """A direct-OpenAI provider with Responses API support."""
-    p = OpenAICompatProvider.__new__(OpenAICompatProvider)
+    p = OpenAICompatProvider(api_key="fixture", spec=find_by_name("openai"))
     p.default_model = "gpt-5"
     p._spec = type("Spec", (), {"name": "openai"})()
     p._effective_base = "https://api.openai.com/v1"

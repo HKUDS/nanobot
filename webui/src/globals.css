@@ -80,8 +80,9 @@
     --muted-foreground: 0 0% 65%;
     --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
+    /* Destructive text needs contrast on dark surfaces; filled controls use a dark label. */
+    --destructive: 0 93.5% 81.8%;
+    --destructive-foreground: 0 0% 9%;
     --border: 0 0% 28%;
     --input: var(--border);
     --ring: 0 0% 83.1%;
@@ -967,38 +968,22 @@
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
 }
 
-.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
-  transform: scale(0.98);
-}
-
 .composer-model-pill-setup {
   border-color: hsl(var(--border) / 0.72);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.62),
-    0 1px 2px hsl(var(--foreground) / 0.035);
-  transition-property: color, background-color, border-color, box-shadow, transform;
-  transition-duration: 180ms;
-  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.dark .composer-model-pill-setup {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.045),
-    0 1px 2px rgb(0 0 0 / 0.12);
+  transition: color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out;
 }
 
 .thread-composer-model-badge:hover > .composer-model-pill-setup {
   border-color: hsl(var(--border));
-  background-color: hsl(var(--accent) / 0.7);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.72),
-    0 2px 5px hsl(var(--foreground) / 0.06);
+  background-color: hsl(var(--foreground) / 0.045);
 }
 
 .dark .thread-composer-model-badge:hover > .composer-model-pill-setup {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.07),
-    0 2px 5px rgb(0 0 0 / 0.16);
+  background-color: rgb(255 255 255 / 0.065);
+}
+
+.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
+  background-color: hsl(var(--foreground) / 0.085);
 }
 
 @keyframes composer-model-pill-setup-attention {
@@ -1136,7 +1121,7 @@
   align-items: center;
 }
 
-/* Keep a 44px hit area around the quieter 36px attachment/send circles.
+/* Keep a 44px hit area around the quieter 36px attachment/send controls.
  * The transparent pseudo-element belongs to the button, including its disabled
  * state; margins reserve its space so adjacent controls never overlap it. */
 [data-compact-controls] .thread-composer-round-action.touch-target {
@@ -1407,9 +1392,64 @@
     text-align: justify;
     text-align-last: justify;
   }
+  .icon-action[aria-pressed="true"], .icon-action[data-state="open"] {
+    color: hsl(var(--foreground));
+  }
+  .icon-action[aria-pressed="true"]::after, .icon-action[data-state="open"]::after {
+    content: "";
+    position: absolute;
+    bottom: 3px;
+    left: calc(50% - 4px);
+    width: 8px;
+    height: 2px;
+    border-radius: 1px;
+    background-color: currentColor;
+    pointer-events: none;
+  }
+  .icon-action svg {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .icon-action [data-product-icon="settings"] {
+      transform: rotate(0deg);
+      transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .icon-action:not(:disabled):hover [data-product-icon="settings"] {
+      transform: rotate(90deg);
+    }
+  }
+  .activity-current-trace { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .activity-current > path:first-child { opacity: 0.35; }
+    .activity-current-trace {
+      display: block;
+      stroke-dasharray: 16 84;
+      animation: activity-current-flow 1800ms linear infinite;
+    }
+  }
+  @keyframes activity-current-flow {
+    0% { stroke-dashoffset: 16; opacity: 0; }
+    10% { opacity: 1; }
+    65% { stroke-dashoffset: 116; opacity: 1; }
+    75%, 100% { stroke-dashoffset: 116; opacity: 0; }
+  }
+  .quiet-control, .settings-hover {
+    --control-hover-fill: hsl(var(--foreground) / 0.045);
+    --control-active-fill: hsl(var(--foreground) / 0.085);
+  }
+  .dark .quiet-control, .dark .settings-hover {
+    --control-hover-fill: rgb(255 255 255 / 0.065);
+    --control-active-fill: rgb(255 255 255 / 0.105);
+  }
   @media (hover: hover) {
-    .settings-hover:hover { background-color: hsl(var(--sidebar-foreground) / 0.055); }
-    .dark .settings-hover:hover { background-color: rgb(255 255 255 / 0.07); }
+    .quiet-control:hover, .settings-hover:hover {
+      background-color: var(--control-hover-fill);
+    }
+  }
+  .quiet-control:active, .settings-hover:active,
+  .quiet-control[data-state="open"], .quiet-control[aria-pressed="true"] {
+    background-color: var(--control-active-fill);
   }
   .settings-editor { padding: 16px var(--settings-inset, 16px); }
   @media (min-width: 640px) {

@@ -140,6 +140,40 @@ def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
     assert soul_path.read_text(encoding="utf-8") == legacy_soul
 
 
+@pytest.mark.parametrize("legacy_workspace", [False, True])
+def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legacy_workspace) -> None:
+    """Default files can be skipped and old files must not hide the current contract."""
+    from nanobot.utils.helpers import sync_workspace_templates
+
+    workspace = _make_workspace(tmp_path)
+    agents_path = workspace / "AGENTS.md"
+    legacy_rule = (
+        "When the user asks for a recurring/periodic task, update HEARTBEAT.md "
+        "instead of creating a one-time cron reminder."
+    )
+    if legacy_workspace:
+        agents_path.write_text(f"# Workspace rules\nReply in Chinese.\n{legacy_rule}\n", encoding="utf-8")
+    sync_workspace_templates(workspace, silent=True)
+    original = agents_path.read_bytes()
+    builder = ContextBuilder(workspace)
+    messages = builder.build_messages(history=[], current_message="每天早上8点提醒我喝水")
+    system = messages[0]["content"]
+
+    assert '"Every day at 8am, remind me to drink water" is a cron task, not a heartbeat task.' in system
+    assert "Heartbeat does not guarantee a requested time or interval." in system
+    assert "background checks with flexible timing" in system
+    assert system.count("## Scheduling") == 1
+    if legacy_workspace:
+        assert "Reply in Chinese." in system
+        assert system.index(legacy_rule) < system.index("## Scheduling")
+        assert "even if workspace guidance describes recurring tasks as heartbeat tasks" in system
+    else:
+        assert "## AGENTS.md" not in system
+    assert "每天早上8点提醒我喝水" in messages[-1]["content"]
+    assert builder.build_messages(history=[], current_message="Check issues when convenient")[0] == messages[0]
+    assert agents_path.read_bytes() == original
+
+
 def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None:
     """SOUL owns personality while the always-injected contract owns execution policy."""
     soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")

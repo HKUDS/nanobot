@@ -14,7 +14,7 @@ from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 
 
 def _loop(tmp_path: Path) -> AgentLoop:
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_stream_with_retry = AsyncMock(

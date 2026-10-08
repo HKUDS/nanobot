@@ -2378,3 +2378,106 @@ describe("NanobotClient", () => {
     expect(FakeSocket.instances.length).toBeGreaterThan(1);
   });
 });
+
+
+describe("binary attachment transport", () => {
+  it("keeps a progressing HTTP upload alive beyond the old 65-second limit", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), milliseconds);
+      return controller.signal;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url, request: RequestInit) => new Promise((resolve, reject) => {
+      request.signal?.addEventListener("abort", () => reject(new Error("Upload timed out")));
+      setTimeout(() => resolve(Response.json({ reference: "slow-ref" }, { status: 201 })), 80_000);
+    })));
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    try {
+      client.connect();
+      const socket = lastSocket(); socket.fakeOpen();
+      socket.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test",
+        upload: { path: "/api/attachments", token: "cap" } });
+      const delivery = client.sendAttachments("chat", "look", [
+        { data_url: "data:text/plain;base64,eA==", name: "note.txt" },
+      ], { turnId: "slow-upload" });
+      await vi.advanceTimersByTimeAsync(80_000);
+      expect(socket.sent.some((frame) => frame.includes("slow-ref"))).toBe(true);
+      socket.fakeMessage({ event: "message_accepted", chat_id: "chat", turn_id: "slow-upload" });
+      await delivery;
+    } finally {
+      client.close(); vi.unstubAllGlobals(); timeout.mockRestore();
+    }
+  });
+
+  it("rejects an oversized message envelope without waiting for an ACK and retains the draft", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ reference: "ref" }, { status: 201 })));
+    const client = new NanobotClient({ url: "ws://test", reconnect: false, maxFrameBytes: 256,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    try {
+      client.connect();
+      const socket = lastSocket(); socket.fakeOpen();
+      socket.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test",
+        upload: { path: "/api/attachments", token: "cap" } });
+      const draft = [{ data_url: "data:text/plain;base64,eA==", name: "note.txt" }];
+      await expect(client.sendAttachments("chat", "x".repeat(400), draft)).rejects.toThrow("frame limit");
+      expect(socket.sent.filter((value) => JSON.parse(value).type === "message")).toHaveLength(0);
+      expect(draft[0].data_url).toBe("data:text/plain;base64,eA==");
+    } finally { client.close(); vi.unstubAllGlobals(); }
+  });
+
+  it("uploads >1 MiB as HTTP bytes and waits for a small WS reference ACK", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ reference: "opaque-ref" }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new NanobotClient({ url: "ws://test", reconnect: false, maxFrameBytes: 1024 * 1024,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    try {
+      client.connect();
+      const socket = lastSocket();
+      socket.fakeOpen();
+      socket.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test",
+        upload: { path: "/api/attachments", token: "upload-capability" } });
+      const raw = "x".repeat(1_089_490);
+      let accepted = false;
+      const delivery = client.sendAttachments("chat", "look", [
+        { data_url: `data:image/png;base64,${btoa(raw)}`, name: "paste.png" },
+      ], { turnId: "large-image" }).then(() => { accepted = true; });
+      await vi.waitFor(() => expect(socket.sent.some((frame) => frame.includes("opaque-ref"))).toBe(true));
+      expect(accepted).toBe(false);
+      const [, request] = fetchMock.mock.calls[0];
+      expect(request.method).toBe("POST");
+      expect(request.headers.Authorization).toBe("Bearer upload-capability");
+      expect(request.redirect).toBe("error");
+      expect(await request.body.text()).toBe(raw);
+      const frame = socket.sent.find((value) => value.includes("opaque-ref"))!;
+      expect(frame.length).toBeLessThan(1024);
+      expect(frame).not.toContain("data_url");
+      socket.fakeMessage({ event: "message_accepted", chat_id: "chat", turn_id: "large-image" });
+      await delivery;
+      expect(accepted).toBe(true);
+    } finally { client.close(); vi.unstubAllGlobals(); }
+  });
+
+  it("does not send a message after HTTP rejection or a connection change", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("denied", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    try {
+      client.connect();
+      const socket = lastSocket(); socket.fakeOpen();
+      socket.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test",
+        upload: { path: "/api/attachments", token: "cap" } });
+      const draft = [{ data_url: "data:text/plain;base64,eA==", name: "note.txt" }];
+      await expect(client.sendAttachments("chat", "look", draft)).rejects.toThrow("401");
+      expect(socket.sent.filter((frame) => JSON.parse(frame).type === "message")).toHaveLength(0);
+      expect(draft[0].data_url).toBe("data:text/plain;base64,eA==");
+      fetchMock.mockImplementation(async () => {
+        socket.fakeCloseWithCode(1009);
+        return Response.json({ reference: "old-connection-ref" });
+      });
+      await expect(client.sendAttachments("chat", "look", draft)).rejects.toThrow("Connection changed");
+      expect(socket.sent.filter((frame) => JSON.parse(frame).type === "message")).toHaveLength(0);
+    } finally { client.close(); vi.unstubAllGlobals(); }
+  });
+});

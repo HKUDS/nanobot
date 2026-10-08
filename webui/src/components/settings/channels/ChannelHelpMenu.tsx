@@ -27,7 +27,7 @@ export function ChannelHelpMenu({ feature, chatAppsDocsUrl }: {
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button type="button" aria-label={label}
-              className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+              className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
               <CircleHelp className="h-4 w-4" aria-hidden />
             </button>
           </DropdownMenuTrigger>

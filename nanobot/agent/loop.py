@@ -1700,6 +1700,7 @@ class AgentLoop:
         cleanup_steps = (
             self.subagents.close,
             self._exec_session_manager.close_all,
+            self.runtime_resolver.aclose,
         )
         for cleanup in cleanup_steps:
             try:

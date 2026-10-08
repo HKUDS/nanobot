@@ -21,7 +21,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 @pytest.fixture
 async def loop(tmp_path):
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = True

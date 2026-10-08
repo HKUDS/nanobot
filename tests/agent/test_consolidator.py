@@ -38,7 +38,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def mock_provider():
-    p = MagicMock()
+    p = MagicMock(aclose=AsyncMock())
     p.chat_stream_with_retry = AsyncMock()
     p.generation = GenerationSettings(max_tokens=100)
     return p

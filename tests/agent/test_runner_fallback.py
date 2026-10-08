@@ -1850,6 +1850,22 @@ class TestGetDefaultModel:
         assert fb.get_default_model() == "primary/model"
 
 
+async def test_fallback_closes_temporary_provider_and_owns_primary_shutdown() -> None:
+    primary = _FakeProvider("primary", _error_response())
+    fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+    primary.aclose = AsyncMock()
+    fallback.aclose = AsyncMock()
+    wrapper = FallbackProvider(primary, [_fallback("backup")], MagicMock(return_value=fallback))
+
+    result = await wrapper.chat(messages=[{"role": "user", "content": "hi"}])
+
+    assert result.content == "fallback ok"
+    fallback.aclose.assert_awaited_once()
+    primary.aclose.assert_not_awaited()
+    await wrapper.aclose()
+    primary.aclose.assert_awaited_once()
+
+
 class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_skips_primary_after_three_failures(self) -> None:

@@ -11,6 +11,7 @@ import { DEFAULT_CUSTOM_MCP_FORM } from "@/components/settings/system/AppsSettin
 import type { SystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import {
   cancelMcpOAuth,
+  changeAutomationChat,
   completeMcpOAuth,
   disableNanobotFeature,
   enableNanobotFeature,
@@ -34,6 +35,7 @@ import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type {
   AutomationUpdatePayload,
+  AutomationChatUpdate,
   McpOAuthFlowPayload,
   McpPresetAction,
   McpPresetsPayload,
@@ -297,6 +299,12 @@ export function createSystemSettingsActions({
     } finally {
       setAutomationAction(null);
     }
+  };
+
+  const handleAutomationChat = async (job: SessionAutomationJob, values: AutomationChatUpdate) => {
+    // The dialog owns the draft and error. Publish only the server acknowledgement.
+    const payload = await changeAutomationChat(client, job.id, values);
+    setAutomations(payload);
   };
 
   const closeMcpOAuthPopup = () => {
@@ -669,6 +677,7 @@ export function createSystemSettingsActions({
     handleApiServiceAction,
     handleAutomationAction,
     handleAutomationEdit,
+    handleAutomationChat,
     handleCliAppAction,
     handleImportMcpConfig,
     handleMcpOAuthCancel,

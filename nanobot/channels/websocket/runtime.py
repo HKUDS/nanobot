@@ -27,6 +27,7 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.config.schema import Base
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
@@ -207,10 +208,8 @@ class WebSocketConfig(Base):
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
-    # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
-    # client-side Worker normalization (see webui Composer). 4 × 6 MB × 1.37
-    # (base64 overhead) + envelope framing stays under 36 MB; the 40 MB ceiling
-    # leaves a small margin for sender slop without opening a DoS avenue.
+    # Keep the existing configurable guard (also used for non-attachment
+    # frames and older clients). HTTP attachments are outside this limit.
     max_message_bytes: int = Field(default=37_748_736, ge=1024, le=41_943_040)
     ping_interval_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
@@ -394,6 +393,7 @@ class WebSocketChannel(BaseChannel):
 
         self.gateway = gateway
         self._media = gateway.media
+        self._uploads = gateway.uploads
         self._transcripts = gateway.transcripts
         self._temporary_chats = gateway.temporary_chats
         self._session_projection = gateway.session_projection
@@ -509,6 +509,7 @@ class WebSocketChannel(BaseChannel):
     async def _cleanup_connection(self, connection: ServerConnection) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
         self._retired_connections.add(connection)
+        self._uploads.revoke(connection)
         state = self._connection_outbound.get(connection)
         if state is not None:
             state.closing = True
@@ -697,6 +698,18 @@ class WebSocketChannel(BaseChannel):
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
+        bridge = BinaryHTTPBridge(self._uploads.handle)
+
+        async def prune_uploads() -> None:
+            while not stop_event.is_set():
+                self._uploads.store.prune()
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=30)
+                except TimeoutError:
+                    pass
+
+        prune_task = asyncio.create_task(prune_uploads())
+
         async def runner() -> None:
             socket_path = self.config.unix_socket_path
             failures = 0
@@ -714,6 +727,7 @@ class WebSocketChannel(BaseChannel):
                             handler,
                             socket_path,
                             process_request=process_request,
+                            create_connection=bridge.connection_factory,
                             open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                             max_size=self.config.max_message_bytes,
                             ping_interval=self.config.ping_interval_s,
@@ -728,6 +742,7 @@ class WebSocketChannel(BaseChannel):
                             self.config.host,
                             self.config.port,
                             process_request=process_request,
+                            create_connection=bridge.connection_factory,
                             open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                             max_size=self.config.max_message_bytes,
                             ping_interval=self.config.ping_interval_s,
@@ -788,6 +803,10 @@ class WebSocketChannel(BaseChannel):
         try:
             await task
         finally:
+            prune_task.cancel()
+            await asyncio.gather(prune_task, return_exceptions=True)
+            await bridge.shutdown()
+            self._uploads.store.clear()
             self._running = False
             if self._server_task is task:
                 self._server_task = None
@@ -815,6 +834,8 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        **({"upload": self._uploads.issue(connection)}
+                           if self.is_allowed(client_id) else {}),
                         **({"terminal": gateway_identity(self.gateway.tokens.instance_id)}
                            if _query_first(query, "terminal_protocol") == "1" else {}),
                     },

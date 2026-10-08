@@ -130,7 +130,7 @@ const DialogContent = React.forwardRef<
             {children}
           </FloatingPortalContext.Provider>
           {showCloseButton ? (
-            <DialogPrimitive.Close className={cn("absolute right-2.5 top-2.5 grid place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground active:bg-muted/80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none", placement === "bottom" ? "h-11 w-11" : "h-7 w-7")}>
+            <DialogPrimitive.Close className={cn("absolute right-2.5 top-2.5 grid place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none", placement === "bottom" ? "h-11 w-11" : "h-7 w-7")}>
               <X className="h-4 w-4" />
               <span className="sr-only">{t("common.close")}</span>
             </DialogPrimitive.Close>

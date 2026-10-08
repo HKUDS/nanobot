@@ -220,6 +220,7 @@ interface UISessionMessage {
 }
 
 export interface SessionAutomationJob {
+  chat_binding_revision?: string;
   id: string;
   name: string;
   enabled: boolean;
@@ -251,6 +252,7 @@ export interface SessionAutomationJob {
       status: "ok" | "error" | "skipped" | string;
       duration_ms?: number;
       error?: string | null;
+      webui_session_key?: string | null; // null: external chat; absent: older host.
     }>;
   };
   origin?: {
@@ -268,6 +270,13 @@ export interface SessionAutomationJob {
 
 export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
 export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
+export interface AutomationChat { id: string; title: string; channel: string; unavailable?: boolean; }
+export interface AutomationChatsPayload {
+  revision: string;
+  current: AutomationChat | null;
+  chats: AutomationChat[];
+}
+export interface AutomationChatUpdate { target_id: string; revision: string; message: string; }
 export interface AutomationUpdatePayload {
   name?: string;
   message?: string;
@@ -907,6 +916,13 @@ export interface SettingsPayload {
   restart_required_sections?: Array<"runtime" | "browser" | "image">;
   version?: {
     current: string;
+    commit?: string | null;
+  };
+  environment?: {
+    python_version: string;
+    os: string;
+    os_version: string;
+    architecture: string;
   };
   docs?: {
     version: string;
@@ -1408,7 +1424,7 @@ interface InboundTurnMetadata {
 
 export type InboundEvent =
   | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
-  | { event: "ready"; chat_id: string; client_id: string }
+  | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
   | {
       event: "attached";
       chat_id: string;
@@ -1599,7 +1615,7 @@ export type ThreadProjectionEvent = Extract<
   created_at_ms?: number;
 };
 
-/** Base64-encoded file attached to an outbound ``message`` envelope.
+/** Local draft/preview data, converted to HTTP binary before sending a message.
  *
  * ``data_url`` must use a server-whitelisted image, video, or document MIME
  * type. SVG remains rejected on ingress to avoid an embedded-script XSS
@@ -1699,7 +1715,7 @@ export type Outbound =
       type: "message";
       chat_id: string;
       content: string;
-      media?: OutboundMedia[];
+      media?: import("../../../packages/client-events/attachments").AttachmentReference[];
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
       session_mentions?: SessionMention[];
