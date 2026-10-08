@@ -607,10 +607,15 @@ describe("Workspace project picker", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ project_path: "/srv/new/" }));
   });
 
-  it("filters the current folder separately from address editing", async () => {
+  it.each(["Escape", "outside"])("preserves directory filtering when path editing is canceled with %s", async (cancel) => {
     const user = userEvent.setup();
-    const onBrowse = vi.fn().mockResolvedValue(directory);
-    render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={vi.fn()} />);
+    const onChange = vi.fn();
+    const onBrowse = vi.fn((raw: string, query: string) => {
+      const path = raw.replace(/\/$/, "");
+      const names = path === scope.project_path ? ["alpha", "beta"] : ["child"];
+      return Promise.resolve({ ...directory, path, entries: names.filter(name => name.includes(query)).map(name => ({ name, path: `${path}/${name}` })) });
+    });
+    render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={onChange} />);
     await user.click(screen.getByRole("button", { name: "Switch working directory" }));
     await screen.findByRole("option", { name: "/srv/workspace/alpha" });
     const input = screen.getByRole("textbox", { name: "Filter this folder" });
@@ -620,6 +625,16 @@ describe("Workspace project picker", () => {
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     expect(input).toBeDisabled();
     expect(screen.getByRole("combobox")).toHaveValue("/srv/workspace/");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "/srv/other/" } });
+    await screen.findByRole("option", { name: "/srv/other/child" });
+    if (cancel === "Escape") await user.keyboard("{Escape}");
+    else await user.click(screen.getByRole("listbox", { name: "/srv/other" }));
+    expect(input).toBeEnabled();
+    expect(input).toHaveValue("alp");
+    await screen.findByRole("option", { name: "/srv/workspace/alpha" });
+    expect(screen.queryByRole("option", { name: "/srv/workspace/beta" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "/srv/other/child" })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
   });
   it("moves to the focused column's parent with the left arrow", async () => {
     const user = userEvent.setup();

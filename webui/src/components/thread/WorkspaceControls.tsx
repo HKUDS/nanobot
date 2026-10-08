@@ -512,7 +512,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     const visit = captureVisit();
     setHistory(current => {
       const visits = [...current.visits];
-      visits[current.index] = { ...visit, filter: "" };
+      visits[current.index] = visit;
       return { ...current, visits };
     });
     setEditingPath(true);
@@ -521,7 +521,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   }
   function cancelPathEditing(focusColumns = true) {
     setEditingPath(false);
-    changeDraft(workspaceDirectoryPrefix(basePath));
+    changeDraft(workspaceDirectoryPrefix(basePath), filterQuery.trim());
     if (focusColumns) focusDirectory();
   }
 
