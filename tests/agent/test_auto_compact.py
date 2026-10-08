@@ -1078,6 +1078,153 @@ class TestProactiveAutoCompact:
         await loop.aclose()
 
 
+class TestCompactModelPreset:
+    """Tests for the optional compact model preset (dedicated compaction provider)."""
+
+    def _make_loop_with_preset(self, tmp_path: Path, *, compact_model_preset: str | None):
+        from nanobot.config.schema import ModelPresetConfig
+        from nanobot.providers.factory import ProviderSnapshot
+
+        def _provider(model_name: str) -> MagicMock:
+            provider = MagicMock(aclose=AsyncMock())
+            provider.get_default_model.return_value = model_name
+            provider.estimate_prompt_tokens.return_value = (10_000, "test")
+            provider.chat_stream_with_retry = AsyncMock(
+                return_value=LLMResponse(content="ok", tool_calls=[])
+            )
+            provider.generation.max_tokens = 4096
+            return provider
+
+        base_provider = _provider("base-model")
+        compact_provider = _provider("compact-model")
+        presets = {"compact": ModelPresetConfig(model="compact-model", context_window_tokens=16_000)}
+
+        def load_preset(name: str) -> ProviderSnapshot:
+            preset = presets[name]
+            return ProviderSnapshot(
+                provider=compact_provider,
+                model=preset.model,
+                context_window_tokens=preset.context_window_tokens,
+                signature=(name, preset.model),
+            )
+
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=base_provider,
+            workspace=tmp_path,
+            model="base-model",
+            context_window_tokens=128_000,
+            session_ttl_minutes=15,
+            model_presets=presets,
+            preset_snapshot_loader=load_preset,
+            compact_model_preset=compact_model_preset,
+        )
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        return loop, base_provider, compact_provider
+
+    def test_config_default_is_none(self):
+        defaults = AgentDefaults()
+        assert defaults.compact_model_preset is None
+
+    def test_config_accepts_camel_case_alias(self):
+        defaults = AgentDefaults.model_validate({"compactModelPreset": "compact"})
+        assert defaults.compact_model_preset == "compact"
+
+    def test_compact_runtime_uses_preset_when_configured(self, tmp_path):
+        loop, base_provider, compact_provider = self._make_loop_with_preset(
+            tmp_path, compact_model_preset="compact"
+        )
+        session = loop.sessions.get_or_create("cli:test")
+        runtime = loop.compact_runtime_for_session(session)
+        assert runtime.model == "compact-model"
+        assert runtime.provider is compact_provider
+        assert base_provider is not runtime.provider
+
+    def test_compact_runtime_falls_back_without_preset(self, tmp_path):
+        loop, base_provider, _ = self._make_loop_with_preset(
+            tmp_path, compact_model_preset=None
+        )
+        session = loop.sessions.get_or_create("cli:test")
+        runtime = loop.compact_runtime_for_session(session)
+        assert runtime.model == "base-model"
+        assert runtime.provider is base_provider
+
+    def test_compact_runtime_falls_back_when_preset_removed(self, tmp_path):
+        loop, base_provider, _ = self._make_loop_with_preset(
+            tmp_path, compact_model_preset="ghost"
+        )
+        session = loop.sessions.get_or_create("cli:test")
+        # Must not raise; an unavailable preset degrades to the session runtime.
+        runtime = loop.compact_runtime_for_session(session)
+        assert runtime.model == "base-model"
+        assert runtime.provider is base_provider
+
+    def test_compact_runtime_prefers_preset_over_session_selection(self, tmp_path):
+        loop, base_provider, compact_provider = self._make_loop_with_preset(
+            tmp_path, compact_model_preset="compact"
+        )
+        session_key = "cli:preset-session"
+        loop.set_session_model_preset(session_key, "compact")
+        session = loop.sessions.get_or_create(session_key)
+        # Even if the session itself selected a preset, compaction uses the
+        # configured compact preset.
+        runtime = loop.compact_runtime_for_session(session)
+        assert runtime.provider is compact_provider
+
+    @pytest.mark.asyncio
+    async def test_idle_auto_compact_uses_compact_preset(self, tmp_path):
+        loop, base_provider, compact_provider = self._make_loop_with_preset(
+            tmp_path, compact_model_preset="compact"
+        )
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 3, prefix="old")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        captured: list = []
+
+        async def _capture_compact(key, *, runtime, **_kwargs):
+            captured.append(runtime)
+            return ""
+
+        loop.consolidator.compact_idle_session = _capture_compact
+
+        # The idle tick must hand the compact preset runtime to the consolidator.
+        loop._check_expired_sessions_if_due()
+        await _drain_background_tasks(loop)
+
+        assert len(captured) == 1
+        assert captured[0].model == "compact-model"
+        assert captured[0].provider is compact_provider
+        await loop.aclose()
+
+    @pytest.mark.asyncio
+    async def test_idle_auto_compact_uses_session_runtime_without_preset(self, tmp_path):
+        loop, base_provider, _ = self._make_loop_with_preset(
+            tmp_path, compact_model_preset=None
+        )
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 3, prefix="old")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        captured: list = []
+
+        async def _capture_compact(key, *, runtime, **_kwargs):
+            captured.append(runtime)
+            return ""
+
+        loop.consolidator.compact_idle_session = _capture_compact
+
+        loop._check_expired_sessions_if_due()
+        await _drain_background_tasks(loop)
+
+        assert len(captured) == 1
+        assert captured[0].model == "base-model"
+        assert captured[0].provider is base_provider
+        await loop.aclose()
+
+
 class TestSummaryPersistence:
     """Test that summary survives restart via session metadata."""
 
