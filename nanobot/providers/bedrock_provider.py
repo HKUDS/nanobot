@@ -59,6 +59,7 @@ class BedrockProvider(LLMProvider):
         *,
         region: str | None = None,
         profile: str | None = None,
+        proxy: str | None = None,
         extra_body: dict[str, Any] | None = None,
         client: Any | None = None,
         provider_name: str = "bedrock",
@@ -67,12 +68,11 @@ class BedrockProvider(LLMProvider):
         self.default_model = default_model
         self.region = region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         self.profile = profile
+        self._proxy = proxy
         self._extra_body = extra_body or {}
         self._client = client if client is not None else self._make_client()
 
     def _make_client(self) -> Any:
-        if self.api_key:
-            os.environ["AWS_BEARER_TOKEN_BEDROCK"] = self.api_key
         try:
             import boto3
             from botocore.config import Config
@@ -86,11 +86,31 @@ class BedrockProvider(LLMProvider):
             session_kwargs["profile_name"] = self.profile
         boto3_module = cast(Any, boto3)
         session = boto3_module.Session(**session_kwargs)
+        if self.api_key:
+            from botocore.tokens import ScopedEnvTokenProvider
+
+            # Scope the bearer token to this session, never to the process environment.
+            token_chain = session._session.get_component("token_provider")
+            token_chain.insert_before(
+                "env",
+                ScopedEnvTokenProvider(
+                    session._session, environ={"AWS_BEARER_TOKEN_BEDROCK": self.api_key},
+                ),
+            )
 
         idle_timeout_s = resolve_stream_idle_timeout_s()
-        client_kwargs: dict[str, Any] = {
-            "config": Config(connect_timeout=idle_timeout_s, read_timeout=idle_timeout_s),
+        config_kwargs: dict[str, Any] = {
+            "connect_timeout": idle_timeout_s,
+            "read_timeout": idle_timeout_s,
         }
+        if self._proxy:
+            # An explicit map replaces botocore's environment-derived proxy map.
+            config_kwargs["proxies"] = {"http": self._proxy, "https": self._proxy}
+        client_config = Config(**config_kwargs)
+        if self._proxy:
+            # Credential-chain clients (for example STS assume-role) share this session.
+            session._session.set_default_client_config(client_config)
+        client_kwargs: dict[str, Any] = {"config": client_config}
         if self.region:
             client_kwargs["region_name"] = self.region
         if self.api_base:

@@ -54,6 +54,7 @@ class EffectiveTranscriptionConfig:
     api_base: str
     max_duration_sec: int
     max_upload_mb: int
+    proxy: str | None = field(default=None, repr=False)
 
     @property
     def configured(self) -> bool:
@@ -142,6 +143,7 @@ def resolve_transcription_config(config: Config) -> EffectiveTranscriptionConfig
         language=getattr(top, "language", None) or getattr(channels, "transcription_language", None),
         api_key=_resolve_transcription_api_key(provider, provider_cfg),
         api_base=_resolve_transcription_api_base(provider, provider_cfg),
+        proxy=resolve_env_refs(provider_cfg.proxy) if provider_cfg and provider_cfg.proxy else None,
         max_duration_sec=int(getattr(top, "max_duration_sec", 120)),
         max_upload_mb=int(getattr(top, "max_upload_mb", 25)),
     )
@@ -210,6 +212,7 @@ async def transcribe_audio_file(
     provider = spec.load_adapter()(
         api_key=config.api_key,
         api_base=config.api_base or None,
+        proxy=config.proxy,
         language=config.language,
         model=config.model,
     )

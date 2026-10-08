@@ -348,12 +348,15 @@ def _delete_oauth_files(token_path: Path, provider_label: str) -> None:
 
 def _login_github_copilot() -> None:
     try:
+        from nanobot.config.loader import load_config, resolve_config_env_vars
         from nanobot.providers.github_copilot_provider import login_github_copilot
 
+        proxy = resolve_config_env_vars(load_config()).providers.github_copilot.proxy or None
         console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
         token = login_github_copilot(
             print_fn=lambda s: console.print(s),
             prompt_fn=lambda s: typer.prompt(s),
+            proxy=proxy,
         )
         account = token.account_id or "GitHub"
         console.print(

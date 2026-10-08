@@ -16,7 +16,8 @@ from nanobot.providers.github_copilot_provider import login_github_copilot
 class GitHubCopilotOAuthFlow:
     """Expose the device prompt while the existing login worker waits for approval."""
 
-    def __init__(self) -> None:
+    def __init__(self, proxy: str | None = None) -> None:
+        self._proxy = proxy
         self.authorization_url = ""
         self.user_code = ""
         self._deadline = time.monotonic() + 900
@@ -55,6 +56,7 @@ class GitHubCopilotOAuthFlow:
                 cancelled=self._cancelled,
                 open_browser=False,
                 persist=False,
+                proxy=self._proxy,
             )
         except Exception as exc:
             self._error = exc

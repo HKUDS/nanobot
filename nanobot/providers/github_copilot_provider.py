@@ -87,6 +87,7 @@ def login_github_copilot(
     cancelled: threading.Event | None = None,
     open_browser: bool = True,
     persist: bool = True,
+    proxy: str | None = None,
 ) -> OAuthToken:
     """Run GitHub device flow and persist the GitHub OAuth token used for Copilot."""
     del prompt_fn
@@ -110,7 +111,9 @@ def login_github_copilot(
     access_token_url = _resolve("NANOBOT_GITHUB_ACCESS_TOKEN_URL", DEFAULT_GITHUB_ACCESS_TOKEN_URL)
     user_url = _resolve("NANOBOT_GITHUB_USER_URL", DEFAULT_GITHUB_USER_URL)
 
-    with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=True) as client:
+    with httpx.Client(
+        timeout=timeout, follow_redirects=True, proxy=proxy, trust_env=not bool(proxy),
+    ) as client:
         response = client.post(
             device_code_url,
             headers={"Accept": "application/json", "User-Agent": USER_AGENT},
@@ -211,6 +214,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         self,
         default_model: str = "github-copilot/gpt-4.1",
         *,
+        proxy: str | None = None,
         provider_name: str = "github_copilot",
     ):
         self._copilot_access_token: str | None = None
@@ -226,6 +230,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
                 "User-Agent": USER_AGENT,
             },
             spec=find_by_name("github_copilot"),
+            proxy=proxy,
             provider_name=provider_name,
         )
 
@@ -249,7 +254,8 @@ class GitHubCopilotProvider(OpenAICompatProvider):
 
             timeout = httpx.Timeout(20.0, connect=20.0)
             async with httpx.AsyncClient(
-                timeout=timeout, follow_redirects=True, trust_env=True
+                timeout=timeout, follow_redirects=True,
+                proxy=self._proxy, trust_env=not bool(self._proxy),
             ) as client:
                 response = await client.get(
                     _resolve("NANOBOT_COPILOT_TOKEN_URL", DEFAULT_COPILOT_TOKEN_URL),

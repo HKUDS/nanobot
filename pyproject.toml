@@ -70,6 +70,7 @@ api = [
 ]
 azure = [
     "azure-identity>=1.19.0,<2.0.0",
+    "aiohttp>=3.9.0,<4.0.0",
 ]
 bedrock = [
     "boto3>=1.43.0",

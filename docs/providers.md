@@ -80,11 +80,15 @@ These fields answer different questions:
 | `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
-| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers, OpenAI Codex, and xAI OAuth. |
+| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported by all providers; defaults to `null`. |
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
-Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex` and `xai_grok`, including OAuth token exchange/refresh and model requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
+Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. Every provider exposes **Network proxy** under **Advanced** in its WebUI settings, including Anthropic-compatible services such as Kimi Coding, Azure OpenAI, Bedrock, GitHub Copilot, custom providers, and transcription-only providers. For OAuth providers, save the proxy before signing in so login, token requests, model discovery, and inference use it.
+
+An explicit proxy takes precedence over environment proxy settings, including `NO_PROXY`, for that provider's requests. Clear the field to restore the existing default network behavior. Configure only trusted proxies: a proxy controls outbound routing and may handle sensitive credentials. `apiBase` remains the provider endpoint URL; it is not a replacement for the network proxy setting.
+
+The provider setting does not change networking for external credential helpers such as Azure CLI, Azure PowerShell, or AWS `credential_process`, or for cloud instance metadata credential discovery. Configure those separately if needed.
 
 ## Common Provider Patterns
 

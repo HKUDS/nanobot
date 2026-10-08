@@ -1275,7 +1275,7 @@ def test_openai_codex_proxy_config_affects_provider_and_signature():
     )
 
 
-def test_provider_proxy_rejects_unsupported_backend():
+def test_provider_proxy_supports_anthropic_backend():
     config = Config.model_validate(
         {
             "agents": {
@@ -1293,8 +1293,9 @@ def test_provider_proxy_rejects_unsupported_backend():
         }
     )
 
-    with pytest.raises(ValueError, match=r"providers\.anthropic\.proxy"):
+    with patch("nanobot.providers.anthropic_provider.AnthropicProvider") as constructor:
         make_provider(config)
+    assert constructor.call_args.kwargs["proxy"] == "http://127.0.0.1:23458"
 
 
 def test_github_copilot_provider_strips_prefixed_model_name():

@@ -76,7 +76,6 @@ export type ProviderForm = {
   profile: string;
 };
 export type CustomProviderDraft = ProviderForm & { name: string };
-const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
 type ProviderRequestOption = {
   kind: "priority" | "hosted_tool";
   titleKey: string;
@@ -786,7 +785,7 @@ export function ProvidersSettings({
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
     const supportsOauthAdvancedSettings =
-      isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
+      isOauthProvider && (provider.advanced_fields?.length ?? 0) > 0;
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
     const apiKeyRequired = provider.api_key_required ?? true;

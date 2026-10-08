@@ -85,7 +85,6 @@ class ModelSettingsPayload(TypedDict):
     providers: list[dict[str, Any]]
 
 
-_OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
 _WEBUI_OAUTH_TIMEOUT_S = 600
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -433,9 +432,8 @@ def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
     if spec.backend in {"openai_compat", "bedrock", "openai_codex", "xai_grok"}:
         fields.append("extra_body")
     if spec.backend == "openai_compat":
-        fields.extend(("extra_query", "proxy"))
-    if spec.name in _OAUTH_PROXY_PROVIDERS and "proxy" not in fields:
-        fields.append("proxy")
+        fields.append("extra_query")
+    fields.append("proxy")
     if spec.name == "openai":
         fields.append("api_type")
     if spec.backend == "bedrock":
@@ -720,12 +718,15 @@ def provider_models_payload(
     if spec.name == "minimax_anthropic" and not api_base.rstrip("/").endswith("/v1"):
         models_url = f"{api_base.rstrip('/')}/v1/models"
 
+    proxy = _resolve_env_placeholders(provider_config.proxy)
+    proxy_kwargs: dict[str, Any] = {"proxy": proxy, "trust_env": False} if proxy else {}
     try:
         response = http_get(
             models_url,
             headers=headers,
             timeout=10.0,
             follow_redirects=False,
+            **proxy_kwargs,
         )
         response.raise_for_status()
         rows = _extract_model_rows(response.json())
@@ -1476,12 +1477,11 @@ def update_provider_settings(
     if not spec.is_oauth and spec.name != "openai":
         updates.pop("api_type", None)
     if spec.is_oauth:
-        if spec.name not in _OAUTH_PROXY_PROVIDERS:
-            raise WebUISettingsError("unknown provider")
-        unsupported = set(updates) - {"proxy", "extra_body"}
+        allowed = _provider_advanced_field_names(provider_key, spec)
+        unsupported = set(updates) - set(allowed)
         if unsupported:
             raise WebUISettingsError(
-                "OAuth provider only supports proxy and extra_body settings"
+                f"OAuth provider only supports {', '.join(allowed)} settings"
             )
     else:
         allowed = {
@@ -1583,8 +1583,15 @@ def login_oauth_provider(
 
         # An existing token can be revoked. Expose the device prompt immediately
         # instead of waiting for approval inside a blocking CLI login request.
+        try:
+            proxy = resolve_config_env_vars(
+                config,
+                config_path=config_path,
+            ).providers.github_copilot.proxy or None
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc), status=400) from exc
         oauth_flows.clear(spec.name)
-        copilot_flow = GitHubCopilotOAuthFlow()
+        copilot_flow = GitHubCopilotOAuthFlow(proxy=proxy)
         flow_id = secrets.token_urlsafe(24)
         # Own the flow before network I/O, so logout/replacement also cancels a
         # login that is still waiting for GitHub to return its device prompt.

@@ -15,6 +15,56 @@ async function chooseProviderToConfigure(label: string) {
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
 
+  it.each([
+    ["kimi_coding", "Kimi Coding", "api_key"],
+    ["azure_openai", "Azure OpenAI", "api_key"],
+    ["bedrock", "Amazon Bedrock", "api_key"],
+    ["assemblyai", "AssemblyAI", "api_key"],
+    ["github_copilot", "GitHub Copilot", "oauth"],
+  ] as const)("saves and clears the Advanced proxy for %s", async (name, label, authType) => {
+    const payload = settingsPayload();
+    payload.providers = [{
+      name, label, configured: false, auth_type: authType,
+      api_key_required: false, proxy: "http://127.0.0.1:7000",
+      api_base: authType === "oauth" ? null : "https://api.example.test/v1",
+      advanced_fields: ["proxy"], oauth_login_supported: true,
+    }];
+    requestMutationMock.mockImplementation(async (action, values) => {
+      if (action === "settings.provider.update") {
+        payload.providers = payload.providers.map((provider) => ({
+          ...provider, proxy: values.proxy || null,
+        }));
+      }
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await chooseProviderToConfigure(label);
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByLabelText("Network proxy")).toHaveValue("http://127.0.0.1:7000");
+    fireEvent.change(screen.getByLabelText("Network proxy"), {
+      target: { value: " http://127.0.0.1:7890 " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.update", expect.objectContaining({
+        provider: name, proxy: "http://127.0.0.1:7890",
+      }), 20_000,
+    ));
+    if (authType !== "oauth") {
+      await chooseProviderToConfigure(label);
+      fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    }
+    await waitFor(() => expect(screen.getByLabelText("Network proxy")).toHaveValue(
+      "http://127.0.0.1:7890",
+    ));
+    fireEvent.change(screen.getByLabelText("Network proxy"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.update", expect.objectContaining({ provider: name, proxy: "" }), 20_000,
+    ));
+    expect(payload.providers[0].proxy).toBeNull();
+  });
+
   it("searches provider aliases and configures in the same dialog without adding an unsaved row", async () => {
     const user = userEvent.setup();
     const payload = settingsPayload();
