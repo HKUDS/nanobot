@@ -1,5 +1,6 @@
-"""Shared helpers for provider backends that implement the OpenAI Responses protocol."""
+"""Shared backend for providers that implement the OpenAI Responses protocol."""
 
+from nanobot.providers.openai_responses.backend import ResponsesBackend, ResponsesWebSocketOptions
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
     convert_tools,
@@ -30,6 +31,8 @@ from nanobot.providers.openai_responses.state import (
 )
 
 __all__ = [
+    "ResponsesBackend",
+    "ResponsesWebSocketOptions",
     "convert_messages",
     "convert_tools",
     "convert_user_message",

@@ -6,7 +6,7 @@ import asyncio
 import base64
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -500,7 +500,7 @@ async def test_codex_inline_compaction_starts_next_request_with_compacted_state(
 
 async def test_codex_idle_socket_eviction_preserves_replay(codex_peer, monkeypatch):
     provider, server, _ = codex_peer
-    monkeypatch.setattr("nanobot.providers.openai_codex_provider._MAX_WEBSOCKET_SESSIONS", 1)
+    provider._responses.websocket_options = replace(provider._responses.websocket_options, max_sessions=1)
     first = await provider.chat(_messages(), provider_context=_context())
     await provider.chat(_messages("other"), provider_context=_context(session="session-b"))
     await asyncio.wait_for(server.peers[0].closed.wait(), 2)

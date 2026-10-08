@@ -1,4 +1,4 @@
-"""Connection-local continuation for Codex's Responses WebSocket protocol."""
+"""Connection-local continuation for the Responses WebSocket protocol."""
 
 # pyright: reportPrivateUsage=false
 
@@ -18,14 +18,8 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus, ProxyError
 from websockets.protocol import State
 
 from nanobot.providers.base import LLMProvider, LLMResponse, resolve_stream_idle_timeout_s
-from nanobot.providers.openai_responses import (
-    ResponsesStreamCapture,
-    build_responses_state,
-    consume_responses_events,
-    is_replayable_finish_reason,
-)
-
-_WEBSOCKET_BETA = "responses_websockets=2026-02-06"
+from nanobot.providers.openai_responses.backend import ResponsesBackend
+from nanobot.providers.openai_responses.parsing import ResponsesStreamCapture
 
 
 def _fingerprint(value: object) -> bytes:
@@ -51,7 +45,7 @@ def _error_token(value: object) -> str | None:
     return None
 
 
-class CodexWebSocketError(RuntimeError):
+class ResponsesWebSocketError(RuntimeError):
     """Bounded API error metadata without upstream prompt or credential echoes."""
 
     def __init__(self, event: dict[str, Any], status_code: int | None = None):
@@ -93,15 +87,17 @@ class CodexWebSocketError(RuntimeError):
             for marker in ("context_management", "compact_threshold", "compaction_trigger")
         )
         super().__init__(
-            f"HTTP {self.status_code}: Codex WebSocket request failed"
-            if self.status_code is not None else "Codex WebSocket request failed"
+            f"HTTP {self.status_code}: Responses WebSocket request failed"
+            if self.status_code is not None else "Responses WebSocket request failed"
         )
 
 
-class CodexWebSocketSession:
+class ResponsesWebSocketSession:
     """Serialize requests and retain continuation only on their authenticated socket."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, beta_header: str | None = None) -> None:
+        self.active_requests = 0
+        self._beta_header = beta_header
         self.lock = asyncio.Lock()
         self._connection: ClientConnection | None = None
         self._auth_fingerprint: bytes | None = None
@@ -126,6 +122,7 @@ class CodexWebSocketSession:
         headers: dict[str, str],
         body: dict[str, Any],
         *,
+        provider: str,
         verify: ssl.SSLContext,
         proxy: str | None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
@@ -134,7 +131,7 @@ class CodexWebSocketSession:
     ) -> LLMResponse | None:
         """Return None when this session must use the HTTP transport."""
         async with self.lock:
-            auth_fingerprint = _fingerprint([url, headers, proxy])
+            auth_fingerprint = _fingerprint([provider, url, headers, proxy])
             if auth_fingerprint != self._auth_fingerprint:
                 await self.aclose()
                 self._auth_fingerprint = auth_fingerprint
@@ -149,7 +146,8 @@ class CodexWebSocketSession:
                             key: value for key, value in headers.items()
                             if key.lower() not in {"accept", "content-type", "user-agent", "openai-beta"}
                         }
-                        ws_headers["OpenAI-Beta"] = _WEBSOCKET_BETA
+                        if self._beta_header is not None:
+                            ws_headers["OpenAI-Beta"] = self._beta_header
                         try:
                             self._connection = await connect(
                                 url.replace("https://", "wss://", 1).replace("http://", "ws://", 1),
@@ -168,7 +166,7 @@ class CodexWebSocketSession:
                                     raw: object = json.loads(exc.response.body)
                                 except ValueError:
                                     raw = {}
-                                raise CodexWebSocketError(
+                                raise ResponsesWebSocketError(
                                     {
                                         **(cast(dict[str, Any], raw) if isinstance(raw, dict) else {}),
                                         "headers": dict(exc.response.headers.raw_items()),
@@ -180,7 +178,7 @@ class CodexWebSocketSession:
                         except (OSError, TimeoutError, ProxyError, ImportError):
                             # No model input was sent. The proxy may support HTTP but reject upgrades.
                             self._http_only = True
-                            logger.info("Codex WebSocket connection unavailable; using HTTP for this session")
+                            logger.info("Responses WebSocket connection unavailable; using HTTP for this session")
                             return None
 
                     input_items = cast(list[dict[str, Any]], body["input"])
@@ -213,15 +211,14 @@ class CodexWebSocketSession:
 
                     try:
                         await self._connection.send(json.dumps(payload, ensure_ascii=False))
-                        content, tool_calls, finish_reason, usage, reasoning = await consume_responses_events(
-                            self._events(self._connection),
+                        result = await ResponsesBackend.consume(
+                            self._events(self._connection), provider=provider, body=body,
                             on_content_delta=on_content_delta,
                             on_tool_call_delta=on_tool_call_delta,
-                            on_reasoning_delta=on_thinking_delta,
-                            on_response_event=observe_event,
-                            capture=capture,
+                            on_thinking_delta=on_thinking_delta,
+                            on_response_event=observe_event, capture=capture,
                         )
-                    except CodexWebSocketError as exc:
+                    except ResponsesWebSocketError as exc:
                         if attempt == 0 and not response_started and (
                             (can_continue and exc.error_code == "previous_response_not_found")
                             or exc.error_code == "websocket_connection_limit_reached"
@@ -230,20 +227,9 @@ class CodexWebSocketSession:
                             continue
                         raise
                     except (ConnectionClosed, OSError) as exc:
-                        raise ConnectionError("Codex WebSocket connection interrupted") from exc
-                    result = LLMResponse(
-                        content=content, tool_calls=tool_calls, finish_reason=finish_reason,
-                        usage=usage, reasoning_content=reasoning,
-                    )
+                        raise ConnectionError("Responses WebSocket connection interrupted") from exc
                     response_id = capture.response.get("id") if capture.response is not None else None
-                    if capture.completed and is_replayable_finish_reason(finish_reason):
-                        result.provider_state = build_responses_state(
-                            provider=f"openai_codex:{url.rstrip('/')}",
-                            model=str(body.get("model") or ""),
-                            input_items=input_items,
-                            output_items=capture.output_items,
-                            usage=usage,
-                        )
+                    if result.provider_state is not None:
                         self._properties_fingerprint = properties_fingerprint
                         items = [*input_items, *capture.output_items]
                         self._prefix_length = len(items)
@@ -256,21 +242,21 @@ class CodexWebSocketSession:
                 # An interrupted response must not leave events queued for the next caller.
                 await self.aclose()
                 raise
-        raise ConnectionError("Codex WebSocket continuation could not be recovered")
+        raise ConnectionError("Responses WebSocket continuation could not be recovered")
 
     async def _events(self, connection: ClientConnection) -> AsyncIterator[dict[str, Any]]:
         while True:
             try:
                 data = await asyncio.wait_for(connection.recv(), resolve_stream_idle_timeout_s())
             except (ConnectionClosed, OSError) as exc:
-                raise ConnectionError("Codex WebSocket connection closed before completion") from exc
+                raise ConnectionError("Responses WebSocket connection closed before completion") from exc
             try:
                 raw: object = json.loads(data)
             except ValueError:
-                raise ConnectionError("Invalid Codex WebSocket response") from None
+                raise ConnectionError("Invalid Responses WebSocket response") from None
             if not isinstance(raw, dict):
-                raise ConnectionError("Invalid Codex WebSocket response")
+                raise ConnectionError("Invalid Responses WebSocket response")
             event = cast(dict[str, Any], raw)
             if event.get("type") in {"error", "response.failed"}:
-                raise CodexWebSocketError(event)
+                raise ResponsesWebSocketError(event)
             yield event
