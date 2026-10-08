@@ -211,6 +211,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   const completionRequest = useRef(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [keyboardInteraction, setKeyboardInteraction] = useState(false);
+  const openedWithKeyboard = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const optionsId = useId();
@@ -562,7 +563,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
       <Dialog open={open} onOpenChange={setOpen}>
         <WorkspacePickerTooltip label={`${t("workspace.picker.switchDirectory")}\n${displayedScope?.project_path ?? ""}`}>
           <DialogTrigger asChild>
-            <button ref={triggerRef} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.055] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
+            <button ref={triggerRef} onClick={event => { openedWithKeyboard.current = event.detail === 0; }} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.055] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
               <WorkspaceIcon className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">{projectLabel}</span>
             </button>
@@ -580,7 +581,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             else if (event.altKey && event.key === "ArrowUp" && parentPath) { event.preventDefault(); navigate(parentPath); }
           }}
           onEscapeKeyDown={event => { if (editingPath) { event.preventDefault(); cancelPathEditing(); } }}
-          onCloseAutoFocus={event => { if (!keyboardInteraction) event.preventDefault(); }}>
+          onCloseAutoFocus={event => { if (!openedWithKeyboard.current) event.preventDefault(); }}>
           <DialogTitle className="sr-only">{t("workspace.picker.title")}</DialogTitle>
           <DialogDescription className="sr-only">{t("workspace.picker.description")}</DialogDescription>
           <div className="flex shrink-0 items-center gap-1 bg-muted px-[var(--picker-toolbar-inset)] pt-[var(--picker-toolbar-inset)] pb-3">

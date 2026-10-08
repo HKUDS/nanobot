@@ -21,6 +21,26 @@ const directory: WorkspaceDirectoriesPayload = {
 };
 
 describe("Workspace project picker", () => {
+  it.each(["pointer", "keyboard"])("restores the opening focus context after %s entry and Escape", async (entry) => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={vi.fn().mockResolvedValue(directory)} onChange={onChange} />);
+    const trigger = screen.getByRole("button", { name: "Switch working directory" });
+    if (entry === "pointer") await user.click(trigger);
+    else {
+      act(() => trigger.focus());
+      await user.keyboard("{Enter}");
+    }
+    await screen.findByRole("option", { name: "/srv/workspace/alpha" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // FocusScope restores focus in a task after its exit cleanup.
+    await act(() => new Promise(resolve => setTimeout(resolve, 0)));
+    if (entry === "keyboard") expect(trigger).toHaveFocus();
+    else expect(trigger).not.toHaveFocus();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["/srv/中文 项目/src", ["/", "/srv", "/srv/中文 项目", "/srv/中文 项目/src"]],
     ["C:\\Projects\\alpha", ["C:\\", "C:\\Projects", "C:\\Projects\\alpha"]],
