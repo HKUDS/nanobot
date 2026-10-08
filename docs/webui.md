@@ -307,10 +307,6 @@ Browsing does not change the workspace until you choose **Confirm**.
 **Cancel** leaves the current workspace unchanged. Desktop uses directory
 columns with Shift+wheel horizontal scrolling; narrow screens show one folder
 at a time, with favorites and recent projects under **Saved locations**.
-Within a directory column, **Up/Down** or **k/j** move the active row,
-**Right** or **l** enters it, and **Left** or **h** opens the parent folder.
-**Enter** also enters the active directory. These shortcuts apply while a
-directory column has focus; letters typed into the path or filter stay as text.
 Directory columns settle on complete rows after scrolling.
 
 On a compatible host without the optional directory-browser capabilities,

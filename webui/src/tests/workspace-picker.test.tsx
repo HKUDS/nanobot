@@ -529,8 +529,8 @@ describe("Workspace project picker", () => {
     await screen.findByRole("option", { name: "/srv/alpine" });
     expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await user.keyboard("{ArrowDown}{ArrowDown}{Tab}");
-    expect(input).toHaveValue("/srv/alpine/");
+    await user.keyboard("{Tab}");
+    expect(input).toHaveValue("/srv/alpha/");
     expect(screen.getAllByRole("combobox")).toHaveLength(1);
     expect(screen.getAllByRole("listbox")).toHaveLength(1);
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
@@ -558,9 +558,6 @@ describe("Workspace project picker", () => {
     await user.tab();
     expect(input).not.toHaveFocus();
     expect(input).toHaveValue("/srv/alpha/");
-    await user.click(input);
-    await user.keyboard("{ArrowUp}{Tab}");
-    expect(input).toHaveValue("/srv/alpha/docs/");
   });
 
   it("ignores a Tab completion after the user changes the path", async () => {
@@ -655,25 +652,7 @@ describe("Workspace project picker", () => {
     expect(screen.queryByRole("option", { name: "/srv/other/child" })).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
-  it.each(["{ArrowLeft}", "h"])("moves to the focused column's parent with %s", async (key) => {
-    const user = userEvent.setup();
-    const browse = vi.fn((raw: string) => {
-      const path = raw.replace(/\/$/, "");
-      return Promise.resolve({ ...directory, path, parent: path.slice(0, path.lastIndexOf("/")) || "/",
-        entries: [{ name: "child", path: `${path}/child` }] });
-    });
-    render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={browse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
-    await user.click(await screen.findByRole("option", { name: "/srv/workspace/child" }));
-    await user.click(await screen.findByRole("option", { name: "/srv/workspace/child/child" }));
-    const ancestor = screen.getByRole("listbox", { name: "/srv/workspace", exact: true });
-    act(() => ancestor.focus());
-    await user.keyboard(key);
-    await screen.findByRole("listbox", { name: "/srv", exact: true });
-    expect(screen.getAllByRole("listbox")).toHaveLength(1);
-  });
-
-  it("uses jkl to browse the active column without consuming text input", async () => {
+  it("leaves directory selection unchanged for hjkl and arrow keys", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const browse = vi.fn((raw: string, query: string) => {
@@ -685,26 +664,27 @@ describe("Workspace project picker", () => {
     const trigger = screen.getByRole("button", { name: "Switch working directory" });
     await user.click(trigger);
     const alpha = await screen.findByRole("option", { name: "/srv/workspace/alpha" });
-    const beta = screen.getByRole("option", { name: "/srv/workspace/beta" });
     const column = screen.getByRole("listbox");
     act(() => column.focus());
-    await user.keyboard("jjk");
-    expect(column).toHaveAttribute("aria-activedescendant", alpha.id);
+    const requests = browse.mock.calls.length;
+    await user.keyboard("hjkl{ArrowDown}{ArrowUp}{ArrowLeft}{ArrowRight}{Alt>}{ArrowLeft}{ArrowRight}{ArrowUp}{/Alt}");
+    expect(column).not.toHaveAttribute("aria-activedescendant");
+    expect(column).toHaveFocus();
     expect(alpha).not.toHaveFocus();
-    expect(beta).not.toHaveFocus();
-    await user.keyboard("l");
-    await screen.findByRole("listbox", { name: "/srv/workspace/alpha", exact: true });
+    expect(browse).toHaveBeenCalledTimes(requests);
     expect(trigger).not.toHaveFocus();
     expect(onChange).not.toHaveBeenCalled();
     const filter = screen.getByRole("textbox", { name: "Filter this folder" });
     await user.type(filter, "hjkl");
     expect(filter).toHaveValue("hjkl");
-    expect(screen.getByRole("listbox", { name: "/srv/workspace/alpha", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "/srv/workspace", exact: true })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const editor = screen.getByRole("combobox");
     await user.clear(editor);
     await user.type(editor, "/srv/hjkl");
+    await user.keyboard("{ArrowDown}{ArrowUp}");
     expect(editor).toHaveValue("/srv/hjkl");
+    expect(editor).not.toHaveAttribute("aria-activedescendant");
   });
 
   it("keeps ancestor columns and replaces descendants when another folder is opened", async () => {

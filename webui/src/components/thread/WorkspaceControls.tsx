@@ -62,9 +62,6 @@ function PickerToolButton({ label, disabled, onClick, children }: {
 
 const DIRECTORY_ROW_HEIGHT = 44;
 const DIRECTORY_OVERSCAN = 4;
-const DIRECTORY_NAVIGATION_KEYS: Record<string, string> = {
-  h: "ArrowLeft", j: "ArrowDown", k: "ArrowUp", l: "ArrowRight",
-};
 
 function WorkspaceDirectoryColumn({ options, activeIndex, selectedPath, initialScrollTop, visitRevision, renderOption, children, style, className, ...props }: {
   options: PickerOption[];
@@ -502,7 +499,6 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     else if (selectedIndex + 1 < projects.length && sameWorkspacePath(projects[selectedIndex + 1].path, hoveredLocation)) savedSelectionJoin = "bottom";
   }
   const breadcrumbs = workspaceBreadcrumbs(currentPath);
-  const parentPath = directory?.parent;
   const hostName = catalog?.host?.name ?? directory?.host;
 
   useLayoutEffect(() => {
@@ -529,9 +525,6 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   async function completePath(keepEditing = true) {
     if (!absoluteDraft) { setPathError(t("workspace.dialog.absolutePathRequired")); return; }
     const request = workspacePathCompletionQuery(pathDraft) ?? { path: basePath, query: "" };
-    const option = activeOptions[activeOption];
-    // Only an explicit keyboard selection may enter a child before resolving the address.
-    if (highlightActive && option && option.kind !== "manual") { navigate(option.path, undefined, keepEditing); return; }
     if (!directoryCache || !canBrowse) return;
     const id = ++completionRequest.current;
     const session = pickerSession.current;
@@ -579,16 +572,13 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             </button>
           </DialogTrigger>
         </WorkspacePickerTooltip>
-        <DialogContent showCloseButton={false} layoutAnchor={layoutAnchor} centerInLayoutAnchor className="flex h-[min(37rem,calc(100%-2rem))] max-w-5xl flex-col gap-0 overflow-hidden p-0 text-[13px] leading-5 [--picker-sidebar-width:15rem] [--picker-toolbar-inset:0.75rem] [--picker-field-radius:calc(var(--radius-modal)_-_var(--picker-toolbar-inset))] sm:[--picker-toolbar-inset:1rem] dark:bg-background"
+        <DialogContent showCloseButton={false} layoutAnchor={layoutAnchor} centerInLayoutAnchor className="flex h-[min(37rem,calc(100%-2rem))] max-w-5xl flex-col gap-0 overflow-hidden p-0 text-[13px] leading-5 [--picker-sidebar-width:11rem] [--picker-toolbar-inset:0.75rem] [--picker-field-radius:calc(var(--radius-modal)_-_var(--picker-toolbar-inset))] sm:[--picker-toolbar-inset:1rem] dark:bg-background"
           onOpenAutoFocus={event => { event.preventDefault(); if (canBrowse) focusDirectory(); else inputRef.current?.focus(); }}
           onPointerDownCapture={() => setKeyboardInteraction(false)}
           onKeyDownCapture={event => {
             if (!["Alt", "Control", "Meta", "Shift"].includes(event.key)) setKeyboardInteraction(true);
             if (!canBrowse || pickingFolder || event.nativeEvent.isComposing) return;
             if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "g") { event.preventDefault(); editPath(); }
-            else if (event.altKey && event.key === "ArrowLeft") { event.preventDefault(); moveHistory(-1); }
-            else if (event.altKey && event.key === "ArrowRight") { event.preventDefault(); moveHistory(1); }
-            else if (event.altKey && event.key === "ArrowUp" && parentPath) { event.preventDefault(); navigate(parentPath); }
           }}
           onEscapeKeyDown={event => { if (editingPath) { event.preventDefault(); cancelPathEditing(); } }}
           onCloseAutoFocus={event => { if (!openedWithKeyboard.current) event.preventDefault(); }}>
@@ -604,11 +594,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             <div className="flex min-w-0 flex-1 items-center rounded-[var(--picker-field-radius)] bg-background/80">
             {editingPath || !canBrowse ? <Input ref={inputRef} role="combobox" aria-expanded={open} aria-controls={`${optionsId}-${activeColumn}`} aria-activedescendant={highlightActive && activeOptions.length ? `${optionsId}-${activeColumn}-${activeOption}` : undefined} aria-autocomplete="list" aria-busy={loading} value={pathDraft} disabled={disabled || pickingFolder} onChange={event => changeDraft(event.target.value)} onBlur={event => { if (canBrowse && !keyboardInteraction && event.relatedTarget !== confirmRef.current) cancelPathEditing(false); }} placeholder={t("workspace.dialog.manual")} aria-label={t("workspace.dialog.manual")} aria-invalid={displayedError ? true : undefined} aria-describedby={displayedError ? errorId : undefined} className="h-9 min-w-0 flex-1 rounded-[var(--picker-field-radius)] border-transparent shadow-none focus-visible:ring-0 text-[16px] leading-5 sm:text-[13px]" onKeyDown={event => {
               if (event.nativeEvent.isComposing) return;
-              if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !event.altKey && activeOptions.length) {
-                event.preventDefault();
-                const next = highlightActive ? (activeOption + (event.key === "ArrowDown" ? 1 : -1) + activeOptions.length) % activeOptions.length : event.key === "ArrowDown" ? 0 : activeOptions.length - 1;
-                setHighlightActive(true); setActiveIndex(next);
-              } else if (event.key === "Tab" && !event.shiftKey && canBrowse && absoluteDraft && (highlightActive || !/[\\/]$/.test(pathDraft))) {
+              if (event.key === "Tab" && !event.shiftKey && canBrowse && absoluteDraft && !/[\\/]$/.test(pathDraft)) {
                 event.preventDefault(); void completePath();
               } else if (event.key === "Enter") {
                 event.preventDefault();
@@ -650,7 +636,6 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                           sameWorkspacePath(currentPath, project.path) && "font-medium text-foreground group-hover/workspace-saved-row:bg-transparent dark:group-hover/workspace-saved-row:bg-transparent",
                           sameWorkspacePath(hoveredLocation, project.path) && (savedSelectionJoin === "top" ? "rounded-b-none" : savedSelectionJoin === "bottom" ? "rounded-t-none" : undefined))}>
                         <span className="min-w-0 flex-1 truncate">{projectNameFromPath(project.path)}</span>
-                        {sameWorkspacePath(project.path, scope?.project_path ?? defaultScope.project_path) && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                       </button>
                     {favoriteButton(project.path)}
                   </div>)}
@@ -666,14 +651,13 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                 onFocus={event => { if (event.target === event.currentTarget) { setActiveColumn(columnIndex); setActiveIndex(0); } }}
                 onKeyDown={event => {
                   if (event.target !== event.currentTarget || event.altKey || event.metaKey || event.ctrlKey || pickingFolder) return;
-                  const key = DIRECTORY_NAVIGATION_KEYS[event.key] ?? event.key;
                   const count = column.options.length;
-                  if (count && ["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) {
+                  if (count && (event.key === "Home" || event.key === "End")) {
                     event.preventDefault(); setHighlightActive(true); setActiveColumn(columnIndex);
-                    setActiveIndex(key === "Home" ? 0 : key === "End" ? count - 1 : highlightActive ? (activeIndex + (key === "ArrowDown" ? 1 : -1) + count) % count : key === "ArrowDown" ? 0 : count - 1);
-                  } else if (count && (key === "Enter" || key === "ArrowRight")) {
+                    setActiveIndex(event.key === "Home" ? 0 : count - 1);
+                  } else if (count && event.key === "Enter") {
                     event.preventDefault(); activate(column.options[Math.min(activeIndex, count - 1)], columnIndex);
-                  } else if (key === "ArrowLeft" && column.parent) { event.preventDefault(); navigate(column.parent); }
+                  }
                 }}
                 renderOption={(option, index) => <div role="presentation" className={cn("workspace-picker-row", SIDEBAR_SELECTION_ITEM_CLASS)} data-keyboard-active={highlightActive && columnIndex === activeColumn && index === activeOption ? "" : undefined}>
                   <button id={`${optionsId}-${columnIndex}-${index}`} type="button" role="option" tabIndex={-1} aria-label={option.path} aria-selected={sameWorkspacePath(column.selectedPath, option.path)} aria-posinset={index + 1} aria-setsize={column.options.length} disabled={pickingFolder}
