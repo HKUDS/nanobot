@@ -344,24 +344,25 @@ async def test_binary_upload_rejects_changed_body_framing(remote, encoded):
 
 
 async def test_stalled_binary_upload_is_bounded_and_retryable(remote, monkeypatch):
-    monkeypatch.setattr("nanobot.webui.remote_proxy.UPLOAD_IDLE_TIMEOUT_SECONDS", .1)
     remote.state.binary_upload = True
     issued = await bootstrap(remote)
     async with connect(issued["ws_url"] + "?token=" + issued["token"], proxy=None) as ws:
         capability = json.loads(await ws.recv())["upload"]
-        reader, writer = await asyncio.open_connection("127.0.0.1", remote.proxy.port)
-        try:
-            writer.write((
-                f"POST /api/attachments HTTP/1.1\r\nHost: 127.0.0.1:{remote.proxy.port}\r\n"
-                f"Authorization: Bearer {capability['token']}\r\nContent-Type: image/png\r\n"
-                "Content-Length: 2\r\nConnection: close\r\n\r\nx"
-            ).encode())
-            await writer.drain()
-            response = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2)
-            assert b"502 Bad Gateway" in response
-        finally:
-            writer.close()
-            await writer.wait_closed()
+        with monkeypatch.context() as stalled_timeout:
+            stalled_timeout.setattr("nanobot.webui.remote_proxy.UPLOAD_IDLE_TIMEOUT_SECONDS", .1)
+            reader, writer = await asyncio.open_connection("127.0.0.1", remote.proxy.port)
+            try:
+                writer.write((
+                    f"POST /api/attachments HTTP/1.1\r\nHost: 127.0.0.1:{remote.proxy.port}\r\n"
+                    f"Authorization: Bearer {capability['token']}\r\nContent-Type: image/png\r\n"
+                    "Content-Length: 2\r\nConnection: close\r\n\r\nx"
+                ).encode())
+                await writer.drain()
+                response = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2)
+                assert b"502 Bad Gateway" in response
+            finally:
+                writer.close()
+                await writer.wait_closed()
         response = await remote.client.post(remote.proxy.origin + capability["path"],
             content=b"xx", headers={"Authorization": "Bearer " + capability["token"],
                                     "Content-Type": "image/png"})
