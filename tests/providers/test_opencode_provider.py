@@ -154,6 +154,19 @@ def test_opencode_affinity_headers_enabled():
     assert relayed._opencode_affinity_headers(ctx) == expected
 
 
+def test_opencode_go_contributor_models_use_responses_api() -> None:
+    """The gateway's /chat/completions route is broken for muse-spark contributor models.
+
+    See HKUDS/nanobot#5896.
+    """
+    provider = _affinity_provider("opencode_go")
+
+    assert provider._should_use_responses_api("opencode-go/muse-spark-1.3-contributor", None) is True
+    assert provider._should_use_responses_api("muse-spark-1.2-contributor", None) is True
+    # Models without Responses support on the same gateway keep using chat completions.
+    assert provider._should_use_responses_api("opencode-go/o3", None) is False
+
+
 def test_opencode_affinity_headers_disabled():
     assert _affinity_provider("opencode")._opencode_affinity_headers(ProviderCallContext()) is None
     plain = OpenAICompatProvider(api_key=None, default_model="gpt-4o", spec=find_by_name("openai"))
