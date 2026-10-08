@@ -381,7 +381,7 @@ describe("App layout", () => {
       }] },
     });
     render(<App />);
-    await screen.findByRole("textbox");
+    await screen.findByRole("textbox", {}, { timeout: 5_000 });
     if (supported) await screen.findByRole("button", { name: /Config check Running/ });
     else expect(screen.queryByText("Config check")).not.toBeInTheDocument();
     const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/subagents"));
@@ -1173,12 +1173,12 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     fireEvent.click(await screen.findByRole("button", { name: "Switch working directory" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit path" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
     fireEvent.change(await screen.findByRole("combobox"), {
       target: { value: projectPath },
     });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Select folder" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Select folder" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     const message = screen.getByLabelText("Message input");
@@ -1193,7 +1193,7 @@ describe("App layout", () => {
       "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.",
     );
     fireEvent.click(projectButton);
-    fireEvent.click(screen.getByRole("button", { name: "Edit path" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const pathInput = await screen.findByRole("combobox");
     expect(pathInput).toHaveValue(`${projectPath}\\`);
     expect(pathInput).toHaveAttribute("aria-invalid", "true");

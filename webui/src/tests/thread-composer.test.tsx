@@ -1500,15 +1500,15 @@ describe("ThreadComposer", () => {
     expect(await screen.findByRole("button", { name: "/Users/test/.nanobot/workspace" })).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Edit path" }));
+    await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "relative/project" } });
     expect(screen.queryByRole("option", { name: "relative/project" })).not.toBeInTheDocument();
     expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
 
     fireEvent.change(input, { target: { value: "/Users/test/project-alpha" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Select folder" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Select folder" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
       project_path: "/Users/test/project-alpha",
@@ -1518,11 +1518,11 @@ describe("ThreadComposer", () => {
     }));
 
     await user.click(screen.getByRole("button", { name: "Switch working directory" }));
-    await user.click(screen.getByRole("button", { name: "Edit path" }));
+    await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const reopenedInput = await screen.findByRole("combobox");
     fireEvent.change(reopenedInput, { target: { value: "~/Pictures/Photos" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Select folder" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Select folder" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(expect.objectContaining({
       project_path: "/Users/test/Pictures/Photos",
@@ -1563,7 +1563,7 @@ describe("ThreadComposer", () => {
     await user.click(screen.getByRole("button", { name: "Switch working directory" }));
 
     fireEvent.change(await screen.findByRole("combobox"), { target: { value: selectedPath } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Select folder" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
     await waitFor(() => expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({ project_path: selectedPath })));
   });
@@ -1676,9 +1676,9 @@ describe("ThreadComposer", () => {
     await user.click(screen.getByRole("button", { name: "Switch working directory" }));
     expect(screen.getByRole("dialog", { name: "Choose a working folder" })).toBeInTheDocument();
     await user.click(await screen.findByRole("option", { name: project.path }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Select folder" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
     expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Select folder" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose a working folder" })).not.toBeInTheDocument());
     expect(onResolveWorkspaceProject).toHaveBeenCalledWith(project.path);
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
@@ -1721,8 +1721,8 @@ describe("ThreadComposer", () => {
     fireEvent.change(screen.getByRole("combobox"), {
       target: { value: "/srv/nas-project" },
     });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Select folder" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Select folder" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
       project_path: "/srv/nas-project",

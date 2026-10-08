@@ -1,7 +1,7 @@
 import { FullAccessIcon, WorkspaceIcon, RestrictedAccessIcon } from "@/components/icons/product-icons";
 import type { HTMLAttributes, ReactElement } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, FolderSearch, Pencil, Search, Star, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronRight, FolderSearch, History, Search, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { floatingItemClassName, floatingItemFocusClassName } from "@/components/
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { SidebarSelectionHighlight, SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
 import type { WorkspaceScopePayload, ProjectDirectory, WorkspaceDirectoriesPayload, WorkspacesPayload } from "@/lib/types";
 import { createWorkspaceDirectoryCache } from "@/lib/workspace-directory-cache";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -33,6 +34,13 @@ function WorkspaceFavoriteButton({ path, pinned, busy, onToggle }: {
 
 type PickerOption = ProjectDirectory & { kind: "directory" | "manual" };
 type PickerColumn = { path: string; parent: string | null; options: PickerOption[]; selectedPath: string | null; hidden: boolean };
+type PickerAncestor = Pick<PickerColumn, "path" | "parent" | "selectedPath">;
+type PickerVisit = { path: string; ancestors: PickerAncestor[]; filter: string; scrollLeft: number | null; scrollTops: number[] };
+type PickerHistory = { visits: PickerVisit[]; index: number; previous: PickerVisit | null; revision: number };
+
+function directoryVisit(path: string, ancestors: PickerAncestor[] = [], scrollTops: number[] = []): PickerVisit {
+  return { path, ancestors: ancestors.map(({ path, parent, selectedPath }) => ({ path, parent, selectedPath })), filter: "", scrollLeft: null, scrollTops };
+}
 
 function WorkspacePickerTooltip({ label, children }: { label: string; children: ReactElement }) {
   return (
@@ -55,9 +63,12 @@ function PickerToolButton({ label, disabled, onClick, children }: {
 const DIRECTORY_ROW_HEIGHT = 44;
 const DIRECTORY_OVERSCAN = 4;
 
-function WorkspaceDirectoryColumn({ options, activeIndex, renderOption, children, ...props }: {
+function WorkspaceDirectoryColumn({ options, activeIndex, selectedPath, initialScrollTop, visitRevision, renderOption, children, ...props }: {
   options: PickerOption[];
   activeIndex: number | null;
+  selectedPath: string | null;
+  initialScrollTop: number;
+  visitRevision: number;
   renderOption: (option: PickerOption, index: number) => ReactElement;
 } & HTMLAttributes<HTMLDivElement>) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -75,9 +86,9 @@ function WorkspaceDirectoryColumn({ options, activeIndex, renderOption, children
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    viewport.scrollTop = 0;
-    setFirstRow(0);
-  }, [options]);
+    viewport.scrollTop = initialScrollTop;
+    setFirstRow(Math.floor(viewport.scrollTop / DIRECTORY_ROW_HEIGHT));
+  }, [options, initialScrollTop, visitRevision]);
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || activeIndex === null) return;
@@ -91,14 +102,15 @@ function WorkspaceDirectoryColumn({ options, activeIndex, renderOption, children
   const end = Math.min(options.length, firstRow + visibleRows + DIRECTORY_OVERSCAN);
   return (
     <div {...props} ref={viewportRef} onScroll={event => setFirstRow(Math.floor(event.currentTarget.scrollTop / DIRECTORY_ROW_HEIGHT))}>
-      <div role="presentation" className="relative" style={{ height: options.length * DIRECTORY_ROW_HEIGHT }}>
+      <SidebarSelectionHighlight role="presentation" className="relative" style={{ height: options.length * DIRECTORY_ROW_HEIGHT }}
+        scope="workspace-directory" activeId={selectedPath} targetSelector='[aria-selected="true"]'>
         {options.slice(start, end).map((option, offset) => {
           const index = start + offset;
           return <div key={`${option.kind}-${option.path}`} role="presentation" className="absolute inset-x-0" style={{ top: index * DIRECTORY_ROW_HEIGHT }}>
             {renderOption(option, index)}
           </div>;
         })}
-      </div>
+      </SidebarSelectionHighlight>
       {children}
     </div>
   );
@@ -135,12 +147,10 @@ function WorkspaceDirectorySkeleton() {
 function WorkspacePickerPath({ path }: { path: string }) {
   const parts = workspacePathCompletionQuery(path);
   return (
-    <WorkspacePickerTooltip label={path}>
-      <span className="flex min-w-0 flex-1 text-[13px]">
-        <span className="min-w-0 truncate">{parts?.path ?? path}</span>
-        {parts?.query && <span className="max-w-[65%] shrink-0 truncate">{parts.query}</span>}
-      </span>
-    </WorkspacePickerTooltip>
+    <span className="flex min-w-0 flex-1 text-[13px]">
+      <span className="min-w-0 truncate">{parts?.path ?? path}</span>
+      {parts?.query && <span className="max-w-[65%] shrink-0 truncate">{parts.query}</span>}
+    </span>
   );
 }
 
@@ -172,15 +182,20 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   const [open, setOpen] = useState(false);
   const [pathDraft, setPathDraft] = useState("");
   const [editingPath, setEditingPath] = useState(false);
-  const [filterQuery, setFilterQuery] = useState("");
   const [showLocations, setShowLocations] = useState(false);
-  const [history, setHistory] = useState<{ paths: string[]; index: number }>({ paths: [], index: 0 });
+  const [hoveredLocation, setHoveredLocation] = useState<string | null>(null);
+  const [history, setHistory] = useState<PickerHistory>(() => ({
+    visits: [directoryVisit(scope?.project_path ?? defaultScope?.project_path ?? "")], index: 0, previous: null, revision: 0,
+  }));
+  const currentVisit = history.visits[history.index];
+  const basePath = currentVisit.path;
+  const filterQuery = currentVisit.filter;
   const compact = useMediaQuery("(max-width: 639px)");
-  const [basePath, setBasePath] = useState(scope?.project_path ?? defaultScope?.project_path ?? "");
   const [catalog, setCatalog] = useState<WorkspacesPayload | null>(null);
   const [directory, setDirectory] = useState<WorkspaceDirectoriesPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+  const [ancestorData, setAncestorData] = useState<{ hidden: boolean; listings: WorkspaceDirectoriesPayload[] }>({ hidden: false, listings: [] });
   const [revision, setRevision] = useState(0);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   const [pathError, setPathError] = useState<string | null>(null);
@@ -189,7 +204,6 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   const [activeIndex, setActiveIndex] = useState(0);
   const [activeColumn, setActiveColumn] = useState(0);
   const [highlightActive, setHighlightActive] = useState(false);
-  const [previousColumns, setPreviousColumns] = useState<PickerColumn[]>([]);
   const columnsRef = useRef<HTMLDivElement | null>(null);
   const breadcrumbRef = useRef<HTMLElement | null>(null);
   const attachBreadcrumb = useCallback((element: HTMLElement | null) => {
@@ -203,12 +217,12 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     setColumnsElement(element);
   }, []);
   const [visibleColumns, setVisibleColumns] = useState(3);
-  const columnCount = Math.min(visibleColumns, previousColumns.length + 1);
   const pickerSession = useRef(0);
   const completionRequest = useRef(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const keyboardInteraction = useRef(false);
+  const [keyboardInteraction, setKeyboardInteraction] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
   const optionsId = useId();
   const errorId = useId();
   const currentProjectScope = selectedProjectScope(scope, defaultScope);
@@ -217,24 +231,31 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   const visible = isHero && !!defaultScope && !!onChange && controls?.can_change_project !== false;
   const canBrowse = controls?.can_browse_directories === true && !!onBrowseDirectories;
   const directoryCache = useMemo(() => onBrowseDirectories ? createWorkspaceDirectoryCache(onBrowseDirectories) : null, [onBrowseDirectories]);
+  const previousColumns = useMemo<PickerColumn[]>(() => currentVisit.ancestors.map(ancestor => {
+    const listing = directoryCache?.peek(ancestor.path, "", showHidden, true)
+      ?? (ancestorData.hidden === showHidden ? ancestorData.listings.find(listing => sameWorkspacePath(listing.path, ancestor.path)) : undefined);
+    return { ...ancestor, hidden: showHidden, options: listing?.entries.map(entry => ({ ...entry, kind: "directory" as const })) ?? [] };
+  }), [currentVisit.ancestors, directoryCache, showHidden, ancestorData]);
   const absoluteDraft = isAbsoluteWorkspacePath(pathDraft);
   const requestedPath = editingPath && absoluteDraft ? pathDraft.trim() : basePath;
+  const previewingPath = editingPath && !sameWorkspacePath(pathDraft.trim(), basePath);
+  const displayedAncestors = previewingPath ? [] : previousColumns;
+  const currentColumnIndex = displayedAncestors.length;
+  const columnCount = Math.min(visibleColumns, currentColumnIndex + 1);
   const folderQuery = editingPath ? "" : filterQuery.trim();
 
   useEffect(() => {
     pickerSession.current += 1;
     completionRequest.current += 1;
     if (!open) return;
-    setPreviousColumns([]);
     setActiveColumn(0);
     setHighlightActive(false);
     const initialPath = scope?.project_path ?? defaultScope?.project_path ?? "";
     setPathDraft(canBrowse ? workspaceDirectoryPrefix(initialPath) : currentProjectScope?.project_path ?? "");
-    setBasePath(initialPath);
-    setHistory({ paths: [initialPath], index: 0 });
+    setHistory(current => ({ visits: [directoryVisit(initialPath)], index: 0, previous: null, revision: current.revision + 1 }));
     setEditingPath(false);
-    setFilterQuery("");
     setShowLocations(false);
+    setHoveredLocation(null);
     setDirectory(null);
     setActiveIndex(0);
     setPathError(null);
@@ -284,19 +305,18 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     return () => window.cancelAnimationFrame(frame);
   }, [open, pickingFolder, pathError, editingPath, canBrowse]);
 
-  const ancestorPaths = JSON.stringify(previousColumns.filter(column => column.hidden !== showHidden).map(column => column.path));
+  const ancestorPaths = JSON.stringify(currentVisit.ancestors.map(column => column.path));
   useEffect(() => {
     if (!open || !canBrowse || !directoryCache) return;
     const paths: string[] = JSON.parse(ancestorPaths);
-    if (!paths.length) return;
+    if (!paths.length) {
+      setAncestorData(current => current.listings.length ? { hidden: showHidden, listings: [] } : current);
+      return;
+    }
     let active = true;
     Promise.all(paths.map(path => directoryCache.load(path, "", showHidden, true))).then(results => {
       if (!active) return;
-      setPreviousColumns(columns => columns.map(column => {
-        const result = results.find(result => sameWorkspacePath(column.path, result.path));
-        if (!result) return column;
-        return { ...column, hidden: showHidden, options: result.entries.map(entry => ({ ...entry, kind: "directory" as const })) };
-      }));
+      setAncestorData({ hidden: showHidden, listings: results });
     }).catch((err: Error) => { if (active) setPathError(err.message); });
     return () => { active = false; };
   }, [open, canBrowse, directoryCache, ancestorPaths, showHidden]);
@@ -315,6 +335,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     const viewport = columnsElement;
     if (!open || !viewport) return;
     const onWheel = (event: WheelEvent) => {
+      setKeyboardInteraction(false);
       if (!event.shiftKey || event.ctrlKey || event.metaKey || viewport.scrollWidth <= viewport.clientWidth) return;
       const delta = event.deltaX || event.deltaY;
       if (!delta) return;
@@ -328,8 +349,11 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
 
   useLayoutEffect(() => {
     const viewport = columnsRef.current;
-    if (viewport) viewport.scrollLeft = viewport.clientWidth * Math.max(0, previousColumns.length + 1 - columnCount) / columnCount;
-  }, [previousColumns.length, columnCount]);
+    if (!viewport) return;
+    viewport.scrollLeft = !previewingPath && currentVisit.scrollLeft !== null
+      ? currentVisit.scrollLeft
+      : viewport.clientWidth * Math.max(0, currentColumnIndex + 1 - columnCount) / columnCount;
+  }, [history.revision, currentColumnIndex, columnCount, currentVisit.scrollLeft, previewingPath]);
 
   useLayoutEffect(() => {
     const viewport = columnsRef.current;
@@ -341,13 +365,13 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     else if (right > viewport.scrollLeft + viewport.clientWidth) viewport.scrollLeft = right - viewport.clientWidth;
   }, [activeColumn, highlightActive, columnCount]);
 
-  function changeDraft(value: string, resetColumns = true) {
+  function changeDraft(value: string, query = "") {
     setHighlightActive(false);
-    if (resetColumns) { setPreviousColumns([]); setActiveColumn(0); }
+    setActiveColumn(sameWorkspacePath(value.trim(), basePath) ? previousColumns.length : 0);
     completionRequest.current += 1;
     setPathDraft(value);
     const absolute = isAbsoluteWorkspacePath(value);
-    const cached = absolute ? directoryCache?.peek(value.trim(), "", showHidden, true) : null;
+    const cached = absolute ? directoryCache?.peek(value.trim(), query, showHidden, true) : null;
     setDirectory(cached ?? null);
     setLoading(canBrowse && absolute && !cached);
     setDirectoryError(null);
@@ -357,25 +381,50 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   function focusDirectory() {
     window.requestAnimationFrame(() => columnsRef.current?.querySelector<HTMLElement>("[data-current-directory]")?.focus());
   }
-  function navigate(path: string, columnIndex?: number, keepEditing = false, historyIndex?: number) {
-    const source = columnIndex === undefined ? undefined : columns[columnIndex];
-    const ancestors = columnIndex === undefined ? [] : columns.slice(0, columnIndex);
-    if (source?.options.length && !sameWorkspacePath(source.path, path)) ancestors.push({ ...source, selectedPath: path });
-    setPreviousColumns(ancestors);
-    setActiveColumn(ancestors.length);
-    setBasePath(path);
-    setFilterQuery("");
+  function captureVisit(): PickerVisit {
+    // A draft preview is not a committed navigation visit.
+    if (previewingPath) return currentVisit;
+    const viewport = columnsRef.current;
+    const scrollTops = [...currentVisit.scrollTops];
+    viewport?.querySelectorAll<HTMLElement>('[data-workspace-column]').forEach(column => {
+      scrollTops[Number(column.dataset.workspaceColumn)] = column.scrollTop;
+    });
+    return { ...currentVisit, scrollLeft: viewport?.scrollLeft ?? null, scrollTops };
+  }
+  function visitDirectory(visit: PickerVisit, keepEditing = false, historyIndex?: number) {
+    const departed = captureVisit();
     setShowLocations(false);
     setEditingPath(keepEditing);
     setHistory(current => {
-      if (historyIndex !== undefined) return { ...current, index: historyIndex };
-      if (sameWorkspacePath(current.paths[current.index], path)) return current;
-      return { paths: [...current.paths.slice(0, current.index + 1), path], index: current.index + 1 };
+      const visits = [...current.visits];
+      visits[current.index] = departed;
+      const previous = sameWorkspacePath(departed.path, visit.path) ? current.previous : departed;
+      if (historyIndex !== undefined) return { visits, index: historyIndex, previous, revision: current.revision + 1 };
+      if (sameWorkspacePath(departed.path, visit.path)) {
+        visits[current.index] = visit;
+        return { visits, index: current.index, previous, revision: current.revision + 1 };
+      }
+      return { visits: [...visits.slice(0, current.index + 1), visit], index: current.index + 1, previous, revision: current.revision + 1 };
     });
-    changeDraft(workspaceDirectoryPrefix(path), false);
+    changeDraft(workspaceDirectoryPrefix(visit.path), visit.filter);
+    setActiveColumn(visit.ancestors.length);
     setRevision(value => value + 1);
     if (keepEditing) inputRef.current?.focus();
     else focusDirectory();
+  }
+  function navigate(path: string, columnIndex?: number, keepEditing = false) {
+    const source = columnIndex === undefined ? undefined : columns[columnIndex];
+    const ancestors = columnIndex === undefined ? [] : columns.slice(0, columnIndex);
+    if (source?.options.length && !sameWorkspacePath(source.path, path)) ancestors.push({ ...source, selectedPath: path });
+    visitDirectory(directoryVisit(path, ancestors, captureVisit().scrollTops.slice(0, ancestors.length)), keepEditing);
+  }
+  function setFilterQuery(filter: string) {
+    setHistory(current => {
+      const visits = [...current.visits];
+      const visit = visits[current.index];
+      visits[current.index] = { ...visit, filter, scrollTops: visit.scrollTops.slice(0, visit.ancestors.length) };
+      return { ...current, visits };
+    });
   }
 
   const applyProjectPath = useCallback((path: string, name?: string) => {
@@ -434,31 +483,46 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     if (!canBrowse) { void chooseProject(project.path, project.name); return; }
     navigate(project.path);
   }
-  const columns: PickerColumn[] = [...previousColumns, { path: directory?.path ?? requestedPath, parent: directory?.parent ?? null, options, selectedPath: null, hidden: showHidden }];
+  const columns: PickerColumn[] = [...displayedAncestors, { path: directory?.path ?? requestedPath, parent: directory?.parent ?? null, options, selectedPath: null, hidden: showHidden }];
   const activeOptions = columns[activeColumn]?.options ?? options;
   const activeOption = Math.min(activeIndex, Math.max(activeOptions.length - 1, 0));
-  const selectionPath = canBrowse ? (!loading && directory && !directory.partial ? directory.path : null) : (pathDraft.trim() ? absoluteDraft ? pathDraft.trim() : null : scope?.project_path ?? defaultScope?.project_path);
+  const browsedSelectionPath = directoryError || directory?.partial ? null : directory?.path ?? basePath;
+  const resolvedDraftPath = !loading && directory && !directory.partial ? directory.path : null;
+  const selectionPath = canBrowse
+    ? editingPath ? resolvedDraftPath : browsedSelectionPath
+    : (pathDraft.trim() ? absoluteDraft ? pathDraft.trim() : null : scope?.project_path ?? defaultScope?.project_path);
   const displayedError = pathError ?? error ?? directoryError;
   const currentPath = editingPath ? basePath : directory?.path ?? basePath;
+  let savedSelectionJoin: "top" | "bottom" | null = null;
+  for (const projects of [favorites, recentProjects]) {
+    const selectedIndex = projects.findIndex(project => sameWorkspacePath(project.path, currentPath));
+    if (selectedIndex < 0 || !hoveredLocation) continue;
+    if (selectedIndex > 0 && sameWorkspacePath(projects[selectedIndex - 1].path, hoveredLocation)) savedSelectionJoin = "top";
+    else if (selectedIndex + 1 < projects.length && sameWorkspacePath(projects[selectedIndex + 1].path, hoveredLocation)) savedSelectionJoin = "bottom";
+  }
   const breadcrumbs = workspaceBreadcrumbs(currentPath);
   const parentPath = directory?.parent;
   const hostName = catalog?.host?.name ?? directory?.host;
-  const hostPlatform = catalog?.host?.platform ?? directory?.platform;
 
   useLayoutEffect(() => {
     if (breadcrumbRef.current) breadcrumbRef.current.scrollLeft = breadcrumbRef.current.scrollWidth;
   }, [currentPath, editingPath, open]);
 
   function editPath() {
+    const visit = captureVisit();
+    setHistory(current => {
+      const visits = [...current.visits];
+      visits[current.index] = { ...visit, filter: "" };
+      return { ...current, visits };
+    });
     setEditingPath(true);
-    setFilterQuery("");
     changeDraft(workspaceDirectoryPrefix(currentPath));
     window.requestAnimationFrame(() => inputRef.current?.select());
   }
-  function cancelPathEditing() {
+  function cancelPathEditing(focusColumns = true) {
     setEditingPath(false);
     changeDraft(workspaceDirectoryPrefix(basePath));
-    focusDirectory();
+    if (focusColumns) focusDirectory();
   }
 
   async function completePath(keepEditing = true) {
@@ -490,14 +554,14 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
 
   function moveHistory(offset: number) {
     const index = history.index + offset;
-    if (index >= 0 && index < history.paths.length) navigate(history.paths[index], undefined, false, index);
+    if (index >= 0 && index < history.visits.length) visitDirectory(history.visits[index], false, index);
   }
 
-  const filterToolbar = canBrowse && !(compact && editingPath) && <div className="flex shrink-0 items-center gap-2 bg-background px-3 py-2">
+  const filterToolbar = canBrowse && !(compact && editingPath) && <div className={cn("flex shrink-0 items-center gap-2", compact ? "bg-[#fcfcfc] px-3 py-2 dark:bg-muted" : "w-56 max-w-[40%]")}>
     {compact && <Button variant="ghost" size="sm" aria-expanded={showLocations} onClick={() => setShowLocations(value => !value)} className="h-11 shrink-0 gap-1.5 rounded-control px-2 text-[12px]"><Star className="h-3.5 w-3.5" />{t("workspace.picker.shortcuts")}</Button>}
     <div className="relative min-w-0 flex-1">
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input aria-label={t("workspace.picker.filter")} placeholder={t("workspace.picker.filter")} value={filterQuery} disabled={pickingFolder || editingPath || compact && showLocations} onChange={event => { setFilterQuery(event.target.value); setActiveIndex(0); setActiveColumn(previousColumns.length); setHighlightActive(false); }} className="h-11 rounded-control border-transparent bg-muted/60 pl-8 text-[16px] shadow-none sm:h-9 sm:text-[12px]" />
+      <Input aria-label={t("workspace.picker.filter")} placeholder={t("workspace.picker.filter")} value={filterQuery} disabled={pickingFolder || editingPath || compact && showLocations} onChange={event => { setFilterQuery(event.target.value); setActiveIndex(0); setActiveColumn(currentColumnIndex); setHighlightActive(false); }} className={cn("h-11 rounded-control border-transparent pl-8 text-[16px] shadow-none sm:h-9 sm:text-[12px]", compact ? "bg-muted/60" : "bg-background/80")} />
     </div>
   </div>;
 
@@ -508,7 +572,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
       <Dialog open={open} onOpenChange={setOpen}>
         <WorkspacePickerTooltip label={`${t("workspace.picker.switchDirectory")}\n${displayedScope?.project_path ?? ""}`}>
           <DialogTrigger asChild>
-            <button ref={triggerRef} onPointerDown={() => { keyboardInteraction.current = false; }} onKeyDown={() => { keyboardInteraction.current = true; }} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.055] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
+            <button ref={triggerRef} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.055] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
               <WorkspaceIcon className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">{projectLabel}</span>
             </button>
@@ -516,9 +580,9 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
         </WorkspacePickerTooltip>
         <DialogContent showCloseButton={false} layoutAnchor={layoutAnchor} centerInLayoutAnchor className="flex h-[min(37rem,calc(100%-2rem))] max-w-5xl flex-col gap-0 overflow-hidden p-0 dark:bg-background"
           onOpenAutoFocus={event => { event.preventDefault(); if (canBrowse) focusDirectory(); else inputRef.current?.focus(); }}
-          onPointerDownCapture={() => { keyboardInteraction.current = false; }}
+          onPointerDownCapture={() => setKeyboardInteraction(false)}
           onKeyDownCapture={event => {
-            keyboardInteraction.current = true;
+            if (!["Alt", "Control", "Meta", "Shift"].includes(event.key)) setKeyboardInteraction(true);
             if (!canBrowse || pickingFolder || event.nativeEvent.isComposing) return;
             if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "g") { event.preventDefault(); editPath(); }
             else if (event.altKey && event.key === "ArrowLeft") { event.preventDefault(); moveHistory(-1); }
@@ -526,21 +590,18 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             else if (event.altKey && event.key === "ArrowUp" && parentPath) { event.preventDefault(); navigate(parentPath); }
           }}
           onEscapeKeyDown={event => { if (editingPath) { event.preventDefault(); cancelPathEditing(); } }}
-          onCloseAutoFocus={event => { if (!keyboardInteraction.current) event.preventDefault(); }}>
-          <div className="flex shrink-0 items-center justify-between gap-3 bg-muted px-4 pt-4 pb-2 sm:px-5">
-            <DialogTitle className="text-[15px] font-semibold">{t("workspace.picker.title")}</DialogTitle>
-            {hostName && <WorkspacePickerTooltip label={`${hostName}${hostPlatform ? ` · ${hostPlatform}` : ""}`}>
-              <span className="min-w-0 max-w-[55%] truncate text-[11px] text-muted-foreground">{t("workspace.picker.host", { name: hostName })}</span>
-            </WorkspacePickerTooltip>}
-          </div>
+          onCloseAutoFocus={event => { if (!keyboardInteraction) event.preventDefault(); }}>
+          <DialogTitle className="sr-only">{t("workspace.picker.title")}</DialogTitle>
           <DialogDescription className="sr-only">{t("workspace.picker.description")}</DialogDescription>
-          <div className="flex shrink-0 items-center gap-1 border-b border-border/70 bg-muted px-3 pb-3 sm:px-4">
+          <div className="flex shrink-0 items-center gap-1 bg-muted px-3 pt-4 pb-3 sm:px-4">
             {canBrowse && <div className="flex shrink-0 items-center">
               <PickerToolButton label={t("workspace.picker.back")} disabled={pickingFolder || history.index === 0} onClick={() => moveHistory(-1)}><ArrowLeft className="h-4 w-4" /></PickerToolButton>
-              {!compact && <PickerToolButton label={t("workspace.picker.forward")} disabled={pickingFolder || history.index >= history.paths.length - 1} onClick={() => moveHistory(1)}><ArrowRight className="h-4 w-4" /></PickerToolButton>}
-              <PickerToolButton label={t("workspace.picker.up")} disabled={pickingFolder || !parentPath || loading} onClick={() => parentPath && navigate(parentPath)}><ArrowUp className="h-4 w-4" /></PickerToolButton>
+              {!compact && <PickerToolButton label={t("workspace.picker.forward")} disabled={pickingFolder || history.index >= history.visits.length - 1} onClick={() => moveHistory(1)}><ArrowRight className="h-4 w-4" /></PickerToolButton>}
+              <PickerToolButton label={t("workspace.picker.history")} disabled={pickingFolder || !history.previous}
+                onClick={() => history.previous && visitDirectory(history.previous)}><History className="h-4 w-4" /></PickerToolButton>
             </div>}
-            {editingPath || !canBrowse ? <Input ref={inputRef} role="combobox" aria-expanded={open} aria-controls={`${optionsId}-${activeColumn}`} aria-activedescendant={highlightActive && activeOptions.length ? `${optionsId}-${activeColumn}-${activeOption}` : undefined} aria-autocomplete="list" aria-busy={loading} value={pathDraft} disabled={disabled || pickingFolder} onChange={event => changeDraft(event.target.value)} placeholder={t("workspace.dialog.manual")} aria-label={t("workspace.dialog.manual")} aria-invalid={displayedError ? true : undefined} aria-describedby={displayedError ? errorId : undefined} className="h-9 min-w-0 flex-1 rounded-control text-[16px] sm:text-[13px]" onKeyDown={event => {
+            <div className="flex min-w-0 flex-1 items-center rounded-control bg-background/80">
+            {editingPath || !canBrowse ? <Input ref={inputRef} role="combobox" aria-expanded={open} aria-controls={`${optionsId}-${activeColumn}`} aria-activedescendant={highlightActive && activeOptions.length ? `${optionsId}-${activeColumn}-${activeOption}` : undefined} aria-autocomplete="list" aria-busy={loading} value={pathDraft} disabled={disabled || pickingFolder} onChange={event => changeDraft(event.target.value)} onBlur={event => { if (canBrowse && !keyboardInteraction && event.relatedTarget !== confirmRef.current) cancelPathEditing(false); }} placeholder={t("workspace.dialog.manual")} aria-label={t("workspace.dialog.manual")} aria-invalid={displayedError ? true : undefined} aria-describedby={displayedError ? errorId : undefined} className="h-9 min-w-0 flex-1 rounded-control text-[16px] sm:text-[13px]" onKeyDown={event => {
               if (event.nativeEvent.isComposing) return;
               if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !event.altKey && activeOptions.length) {
                 event.preventDefault();
@@ -554,46 +615,54 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                 else if ((event.ctrlKey || event.metaKey) && selectionPath) void chooseProject(selectionPath);
                 else void completePath(false);
               }
-            }} /> : <nav ref={attachBreadcrumb} aria-label={t("workspace.picker.location")} className="flex min-w-0 flex-1 items-center overflow-x-auto rounded-control bg-background/80 px-1 [scrollbar-width:none]">
+            }} /> : <nav ref={attachBreadcrumb} aria-label={t("workspace.picker.location")}
+              onClick={event => { if (!pickingFolder && !(event.target as HTMLElement).closest("button")) editPath(); }}
+              className="flex h-11 min-w-0 flex-1 cursor-text items-center overflow-x-auto rounded-control sm:h-9 [scrollbar-width:none]">
               {breadcrumbs.map((crumb, index) => <span key={crumb.path} className="flex shrink-0 items-center">
                 {index > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/60" />}
-                <WorkspacePickerTooltip label={crumb.path}>
                   <button type="button" disabled={pickingFolder} aria-current={index === breadcrumbs.length - 1 ? "location" : undefined} onClick={() => navigate(crumb.path)}
-                    className="h-11 max-w-48 truncate rounded-control px-2 text-[12px] text-muted-foreground outline-none hover:bg-foreground/[0.055] focus-visible:ring-2 focus-visible:ring-ring aria-[current=location]:font-medium aria-[current=location]:text-foreground sm:h-9">{crumb.name}</button>
-                </WorkspacePickerTooltip>
+                    className="h-11 max-w-48 cursor-pointer truncate rounded-control px-2 text-[12px] text-muted-foreground outline-none hover:bg-foreground/[0.055] focus-visible:ring-2 focus-visible:ring-ring aria-[current=location]:font-medium aria-[current=location]:text-foreground sm:h-9">{crumb.name}</button>
               </span>)}
+              <WorkspacePickerTooltip label={t("workspace.picker.editPath")}>
+                <button type="button" disabled={pickingFolder} aria-label={`${t("workspace.picker.editPath")}: ${currentPath}`} onClick={editPath}
+                  className="min-w-8 flex-1 cursor-text self-stretch rounded-control outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+              </WorkspacePickerTooltip>
             </nav>}
-            {canBrowse && <PickerToolButton label={t(editingPath ? "workspace.picker.cancelPath" : "workspace.picker.editPath")} disabled={pickingFolder} onClick={editingPath ? cancelPathEditing : editPath}>
-              {editingPath ? <X className="h-4 w-4" /> : <Pencil className="h-3.5 w-3.5" />}
-            </PickerToolButton>}
+            </div>
+            {!compact && filterToolbar}
           </div>
           {compact && filterToolbar}
-          <div className="flex min-h-0 flex-1 bg-background">
-            {(!compact || showLocations || !canBrowse) && <nav aria-label={t("workspace.picker.shortcuts")} className={cn("flex shrink-0 flex-col gap-4 overflow-auto bg-sidebar p-2", compact && canBrowse ? "w-full" : "w-60 border-r border-border/60", compact && !canBrowse && "w-40")}>
+          <div className="flex min-h-0 flex-1 bg-muted">
+            {(!compact || showLocations || !canBrowse) && <nav aria-label={t("workspace.picker.shortcuts")}
+              className={cn("flex shrink-0 flex-col overflow-auto bg-muted p-2", compact && canBrowse ? "w-full" : "w-60", compact && !canBrowse && "w-40")}>
+              {hostName && <p className="shrink-0 truncate px-3 pt-2 pb-1 text-[11px] leading-4 text-muted-foreground">{hostName}</p>}
+              <SidebarSelectionHighlight scope="workspace-saved-location" activeId={currentPath} targetSelector='button[aria-current="location"]' className="relative flex shrink-0 flex-col gap-4"
+                highlightClassName={savedSelectionJoin === "top" ? "rounded-t-none" : savedSelectionJoin === "bottom" ? "rounded-b-none" : undefined}>
               {[{ label: t("workspace.picker.favorites"), projects: favorites, favorite: true }, { label: t("workspace.picker.recent"), projects: recentProjects, favorite: false }].map(section => (
                 <section key={section.label} className="min-w-0 shrink-0">
                   <h3 className="px-3 py-2 text-[11px] font-medium text-muted-foreground">{section.label}</h3>
-                  {section.projects.map(project => <div key={project.path} className="workspace-picker-row relative">
-                    <WorkspacePickerTooltip label={project.path}>
+                  {section.projects.map(project => <div key={project.path} className={cn("workspace-picker-row group/workspace-saved-row", SIDEBAR_SELECTION_ITEM_CLASS)}
+                    onPointerEnter={() => setHoveredLocation(project.path)} onPointerLeave={() => setHoveredLocation(null)}>
                       <button type="button" aria-label={project.path} aria-current={sameWorkspacePath(currentPath, project.path) ? "location" : undefined}
                         disabled={pickingFolder} onMouseDown={event => event.preventDefault()} onClick={() => openShortcut(project)}
-                        className={cn(floatingItemClassName, floatingItemFocusClassName, "flex min-h-12 w-full min-w-0 items-center gap-2 px-3 py-2 text-left hover:bg-foreground/[0.055] dark:hover:bg-white/[0.08]", canFavorite && "pr-12", sameWorkspacePath(currentPath, project.path) && "bg-primary/10 text-primary")}>
+                        className={cn(floatingItemClassName, "flex h-14 min-h-14 w-full min-w-0 items-center gap-2 px-3 py-2 text-left group-hover/workspace-saved-row:bg-foreground/[0.055] dark:group-hover/workspace-saved-row:bg-white/[0.08] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring", canFavorite && "pr-12",
+                          sameWorkspacePath(currentPath, project.path) && "text-foreground group-hover/workspace-saved-row:bg-transparent dark:group-hover/workspace-saved-row:bg-transparent",
+                          sameWorkspacePath(hoveredLocation, project.path) && (savedSelectionJoin === "top" ? "rounded-b-none" : savedSelectionJoin === "bottom" ? "rounded-t-none" : undefined))}>
                         <WorkspaceIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                         <WorkspaceSavedProjectLabel path={project.path} />
                         {sameWorkspacePath(project.path, scope?.project_path ?? defaultScope.project_path) && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                       </button>
-                    </WorkspacePickerTooltip>
                     {favoriteButton(project.path)}
                   </div>)}
                   {section.favorite && !favorites.length && canFavorite && <p className="px-3 text-[11px] leading-relaxed text-muted-foreground">{t("workspace.picker.favoriteHint")}</p>}
                 </section>
               ))}
+              </SidebarSelectionHighlight>
             </nav>}
-            <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", compact && showLocations && canBrowse && "hidden")}>
-            {!compact && filterToolbar}
-            <div ref={attachColumns} data-workspace-columns className="flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain px-1 pb-2">
-              {columns.map((column, columnIndex) => (!compact || columnIndex === previousColumns.length) && <WorkspaceDirectoryColumn key={columnIndex} options={column.options} activeIndex={highlightActive && columnIndex === activeColumn ? activeOption : null}
-                id={`${optionsId}-${columnIndex}`} data-current-directory={columnIndex === previousColumns.length ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === previousColumns.length && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className={cn("min-w-0 shrink-0 overflow-x-hidden overflow-y-auto border-r border-transparent px-1 py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring", !!columns[columnIndex + 1]?.options.length && !compact && "border-border/50")}
+            <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-l-control bg-[#fcfcfc] dark:bg-muted", compact && showLocations && canBrowse && "hidden")}>
+            <div ref={attachColumns} data-workspace-columns className="flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain">
+              {columns.map((column, columnIndex) => (!compact || columnIndex === currentColumnIndex) && <WorkspaceDirectoryColumn key={columnIndex} options={column.options} selectedPath={column.selectedPath} initialScrollTop={previewingPath ? 0 : currentVisit.scrollTops[columnIndex] ?? 0} visitRevision={history.revision} activeIndex={highlightActive && columnIndex === activeColumn ? activeOption : null}
+                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className={cn("relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 pt-1 pb-2 outline-none", keyboardInteraction && "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring")}
                 onFocus={event => { if (event.target === event.currentTarget) { setActiveColumn(columnIndex); setActiveIndex(0); } }}
                 onKeyDown={event => {
                   if (event.target !== event.currentTarget || event.altKey || event.metaKey || event.ctrlKey || pickingFolder) return;
@@ -605,31 +674,31 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                     event.preventDefault(); activate(column.options[Math.min(activeIndex, count - 1)], columnIndex);
                   } else if (event.key === "ArrowLeft" && column.parent) { event.preventDefault(); navigate(column.parent); }
                 }}
-                renderOption={(option, index) => <div role="presentation" className="workspace-picker-row relative" data-keyboard-active={highlightActive && columnIndex === activeColumn && index === activeOption ? "" : undefined}>
+                renderOption={(option, index) => <div role="presentation" className={cn("workspace-picker-row", SIDEBAR_SELECTION_ITEM_CLASS)} data-keyboard-active={highlightActive && columnIndex === activeColumn && index === activeOption ? "" : undefined}>
                   <button id={`${optionsId}-${columnIndex}-${index}`} type="button" role="option" tabIndex={-1} aria-label={option.path} aria-selected={sameWorkspacePath(column.selectedPath, option.path)} aria-posinset={index + 1} aria-setsize={column.options.length} disabled={pickingFolder}
                     onPointerMove={() => { setHighlightActive(false); setActiveColumn(columnIndex); setActiveIndex(index); }}
                     onMouseDown={event => event.preventDefault()} onClick={() => activate(option, columnIndex)}
                     className={cn(floatingItemClassName, floatingItemFocusClassName, "flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left hover:bg-foreground/[0.055] dark:hover:bg-white/[0.08] disabled:opacity-50", canFavorite && "pr-12",
-                      sameWorkspacePath(column.selectedPath, option.path) && "bg-primary/10 text-primary font-medium hover:bg-primary/10",
+                      sameWorkspacePath(column.selectedPath, option.path) && "font-medium text-foreground hover:bg-transparent dark:hover:bg-transparent focus:bg-transparent dark:focus:bg-transparent",
                       highlightActive && columnIndex === activeColumn && index === activeOption && "ring-1 ring-inset ring-ring")}>
-                    <WorkspaceIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    {option.kind === "directory" ? <WorkspacePickerTooltip label={option.path}><span className="min-w-0 flex-1 truncate text-[13px]">{option.name}</span></WorkspacePickerTooltip> : <WorkspacePickerPath path={option.path} />}
+                    <WorkspaceIcon className="h-4 w-4 shrink-0 -translate-y-px text-muted-foreground" />
+                    {option.kind === "directory" ? <span className="min-w-0 flex-1 truncate text-[13px] leading-4">{option.name}</span> : <WorkspacePickerPath path={option.path} />}
                     {sameWorkspacePath(option.path, scope?.project_path ?? defaultScope.project_path) && <Check className="h-4 w-4 shrink-0 text-muted-foreground" />}
                   </button>
                   {favoriteButton(option.path)}
               </div>}>
-              {columnIndex === previousColumns.length && loading && <WorkspaceDirectorySkeleton />}
-              {columnIndex === previousColumns.length && canBrowse && !loading && directory && !column.options.length && !displayedError && <div role="status" className="flex flex-col items-center gap-2 px-4 py-10 text-center text-[12px] text-muted-foreground"><FolderSearch className="h-6 w-6 opacity-50" /><p>{t(folderQuery || directory.partial ? "workspace.picker.noMatches" : "workspace.picker.empty")}</p></div>}
-              {columnIndex === previousColumns.length && directory?.truncated && <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("workspace.picker.truncated")}</p>}
-              {columnIndex === previousColumns.length && displayedError && <div className="px-3 py-3"><p id={errorId} role="alert" className="text-[12px] text-destructive">{displayedError}</p>{directoryError && <Button variant="ghost" size="sm" onClick={() => setRevision(value => value + 1)} className="mt-2">{t("workspace.picker.retry")}</Button>}</div>}
+              {columnIndex === currentColumnIndex && loading && <WorkspaceDirectorySkeleton />}
+              {columnIndex === currentColumnIndex && canBrowse && !loading && directory && !column.options.length && !displayedError && <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 py-10 text-center text-[12px] text-muted-foreground"><FolderSearch className="h-6 w-6 opacity-50" /><p>{t(folderQuery || directory.partial ? "workspace.picker.noMatches" : "workspace.picker.empty")}</p></div>}
+              {columnIndex === currentColumnIndex && directory?.truncated && <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("workspace.picker.truncated")}</p>}
+              {columnIndex === currentColumnIndex && displayedError && <div className="px-3 py-3"><p id={errorId} role="alert" className="text-[12px] text-destructive">{displayedError}</p>{directoryError && <Button variant="ghost" size="sm" onClick={() => setRevision(value => value + 1)} className="mt-2">{t("workspace.picker.retry")}</Button>}</div>}
               </WorkspaceDirectoryColumn>)}
             </div>
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-3 border-t border-border/70 bg-muted px-4 py-3">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-3 bg-muted px-4 py-3">
             {canBrowse && <label className="mr-auto flex w-full items-center gap-2 text-[12px] text-muted-foreground sm:w-auto"><ToggleButton checked={showHidden} onChange={setShowHidden} label={t("workspace.picker.hidden")} />{t("workspace.picker.hidden")}</label>}
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)} className="h-11 rounded-control px-4 sm:h-10">{t("workspace.picker.cancel")}</Button>
-            <Button size="sm" className="h-11 rounded-control px-4 sm:h-10" disabled={!selectionPath || pickingFolder || (editingPath && !absoluteDraft)} onClick={() => selectionPath && void chooseProject(selectionPath)}>{t("workspace.picker.select")}</Button>
+            <Button ref={confirmRef} size="sm" className="h-11 rounded-control px-4 sm:h-10" disabled={!selectionPath || pickingFolder || (editingPath && !absoluteDraft)} onClick={() => selectionPath && void chooseProject(selectionPath)}>{t("workspace.picker.select")}</Button>
           </div>
         </DialogContent>
       </Dialog>

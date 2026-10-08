@@ -62,10 +62,19 @@ export function SidebarSelectionHighlight({
       const firstPosition = !positionedRef.current;
       if (firstPosition) highlight.style.transitionProperty = "none";
 
-      highlight.style.width = `${targetRect.width}px`;
-      highlight.style.height = `${targetRect.height}px`;
-      highlight.style.transform = `translate3d(${targetRect.left - containerRect.left}px, ${
-        targetRect.top - containerRect.top
+      // Align the paint origin and destination to layout pixels. A fractional
+      // origin rasterized before translation can leave seams beside row backgrounds.
+      const snap = Math.round;
+      const originLeft = snap(containerRect.left);
+      const originTop = snap(containerRect.top);
+      const targetLeft = snap(targetRect.left);
+      const targetTop = snap(targetRect.top);
+      highlight.style.left = `${originLeft - containerRect.left}px`;
+      highlight.style.top = `${originTop - containerRect.top}px`;
+      highlight.style.width = `${snap(targetRect.right) - targetLeft}px`;
+      highlight.style.height = `${snap(targetRect.bottom) - targetTop}px`;
+      highlight.style.transform = `translate3d(${targetLeft - originLeft}px, ${
+        targetTop - originTop
       }px, 0)`;
       highlight.style.opacity = "1";
       positionedRef.current = true;
