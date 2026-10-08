@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
 
 from loguru import logger
-from pydantic.alias_generators import to_snake
 
 from nanobot.providers.base import (
     LLMProvider,
@@ -36,7 +35,13 @@ from nanobot.providers.base import (
 )
 from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
-from nanobot.providers.registry import ModelAPICapabilities, ResponsesCapabilities
+from nanobot.providers.registry import (
+    ModelAPICapabilities,
+    ResponsesCapabilities,
+    hosted_web_search_enabled,
+    is_direct_openai_base,
+    is_hosted_web_search_tool,
+)
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
@@ -49,19 +54,6 @@ if TYPE_CHECKING:
 AsyncOpenAI: Any = None
 
 _GEMINI_SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
-
-
-def _is_hosted_web_search_type(value: object) -> bool:
-    return isinstance(value, str) and (
-        value == "web_search" or value.startswith("web_search_")
-    )
-
-
-def _is_hosted_web_search_tool(tool: object) -> bool:
-    if not isinstance(tool, dict):
-        return False
-    tool_type = cast(dict[object, object], tool).get("type")
-    return _is_hosted_web_search_type(tool_type)
 
 
 def _is_named_function_tool(tool: object, name: str) -> bool:
@@ -158,10 +150,6 @@ _MODEL_THINKING_STYLES: dict[str, str] = {
 
 def _model_slug(model_name: str) -> str:
     return model_name.lower().rsplit("/", 1)[-1]
-
-
-def _provider_prefix_key(name: str) -> str:
-    return to_snake(name.replace("-", "_")).lower()
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
@@ -389,14 +377,6 @@ def _is_local_endpoint(
     except ValueError:
         return False
     return addr.is_loopback or addr.is_private
-
-
-def _is_direct_openai_base(api_base: str | None) -> bool:
-    """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
-    if not api_base:
-        return True
-    normalized = api_base.strip().lower().rstrip("/")
-    return "api.openai.com" in normalized and "openrouter" not in normalized
 
 
 def _responses_circuit_key(
@@ -878,24 +858,7 @@ class OpenAICompatProvider(LLMProvider):
     # ------------------------------------------------------------------
 
     def _request_model_name(self, model_name: str) -> str:
-        spec = self._spec
-        if not spec or "/" not in model_name:
-            return model_name
-        if spec.strip_model_prefix:
-            return model_name.split("/")[-1]
-
-        route_prefixes = getattr(spec, "strip_model_prefixes", ())
-        if not isinstance(route_prefixes, tuple) or not route_prefixes:
-            return model_name
-        typed_route_prefixes = cast(tuple[str, ...], route_prefixes)
-        model_prefix, routed_model = model_name.split("/", 1)
-        model_prefix_key = _provider_prefix_key(model_prefix)
-        if any(
-            _provider_prefix_key(prefix) == model_prefix_key
-            for prefix in typed_route_prefixes
-        ):
-            return routed_model
-        return model_name
+        return self._spec.request_model_name(model_name) if self._spec else model_name
 
     @staticmethod
     def _supports_temperature(
@@ -1129,22 +1092,12 @@ class OpenAICompatProvider(LLMProvider):
         """Apply a preset's declaration before the provider's curated defaults."""
         if self._preset_model_api is not None:
             return self._preset_model_api
-        capabilities = self._responses_capabilities()
-        if capabilities is None or self._api_type == "chat_completions":
+        if self._spec is None:
             return ModelAPICapabilities()
-        if self._api_type == "responses":
-            return ModelAPICapabilities(("responses",), "responses")
-        model_name = self._request_model_name(model or self.default_model)
-        if self._hosted_web_search_enabled() and (
-            capabilities.route_reasoning or capabilities.matches_model(model_name)
-        ):
-            return ModelAPICapabilities(("responses",), "responses")
-        if (
-            capabilities.requires_direct_openai_base
-            and not _is_direct_openai_base(self._effective_base)
-        ):
-            return ModelAPICapabilities()
-        return capabilities.model_api(model_name, reasoning_effort)
+        return self._spec.default_model_api(
+            model or self.default_model, reasoning_effort,
+            api_base=self._effective_base, api_type=self._api_type, extra_body=self._extra_body,
+        )
 
     def _responses_is_required(
         self, model: str | None = None, reasoning_effort: str | None = None,
@@ -1153,19 +1106,8 @@ class OpenAICompatProvider(LLMProvider):
         return "chat_completions" not in api.supported_apis or self._hosted_web_search_enabled()
 
     def _hosted_web_search_enabled(self) -> bool:
-        extra_body = getattr(self, "_extra_body", {})
-        configured_tools = extra_body.get("tools")
-        if "tools" in extra_body:
-            return isinstance(configured_tools, list) and any(
-                _is_hosted_web_search_tool(tool)
-                for tool in cast(list[object], configured_tools)
-            )
-        return bool(
-            self._spec
-            and any(
-                _is_hosted_web_search_type(tool_type)
-                for tool_type in getattr(self._spec, "responses_default_tools", ())
-            )
+        return hosted_web_search_enabled(
+            self._extra_body, self._spec.responses_default_tools if self._spec else (),
         )
 
     def _responses_capabilities(self) -> ResponsesCapabilities | None:
@@ -1214,7 +1156,7 @@ class OpenAICompatProvider(LLMProvider):
             return False
         if (
             capabilities.requires_direct_openai_base
-            and not _is_direct_openai_base(self._effective_base)
+            and not is_direct_openai_base(self._effective_base)
         ):
             return False
         return True
@@ -1361,7 +1303,7 @@ class OpenAICompatProvider(LLMProvider):
                 for tool in cast(list[object], configured_tools):
                     if _is_named_function_tool(tool, "web_search"):
                         continue
-                    if _is_hosted_web_search_tool(tool):
+                    if is_hosted_web_search_tool(tool):
                         if hosted_search_seen:
                             continue
                         hosted_search_seen = True

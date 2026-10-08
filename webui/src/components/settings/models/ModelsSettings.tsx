@@ -43,7 +43,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
+import { fetchAutomaticModelAPI } from "@/lib/api";
+import type { AutomaticModelAPIPayload, ModelAPIConfig, SettingsPayload } from "@/lib/types";
 
 export interface AgentSettingsDraft {
   model: string;
@@ -237,6 +238,29 @@ export function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
+  const [automaticAPI, setAutomaticAPI] = useState<{
+    scope: string;
+    result: AutomaticModelAPIPayload;
+  } | null>(null);
+  const automaticAPIScope = JSON.stringify([
+    token, form.provider, form.model, form.reasoningEffort, settings.providers,
+  ]);
+  useEffect(() => {
+    if (!editorOpen || settings.model_api_resolution_supported !== true || !form.model.trim()) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void fetchAutomaticModelAPI(token, form.provider, form.model, form.reasoningEffort)
+        .then((result) => {
+          if (!cancelled) setAutomaticAPI({ scope: automaticAPIScope, result });
+        })
+        .catch(() => {
+          if (!cancelled) setAutomaticAPI(null);
+        });
+    }, 150);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [editorOpen, settings.model_api_resolution_supported, automaticAPIScope, token, form]);
+  const resolvedAutomaticAPI = settings.model_api_resolution_supported === true
+    && automaticAPI?.scope === automaticAPIScope ? automaticAPI.result : null;
   const editorTriggerRef = useRef<HTMLElement | null>(null);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
   const suggestedPresetNameRef = useRef<string | null>(null);
@@ -509,8 +533,9 @@ export function ModelsSettings({
       </SettingsRow>
       <ModelAPIControl
         provider={selectedProvider ?? settings.providers.find(
-          (provider) => provider.name === selectedPreset?.resolved_provider,
+          (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
         )}
+        automaticAPI={resolvedAutomaticAPI?.api}
         value={form.api}
         onChange={(api) => setForm((prev) => ({ ...prev, api }))}
       />

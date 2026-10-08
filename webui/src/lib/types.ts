@@ -600,6 +600,14 @@ export interface ModelAPIConfig {
   preferred_api?: "chat_completions" | "responses" | null;
 }
 
+export type ProviderRequestAPI =
+  "chat_completions" | "responses" | "anthropic_messages" | "bedrock_converse" | "transcription";
+
+export interface AutomaticModelAPIPayload {
+  provider: string;
+  api: ProviderRequestAPI;
+}
+
 interface ProviderModelInfo {
   id: string;
   label?: string | null;
@@ -702,6 +710,8 @@ export interface SettingsPayload {
   model_call_order_editable: boolean;
   /** Whether an actual legacy model configuration is available to convert. */
   model_configuration_migratable?: boolean;
+  /** Host can resolve the default request API for an unsaved model configuration. */
+  model_api_resolution_supported?: boolean;
   created_model_preset?: string;
   created_provider?: string;
   providers: Array<{
@@ -718,9 +728,7 @@ export interface SettingsPayload {
     model_catalog?: ProviderModelsPayload["catalog_kind"];
     model_api_configurable?: boolean;
     /** Request formats implemented by the host's provider adapter. */
-    request_apis?: Array<
-      "chat_completions" | "responses" | "anthropic_messages" | "bedrock_converse" | "transcription"
-    >;
+    request_apis?: ProviderRequestAPI[];
     api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;

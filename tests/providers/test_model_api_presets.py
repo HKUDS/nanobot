@@ -8,7 +8,12 @@ from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelAPIConfig, ModelPresetConfig
-from nanobot.providers.factory import make_provider, provider_signature, validate_provider_setup
+from nanobot.providers.factory import (
+    make_provider,
+    provider_signature,
+    resolve_automatic_model_api,
+    validate_provider_setup,
+)
 from nanobot.providers.openai_compat_provider import _RESPONSES_FAILURE_THRESHOLD
 
 
@@ -75,6 +80,36 @@ async def bind_transport():
     yield bind
     for client in clients:
         await client.close()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(("provider_name", "model", "api_base", "effort"), [
+    ("tenant", "gpt-6-luna", "https://tenant.test/v1", "high"),
+    ("openai", "openai/gpt-6-luna", "https://api.openai.com/v1", None),
+    ("openai", "gpt-6-luna", "https://tenant.test/v1", "high"),
+    ("openai", "gpt-4o", "https://api.openai.com/v1", "high"),
+    ("opencode_go", "opencode-go/muse-spark-1.3-contributor", "https://opencode.ai/zen/go/v1", None),
+])
+async def test_automatic_preview_matches_actual_request(
+    bind_transport, stream, provider_name, model, api_base, effort,
+):
+    config = Config.model_validate({
+        "providers": {provider_name: {"apiBase": api_base, "apiKey": "fixture"}},
+    })
+    preset = ModelPresetConfig(model=model, provider=provider_name, reasoning_effort=effort)
+    resolved_provider, api = resolve_automatic_model_api(config, preset=preset)
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        return _answer(request)
+
+    provider = bind_transport(make_provider(config, preset=preset), handler)
+    invoke = provider.chat_stream if stream else provider.chat
+    response = await invoke([{"role": "user", "content": "hello"}], reasoning_effort=effort)
+    assert response.content == "ok"
+    assert resolved_provider == provider_name
+    assert paths == ["/v1/responses" if api == "responses" else "/v1/chat/completions"]
 
 
 @pytest.mark.parametrize("stream", [False, True])

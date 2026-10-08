@@ -241,10 +241,9 @@ class GitHubCopilotProvider(OpenAICompatProvider):
     ) -> ModelAPICapabilities:
         if self._preset_model_api is not None:
             return self._preset_model_api
-        catalog = _GITHUB_COPILOT_MODEL_CATALOG.peek(cache_key=_copilot_catalog_cache_key(self._proxy))
-        row = catalog.find(model or self.default_model) if catalog is not None else None
-        if row is not None and row.api is not None:
-            return row.api
+        api = cached_github_copilot_model_api(model or self.default_model, self._proxy)
+        if api is not None:
+            return api
         return super()._model_api_capabilities(model, reasoning_effort)
 
     async def _get_copilot_access_token(self) -> str:
@@ -347,6 +346,15 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             on_tool_call_delta=on_tool_call_delta,
             provider_context=provider_context,
         )
+
+
+def cached_github_copilot_model_api(
+    model: str, proxy: str | None = None,
+) -> ModelAPICapabilities | None:
+    """Read the account's known model APIs without refreshing the catalog."""
+    catalog = _GITHUB_COPILOT_MODEL_CATALOG.peek(cache_key=_copilot_catalog_cache_key(proxy))
+    row = catalog.find(model) if catalog is not None else None
+    return row.api if row is not None else None
 
 
 def get_github_copilot_model_catalog(

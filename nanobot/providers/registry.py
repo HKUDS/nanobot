@@ -13,7 +13,7 @@ Every entry writes out all fields so you can copy-paste as a template.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic.alias_generators import to_snake
 
@@ -21,6 +21,37 @@ RequestAPI = Literal["chat_completions", "responses"]
 ProviderAPI = Literal[
     "chat_completions", "responses", "anthropic_messages", "bedrock_converse", "transcription",
 ]
+
+
+def is_direct_openai_base(api_base: str | None) -> bool:
+    """Return whether the endpoint matches the direct OpenAI routing rule."""
+    if not api_base:
+        return True
+    normalized = api_base.strip().lower().rstrip("/")
+    return "api.openai.com" in normalized and "openrouter" not in normalized
+
+
+def is_hosted_web_search_type(value: object) -> bool:
+    return isinstance(value, str) and (
+        value == "web_search" or value.startswith("web_search_")
+    )
+
+
+def is_hosted_web_search_tool(tool: object) -> bool:
+    if not isinstance(tool, dict):
+        return False
+    return is_hosted_web_search_type(cast(dict[object, object], tool).get("type"))
+
+
+def hosted_web_search_enabled(
+    extra_body: dict[str, Any], default_tools: tuple[str, ...] = (),
+) -> bool:
+    if "tools" in extra_body:
+        tools = extra_body["tools"]
+        return isinstance(tools, list) and any(
+            is_hosted_web_search_tool(tool) for tool in cast(list[object], tools)
+        )
+    return any(is_hosted_web_search_type(value) for value in default_tools)
 
 
 @dataclass(frozen=True)
@@ -194,6 +225,48 @@ class ProviderSpec:
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
+
+    def request_model_name(self, model: str) -> str:
+        """Remove only the provider prefixes owned by this adapter."""
+        if "/" not in model:
+            return model
+        if self.strip_model_prefix:
+            return model.rsplit("/", 1)[-1]
+        prefix, routed_model = model.split("/", 1)
+        prefix_key = to_snake(prefix.replace("-", "_")).lower()
+        if any(
+            to_snake(value.replace("-", "_")).lower() == prefix_key
+            for value in self.strip_model_prefixes
+        ):
+            return routed_model
+        return model
+
+    def default_model_api(
+        self,
+        model: str,
+        reasoning_effort: str | None = None,
+        *,
+        api_base: str | None = None,
+        api_type: str = "auto",
+        extra_body: dict[str, Any] | None = None,
+    ) -> ModelAPICapabilities:
+        """Resolve automatic API defaults without constructing or probing a client."""
+        capabilities = self.responses
+        if capabilities is None:
+            return ModelAPICapabilities()
+        if capabilities.allows_api_type_override:
+            if api_type == "chat_completions":
+                return ModelAPICapabilities()
+            if api_type == "responses":
+                return ModelAPICapabilities(("responses",), "responses")
+        model_name = self.request_model_name(model)
+        if hosted_web_search_enabled(extra_body or {}, self.responses_default_tools) and (
+            capabilities.route_reasoning or capabilities.matches_model(model_name)
+        ):
+            return ModelAPICapabilities(("responses",), "responses")
+        if capabilities.requires_direct_openai_base and not is_direct_openai_base(api_base):
+            return ModelAPICapabilities()
+        return capabilities.model_api(model_name, reasoning_effort)
 
     @property
     def model_api_configurable(self) -> bool:

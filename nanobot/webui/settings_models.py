@@ -32,6 +32,7 @@ from nanobot.config.schema import (
     ModelPresetConfig,
     ProviderConfig,
 )
+from nanobot.providers.factory import resolve_automatic_model_api
 from nanobot.providers.image_generation import get_image_gen_provider
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 from nanobot.providers.oauth_model_catalog import (
@@ -73,6 +74,7 @@ class ModelSettingsOperations:
     update_provider: SettingsOperation
     create_provider: SettingsOperation
     provider_models: SettingsOperation
+    model_api: SettingsOperation
     oauth_login: SettingsOperation
     oauth_complete: SettingsOperation
     oauth_logout: SettingsOperation
@@ -88,6 +90,7 @@ class ModelSettingsPayload(TypedDict):
     model_call_order: list[str]
     model_call_order_editable: bool
     model_configuration_migratable: bool
+    model_api_resolution_supported: bool
     providers: list[dict[str, Any]]
 
 
@@ -1013,6 +1016,25 @@ def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
     return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
 
+def model_api_resolution_payload(config: Config, query: QueryParams) -> dict[str, Any]:
+    """Resolve a draft's automatic API using provider-owned routing rules."""
+    model = (query_first(query, "model") or "").strip()
+    if not model:
+        raise WebUISettingsError("model is required")
+    preset = ModelPresetConfig(
+        model=model,
+        provider=(query_first(query, "provider") or "auto").strip(),
+        reasoning_effort=(query_first(query, "reasoning_effort") or "").strip() or None,
+    )
+    try:
+        provider, api = resolve_automatic_model_api(
+            resolve_config_env_vars(config.model_copy(deep=True)), preset=preset,
+        )
+    except ValueError as exc:
+        raise WebUISettingsError(str(exc)) from exc
+    return {"provider": provider, "api": api}
+
+
 def model_settings_payload(
     config: Config,
     *,
@@ -1102,6 +1124,7 @@ def model_settings_payload(
 
     model_call_order, model_call_order_editable = _model_call_order_state(config)
     return {
+        "model_api_resolution_supported": True,
         "agent": {
             "model": effective_preset.model,
             "provider": selected_provider,
@@ -1885,6 +1908,12 @@ class ModelSettingsHandler:
                         "image" if image_restart_cleared else None
                     ),
                 )
+
+            if action == "model-api":
+                payload = await asyncio.to_thread(
+                    self.settings.read, operations.model_api, request.query,
+                )
+                return SettingsRouteResult.success(payload)
 
             if action == "provider-models":
                 try:

@@ -1468,7 +1468,7 @@ Set `agents.defaults.modelPreset` to choose the preset followed by sessions that
 
 ### Preset request API
 
-Leave API selection on **Automatic (recommended)** unless your provider requires a specific endpoint. For OpenAI-compatible providers, including custom gateways, and GitHub Copilot, a preset can choose Responses or Chat Completions. Credentials and endpoint URLs stay in the provider. Two presets sharing a provider can select different APIs.
+Leave API selection on **Auto** unless your provider requires a specific endpoint. For OpenAI-compatible providers, including custom gateways, and GitHub Copilot, a preset can choose Responses or Chat Completions. Credentials and endpoint URLs stay in the provider. Two presets sharing a provider can select different APIs.
 
 ```json
 {
@@ -1490,9 +1490,9 @@ Leave API selection on **Automatic (recommended)** unless your provider requires
 
 Omit `api` or set it to `null` for automatic routing. An explicit declaration overrides provider API defaults, including legacy `providers.openai.apiType`. Automatic Copilot routing uses the account's last successfully discovered `supported_endpoints` when available; other automatic routes use registry defaults. Custom gateways default to Chat Completions until Responses support is declared. Protocol behavior such as reasoning replay and native compaction remains provider-owned; declaring Responses support does not enable OpenAI-native compaction on a custom gateway.
 
-In the WebUI, open **Settings → Models → a preset → API connection**. Choose **Automatic (recommended)**, **Responses**, or **Chat Completions**. Selecting Responses also reveals **Try Chat Completions if Responses is unsupported**, which starts off when selecting Responses and requires the same model to support both endpoints. The explanation below the selector describes the chosen behavior.
+In the WebUI, open **Settings → Models → a preset → API connection**. Choose **Auto**, **Responses**, or **Chat Completions**. Auto shows the default API in parentheses, such as **Auto (Responses)**, and updates when the provider, model, or reasoning setting changes. The gateway resolves this default using the same rules as model requests, without probing remote endpoints. The label describes the default preference; compatibility failures can still activate permitted Chat fallback. Hosts that do not advertise API resolution show **Auto** without a resolved label. Selecting Responses also reveals **Try Chat Completions if Responses is unsupported**, which starts off when selecting Responses and requires the same model to support both endpoints.
 
-Every provider adapter declares its request formats in `nanobot/providers/registry.py`. OpenAI Codex, xAI Grok subscriptions, and the Azure OpenAI adapter use Responses; Anthropic uses Messages, and Bedrock uses Converse. The WebUI shows these fixed connections with an explanation instead of an editable selector. Preset declarations cannot enable a format the adapter does not implement. An OpenAI-compatible adapter implementing both formats does not guarantee that a particular remote model supports both.
+Every provider adapter declares its request formats in `nanobot/providers/registry.py`. OpenAI Codex, xAI Grok subscriptions, and the Azure OpenAI adapter use Responses; Anthropic uses Messages, and Bedrock uses Converse. The WebUI shows the protocol name for these fixed connections instead of an editable selector. Preset declarations cannot enable a format the adapter does not implement. An OpenAI-compatible adapter implementing both formats does not guarantee that a particular remote model supports both.
 
 Changing a preset's model or provider resets its API declaration to automatic unless the same update supplies a new declaration. Each fallback preset retains its own declaration. Legacy direct `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
 

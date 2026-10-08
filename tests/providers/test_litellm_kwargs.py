@@ -16,7 +16,7 @@ import pytest
 
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 
 
 def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
@@ -320,8 +320,8 @@ async def test_openai_compat_chat_stream_forwards_reasoning_deltas_deepseek_styl
             api_key="sk-test",
             default_model="deepseek-v4-pro",
             spec=spec,
+            model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
         )
-        provider._api_type = "chat_completions"
         result = await provider.chat_stream(
             messages=[{"role": "user", "content": "hi"}],
             model="deepseek-v4-pro",

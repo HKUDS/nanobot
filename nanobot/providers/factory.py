@@ -8,7 +8,7 @@ from pathlib import Path
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
+from nanobot.providers.registry import ProviderAPI, ProviderSpec, create_dynamic_spec, find_by_name
 
 
 @dataclass(frozen=True)
@@ -131,6 +131,34 @@ def _resolve_provider_setup(
         spec=spec,
         backend=backend,
     )
+
+
+def resolve_automatic_model_api(
+    config: Config, *, preset: ModelPresetConfig,
+) -> tuple[str, ProviderAPI]:
+    """Preview the default request API without live requests or circuit-breaker state."""
+    setup = _resolve_provider_setup(config, preset=preset)
+    spec = setup.spec
+    if spec is None:
+        return setup.provider_name, "chat_completions"
+    if len(spec.request_apis) == 1:
+        return setup.provider_name, spec.request_apis[0]
+    provider_config = setup.provider_config
+    if setup.backend == "github_copilot":
+        from nanobot.providers.github_copilot_provider import cached_github_copilot_model_api
+
+        api = cached_github_copilot_model_api(
+            setup.model, provider_config.proxy if provider_config else None,
+        )
+        if api is not None:
+            return setup.provider_name, api.preferred_api
+    api = spec.default_model_api(
+        setup.model, preset.reasoning_effort,
+        api_base=config.get_api_base(setup.model, preset=preset),
+        api_type=provider_config.api_type if provider_config else "auto",
+        extra_body=provider_config.extra_body if provider_config else None,
+    )
+    return setup.provider_name, api.preferred_api
 
 
 def validate_provider_setup(
