@@ -37,6 +37,7 @@ from nanobot.providers.openai_responses import (
     ResponsesWebSocketOptions,
     responses_state_matches,
 )
+from nanobot.providers.openai_responses.images import prepare_inline_images
 from nanobot.providers.openai_responses.state import without_response_item_ids
 from nanobot.providers.openai_responses.websocket import ResponsesWebSocketError
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
@@ -176,7 +177,7 @@ class OpenAICodexProvider(LLMProvider):
                 *,
                 emit_deltas: bool,
             ) -> LLMResponse:
-                wire_body = without_response_item_ids(request_body)
+                wire_body = await prepare_inline_images(without_response_item_ids(request_body))
                 if session_id:
                     websocket_result = await self._responses.websocket_request(
                         session_id, DEFAULT_CODEX_URL, headers, wire_body,

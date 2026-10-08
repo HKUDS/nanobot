@@ -593,6 +593,18 @@ The WebUI reads the account's Codex model catalog online, including current
 context-window and reasoning-effort metadata. A small compatible catalog remains
 available when the service cannot be reached.
 
+Before sending a large inline image batch, Codex prepares smaller copies while
+keeping the attachment files intact. It first re-encodes at the original dimensions,
+then reduces each dimension by at most 25% if needed, with JPEG quality at least 65.
+PNG transparency is preserved. The shared 1 MB image data URL budget is a best-effort
+transport target; small image blocks, animated images, and remote references keep
+their original payloads. Gateway logs report image sizes and byte counts.
+
+After three WebSocket transport failures without a completed reply, the same
+authenticated session uses HTTP for subsequent attempts. The existing retry policy
+controls replay and cancellation. WebSocket logs include request bytes, first-event timing,
+and close codes; unrecognized close reasons are redacted.
+
 For an eligible X Premium / Grok subscription:
 
 ```bash
