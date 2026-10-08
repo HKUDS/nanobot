@@ -128,7 +128,8 @@ export default {
   plugins: [
     animate,
     typography,
-    plugin(({ addVariant }) => {
+    plugin(({ addVariant, addUtilities }) => {
+      addUtilities({ ".rounded-full": { cornerShape: "round" } });
       // Revealing controls on emulated hover can consume the first Safari
       // tap. Keep these sidebar hover effects on hover-capable pointers.
       addVariant("media-hover", "@media (hover: hover)");
