@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import type { TFunction } from "i18next";
 
 import {
@@ -68,6 +68,8 @@ export function useCapabilitySettingsActions({
     webSearchKeyEditing,
     webSearchSaving,
   } = state;
+  const latestState = useRef(state);
+  latestState.current = state;
   const setError = (section: "image" | "voice" | "web" | "safety", message?: string) =>
     state.setCapabilityErrors((prev) => ({ ...prev, [section]: message }));
 
@@ -81,7 +83,7 @@ export function useCapabilitySettingsActions({
     try {
       const payload = await updateImageGenerationSettings(client, imageGenerationForm);
       applyPayload(payload, { preserveCapabilityForms: true });
-      state.setImageGenerationForm(imageGenerationFormFromPayload(payload));
+      state.setImageGenerationForm((current) => current === imageGenerationForm ? imageGenerationFormFromPayload(payload) : current);
       if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
@@ -103,7 +105,7 @@ export function useCapabilitySettingsActions({
     try {
       const payload = await updateTranscriptionSettings(client, transcriptionForm);
       applyPayload(payload, { preserveCapabilityForms: true });
-      state.setTranscriptionForm(transcriptionFormFromPayload(payload));
+      state.setTranscriptionForm((current) => current === transcriptionForm ? transcriptionFormFromPayload(payload) : current);
       if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
@@ -123,7 +125,7 @@ export function useCapabilitySettingsActions({
     try {
       const payload = await updateNetworkSafetySettings(client, networkSafetyForm);
       applyPayload(payload, { preserveCapabilityForms: true });
-      state.setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+      state.setNetworkSafetyForm((current) => current === networkSafetyForm ? networkSafetyFormFromPayload(payload) : current);
       if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
@@ -180,6 +182,7 @@ export function useCapabilitySettingsActions({
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
       await maybeRestartHostEngine(payload);
+      if (latestState.current.webSearchForm !== webSearchForm) return;
       setWebSearchForm((prev) => ({
         provider: payload.web_search.provider,
         apiKey: "",

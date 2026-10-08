@@ -137,6 +137,30 @@ describe("Settings capabilities", () => {
     ));
   });
 
+  it("preserves transcription edits made while an earlier save is pending", async () => {
+    const payload: SettingsPayload = { ...settingsPayload(), transcription: {
+      ...DEFAULT_TRANSCRIPTION_SETTINGS, provider_configured: true,
+      providers: [{ name: "groq", label: "Groq", configured: true }],
+    } };
+    let finishSave!: (value: SettingsPayload) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve) => { finishSave = resolve; }))
+      .mockImplementation(async (_method, update) => ({
+        ...payload, transcription: { ...payload.transcription!, model: update.model },
+      }));
+    renderSettingsView({ initialSection: "voice", initialSettings: payload });
+    const model = screen.getByDisplayValue("whisper-large-v3");
+    fireEvent.change(model, { target: { value: "first-model" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(model, { target: { value: "latest-model" } });
+    await act(async () => finishSave({
+      ...payload, transcription: { ...payload.transcription!, model: "first-model" },
+    }));
+    expect(model).toHaveValue("latest-model");
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.transcription.update", expect.objectContaining({ model: "latest-model" }), 20_000,
+    ));
+  });
+
   it("reveals the configured transcription provider and model when enabled", () => {
     const payload: SettingsPayload = { ...settingsPayload(), transcription: {
       enabled: false, provider: "groq", provider_configured: true, model: "whisper-large-v3",
