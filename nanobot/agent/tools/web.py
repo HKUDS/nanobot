@@ -1023,8 +1023,7 @@ class WebSearchTool(Tool):
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
-            # Note: duckduckgo_search is synchronous and does its own requests
-            # We run it in a thread to avoid blocking the loop
+            # DDGS.text performs synchronous requests; run it in a thread to avoid blocking the loop.
             from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
 
             ddgs_type = cast(Any, DDGS)

@@ -62,6 +62,10 @@ export function SidebarSelectionHighlight({
       const firstPosition = !positionedRef.current;
       if (firstPosition) highlight.style.transitionProperty = "none";
 
+      // Preserve fractional layout coordinates so the highlight shares the
+      // target's edges, including where it meets an adjacent hover background.
+      highlight.style.left = "0px";
+      highlight.style.top = "0px";
       highlight.style.width = `${targetRect.width}px`;
       highlight.style.height = `${targetRect.height}px`;
       highlight.style.transform = `translate3d(${targetRect.left - containerRect.left}px, ${
@@ -117,7 +121,7 @@ export function SidebarSelectionHighlight({
         data-testid={`${scope}-selection-highlight`}
         data-active-id={activeId ?? undefined}
         aria-hidden="true"
-        className={cn("pointer-events-none absolute left-0 top-0 z-0 !mt-0 rounded-xl bg-sidebar-foreground/[0.055] opacity-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none dark:bg-white/[0.07]", highlightClassName)}
+        className={cn("pointer-events-none absolute left-0 top-0 z-0 !mt-0 rounded-control bg-sidebar-foreground/[0.055] opacity-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none dark:bg-white/[0.07]", highlightClassName)}
       />
     </div>
   );

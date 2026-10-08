@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
@@ -19,6 +20,7 @@ from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Request
 
+from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.webui import remote_ssh
 from nanobot.webui.client_contract import webui_contract
@@ -33,6 +35,7 @@ MEDIA = "/api/media/AAAAAAAAAAAAAAAAAAAAAA/remoteFilePayload"
 
 @pytest.fixture
 async def remote(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     assets = tmp_path / "local-dist"
     assets.mkdir()
     (assets / "index.html").write_text("<!doctype html><title>Local nanobot</title>", encoding="utf-8")
@@ -50,6 +53,7 @@ async def remote(tmp_path, monkeypatch):
     seen, children = [], []
     # Frozen initial wire declaration: current client vs an independently defined host.
     state = SimpleNamespace(block=asyncio.Event(), entered=asyncio.Event(), ws_redirect=False,
+                            binary_upload=False,
                             contract={"version": "0.3.5", "min_protocol": 1, "max_protocol": 1,
                                       "capabilities": ["webui.core.v1"]})
 
@@ -98,14 +102,21 @@ async def remote(tmp_path, monkeypatch):
     async def messages(ws):
         assert ws in services.endpoint.webui_connections
         assert ws.request.headers.get("X-Nanobot-Auth") is None
-        await ws.send(json.dumps({"ready": True, "media": MEDIA,
-                                  "query": parse_qs(urlsplit(ws.request.path).query).get("client_id")}))
-        async for message in ws:
-            await ws.send(message)
+        try:
+            await ws.send(json.dumps({"ready": True, "media": MEDIA,
+                                      "query": parse_qs(urlsplit(ws.request.path).query).get("client_id"),
+                                      **({"event": "ready", "upload": services.uploads.issue(ws)}
+                                         if state.binary_upload else {})}))
+            async for message in ws:
+                await ws.send(message)
+        finally:
+            services.uploads.revoke(ws)
 
     real_spawn = asyncio.create_subprocess_exec
     monkeypatch.setattr(remote_ssh.shutil, "which", lambda _: "fixture-ssh")
-    async with serve(messages, "127.0.0.1", 0, process_request=process, max_size=64 * 1024 * 1024) as server:
+    bridge = BinaryHTTPBridge(services.uploads.handle)
+    async with serve(messages, "127.0.0.1", 0, process_request=process,
+                     create_connection=bridge.connection_factory, max_size=64 * 1024 * 1024) as server:
         port = server.sockets[0].getsockname()[1]
         pipe = f"""
 import os, socket, threading
@@ -135,6 +146,8 @@ while data := upstream.recv(65536):
         finally:
             state.block.set()
             await proxy.close()
+            await bridge.shutdown()
+            services.uploads.store.clear()
             assert all(child.returncode is not None for child in children)
 
 
@@ -278,6 +291,82 @@ async def test_custom_ws_path_multiple_tabs_and_binary_upload(remote):
         second = await bootstrap(remote)
         async with connect(second["ws_url"] + "?token=" + second["token"], proxy=None) as other:
             assert json.loads(await other.recv())["ready"] is True
+
+
+async def test_binary_http_upload_uses_a_live_local_capability(remote):
+    remote.state.binary_upload = True
+    issued = await bootstrap(remote)
+    raw = b"x" * 1_453_245
+    url = issued["ws_url"] + "?token=" + issued["token"]
+    async with connect(url, proxy=None, origin=remote.proxy.origin) as ws:
+        capability = json.loads(await ws.recv())["upload"]
+        headers = {"Authorization": "Bearer " + capability["token"],
+                   "Content-Type": "image/png", "X-Attachment-Name": "clipboard.png"}
+        response = await remote.client.post(remote.proxy.origin + capability["path"],
+                                            content=raw, headers=headers)
+        assert response.status_code == 201, response.text
+        assert response.headers["cache-control"] == "no-store"
+        assert capability["token"] not in remote.services.uploads._tokens
+        owner = next(iter(remote.services.uploads._tokens))
+        paths = remote.services.uploads.store.resolve([response.json()["reference"]], owner=owner)
+        assert Path(paths[0]).read_bytes() == raw
+        assert (await remote.client.post(remote.proxy.origin + "/api/attachments", content=raw,
+            headers={**headers, "Authorization": "Bearer " + issued["api_token"]})).status_code == 401
+        assert (await remote.client.post(remote.proxy.origin + "/api/fixture", content=b"write",
+            headers={"Authorization": "Bearer " + issued["api_token"]})).status_code == 405
+        assert (await remote.client.post(remote.proxy.origin + capability["path"], content=raw,
+            headers={**headers, "Origin": "https://foreign.test"})).status_code == 403
+    async with asyncio.timeout(5):
+        while remote.services.uploads._tokens:
+            await asyncio.sleep(.01)
+    assert (await remote.client.post(remote.proxy.origin + capability["path"],
+                                    content=raw, headers=headers)).status_code == 401
+    assert not remote.services.uploads.store._entries
+
+
+@pytest.mark.parametrize("encoded", [False, True], ids=["chunked", "compressed"])
+async def test_binary_upload_rejects_changed_body_framing(remote, encoded):
+    remote.state.binary_upload = True
+    issued = await bootstrap(remote)
+
+    async def chunks():
+        yield b"bytes"
+
+    async with connect(issued["ws_url"] + "?token=" + issued["token"], proxy=None) as ws:
+        capability = json.loads(await ws.recv())["upload"]
+        response = await remote.client.post(remote.proxy.origin + capability["path"],
+            content=b"bytes" if encoded else chunks(), headers={
+                "Authorization": "Bearer " + capability["token"], "Content-Type": "image/png",
+                **({"Content-Encoding": "gzip"} if encoded else {}),
+            })
+        assert response.status_code == 400
+        assert not remote.services.uploads.store._entries
+
+
+async def test_stalled_binary_upload_is_bounded_and_retryable(remote, monkeypatch):
+    remote.state.binary_upload = True
+    issued = await bootstrap(remote)
+    async with connect(issued["ws_url"] + "?token=" + issued["token"], proxy=None) as ws:
+        capability = json.loads(await ws.recv())["upload"]
+        with monkeypatch.context() as stalled_timeout:
+            stalled_timeout.setattr("nanobot.webui.remote_proxy.UPLOAD_IDLE_TIMEOUT_SECONDS", .1)
+            reader, writer = await asyncio.open_connection("127.0.0.1", remote.proxy.port)
+            try:
+                writer.write((
+                    f"POST /api/attachments HTTP/1.1\r\nHost: 127.0.0.1:{remote.proxy.port}\r\n"
+                    f"Authorization: Bearer {capability['token']}\r\nContent-Type: image/png\r\n"
+                    "Content-Length: 2\r\nConnection: close\r\n\r\nx"
+                ).encode())
+                await writer.drain()
+                response = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2)
+                assert b"502 Bad Gateway" in response
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        response = await remote.client.post(remote.proxy.origin + capability["path"],
+            content=b"xx", headers={"Authorization": "Bearer " + capability["token"],
+                                    "Content-Type": "image/png"})
+        assert response.status_code == 201, response.text
 
 
 async def test_signed_media_wrapped_over_http_and_websocket_and_range_preserved(remote):

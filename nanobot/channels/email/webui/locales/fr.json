@@ -15,7 +15,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Autoriser nanobot à lire et envoyer des e-mails",
+        "label": "Accès aux e-mails",
         "choices": {
           "true": "Accordé",
           "false": "Non accordé"
@@ -58,7 +58,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Intervalle de relève (secondes)",
+        "label": "Intervalle de vérification (secondes)",
         "placeholder": "30"
       },
       "allowFrom": {
@@ -85,35 +85,35 @@
       "imapUseSsl": {
         "label": "SSL IMAP",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "smtpUseTls": {
         "label": "SMTP-TLS",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "smtpUseSsl": {
         "label": "SMTP-SSL",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "autoReplyEnabled": {
         "label": "Réponses automatiques",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "markSeen": {
         "label": "Marquer comme lu",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
@@ -125,33 +125,33 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "Déplacer vers la boîte aux lettres"
+        "label": "Boîte cible"
       },
       "postActionExpunge": {
-        "label": "Appliquer l'action de manière permanente",
+        "label": "Suppression définitive",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "Ignorer les messages ignorés",
+        "label": "Garder les e-mails ignorés",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "maxBodyChars": {
-        "label": "Longueur maximale du corps"
+        "label": "Limite du corps (caractères)"
       },
       "subjectPrefix": {
-        "label": "Préfixe du sujet de la réponse"
+        "label": "Préfixe d’objet"
       },
       "allowedAttachmentTypes": {
-        "label": "Types de pièces jointes autorisés"
+        "label": "Types de pièces jointes"
       },
       "maxAttachmentSize": {
-        "label": "Taille maximale des pièces jointes"
+        "label": "Limite par pièce jointe (octets)"
       },
       "maxAttachmentsPerEmail": {
         "label": "Nombre maximal de pièces jointes"
@@ -159,7 +159,7 @@
       "trustedAuthservIds": {
         "label": "Services d’authentification approuvés",
         "placeholder": "mx.google.com, séparés par des virgules",
-        "help": "Valeurs authserv-id exactes ajoutées par le service de réception. Requis si SPF ou DKIM est vérifié."
+        "help": "Saisissez les valeurs authserv-id de confiance.\n\nValeurs authserv-id exactes ajoutées par le service de réception. Requis si SPF ou DKIM est vérifié."
       }
     }
   }

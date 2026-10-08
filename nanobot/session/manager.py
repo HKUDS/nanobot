@@ -1593,7 +1593,7 @@ class SessionManager:
         return JsonlSessionStore.session_key_from_path(path)
 
     def _get_session_path(self, key: str) -> Path:
-        """Get the collision-resistant workspace path for a session."""
+        """Get the canonical session path in the workspace's external storage namespace."""
         return self._jsonl_store.get_session_path(key)
 
     def _get_runtime_checkpoint_path(self, key: str) -> Path:

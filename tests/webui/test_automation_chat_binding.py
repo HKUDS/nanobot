@@ -6,7 +6,7 @@ import socket
 import uuid
 from contextlib import suppress
 from dataclasses import asdict
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -214,7 +214,7 @@ async def test_real_gateway_move_run_reload_and_previous_result(tmp_path, target
         target_session.metadata["title"] = "Report inbox"
         target_session.add_message("user", "Report inbox")
         sessions.save(target_session)
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = False
@@ -369,7 +369,7 @@ async def test_late_subagent_result_stays_with_moved_task(tmp_path, monkeypatch)
     release = asyncio.Event()
     entered = asyncio.Event()
     started = False
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = False

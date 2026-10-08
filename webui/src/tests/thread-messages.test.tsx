@@ -29,7 +29,7 @@ function assistantActionCounts(root: ParentNode = document) {
     if (!row.querySelector("[data-message-block-menu-trigger]")) continue;
     const { menu } = openMessageBlockMenu(row);
     counts.copy += within(menu).queryAllByRole("button", { name: "Copy", exact: true }).length;
-    counts.fork += within(menu).queryAllByRole("button", { name: "Fork", exact: true }).length;
+    counts.fork += within(menu).queryAllByRole("button", { name: "New chat from here", exact: true }).length;
     fireEvent.keyDown(menu, { key: "Escape" });
   }
   return counts;
@@ -681,7 +681,7 @@ describe("ThreadMessages", () => {
     } as unknown as Selection);
 
     document.dispatchEvent(new Event("selectionchange"));
-    const action = await screen.findByRole("button", { name: "Ask about this" });
+    const action = await screen.findByRole("button", { name: "Ask about selection" });
     fireEvent.click(action);
 
     await waitFor(() => expect(onQuoteSelection).toHaveBeenCalledWith("selected answer"));

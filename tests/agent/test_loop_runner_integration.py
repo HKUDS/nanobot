@@ -506,9 +506,8 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_streamed_flag_not_set_on_llm_error(tmp_path):
-    """When LLM errors during a streaming-capable channel interaction,
-    _streamed must NOT be set so ChannelManager delivers the error."""
+async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_path):
+    """LLM errors must not produce StreamedResponseEvent, so channels deliver the error."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -617,7 +616,7 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
     session = loop.sessions.get_or_create("cli:test")
     assert [
         {key: value for key, value in message.items() if key in {"role", "content"}}
-        for message in session.messages
+        for message in map(public_history_message, session.messages)
     ] == [
         {"role": "user", "content": "first question"},
         {"role": "assistant", "content": _PERSISTED_MODEL_ERROR_PLACEHOLDER},

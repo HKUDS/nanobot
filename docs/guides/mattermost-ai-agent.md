@@ -1,7 +1,6 @@
 # Build a Mattermost AI Agent with nanobot
 
-This guide connects nanobot to Mattermost through the built-in Mattermost
-channel, using WebSocket events and the Mattermost REST API.
+This guide connects nanobot to Mattermost through the built-in Mattermost channel, using WebSocket events and the Mattermost REST API.
 
 ## What this guide builds
 
@@ -51,20 +50,11 @@ Merge this snippet into `~/.nanobot/config.json`:
 }
 ```
 
-`teamId` scopes the channel to a Mattermost team. Keep `groupPolicy` as
-`mention` for the first test. `groupPolicyInThread` can be `"mention"`,
-`"open"`, or `"allowlist"` and controls messages that reply inside a
-thread. If it is omitted, it inherits `groupPolicy`, preserving the behavior
-of existing configurations. Set it to `"open"` explicitly when follow-up
-messages in threads should not require another @mention.
+`teamId` scopes the channel to a Mattermost team. Keep `groupPolicy` as `mention` for the first test. `groupPolicyInThread` can be `"mention"`, `"open"`, or `"allowlist"` and controls messages that reply inside a thread. If it is omitted, it inherits `groupPolicy`, preserving the behavior of existing configurations. Set it to `"open"` explicitly when follow-up messages in threads should not require another @mention.
 
-When `groupPolicy` is `"allowlist"`, `groupAllowFrom` remains the outer
-channel boundary for root posts and thread replies. A thread policy cannot open
-a channel that is not on that allowlist.
+When `groupPolicy` is `"allowlist"`, `groupAllowFrom` remains the outer channel boundary for root posts and thread replies. A thread policy cannot open a channel that is not on that allowlist.
 
-Mattermost DMs are open by default. Setting `dm.policy` to `"allowlist"` with no
-`dm.allowFrom` entries makes new DM senders receive a pairing code. Approve the
-code before using the bot normally.
+Mattermost DMs are open by default. Setting `dm.policy` to `"allowlist"` with no `dm.allowFrom` entries makes new DM senders receive a pairing code. Approve the code before using the bot normally.
 
 ## Run nanobot gateway
 
@@ -75,8 +65,7 @@ nanobot gateway
 
 ## Test a message
 
-DM the bot account. It should return a pairing code. Approve it from a trusted
-local surface:
+DM the bot account. It should return a pairing code. Approve it from a trusted local surface:
 
 ```bash
 nanobot agent -m "/pairing approve ABCD-EFGH"
@@ -97,13 +86,10 @@ Then DM the bot again, or mention it in a channel where the bot has access:
 
 ## Troubleshooting
 
-- If startup logs say `serverUrl and token must be configured`, check the
-  camelCase config keys.
+- If startup logs say `serverUrl and token must be configured`, check the camelCase config keys.
 - If DMs are ignored, review the `dm` policy and pairing approval state.
-- If channel messages are ignored, confirm the bot is mentioned and belongs to
-  the team/channel.
-- If thread replies are surprising, review `groupPolicyInThread`,
-  `replyInThread`, and `includeThreadContext`.
+- If channel messages are ignored, confirm the bot is mentioned and belongs to the team/channel.
+- If thread replies are surprising, review `groupPolicyInThread`, `replyInThread`, and `includeThreadContext`.
 
 ## Next: memory, automations, MCP tools
 

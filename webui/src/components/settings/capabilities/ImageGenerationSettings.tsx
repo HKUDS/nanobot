@@ -1,4 +1,6 @@
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { ProviderParameterFields } from "@/components/settings/models/ProviderParameterFields";
+import { providerJsonValue } from "@/components/settings/models/providerForm";
 import type { Dispatch, SetStateAction, ReactNode } from "react";
 import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import { useTranslation } from "react-i18next";
@@ -37,6 +39,10 @@ export function imageGenerationFormFromPayload(payload: SettingsPayload): ImageG
     defaultAspectRatio: payload.image_generation.default_aspect_ratio,
     defaultImageSize: payload.image_generation.default_image_size,
     maxImagesPerTurn: payload.image_generation.max_images_per_turn,
+    ...(payload.image_generation.request_overrides_supported ? {
+      extraHeaders: providerJsonValue(payload.image_generation.extra_headers),
+      extraBody: providerJsonValue(payload.image_generation.extra_body),
+    } : {}),
   };
 }
 
@@ -51,6 +57,7 @@ export function ImageGenerationSettings({
   saving,
   onChangeForm,
   onSave,
+  onSaveRequestSettings,
   onOpenProviders,
   showBrandLogos,
   onRestart,
@@ -67,6 +74,7 @@ export function ImageGenerationSettings({
   saving: boolean;
   onChangeForm: Dispatch<SetStateAction<ImageGenerationSettingsUpdate>>;
   onSave: () => void;
+  onSaveRequestSettings: (values: Pick<ImageGenerationSettingsUpdate, "extraHeaders" | "extraBody">) => Promise<void>;
   onOpenProviders: () => void;
   showBrandLogos: boolean;
   onRestart?: () => void;
@@ -76,8 +84,7 @@ export function ImageGenerationSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const selectedProvider =
-    settings.image_generation.providers.find((provider) => provider.name === form.provider) ??
-    settings.image_generation.providers[0];
+    settings.image_generation.providers.find((provider) => provider.name === form.provider);
   const providerConfigured = !!selectedProvider?.configured;
   const missingCredential = form.enabled && !providerConfigured;
   useAutoSave(form, dirty, saving, onSave, !embedded && !missingCredential);
@@ -95,6 +102,8 @@ export function ImageGenerationSettings({
       ...prev,
       provider,
       model: nextProvider?.default_model || nextProvider?.models?.[0] || prev.model,
+      ...(settings.image_generation.request_overrides_supported && provider !== prev.provider
+        ? { extraHeaders: "", extraBody: "" } : {}),
     }));
   };
 
@@ -114,7 +123,8 @@ export function ImageGenerationSettings({
           </SettingsRow>
           ) : null}
           {embedded || form.enabled ? <>
-          <SettingsRow title={tx("settings.rows.imageProvider", "Image provider")}>
+          <SettingsRow title={tx("settings.rows.imageProvider", "Image provider")}
+            description={selectedProvider?.uses_images_api ? t("settings.image.imagesApiHint") : undefined}>
             <ProviderPicker
               providers={settings.image_generation.providers}
               value={form.provider}
@@ -186,6 +196,17 @@ export function ImageGenerationSettings({
             />
           </SettingsRow>
           <SettingsAdvancedOptions>
+          {settings.image_generation.request_overrides_supported && (
+            <div className="settings-list-inset space-y-3 py-3">
+              <p className="text-[13px] text-muted-foreground">{t("settings.image.requestOverridesHint")}</p>
+              <ProviderParameterFields fields={["extra_headers", "extra_body"]}
+                inherit disabled={saving || dirty || missingCredential}
+                onSave={onSaveRequestSettings}
+                form={{ extraHeaders: form.extraHeaders ?? "", extraBody: form.extraBody ?? "", extraQuery: "" }}
+                onChange={(value) => onChangeForm((prev) => ({ ...prev, ...value }))}
+              />
+            </div>
+          )}
           <SettingsRow title={tx("settings.rows.maxImagesPerTurn", "Max images per request")}>
             <NumberInput
               value={form.maxImagesPerTurn}

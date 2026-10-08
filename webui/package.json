@@ -27,6 +27,7 @@
     "i18next": "^26.0.6",
     "lucide-react": "^0.469.0",
     "micromark-factory-space": "^2.0.1",
+    "micromark-util-decode-string": "^2.0.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

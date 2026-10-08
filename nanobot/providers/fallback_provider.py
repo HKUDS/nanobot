@@ -169,6 +169,9 @@ class FallbackProvider(LLMProvider):
     def get_default_model(self) -> str:
         return self._primary.get_default_model()
 
+    async def aclose(self) -> None:
+        await self._primary.aclose()
+
     def set_fallback_model_observer(self, observer: FallbackModelObserver | None) -> None:
         """Attach a process-level observer without changing request call signatures."""
         self._fallback_model_observer = observer
@@ -612,9 +615,12 @@ class FallbackProvider(LLMProvider):
                 fallback_kwargs.pop("reasoning_effort", None)
             else:
                 fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
-            fallback_response, fallback_exception = await self._call_provider(
-                call, fallback_provider, fallback_kwargs
-            )
+            try:
+                fallback_response, fallback_exception = await self._call_provider(
+                    call, fallback_provider, fallback_kwargs
+                )
+            finally:
+                await fallback_provider.aclose()
             if fallback_exception is not None:
                 logger.warning(
                     "Fallback '{}' raised {}",

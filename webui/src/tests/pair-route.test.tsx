@@ -20,14 +20,14 @@ describe("paired network route", () => {
   it("does not mislabel a saved custom route as a direct connection", () => {
     mocks.config = "/private/paired/ssh_route";
     render(<PairRouteSettings id="paired" />);
-    expect(screen.getByRole("combobox")).toHaveTextContent("Saved network route");
+    expect(screen.getByRole("combobox")).toHaveTextContent("Saved route");
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     expect(mocks.action).not.toHaveBeenCalled();
   });
   it("shows direct only when no saved route is configured", () => {
     render(<PairRouteSettings id="paired" />);
     expect(screen.getByRole("combobox")).toHaveTextContent("Direct connection");
-    expect(screen.getByText(i18n.t("remote.pair.routeHint"))).toBeVisible();
+    expect(screen.getByText(i18n.t("remote.pair.routeHint").replace(/\s+/g, " ").trim())).toBeVisible();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
   it("shows saving, then confirms the saved route without connecting", async () => {

@@ -1,10 +1,6 @@
 # nanobot WebUI Source
 
-This directory contains the React/TypeScript source for the nanobot WebUI. If
-you installed `nanobot-ai` from PyPI and only want to use the bundled browser UI,
-read the user guide in [`docs/webui.md`](../docs/webui.md). You do not need
-Node.js, Bun, Vite, or anything in this directory unless you are changing the
-frontend.
+This directory contains the React/TypeScript source for the nanobot WebUI. If you installed `nanobot-ai` from PyPI and only want to use the bundled browser UI, read the user guide in [`docs/webui.md`](../docs/webui.md). You do not need Node.js, Bun, Vite, or anything in this directory unless you are changing the frontend.
 
 For the project overview, install guide, and general docs map, see the root [`README.md`](../README.md) and [`docs/README.md`](../docs/README.md).
 
@@ -17,9 +13,7 @@ For the project overview, install guide, and general docs map, see the root [`RE
 | Change WebUI source code | [Develop the WebUI (Vite HMR)](#develop-the-webui-vite-hmr) | `http://127.0.0.1:5173` |
 | Debug setup failures | [`docs/troubleshooting.md#webui-problems`](../docs/troubleshooting.md#webui-problems) | Diagnosis order and common fixes |
 
-The source app is built with Vite + React 18 + TypeScript + Tailwind 3 +
-shadcn/ui. It talks to the gateway over the WebSocket multiplex protocol and
-reads session metadata from the embedded REST surface on the same port.
+The source app is built with Vite + React 18 + TypeScript + Tailwind 3 + shadcn/ui. It talks to the gateway over the WebSocket multiplex protocol and reads session metadata from the embedded REST surface on the same port.
 
 ## Layout
 
@@ -48,12 +42,9 @@ From the repository root:
 nanobot webui --dev
 ```
 
-The command safely prepares the local WebSocket channel, starts both the gateway and Vite,
-and opens `http://127.0.0.1:5173`. Vite proxies to the configured WebSocket channel and applies
-frontend changes with HMR. Press Ctrl+C in that terminal to stop both processes.
+The command safely prepares the local WebSocket channel, starts both the gateway and Vite, and opens `http://127.0.0.1:5173`. Vite proxies to the configured WebSocket channel and applies frontend changes with HMR. Press Ctrl+C in that terminal to stop both processes.
 
-Use `--no-open` to skip opening a browser. `--dev` is foreground-only and cannot be combined
-with `--background`.
+Use `--no-open` to skip opening a browser. `--dev` is foreground-only and cannot be combined with `--background`.
 
 ## Manual development setup
 

@@ -2191,8 +2191,8 @@ async def test_stream_end_flushes_buffered_answer() -> None:
     channel._context_token_at["wx-user"] = time.time()
     channel._send_text = AsyncMock()
 
-    await channel.send_delta("wx-user", "hello ", {"_stream_delta": True})
-    await channel.send_delta("wx-user", "world", {"_stream_end": True})
+    await channel.send_delta("wx-user", "hello ")
+    await channel.send_delta("wx-user", "world", stream_end=True)
 
     channel._send_text.assert_awaited_once_with("wx-user", "hello world", "ctx-1")
     assert "wx-user" not in channel._stream_buffers
@@ -2230,14 +2230,14 @@ async def test_stream_end_send_failure_keeps_buffer_for_retry() -> None:
     channel._context_token_at["wx-user"] = time.time()
     channel._send_text = AsyncMock(side_effect=RuntimeError("temporary send failure"))
 
-    await channel.send_delta("wx-user", "hello ", {"_stream_delta": True})
+    await channel.send_delta("wx-user", "hello ")
     with pytest.raises(RuntimeError):
-        await channel.send_delta("wx-user", "world", {"_stream_end": True})
+        await channel.send_delta("wx-user", "world", stream_end=True)
 
     assert channel._stream_buffers["wx-user"] == ["hello "]
 
     channel._send_text = AsyncMock()
-    await channel.send_delta("wx-user", "world", {"_stream_end": True})
+    await channel.send_delta("wx-user", "world", stream_end=True)
 
     channel._send_text.assert_awaited_once_with("wx-user", "hello world", "ctx-1")
     assert "wx-user" not in channel._stream_buffers

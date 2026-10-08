@@ -15,6 +15,8 @@ from typing import NoReturn
 
 import typer
 
+from nanobot.config.home import get_home_path
+
 app = typer.Typer(help="Pair this server with a local nanobot. No public WebUI or relay.")
 
 
@@ -190,7 +192,7 @@ def pair(
                 RemoteInspection,
             )
 
-            result = subprocess.run([sys.executable, "-c", _LOCATE, str(Path.home() / ".nanobot/config.json")], capture_output=True, text=True, timeout=8)
+            result = subprocess.run([sys.executable, "-c", _LOCATE, str(get_home_path() / "config.json")], capture_output=True, text=True, timeout=8)
             records = [line.partition("NANOBOT_REMOTE:")[2] for line in result.stdout.splitlines() if "NANOBOT_REMOTE:" in line]
             candidates = RemoteInspection.model_validate_json(records[-1]).candidates if records else []
             if len(candidates) == 1:

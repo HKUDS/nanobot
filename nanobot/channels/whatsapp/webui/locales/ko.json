@@ -5,11 +5,11 @@
     "officialLabel": "WhatsApp 도움말 열기",
     "fields": {
       "allowFrom": {
-        "label": "허용된 연락처",
+        "label": "허용 연락처",
         "placeholder": "전화번호 또는 WhatsApp ID"
       },
       "groupPolicy": {
-        "label": "그룹 동작",
+        "label": "그룹 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",

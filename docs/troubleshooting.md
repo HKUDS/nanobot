@@ -31,6 +31,21 @@ If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram,
 
 `nanobot status` does not call the model. If provider/model setup is incomplete, it points to WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
 
+## Empty topics after a WebUI restart
+
+The Restart button in WebUI settings does not create a conversation or add messages
+to an existing conversation. Reopening WebUI or reconnecting to the gateway also
+does not save a topic until a message or another session action creates it.
+
+Older gateway versions could save an empty topic when the Restart button had no
+current chat. Update the gateway to stop creating these topics. Existing topics
+are not deleted by the update; check their contents before removing them. A typed
+`/restart` command remains part of that chat's display history.
+
+If settings stay disabled after a restart while another tab has reconnected,
+reload the affected page. Updated WebUI clients track restart completion per tab,
+so one tab cannot leave another tab waiting by clearing the shared restart marker.
+
 ## Session storage overlaps the workspace
 
 Sessions live at `<config-dir>/sessions/<workspace-id>/`, outside the agent workspace. If startup reports a conflict, compare the printed paths. A valid layout is `bot/config.json`, `bot/sessions/`, and `bot/workspace/`.
@@ -272,6 +287,8 @@ Open:
 ```text
 http://127.0.0.1:8765
 ```
+
+For first access, copy the complete login link printed by `nanobot webui`, including the fragment after `#`. In WSL, open that link in your Windows browser if automatic opening fails. The plain page address does not sign in a new browser.
 
 If accessing from another device, bind the WebSocket channel to `0.0.0.0` and set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds without a token or token issue secret.
 

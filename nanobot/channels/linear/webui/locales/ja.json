@@ -16,7 +16,7 @@
       "clientId": {
         "label": "OAuth クライアント ID",
         "placeholder": "Linear OAuth クライアント ID",
-        "help": "Linear の非公開 OAuth アプリからコピーします。"
+        "help": "非公開の OAuth アプリからコピーします。\n\nLinear の非公開 OAuth アプリからコピーします。"
       },
       "clientSecret": {
         "label": "OAuth クライアントシークレット",
@@ -26,12 +26,12 @@
       "webhookSigningSecret": {
         "label": "Webhook 署名シークレット",
         "placeholder": "••••••",
-        "help": "Webhook の本文を解析する前に Linear-Signature を検証するために使います。"
+        "help": "Webhook の署名を検証します。\n\nWebhook の本文を解析する前に Linear-Signature を検証するために使います。"
       },
       "publicBaseUrl": {
         "label": "公開 HTTPS URL",
         "placeholder": "https://nanobot.example.com",
-        "help": "下のリスナーへ転送される安定した HTTPS オリジンを指定します。パスは含めないでください。"
+        "help": "パスを含まない HTTPS URL を入力します。\n\n下のリスナーへ転送される安定した HTTPS オリジンを指定します。パスは含めないでください。"
       },
       "host": {
         "label": "リッスンホスト",
@@ -52,11 +52,11 @@
       "allowFrom": {
         "label": "許可する Linear ユーザー",
         "placeholder": "Linear ユーザー ID（カンマ区切り）",
-        "help": "nanobot のペアリングを使う場合は空欄にします。接続済みワークスペースの全ユーザーを許可する場合のみ * を指定してください。"
+        "help": "この接続を使えるユーザーを選びます。\n\nnanobot のペアリングを使う場合は空欄にします。接続済みワークスペースの全ユーザーを許可する場合のみ * を指定してください。"
       },
       "showReasoning": {
         "label": "推論を表示",
-        "help": "モデルの推論を Linear の思考アクティビティとして投稿します。静かなセッションにするにはオフにします。"
+        "help": "推論を思考の活動として公開します。\n\nモデルの推論を Linear の思考アクティビティとして投稿します。静かなセッションにするにはオフにします。"
       }
     }
   },
@@ -67,7 +67,7 @@
     "enterSecret": "シークレットを入力",
     "secretSaveFailed": "保存を確認できませんでした。再試行するかキャンセルしてください。",
     "authorizeTitle": "Linear で認証",
-    "authorizeDescription": "Linear でワークスペースを選び、nanobot を認証してください。完了したらここに戻ってください。",
+    "authorizeDescription": "Linear で承認してから、ここに戻ります。\n\nLinear でワークスペースを選び、nanobot を認証してください。完了したらここに戻ってください。",
     "waiting": "Linear の認証を待っています...",
     "connected": "Linear に接続しました。",
     "stopped": "認証を中止しました。",
@@ -94,7 +94,7 @@
     "workspaceActions": "{{name}} を管理",
     "reauthorize": "再認可",
     "disconnectTitle": "{{name}} を削除しますか？",
-    "disconnectDescription": "このワークスペースの認可と nanobot のメンバーアクセス設定を削除します。Issue、コメント、nanobot の会話履歴は保持されます。他のワークスペースには影響しません。後で再認可できます。",
+    "disconnectDescription": "ワークスペースの承認を解除し、履歴は残します。\n\nこのワークスペースの認可と nanobot のメンバーアクセス設定を削除します。Issue、コメント、nanobot の会話履歴は保持されます。他のワークスペースには影響しません。後で再認可できます。",
     "disconnectLast": "接続済みの最後のワークスペースのため、Linear チャンネルも無効になります。",
     "disconnecting": "削除中…",
     "addWorkspace": "ワークスペースを接続",

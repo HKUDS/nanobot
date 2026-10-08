@@ -13,6 +13,12 @@ if (!HTMLElement.prototype.scrollIntoView) {
   HTMLElement.prototype.scrollIntoView = () => {};
 }
 
+// happy-dom does not load fonts; text measurements can run immediately.
+Object.defineProperty(document, "fonts", {
+  value: { ready: Promise.resolve() },
+  configurable: true,
+});
+
 function createTestStorage(): Storage {
   const store = new Map<string, string>();
   return {

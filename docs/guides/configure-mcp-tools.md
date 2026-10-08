@@ -1,7 +1,6 @@
 # How to Configure MCP Tools in nanobot
 
-This guide adds an MCP server to nanobot so the agent can use external tools
-through the Model Context Protocol.
+This guide adds an MCP server to nanobot so the agent can use external tools through the Model Context Protocol.
 
 ## What you will build
 
@@ -11,8 +10,7 @@ through the Model Context Protocol.
 
 ## When to use this
 
-Use MCP when the capability you need already exists as an MCP server, or when
-you want external tools to be managed outside nanobot core.
+Use MCP when the capability you need already exists as an MCP server, or when you want external tools to be managed outside nanobot core.
 
 ## Install
 
@@ -22,20 +20,14 @@ nanobot onboard --wizard
 nanobot agent -m "Hello!"
 ```
 
-Install the MCP server runtime separately. Many examples use `npx`, `uvx`, or a
-remote HTTP endpoint.
+Install the MCP server runtime separately. Many examples use `npx`, `uvx`, or a remote HTTP endpoint.
 
 ## Minimal working example
 
 For local interactive setup:
 
 1. Run `nanobot webui` and open **Apps**.
-2. Choose a known MCP server preset, or add a custom stdio, HTTP, or SSE server.
-   For a custom OAuth server, choose **OAuth** under **Authentication**, save it,
-   and click **Connect**. Presets such as Xmind, Notion, and Linear go straight to
-   **Connect**. Approve access in the browser window. HTTPS and localhost WebUIs
-   return automatically. From a remote plain-HTTP WebUI, copy the complete
-   localhost callback URL from the browser address bar and paste it into nanobot.
+2. Choose a known MCP server preset, or add a custom stdio, HTTP, or SSE server. For a custom OAuth server, choose **OAuth** under **Authentication**, save it, and click **Connect**. Presets such as Xmind, Notion, and Linear go straight to **Connect**. Approve access in the browser window. HTTPS and localhost WebUIs return automatically. From a remote plain-HTTP WebUI, copy the complete localhost callback URL from the browser address bar and paste it into nanobot.
 3. Limit the enabled tools when the server exposes more than the task needs.
 4. Save and restart when prompted.
 5. Mention the connected MCP server with `@` in the next message and ask for a small test action.
@@ -63,26 +55,22 @@ Restart nanobot and ask a question that requires the MCP tool.
 - Prefer `enabledTools` over exposing every tool by default.
 - Use `toolTimeout` for slow MCP operations.
 - Use HTTP MCP only for endpoints you trust.
-- For deployment-managed OAuth servers, set `auth` to `oauth` and complete the
-  browser connection from **Apps → MCP**.
+- For deployment-managed OAuth servers, set `auth` to `oauth` and complete the browser connection from **Apps → MCP**.
 - Keep MCP server commands stable and versioned in deployment docs or scripts.
 
 ## Security notes
 
 - Stdio MCP starts a local process; review the command before enabling it.
-- HTTP/SSE MCP uses nanobot's SSRF guard, including OAuth discovery, registration,
-  token exchange, and redirects.
+- HTTP/SSE MCP uses nanobot's SSRF guard, including OAuth discovery, registration, token exchange, and redirects.
 - OAuth credentials live in the nanobot data directory, not in `config.json`.
 - Allow private HTTP MCP hosts only with narrow `tools.ssrfWhitelist` CIDRs.
-- Do not place secrets in command arguments when environment variables or
-  headers can be used.
+- Do not place secrets in command arguments when environment variables or headers can be used.
 
 ## Troubleshooting
 
 - Run the MCP command outside nanobot first.
 - Start `nanobot gateway --verbose` and inspect tool registration logs.
-- If an HTTP MCP URL is blocked, check whether it points to loopback or a
-  private address that needs explicit allowlisting.
+- If an HTTP MCP URL is blocked, check whether it points to loopback or a private address that needs explicit allowlisting.
 
 ## Related nanobot docs
 

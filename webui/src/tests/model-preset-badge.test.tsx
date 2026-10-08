@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ModelPresetBadge } from "@/components/thread/ModelPresetBadge";
 
 const presets = [
-  { name: "zhipu", model: "glm-5", provider: "zhipu" },
+  { name: "zhipu", model: "glm-5", provider: "zhipu", contextWindowTokens: 1_000_000, reasoningEffort: "high" },
   { name: "codex", model: "openai-codex/gpt-5.5", provider: "openai_codex" },
 ];
 
@@ -90,7 +90,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(onPresetChange).not.toHaveBeenCalled();
     await user.click(trigger);
     await user.tab();
-    expect(screen.getByRole("button", { name: "Manage models" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Manage presets" })).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onManageModels).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -106,7 +106,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
       expect(screen.queryByTestId("composer-model-pill-viewport")).not.toBeInTheDocument();
       fireEvent.pointerUp(trigger, { pointerId: 1, pointerType: "touch", clientY: 100 });
       fireEvent.click(trigger);
-      expect(screen.getByRole("button", { name: "Manage models" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Manage presets" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -122,7 +122,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     fireEvent.click(current);
     expect(onPresetChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "deepseek-chat" }));
-    fireEvent.click(screen.getByRole("button", { name: "Manage models" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage presets" }));
     expect(onManageModels).toHaveBeenCalledTimes(1);
   });
 
@@ -157,7 +157,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(container.querySelector("[title]")).toBeNull();
     await user.hover(trigger);
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("zhipu glm-5");
+    expect(tooltip).toHaveTextContent("zhipu glm-5 1M high");
     expect(tooltip).not.toHaveTextContent("codex");
     await user.click(trigger);
     expect(await screen.findByRole("listbox")).toBeInTheDocument();

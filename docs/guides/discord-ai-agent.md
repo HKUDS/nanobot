@@ -1,7 +1,6 @@
 # Build a Discord AI Agent with nanobot
 
-This guide connects nanobot to Discord so a Discord user or server channel can
-talk to your self-hosted AI agent through the nanobot gateway.
+This guide connects nanobot to Discord so a Discord user or server channel can talk to your self-hosted AI agent through the nanobot gateway.
 
 ## What this guide builds
 
@@ -36,8 +35,7 @@ Install the optional channel dependency:
 nanobot plugins enable discord
 ```
 
-Create a Discord application, add a bot, copy the token, and enable
-`MESSAGE CONTENT INTENT` in the bot settings.
+Create a Discord application, add a bot, copy the token, and enable `MESSAGE CONTENT INTENT` in the bot settings.
 
 Merge this snippet into `~/.nanobot/config.json`:
 
@@ -56,13 +54,11 @@ Merge this snippet into `~/.nanobot/config.json`:
 }
 ```
 
-Omitting `allowFrom` enables pairing-only mode. A new user should DM the bot
-first, get a pairing code, and be approved before using the bot in servers.
+Omitting `allowFrom` enables pairing-only mode. A new user should DM the bot first, get a pairing code, and be approved before using the bot in servers.
 
 Invite the bot with permissions to read history and send messages.
 
-Set `replyToMessage` to `true` to make responses use Discord's native reply UI.
-It defaults to `false`, preserving the existing behavior.
+Set `replyToMessage` to `true` to make responses use Discord's native reply UI. It defaults to `false`, preserving the existing behavior.
 
 ## Run nanobot gateway
 
@@ -73,8 +69,7 @@ nanobot gateway
 
 ## Test a message
 
-Send the bot a DM first. It should return a pairing code. Approve it from a
-trusted local surface:
+Send the bot a DM first. It should return a pairing code. Approve it from a trusted local surface:
 
 ```bash
 nanobot agent -m "/pairing approve ABCD-EFGH"
@@ -90,8 +85,7 @@ After approval, mention it in an allowed server channel:
 
 - Keep `groupPolicy` as `mention` for first deployment.
 - Use `allowChannels` for server channels where the bot should operate.
-- Prefer pairing-only mode for user access; add `allowFrom` only when you want a
-  static allowlist.
+- Prefer pairing-only mode for user access; add `allowFrom` only when you want a static allowlist.
 - Avoid open group behavior in busy channels until session routing is clear.
 - Review tool access before inviting the bot into shared servers.
 
@@ -99,8 +93,7 @@ After approval, mention it in an allowed server channel:
 
 - If no messages arrive, confirm Message Content intent is enabled.
 - If a DM returns a pairing code, approve it before testing normal replies.
-- If server messages are ignored, check pairing approval, `allowChannels`, and
-  whether the bot was mentioned.
+- If server messages are ignored, check pairing approval, `allowChannels`, and whether the bot was mentioned.
 - If the bot cannot reply, confirm the invite permissions and channel overrides.
 
 ## Next: memory, automations, MCP tools

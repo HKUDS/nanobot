@@ -268,7 +268,7 @@ describe("SkillsMarketplace", () => {
     const skill = {
       id: "skillhub:react-testing", skill_id: "react-testing", name: "React Testing",
       source: "react-testing", provider: "skillhub" as const, installs: 42,
-      url: "https://skillhub.cn/react-testing", installed: false, install_supported: true,
+      url: "https://skillhub.cn/skills/react-testing", installed: false, install_supported: true,
       metric: "installs_total" as const, rank: 1,
     };
     let resolveTrending!: (value: Awaited<ReturnType<typeof fetchTrendingMarketplaceSkills>>) => void;

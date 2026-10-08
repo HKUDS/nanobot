@@ -16,7 +16,7 @@
       "clientId": {
         "label": "ID máy khách OAuth",
         "placeholder": "ID máy khách OAuth Linear",
-        "help": "Sao chép từ ứng dụng OAuth riêng tư trong Linear."
+        "help": "Sao chép từ ứng dụng OAuth riêng.\n\nSao chép từ ứng dụng OAuth riêng tư trong Linear."
       },
       "clientSecret": {
         "label": "Mã bí mật máy khách OAuth",
@@ -26,12 +26,12 @@
       "webhookSigningSecret": {
         "label": "Mã bí mật ký webhook",
         "placeholder": "••••••",
-        "help": "Dùng để xác minh Linear-Signature trước khi phân tích nội dung webhook."
+        "help": "Xác minh chữ ký Webhook.\n\nDùng để xác minh Linear-Signature trước khi phân tích nội dung webhook."
       },
       "publicBaseUrl": {
         "label": "URL HTTPS công khai",
         "placeholder": "https://nanobot.example.com",
-        "help": "Origin HTTPS ổn định được chuyển tiếp tới listener bên dưới; không bao gồm path."
+        "help": "Nhập URL HTTPS không có đường dẫn.\n\nOrigin HTTPS ổn định được chuyển tiếp tới listener bên dưới; không bao gồm path."
       },
       "host": {
         "label": "Host lắng nghe",
@@ -52,11 +52,11 @@
       "allowFrom": {
         "label": "Người dùng Linear được phép",
         "placeholder": "ID người dùng Linear, phân tách bằng dấu phẩy",
-        "help": "Để trống để dùng ghép đôi nanobot, hoặc dùng * để cho phép mọi người dùng trong các workspace đã kết nối."
+        "help": "Chọn người được phép dùng kết nối này.\n\nĐể trống để dùng ghép đôi nanobot, hoặc dùng * để cho phép mọi người dùng trong các workspace đã kết nối."
       },
       "showReasoning": {
-        "label": "Hiển thị suy luận",
-        "help": "Đăng suy luận của mô hình dưới dạng hoạt động suy nghĩ trong Linear. Tắt để phiên gọn hơn."
+        "label": "Hiện suy luận",
+        "help": "Đăng suy luận dưới dạng hoạt động suy nghĩ.\n\nĐăng suy luận của mô hình dưới dạng hoạt động suy nghĩ trong Linear. Tắt để phiên gọn hơn."
       }
     }
   },
@@ -67,7 +67,7 @@
     "enterSecret": "Nhập khóa bí mật",
     "secretSaveFailed": "Chưa thể xác nhận đã lưu. Hãy thử lại hoặc hủy.",
     "authorizeTitle": "Cấp quyền trong Linear",
-    "authorizeDescription": "Tiếp tục trong Linear để chọn workspace và cấp quyền cho nanobot. Quay lại đây khi hoàn tất.",
+    "authorizeDescription": "Cấp quyền trong Linear rồi quay lại đây.\n\nTiếp tục trong Linear để chọn workspace và cấp quyền cho nanobot. Quay lại đây khi hoàn tất.",
     "waiting": "Đang chờ cấp quyền Linear...",
     "connected": "Linear đã được kết nối.",
     "stopped": "Đã dừng cấp quyền.",
@@ -94,7 +94,7 @@
     "workspaceActions": "Quản lý {{name}}",
     "reauthorize": "Cấp quyền lại",
     "disconnectTitle": "Xóa {{name}}?",
-    "disconnectDescription": "Thu hồi quyền và xóa cài đặt quyền thành viên của không gian này trong nanobot. Giữ lại issue, bình luận và lịch sử nanobot. Không ảnh hưởng đến không gian khác. Có thể cấp quyền lại sau.",
+    "disconnectDescription": "Xóa quyền vùng làm việc; giữ lịch sử.\n\nThu hồi quyền và xóa cài đặt quyền thành viên của không gian này trong nanobot. Giữ lại issue, bình luận và lịch sử nanobot. Không ảnh hưởng đến không gian khác. Có thể cấp quyền lại sau.",
     "disconnectLast": "Đây là không gian làm việc được kết nối cuối cùng, nên kênh Linear cũng sẽ bị tắt.",
     "disconnecting": "Đang xóa…",
     "addWorkspace": "Kết nối không gian làm việc",

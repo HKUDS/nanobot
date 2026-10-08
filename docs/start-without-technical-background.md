@@ -78,11 +78,10 @@ If your organization blocks downloaded install scripts, use the [alternative ins
 
 In the browser, open **Settings → Models**. Then:
 
-1. Choose your provider.
-2. Enter its API key and base URL when required.
-3. Create or select a model preset.
-4. Enter a model ID available to your provider account.
-5. Save the configuration.
+1. Choose **New preset** and give it a name. If **Convert to presets** appears, choose it first.
+2. Open **Provider** and select your provider. To add one, choose **Add provider** from the same menu, then enter and save its connection details or complete sign-in.
+3. Choose a model from the list or enter a model ID available to your account.
+4. Choose **Save**.
 
 Treat every API key like a password. Do not include it in screenshots or support requests.
 
@@ -117,7 +116,7 @@ Do not configure every feature immediately. Choose one next goal:
 | Goal | What to do |
 |---|---|
 | Change the AI model | Open **Settings → Models** |
-| Add a provider credential | Open **Settings → Models**, then find the provider |
+| Add a provider credential | Open **Settings → Models → Manage providers** |
 | Connect Telegram, Discord, Slack, Feishu, WeChat, or another chat app | Open **Settings → Channels**, choose the platform, and follow its connection steps |
 | Add a tool integration | Open **Apps** and choose an App or MCP integration |
 | Schedule a reminder or recurring task | Ask nanobot in the target chat, then manage it in **Automations** |

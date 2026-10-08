@@ -1988,6 +1988,9 @@ class LLMProvider(ABC):
 
         return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]
 
+    async def aclose(self) -> None:
+        """Close provider-owned transports after their active requests have stopped."""
+
     @abstractmethod
     def get_default_model(self) -> str:
         """Get the default model for this provider."""

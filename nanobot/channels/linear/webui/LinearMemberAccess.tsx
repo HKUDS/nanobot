@@ -8,7 +8,7 @@ import { SETTINGS_SEARCH_INPUT_CLASS, SettingsGroup, SettingsRow } from "@/compo
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Button } from "@/components/ui/button";
 import { DisclosureContent } from "@/components/ui/disclosure";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -72,7 +72,7 @@ export function LinearMemberAccess({ organizationId, configScope = "", disabled 
         <div className="settings-list-inset flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input value={search} onChange={(event) => setSearch(event.target.value)}
+            <SearchInput value={search} onChange={(event) => setSearch(event.target.value)}
               aria-label={tx("members.search", "Search members")}
               placeholder={tx("members.search", "Search members")}
               className={cn(SETTINGS_SEARCH_INPUT_CLASS, "pl-9 text-[13px]")} />
