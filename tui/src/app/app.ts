@@ -1190,10 +1190,14 @@ export class NanobotTui {
       this.eventQueue.whenIdle(() => this.sendNextFollowUp())
       return
     }
-    const prompt = this.promptQueue.takeFollowUp()
+    const prompt = this.promptQueue.snapshot()[0]
     if (!prompt) return
+    if (!this.sendPrompt(prompt)) {
+      this.restoreQueuedPrompts()
+      return
+    }
+    this.promptQueue.takeFollowUp()
     this.syncQueuePreview()
-    this.sendPrompt(prompt)
   }
 
   private get promptQueue(): PromptQueue {
@@ -1240,8 +1244,10 @@ export class NanobotTui {
     const queued = this.promptQueue.restore()
     if (!queued.length) return
     this.syncQueuePreview()
-    const current = this.draft.expand(this.composer.plainText).trim()
-    this.setComposer([current, ...queued.map((prompt) => prompt.content)].filter(Boolean).join("\n\n"))
+    const current = this.composer.plainText.trim()
+    const content = [current, ...queued.map((prompt) => prompt.content)].filter(Boolean).join("\n\n")
+    this.composer.replaceText(content)
+    this.setComposerStringCursor(content, content.length)
   }
 
   private queueFollowUp(): void {
