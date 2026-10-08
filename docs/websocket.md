@@ -206,9 +206,6 @@ See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
 
 ### Binary attachments (WebUI and TUI)
 
-The WebSocket channel owns the HTTP bridge, upload capabilities, attachment
-policy and staging. WebUI message handling uses these injected gateway services.
-
 The gateway advertises `webui.attachments.binary.v1`. WebUI protocol 1 and the
 terminal protocol are unchanged. Bundled clients and their gateway use HTTP on
 the same listener for attachment uploads. After an authorized handshake, `ready`
@@ -236,29 +233,21 @@ one-time handshake token, API token, or client-selected `client_id`.
 
 The upload path accepts the existing image, document, and video MIME whitelist.
 Existing file/count/total limits still apply independently of `maxMessageBytes`.
-Pending uploads are bounded by count, bytes, and lifetime; timeout, disconnect,
-shutdown, and expired crash-remnant cleanup never remove committed session media.
-Each upload body has a five-minute total deadline and a 30-second deadline for
-the next body chunk. This allows a 20 MiB video to upload over a 1 Mbps connection
-while releasing stalled uploads. Incomplete HTTP headers retain a separate
-75-second deadline. Bundled clients and the remote proxy allow up to 315 seconds
-per upload request, including request/response overhead. Slower transfers may
-still time out; uploads are not resumable, so a retry sends the whole file.
-Persisted sessions still contain local media paths and replay through signed
-`/api/media/` URLs. No history migration is needed. Old internal `media.data_url`
-message uploads are no longer accepted; update both clients with the gateway.
-Local previews and the separate audio transcription protocol are unchanged.
+Uploads time out after five minutes, or after 30 seconds without receiving more
+data. Uploads are not resumable, so a retry sends the whole file.
+
+Update WebUI and TUI together with the gateway. Existing messages and attachments
+remain available without a history migration. Clients must use HTTP uploads;
+`media.data_url` message uploads are no longer accepted. Local previews and the
+separate audio transcription protocol are unchanged.
 
 Reverse proxies must forward `POST /api/attachments` (including its authorization
 header) to the gateway and permit the configured file sizes. Do not enable public
 CORS for this capability endpoint.
 
-For a remote host opened through the local WebUI, the local proxy streams this
-upload over the existing SSH transport. It replaces the host's upload token with
-a capability tied to the browser's live WebSocket and revokes that capability on
-disconnect. API tokens cannot authorize uploads, and other HTTP API routes remain
-read-only. Update the local installation and the remote gateway together to use
-binary attachments; an older host's text chats and HTTP reads remain available.
+For a remote host opened through the local WebUI, update the local installation
+and the remote gateway together to use binary attachments. An older host's text
+chats and HTTP reads remain available.
 
 ## Configuration Reference
 
