@@ -60,6 +60,21 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
 
 
 @pytest.fixture(autouse=True)
+def _isolate_llm_usage_stores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
+    from nanobot import llm_usage
+
+    stores: dict[Path, llm_usage.LLMUsageStore] = {}
+    monkeypatch.setattr(llm_usage, "_STORES", stores)
+    try:
+        yield
+    finally:
+        for store in stores.values():
+            store.close()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_star_prompt_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
