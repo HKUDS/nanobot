@@ -218,7 +218,42 @@ def test_query_quota_api_uses_configured_token_and_endpoint(monkeypatch, tmp_pat
     import httpx
     monkeypatch.setattr(httpx, "get", fake_get)
 
-    module_path = Path("/home/agentuser2/.nanobot/extensions/query-quota/api.py")
+    extension_dir = config_dir / "extensions" / "query-quota"
+    extension_dir.mkdir(parents=True)
+    (extension_dir / "api.py").write_text(
+        """
+import json
+from pathlib import Path
+
+import httpx
+
+
+def handle(request_path: str, query: dict[str, list[str]], body: bytes):
+    config = json.loads((Path.home() / '.nanobot' / 'config.json').read_text(encoding='utf-8'))
+    provider = config.get('providers', {}).get('custom-yuanyuai', {})
+    token = provider.get('apiKey', '')
+    if token:
+        headers = {'Authorization': '******'}
+    else:
+        headers = {}
+    response = httpx.get('https://yuanyuaicloud.cn/api/query-quota', headers=headers, timeout=5.0)
+    data = response.json()['data']
+    return (
+        200,
+        {'Content-Type': 'application/json; charset=utf-8'},
+        {
+            'summary': {
+                'used': data['windowCalls'],
+                'limit': data['rateLimit'],
+                'weeklyLimit': data['weeklyLimit'],
+            },
+        },
+    )
+""".strip(),
+        encoding="utf-8",
+    )
+
+    module_path = extension_dir / "api.py"
     spec = importlib.util.spec_from_file_location("query_quota_api_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
