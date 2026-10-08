@@ -561,7 +561,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     {compact && <Button variant="ghost" size="sm" aria-expanded={showLocations} onClick={() => setShowLocations(value => !value)} className="h-11 shrink-0 gap-1.5 rounded-control px-2 text-[12px]"><Star className="h-3.5 w-3.5" />{t("workspace.picker.shortcuts")}</Button>}
     <div className="relative min-w-0 flex-1">
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input aria-label={t("workspace.picker.filter")} placeholder={t("workspace.picker.filter")} value={filterQuery} disabled={pickingFolder || editingPath || compact && showLocations} onChange={event => { setFilterQuery(event.target.value); setActiveIndex(0); setActiveColumn(currentColumnIndex); setHighlightActive(false); }} className={cn("h-11 rounded-control border-transparent pl-8 text-[16px] shadow-none sm:h-9 sm:text-[12px]", compact ? "bg-muted/60" : "bg-background/80")} />
+      <Input aria-label={t("workspace.picker.filter")} placeholder={t("workspace.picker.filter")} value={filterQuery} disabled={pickingFolder || editingPath || compact && showLocations} onChange={event => { setFilterQuery(event.target.value); setActiveIndex(0); setActiveColumn(currentColumnIndex); setHighlightActive(false); }} className={cn("h-11 rounded-[var(--picker-field-radius)] border-transparent pl-8 text-[16px] shadow-none sm:h-9 sm:text-[12px]", compact ? "bg-muted/60" : "bg-background/80")} />
     </div>
   </div>;
 
@@ -578,7 +578,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             </button>
           </DialogTrigger>
         </WorkspacePickerTooltip>
-        <DialogContent showCloseButton={false} layoutAnchor={layoutAnchor} centerInLayoutAnchor className="flex h-[min(37rem,calc(100%-2rem))] max-w-5xl flex-col gap-0 overflow-hidden p-0 dark:bg-background"
+        <DialogContent showCloseButton={false} layoutAnchor={layoutAnchor} centerInLayoutAnchor className="flex h-[min(37rem,calc(100%-2rem))] max-w-5xl flex-col gap-0 overflow-hidden p-0 [--picker-toolbar-inset:0.75rem] [--picker-field-radius:calc(var(--radius-modal)_-_var(--picker-toolbar-inset))] sm:[--picker-toolbar-inset:1rem] dark:bg-background"
           onOpenAutoFocus={event => { event.preventDefault(); if (canBrowse) focusDirectory(); else inputRef.current?.focus(); }}
           onPointerDownCapture={() => setKeyboardInteraction(false)}
           onKeyDownCapture={event => {
@@ -593,15 +593,15 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
           onCloseAutoFocus={event => { if (!keyboardInteraction) event.preventDefault(); }}>
           <DialogTitle className="sr-only">{t("workspace.picker.title")}</DialogTitle>
           <DialogDescription className="sr-only">{t("workspace.picker.description")}</DialogDescription>
-          <div className="flex shrink-0 items-center gap-1 bg-muted px-3 pt-4 pb-3 sm:px-4">
+          <div className="flex shrink-0 items-center gap-1 bg-muted px-[var(--picker-toolbar-inset)] pt-[var(--picker-toolbar-inset)] pb-3">
             {canBrowse && <div className="flex shrink-0 items-center">
               <PickerToolButton label={t("workspace.picker.back")} disabled={pickingFolder || history.index === 0} onClick={() => moveHistory(-1)}><ArrowLeft className="h-4 w-4" /></PickerToolButton>
               {!compact && <PickerToolButton label={t("workspace.picker.forward")} disabled={pickingFolder || history.index >= history.visits.length - 1} onClick={() => moveHistory(1)}><ArrowRight className="h-4 w-4" /></PickerToolButton>}
               <PickerToolButton label={t("workspace.picker.history")} disabled={pickingFolder || !history.previous}
                 onClick={() => history.previous && visitDirectory(history.previous)}><History className="h-4 w-4" /></PickerToolButton>
             </div>}
-            <div className="flex min-w-0 flex-1 items-center rounded-control bg-background/80">
-            {editingPath || !canBrowse ? <Input ref={inputRef} role="combobox" aria-expanded={open} aria-controls={`${optionsId}-${activeColumn}`} aria-activedescendant={highlightActive && activeOptions.length ? `${optionsId}-${activeColumn}-${activeOption}` : undefined} aria-autocomplete="list" aria-busy={loading} value={pathDraft} disabled={disabled || pickingFolder} onChange={event => changeDraft(event.target.value)} onBlur={event => { if (canBrowse && !keyboardInteraction && event.relatedTarget !== confirmRef.current) cancelPathEditing(false); }} placeholder={t("workspace.dialog.manual")} aria-label={t("workspace.dialog.manual")} aria-invalid={displayedError ? true : undefined} aria-describedby={displayedError ? errorId : undefined} className="h-9 min-w-0 flex-1 rounded-control text-[16px] sm:text-[13px]" onKeyDown={event => {
+            <div className="flex min-w-0 flex-1 items-center rounded-[var(--picker-field-radius)] bg-background/80">
+            {editingPath || !canBrowse ? <Input ref={inputRef} role="combobox" aria-expanded={open} aria-controls={`${optionsId}-${activeColumn}`} aria-activedescendant={highlightActive && activeOptions.length ? `${optionsId}-${activeColumn}-${activeOption}` : undefined} aria-autocomplete="list" aria-busy={loading} value={pathDraft} disabled={disabled || pickingFolder} onChange={event => changeDraft(event.target.value)} onBlur={event => { if (canBrowse && !keyboardInteraction && event.relatedTarget !== confirmRef.current) cancelPathEditing(false); }} placeholder={t("workspace.dialog.manual")} aria-label={t("workspace.dialog.manual")} aria-invalid={displayedError ? true : undefined} aria-describedby={displayedError ? errorId : undefined} className="h-9 min-w-0 flex-1 rounded-[var(--picker-field-radius)] text-[16px] sm:text-[13px]" onKeyDown={event => {
               if (event.nativeEvent.isComposing) return;
               if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !event.altKey && activeOptions.length) {
                 event.preventDefault();
@@ -617,15 +617,15 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
               }
             }} /> : <nav ref={attachBreadcrumb} aria-label={t("workspace.picker.location")}
               onClick={event => { if (!pickingFolder && !(event.target as HTMLElement).closest("button")) editPath(); }}
-              className="flex h-11 min-w-0 flex-1 cursor-text items-center overflow-x-auto rounded-control sm:h-9 [scrollbar-width:none]">
+              className="flex h-11 min-w-0 flex-1 cursor-text items-center overflow-x-auto rounded-[var(--picker-field-radius)] sm:h-9 [scrollbar-width:none]">
               {breadcrumbs.map((crumb, index) => <span key={crumb.path} className="flex shrink-0 items-center">
                 {index > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/60" />}
                   <button type="button" disabled={pickingFolder} aria-current={index === breadcrumbs.length - 1 ? "location" : undefined} onClick={() => navigate(crumb.path)}
-                    className="h-11 max-w-48 cursor-pointer truncate rounded-control px-2 text-[12px] text-muted-foreground outline-none hover:bg-foreground/[0.055] focus-visible:ring-2 focus-visible:ring-ring aria-[current=location]:font-medium aria-[current=location]:text-foreground sm:h-9">{crumb.name}</button>
+                    className="h-11 max-w-48 cursor-pointer truncate rounded-[var(--picker-field-radius)] px-2 text-[12px] text-muted-foreground outline-none hover:bg-foreground/[0.055] focus-visible:ring-2 focus-visible:ring-ring aria-[current=location]:font-medium aria-[current=location]:text-foreground sm:h-9">{crumb.name}</button>
               </span>)}
               <WorkspacePickerTooltip label={t("workspace.picker.editPath")}>
                 <button type="button" disabled={pickingFolder} aria-label={`${t("workspace.picker.editPath")}: ${currentPath}`} onClick={editPath}
-                  className="min-w-8 flex-1 cursor-text self-stretch rounded-control outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  className="min-w-8 flex-1 cursor-text self-stretch rounded-[var(--picker-field-radius)] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
               </WorkspacePickerTooltip>
             </nav>}
             </div>
