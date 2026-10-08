@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
+from nanobot.config.schema import Config, InlineFallbackConfig, ModelAPIConfig, ModelPresetConfig
 from nanobot.llm_usage import get_llm_usage_store
 from nanobot.llm_usage.models import LLMCallRecord
 from nanobot.providers.base import LLMUsage
@@ -744,6 +744,81 @@ def test_model_configuration_advanced_options_round_trip(
     assert row["max_tokens"] == 8192
     assert row["temperature"] == 0
     assert row["reasoning_effort"] is None
+
+
+def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({"providers": {
+        "tenant": {"apiBase": "https://tenant.test/v1"},
+    }})
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    api = {"supported_apis": ["responses"], "preferred_api": "responses"}
+    created = create_model_configuration({
+        "name": ["reasoning"], "provider": ["tenant"], "model": ["gpt-6-luna"],
+        "api": [json.dumps(api)],
+    })
+    row = next(row for row in created["model_presets"] if row["name"] == "reasoning")
+    assert row["api"] == api
+    providers = {row["name"]: row for row in created["providers"]}
+    assert providers["tenant"]["model_api_configurable"] is True
+    assert providers["github_copilot"]["model_api_configurable"] is True
+    assert providers["anthropic"]["model_api_configurable"] is False
+    saved = load_config(config_path)
+    assert saved.model_presets["reasoning"].api.to_capabilities().preferred_api == "responses"
+    assert json.loads(config_path.read_text())["modelPresets"]["reasoning"]["api"] == {
+        "supportedApis": ["responses"], "preferredApi": "responses",
+    }
+
+    update_model_call_order({"order": [json.dumps(["reasoning"])]})
+    assert settings_payload()["agent"]["api"] == api
+    update_model_configuration({"name": ["reasoning"], "temperature": ["0.3"]})
+    assert settings_payload()["agent"]["api"] == api
+    reset = update_model_configuration({"name": ["reasoning"], "api": [""]})
+    assert next(row for row in reset["model_presets"] if row["name"] == "reasoning")["api"] is None
+    assert load_config(config_path).model_presets["reasoning"].api is None
+    update_model_configuration({"name": ["reasoning"], "api": [json.dumps(api)]})
+    update_model_configuration({"name": ["reasoning"], "model": ["another-model"]})
+    assert load_config(config_path).model_presets["reasoning"].api is None
+
+
+@pytest.mark.parametrize("provider,api,error", [
+    ("openai", {"supportedApis": ["chat_completions"], "preferredApi": "responses"}, "api must declare"),
+    ("anthropic", {"supportedApis": ["responses"]}, "provider does not support"),
+])
+def test_create_preset_rejects_invalid_api_without_saving(tmp_path, monkeypatch, provider, api, error):
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "fixture"
+    config.providers.anthropic.api_key = "fixture"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    with pytest.raises(WebUISettingsError, match=error):
+        create_model_configuration({
+            "name": ["test"], "provider": [provider], "model": ["test-model"],
+            "api": [json.dumps(api)],
+        })
+    assert load_config(config_path).model_presets == {}
+
+
+def test_legacy_migration_preserves_primary_and_fallback_apis(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({"providers": {
+        "tenant": {"apiBase": "https://tenant.test/v1"},
+    }})
+    defaults = config.agents.defaults
+    defaults.model = "tenant/reasoning"
+    defaults.provider = "tenant"
+    defaults.api = ModelAPIConfig(supported_apis=("responses",))
+    defaults.fallback_models = [InlineFallbackConfig(
+        provider="tenant", model="tenant/chat", api=ModelAPIConfig(supported_apis=("chat_completions",)),
+    )]
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    migrate_model_configurations()
+    saved = load_config(config_path)
+    assert saved.model_presets["reasoning"].api == defaults.api
+    assert saved.model_presets["chat"].api == defaults.fallback_models[0].api
 
 
 def test_delete_model_configuration_protects_primary_and_removes_fallback_references(

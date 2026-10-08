@@ -89,6 +89,50 @@ async function togglePresetEditor(name = "primary") {
 describe("Settings models", () => {
   installSettingsViewTestHooks();
 
+  it("saves and restores a preset API declaration, then returns to automatic", async () => {
+    let payload = settingsPayload();
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true, model_api_configurable: true }];
+    payload.model_presets[0].provider = "openai";
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    requestMutationMock.mockImplementation(async (action, args) => {
+      expect(action).toBe("settings.model_configuration.update");
+      payload = {
+        ...payload,
+        model_presets: payload.model_presets.map((preset) => ({ ...preset, api: args.api })),
+      };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models" });
+    await togglePresetEditor();
+    await openPopover(screen.getByLabelText("Request API"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Responses" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update",
+      { name: "primary", api: { supported_apis: ["responses"], preferred_api: "responses" } },
+      20_000,
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await togglePresetEditor();
+    expect(screen.getByLabelText("Request API")).toHaveTextContent("Responses");
+    await openPopover(screen.getByLabelText("Request API"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Automatic" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", { name: "primary", api: null }, 20_000,
+    ));
+  });
+
+  it("hides API controls when the host omits preset API support", async () => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    renderSettingsView({ initialSection: "models" });
+    await togglePresetEditor();
+    expect(screen.queryByRole("button", { name: "Request API" })).not.toBeInTheDocument();
+  });
+
   it.each(["manual", "poll", "direct"])("reauthenticates from the catalog and preserves the preset draft (%s)", async (mode) => {
     const payload = settingsPayload();
     payload.providers = [{

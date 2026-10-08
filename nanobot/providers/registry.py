@@ -17,6 +17,16 @@ from typing import Any, Literal
 
 from pydantic.alias_generators import to_snake
 
+RequestAPI = Literal["chat_completions", "responses"]
+
+
+@dataclass(frozen=True)
+class ModelAPICapabilities:
+    """APIs declared for one model, including its preferred request surface."""
+
+    supported_apis: tuple[RequestAPI, ...] = ("chat_completions",)
+    preferred_api: RequestAPI = "chat_completions"
+
 
 @dataclass(frozen=True)
 class ProviderModelSpec:
@@ -29,6 +39,7 @@ class ProviderModelSpec:
     context_window: int | None = None
     reasoning_efforts: tuple[str, ...] = ()
     supports_backend_search: bool = False
+    api: ModelAPICapabilities | None = None
 
 
 @dataclass(frozen=True)
@@ -40,7 +51,8 @@ class ResponsesCapabilities:
     """
 
     models: tuple[str, ...] = ()
-    auto_route: bool = False
+    model_prefixes: tuple[str, ...] = ()
+    route_reasoning: bool = False
     requires_direct_openai_base: bool = False
     allows_api_type_override: bool = False
     reasoning_replay: Literal["none", "encrypted", "plaintext"] = "none"
@@ -50,11 +62,25 @@ class ResponsesCapabilities:
     def matches_model(self, model: str) -> bool:
         """Return whether *model* is explicitly routed through Responses."""
         model_name = model.lower()
+        wire_name = model_name.rsplit("/", 1)[-1]
         return any(
             model_name == supported.lower()
             or model_name.endswith(f"/{supported.lower()}")
             for supported in self.models
+        ) or any(wire_name.startswith(prefix.lower()) for prefix in self.model_prefixes)
+
+    def model_api(
+        self, model: str, reasoning_effort: str | None = None,
+    ) -> ModelAPICapabilities:
+        """Resolve the provider's curated API defaults for one model."""
+        if not self.matches_model(model) and not (
+            self.route_reasoning and reasoning_effort and reasoning_effort.lower() != "none"
+        ):
+            return ModelAPICapabilities()
+        apis: tuple[RequestAPI, ...] = (
+            ("responses", "chat_completions") if self.allows_chat_fallback else ("responses",)
         )
+        return ModelAPICapabilities(supported_apis=apis, preferred_api="responses")
 
 
 @dataclass(frozen=True)
@@ -433,7 +459,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         supports_max_completion_tokens=True,
         responses=ResponsesCapabilities(
-            auto_route=True,
+            model_prefixes=("gpt-5", "gpt-6", "o1", "o3", "o4"),
+            route_reasoning=True,
             requires_direct_openai_base=True,
             allows_api_type_override=True,
             reasoning_replay="encrypted",
@@ -553,7 +580,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,
         supports_max_completion_tokens=True,
         responses=ResponsesCapabilities(
-            auto_route=True,
+            model_prefixes=("gpt-5", "gpt-6", "o1", "o3", "o4"),
+            route_reasoning=True,
             reasoning_replay="encrypted",
             allows_chat_fallback=False,
         ),

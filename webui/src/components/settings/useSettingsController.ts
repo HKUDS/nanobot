@@ -20,6 +20,7 @@ import type {
   SettingsSectionKey,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
+import { modelAPISelection } from "@/components/settings/models/ModelAPIControl";
 import { useModelSettingsActions } from "@/components/settings/models/useModelSettingsActions";
 import {
   useProviderFormsSync,
@@ -298,7 +299,8 @@ export function useSettingsController({
       form.maxTokens !== selectedPreset.max_tokens ||
       form.contextWindowTokens !== normalizeContextWindowTokens(selectedPreset.context_window_tokens) ||
       form.temperature !== selectedPreset.temperature ||
-      form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "")
+      form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "") ||
+      modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
     );
   }, [form, modelPresetEditingName, settings]);
 

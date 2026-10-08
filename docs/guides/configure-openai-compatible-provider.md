@@ -70,6 +70,7 @@ nanobot agent -m "Hello!"
 - Use a placeholder key such as `EMPTY` only when the endpoint requires a
   non-empty key but does not validate it.
 - Leave `apiType` unset for OpenAI-compatible custom endpoints.
+- For models requiring Responses, declare `api.supportedApis: ["responses"]` in their [model preset](../configuration.md#preset-request-api), or select Responses in the WebUI preset editor.
 
 ## Security notes
 

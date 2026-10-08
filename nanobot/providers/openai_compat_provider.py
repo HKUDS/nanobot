@@ -36,11 +36,12 @@ from nanobot.providers.base import (
 )
 from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
+from nanobot.providers.registry import ModelAPICapabilities, ResponsesCapabilities
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
 
-    from nanobot.providers.registry import ProviderSpec, ResponsesCapabilities
+    from nanobot.providers.registry import ProviderSpec
 
 # Module-level placeholder — set lazily by _ensure_client on first real
 # use, or replaced by tests via ``patch(...)``.  Kept as a plain name so
@@ -512,6 +513,7 @@ class OpenAICompatProvider(LLMProvider):
         spec: ProviderSpec | None = None,
         extra_body: dict[str, Any] | None = None,
         api_type: str = "auto",
+        model_api: ModelAPICapabilities | None = None,
         extra_query: dict[str, str] | None = None,
         proxy: str | None = None,
         provider_name: str = "openai",
@@ -520,6 +522,7 @@ class OpenAICompatProvider(LLMProvider):
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
+        self._preset_model_api = model_api
         self._extra_body = dict(extra_body or {})
         responses = spec.responses if spec is not None else None
         self._api_type = (
@@ -1111,41 +1114,43 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None,
     ) -> bool:
         """Choose Responses for providers/models that explicitly support it."""
-        if self._api_type == "chat_completions":
-            return False
-        capabilities = self._responses_capabilities()
-        if capabilities is None:
-            return False
-        model_name = self._request_model_name(model or self.default_model).lower()
-        if self._api_type == "responses":
-            # Explicit configuration means Responses is mandatory; do not
-            # consult the circuit breaker or fall back to Chat Completions.
+        api = self._model_api_capabilities(model, reasoning_effort)
+        if self._hosted_web_search_enabled() and "responses" in api.supported_apis:
             return True
+        if api.preferred_api != "responses":
+            return False
+        if self._responses_is_required(model, reasoning_effort):
+            return True
+        return self._responses_circuit_allows_probe(model, reasoning_effort)
 
-        explicitly_supported = capabilities.matches_model(model_name)
+    def _model_api_capabilities(
+        self, model: str | None = None, reasoning_effort: str | None = None,
+    ) -> ModelAPICapabilities:
+        """Apply a preset's declaration before the provider's curated defaults."""
+        if self._preset_model_api is not None:
+            return self._preset_model_api
+        capabilities = self._responses_capabilities()
+        if capabilities is None or self._api_type == "chat_completions":
+            return ModelAPICapabilities()
+        if self._api_type == "responses":
+            return ModelAPICapabilities(("responses",), "responses")
+        model_name = self._request_model_name(model or self.default_model)
         if self._hosted_web_search_enabled() and (
-            capabilities.auto_route or explicitly_supported
+            capabilities.route_reasoning or capabilities.matches_model(model_name)
         ):
-            # Provider-hosted tools require Responses on models that the
-            # capability profile declares eligible for that transport.
-            return True
+            return ModelAPICapabilities(("responses",), "responses")
         if (
             capabilities.requires_direct_openai_base
             and not _is_direct_openai_base(self._effective_base)
         ):
-            return False
+            return ModelAPICapabilities()
+        return capabilities.model_api(model_name, reasoning_effort)
 
-        wants_auto_route = capabilities.auto_route and (
-            (reasoning_effort is not None and reasoning_effort.lower() != "none")
-            or any(token in model_name for token in ("gpt-5", "gpt-6", "o1", "o3", "o4"))
-        )
-        if not explicitly_supported and not wants_auto_route:
-            return False
-
-        return self._responses_circuit_allows_probe(model, reasoning_effort)
-
-    def _responses_is_required(self) -> bool:
-        return self._api_type == "responses" or self._hosted_web_search_enabled()
+    def _responses_is_required(
+        self, model: str | None = None, reasoning_effort: str | None = None,
+    ) -> bool:
+        api = self._model_api_capabilities(model, reasoning_effort)
+        return "chat_completions" not in api.supported_apis or self._hosted_web_search_enabled()
 
     def _hosted_web_search_enabled(self) -> bool:
         extra_body = getattr(self, "_extra_body", {})
@@ -1164,6 +1169,8 @@ class OpenAICompatProvider(LLMProvider):
         )
 
     def _responses_capabilities(self) -> ResponsesCapabilities | None:
+        if self._preset_model_api is not None and "responses" in self._preset_model_api.supported_apis:
+            return self._spec.responses if self._spec and self._spec.responses else ResponsesCapabilities()
         return self._spec.responses if self._spec is not None else None
 
     def _responses_state_provider(self) -> str:
@@ -1187,11 +1194,20 @@ class OpenAICompatProvider(LLMProvider):
 
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Enable server compaction only on direct OpenAI Responses endpoints."""
-        _ = model
         capabilities = self._responses_capabilities()
         if (
             not self._responses.native_compaction_available
-            or self._api_type == "chat_completions"
+            or (
+                self._preset_model_api is not None
+                and (
+                    "responses" not in self._preset_model_api.supported_apis
+                    or (
+                        self._preset_model_api.preferred_api != "responses"
+                        and not self._hosted_web_search_enabled()
+                    )
+                )
+            )
+            or (self._preset_model_api is None and self._api_type == "chat_completions")
             or capabilities is None
             or not capabilities.supports_native_compaction
         ):
@@ -1951,10 +1967,7 @@ class OpenAICompatProvider(LLMProvider):
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
-                    capabilities = self._responses_capabilities()
-                    if capabilities is not None and not capabilities.allows_chat_fallback:
-                        raise
-                    if self._responses_is_required():
+                    if self._responses_is_required(model, reasoning_effort):
                         raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
@@ -2008,10 +2021,7 @@ class OpenAICompatProvider(LLMProvider):
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
-                    capabilities = self._responses_capabilities()
-                    if capabilities is not None and not capabilities.allows_chat_fallback:
-                        raise
-                    if self._responses_is_required():
+                    if self._responses_is_required(model, reasoning_effort):
                         raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise

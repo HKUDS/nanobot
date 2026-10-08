@@ -25,7 +25,13 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict, cast
 import httpx
 
 from nanobot.config.loader import resolve_config_env_vars
-from nanobot.config.schema import Config, FallbackCandidate, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import (
+    Config,
+    FallbackCandidate,
+    ModelAPIConfig,
+    ModelPresetConfig,
+    ProviderConfig,
+)
 from nanobot.providers.image_generation import get_image_gen_provider
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 from nanobot.providers.oauth_model_catalog import (
@@ -469,6 +475,7 @@ def _provider_settings_row(
         "default_api_base": spec.default_api_base or None,
         "model_selectable": not spec.is_transcription_only,
         "model_catalog": model_catalog_kind(spec),
+        "model_api_configurable": spec.backend in {"openai_compat", "github_copilot"},
         "advanced_fields": _provider_advanced_field_names(name, spec),
         "extra_headers": _redact_provider_secret_values(provider_config.extra_headers),
         "extra_body": _redact_provider_secret_values(provider_config.extra_body),
@@ -677,6 +684,12 @@ def provider_models_payload(
                 "context_window": model.context_window,
                 "reasoning_efforts": list(model.reasoning_efforts),
                 "supports_backend_search": model.supports_backend_search,
+                **({
+                    "api": {
+                        "supported_apis": list(model.api.supported_apis),
+                        "preferred_api": model.api.preferred_api,
+                    },
+                } if model.api is not None else {}),
             }
             for model in catalog.models
         ]
@@ -1050,6 +1063,7 @@ def model_settings_payload(
             "context_window_tokens": defaults.context_window_tokens,
             "temperature": defaults.temperature,
             "reasoning_effort": defaults.reasoning_effort,
+            "api": defaults.api.model_dump(mode="json") if defaults.api is not None else None,
             "reasoning_effort_values": reasoning_effort_values_for(
                 config.get_provider_name(
                     defaults.model,
@@ -1077,6 +1091,7 @@ def model_settings_payload(
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,
                 "reasoning_effort": preset.reasoning_effort,
+                "api": preset.api.model_dump(mode="json") if preset.api is not None else None,
                 "reasoning_effort_values": reasoning_effort_values_for(
                     resolved_preset_provider,
                     preset.model,
@@ -1096,6 +1111,10 @@ def model_settings_payload(
             "context_window_tokens": effective_preset.context_window_tokens,
             "temperature": effective_preset.temperature,
             "reasoning_effort": effective_preset.reasoning_effort,
+            "api": (
+                effective_preset.api.model_dump(mode="json")
+                if effective_preset.api is not None else None
+            ),
             "timezone": defaults.timezone,
             "tool_hint_max_length": defaults.tool_hint_max_length,
         },
@@ -1118,6 +1137,7 @@ def update_agent_model_settings(
 ) -> bool:
     defaults = config.agents.defaults
     changed = False
+    identity_changed = False
 
     if "model_preset" in query or "modelPreset" in query:
         preset = (query_first_alias(query, "model_preset", "modelPreset") or "").strip()
@@ -1136,6 +1156,7 @@ def update_agent_model_settings(
         if defaults.model != model:
             defaults.model = model
             changed = True
+            identity_changed = True
 
     provider = query_first(query, "provider")
     if provider is not None:
@@ -1146,6 +1167,7 @@ def update_agent_model_settings(
         if defaults.provider != provider:
             defaults.provider = provider
             changed = True
+            identity_changed = True
 
     context_window_tokens = _parse_positive_int(
         query_first_alias(query, "context_window_tokens", "contextWindowTokens"),
@@ -1157,7 +1179,36 @@ def update_agent_model_settings(
     ):
         defaults.context_window_tokens = context_window_tokens
         changed = True
+    if "api" in query:
+        api = _parse_preset_api(config, defaults.model, defaults.provider, query_first(query, "api"))
+        if defaults.api != api:
+            defaults.api = api
+            changed = True
+    elif identity_changed:
+        defaults.api = None
     return changed
+
+
+def _parse_preset_api(
+    config: Config, model: str, provider: str, raw: str | None,
+) -> ModelAPIConfig | None:
+    if not raw:
+        return None
+    try:
+        value: object = json.loads(raw)
+        api = ModelAPIConfig.model_validate(value) if value is not None else None
+    except ValueError:
+        raise WebUISettingsError(
+            "api must declare supportedApis and a preferredApi from that list",
+        ) from None
+    if api is None:
+        return None
+    preset = ModelPresetConfig(model=model, provider=provider)
+    provider_name = config.get_provider_name(model, preset=preset) or provider
+    entry = resolve_settings_provider(config, provider_name)
+    if entry is None or entry[0].backend not in {"openai_compat", "github_copilot"}:
+        raise WebUISettingsError("provider does not support configurable model APIs")
+    return api
 
 
 def create_model_configuration(
@@ -1217,6 +1268,7 @@ def create_model_configuration(
         ),
         temperature=temperature if temperature is not None else base.temperature,
         reasoning_effort=reasoning_effort,
+        api=_parse_preset_api(config, model, provider, query_first(query, "api")),
     )
     if activate_as_primary:
         config.agents.defaults.model_preset = name
@@ -1239,6 +1291,7 @@ def update_model_configuration(
         raise WebUISettingsError("unknown model configuration")
 
     changed = False
+    identity_changed = False
     new_name_value = query_first_alias(query, "new_name", "newName")
     if new_name_value is not None:
         new_name = _model_configuration_name(new_name_value)
@@ -1254,6 +1307,7 @@ def update_model_configuration(
         if preset.model != model:
             preset.model = model
             changed = True
+            identity_changed = True
 
     provider = query_first(query, "provider")
     if provider is not None:
@@ -1264,6 +1318,7 @@ def update_model_configuration(
         if preset.provider != provider:
             preset.provider = provider
             changed = True
+            identity_changed = True
 
     context_window_tokens = _parse_positive_int(
         query_first_alias(query, "context_window_tokens", "contextWindowTokens"),
@@ -1296,6 +1351,13 @@ def update_model_configuration(
         if preset.reasoning_effort != reasoning_effort:
             preset.reasoning_effort = reasoning_effort
             changed = True
+    if "api" in query:
+        api = _parse_preset_api(config, preset.model, preset.provider, query_first(query, "api"))
+        if preset.api != api:
+            preset.api = api
+            changed = True
+    elif identity_changed:
+        preset.api = None
     return changed
 
 
@@ -1372,6 +1434,7 @@ def migrate_model_configurations(
             context_window_tokens=primary.context_window_tokens,
             temperature=primary.temperature,
             reasoning_effort=primary.reasoning_effort,
+            api=primary.api,
         )
         defaults.model_preset = name
         created.append(name)
@@ -1400,6 +1463,7 @@ def migrate_model_configurations(
                 else primary.temperature
             ),
             reasoning_effort=fallback.reasoning_effort,
+            api=fallback.api,
         )
         fallback_models.append(name)
         created.append(name)

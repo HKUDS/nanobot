@@ -7,6 +7,7 @@ import type {
   PendingRestartSections,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
+import { modelAPISelection } from "@/components/settings/models/ModelAPIControl";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
   providerFormFromRow,
@@ -195,6 +196,8 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          api: settings.providers.find((row) => row.name === provider)?.model_api_configurable === true
+            ? form.api : undefined,
         });
         const createdPreset = payload.created_model_preset;
         const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
@@ -257,6 +260,11 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        api: settings.providers.find((row) => row.name === (
+          form.provider === "auto" ? selectedPreset.resolved_provider : form.provider
+        ))?.model_api_configurable === true &&
+          modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
+          ? form.api : undefined,
       });
       applyPayload(payload);
       setForm(agentDraftFromPayload(payload, nextName));
@@ -290,6 +298,7 @@ export function useModelSettingsActions({
       modelPreset: "",
       provider,
       model: "",
+      api: null,
       maxTokens: primaryPreset?.max_tokens ?? settings.agent.max_tokens,
       contextWindowTokens: normalizeContextWindowTokens(
         primaryPreset?.context_window_tokens ?? settings.agent.context_window_tokens,

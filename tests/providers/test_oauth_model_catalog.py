@@ -263,7 +263,7 @@ def test_xai_inference_classifies_typed_reauth() -> None:
     "responses_model",
     ["gpt-5.4-mini", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"],
 )
-def test_github_copilot_catalog_only_lists_compatible_chat_models(
+def test_github_copilot_catalog_routes_advertised_model_apis(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     responses_model: str,
@@ -345,9 +345,17 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
     assert [model.id for model in catalog.models] == [
         "github-copilot/claude-sonnet",
         f"github-copilot/{responses_model}",
+        "github-copilot/unknown-responses-only",
     ]
     assert catalog.models[0].context_window == 200_000
     assert catalog.models[0].reasoning_efforts == ("low", "high")
+    assert catalog.models[0].api.supported_apis == ("chat_completions",)
+    assert catalog.models[2].api.supported_apis == ("responses",)
+    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
+    provider = GitHubCopilotProvider(default_model="github-copilot/unknown-responses-only")
+    assert provider._should_use_responses_api(None, None)
+    assert not provider._should_use_responses_api("github-copilot/claude-sonnet", "high")
     assert len(captured) == 2
     assert captured[0].headers["Authorization"] == "token github-secret"
     assert captured[1].headers["Authorization"] == "Bearer copilot-secret"

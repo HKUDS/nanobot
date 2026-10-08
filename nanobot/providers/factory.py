@@ -97,6 +97,8 @@ def _resolve_provider_setup(
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
+    if preset.api is not None and backend not in {"openai_compat", "github_copilot"}:
+        raise ValueError("preset.api is supported for OpenAI-compatible and GitHub Copilot providers")
     if p and p.proxy and backend not in {"openai_compat", "openai_codex", "xai_grok"}:
         raise ValueError(
             f"providers.{provider_name}.proxy is only supported for "
@@ -197,7 +199,10 @@ def _make_provider_core(
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
-        provider = GitHubCopilotProvider(default_model=model, provider_name=provider_name)
+        provider = GitHubCopilotProvider(
+            default_model=model, provider_name=provider_name,
+            model_api=preset.api.to_capabilities() if preset.api is not None else None,
+        )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
@@ -231,6 +236,7 @@ def _make_provider_core(
             spec=spec,
             extra_body=p.extra_body if p else None,
             api_type=p.api_type if p else "auto",
+            model_api=preset.api.to_capabilities() if preset.api is not None else None,
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
             provider_name=provider_name,
@@ -257,6 +263,7 @@ def _inline_fallback_preset(
             fallback.temperature if fallback.temperature is not None else primary.temperature
         ),
         reasoning_effort=fallback.reasoning_effort,
+        api=fallback.api,
     )
 
 
@@ -347,6 +354,7 @@ def provider_signature(
             fallback.temperature,
             fallback.reasoning_effort,
             fallback.context_window_tokens,
+            fallback.api.model_dump_json() if fallback.api is not None else None,
             getattr(fp, "proxy", None) if fp else None,
             fp.thinking_style if fp else None,
         )
@@ -368,6 +376,7 @@ def provider_signature(
         resolved.temperature,
         resolved.reasoning_effort,
         resolved.context_window_tokens,
+        resolved.api.model_dump_json() if resolved.api is not None else None,
         getattr(p, "proxy", None) if p else None,
         p.thinking_style if p else None,
         tuple(

@@ -1,4 +1,5 @@
 import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
+import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -42,7 +43,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { SettingsPayload } from "@/lib/types";
+import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
 
 export interface AgentSettingsDraft {
   model: string;
@@ -52,6 +53,7 @@ export interface AgentSettingsDraft {
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  api: ModelAPIConfig | null;
   timezone: string;
   toolHintMaxLength: number;
 }
@@ -92,6 +94,7 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   contextWindowTokens: 200_000,
   temperature: 0.1,
   reasoningEffort: "",
+  api: null,
   timezone: "UTC",
   toolHintMaxLength: 40,
 };
@@ -115,6 +118,7 @@ export function agentDraftFromPayload(
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
+    api: activePreset ? activePreset.api ?? null : payload.agent.api ?? null,
     timezone: payload.agent.timezone,
     toolHintMaxLength: payload.agent.tool_hint_max_length,
   };
@@ -337,6 +341,7 @@ export function ModelsSettings({
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
+      api: preset.api ?? null,
     }));
     setEditorRowKey(rowKey);
     setEditorOpen(true);
@@ -446,6 +451,7 @@ export function ModelsSettings({
               ...prev,
               provider,
               model: provider === prev.provider ? prev.model : "",
+              api: provider === prev.provider ? prev.api : null,
               modelPreset: clearSuggestedName ? "" : prev.modelPreset,
             }));
           }}
@@ -495,11 +501,20 @@ export function ModelsSettings({
             setForm((prev) => ({
               ...prev,
               model,
+              api: model === prev.model ? prev.api : null,
               modelPreset: canSuggestName ? suggestion : prev.modelPreset,
             }));
           }}
         />
       </SettingsRow>
+      {(selectedProvider ?? settings.providers.find(
+        (provider) => provider.name === selectedPreset?.resolved_provider,
+      ))?.model_api_configurable === true ? (
+        <ModelAPIControl
+          value={form.api}
+          onChange={(api) => setForm((prev) => ({ ...prev, api }))}
+        />
+      ) : null}
       <button
         type="button"
         aria-expanded={advancedOpen}

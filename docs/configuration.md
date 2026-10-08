@@ -316,7 +316,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 <details>
 <summary><b>OpenAI</b></summary>
 
-By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normally and routes GPT-5/o-series or explicit `reasoningEffort` requests through the Responses API when useful. You can force a specific API surface:
+Without a preset API declaration, direct OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normally and routes GPT-5/GPT-6/o-series or explicit `reasoningEffort` requests through Responses. Prefer [preset API declarations](#preset-request-api) to select an API for each model and endpoint. The legacy provider-wide default remains available:
 
 ```json
 {
@@ -1460,10 +1460,37 @@ Older configs may still contain a `label` inside a preset. It is accepted when l
 | `contextWindowTokens` | Context window size used by prompt building and consolidation decisions. |
 | `temperature` | Sampling temperature. |
 | `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
+| `api` | Optional supported APIs and preferred API for this model at the configured endpoint. |
 
 `default` is reserved and always means the implicit preset built from direct `agents.defaults.*` fields; do not define `modelPresets.default`. Use `/model default` to switch back to those direct fields in an existing config.
 
 Set `agents.defaults.modelPreset` to choose the preset followed by sessions that have no saved model selection. When `modelPreset` is `null` or omitted, such sessions follow the implicit `default` preset from direct `agents.defaults.*` fields. `/model <preset>` saves an override in the current session, so its future turns keep that preset across process restarts while other sessions remain unchanged. The command does not write the selection back to `config.json`.
+
+### Preset request API
+
+Declare API support in the preset for OpenAI-compatible providers, including custom gateways, and GitHub Copilot. Credentials and endpoint URLs stay in the provider. Two presets sharing a provider can select different APIs.
+
+```json
+{
+  "modelPresets": {
+    "gatewayReasoning": {
+      "provider": "companyProxy",
+      "model": "gpt-6-luna",
+      "reasoningEffort": "high",
+      "api": {
+        "supportedApis": ["responses"],
+        "preferredApi": "responses"
+      }
+    }
+  }
+}
+```
+
+`supportedApis` is a nonempty list containing `chat_completions`, `responses`, or both. `preferredApi` must belong to that list; when omitted, it defaults to the first entry. A Responses-only preset never falls back to Chat Completions. Declare both APIs with `preferredApi: "responses"` to allow Chat fallback for classified Responses compatibility errors. Other failures retain their normal error handling. Native hosted search uses Responses when it is supported by the preset.
+
+Omit `api` or set it to `null` for automatic routing. An explicit declaration overrides provider API defaults, including legacy `providers.openai.apiType`. Automatic Copilot routing uses the account's last successfully discovered `supported_endpoints` when available; other automatic routes use registry defaults. Custom gateways default to Chat Completions until Responses support is declared. Protocol behavior such as reasoning replay and native compaction remains provider-owned; declaring Responses support does not enable OpenAI-native compaction on a custom gateway.
+
+In the WebUI, open **Settings → Models → a preset → Request API** to choose automatic routing, either API, or Responses with Chat fallback. Changing a preset's model or provider resets its API declaration to automatic unless the same update supplies a new declaration. Each fallback preset retains its own declaration. Legacy direct `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
 
 ### Model Fallbacks
 

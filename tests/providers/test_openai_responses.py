@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from loguru import logger
+from openai.types.responses import ResponseFunctionToolCall
 
 from nanobot.providers.base import LLMUsage
 from nanobot.providers.openai_responses.converters import (
@@ -32,6 +33,33 @@ from nanobot.providers.openai_responses.state import (
     responses_state_context_tokens,
     responses_state_items,
 )
+
+
+async def test_sdk_tool_alias_survives_capture_and_next_request_replay():
+    item = ResponseFunctionToolCall.model_validate({
+        "type": "function_call", "id": "fc_alias", "call_id": "call_alias",
+        "name": "lookup", "arguments": "{}", "async": True,
+    })
+    events = [SimpleNamespace(
+        type="response.completed",
+        response=SimpleNamespace(status="completed", usage=None, output=[item]),
+    )]
+
+    async def stream():
+        for event in events:
+            yield event
+
+    capture = ResponsesStreamCapture()
+    await consume_sdk_stream(stream(), capture=capture)
+    state = build_responses_state(
+        provider="fixture", model="fixture", input_items=[], output_items=capture.output_items,
+    )
+    _, items, replayed = prepare_responses_input(
+        [], state=state, provider="fixture", model="fixture",
+    )
+    assert replayed
+    assert items[0]["async"] is True
+    assert "async_" not in items[0]
 
 # ======================================================================
 # converters - split_tool_call_id
