@@ -5,6 +5,8 @@ import { NanobotTui } from "./app"
 import type { MessageOptions, SkillCandidate, SlashCommand } from "../client"
 import type { ClipboardImageReader } from "../composer/clipboard-image"
 import { options, client, mount, waitUntil, occurrences } from "./test-support"
+import { LOCAL_COMMANDS } from "./commands"
+import type { CommandMenu } from "../menus/command-menu"
 
 describe("NanobotTui composer", () => {
   let setup: TestRendererSetup | undefined
@@ -677,6 +679,37 @@ describe("NanobotTui composer", () => {
 
     expect(ui.composer.plainText).toBe("/history ")
     expect(ui.commandMenu.visible).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  test.each(["enter", "tab"])("completes /se to /sessions with %s", async (key) => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as {
+      ready: boolean
+      composer: TextareaRenderable
+      commandMenu: CommandMenu
+    }
+    await waitUntil(() => ui.ready)
+    ui.commandMenu.setCommands([{
+      command: "/model",
+      title: "Switch model preset",
+      description: "Show or switch the active model preset.",
+      argHint: "[preset]",
+      lifecycle: "side_channel",
+      acceptsArgs: true,
+    }], LOCAL_COMMANDS)
+
+    await setup.mockInput.typeText("/se")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("› /sessions")
+    if (key === "enter") setup.mockInput.pressEnter()
+    else setup.mockInput.pressTab()
+    await waitUntil(() => ui.composer.plainText !== "/se")
+
+    expect(ui.composer.plainText).toBe("/sessions")
     expect(sent).toEqual([])
   })
 
