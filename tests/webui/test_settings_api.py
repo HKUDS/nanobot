@@ -766,7 +766,7 @@ def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch):
     assert providers["anthropic"]["model_api_configurable"] is False
     saved = load_config(config_path)
     assert saved.model_presets["reasoning"].api.to_capabilities().preferred_api == "responses"
-    assert json.loads(config_path.read_text())["modelPresets"]["reasoning"]["api"] == {
+    assert json.loads(config_path.read_text(encoding="utf-8"))["modelPresets"]["reasoning"]["api"] == {
         "supportedApis": ["responses"], "preferredApi": "responses",
     }
 
