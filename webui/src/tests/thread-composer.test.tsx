@@ -1057,6 +1057,26 @@ describe("ThreadComposer", () => {
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("one recording"));
   });
 
+  it("releases microphone access granted after the composer unmounts", async () => {
+    const { getUserMedia, stopTrack } = mockVoiceRecorder();
+    let resolveStream: ((stream: MediaStream) => void) | undefined;
+    getUserMedia.mockImplementation(() => new Promise((resolve) => {
+      resolveStream = resolve as (stream: MediaStream) => void;
+    }));
+    const onTranscribeAudio = vi.fn(async () => "unused");
+    const view = render(
+      <ThreadComposer onSend={vi.fn()} onTranscribeAudio={onTranscribeAudio} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    view.unmount();
+    await act(async () => {
+      resolveStream?.({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream);
+    });
+    expect(stopTrack).toHaveBeenCalledTimes(1);
+    expect(onTranscribeAudio).not.toHaveBeenCalled();
+  });
+
   it("distinguishes a missing microphone from a blocked permission", async () => {
     const { getUserMedia } = mockVoiceRecorder();
     getUserMedia.mockRejectedValue(Object.assign(new Error("no microphone"), {
