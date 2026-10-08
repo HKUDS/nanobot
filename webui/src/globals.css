@@ -80,8 +80,9 @@
     --muted-foreground: 0 0% 65%;
     --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
+    /* Destructive text needs contrast on dark surfaces; filled controls use a dark label. */
+    --destructive: 0 93.5% 81.8%;
+    --destructive-foreground: 0 0% 9%;
     --border: 0 0% 28%;
     --input: var(--border);
     --ring: 0 0% 83.1%;

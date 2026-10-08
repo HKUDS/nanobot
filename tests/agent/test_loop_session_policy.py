@@ -37,7 +37,7 @@ def _message(key: str, content: str) -> InboundMessage:
 
 
 def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.chat_stream_with_retry = AsyncMock(

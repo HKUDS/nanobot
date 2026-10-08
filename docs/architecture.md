@@ -74,6 +74,19 @@ Provider selection uses:
 
 Provider implementations live in `nanobot/providers/`. Most hosted providers use the OpenAI-compatible implementation, while Anthropic, Azure OpenAI, AWS Bedrock, OpenAI Codex, and GitHub Copilot have specialized paths.
 
+Responses API paths share `nanobot/providers/openai_responses/backend.py`.
+The backend constructs protocol input, dispatches SDK or HTTP/SSE requests,
+owns WebSocket sessions, and advances replay and compaction state. SDK, SSE,
+and WebSocket events use the same parser in `openai_responses/parsing.py`.
+
+Provider adapters supply authentication, endpoint and model rules, supported
+request fields, hosted tools, and error mapping. Codex enables WebSocket with
+its beta header; other adapters retain their existing HTTP transports. Protocol
+compatibility alone does not enable WebSocket or persistent continuation.
+OpenAI's `extraBody.store` override controls server storage; automatic response-ID
+continuation currently uses the active WebSocket connection. Full replay state
+remains local and scoped to the provider endpoint and model.
+
 Useful docs:
 
 - [`providers.md`](./providers.md) for practical setup;

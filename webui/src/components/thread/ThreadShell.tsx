@@ -538,6 +538,7 @@ function randomHeroGreetingKey(): (typeof HERO_GREETING_KEYS)[number] {
 }
 
 interface PendingFirstMessage {
+  finish?: (accepted: boolean) => void;
   content: string;
   images?: SendAttachment[];
   options?: SendOptions;
@@ -1442,6 +1443,9 @@ export function ThreadShell({
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
       setSubmittedViewportTurnId(submitted.turnId);
     }
+    if (submitted?.delivery) {
+      void submitted.delivery.then(() => pending.finish?.(true), () => pending.finish?.(false));
+    } else pending.finish?.(submitted !== null);
     setBooting(false);
   }, [chatId, pendingFirstTargetChatId, send]);
 
@@ -1489,7 +1493,9 @@ export function ThreadShell({
     async (content: string, images?: SendAttachment[], options?: SendOptions) => {
       if (booting) return false;
       setBooting(true);
-      pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
+      let finish!: (accepted: boolean) => void;
+      const delivery = new Promise<boolean>((resolve) => { finish = resolve; });
+      pendingFirstRef.current = { content, images, options: withWorkspaceScope(options), finish };
       setPendingFirstTargetChatId(null);
       const newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
       if (!newId) {
@@ -1502,7 +1508,7 @@ export function ThreadShell({
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
       }
       setPendingFirstTargetChatId(newId);
-      return true;
+      return delivery;
     },
     [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
   );
@@ -1519,7 +1525,7 @@ export function ThreadShell({
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
         setSubmittedViewportTurnId(submitted.turnId);
       }
-      return submitted !== null;
+      return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
     [chatId, send, withWorkspaceScope],
   );

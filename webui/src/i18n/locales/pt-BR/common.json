@@ -1935,7 +1935,6 @@
         "decode_failed": "Não foi possível decodificar esta imagem",
         "too_large": "A imagem é grande demais — tente uma menor",
         "total_too_large": "Os anexos são grandes demais em conjunto — remova alguns ou use arquivos menores",
-        "transport_too_large": "Este anexo excederia o limite de transporte do gateway",
         "io": "Não foi possível ler este arquivo"
       },
       "workspace": {

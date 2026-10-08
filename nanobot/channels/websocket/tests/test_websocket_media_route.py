@@ -224,7 +224,7 @@ def test_local_markdown_image_rejects_workspace_escape(
     with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
         assert channel.gateway.media.rewrite_local_markdown_images(text) == text
 
-    assert not (media / "websocket").exists()
+    assert list((media / "websocket").iterdir()) == []
 
 
 # ---------------------------------------------------------------------------

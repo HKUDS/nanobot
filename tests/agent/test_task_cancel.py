@@ -31,7 +31,7 @@ def _make_loop(*, tools_config=None):
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())

@@ -1549,7 +1549,7 @@ describe("App layout", () => {
             provider: "skillhub",
             installs: 11_831,
             downloads: 142_525,
-            url: "https://skillhub.cn/tencent-adm/ima-skills",
+            url: "https://skillhub.cn/skills/tencent-adm/ima-skills",
             installed: false,
             install_supported: true,
             metric: "installs_total",
@@ -1589,7 +1589,7 @@ describe("App layout", () => {
             provider: "skillhub",
             installs: 693,
             downloads: 7_718,
-            url: "https://skillhub.cn/ivangdavila/react",
+            url: "https://skillhub.cn/skills/ivangdavila/react",
             installed: false,
             install_supported: true,
             metric: "installs_total",
@@ -1619,6 +1619,9 @@ describe("App layout", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText("find-skills")).toBeInTheDocument();
     expect(screen.getByText("ima-skills")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open ima-skills on SkillHub" })).toHaveAttribute(
+      "href", "https://skillhub.cn/skills/tencent-adm/ima-skills",
+    );
     expect(screen.getAllByText("SkillHub")).toHaveLength(2);
     expect(screen.getAllByText("skills.sh")).toHaveLength(2);
     expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
@@ -1643,6 +1646,9 @@ describe("App layout", () => {
     });
 
     expect(await screen.findByText("React Testing")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open React on SkillHub" })).toHaveAttribute(
+      "href", "https://skillhub.cn/skills/ivangdavila/react",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Install React Testing" }));
     expect(
       await screen.findByRole("heading", { name: "Install React Testing?" }),

@@ -35,7 +35,7 @@ from nanobot.webui.metadata import (
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     return AgentLoop(
         bus=bus,
