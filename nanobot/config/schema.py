@@ -83,7 +83,7 @@ class DreamConfig(Base):
 
 
 class ModelAPIConfig(Base):
-    """API support and preference scoped to a model preset's endpoint."""
+    """Allowed request APIs and preference for a model preset's endpoint."""
 
     supported_apis: tuple[RequestAPI, ...] = Field(min_length=1)
     preferred_api: RequestAPI | None = None

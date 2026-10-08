@@ -89,9 +89,14 @@ async function togglePresetEditor(name = "primary") {
 describe("Settings models", () => {
   installSettingsViewTestHooks();
 
-  it("saves and restores a preset API declaration, then returns to automatic", async () => {
+  it.each(["legacy", "declaration"])("saves and restores a preset API declaration, then returns to automatic (%s host)", async (host) => {
     let payload = settingsPayload();
-    payload.providers = [{ name: "openai", label: "OpenAI", configured: true, model_api_configurable: true }];
+    const provider: SettingsPayload["providers"][number] = {
+      name: "openai", label: "OpenAI", configured: true,
+    };
+    if (host === "legacy") provider.model_api_configurable = true;
+    else provider.request_apis = ["chat_completions", "responses"];
+    payload.providers = [provider];
     payload.model_presets[0].provider = "openai";
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
     requestMutationMock.mockImplementation(async (action, args) => {
@@ -104,8 +109,10 @@ describe("Settings models", () => {
     });
     renderSettingsView({ initialSection: "models" });
     await togglePresetEditor();
-    await openPopover(screen.getByLabelText("Request API"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Responses" }));
+    await openPopover(screen.getByLabelText("API connection"));
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Responses" }));
+    expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.model_configuration.update",
@@ -115,22 +122,81 @@ describe("Settings models", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     await togglePresetEditor();
-    expect(screen.getByLabelText("Request API")).toHaveTextContent("Responses");
-    await openPopover(screen.getByLabelText("Request API"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Automatic" }));
+    expect(screen.getByLabelText("API connection")).toHaveTextContent("Responses");
+    fireEvent.click(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update",
+      { name: "primary", api: { supported_apis: ["responses", "chat_completions"], preferred_api: "responses" } },
+      20_000,
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await togglePresetEditor();
+    expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).toBeChecked();
+    await openPopover(screen.getByLabelText("API connection"));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Responses" }));
+    expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await openPopover(screen.getByLabelText("API connection"));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Automatic (recommended)" }));
+    expect(screen.queryByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.model_configuration.update", { name: "primary", api: null }, 20_000,
     ));
   });
 
-  it("hides API controls when the host omits preset API support", async () => {
+  it.each([undefined, ["future_api"], "responses"])("hides API controls when host support is unconfirmed (%s)", async (requestAPIs) => {
     const payload = settingsPayload();
-    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      ...payload,
+      providers: [{ name: "openai", label: "OpenAI", configured: true, request_apis: requestAPIs }],
+    })));
+    renderSettingsView({ initialSection: "models" });
+    await togglePresetEditor();
+    expect(screen.queryByRole("button", { name: "API connection" })).not.toBeInTheDocument();
+  });
+
+  it("uses the host's API declaration and preserves an existing Chat preference when renaming", async () => {
+    const payload = settingsPayload();
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      request_apis: ["chat_completions", "responses"],
+    }];
+    payload.model_presets[0].api = {
+      supported_apis: ["chat_completions", "responses"], preferred_api: "chat_completions",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models" });
+    await togglePresetEditor();
+    expect(screen.getByLabelText("API connection")).toHaveTextContent("Chat Completions");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Preset name"), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { name: "primary", new_name: "Renamed" }, 20_000,
+    ));
+  });
+
+  it.each([
+    ["openai_codex", "OpenAI Codex", "responses", "Responses"],
+    ["anthropic", "Anthropic", "anthropic_messages", "Anthropic Messages"],
+    ["bedrock", "AWS Bedrock", "bedrock_converse", "Bedrock Converse"],
+  ] as const)("explains the provider-managed connection for %s", async (provider, label, api, apiLabel) => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: provider, label, configured: true, request_apis: [api] }];
+    payload.model_presets[0].provider = provider;
+    payload.model_presets[0].resolved_provider = provider;
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
     renderSettingsView({ initialSection: "models" });
     await togglePresetEditor();
-    expect(screen.queryByRole("button", { name: "Request API" })).not.toBeInTheDocument();
+    expect(screen.getByText(apiLabel, { exact: true })).toBeVisible();
+    expect(screen.getByText(`${label} manages this connection. No configuration needed.`)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "API connection" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it.each(["manual", "poll", "direct"])("reauthenticates from the catalog and preserves the preset draft (%s)", async (mode) => {

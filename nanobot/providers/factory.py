@@ -97,8 +97,8 @@ def _resolve_provider_setup(
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
-    if preset.api is not None and backend not in {"openai_compat", "github_copilot"}:
-        raise ValueError("preset.api is supported for OpenAI-compatible and GitHub Copilot providers")
+    if preset.api is not None and spec is not None:
+        spec.validate_model_api(preset.api.to_capabilities())
     if p and p.proxy and backend not in {"openai_compat", "openai_codex", "xai_grok"}:
         raise ValueError(
             f"providers.{provider_name}.proxy is only supported for "

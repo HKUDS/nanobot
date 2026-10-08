@@ -764,6 +764,10 @@ def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch):
     assert providers["tenant"]["model_api_configurable"] is True
     assert providers["github_copilot"]["model_api_configurable"] is True
     assert providers["anthropic"]["model_api_configurable"] is False
+    assert providers["tenant"]["request_apis"] == ["chat_completions", "responses"]
+    assert providers["openai_codex"]["request_apis"] == ["responses"]
+    assert providers["anthropic"]["request_apis"] == ["anthropic_messages"]
+    assert providers["bedrock"]["request_apis"] == ["bedrock_converse"]
     saved = load_config(config_path)
     assert saved.model_presets["reasoning"].api.to_capabilities().preferred_api == "responses"
     assert json.loads(config_path.read_text(encoding="utf-8"))["modelPresets"]["reasoning"]["api"] == {
@@ -784,7 +788,7 @@ def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("provider,api,error", [
     ("openai", {"supportedApis": ["chat_completions"], "preferredApi": "responses"}, "api must declare"),
-    ("anthropic", {"supportedApis": ["responses"]}, "provider does not support"),
+    ("anthropic", {"supportedApis": ["responses"]}, "does not support"),
 ])
 def test_create_preset_rejects_invalid_api_without_saving(tmp_path, monkeypatch, provider, api, error):
     config_path = tmp_path / "config.json"
@@ -799,6 +803,24 @@ def test_create_preset_rejects_invalid_api_without_saving(tmp_path, monkeypatch,
             "api": [json.dumps(api)],
         })
     assert load_config(config_path).model_presets == {}
+
+
+def test_fixed_responses_provider_rejects_chat_without_saving(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "modelPresets": {"codex": {"provider": "openai_codex", "model": "gpt-6-astra"}},
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    with pytest.raises(WebUISettingsError, match="OpenAI Codex.*does not support chat_completions"):
+        update_model_configuration({
+            "name": ["codex"], "api": [json.dumps({"supportedApis": ["chat_completions"]})],
+        })
+    assert load_config(config_path).model_presets["codex"].api is None
+    update_model_configuration({
+        "name": ["codex"], "api": [json.dumps({"supportedApis": ["responses"]})],
+    })
+    assert load_config(config_path).model_presets["codex"].api.supported_apis == ("responses",)
 
 
 def test_legacy_migration_preserves_primary_and_fallback_apis(tmp_path, monkeypatch):

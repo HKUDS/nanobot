@@ -18,6 +18,9 @@ from typing import Any, Literal
 from pydantic.alias_generators import to_snake
 
 RequestAPI = Literal["chat_completions", "responses"]
+ProviderAPI = Literal[
+    "chat_completions", "responses", "anthropic_messages", "bedrock_converse", "transcription",
+]
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,9 @@ class ProviderSpec:
     name: str  # config field name, e.g. "dashscope"
     keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
+    # Request formats implemented by this adapter. Remote model support is
+    # separate: a compatible adapter does not guarantee both endpoint APIs.
+    request_apis: tuple[ProviderAPI, ...]
     display_name: str = ""  # shown in `nanobot status`
     model_catalog: str = "auto"  # WebUI model-list source, including builtin/hybrid
     builtin_models: tuple[ProviderModelSpec, ...] = ()
@@ -189,6 +195,18 @@ class ProviderSpec:
     def label(self) -> str:
         return self.display_name or self.name.title()
 
+    @property
+    def model_api_configurable(self) -> bool:
+        return "chat_completions" in self.request_apis and "responses" in self.request_apis
+
+    def validate_model_api(self, api: ModelAPICapabilities) -> None:
+        unsupported = set(api.supported_apis).difference(self.request_apis)
+        if unsupported:
+            raise ValueError(
+                f"Provider '{self.label}' does not support {', '.join(sorted(unsupported))}. "
+                f"Available request APIs: {', '.join(self.request_apis)}."
+            )
+
 
 # ---------------------------------------------------------------------------
 # PROVIDERS — the registry. Order = priority. Copy any entry as template.
@@ -200,16 +218,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="custom",
         keywords=(),
         env_key="",
+        request_apis=("chat_completions", "responses"),
         display_name="Custom",
         backend="openai_compat",
         is_direct=True,
     ),
 
-    # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
+    # === Azure OpenAI (native Responses, API-key or AAD authentication) ===
     ProviderSpec(
         name="azure_openai",
         keywords=("azure", "azure-openai"),
         env_key="",
+        request_apis=("responses",),
         display_name="Azure OpenAI",
         backend="azure_openai",
         is_direct=True,
@@ -233,6 +253,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             "zai.",
         ),
         env_key="AWS_BEARER_TOKEN_BEDROCK",
+        request_apis=("bedrock_converse",),
         display_name="AWS Bedrock",
         backend="bedrock",
         is_direct=True,
@@ -244,6 +265,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="openrouter",
         keywords=("openrouter",),
         env_key="OPENROUTER_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenRouter",
         backend="openai_compat",
         is_gateway=True,
@@ -258,6 +280,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="orcarouter",
         keywords=("orcarouter",),
         env_key="ORCAROUTER_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OrcaRouter",
         backend="openai_compat",
         is_gateway=True,
@@ -271,6 +294,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="edenai",
         keywords=("edenai",),
         env_key="EDENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Eden AI",
         backend="openai_compat",
         is_gateway=True,
@@ -284,6 +308,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="opencode",
         keywords=("opencode/", "opencode", "opencode-zen", "opencode_zen"),
         env_key="OPENCODE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenCode Zen",
         backend="openai_compat",
         is_gateway=True,
@@ -296,6 +321,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="opencode_zen",
         keywords=("opencode/", "opencode_zen", "opencode-zen"),
         env_key="OPENCODE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenCode Zen",
         settings_alias_for="opencode",
         backend="openai_compat",
@@ -304,12 +330,13 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://opencode.ai/zen/v1",
         strip_model_prefixes=("opencode", "opencode_zen", "opencode-zen"),
     ),
-    # OpenCode Go: OpenAI-compatible chat-completions gateway for low-cost models.
+    # OpenCode Go: low-cost gateway with model-specific request API routing.
     # OpenCode's own config uses "opencode-go/<model>"; send the bare model upstream.
     ProviderSpec(
         name="opencode_go",
         keywords=("opencode-go", "opencode_go"),
         env_key="OPENCODE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenCode Go",
         backend="openai_compat",
         is_gateway=True,
@@ -326,6 +353,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="huggingface",
         keywords=("huggingface", "hugging-face"),
         env_key="HF_TOKEN",
+        request_apis=("chat_completions", "responses"),
         display_name="Hugging Face",
         backend="openai_compat",
         is_gateway=True,
@@ -338,6 +366,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="skywork",
         keywords=("skywork", "skyclaw", "apifree"),
         env_key="SKYWORK_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Skywork",
         model_catalog="official",
         backend="openai_compat",
@@ -353,6 +382,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="aihubmix",
         keywords=("aihubmix",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="AiHubMix",
         backend="openai_compat",
         is_gateway=True,
@@ -365,6 +395,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="siliconflow",
         keywords=("siliconflow",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="SiliconFlow",
         backend="openai_compat",
         is_gateway=True,
@@ -377,6 +408,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="novita",
         keywords=("novita",),
         env_key="NOVITA_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Novita AI",
         backend="openai_compat",
         is_gateway=True,
@@ -389,6 +421,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="volcengine",
         keywords=("volcengine", "volces", "ark"),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="VolcEngine",
         backend="openai_compat",
         is_gateway=True,
@@ -403,6 +436,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="volcengine_coding_plan",
         keywords=("volcengine-plan",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="VolcEngine Coding Plan",
         backend="openai_compat",
         is_gateway=True,
@@ -417,6 +451,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="byteplus",
         keywords=("byteplus",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="BytePlus",
         backend="openai_compat",
         is_gateway=True,
@@ -431,6 +466,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="byteplus_coding_plan",
         keywords=("byteplus-plan",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="BytePlus Coding Plan",
         backend="openai_compat",
         is_gateway=True,
@@ -446,6 +482,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="anthropic",
         keywords=("anthropic", "claude"),
         env_key="ANTHROPIC_API_KEY",
+        request_apis=("anthropic_messages",),
         display_name="Anthropic",
         backend="anthropic",
         supports_prompt_caching=True,
@@ -455,6 +492,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="openai",
         keywords=("openai", "gpt"),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenAI",
         backend="openai_compat",
         supports_max_completion_tokens=True,
@@ -472,6 +510,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="openai_codex",
         keywords=("openai-codex",),
         env_key="",
+        request_apis=("responses",),
         display_name="OpenAI Codex",
         model_catalog="hybrid",
         builtin_models=(
@@ -535,6 +574,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="xai_grok",
         keywords=("xai-grok", "xai_grok"),
         env_key="",
+        request_apis=("responses",),
         display_name="xAI Grok",
         model_catalog="hybrid",
         builtin_models=(
@@ -560,6 +600,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="github_copilot",
         keywords=("github_copilot", "copilot"),
         env_key="",
+        request_apis=("chat_completions", "responses"),
         display_name="Github Copilot",
         model_catalog="hybrid",
         builtin_models=(
@@ -591,6 +632,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="deepseek",
         keywords=("deepseek",),
         env_key="DEEPSEEK_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="DeepSeek",
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
@@ -610,6 +652,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="gemini",
         keywords=("gemini", "gemma"),
         env_key="GEMINI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Gemini",
         backend="openai_compat",
         default_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -619,6 +662,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="zhipu",
         keywords=("zhipu", "glm", "zai"),
         env_key="ZAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Zhipu AI",
         backend="openai_compat",
         env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
@@ -629,6 +673,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="dashscope",
         keywords=("qwen", "dashscope"),
         env_key="DASHSCOPE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="DashScope",
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -639,6 +684,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="modelscope",
         keywords=("modelscope",),
         env_key="MODELSCOPE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="ModelScope",
         backend="openai_compat",
         is_gateway=True,
@@ -653,6 +699,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="moonshot",
         keywords=("moonshot", "kimi"),
         env_key="MOONSHOT_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Moonshot",
         backend="openai_compat",
         default_api_base="https://api.moonshot.ai/v1",
@@ -668,6 +715,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="kimi_coding",
         keywords=("kimi-coding", "kimi_coding", "kimi-for-coding"),
         env_key="KIMI_CODING_API_KEY",
+        request_apis=("anthropic_messages",),
         display_name="Kimi Coding",
         backend="anthropic",
         default_api_base="https://api.kimi.com/coding/v1",
@@ -678,6 +726,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="minimax",
         keywords=("minimax",),
         env_key="MINIMAX_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="MiniMax",
         backend="openai_compat",
         default_api_base="https://api.minimax.io/v1",
@@ -688,6 +737,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="minimax_anthropic",
         keywords=("minimax_anthropic",),
         env_key="MINIMAX_API_KEY",
+        request_apis=("anthropic_messages",),
         display_name="MiniMax (Anthropic)",
         backend="anthropic",
         default_api_base="https://api.minimax.io/anthropic",
@@ -703,6 +753,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="mistral",
         keywords=("mistral", "magistral", "ministral", "codestral", "devstral"),
         env_key="MISTRAL_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Mistral",
         backend="openai_compat",
         default_api_base="https://api.mistral.ai/v1",
@@ -722,6 +773,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="stepfun",
         keywords=("stepfun", "step"),
         env_key="STEPFUN_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Step Fun",
         backend="openai_compat",
         default_api_base="https://api.stepfun.com/v1",
@@ -734,6 +786,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="xiaomi_mimo",
         keywords=("xiaomi_mimo", "mimo"),
         env_key="XIAOMIMIMO_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Xiaomi MIMO",
         backend="openai_compat",
         default_api_base="https://api.xiaomimimo.com/v1",
@@ -744,6 +797,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="longcat",
         keywords=("longcat",),
         env_key="LONGCAT_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="LongCat",
         backend="openai_compat",
         default_api_base="https://api.longcat.chat/openai/v1",
@@ -753,6 +807,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="ant_ling",
         keywords=("ant_ling", "ant-ling", "ling-", "ring-"),
         env_key="ANT_LING_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Ant Ling",
         backend="openai_compat",
         detect_by_base_keyword="ant-ling.com",
@@ -764,6 +819,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="vllm",
         keywords=("vllm",),
         env_key="HOSTED_VLLM_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="vLLM",
         backend="openai_compat",
         is_local=True,
@@ -773,6 +829,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="ollama",
         keywords=("ollama", "nemotron"),
         env_key="OLLAMA_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Ollama",
         backend="openai_compat",
         is_local=True,
@@ -784,6 +841,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="lm_studio",
         keywords=("lm-studio", "lmstudio", "lm_studio"),
         env_key="LM_STUDIO_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="LM Studio",
         backend="openai_compat",
         is_local=True,
@@ -795,6 +853,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="atomic_chat",
         keywords=("atomic-chat", "atomic_chat", "atomicchat"),
         env_key="ATOMIC_CHAT_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Atomic Chat",
         backend="openai_compat",
         is_local=True,
@@ -806,6 +865,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="ovms",
         keywords=("openvino", "ovms"),
         env_key="",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenVINO Model Server",
         backend="openai_compat",
         is_direct=True,
@@ -818,6 +878,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="nvidia",
         keywords=("nvidia", "nemotron", "nvapi"),
         env_key="NVIDIA_NIM_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="NVIDIA NIM",
         backend="openai_compat",
         is_gateway=False,
@@ -831,6 +892,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="groq",
         keywords=("groq",),
         env_key="GROQ_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Groq",
         backend="openai_compat",
         default_api_base="https://api.groq.com/openai/v1",
@@ -841,6 +903,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="assemblyai",
         keywords=("assemblyai",),
         env_key="ASSEMBLYAI_API_KEY",
+        request_apis=("transcription",),
         display_name="AssemblyAI",
         backend="openai_compat",
         default_api_base="https://api.assemblyai.com/v2",
@@ -851,6 +914,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="qianfan",
         keywords=("qianfan", "ernie"),
         env_key="QIANFAN_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Qianfan",
         backend="openai_compat",
         default_api_base="https://qianfan.baidubce.com/v2"
@@ -885,6 +949,7 @@ def create_dynamic_spec(
         name=normalized,
         keywords=(),
         env_key="",
+        request_apis=("chat_completions", "responses"),
         display_name=display_name or name.replace("-", " ").replace("_", " ").title(),
         backend="openai_compat",
         is_direct=True,

@@ -717,6 +717,10 @@ export interface SettingsPayload {
     model_selectable?: boolean;
     model_catalog?: ProviderModelsPayload["catalog_kind"];
     model_api_configurable?: boolean;
+    /** Request formats implemented by the host's provider adapter. */
+    request_apis?: Array<
+      "chat_completions" | "responses" | "anthropic_messages" | "bedrock_converse" | "transcription"
+    >;
     api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;

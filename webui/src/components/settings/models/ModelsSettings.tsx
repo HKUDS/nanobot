@@ -507,14 +507,13 @@ export function ModelsSettings({
           }}
         />
       </SettingsRow>
-      {(selectedProvider ?? settings.providers.find(
-        (provider) => provider.name === selectedPreset?.resolved_provider,
-      ))?.model_api_configurable === true ? (
-        <ModelAPIControl
-          value={form.api}
-          onChange={(api) => setForm((prev) => ({ ...prev, api }))}
-        />
-      ) : null}
+      <ModelAPIControl
+        provider={selectedProvider ?? settings.providers.find(
+          (provider) => provider.name === selectedPreset?.resolved_provider,
+        )}
+        value={form.api}
+        onChange={(api) => setForm((prev) => ({ ...prev, api }))}
+      />
       <button
         type="button"
         aria-expanded={advancedOpen}

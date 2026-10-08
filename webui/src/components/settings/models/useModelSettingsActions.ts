@@ -7,7 +7,7 @@ import type {
   PendingRestartSections,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
-import { modelAPISelection } from "@/components/settings/models/ModelAPIControl";
+import { modelAPIConfigurable, modelAPISelection } from "@/components/settings/models/ModelAPIControl";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
   providerFormFromRow,
@@ -196,7 +196,7 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
-          api: settings.providers.find((row) => row.name === provider)?.model_api_configurable === true
+          api: modelAPIConfigurable(settings.providers.find((row) => row.name === provider))
             ? form.api : undefined,
         });
         const createdPreset = payload.created_model_preset;
@@ -260,9 +260,9 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
-        api: settings.providers.find((row) => row.name === (
+        api: modelAPIConfigurable(settings.providers.find((row) => row.name === (
           form.provider === "auto" ? selectedPreset.resolved_provider : form.provider
-        ))?.model_api_configurable === true &&
+        ))) &&
           modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
           ? form.api : undefined,
       });

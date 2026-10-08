@@ -475,7 +475,8 @@ def _provider_settings_row(
         "default_api_base": spec.default_api_base or None,
         "model_selectable": not spec.is_transcription_only,
         "model_catalog": model_catalog_kind(spec),
-        "model_api_configurable": spec.backend in {"openai_compat", "github_copilot"},
+        "request_apis": list(spec.request_apis),
+        "model_api_configurable": spec.model_api_configurable,
         "advanced_fields": _provider_advanced_field_names(name, spec),
         "extra_headers": _redact_provider_secret_values(provider_config.extra_headers),
         "extra_body": _redact_provider_secret_values(provider_config.extra_body),
@@ -1206,8 +1207,12 @@ def _parse_preset_api(
     preset = ModelPresetConfig(model=model, provider=provider)
     provider_name = config.get_provider_name(model, preset=preset) or provider
     entry = resolve_settings_provider(config, provider_name)
-    if entry is None or entry[0].backend not in {"openai_compat", "github_copilot"}:
-        raise WebUISettingsError("provider does not support configurable model APIs")
+    if entry is None:
+        raise WebUISettingsError("unknown provider")
+    try:
+        entry[0].validate_model_api(api.to_capabilities())
+    except ValueError as exc:
+        raise WebUISettingsError(str(exc)) from None
     return api
 
 

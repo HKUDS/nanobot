@@ -7,8 +7,8 @@ import pytest
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelAPIConfig
-from nanobot.providers.factory import make_provider, provider_signature
+from nanobot.config.schema import Config, InlineFallbackConfig, ModelAPIConfig, ModelPresetConfig
+from nanobot.providers.factory import make_provider, provider_signature, validate_provider_setup
 from nanobot.providers.openai_compat_provider import _RESPONSES_FAILURE_THRESHOLD
 
 
@@ -169,6 +169,17 @@ async def test_fallback_preset_keeps_its_api_and_invalidates_runtime(bind_transp
 def test_preset_api_preference_must_be_supported():
     with pytest.raises(ValidationError, match="preferred_api must be one of supported_apis"):
         ModelAPIConfig.model_validate({"supportedApis": ["chat_completions"], "preferredApi": "responses"})
+
+
+def test_fixed_provider_validates_preset_api_before_loading_client():
+    config = Config()
+    preset = ModelPresetConfig(
+        provider="openai_codex", model="gpt-6-astra", api=ModelAPIConfig(supported_apis=("responses",)),
+    )
+    validate_provider_setup(config, preset=preset)
+    preset.api = ModelAPIConfig(supported_apis=("responses", "chat_completions"))
+    with pytest.raises(ValueError, match="OpenAI Codex.*does not support chat_completions"):
+        validate_provider_setup(config, preset=preset)
 
 
 @pytest.mark.parametrize("apis,preferred", [

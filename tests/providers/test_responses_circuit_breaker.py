@@ -64,6 +64,7 @@ def test_responses_behavior_is_declared_by_capabilities(provider):
         name="example",
         keywords=("example",),
         env_key="EXAMPLE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         responses=ResponsesCapabilities(
             models=("example-o3",),
             reasoning_replay="plaintext",
@@ -239,6 +240,7 @@ def _deepseek_provider(provider):
         name="deepseek",
         keywords=("deepseek",),
         env_key="DEEPSEEK_API_KEY",
+        request_apis=("chat_completions", "responses"),
         responses=ResponsesCapabilities(
             models=("deepseek-v4-flash",),
             reasoning_replay="plaintext",

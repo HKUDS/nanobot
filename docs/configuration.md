@@ -1468,7 +1468,7 @@ Set `agents.defaults.modelPreset` to choose the preset followed by sessions that
 
 ### Preset request API
 
-Declare API support in the preset for OpenAI-compatible providers, including custom gateways, and GitHub Copilot. Credentials and endpoint URLs stay in the provider. Two presets sharing a provider can select different APIs.
+Leave API selection on **Automatic (recommended)** unless your provider requires a specific endpoint. For OpenAI-compatible providers, including custom gateways, and GitHub Copilot, a preset can choose Responses or Chat Completions. Credentials and endpoint URLs stay in the provider. Two presets sharing a provider can select different APIs.
 
 ```json
 {
@@ -1486,11 +1486,15 @@ Declare API support in the preset for OpenAI-compatible providers, including cus
 }
 ```
 
-`supportedApis` is a nonempty list containing `chat_completions`, `responses`, or both. `preferredApi` must belong to that list; when omitted, it defaults to the first entry. A Responses-only preset never falls back to Chat Completions. Declare both APIs with `preferredApi: "responses"` to allow Chat fallback for classified Responses compatibility errors. Other failures retain their normal error handling. Native hosted search uses Responses when it is supported by the preset.
+`supportedApis` is a nonempty list of APIs this preset is allowed to use: `chat_completions`, `responses`, or both. `preferredApi` must belong to that list; when omitted, it defaults to the first entry. A Responses-only preset never falls back to Chat Completions. Declare both APIs with `preferredApi: "responses"` to allow Chat fallback for classified Responses compatibility errors, when the endpoint serves that model through both APIs. Other failures retain their normal error handling. Native hosted search uses Responses when it is allowed by the preset.
 
 Omit `api` or set it to `null` for automatic routing. An explicit declaration overrides provider API defaults, including legacy `providers.openai.apiType`. Automatic Copilot routing uses the account's last successfully discovered `supported_endpoints` when available; other automatic routes use registry defaults. Custom gateways default to Chat Completions until Responses support is declared. Protocol behavior such as reasoning replay and native compaction remains provider-owned; declaring Responses support does not enable OpenAI-native compaction on a custom gateway.
 
-In the WebUI, open **Settings → Models → a preset → Request API** to choose automatic routing, either API, or Responses with Chat fallback. Changing a preset's model or provider resets its API declaration to automatic unless the same update supplies a new declaration. Each fallback preset retains its own declaration. Legacy direct `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
+In the WebUI, open **Settings → Models → a preset → API connection**. Choose **Automatic (recommended)**, **Responses**, or **Chat Completions**. Selecting Responses also reveals **Try Chat Completions if Responses is unsupported**, which starts off when selecting Responses and requires the same model to support both endpoints. The explanation below the selector describes the chosen behavior.
+
+Every provider adapter declares its request formats in `nanobot/providers/registry.py`. OpenAI Codex, xAI Grok subscriptions, and the Azure OpenAI adapter use Responses; Anthropic uses Messages, and Bedrock uses Converse. The WebUI shows these fixed connections with an explanation instead of an editable selector. Preset declarations cannot enable a format the adapter does not implement. An OpenAI-compatible adapter implementing both formats does not guarantee that a particular remote model supports both.
+
+Changing a preset's model or provider resets its API declaration to automatic unless the same update supplies a new declaration. Each fallback preset retains its own declaration. Legacy direct `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
 
 ### Model Fallbacks
 
