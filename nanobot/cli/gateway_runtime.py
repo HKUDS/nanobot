@@ -937,7 +937,7 @@ def _run_gateway(
                 if orphaned:
                     logger.info("Last local client disappeared; stopping on-demand gateway")
 
-            tasks = [
+            tasks.extend([
                 asyncio.create_task(
                     watch_config_file(
                         Path(config_path),
@@ -959,7 +959,7 @@ def _run_gateway(
                     _monitor_local_clients(),
                     name="nanobot-gateway-client-monitor",
                 ),
-            ]
+            ])
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),
@@ -986,7 +986,11 @@ def _run_gateway(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if runtime_tasks in done:
-                await runtime_tasks
+                try:
+                    await runtime_tasks
+                except asyncio.CancelledError:
+                    if not shutdown_event.is_set():
+                        raise
             else:
                 runtime_tasks.cancel()
         except KeyboardInterrupt:
