@@ -234,7 +234,7 @@ describe("Workspace project picker", () => {
   it.each([
     ["/srv/alpha/", "/srv/beta/"],
     ["C:\\Projects\\alpha\\", "C:\\Projects\\beta\\"],
-  ])("distinguishes saved folders with the same name by their parent paths: %s", async (firstParent, secondParent) => {
+  ])("keeps same-named saved folders independently selectable by their full paths: %s", async (firstParent, secondParent) => {
     const user = userEvent.setup();
     const firstPath = `${firstParent}src`;
     const secondPath = `${secondParent}src`;
@@ -247,10 +247,8 @@ describe("Workspace project picker", () => {
     await user.click(screen.getByRole("button", { name: "Switch working directory" }));
     const first = await screen.findByRole("button", { name: firstPath });
     const second = screen.getByRole("button", { name: secondPath });
-    expect(within(first).getByText("src", { exact: true })).toBeInTheDocument();
-    expect(within(first).getByText(firstParent, { exact: true })).toBeInTheDocument();
-    expect(within(second).getByText("src", { exact: true })).toBeInTheDocument();
-    expect(within(second).getByText(secondParent, { exact: true })).toBeInTheDocument();
+    expect(first).toHaveTextContent(/^src$/);
+    expect(second).toHaveTextContent(/^src$/);
     act(() => first.focus());
     expect(first).toHaveFocus();
     await user.click(second);

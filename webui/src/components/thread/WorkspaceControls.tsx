@@ -154,16 +154,6 @@ function WorkspacePickerPath({ path }: { path: string }) {
   );
 }
 
-function WorkspaceSavedProjectLabel({ path }: { path: string }) {
-  const parts = workspacePathCompletionQuery(path);
-  return (
-    <span className="min-w-0 flex-1">
-      <span className="block truncate text-[13px] font-medium leading-5">{projectNameFromPath(path)}</span>
-      {parts?.query && <span dir="rtl" className="block truncate text-left text-[11px] leading-4 text-muted-foreground"><bdi dir="ltr">{parts.path}</bdi></span>}
-    </span>
-  );
-}
-
 export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, controls, error, onLoadProjects, onResolveProject, onFavoriteProject, onBrowseDirectories, layoutAnchor, onChange }: {
   layoutAnchor?: HTMLElement | null;
   isHero: boolean;
@@ -645,11 +635,10 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                     onPointerEnter={() => setHoveredLocation(project.path)} onPointerLeave={() => setHoveredLocation(null)}>
                       <button type="button" aria-label={project.path} aria-current={sameWorkspacePath(currentPath, project.path) ? "location" : undefined}
                         disabled={pickingFolder} onMouseDown={event => event.preventDefault()} onClick={() => openShortcut(project)}
-                        className={cn(floatingItemClassName, "flex h-14 min-h-14 w-full min-w-0 items-center gap-2 px-3 py-2 text-left group-hover/workspace-saved-row:bg-foreground/[0.055] dark:group-hover/workspace-saved-row:bg-white/[0.08] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring", canFavorite && "pr-12",
-                          sameWorkspacePath(currentPath, project.path) && "text-foreground group-hover/workspace-saved-row:bg-transparent dark:group-hover/workspace-saved-row:bg-transparent",
+                        className={cn(floatingItemClassName, "flex h-11 min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left group-hover/workspace-saved-row:bg-foreground/[0.055] dark:group-hover/workspace-saved-row:bg-white/[0.08] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring", canFavorite && "pr-12",
+                          sameWorkspacePath(currentPath, project.path) && "font-medium text-foreground group-hover/workspace-saved-row:bg-transparent dark:group-hover/workspace-saved-row:bg-transparent",
                           sameWorkspacePath(hoveredLocation, project.path) && (savedSelectionJoin === "top" ? "rounded-b-none" : savedSelectionJoin === "bottom" ? "rounded-t-none" : undefined))}>
-                        <WorkspaceIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <WorkspaceSavedProjectLabel path={project.path} />
+                        <span className="min-w-0 flex-1 truncate text-[13px] leading-4">{projectNameFromPath(project.path)}</span>
                         {sameWorkspacePath(project.path, scope?.project_path ?? defaultScope.project_path) && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                       </button>
                     {favoriteButton(project.path)}
@@ -659,7 +648,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
               ))}
               </SidebarSelectionHighlight>
             </nav>}
-            <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-l-control bg-[#fcfcfc] dark:bg-muted", compact && showLocations && canBrowse && "hidden")}>
+            <div className={cn("mr-[var(--picker-toolbar-inset)] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--picker-field-radius)] bg-[#fcfcfc] dark:bg-muted", compact && showLocations && canBrowse && "hidden")}>
             <div ref={attachColumns} data-workspace-columns className="sidebar-scrollbar flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain">
               {columns.map((column, columnIndex) => (!compact || columnIndex === currentColumnIndex) && <WorkspaceDirectoryColumn key={columnIndex} options={column.options} selectedPath={column.selectedPath} initialScrollTop={previewingPath ? 0 : currentVisit.scrollTops[columnIndex] ?? 0} visitRevision={history.revision} activeIndex={highlightActive && columnIndex === activeColumn ? activeOption : null}
                 id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className={cn("sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 pt-1 pb-2 outline-none", keyboardInteraction && "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring")}
@@ -681,7 +670,6 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                     className={cn(floatingItemClassName, floatingItemFocusClassName, "flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left hover:bg-foreground/[0.055] dark:hover:bg-white/[0.08] disabled:opacity-50", canFavorite && "pr-12",
                       sameWorkspacePath(column.selectedPath, option.path) && "font-medium text-foreground hover:bg-transparent dark:hover:bg-transparent focus:bg-transparent dark:focus:bg-transparent",
                       highlightActive && columnIndex === activeColumn && index === activeOption && "ring-1 ring-inset ring-ring")}>
-                    <WorkspaceIcon className="h-4 w-4 shrink-0 -translate-y-px text-muted-foreground" />
                     {option.kind === "directory" ? <span className="min-w-0 flex-1 truncate text-[13px] leading-4">{option.name}</span> : <WorkspacePickerPath path={option.path} />}
                     {sameWorkspacePath(option.path, scope?.project_path ?? defaultScope.project_path) && <Check className="h-4 w-4 shrink-0 text-muted-foreground" />}
                   </button>
