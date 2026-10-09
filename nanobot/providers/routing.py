@@ -69,7 +69,8 @@ def resolve_model_api(
     if preset_api is not None:
         api = preset_api.to_capabilities()
         spec.validate_model_api(api)
-        if connection_api is not None:
+        # Built-in OpenAI declares defaults; custom endpoints declare an API ceiling.
+        if connection_api is not None and spec.is_direct:
             unsupported = set(api.supported_apis) - set(connection_api.supported_apis)
             if unsupported:
                 raise ValueError(
@@ -178,7 +179,6 @@ def resolve_automatic_model_api(
     api = spec.default_model_api(
         setup.model, preset.reasoning_effort,
         api_base=config.get_api_base(setup.model, preset=preset),
-        api_type=provider_config.api_type if provider_config else "auto",
         extra_body=provider_config.extra_body if provider_config else None,
     )
     return setup.provider_name, api.preferred_api

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
@@ -83,7 +84,7 @@ class DreamConfig(Base):
 
 
 class ProviderAPIConfig(Base):
-    """Request APIs accepted by a custom endpoint and its default API."""
+    """Connection API defaults and custom endpoints' accepted request APIs."""
 
     supported_apis: tuple[RequestAPI, ...] = Field(min_length=1)
     preferred_api: RequestAPI | None = None
@@ -237,7 +238,6 @@ class ProviderConfig(Base):
     api_key: str | None = Field(default=None, repr=False)
     api_base: str | None = None
     api: ProviderAPIConfig | None = Field(default=None, exclude_if=lambda value: value is None)
-    api_type: Literal["auto", "chat_completions", "responses"] = "auto"  # Request API surface
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
@@ -346,18 +346,18 @@ class ProvidersConfig(Base):
                     self.model_extra[key] = ProviderConfig.model_validate(value)
         return self
 
-    @model_validator(mode="after")
-    def _validate_api_type_scope(self) -> "ProvidersConfig":
-        for name in self.__class__.model_fields:
-            if name == "openai":
-                continue
-            provider = getattr(self, name, None)
-            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
-                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
-        for provider in (self.model_extra or {}).values():
-            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
-                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_api_type(cls, value: Any) -> Any:
+        # Temporary for two releases; remove with provider_api_migration.py.
+        if not isinstance(value, dict):
+            return value
+        providers = cast(dict[str, Any], value)
+        return {
+            name: migrate_legacy_provider_api(cast(dict[str, Any], provider), provider_name=name)
+            if isinstance(provider, dict) else provider
+            for name, provider in providers.items()
+        }
 
 
 class HeartbeatConfig(Base):

@@ -1074,7 +1074,7 @@ async def test_gpt6_temperature_requires_explicit_none_effort(
             api_key="sk-test-key",
             default_model=model,
             spec=find_by_name("openai"),
-            api_type=api_type,
+            model_api=ModelAPICapabilities((api_type,), api_type),
         )
         result = await provider.chat(
             messages=[{"role": "user", "content": "hello"}],

@@ -777,7 +777,6 @@
       "supportedAPIs": "API compatibles",
       "defaultAPI": "API predeterminada",
       "declareAPIs": "Configurar API compatibles",
-      "apiType": "Tipo de API",
       "proxy": "Proxy de red",
       "thinkingStyle": "Formato de razonamiento",
       "region": "Región",

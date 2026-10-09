@@ -410,7 +410,6 @@ export function useModelSettingsActions({
         if (provider.provider_api_configurable) update.api = providerForm.api;
       }
       for (const field of provider.advanced_fields ?? []) {
-        if (field === "api_type") update.apiType = providerForm.apiType;
         if (field === "proxy") update.proxy = providerForm.proxy.trim();
         if (field === "extra_headers") {
           update.extraHeaders = providerForm.extraHeaders.trim();

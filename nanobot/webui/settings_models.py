@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict, cast
 import httpx
 
 from nanobot.config.loader import resolve_config_env_vars
+from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.schema import (
     Config,
     FallbackCandidate,
@@ -208,7 +209,6 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     string_fields = (
         ("api_key", "apiKey"),
         ("api_base", "apiBase"),
-        ("api_type", "apiType"),
         ("proxy", "proxy"),
         ("thinking_style", "thinkingStyle"),
         ("region", "region"),
@@ -218,7 +218,7 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     for snake, camel in string_fields:
         if query_has_alias(query, snake, camel):
             value = (query_first_alias(query, snake, camel) or "").strip()
-            updates[snake] = value or ("auto" if snake == "api_type" else None)
+            updates[snake] = value or None
 
     for snake, camel in (
         ("extra_headers", "extraHeaders"),
@@ -232,6 +232,9 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
             updates["api"] = json.loads(query_first(query, "api") or "null")
         except ValueError as exc:
             raise WebUISettingsError("api must declare supportedApis and a preferredApi from that list") from exc
+    # Temporary input compatibility for older clients during the two-release window.
+    if query_has_alias(query, "api_type", "apiType"):
+        updates["api_type"] = query_first_alias(query, "api_type", "apiType") or "auto"
     return updates
 
 
@@ -451,8 +454,6 @@ def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
         fields.extend(("extra_query", "proxy"))
     if spec.name in _OAUTH_PROXY_PROVIDERS and "proxy" not in fields:
         fields.append("proxy")
-    if spec.name == "openai":
-        fields.append("api_type")
     if spec.backend == "bedrock":
         fields.extend(("region", "profile"))
     if find_by_name(name) is None:
@@ -468,7 +469,10 @@ def _provider_settings_row(
 ) -> dict[str, Any]:
     oauth_status = oauth_status_reader(spec) if spec.is_oauth else None
     is_custom = find_by_name(name) is None
-    request_apis = provider_config.api.supported_apis if provider_config.api else spec.request_apis
+    request_apis = (
+        provider_config.api.supported_apis
+        if provider_config.api is not None and spec.is_direct else spec.request_apis
+    )
     row = {
         "name": name,
         "label": spec.label,
@@ -503,8 +507,6 @@ def _provider_settings_row(
         row["oauth_account"] = oauth_status["account"]
         row["oauth_expires_at"] = oauth_status["expires_at"]
         row["oauth_login_supported"] = oauth_status["login_supported"]
-    if spec.name == "openai":
-        row["api_type"] = provider_config.api_type
     return row
 
 
@@ -1559,7 +1561,6 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
 
     provider_key = _custom_provider_key(config, display_name)
     updates["display_name"] = display_name
-    updates["api_type"] = "auto"
     provider_config = _validated_provider_config(None, updates)
     setattr(config.providers, provider_key, provider_config)
     return provider_key
@@ -1580,6 +1581,10 @@ def update_provider_settings(
     updates = _provider_config_updates(query)
     if not spec.is_oauth and spec.name != "openai":
         updates.pop("api_type", None)
+    try:
+        updates = migrate_legacy_provider_api(updates, provider_name=provider_key)
+    except ValueError as exc:
+        raise WebUISettingsError(str(exc)) from None
     if spec.is_oauth:
         if spec.name not in _OAUTH_PROXY_PROVIDERS:
             raise WebUISettingsError("unknown provider")

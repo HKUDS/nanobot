@@ -18,7 +18,7 @@ from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.bedrock_provider import BedrockProvider
 from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 from nanobot.providers.xai_grok_provider import XAIGrokProvider
 
 
@@ -120,7 +120,7 @@ async def image_peer(monkeypatch):
         await runner.cleanup()
 
 
-def _provider(adapter, url, monkeypatch, api_type=None):
+def _provider(adapter, url, monkeypatch):
     if adapter == "azure":
         return AzureOpenAIProvider(api_key="fixture", api_base=url, default_model="gpt-5.4")
     if adapter == "anthropic":
@@ -140,7 +140,9 @@ def _provider(adapter, url, monkeypatch, api_type=None):
     return OpenAICompatProvider(
         api_key="fixture", api_base=f"{url}/v1", spec=spec,
         default_model="deepseek-v4-flash-vision-exp" if adapter == "deepseek" else "gpt-5.4",
-        api_type=api_type or ("chat_completions" if adapter == "chat" else "responses"), extra_body={"tools": []},
+        model_api=ModelAPICapabilities(("chat_completions",), "chat_completions") if adapter == "chat"
+        else ModelAPICapabilities(("responses",), "responses") if adapter != "deepseek" else None,
+        extra_body={"tools": []},
     )
 
 
@@ -250,7 +252,7 @@ async def test_responses_image_rejection_discards_replay_and_retries_once(
 @pytest.mark.parametrize("streaming", [False, True])
 async def test_auto_responses_fallback_keeps_prepared_images(image_peer, image_blocks, monkeypatch, streaming):
     url, requests, reject = image_peer
-    provider = _provider("deepseek", url, monkeypatch, api_type="auto")
+    provider = _provider("deepseek", url, monkeypatch)
     reject["images"] = True
     try:
         result = await (provider.chat_stream if streaming else provider.chat)(_messages(image_blocks))
@@ -267,7 +269,7 @@ async def test_text_only_model_keeps_its_image_policy(image_peer, image_blocks, 
     url, requests, _ = image_peer
     provider = OpenAICompatProvider(
         api_key="fixture", api_base=f"{url}/v1", spec=find_by_name("deepseek"),
-        default_model="deepseek-v4-flash", api_type="responses", extra_body={"tools": []},
+        default_model="deepseek-v4-flash", extra_body={"tools": []},
     )
     try:
         result = await (provider.chat_stream if streaming else provider.chat)(_messages(image_blocks))

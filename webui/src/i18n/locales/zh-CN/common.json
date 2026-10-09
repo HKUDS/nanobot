@@ -1197,7 +1197,6 @@
       "supportedAPIs": "支持的协议",
       "defaultAPI": "默认协议",
       "declareAPIs": "设置支持的协议",
-      "apiType": "API 类型",
       "proxy": "网络代理",
       "thinkingStyle": "推理格式",
       "region": "区域",

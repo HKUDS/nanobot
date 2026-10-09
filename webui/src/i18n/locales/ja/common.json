@@ -777,7 +777,6 @@
       "supportedAPIs": "対応する API",
       "defaultAPI": "デフォルトの API",
       "declareAPIs": "対応する API を設定",
-      "apiType": "API タイプ",
       "proxy": "ネットワークプロキシ",
       "thinkingStyle": "推論の形式",
       "region": "リージョン",

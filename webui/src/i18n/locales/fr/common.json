@@ -777,7 +777,6 @@
       "supportedAPIs": "API prises en charge",
       "defaultAPI": "API par défaut",
       "declareAPIs": "Définir les API prises en charge",
-      "apiType": "Type d’API",
       "proxy": "Proxy réseau",
       "thinkingStyle": "Format du raisonnement",
       "region": "Région",

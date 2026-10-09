@@ -11,15 +11,18 @@ import type { ModelAPIConfig, ProviderRequestAPI, SettingsPayload } from "@/lib/
 export function ModelAPIControl({
   provider,
   automaticAPI,
+  title,
   value,
   onChange,
 }: {
   provider: SettingsPayload["providers"][number] | undefined;
   automaticAPI?: ProviderRequestAPI;
+  title?: string;
   value: ModelAPIConfig | null;
   onChange: (api: ModelAPIConfig | null) => void;
 }) {
   const { t } = useTranslation();
+  const controlTitle = title ?? t("settings.models.requestAPI");
   const [pointerFocus, setPointerFocus] = useState(false);
   const requestAPIs = Array.isArray(provider?.request_apis) ? provider.request_apis : undefined;
   const configurable = modelAPIConfigurable(provider);
@@ -47,7 +50,7 @@ export function ModelAPIControl({
 
   return (
     <div>
-      <SettingsRow title={t("settings.models.requestAPI")}>
+      <SettingsRow title={controlTitle}>
         {configurable ? (
           <Select value={selectedAPI} onValueChange={(api) => {
             if (api === selectedAPI) return;
@@ -57,7 +60,7 @@ export function ModelAPIControl({
             }
           }}>
             <SelectTrigger
-              aria-label={t("settings.models.requestAPI")}
+              aria-label={controlTitle}
               className={cn("w-full rounded-full", pointerFocus && "focus-visible:ring-0")}
               onPointerDown={() => setPointerFocus(true)}
               onKeyDown={() => setPointerFocus(false)}

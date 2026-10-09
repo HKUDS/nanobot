@@ -777,7 +777,6 @@
       "supportedAPIs": "支援的協定",
       "defaultAPI": "預設協定",
       "declareAPIs": "設定支援的協定",
-      "apiType": "API 類型",
       "proxy": "網路代理",
       "thinkingStyle": "推理格式",
       "region": "區域",

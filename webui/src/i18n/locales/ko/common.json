@@ -777,7 +777,6 @@
       "supportedAPIs": "지원 API",
       "defaultAPI": "기본 API",
       "declareAPIs": "지원 API 설정",
-      "apiType": "API 유형",
       "proxy": "네트워크 프록시",
       "thinkingStyle": "추론 형식",
       "region": "리전",

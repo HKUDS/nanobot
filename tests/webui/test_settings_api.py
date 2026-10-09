@@ -1041,7 +1041,7 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
     )
 
     saved = load_config(config_path)
-    assert saved.providers.openai.api_type == "responses"
+    assert saved.providers.openai.api.to_capabilities().preferred_api == "responses"
     assert saved.providers.openai.proxy == "http://127.0.0.1:7890"
     assert saved.providers.openai.extra_headers == {"X-Trace": "enabled"}
     assert saved.providers.openai.extra_body == {"service_tier": "priority"}
@@ -2742,3 +2742,15 @@ def test_custom_connection_cannot_remove_api_used_by_legacy_or_inline_model(tmp_
             "provider": ["tenant"], "api": [json.dumps({"supportedApis": ["responses"]})],
         })
     assert config_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", ["apiType", "api_type"])
+def test_legacy_openai_settings_can_return_to_auto(monkeypatch, tmp_path, field):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({"providers": {"openai": {
+        "apiKey": "fixture", "api": {"supportedApis": ["responses"]},
+    }}})
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    update_provider_settings({"provider": ["openai"], field: ["auto"]})
+    assert load_config(config_path).providers.openai.api is None

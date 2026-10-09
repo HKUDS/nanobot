@@ -10,7 +10,7 @@ import pytest
 from nanobot.config.schema import Config, ProvidersConfig
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from nanobot.providers.registry import PROVIDERS, ModelAPICapabilities, find_by_name
 
 
 def test_opencode_config_fields_exist() -> None:
@@ -250,7 +250,7 @@ async def test_opencode_wire_affinity(monkeypatch, api_type, stream, configured_
             headers[configured_header] = "configured"
         provider = OpenAICompatProvider(
             api_key="test", api_base="https://opencode.ai/zen/v1",
-            spec=find_by_name("openai"), api_type=api_type, extra_headers=headers,
+            spec=find_by_name("openai"), model_api=ModelAPICapabilities((api_type,), api_type), extra_headers=headers,
             default_model="gpt-5",
             extra_body={"context_management": [{"type": "compaction"}]} if compaction else None,
         )

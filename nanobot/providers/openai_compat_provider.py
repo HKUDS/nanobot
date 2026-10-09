@@ -492,7 +492,6 @@ class OpenAICompatProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
         extra_body: dict[str, Any] | None = None,
-        api_type: str = "auto",
         model_api: ModelAPICapabilities | None = None,
         extra_query: dict[str, str] | None = None,
         proxy: str | None = None,
@@ -504,12 +503,6 @@ class OpenAICompatProvider(LLMProvider):
         self._spec = spec
         self._preset_model_api = model_api
         self._extra_body = dict(extra_body or {})
-        responses = spec.responses if spec is not None else None
-        self._api_type = (
-            api_type
-            if responses is not None and responses.allows_api_type_override
-            else "auto"
-        )
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
         self._responses = ResponsesBackend()
@@ -1096,7 +1089,7 @@ class OpenAICompatProvider(LLMProvider):
             return ModelAPICapabilities()
         return self._spec.default_model_api(
             model or self.default_model, reasoning_effort,
-            api_base=self._effective_base, api_type=self._api_type, extra_body=self._extra_body,
+            api_base=self._effective_base, extra_body=self._extra_body,
         )
 
     def _responses_is_required(
@@ -1151,8 +1144,6 @@ class OpenAICompatProvider(LLMProvider):
                 return False
             if self._preset_model_api.preferred_api != "responses" and not self._hosted_web_search_enabled():
                 return False
-        elif self._api_type == "chat_completions":
-            return False
         if (
             capabilities.requires_direct_openai_base
             and not is_direct_openai_base(self._effective_base)

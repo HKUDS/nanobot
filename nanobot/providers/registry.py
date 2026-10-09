@@ -88,7 +88,6 @@ class ResponsesCapabilities:
     model_prefixes: tuple[str, ...] = ()
     route_reasoning: bool = False
     requires_direct_openai_base: bool = False
-    allows_api_type_override: bool = False
     reasoning_replay: Literal["none", "encrypted", "plaintext"] = "none"
     supports_native_compaction: bool = False
     allows_chat_fallback: bool = True
@@ -247,18 +246,12 @@ class ProviderSpec:
         reasoning_effort: str | None = None,
         *,
         api_base: str | None = None,
-        api_type: str = "auto",
         extra_body: dict[str, Any] | None = None,
     ) -> ModelAPICapabilities:
         """Resolve automatic API defaults without constructing or probing a client."""
         capabilities = self.responses
         if capabilities is None:
             return ModelAPICapabilities()
-        if capabilities.allows_api_type_override:
-            if api_type == "chat_completions":
-                return ModelAPICapabilities()
-            if api_type == "responses":
-                return ModelAPICapabilities(("responses",), "responses")
         model_name = self.request_model_name(model)
         if hosted_web_search_enabled(extra_body or {}, self.responses_default_tools) and (
             capabilities.route_reasoning or capabilities.matches_model(model_name)
@@ -274,7 +267,9 @@ class ProviderSpec:
 
     @property
     def provider_api_configurable(self) -> bool:
-        return self.is_direct and self.backend == "openai_compat" and "anthropic_messages" in self.request_apis
+        return self.name == "openai" or (
+            self.is_direct and self.backend == "openai_compat" and "anthropic_messages" in self.request_apis
+        )
 
     def validate_model_api(self, api: ModelAPICapabilities) -> None:
         unsupported = set(api.supported_apis).difference(self.request_apis)
@@ -577,7 +572,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             model_prefixes=("gpt-5", "gpt-6", "o1", "o3", "o4"),
             route_reasoning=True,
             requires_direct_openai_base=True,
-            allows_api_type_override=True,
             reasoning_replay="encrypted",
             supports_native_compaction=True,
         ),

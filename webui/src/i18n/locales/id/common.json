@@ -777,7 +777,6 @@
       "supportedAPIs": "API yang didukung",
       "defaultAPI": "API default",
       "declareAPIs": "Atur API yang didukung",
-      "apiType": "Jenis API",
       "proxy": "Proksi jaringan",
       "thinkingStyle": "Format penalaran",
       "region": "Wilayah",

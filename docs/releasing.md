@@ -45,6 +45,19 @@ uploading to PyPI, and deploying the documentation are separate operations.
     tagging. Reconcile the final changelog and documentation source references. The tag must
     point to this verified commit, not an unchecked later `main` tip.
 
+### OpenAI API selector compatibility window
+
+The temporary `providers.openai.apiType` / `api_type` conversion is supported for exactly
+two consecutive releases: the first release containing `nanobot/config/provider_api_migration.py`
+and the next release. Record the first release tag and the final supported tag in release notes.
+Config saves write the new `api` declaration; there is no legacy runtime selector.
+
+Before publishing the third release, remove `provider_api_migration.py`, its import and
+`ProvidersConfig._migrate_legacy_api_type`, and the legacy settings query conversion in
+`nanobot/webui/settings_models.py`. Remove the migration-specific tests and update the
+configuration documentation and release notes to require the current format. Keep the
+current-format routing, settings, and persistence regressions.
+
 ### TUI preflight without a release tag
 
 Use Bun 1.3.13 and a clean checkout. The local build and packaging scripts do not require a

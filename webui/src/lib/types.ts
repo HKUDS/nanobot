@@ -735,13 +735,11 @@ export interface SettingsPayload {
     adapter_request_apis?: ProviderRequestAPI[];
     provider_api_configurable?: boolean;
     api?: ModelAPIConfig | null;
-    api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
     oauth_login_supported?: boolean;
     proxy?: string | null;
     advanced_fields?: Array<
-      | "api_type"
       | "extra_headers"
       | "extra_body"
       | "extra_query"
@@ -1354,7 +1352,6 @@ export interface ProviderSettingsUpdate {
   displayName?: string;
   apiKey?: string;
   apiBase?: string;
-  apiType?: "auto" | "chat_completions" | "responses";
   api?: ModelAPIConfig | null;
   proxy?: string;
   extraHeaders?: string;

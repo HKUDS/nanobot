@@ -696,8 +696,9 @@ describe("Settings providers", () => {
         api_key_required: true,
         api_key_hint: "sk-••••test",
         api_base: "https://api.openai.com/v1",
-        api_type: "auto",
-        advanced_fields: ["api_type", "extra_body"],
+        provider_api_configurable: true,
+        request_apis: ["chat_completions", "responses"],
+        advanced_fields: ["extra_body"],
         extra_body: null,
       },
     ];
@@ -769,11 +770,11 @@ describe("Settings providers", () => {
         .map(([, values]) => {
           const update = values as {
             provider: string;
-            apiType?: string;
+            api?: { supported_apis: string[]; preferred_api: string };
             extraBody?: string;
           };
           return [update.provider, {
-            ...(update.apiType ? { apiType: update.apiType } : {}),
+            ...(update.api ? { api: update.api } : {}),
             extraBody: JSON.parse(update.extraBody ?? "{}"),
           }] as const;
         });
@@ -782,7 +783,7 @@ describe("Settings providers", () => {
         ["openai_codex", { extraBody: { service_tier: "priority" } }],
         ["deepseek", { extraBody: { tools: [] } }],
         ["openai", {
-          apiType: "responses",
+          api: { supported_apis: ["responses"], preferred_api: "responses" },
           extraBody: { tools: [{ type: "web_search" }] },
         }],
       ]);
@@ -800,8 +801,9 @@ describe("Settings providers", () => {
         api_key_required: true,
         api_key_hint: "sk-••••test",
         api_base: "https://api.openai.com/v1",
-        api_type: "auto",
-        advanced_fields: ["api_type", "extra_body"],
+        provider_api_configurable: true,
+        request_apis: ["chat_completions", "responses"],
+        advanced_fields: ["extra_body"],
         extra_body: {
           metadata: { owner: "legacy-config" },
           tools: [
@@ -1036,6 +1038,61 @@ describe("Settings providers", () => {
     fireEvent.click(screen.getByRole("button", { name: "Custom provider" }));
     expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Supported APIs" })).not.toBeInTheDocument();
+  });
+
+  it("saves and reopens OpenAI defaults, including automatic routing", async () => {
+    const user = userEvent.setup();
+    let payload = settingsPayload();
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      provider_api_configurable: true, request_apis: ["chat_completions", "responses"],
+      api: { supported_apis: ["responses"], preferred_api: "responses" },
+    }];
+    requestMutationMock.mockImplementation(async (_action, args) => {
+      payload = { ...payload, providers: [{ ...payload.providers[0], api: args.api }] };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Responses");
+    await user.click(screen.getByRole("combobox", { name: "Default API" }));
+    await user.click(screen.getByRole("option", { name: "Chat Completions", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
+      provider: "openai", api: { supported_apis: ["chat_completions"], preferred_api: "chat_completions" },
+    }), 20_000);
+    await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Chat Completions");
+    await user.click(screen.getByRole("combobox", { name: "Default API" }));
+    await user.click(screen.getByRole("option", { name: "Auto", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
+      provider: "openai", api: null,
+    }), 20_000);
+    await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Auto");
+  });
+
+  it("keeps ordinary OpenAI edits available on hosts without API declarations", async () => {
+    const payload = settingsPayload();
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      api_base: "https://api.openai.com/v1", advanced_fields: ["extra_body"],
+      extra_body: { tools: [{ type: "web_search" }] },
+    }];
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "OpenAI web search" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("API base URL"), { target: { value: "https://gateway.test/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
+      provider: "openai", apiBase: "https://gateway.test/v1",
+    }), 20_000));
+    const update = requestMutationMock.mock.calls.at(-1)?.[1];
+    expect(JSON.parse(update.extraBody)).toEqual({ tools: [{ type: "web_search" }] });
   });
 
 });

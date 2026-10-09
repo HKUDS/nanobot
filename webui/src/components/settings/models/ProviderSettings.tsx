@@ -25,6 +25,7 @@ import {
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
 import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,7 +61,6 @@ import type {
   SettingsPayload,
 } from "@/lib/types";
 
-type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderAdvancedField = NonNullable<
   SettingsPayload["providers"][number]["advanced_fields"]
 >[number];
@@ -68,7 +68,6 @@ export type ProviderForm = {
   displayName: string;
   apiKey: string;
   apiBase: string;
-  apiType: ProviderApiType;
   api: ModelAPIConfig | null;
   proxy: string;
   extraHeaders: string;
@@ -198,7 +197,7 @@ function updateProviderRequestOption(
   return {
     extraBody: providerJsonValue(extraBody),
     ...(option.forceResponses && enabled
-      ? { apiType: "responses" as const }
+      ? { api: { supported_apis: ["responses"], preferred_api: "responses" } satisfies ModelAPIConfig }
       : {}),
   };
 }
@@ -210,7 +209,6 @@ export function providerFormFromRow(
     displayName: provider.is_custom ? provider.label : "",
     apiKey: "",
     apiBase: provider.api_base ?? provider.default_api_base ?? "",
-    apiType: provider.api_type ?? "auto",
     api: provider.api ?? null,
     proxy: provider.proxy ?? "",
     extraHeaders: providerJsonValue(provider.extra_headers),
@@ -228,7 +226,6 @@ function emptyCustomProviderDraft(): CustomProviderDraft {
     displayName: "",
     apiKey: "",
     apiBase: "",
-    apiType: "auto",
     api: { supported_apis: ["chat_completions"], preferred_api: "chat_completions" },
     proxy: "",
     extraHeaders: "",
@@ -239,12 +236,6 @@ function emptyCustomProviderDraft(): CustomProviderDraft {
     profile: "",
   };
 }
-
-const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "chat_completions", label: "Chat Completions" },
-  { value: "responses", label: "Responses" },
-];
 
 const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
   ["vllm", "ollama", "lm_studio", "atomic_chat", "ovms"].map((name, index) => [
@@ -411,14 +402,17 @@ export function ProviderOAuthLoginDialog({
 function ProviderRequestOptions({
   providerName,
   form,
+  apiConfigurable,
   onChange,
 }: {
   providerName: string;
   form: ProviderForm;
+  apiConfigurable: boolean;
   onChange: (value: Partial<ProviderForm>) => void;
 }) {
   const { t } = useTranslation();
-  const options = PROVIDER_REQUEST_OPTIONS[providerName] ?? [];
+  const options = (PROVIDER_REQUEST_OPTIONS[providerName] ?? [])
+    .filter((option) => !option.forceResponses || apiConfigurable);
   if (options.length === 0) return null;
   const extraBody = parseProviderExtraBody(form.extraBody) ?? {};
 
@@ -509,42 +503,6 @@ function ProviderAdvancedOptions({
       <DisclosureContent id={contentId} open={open}>
         <div className="py-3">
           <div className="grid gap-3 md:grid-cols-2">
-            {enabled.has("api_type") ? (
-              <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.apiType", "API type")}
-                </span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 w-full justify-between rounded-full px-3 text-[13px]"
-                    >
-                      <span>
-                        {OPENAI_API_TYPE_OPTIONS.find(
-                          (option) => option.value === form.apiType,
-                        )?.label ?? form.apiType}
-                      </span>
-                      <ChevronDown
-                        className="h-3.5 w-3.5 text-muted-foreground"
-                        aria-hidden
-                      />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="min-w-[220px]">
-                    {OPENAI_API_TYPE_OPTIONS.map((option) => (
-                      <DropdownMenuItem
-                        key={option.value}
-                        onSelect={() => onChange({ apiType: option.value })}
-                      >
-                        {option.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </label>
-            ) : null}
             {enabled.has("thinking_style") ? (
               <label className="block space-y-1.5">
                 <span className="text-[12px] font-medium text-muted-foreground">
@@ -910,6 +868,7 @@ export function ProvidersSettings({
                 </div>
                 <ProviderRequestOptions
                   providerName={provider.name}
+                  apiConfigurable={provider.provider_api_configurable === true}
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
@@ -1040,15 +999,23 @@ export function ProvidersSettings({
                 </label>
                 <ProviderRequestOptions
                   providerName={provider.name}
+                  apiConfigurable={provider.provider_api_configurable === true}
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
-                {provider.provider_api_configurable && (
+                {provider.provider_api_configurable && (provider.name === "openai" ? (
+                  <ModelAPIControl
+                    provider={provider}
+                    title={t("settings.providers.defaultAPI")}
+                    value={form.api}
+                    onChange={(api) => onChangeProviderForm(provider.name, { api })}
+                  />
+                ) : (
                   <ProviderAPIControl
                     value={form.api}
                     onChange={(api) => onChangeProviderForm(provider.name, { api })}
                   />
-                )}
+                ))}
                 <ProviderAdvancedOptions
                   fields={advancedFields}
                   form={form}

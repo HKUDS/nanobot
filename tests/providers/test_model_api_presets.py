@@ -324,13 +324,13 @@ def test_fixed_provider_validates_preset_api_before_loading_client():
     (("chat_completions",), "chat_completions"),
     (("chat_completions", "responses"), "chat_completions"),
 ])
-async def test_preset_overrides_legacy_openai_default_and_scopes_compaction(bind_transport, apis, preferred):
+async def test_preset_overrides_openai_default_and_scopes_compaction(bind_transport, apis, preferred):
     config = _config()
     preset = config.model_presets["responses"]
     preset.provider = "openai"
     preset.api = ModelAPIConfig(supported_apis=apis, preferred_api=preferred)
     config.providers.openai.api_key = "fixture"
-    config.providers.openai.api_type = "chat_completions"
+    config.providers.openai.api = ModelAPIConfig(supported_apis=("chat_completions",))
     requests = []
 
     def handler(request):
@@ -452,3 +452,40 @@ async def test_explicit_model_api_overrides_connection_default(bind_transport, p
     provider = bind_transport(make_provider(config, preset=preset), handler)
     assert (await provider.chat([{"role": "user", "content": "hello"}], model=preset.model)).content == "ok"
     assert paths == [path]
+
+
+@pytest.mark.parametrize("legacy,path", [
+    ("auto", "/v1/chat/completions"),
+    ("chat_completions", "/v1/chat/completions"),
+    ("responses", "/v1/responses"),
+])
+async def test_migrated_openai_default_routes_and_allows_model_override(bind_transport, tmp_path, legacy, path):
+    from nanobot.config.loader import load_config, save_config
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "providers": {"openai": {"apiKey": "fixture", "apiType": legacy}},
+        "agents": {"defaults": {"model": "gpt-4o", "provider": "openai"}},
+    }))
+    config = load_config(config_path)
+    save_config(config, config_path)
+    config = load_config(config_path)
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        return _answer(request)
+
+    provider = bind_transport(make_provider(config), handler)
+    assert (await provider.chat([{"role": "user", "content": "hello"}])).content == "ok"
+    assert requests == [path]
+    assert resolve_automatic_model_api(config, preset=config.resolve_preset())[1] == (
+        "responses" if legacy == "responses" else "chat_completions"
+    )
+    opposite = "chat_completions" if legacy == "responses" else "responses"
+    config.model_presets["override"] = ModelPresetConfig(
+        model="gpt-4o", provider="openai", api=ModelAPIConfig(supported_apis=(opposite,)),
+    )
+    override = bind_transport(make_provider(config, preset_name="override"), handler)
+    assert (await override.chat([{"role": "user", "content": "hello"}])).content == "ok"
+    assert requests[-1] == ("/v1/responses" if opposite == "responses" else "/v1/chat/completions")

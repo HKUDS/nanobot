@@ -316,20 +316,20 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 <details>
 <summary><b>OpenAI</b></summary>
 
-Without a preset API declaration, direct OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normally and routes GPT-5/GPT-6/o-series or explicit `reasoningEffort` requests through Responses. Prefer [preset API declarations](#preset-request-api) to select an API for each model and endpoint. The legacy provider-wide default remains available:
+Without an API declaration, direct OpenAI calls Chat Completions normally and routes GPT-5/GPT-6/o-series or explicit `reasoningEffort` requests through Responses. Set `providers.openai.api` to change the connection default, or use [preset API declarations](#preset-request-api) for individual models:
 
 ```json
 {
   "providers": {
     "openai": {
       "apiKey": "${OPENAI_API_KEY}",
-      "apiType": "chat_completions"
+      "api": { "supportedApis": ["chat_completions"], "preferredApi": "chat_completions" }
     }
   }
 }
 ```
 
-Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
+For OpenAI, the connection declaration is a default: explicit model presets can select any API supported by the adapter. Use only `chat_completions` and/or `responses`. Omit `api` or set it to `null` for automatic routing. A Responses-only declaration prevents Chat compatibility fallback; include both APIs to permit that fallback.
 
 `extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes
 ordinary fields through as the SDK `extra_body` value; list-valued `extraBody.tools` is handled
@@ -342,7 +342,7 @@ API body shape; nanobot merges ordinary top-level fields into the Responses requ
   "providers": {
     "openai": {
       "apiKey": "${OPENAI_API_KEY}",
-      "apiType": "responses",
+      "api": { "supportedApis": ["responses"], "preferredApi": "responses" },
       "extraBody": {
         "tools": [{ "type": "web_search" }],
         "include": ["web_search_call.action.sources"]
@@ -352,7 +352,7 @@ API body shape; nanobot merges ordinary top-level fields into the Responses requ
 }
 ```
 
-The WebUI's OpenAI web-search switch writes the corresponding `apiType` and `extraBody.tools`
+The WebUI's OpenAI web-search switch writes a Responses-only `api` declaration and `extraBody.tools`
 fields. A hosted search tool replaces nanobot's same-name local `web_search` function for that
 request, while other tools such as `web_fetch` remain available.
 
@@ -1460,6 +1460,20 @@ For the built-in `custom` connection or any named custom provider, declare the p
 
 The WebUI custom provider creation and editing forms expose **Supported APIs** and **Default API**. New connections start with Chat Completions; select the protocols your endpoint accepts. Existing connections without an `api` declaration retain their previous automatic routing. Use **Set supported APIs** to add a declaration. Removing a protocol used by an existing explicit model configuration is rejected; update the model configuration first.
 
+### Legacy OpenAI API selector migration
+
+`providers.openai.apiType` (or `api_type`) is accepted only as temporary input compatibility.
+`chat_completions` and `responses` convert to a single-API connection declaration; `auto`
+leaves automatic routing enabled. If `api` is also present, it wins, including `api: null`.
+Saving configuration writes only the current declaration. Runtime adapters and the WebUI
+use `api`; the OpenAI connection default remains overridable by explicit model presets.
+
+The conversion is supported for the first release containing this migration and the immediately
+following release. It will be removed before the third release. During this window, older clients'
+OpenAI settings mutations using `apiType` are converted at the settings input boundary as well.
+Save the configuration with a supported release to migrate it before upgrading beyond this window.
+See the [release removal checklist](./releasing.md#openai-api-selector-compatibility-window).
+
 ### Preset request API
 
 Leave API selection on **Auto** unless your provider requires a specific endpoint. For OpenAI-compatible providers and GitHub Copilot, a preset can choose Responses or Chat Completions. Custom gateways also allow Anthropic Messages. Credentials and endpoint URLs stay in the provider. Two presets sharing a provider can select different APIs.
@@ -1492,7 +1506,7 @@ Leave API selection on **Auto** unless your provider requires a specific endpoin
 
 A custom preset declaring `anthropic_messages` uses the Anthropic adapter for message history, tools, thinking, and streaming. Its connection retains the provider's key, base URL, headers, query parameters, body additions, and explicit proxy. Anthropic requests target `/v1/messages`; a trailing `/v1` in the configured base is normalized by the adapter. Model names use the connection's existing prefix rules. Selecting this protocol does not change other presets sharing the connection.
 
-Omit `api` or set it to `null` for automatic routing. An explicit declaration overrides provider API defaults, including legacy `providers.openai.apiType`. Automatic Copilot routing uses the account's last successfully discovered `supported_endpoints` when available; other automatic routes use registry defaults. Custom gateways use their connection API default when declared, otherwise Chat Completions. A preset can override that default only within the connection's declared supported APIs. Protocol behavior such as reasoning replay and native compaction remains provider-owned; declaring Responses support does not enable OpenAI-native compaction on a custom gateway.
+Omit `api` or set it to `null` for automatic routing. An explicit model declaration overrides the OpenAI connection default. Automatic Copilot routing uses the account's last successfully discovered `supported_endpoints` when available; other automatic routes use registry defaults. Custom gateways use their connection API default when declared, otherwise Chat Completions. A preset can override that default only within the connection's declared supported APIs. Protocol behavior such as reasoning replay and native compaction remains provider-owned; declaring Responses support does not enable OpenAI-native compaction on a custom gateway.
 
 In the WebUI, open **Settings → Models → a preset → API connection**. Choose **Auto**, **Responses**, **Chat Completions**, or **Anthropic Messages**, according to the host's declared adapter support. Auto shows the default API in parentheses, such as **Auto (Responses)**, and updates when the provider, model, or reasoning setting changes. The gateway resolves this default using the same rules as model requests, without probing remote endpoints. The label describes the default preference; compatibility failures can still activate permitted Chat fallback. Hosts that do not advertise API resolution show **Auto** without a resolved label. Selecting Responses also reveals **Try Chat Completions if Responses is unsupported**, which starts off when selecting Responses and requires the same model to support both endpoints.
 
