@@ -37,6 +37,7 @@ import {
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferMediaKind } from "@/lib/media";
 import { browserSafeFaviconUrls } from "@/lib/provider-brand";
+import { remarkCjkAutolinks } from "@/lib/remark-cjk-autolinks";
 import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
 
@@ -300,6 +301,7 @@ const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkCjkStrongBoundaries,
   remarkBreaks,
   remarkGfm,
+  remarkCjkAutolinks,
   [remarkMath, { singleDollarTextMath: false }],
   remarkTexMath,
   remarkSafeHtmlSubset,
