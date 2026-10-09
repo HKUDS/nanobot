@@ -422,6 +422,7 @@ def _parse_github_copilot_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
         supports = _catalog_mapping(capabilities.get("supports"))
         limits = _catalog_mapping(capabilities.get("limits"))
         fallback = fallback_by_id.get(wire_id)
+        reasoning_efforts = _catalog_reasoning_efforts(supports.get("reasoning_effort"))
         models.append(
             ProviderModelSpec(
                 id=f"github-copilot/{wire_id}",
@@ -435,7 +436,8 @@ def _parse_github_copilot_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
                     _catalog_positive_int(limits, "max_context_window_tokens")
                     or (fallback.context_window if fallback is not None else None)
                 ),
-                reasoning_efforts=_catalog_reasoning_efforts(supports.get("reasoning_effort")),
+                reasoning_efforts=reasoning_efforts,
+                reasoning_efforts_from_provider=bool(reasoning_efforts),
             )
         )
     return tuple(models)

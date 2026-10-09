@@ -706,6 +706,7 @@ def _parse_openai_codex_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
         seen.add(wire_id)
         fallback = fallback_by_id.get(wire_id)
         priority = row.get("priority")
+        reasoning_efforts = _catalog_reasoning_efforts(row.get("supported_reasoning_levels"))
         parsed.append(
             (
                 priority if isinstance(priority, int) and not isinstance(priority, bool) else 2**31,
@@ -725,9 +726,10 @@ def _parse_openai_codex_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
                         or (fallback.context_window if fallback is not None else None)
                     ),
                     reasoning_efforts=(
-                        _catalog_reasoning_efforts(row.get("supported_reasoning_levels"))
+                        reasoning_efforts
                         or (fallback.reasoning_efforts if fallback is not None else ())
                     ),
+                    reasoning_efforts_from_provider=bool(reasoning_efforts),
                 ),
             )
         )

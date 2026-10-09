@@ -1,4 +1,5 @@
 import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
+import { ReasoningEffortControl } from "@/components/settings/models/ReasoningEffortControl";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -500,6 +501,21 @@ export function ModelsSettings({
           }}
         />
       </SettingsRow>
+      <SettingsRow title={tx("settings.models.reasoningEffort", "Reasoning effort")}>
+        <ReasoningEffortControl
+          token={token}
+          settings={settings}
+          selectedPreset={selectedPreset}
+          provider={form.provider}
+          model={form.model}
+          value={form.reasoningEffort}
+          onProviderOAuthLogin={onProviderOAuthLogin}
+          providerSigningIn={selectedProviderSigningIn}
+          onChange={(reasoningEffort) =>
+            setForm((prev) => ({ ...prev, reasoningEffort }))
+          }
+        />
+      </SettingsRow>
       <button
         type="button"
         aria-expanded={advancedOpen}
@@ -534,7 +550,6 @@ export function ModelsSettings({
             maxTokens={form.maxTokens}
             contextWindowTokens={form.contextWindowTokens}
             temperature={form.temperature}
-            reasoningEffort={form.reasoningEffort}
             onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
           />
         </div>
@@ -876,18 +891,16 @@ function ModelAdvancedFields({
   maxTokens,
   contextWindowTokens,
   temperature,
-  reasoningEffort,
   onChange,
 }: {
   maxTokens: number;
   contextWindowTokens: number;
   temperature: number;
-  reasoningEffort: string;
   onChange: (
     value: Partial<
       Pick<
         AgentSettingsDraft,
-        "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
+        "maxTokens" | "contextWindowTokens" | "temperature"
       >
     >,
   ) => void;
@@ -963,19 +976,6 @@ function ModelAdvancedFields({
             : tx("settings.models.contextWindowError", "Enter a positive token count, such as 200k, 1m, or 131072.")}
         </p>
       </div>
-      <label className="block">
-        <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-          {tx("settings.models.reasoningEffort", "Reasoning effort")}
-        </span>
-        <Input
-          value={reasoningEffort}
-          onChange={(event) => onChange({ reasoningEffort: event.target.value })}
-          placeholder={tx("settings.values.default", "Default")}
-          autoCapitalize="none"
-          spellCheck={false}
-          className="h-9 text-[13px]"
-        />
-      </label>
     </div>
   );
 }

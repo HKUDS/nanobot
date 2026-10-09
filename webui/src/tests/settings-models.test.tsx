@@ -279,15 +279,19 @@ describe("Settings models", () => {
     await togglePresetEditor();
     const advanced = await screen.findByRole("button", { name: /Advanced options/ });
 
+    const reasoningEffort = screen.getByRole("combobox", { name: "Reasoning effort" });
+    expect(screen.queryByRole("textbox", { name: "Reasoning effort" })).not.toBeInTheDocument();
+
     fireEvent.click(advanced);
 
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByText("Temperature")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue("200k");
-    const reasoningEffort = screen.getByLabelText("Reasoning effort");
-    expect(reasoningEffort).toHaveProperty("type", "text");
-    fireEvent.change(reasoningEffort, { target: { value: "provider-native-mode" } });
-    expect(reasoningEffort).toHaveValue("provider-native-mode");
+    fireEvent.keyDown(reasoningEffort, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Custom" }));
+    const customEffort = screen.getByRole("textbox", { name: "Custom" });
+    fireEvent.change(customEffort, { target: { value: "provider-native-mode" } });
+    expect(customEffort).toHaveValue("provider-native-mode");
   });
 
   it.each([["128000", 128000], ["131072", 131072], ["272k", 272000], ["256K", 256000], ["1.5m", 1500000], ["1.001k", 1001]] as const)("saves a custom context budget (%s)", async (input, tokens) => {
@@ -1597,7 +1601,9 @@ describe("Settings models", () => {
     fireEvent.change(screen.getByLabelText("Temperature"), {
       target: { value: "0.4" },
     });
-    fireEvent.change(screen.getByLabelText("Reasoning effort"), {
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Reasoning effort" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Custom" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom" }), {
       target: { value: "provider-native-mode" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -1622,5 +1628,143 @@ describe("Settings models", () => {
         temperature: 0.4,
       });
     });
+  });
+
+  it("clears a saved effort via Default and discovers hybrid levels without mutating settings", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      model_presets: [{
+        ...base.model_presets[0],
+        model: "openai-codex/gpt-5.5",
+        provider: "openai_codex",
+        resolved_provider: "openai_codex",
+        reasoning_effort: "xhigh",
+      }],
+      providers: [{
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: true,
+        auth_type: "oauth",
+        model_catalog: "hybrid",
+        oauth_login_supported: true,
+      }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/provider-models?provider=openai_codex") {
+        return jsonResponse({
+          provider: "openai_codex",
+          label: "OpenAI Codex",
+          status: "available",
+          catalog_kind: "hybrid",
+          source: "remote",
+          error_kind: null,
+          models: [{
+            id: "openai-codex/gpt-5.5",
+            reasoning_efforts: ["low", "medium", "high", "xhigh"],
+            reasoning_efforts_from_provider: true,
+          }],
+          model_count: 1,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    await togglePresetEditor();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider-models?provider=openai_codex",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+    expect(
+      await screen.findByText("Levels reported by the provider for this model."),
+    ).toBeInTheDocument();
+    expect(
+      requestMutationMock.mock.calls.filter(([action]) =>
+        String(action).startsWith("settings.model"),
+      ),
+    ).toHaveLength(0);
+
+    const effortSelect = screen.getByRole("combobox", { name: "Reasoning effort" });
+    expect(effortSelect).toHaveTextContent("xhigh");
+    fireEvent.keyDown(effortSelect, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Default" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_configuration.update",
+        { name: "primary", reasoning_effort: "" },
+        20_000,
+      ),
+    );
+  });
+
+  it("persists a custom reasoning effort when creating a preset", async () => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
+    const createdPayload: SettingsPayload = {
+      ...payload,
+      model_presets: [
+        ...payload.model_presets,
+        {
+          ...payload.model_presets[0],
+          name: "Writer",
+          active: false,
+          model: "openai/gpt-4o-mini",
+          provider: "openai",
+          resolved_provider: "openai",
+          reasoning_effort: "high",
+        },
+      ],
+      created_model_preset: "Writer",
+    };
+    const orderedPayload: SettingsPayload = {
+      ...createdPayload,
+      model_call_order: ["primary", "Writer"],
+      created_model_preset: undefined,
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    }));
+    requestMutationMock
+      .mockResolvedValueOnce(createdPayload)
+      .mockResolvedValueOnce(orderedPayload);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: "New model preset" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
+      target: { value: "Writer" },
+    });
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    const modelSearch = await screen.findByRole("combobox", {
+      name: "Search or type model ID",
+    });
+    fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
+    fireEvent.keyDown(modelSearch, { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Reasoning effort" }), {
+      key: "ArrowDown",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Custom" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom" }), {
+      target: { value: "high" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_configuration.create",
+        expect.objectContaining({ name: "Writer", reasoning_effort: "high" }),
+        20_000,
+      ),
+    );
   });
 });

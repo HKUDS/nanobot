@@ -602,6 +602,7 @@ interface ProviderModelInfo {
   owned_by?: string | null;
   context_window?: number | null;
   reasoning_efforts?: string[];
+  reasoning_efforts_from_provider?: boolean;
   supports_backend_search?: boolean;
 }
 

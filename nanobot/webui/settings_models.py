@@ -676,6 +676,7 @@ def provider_models_payload(
                 "owned_by": model.owned_by or spec.label,
                 "context_window": model.context_window,
                 "reasoning_efforts": list(model.reasoning_efforts),
+                "reasoning_efforts_from_provider": model.reasoning_efforts_from_provider,
                 "supports_backend_search": model.supports_backend_search,
             }
             for model in catalog.models

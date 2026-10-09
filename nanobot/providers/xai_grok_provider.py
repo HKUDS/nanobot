@@ -731,6 +731,9 @@ def _parse_xai_grok_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
         )
         if not label or label == raw_id:
             label = fallback.label if fallback is not None else wire_id
+        reasoning_efforts = _catalog_reasoning_efforts(
+            row.get("reasoning_efforts", meta.get("reasoning_efforts"))
+        )
         models.append(
             ProviderModelSpec(
                 id=f"xai-grok/{wire_id}",
@@ -750,9 +753,8 @@ def _parse_xai_grok_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
                     or _catalog_positive_int(meta, "context_window", "context_length")
                     or (fallback.context_window if fallback is not None else None)
                 ),
-                reasoning_efforts=_catalog_reasoning_efforts(
-                    row.get("reasoning_efforts", meta.get("reasoning_efforts"))
-                ),
+                reasoning_efforts=reasoning_efforts,
+                reasoning_efforts_from_provider=bool(reasoning_efforts),
                 supports_backend_search=_catalog_bool_field(
                     row,
                     "supports_backend_search",

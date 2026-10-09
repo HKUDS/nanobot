@@ -17,9 +17,15 @@ from nanobot.providers.oauth_model_catalog import (
     get_oauth_model_catalog,
     invalidate_oauth_model_catalog,
 )
-from nanobot.providers.openai_codex_provider import DEFAULT_OPENAI_CODEX_MODELS_URL
+from nanobot.providers.openai_codex_provider import (
+    DEFAULT_OPENAI_CODEX_MODELS_URL,
+    _parse_openai_codex_models,
+)
 from nanobot.providers.registry import ProviderModelSpec
-from nanobot.providers.xai_grok_provider import DEFAULT_XAI_GROK_MODELS_URL
+from nanobot.providers.xai_grok_provider import (
+    DEFAULT_XAI_GROK_MODELS_URL,
+    _parse_xai_grok_models,
+)
 from nanobot.providers.xai_oauth import XAIToken
 
 
@@ -122,12 +128,14 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
     assert grok.description == "Latest frontier model"
     assert grok.context_window == 500_000
     assert grok.reasoning_efforts == ("xhigh", "high", "low")
+    assert grok.reasoning_efforts_from_provider is True
     assert grok.supports_backend_search is True
     next_model = catalog.find("xai-grok/grok-next")
     assert next_model is not None
     assert next_model.label == "Grok Next"
     assert next_model.context_window == 750_000
     assert next_model.reasoning_efforts == ("high", "low")
+    assert next_model.reasoning_efforts_from_provider is True
 
     request = captured["request"]
     assert isinstance(request, httpx.Request)
@@ -138,6 +146,22 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
     assert request.headers["x-email"] == "user@example.com"
     assert captured["kwargs"] == {"timeout": 10.0, "follow_redirects": False}
     assert get_oauth_model_catalog("xai_grok").source == "cache"
+
+
+def test_xai_parser_marks_missing_reasoning_metadata_unconfirmed() -> None:
+    models = _parse_xai_grok_models(
+        {
+            "data": [
+                {"id": "grok-plain"},
+                {"id": "grok-meta", "_meta": {"reasoning_efforts": "bogus"}},
+            ]
+        }
+    )
+    by_id = {model.id: model for model in models}
+    assert by_id["xai-grok/grok-plain"].reasoning_efforts == ()
+    assert by_id["xai-grok/grok-plain"].reasoning_efforts_from_provider is False
+    assert by_id["xai-grok/grok-meta"].reasoning_efforts == ()
+    assert by_id["xai-grok/grok-meta"].reasoning_efforts_from_provider is False
 
 
 @pytest.mark.parametrize(
@@ -234,6 +258,40 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     assert request.url.params["client_version"] == "99.99.99"
     assert request.headers["Authorization"] == "Bearer secret"
     assert request.headers["chatgpt-account-id"] == "account-42"
+
+
+def test_codex_catalog_preserves_reasoning_level_provenance() -> None:
+    models = _parse_openai_codex_models(
+        {
+            "models": [
+                {
+                    "slug": "gpt-new",
+                    "supported_reasoning_levels": [
+                        "high",
+                        {"effort": "low"},
+                        "low",
+                        {"value": "xhigh"},
+                        "  ",
+                        {"effort": "high"},
+                    ],
+                },
+                {"slug": "gpt-5.5"},
+                {"slug": "gpt-plain", "supported_reasoning_levels": []},
+            ]
+        }
+    )
+
+    by_id = {model.id: model for model in models}
+    assert by_id["openai-codex/gpt-new"].reasoning_efforts == ("high", "low", "xhigh")
+    assert by_id["openai-codex/gpt-new"].reasoning_efforts_from_provider is True
+    assert by_id["openai-codex/gpt-5.5"].reasoning_efforts == ("low", "medium", "high", "xhigh")
+    assert by_id["openai-codex/gpt-5.5"].reasoning_efforts_from_provider is False
+    assert by_id["openai-codex/gpt-plain"].reasoning_efforts == ()
+    assert by_id["openai-codex/gpt-plain"].reasoning_efforts_from_provider is False
+
+    positional = ProviderModelSpec("provider/positional", "", "", "", None, ("low",), True)
+    assert positional.supports_backend_search is True
+    assert positional.reasoning_efforts_from_provider is False
 
 
 @pytest.mark.parametrize("detail", [
@@ -344,6 +402,9 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
     ]
     assert catalog.models[0].context_window == 200_000
     assert catalog.models[0].reasoning_efforts == ("low", "high")
+    assert catalog.models[0].reasoning_efforts_from_provider is True
+    assert catalog.models[1].reasoning_efforts == ()
+    assert catalog.models[1].reasoning_efforts_from_provider is False
     assert len(captured) == 2
     assert captured[0].headers["Authorization"] == "token github-secret"
     assert captured[1].headers["Authorization"] == "Bearer copilot-secret"
