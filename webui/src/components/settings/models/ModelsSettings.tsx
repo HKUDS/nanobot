@@ -238,6 +238,7 @@ export function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const resolvedAutomaticAPI = useAutomaticModelAPI({
     token,
     provider: form.provider,
@@ -245,13 +246,12 @@ export function ModelsSettings({
     reasoningEffort: form.reasoningEffort,
     providers: settings.providers,
     supported: settings.model_api_resolution_supported === true,
-    editorOpen,
+    editorOpen: editorOpen && advancedOpen,
   });
   const editorTriggerRef = useRef<HTMLElement | null>(null);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
   const suggestedPresetNameRef = useRef<string | null>(null);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const advancedId = useId();
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
   const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
@@ -517,14 +517,6 @@ export function ModelsSettings({
           }}
         />
       </SettingsRow>
-      <ModelAPIControl
-        provider={selectedProvider ?? settings.providers.find(
-          (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
-        )}
-        automaticAPI={resolvedAutomaticAPI?.api}
-        value={form.api}
-        onChange={(api) => setForm((prev) => ({ ...prev, api }))}
-      />
       <button
         type="button"
         aria-expanded={advancedOpen}
@@ -557,14 +549,24 @@ export function ModelsSettings({
         </span>
       </button>
       <DisclosureContent id={advancedId} open={advancedOpen}>
-        <div className="bg-muted/12 px-4 py-4 sm:px-5">
-          <ModelAdvancedFields
-            maxTokens={form.maxTokens}
-            contextWindowTokens={form.contextWindowTokens}
-            temperature={form.temperature}
-            reasoningEffort={form.reasoningEffort}
-            onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
+        <div className="bg-muted/12">
+          <ModelAPIControl
+            provider={selectedProvider ?? settings.providers.find(
+              (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
+            )}
+            automaticAPI={resolvedAutomaticAPI?.api}
+            value={form.api}
+            onChange={(api) => setForm((prev) => ({ ...prev, api }))}
           />
+          <div className="px-4 py-4 sm:px-5">
+            <ModelAdvancedFields
+              maxTokens={form.maxTokens}
+              contextWindowTokens={form.contextWindowTokens}
+              temperature={form.temperature}
+              reasoningEffort={form.reasoningEffort}
+              onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
+            />
+          </div>
         </div>
       </DisclosureContent>
       <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">

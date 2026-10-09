@@ -86,6 +86,11 @@ async function togglePresetEditor(name = "primary") {
   fireEvent.click(within(row).getAllByRole("button")[0]);
 }
 
+async function openPresetAdvancedOptions() {
+  await togglePresetEditor();
+  fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+}
+
 describe("Settings models", () => {
   installSettingsViewTestHooks();
 
@@ -109,6 +114,8 @@ describe("Settings models", () => {
     });
     renderSettingsView({ initialSection: "models" });
     await togglePresetEditor();
+    expect(screen.queryByRole("combobox", { name: "API connection" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     await openPopover(screen.getByLabelText("API connection"));
     expect(screen.getAllByRole("option")).toHaveLength(3);
     fireEvent.click(screen.getByRole("option", { name: "Responses" }));
@@ -121,7 +128,7 @@ describe("Settings models", () => {
     ));
     await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     expect(screen.getByLabelText("API connection")).toHaveTextContent("Responses");
     fireEvent.click(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -132,7 +139,7 @@ describe("Settings models", () => {
     ));
     await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).toBeChecked();
     await openPopover(screen.getByLabelText("API connection"));
     fireEvent.click(screen.getByRole("option", { name: "Responses" }));
@@ -166,7 +173,7 @@ describe("Settings models", () => {
       return payload;
     });
     renderSettingsView({ initialSection: "models" });
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     await openPopover(screen.getByLabelText("API connection"));
     expect(screen.getAllByRole("option")).toHaveLength(4);
     fireEvent.click(screen.getByRole("option", { name: "Anthropic Messages" }));
@@ -179,7 +186,7 @@ describe("Settings models", () => {
     ));
     await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     expect(screen.getByLabelText("API connection")).toHaveTextContent("Anthropic Messages");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     await openPopover(screen.getByLabelText("API connection"));
@@ -207,7 +214,7 @@ describe("Settings models", () => {
     }));
     requestMutationMock.mockResolvedValue(payload);
     renderSettingsView({ initialSection: "models", initialSettings: payload });
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     await openPopover(screen.getByRole("button", { name: "anthropic/claude-sonnet-4", exact: true }));
     const search = screen.getByRole("combobox", { name: "Choose model" });
     fireEvent.change(search, { target: { value: "gpt-4o" } });
@@ -242,13 +249,12 @@ describe("Settings models", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     renderSettingsView({ initialSection: "models" });
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     await openPopover(screen.getByLabelText("API connection"));
     expect(screen.getByRole("option", { name: "Auto (Chat Completions)" })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("option", { name: "Auto (Chat Completions)" }));
-    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "high" } });
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("reasoning_effort=high"))).toBe(true));
     fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "none" } });
@@ -275,9 +281,8 @@ describe("Settings models", () => {
       });
     }));
     renderSettingsView({ initialSection: "models" });
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));
-    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "high" } });
     await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Responses)"));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -297,7 +302,7 @@ describe("Settings models", () => {
       ? jsonResponse({ provider: "openai", api }) : jsonResponse(payload));
     vi.stubGlobal("fetch", fetchMock);
     renderSettingsView({ initialSection: "models" });
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/model-api?"))).toBe(true));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByLabelText("API connection")).toHaveTextContent(/^Auto$/);
@@ -311,7 +316,7 @@ describe("Settings models", () => {
       providers: [{ name: "openai", label: "OpenAI", configured: true, request_apis: requestAPIs }],
     })));
     renderSettingsView({ initialSection: "models" });
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     expect(screen.queryByRole("combobox", { name: "API connection" })).not.toBeInTheDocument();
   });
 
@@ -328,7 +333,8 @@ describe("Settings models", () => {
     requestMutationMock.mockResolvedValue(payload);
     renderSettingsView({ initialSection: "models" });
     await togglePresetEditor();
-    expect(screen.getByLabelText("API connection")).toHaveTextContent("Chat Completions");
+    expect(screen.queryByRole("combobox", { name: "API connection" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Advanced options/ })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Preset name"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -348,7 +354,7 @@ describe("Settings models", () => {
     payload.model_presets[0].resolved_provider = provider;
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
     renderSettingsView({ initialSection: "models" });
-    await togglePresetEditor();
+    await openPresetAdvancedOptions();
     expect(screen.getByText(apiLabel, { exact: true })).toBeVisible();
     expect(screen.queryByRole("combobox", { name: "API connection" })).not.toBeInTheDocument();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();

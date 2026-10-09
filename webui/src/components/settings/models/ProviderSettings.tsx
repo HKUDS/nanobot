@@ -459,18 +459,20 @@ function ProviderAdvancedOptions({
   fields,
   form,
   onChange,
+  children,
   footer,
 }: {
   fields: ProviderAdvancedField[];
   form: ProviderForm;
   onChange: (value: Partial<ProviderForm>) => void;
+  children?: ReactNode;
   footer?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const enabled = new Set(fields);
   const contentId = useId();
-  if (enabled.size === 0) return null;
+  if (enabled.size === 0 && !children) return null;
 
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const thinkingStyleOptions = [
@@ -501,7 +503,8 @@ function ProviderAdvancedOptions({
         />
       </button>
       <DisclosureContent id={contentId} open={open}>
-        <div className="py-3">
+        <div className="space-y-3 py-3">
+          {children}
           <div className="grid gap-3 md:grid-cols-2">
             {enabled.has("thinking_style") ? (
               <label className="block space-y-1.5">
@@ -1003,24 +1006,25 @@ export function ProvidersSettings({
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
-                {provider.provider_api_configurable && (provider.name === "openai" ? (
-                  <ModelAPIControl
-                    provider={provider}
-                    title={t("settings.providers.defaultAPI")}
-                    value={form.api}
-                    onChange={(api) => onChangeProviderForm(provider.name, { api })}
-                  />
-                ) : (
-                  <ProviderAPIControl
-                    value={form.api}
-                    onChange={(api) => onChangeProviderForm(provider.name, { api })}
-                  />
-                ))}
                 <ProviderAdvancedOptions
                   fields={advancedFields}
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
-                />
+                >
+                  {provider.provider_api_configurable && (provider.name === "openai" ? (
+                    <ModelAPIControl
+                      provider={provider}
+                      title={t("settings.providers.defaultAPI")}
+                      value={form.api}
+                      onChange={(api) => onChangeProviderForm(provider.name, { api })}
+                    />
+                  ) : (
+                    <ProviderAPIControl
+                      value={form.api}
+                      onChange={(api) => onChangeProviderForm(provider.name, { api })}
+                    />
+                  ))}
+                </ProviderAdvancedOptions>
                 <div className="flex items-center justify-end gap-2">
                   <Button
                     size="sm"
@@ -1156,19 +1160,20 @@ export function ProvidersSettings({
             </Button>
           </div>
         </label>
-        {settings.provider_api_configuration_supported && (
-          <ProviderAPIControl
-            value={customProviderDraft.api}
-            onChange={(api) => setCustomProviderDraft((current) => ({ ...current, api }))}
-          />
-        )}
         <ProviderAdvancedOptions
           fields={CUSTOM_PROVIDER_ADVANCED_FIELDS}
           form={customProviderDraft}
           onChange={(value) =>
             setCustomProviderDraft((current) => ({ ...current, ...value }))
           }
-        />
+        >
+          {settings.provider_api_configuration_supported && (
+            <ProviderAPIControl
+              value={customProviderDraft.api}
+              onChange={(api) => setCustomProviderDraft((current) => ({ ...current, api }))}
+            />
+          )}
+        </ProviderAdvancedOptions>
         <div className="flex items-center justify-end gap-2">
           <Button
             size="sm"

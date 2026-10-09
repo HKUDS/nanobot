@@ -1011,15 +1011,19 @@ describe("Settings providers", () => {
     await user.click(screen.getByRole("button", { name: "Custom" }));
     await user.type(screen.getByPlaceholderText("My model provider"), "Tenant");
     await user.type(screen.getByPlaceholderText("https://api.example.com/v1"), "https://tenant.test");
+    expect(screen.queryByRole("group", { name: "Supported APIs" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("switch", { name: "Chat Completions" })).toBeDisabled();
     await user.click(screen.getByRole("switch", { name: "Anthropic Messages" }));
     await user.click(screen.getByRole("switch", { name: "Chat Completions" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Anthropic Messages");
     expect(screen.getByRole("switch", { name: "Anthropic Messages" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
     await user.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.create", expect.objectContaining({ api }), 20_000);
     await user.click(screen.getByRole("button", { name: "Tenant", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Anthropic Messages");
     await user.click(screen.getByRole("switch", { name: "Responses" }));
     await user.click(screen.getByRole("combobox", { name: "Default API" }));
@@ -1029,6 +1033,7 @@ describe("Settings providers", () => {
       provider: "tenant", api: { supported_apis: ["anthropic_messages", "responses"], preferred_api: "responses" },
     }), 20_000));
     await user.click(screen.getByRole("button", { name: "Tenant", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Responses");
   });
 
@@ -1036,6 +1041,7 @@ describe("Settings providers", () => {
     renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
     fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
     fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Supported APIs" })).not.toBeInTheDocument();
   });
@@ -1054,6 +1060,8 @@ describe("Settings providers", () => {
     });
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Responses");
     await user.click(screen.getByRole("combobox", { name: "Default API" }));
     await user.click(screen.getByRole("option", { name: "Chat Completions", exact: true }));
@@ -1063,6 +1071,7 @@ describe("Settings providers", () => {
       provider: "openai", api: { supported_apis: ["chat_completions"], preferred_api: "chat_completions" },
     }), 20_000);
     await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Chat Completions");
     await user.click(screen.getByRole("combobox", { name: "Default API" }));
     await user.click(screen.getByRole("option", { name: "Auto", exact: true }));
@@ -1072,6 +1081,7 @@ describe("Settings providers", () => {
       provider: "openai", api: null,
     }), 20_000);
     await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Auto");
   });
 
