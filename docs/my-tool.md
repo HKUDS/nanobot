@@ -160,6 +160,11 @@ Agent: I've used ~53k tokens total so far. I'll keep my remaining replies concis
 
 ### "Subagent monitoring"
 
+Subagent snapshots include only tasks created by the current session. This scope
+also applies to `subagents._task_statuses.<task_id>` and nested fields. Without a
+current session key, direct subagent checks return an error and the full overview
+contains no tasks. Completed tasks are removed; this is not a result archive.
+
 ```text
 Agent: Let me check on the background tasks.
 → my(action="check", key="subagents")

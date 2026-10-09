@@ -44,7 +44,7 @@
         "label": "Reconnect delay"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "Maximum reconnect delay"
+        "label": "Reconnect delay limit (ms)"
       },
       "socketConnectTimeoutMs": {
         "label": "Connection timeout"
@@ -56,16 +56,16 @@
         "label": "Watch timeout"
       },
       "watchLimit": {
-        "label": "Watch batch size"
+        "label": "Batch size"
       },
       "retryDelayMs": {
         "label": "Retry delay"
       },
       "maxRetryAttempts": {
-        "label": "Maximum retries"
+        "label": "Retry limit"
       },
       "mention_requireInGroups": {
-        "label": "Require mentions in groups",
+        "label": "Require group mention",
         "choices": {
           "true": "On",
           "false": "Off"

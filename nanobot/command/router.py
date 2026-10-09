@@ -5,19 +5,22 @@ from __future__ import annotations
 import re
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from difflib import get_close_matches
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.events import InboundMessage
     from nanobot.session.manager import Session
     from nanobot.utils.llm_runtime import LLMRuntime
 
-Handler = Callable[["CommandContext"], Awaitable["OutboundMessage | None"]]
+Handler = Callable[["CommandContext"], Awaitable["InboundMessage | OutboundMessage | None"]]
 _BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def command_text(message: InboundMessage) -> str:
+    """Return routable text; command-generated agent input must not be dispatched again."""
+    return "" if message.metadata.get("original_command") else message.content.strip()
 
 
 def normalize_command_text(text: str) -> str:
@@ -82,12 +85,21 @@ class CommandRouter:
     def is_priority(self, text: str) -> bool:
         return normalize_command_text(text).lower() in self._priority
 
+    def command_name(self, text: str) -> str | None:
+        """Return the registered command name, or None for ordinary chat text.
+
+        A leading slash alone is not command intent: absolute paths and other
+        slash-prefixed text must remain available to the agent.
+        """
+        parts = normalize_command_text(text).split(maxsplit=1)
+        return self._registered_commands().get(parts[0].lower()) if parts else None
+
     def is_dispatchable_command(self, text: str) -> bool:
         """Check whether *text* should be handled by non-priority dispatch.
 
         Exact priority commands are handled separately. Recognized non-priority
-        commands and invalid slash commands are dispatched here so malformed
-        commands can be rejected instead of reaching the LLM.
+        commands and malformed uses of registered commands are dispatched here
+        so argument errors can be rejected instead of reaching the LLM.
         """
         cmd = normalize_command_text(text).lower()
         if cmd in self._priority:
@@ -97,9 +109,9 @@ class CommandRouter:
         for pfx, _ in self._prefix:
             if cmd.startswith(pfx):
                 return True
-        return cmd.startswith("/")
+        return self.command_name(text) is not None
 
-    async def dispatch_priority(self, ctx: CommandContext) -> OutboundMessage | None:
+    async def dispatch_priority(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
         ctx.raw = normalize_command_text(ctx.raw)
         handler = self._priority.get(ctx.raw.lower())
@@ -107,8 +119,10 @@ class CommandRouter:
             return await handler(ctx)
         return None
 
-    async def dispatch(self, ctx: CommandContext) -> OutboundMessage | None:
-        """Try exact and prefix handlers, then reject invalid slash commands."""
+    async def dispatch(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
+        """Try exact and prefix handlers, then validate registered commands."""
+        if ctx.msg.metadata.get("original_command"):
+            return None
         ctx.raw = normalize_command_text(ctx.raw)
         cmd = ctx.raw.lower()
 
@@ -123,39 +137,25 @@ class CommandRouter:
         return self._invalid_command_response(ctx)
 
     def _invalid_command_response(self, ctx: CommandContext) -> OutboundMessage | None:
-        if not ctx.raw.startswith("/"):
+        canonical = self.command_name(ctx.raw)
+        if canonical is None:
             return None
 
         entered = ctx.raw.split(maxsplit=1)[0]
-        commands = self._registered_commands()
-        canonical = commands.get(entered.lower())
-        if canonical is not None:
-            accepts_args = any(
-                pfx.rstrip().lower() == entered.lower()
-                for pfx, _ in self._prefix
+        accepts_args = any(
+            pfx.rstrip().lower() == entered.lower()
+            for pfx, _ in self._prefix
+        )
+        if accepts_args:
+            content = (
+                f'Invalid command "{entered}". '
+                'Use "/help" to list available commands.'
             )
-            if accepts_args:
-                content = (
-                    f'Invalid command "{entered}". '
-                    'Use "/help" to list available commands.'
-                )
-            else:
-                content = (
-                    f'Command "{canonical}" does not accept arguments. '
-                    f'Did you mean "{canonical}"?'
-                )
         else:
-            matches = get_close_matches(entered.lower(), commands, n=1, cutoff=0.6)
-            if matches:
-                content = (
-                    f'Unknown command "{entered}". '
-                    f'Did you mean "{commands[matches[0]]}"?'
-                )
-            else:
-                content = (
-                    f'Unknown command "{entered}". '
-                    'Use "/help" to list available commands.'
-                )
+            content = (
+                f'Command "{canonical}" does not accept arguments. '
+                f'Did you mean "{canonical}"?'
+            )
 
         return OutboundMessage(
             channel=ctx.msg.channel,

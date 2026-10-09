@@ -12,6 +12,7 @@ from nanobot.cli.runtime_config import (
     _print_config_error,
     _print_runtime_config_validation_error,
     _provider_setup_error,
+    _validate_session_storage,
 )
 from nanobot.cli.webui_support import (
     _attach_to_background_gateway,
@@ -142,6 +143,7 @@ def webui(
         _print_config_error(exc)
         raise typer.Exit(1) from exc
 
+    _validate_session_storage(resolved_setup_config, workspace_override=workspace)
     provider_error = _provider_setup_error(resolved_setup_config)
     if provider_error:
         console.print(f"[yellow]Model setup is incomplete: {provider_error}[/yellow]")

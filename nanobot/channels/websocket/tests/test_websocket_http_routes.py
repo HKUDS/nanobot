@@ -331,7 +331,14 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
         assert [row["key"] for row in listing.json()["sessions"]] == [key]
         assert listing.json()["sessions"][0]["preview"] == "original question"
         assert thread.status_code == 200
-        assert [message["content"] for message in thread.json()["messages"]] == [
+        body = thread.json()
+        assert body["projection"] == "events"
+        assert "messages" not in body
+        assert [
+            event["text"]
+            for event in body["events"]
+            if event["event"] in {"user_message", "message", "stream_end"}
+        ] == [
             "original question",
             "original answer",
         ]
@@ -2384,6 +2391,7 @@ async def test_session_delete_removes_unpersisted_new_chat(
     channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=_free_port())
     connection = AsyncMock()
     connection.remote_address = ("127.0.0.1", 50123)
+    connection.request.headers = {"Host": "localhost"}
 
     await channel._dispatch_envelope(
         connection,
@@ -3152,8 +3160,11 @@ async def test_webui_thread_resigns_assistant_media_urls(
             headers=auth,
         )
         assert resp.status_code == 200
-        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
-        media = assistant["media"]
+        body = resp.json()
+        assert body["projection"] == "events"
+        assert "messages" not in body
+        assistant = next(event for event in body["events"] if event["event"] == "message")
+        media = assistant["media_urls"]
         assert media[0]["kind"] == "video"
         assert media[0]["name"] == "clip.mp4"
         assert media[0]["url"].startswith("/api/media/")
@@ -3164,10 +3175,10 @@ async def test_webui_thread_resigns_assistant_media_urls(
             headers=auth,
         )
         repeated_assistant = next(
-            m for m in repeated.json()["messages"] if m["role"] == "assistant"
+            event for event in repeated.json()["events"] if event["event"] == "message"
         )
-        assert repeated_assistant["id"] == assistant["id"]
-        assert repeated_assistant["media"][0]["url"] == media[0]["url"]
+        assert repeated_assistant["projection_id"] == assistant["projection_id"]
+        assert repeated_assistant["media_urls"][0]["url"] == media[0]["url"]
         assert len(list(websocket_media.iterdir())) == 1
 
         fetched = await _http_get(f"http://127.0.0.1:29914{media[0]['url']}")
@@ -3243,7 +3254,10 @@ async def test_webui_thread_complete_transcript_skips_session_history_read(
         )
 
         assert response.status_code == 200
-        assert [message["content"] for message in response.json()["messages"]] == [
+        body = response.json()
+        assert body["projection"] == "events"
+        assert "messages" not in body
+        assert [event["text"] for event in body["events"] if "text" in event] == [
             "hi",
             "hello back",
         ]
@@ -3290,7 +3304,9 @@ async def test_webui_thread_negotiates_gzip_for_large_payloads(
         assert compressed.headers["Content-Encoding"] == "gzip"
         assert compressed.headers["Vary"] == "Accept-Encoding"
         assert int(compressed.headers["Content-Length"]) < len(compressed.content)
-        assert compressed.json()["messages"][0]["content"].startswith("compress me")
+        assert compressed.json()["projection"] == "events"
+        assert "messages" not in compressed.json()
+        assert compressed.json()["events"][0]["text"].startswith("compress me")
 
         identity = await _http_get(
             url,
@@ -3348,10 +3364,12 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
         assert first.status_code == 200
         assert first.headers["Cache-Control"] == "no-store"
         assert first.headers["ETag"] == f'"{first.json()["revision"]}"'
-        trace_message = next(
-            message for message in first.json()["messages"] if message.get("kind") == "trace"
+        assert first.json()["projection"] == "events"
+        assert "messages" not in first.json()
+        trace_event = next(
+            event for event in first.json()["events"] if event.get("kind") == "progress"
         )
-        assert trace_message["content"] == "exec(…)"
+        assert trace_event["text"] == "exec(…)"
 
         unchanged = await _http_get(
             url,
@@ -3363,11 +3381,12 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
         detail = await _http_get(
             f"http://127.0.0.1:{port}/api/sessions/"
             "websocket%3Arevalidated-thread/webui-thread/trace-detail"
-            f"?ref={trace_message['traceDetail']['ref']}",
+            f"?ref={trace_event['trace_detail']['ref']}",
             headers=auth,
         )
         assert detail.status_code == 200
-        assert detail.json()["content"] == trace
+        assert detail.json()["message_id"] == trace_event["projection_id"]
+        assert detail.json()["events"][0]["text"] == trace
 
         append_transcript_object(
             key,
@@ -3636,61 +3655,20 @@ async def test_recovery_mutation_uses_authenticated_websocket_action(bus: MagicM
     )
 
 
-@pytest.mark.asyncio
-async def test_workspace_folder_picker_is_local_authenticated_mutation(
-    bus: MagicMock,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    selected = tmp_path / "project"
-    selected.mkdir()
-    pick_folder = AsyncMock(return_value=str(selected))
-    monkeypatch.setattr(
-        "nanobot.webui.ws_http.native_folder_picker_available",
-        lambda: True,
-    )
-    monkeypatch.setattr("nanobot.webui.ws_http.pick_native_folder", pick_folder)
-    channel = _ch(bus)
-
-    response = await _webui_mutate(channel, "workspace.pick_folder")
-
-    assert response.status_code == 200
-    assert response.json() == {"path": str(selected)}
-    pick_folder.assert_awaited_once_with()
-
-
 @pytest.mark.parametrize(
-    ("connection", "headers", "can_use_full_access", "can_pick_folder"),
+    ("connection", "headers", "can_use_full_access"),
     [
-        (
-            _REMOTE,
-            {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"},
-            False,
-            False,
-        ),
-        (
-            _LOCAL,
-            {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"},
-            False,
-            False,
-        ),
-        (_LOCAL, {"Host": "127.0.0.1:8765"}, True, True),
+        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, False),
+        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, False),
+        (_LOCAL, {"Host": "127.0.0.1:8765"}, True),
     ],
 )
-@pytest.mark.parametrize("native_picker_available", [True, False])
 def test_workspace_payload_separates_remote_project_selection_from_full_access(
     bus: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
-    native_picker_available: bool,
     connection: _FakeConn,
     headers: dict[str, str],
     can_use_full_access: bool,
-    can_pick_folder: bool,
 ) -> None:
-    monkeypatch.setattr(
-        "nanobot.webui.ws_http.native_folder_picker_available",
-        lambda: native_picker_available,
-    )
     channel = _ch(bus)
     token = channel.gateway.tokens.issue_api_token(300)
     request = _FakeReq(
@@ -3704,63 +3682,9 @@ def test_workspace_payload_separates_remote_project_selection_from_full_access(
     controls = json.loads(response.body.decode())["controls"]
     assert controls["can_change_project"] is True
     assert controls["can_use_full_access"] is can_use_full_access
-    assert controls["can_pick_folder"] is (can_pick_folder and native_picker_available)
-
-
-@pytest.mark.asyncio
-async def test_workspace_folder_picker_rejects_direct_http(
-    bus: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pick_folder = AsyncMock(return_value="/tmp")
-    monkeypatch.setattr(
-        "nanobot.webui.ws_http.native_folder_picker_available",
-        lambda: True,
-    )
-    monkeypatch.setattr("nanobot.webui.ws_http.pick_native_folder", pick_folder)
-    channel = _ch(bus)
-
-    response = await channel.gateway.http.dispatch(
-        _LOCAL,
-        _FakeReq(
-            {"Host": "127.0.0.1:8765"},
-            path="/api/workspaces/pick-folder",
-        ),
-    )
-
-    assert response is not None
-    assert response.status_code == 405
-    assert b"authenticated WebSocket" in response.body
-    pick_folder.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("connection", "host"),
-    [(_REMOTE, "127.0.0.1"), (_LOCAL, "0.0.0.0")],
-)
-async def test_workspace_folder_picker_rejects_nonlocal_surfaces(
-    bus: MagicMock,
-    monkeypatch,
-    connection: _FakeConn,
-    host: str,
-) -> None:
-    pick_folder = AsyncMock(return_value="/tmp")
-    monkeypatch.setattr(
-        "nanobot.webui.ws_http.native_folder_picker_available",
-        lambda: True,
-    )
-    monkeypatch.setattr("nanobot.webui.ws_http.pick_native_folder", pick_folder)
-    channel = _ch(bus, host=host, token="test-token" if host == "0.0.0.0" else "")
-
-    response = await _webui_mutate(
-        channel,
-        "workspace.pick_folder",
-        connection=connection,
-    )
-
-    assert response.status_code == 403
-    pick_folder.assert_not_awaited()
+    assert controls["can_browse_directories"] is True
+    assert controls["can_resolve_project"] is True
+    assert controls["can_manage_favorites"] is True
 
 
 def test_local_browser_request_requires_loopback_host_and_forwarded_origin() -> None:
@@ -4185,3 +4109,97 @@ def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_star_prompt_requires_authenticated_mutation_and_persists_dismissal(
+    bus: MagicMock,
+) -> None:
+    from nanobot.webui.star_prompt import StarPromptState, get_webui_dir
+
+    state_path = get_webui_dir() / "star-prompt.json"
+    state_path.write_text(StarPromptState(
+        completed_replies=10, active_days=["2026-09-20", "2026-09-21", "2026-09-22"]
+    ).model_dump_json(), encoding="utf-8")
+    channel = _ch(bus, port=29912)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        raw = await _http_get("http://127.0.0.1:29912/api/webui/star-prompt/claim")
+        assert raw.status_code in {401, 405}
+        first = await _webui_mutate(channel, "star_prompt.claim", {})
+        assert first.status_code == 200
+        assert first.json() == {"show": True}
+        second = await _webui_mutate(channel, "star_prompt.claim", {})
+        assert second.json() == {"show": False}
+        dismissed = await _webui_mutate(channel, "star_prompt.dismiss", {})
+        assert dismissed.status_code == 200
+        assert StarPromptState.model_validate_json(state_path.read_text()).dismissed_forever
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connection", [_LOCAL, _REMOTE])
+async def test_project_directory_http_read_requires_auth_and_keeps_scope(
+    bus: MagicMock, tmp_path: Path, connection: _FakeConn,
+) -> None:
+    root = tmp_path / "folders"
+    root.mkdir()
+    (root / "project").mkdir()
+    (root / "private.txt").write_text("not returned")
+    channel = _ch(bus, workspace_path=tmp_path)
+    path = f"/api/workspaces/directories?path={root}"
+    response = await channel.gateway.http._dispatch_misc_routes(connection, _FakeReq({}, path=path), "/api/workspaces/directories")
+    assert response is not None and response.status_code == 401
+    token = channel.gateway.tokens.issue_api_token(300)
+    request = _FakeReq({"Authorization": f"Bearer {token}"}, path=path)
+    response = await channel.gateway.http._dispatch_misc_routes(connection, request, "/api/workspaces/directories")
+    assert response is not None and response.status_code == 200
+    assert json.loads(response.body)["entries"] == [{"name": "project", "path": str(root / "project")}]
+    partial_request = _FakeReq({"Authorization": f"Bearer {token}"}, path=f"/api/workspaces/directories?path={root / 'proj'}&partial=1")
+    partial_response = await channel.gateway.http._dispatch_misc_routes(connection, partial_request, "/api/workspaces/directories")
+    assert partial_response is not None and partial_response.status_code == 200
+    assert json.loads(partial_response.body)["partial"] is True
+    assert json.loads(partial_response.body)["entries"] == [{"name": "project", "path": str(root / "project")}]
+    assert channel.gateway.workspaces.default_scope().project_path == tmp_path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connection", [_LOCAL, _REMOTE])
+async def test_project_selection_remembers_resolved_path_without_changing_access(
+    bus: MagicMock, tmp_path: Path, connection: _FakeConn,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    channel = _ch(bus, workspace_path=tmp_path)
+    scope = channel.gateway.workspaces.default_scope()
+    response = await _webui_mutate(channel, "workspace.resolve_project", {"path": str(project)}, connection=connection)
+    assert response.status_code == 200
+    assert response.json() == {"name": "project", "path": str(project)}
+    assert channel.gateway.workspaces.default_scope() == scope
+    payload = channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)
+    assert payload["recent_projects"] == [{"name": "project", "path": str(project)}]
+    rejected = await _webui_mutate(channel, "workspace.resolve_project", {"path": str(tmp_path / "missing")}, connection=connection)
+    assert rejected.status_code == 400
+    assert channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)["recent_projects"] == payload["recent_projects"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connection", [_LOCAL, _REMOTE])
+async def test_project_favorites_mutation_persists_without_selecting_project(
+    bus: MagicMock, tmp_path: Path, connection: _FakeConn,
+) -> None:
+    project = tmp_path / "pinned"
+    project.mkdir()
+    channel = _ch(bus, workspace_path=tmp_path)
+    response = await _webui_mutate(channel, "workspace.favorite", {"path": str(project), "pinned": True}, connection=connection)
+    assert response.status_code == 200
+    assert response.json() == {"favorite_projects": [{"name": "pinned", "path": str(project)}]}
+    payload = channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)
+    assert payload["favorite_projects"] == response.json()["favorite_projects"]
+    assert payload["recent_projects"] == []
+    assert payload["default_scope"]["project_path"] == str(tmp_path)
+    response = await _webui_mutate(channel, "workspace.favorite", {"path": str(project), "pinned": False}, connection=connection)
+    assert response.status_code == 200
+    assert response.json() == {"favorite_projects": []}

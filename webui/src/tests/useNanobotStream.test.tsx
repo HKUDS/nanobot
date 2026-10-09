@@ -43,6 +43,7 @@ const SEMANTIC_MESSAGE_FIELDS = [
   "reasoning",
   "latencyMs",
   "source",
+  "responseSources",
   "turnId",
   "turnPhase",
   "turnSeq",
@@ -145,6 +146,7 @@ function fakeClient() {
         return () => set!.delete(h);
       },
       sendMessage: vi.fn(),
+      sendAttachments: vi.fn().mockResolvedValue(undefined),
       requestMutation,
       finishRunLocally: vi.fn(),
       newChat: vi.fn(),
@@ -201,6 +203,42 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("keeps invocation snapshots across streaming, recovery segments, completion and reload", async () => {
+    const fake = fakeClient();
+    const a = { provider: "openai_codex", model: "gpt", preset: "writer", fallback: false };
+    const b = { provider: "xai", model: "grok", preset: "reviewer", fallback: true };
+    const { result, unmount } = renderHook(() => useNanobotStream("sources", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => fake.emit("sources", { event: "delta", chat_id: "sources", text: "First", response_sources: [a] }));
+    await flushStreamFrame();
+    expect(result.current.messages[0].responseSources).toEqual([a]);
+    act(() => {
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", resuming: true, response_sources: [a] });
+      fake.emit("sources", { event: "delta", chat_id: "sources", text: "Recovered", response_sources: [b] });
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", response_sources: [b] });
+      fake.emit("sources", { event: "turn_end", chat_id: "sources" });
+    });
+    expect(result.current.messages.map(m => m.responseSources)).toEqual([[a], [b]]);
+    const history = result.current.messages;
+    unmount();
+    const reloaded = renderHook(() => useNanobotStream("sources", history), { wrapper: wrap(fake.client) });
+    expect(reloaded.result.current.messages.map(m => m.responseSources)).toEqual([[a], [b]]);
+  });
+
+  it("honors complete and end-only sources and clears an ambiguous merged attribution", () => {
+    const fake = fakeClient();
+    const a = { provider: "openai", model: "shared-model", preset: "primary", fallback: false };
+    const b = { provider: "openai", model: "shared-model", preset: "backup", fallback: true };
+    const { result } = renderHook(() => useNanobotStream("sources", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("sources", { event: "message", chat_id: "sources", text: "Complete", response_sources: [b] });
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", text: "Mixed", response_sources: [a, b], resuming: true, merge_next: true });
+    });
+    expect(result.current.messages.map(m => m.responseSources)).toEqual([[b], [a, b]]);
+    act(() => fake.emit("sources", { event: "stream_end", chat_id: "sources", response_sources: [] }));
+    expect(result.current.messages[1].responseSources).toEqual([]);
+  });
   it.each(["succeeded", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
     const fake = fakeClient();
     const { result } = renderHook(
@@ -2684,7 +2722,7 @@ describe("useNanobotStream", () => {
 
     expect(result.current.messages[0].media).toEqual([attachment.preview]);
     expect(result.current.messages[0].images).toBeUndefined();
-    expect(fake.client.sendMessage).toHaveBeenCalledWith(
+    expect(fake.client.sendAttachments).toHaveBeenCalledWith(
       "chat-file-send",
       "summarize",
       [attachment.media],
@@ -2750,44 +2788,25 @@ describe("useNanobotStream", () => {
     ]);
   });
 
-  it("keeps assistant html media as a file attachment", () => {
+  it.each([
+    { name: "index.html", kind: "file", url: "/api/media/sig/html" },
+    { name: "growth.svg", kind: "image", url: "/api/media/sig/svg" },
+  ])("classifies assistant $name media as $kind", ({ name, kind, url }) => {
     const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-html-media", EMPTY_MESSAGES), {
+    const { result } = renderHook(() => useNanobotStream("chat-media", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
     });
 
     act(() => {
-      fake.emit("chat-html-media", {
+      fake.emit("chat-media", {
         event: "message",
-        chat_id: "chat-html-media",
-        text: "file ready",
-        media_urls: [{ url: "/api/media/sig/html", name: "index.html" }],
+        chat_id: "chat-media",
+        text: "media ready",
+        media_urls: [{ url, name }],
       });
     });
 
-    expect(result.current.messages[0].media).toEqual([
-      { kind: "file", url: "/api/media/sig/html", name: "index.html" },
-    ]);
-  });
-
-  it("infers assistant svg media as an image attachment", () => {
-    const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-svg-media", EMPTY_MESSAGES), {
-      wrapper: wrap(fake.client),
-    });
-
-    act(() => {
-      fake.emit("chat-svg-media", {
-        event: "message",
-        chat_id: "chat-svg-media",
-        text: "chart ready",
-        media_urls: [{ url: "/api/media/sig/svg", name: "growth.svg" }],
-      });
-    });
-
-    expect(result.current.messages[0].media).toEqual([
-      { kind: "image", url: "/api/media/sig/svg", name: "growth.svg" },
-    ]);
+    expect(result.current.messages[0].media).toEqual([{ kind, url, name }]);
   });
 
   it("corrects explicit image media when the name is a non-image file", () => {
@@ -3539,7 +3558,7 @@ describe("useNanobotStream", () => {
 
 });
 
-describe("live/replay projection before canonical-event revision migration", () => {
+describe("live canonical event projection", () => {
   it.each(PROJECTION_FIXTURE_CASES)("matches the shared $name fixture", (fixtureCase) => {
     // Keep client-only elapsed-time estimates out of the transport contract.
     const clock = vi.spyOn(Date, "now").mockReturnValue(0);

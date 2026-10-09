@@ -22,6 +22,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
 )
+from nanobot.providers.images import prepare_message_images
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -742,7 +743,7 @@ class AnthropicProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
-            messages, tools, model, max_tokens, temperature,
+            await prepare_message_images(messages), tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
         try:
@@ -780,7 +781,7 @@ class AnthropicProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
-            messages, tools, model, max_tokens, temperature,
+            await prepare_message_images(messages), tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
         idle_timeout_s = resolve_stream_idle_timeout_s()

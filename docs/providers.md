@@ -4,6 +4,23 @@ Use this page when the first reply fails because of provider/model mismatch, or 
 
 For normal local setup, open **Settings → Models** in the WebUI to add provider credentials, create a model preset, and select the active model. Use the JSON below for manual deployments, local endpoints, provider-specific fields, or diagnosis.
 
+The model picker fetches online catalogs for OpenAI Codex, xAI Grok, and GitHub
+Copilot. An explicit authorization failure hides the picker’s search and model
+list and offers **Sign in again** using the existing provider login flow.
+Successful WebUI sign-in clears the catalog cache and restores model selection.
+Existing presets, selected models, and unsaved preset details are preserved.
+Network, rate-limit, and service failures instead keep cached or built-in lists
+available, label them as potentially out of date, and ask you to try again later
+(failed refreshes are cached briefly). Manual model IDs remain available for
+these temporary failures. A successful chat may have used a fallback preset and
+does not prove that the selected provider's authorization is still valid.
+When a live chat uses a fallback model, a dismissible notice above the composer
+names that model and links to model settings. If the provider explicitly rejected
+OAuth credentials, the notice instead names the provider that needs a new login,
+with fallback completion as secondary information. Network errors, ordinary
+permission denials, and rate limits do not request reauthentication. The notice
+does not change your selected preset.
+
 For every setup, answer three questions:
 
 1. Which provider owns the credential or endpoint?
@@ -68,6 +85,23 @@ These fields answer different questions:
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
 Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex` and `xai_grok`, including OAuth token exchange/refresh and model requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
+
+## Inline Image Requests
+
+Before sending a large inline image batch, providers prepare smaller copies while
+keeping the attachment files intact. This applies to Responses, Chat Completions,
+Anthropic Messages, and Bedrock Converse requests, including images returned by tools
+and images in Responses history replay. Preparation first re-encodes at the original
+dimensions, then reduces each dimension by at most 25% if needed, with JPEG quality
+at least 65. PNG transparency is preserved. The shared 1 MB image data URL budget is
+a best-effort transport target; small image blocks, animated images, and remote
+references keep their original payloads. Gateway logs report image sizes and byte counts.
+
+Preparation preserves each adapter's model and API capability rules. When automatic
+Responses compatibility fallback is allowed, switching to Chat Completions retains
+the images. The shared retry policy can retry a non-transient image request error once
+without images, using text placeholders that explicitly say the images were not delivered.
+Responses state containing images is discarded before that text-only retry.
 
 ## Common Provider Patterns
 
@@ -576,6 +610,11 @@ The WebUI reads the account's Codex model catalog online, including current
 context-window and reasoning-effort metadata. A small compatible catalog remains
 available when the service cannot be reached.
 
+After three WebSocket transport failures without a completed reply, the same
+authenticated session uses HTTP for subsequent attempts. The existing retry policy
+controls replay and cancellation. WebSocket logs include request bytes, first-event timing,
+and close codes; unrecognized close reasons are redacted.
+
 For an eligible X Premium / Grok subscription:
 
 ```bash
@@ -602,6 +641,15 @@ public client contract documented and implemented by
 xAI may change that upstream contract independently of nanobot.
 
 For GitHub Copilot:
+
+You can also sign in from the WebUI's model settings. The sign-in dialog shows a
+device code: copy it, select **Open GitHub**, and enter the code on GitHub. Keep
+the dialog open; nanobot detects approval and refreshes the model catalog
+automatically. Closing the dialog cancels the pending sign-in without replacing
+your saved credentials. This works from a remote browser too; no browser needs
+to open on the gateway machine.
+
+For terminal sign-in:
 
 ```bash
 nanobot provider login github-copilot --set-main

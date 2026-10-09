@@ -18,6 +18,8 @@ import {
   ProviderPicker,
   ProviderPickerIcon,
   formatContextWindow,
+  formatContextWindowInput,
+  parseContextWindowTokens,
   formatModelContextWindow,
   normalizeContextWindowTokens,
   settingsProviderConfigured,
@@ -39,7 +41,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import type { SettingsPayload } from "@/lib/types";
 
@@ -54,8 +55,6 @@ export interface AgentSettingsDraft {
   timezone: string;
   toolHintMaxLength: number;
 }
-
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
 
 function modelPresetValue(payload: SettingsPayload): string {
   return (
@@ -483,6 +482,8 @@ export function ModelsSettings({
           provider={form.provider}
           value={form.model}
           showProviderLogos={showBrandLogos}
+          onProviderOAuthLogin={onProviderOAuthLogin}
+          providerSigningIn={selectedProviderSigningIn}
           onChange={(model) => {
             const canSuggestName =
               creating &&
@@ -510,15 +511,13 @@ export function ModelsSettings({
           <span className="block text-[14px] font-medium text-foreground">
             {tx("settings.models.advancedOptions", "Advanced options")}
           </span>
-          <span className="mt-0.5 block text-[12px] text-muted-foreground">
-            {tx(
-              "settings.models.advancedSummary",
-              "Context {{context}} · Max {{max}} tokens",
-              {
-                context: formatModelContextWindow(form.contextWindowTokens),
-                max: formatContextWindow(form.maxTokens),
-              },
-            )}
+          <span className="mt-0.5 flex flex-wrap gap-x-3 text-[12px] tabular-nums text-muted-foreground">
+            <span>{tx("settings.models.contextSummary", "Context {{context}}", {
+              context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
+            })}</span>{" "}
+            <span>{tx("settings.models.outputSummary", "Max {{max}} tokens", {
+              max: formatContextWindow(form.maxTokens),
+            })}</span>
           </span>
         </span>
         <ChevronDown
@@ -895,9 +894,10 @@ function ModelAdvancedFields({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const contextWindowOptions = Array.from(
-    new Set([...CONTEXT_WINDOW_TOKEN_OPTIONS, contextWindowTokens]),
-  ).sort((left, right) => left - right);
+  const [contextDraft, setContextDraft] = useState<{ text: string; tokens: number } | null>(null);
+  const contextWindowInputId = useId();
+  const contextWindowHintId = `${contextWindowInputId}-hint`;
+  const contextWindowValid = Number.isSafeInteger(contextWindowTokens) && contextWindowTokens > 0;
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -936,20 +936,32 @@ function ModelAdvancedFields({
         </label>
       </div>
       <div>
-        <span className="mb-2 block text-[12px] font-medium text-muted-foreground">
+        <label htmlFor={contextWindowInputId} className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
           {tx("settings.rows.contextWindow", "Context window")}
-        </span>
-        <SegmentedControl
-          value={String(contextWindowTokens)}
-          animateIndicator={false}
-          options={contextWindowOptions.map((tokens) => ({
-            value: String(tokens),
-            label: formatModelContextWindow(tokens),
-          }))}
-          onChange={(value) =>
-            onChange({ contextWindowTokens: normalizeContextWindowTokens(Number(value)) })
-          }
+        </label>
+        <Input
+          id={contextWindowInputId}
+          type="text"
+          autoCapitalize="none"
+          spellCheck={false}
+          required
+          value={contextDraft && Object.is(contextDraft.tokens, contextWindowTokens)
+            ? contextDraft.text : formatContextWindowInput(contextWindowTokens)}
+          onChange={(event) => {
+            const text = event.target.value;
+            const tokens = parseContextWindowTokens(text);
+            setContextDraft({ text, tokens });
+            onChange({ contextWindowTokens: tokens });
+          }}
+          aria-invalid={!contextWindowValid}
+          aria-describedby={contextWindowHintId}
+          className="h-9 text-[13px]"
         />
+        <p id={contextWindowHintId} className={cn("mt-1.5 text-[12px]", contextWindowValid ? "text-muted-foreground" : "text-destructive")}>
+          {contextWindowValid
+            ? t("settings.models.contextWindowHint", { tokens: contextWindowTokens.toLocaleString(), defaultValue: "{{tokens}} tokens" })
+            : tx("settings.models.contextWindowError", "Enter a positive token count, such as 200k, 1m, or 131072.")}
+        </p>
       </div>
       <label className="block">
         <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">

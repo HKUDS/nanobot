@@ -23,15 +23,15 @@ export function TimezonePicker({ value, onChange, ...triggerProps }: {
             .formatToParts(now).find((part) => part.type === "timeZoneName")?.value ?? zone;
           const offset = new Intl.DateTimeFormat("en", { timeZone: zone, timeZoneName: "longOffset" })
             .formatToParts(now).find((part) => part.type === "timeZoneName")?.value ?? "";
-          return { zone, detail: `${name} · ${offset.replace("GMT", "UTC")}` };
+          return { zone, detail: name, offset: offset.replace("GMT", "UTC") };
         } catch {
           // Keep a server-supported timezone visible even if this browser cannot format it.
-          return { zone, detail: zone };
+          return { zone, detail: zone, offset: "" };
         }
       });
   }, [i18n.language, value]);
-  const filtered = options.filter(({ zone, detail }) =>
-    `${zone.replaceAll("_", " ")} ${zone} ${detail}`.toLocaleLowerCase(i18n.language)
+  const filtered = options.filter(({ zone, detail, offset }) =>
+    `${zone.replaceAll("_", " ")} ${zone} ${detail} ${offset}`.toLocaleLowerCase(i18n.language)
       .includes(query.trim().toLocaleLowerCase(i18n.language)));
   const select = (zone: string) => { onChange(zone); setOpen(false); };
   const navigation = useComboboxNavigation({
@@ -52,10 +52,12 @@ export function TimezonePicker({ value, onChange, ...triggerProps }: {
           aria-label={t("sidebar.searchAria")} placeholder={t("sidebar.searchPlaceholder")}
           className="mb-1.5 h-9 rounded-full" />
         <div {...navigation.listProps} aria-label={triggerProps["aria-label"]} className="max-h-64 overflow-y-auto">
-          {filtered.map(({ zone, detail }) => (
+          {filtered.map(({ zone, detail, offset }) => (
             <ComboboxOption key={zone} {...navigation.getOptionProps(zone)} className="block">
               <span className="block">{zone}</span>
-              <span className="block text-xs text-muted-foreground">{detail}</span>
+              <span className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                <span>{detail}</span>{" "}<span className="tabular-nums">{offset}</span>
+              </span>
             </ComboboxOption>
           ))}
         </div>

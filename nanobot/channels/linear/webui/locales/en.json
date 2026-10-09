@@ -4,19 +4,19 @@
   "setup": {
     "docsLabel": "Open Linear setup guide",
     "officialLabel": "Create Linear OAuth app",
-    "tryIt": "Mention the app in an issue comment. Follow-ups inside its Agent Session do not need another mention.",
-    "summary": "Create a private Linear OAuth app, save its credentials and public URL, then authorize each workspace. New sessions require an explicit @mention; ordinary comments are ignored.",
+    "tryIt": "Mention the app in an issue comment or delegate an issue to it. Follow-ups inside its Agent Session do not need another mention.",
+    "summary": "Create a private Linear OAuth app, save its credentials and public URL, then authorize each workspace. Start a session by mentioning the app or delegating an issue to it; ordinary comments are ignored.",
     "steps": [
       "Expose this nanobot instance through a stable HTTPS URL (a tunnel is fine).",
-      "Create a private OAuth app in Linear with read, write, and app:mentionable scopes. Do not add app:assignable.",
+      "Create a private OAuth app in Linear with read, write, app:mentionable, and app:assignable scopes.",
       "Subscribe the app webhook to AgentSessionEvent, PermissionChange, and OAuthAuthorization using the generated webhook URL.",
-      "Enter the app credentials, wait for them to save automatically, connect the workspace with OAuth, then @mention the app on an issue."
+      "Connect the workspace with OAuth, then mention the app or delegate an issue to it."
     ],
     "fields": {
       "clientId": {
         "label": "OAuth client ID",
         "placeholder": "Linear OAuth client ID",
-        "help": "Copy it from the private OAuth app in Linear."
+        "help": "Copy from the private OAuth app.\n\nCopy it from the private OAuth app in Linear."
       },
       "clientSecret": {
         "label": "OAuth client secret",
@@ -26,12 +26,12 @@
       "webhookSigningSecret": {
         "label": "Webhook signing secret",
         "placeholder": "••••••",
-        "help": "Used to verify Linear-Signature before any webhook body is parsed."
+        "help": "Verify the Webhook signature.\n\nUsed to verify Linear-Signature before any webhook body is parsed."
       },
       "publicBaseUrl": {
         "label": "Public HTTPS URL",
         "placeholder": "https://nanobot.example.com",
-        "help": "A stable HTTPS origin routed to the listener below; do not include a path."
+        "help": "Enter an HTTPS URL without a path.\n\nA stable HTTPS origin routed to the listener below; do not include a path."
       },
       "host": {
         "label": "Listen host",
@@ -52,25 +52,86 @@
       "allowFrom": {
         "label": "Allowed Linear users",
         "placeholder": "Linear user IDs, comma separated",
-        "help": "Leave empty to use nanobot pairing, or use * to allow every user in connected workspaces."
+        "help": "Choose who can use this connection.\n\nLeave empty to use nanobot pairing, or use * to allow every user in connected workspaces."
+      },
+      "showReasoning": {
+        "label": "Show reasoning",
+        "help": "Post reasoning as thought activity.\n\nPost model reasoning as thought activities in Linear. Turn this off for a quieter session."
       }
     }
   },
   "custom": {
-    "qrAlt": "Linear authorization QR code",
+    "secretSaved": "Saved",
+    "replaceSecret": "Replace",
+    "replaceSecretLabel": "Replace {{name}}",
+    "enterSecret": "Enter secret",
+    "secretSaveFailed": "Could not confirm the save. Try again or cancel.",
     "authorizeTitle": "Authorize in Linear",
-    "authorizeDescription": "Open Linear in this browser or scan the QR code. nanobot enables the channel after authorization.",
+    "authorizeDescription": "Authorize in Linear, then return here.\n\nContinue in Linear to choose a workspace and authorize nanobot. Return here when you're done.",
     "waiting": "Waiting for Linear authorization...",
     "connected": "Linear is connected.",
     "stopped": "Authorization stopped.",
     "connecting": "Connecting...",
-    "reconnect": "Connect another workspace",
     "connect": "Connect Linear",
     "openLinear": "Continue in Linear",
-    "createApp": "Create prefilled Linear app",
-    "savePublicUrl": "Enter a public HTTPS URL to create a prefilled Linear app.",
-    "saveBeforeConnect": "Enter the app credentials and wait for them to save before connecting.",
-    "removeCredentials": "Remove saved credentials",
-    "retrySave": "Retry"
+    "createApp": "Create Linear app",
+    "savePublicUrl": "Enter a public HTTPS URL to create a Linear app.",
+    "retrySave": "Retry",
+    "channelRunning": "Channel running",
+    "accessAll": "Every member of an authorized workspace can run this agent.",
+    "accessRestricted": "Only the Linear user IDs listed in Advanced can run this agent.",
+    "accessPairing": "Pair on first use; connect Linear MCP to search or edit issues.",
+    "configureTools": "Configure Linear MCP",
+    "workspacesTitle": "Authorized workspaces",
+    "refreshWorkspaces": "Refresh workspaces",
+    "loadingWorkspaces": "Loading workspaces",
+    "noWorkspaces": "No workspaces are authorized. Connect a workspace to receive Linear agent requests.",
+    "refreshRequired": "Authorization refresh required",
+    "missingScopes": "Reconnect to grant: {{scopes}}",
+    "authorized": "Authorized",
+    "confirmDisconnect": "Remove workspace",
+    "disconnect": "Remove workspace",
+    "workspaceActions": "Manage {{name}}",
+    "reauthorize": "Reauthorize",
+    "disconnectTitle": "Remove {{name}}?",
+    "disconnectDescription": "Remove workspace access; keep history.\n\nRevoke this workspace's authorization and clear its member access settings in nanobot. Linear issues, comments, and nanobot conversation history will be kept. Other workspaces are not affected. You can authorize this workspace again later.",
+    "disconnectLast": "This is the last connected workspace, so the Linear channel will also be turned off.",
+    "disconnecting": "Removing…",
+    "addWorkspace": "Connect workspace",
+    "addWorkspaceDetails": "About connecting workspaces",
+    "addWorkspaceHelp": "Uses the current Linear app. To connect another workspace, the app must allow installation in other workspaces; private apps only work in their own workspace. Authorizing an existing workspace updates its connection without creating a duplicate.",
+    "resetConnection": "Reset Linear connection",
+    "resetTitle": "Reset Linear?",
+    "resetDescription": "Disconnect all workspaces linked through this app and stop the channel.",
+    "resetClears": "Clears",
+    "resetClearsDetail": "Member access settings and this instance’s app configuration, including saved credentials.",
+    "resetKeeps": "Keeps",
+    "resetKeepsDetail": "Linear app, issues, comments, chat history and pairing approvals.",
+    "resetConfirm": "Reset",
+    "resetting": "Resetting…",
+    "resetIncomplete": "Reset is incomplete. Workspaces already removed stay removed; retry to finish the remaining steps.",
+    "resetInspectFailed": "Could not verify connected workspaces. App settings were kept.",
+    "resetChanged": "Another workspace was connected. Review the connections and try again.",
+    "resetStopFailed": "The Linear channel could not be stopped. App settings were kept.",
+    "resetSaveFailed": "Could not clear the app settings. Please retry."
+  },
+  "members": {
+    "title": "Member access",
+    "help": "Enable members to use nanobot without a pairing code. Linear's existing authorization still applies. This does not grant access to the nanobot admin UI. Turning access off blocks new requests, not tasks already running.",
+    "allowAll": "Advanced settings currently allow all members (*), including new members. Individual off switches still take precedence. Remove * to require approval for new members.",
+    "search": "Search members",
+    "refresh": "Refresh members",
+    "working": "Saving…",
+    "saved": "Saved",
+    "retry": "Refresh members to check the current state and try again.",
+    "empty": "No matching active members.",
+    "allow": "Allow {{name}} to use nanobot",
+    "saveUnconfirmed": "Access was not confirmed. Refresh members before trying again.",
+    "guide": "Use Member access to approve teammates without pairing codes. Existing approvals still work unless switched off. Connect Linear MCP to search or edit issues.",
+    "intro": "Choose who can use nanobot in Linear. No pairing codes needed.",
+    "details": "About member access",
+    "summary": "{{allowed}} enabled",
+    "loading": "Finding members…",
+    "refreshing": "Checking for updates…"
   }
 }

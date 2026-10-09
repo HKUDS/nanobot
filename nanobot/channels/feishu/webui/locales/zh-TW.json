@@ -21,22 +21,22 @@
         }
       },
       "groupPolicy": {
-        "label": "群組行為",
+        "label": "群聊規則",
         "choices": {
-          "mention": "僅提及時",
-          "open": "所有訊息",
+          "mention": "提及回覆",
+          "open": "全部訊息",
           "allowlist": "允許清單"
         }
       },
       "allowFrom": {
-        "label": "允許的使用者",
+        "label": "允許使用者",
         "placeholder": "使用者 ID，以逗號分隔"
       },
       "topicIsolation": {
-        "label": "主題隔離",
+        "label": "獨立話題",
         "choices": {
-          "true": "每個主題使用獨立工作階段",
-          "false": "群組共用一個工作階段"
+          "true": "獨立會話",
+          "false": "共享會話"
         }
       },
       "name": {
@@ -55,7 +55,7 @@
         "label": "完成表情"
       },
       "toolHintPrefix": {
-        "label": "工具提示前綴"
+        "label": "提示字首"
       },
       "replyToMessage": {
         "label": "引用回覆",

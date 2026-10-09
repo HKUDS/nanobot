@@ -7,6 +7,8 @@ import sys
 from contextlib import suppress
 
 from nanobot.cli.process_identity import set_cli_process_identity
+from nanobot.utils.log_config import configure_console_logging
+from nanobot.utils.rotating_output import configure_background_output_from_env
 
 _ROOT_OPTIONS = frozenset(
     {
@@ -58,6 +60,7 @@ def _configure_windows_console() -> None:
 
 def _run_agent(args: list[str], *, prog_name: str) -> None:
     """Run the shared agent command without importing the complete CLI graph."""
+    configure_console_logging(sys.stderr)
     import typer
 
     from nanobot.cli.agent import agent
@@ -70,6 +73,7 @@ def _run_agent(args: list[str], *, prog_name: str) -> None:
 
 def main() -> None:
     """Dispatch native TUI startup without importing the complete CLI graph."""
+    configure_background_output_from_env()
     raw_args = sys.argv[1:]
     # Installed completion scripts call ``nanobot`` without positional arguments
     # and pass the request through this environment variable. Keep those requests

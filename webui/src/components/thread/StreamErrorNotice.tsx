@@ -45,7 +45,7 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
         size="icon"
         onClick={onDismiss}
         aria-label={t("common.dismiss")}
-        className="h-6 w-6 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive"
+        className="h-6 w-6 shrink-0 text-destructive hover:text-destructive"
       >
         <X className="h-3.5 w-3.5" />
       </Button>

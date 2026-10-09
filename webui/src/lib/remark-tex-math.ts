@@ -25,37 +25,50 @@ type ProcessorData = {
   micromarkExtensions?: Extension[];
 };
 
-const texMathSyntax: Extension = {
-  flow: {
-    [BACKSLASH]: {
-      tokenize: tokenizeTexMathFlow,
-      concrete: true,
-      name: "texMathFlow",
+function texMathSyntax(allowUnclosedFlow: boolean): Extension {
+  return {
+    flow: {
+      [BACKSLASH]: {
+        tokenize(effects, ok, nok) {
+          return tokenizeTexMathFlow(effects, ok, nok, allowUnclosedFlow);
+        },
+        concrete: true,
+        name: "texMathFlow",
+      },
+      [DOLLAR]: {
+        tokenize(effects, ok, nok) {
+          return tokenizeDollarMathFlow(effects, ok, nok, allowUnclosedFlow);
+        },
+        concrete: true,
+        name: "dollarMathFlow",
+      },
     },
-    [DOLLAR]: {
-      tokenize: tokenizeDollarMathFlow,
-      concrete: true,
-      name: "dollarMathFlow",
+    text: {
+      [BACKSLASH]: {
+        tokenize: tokenizeTexMathText,
+        name: "texMathText",
+      },
+      [DOLLAR]: {
+        tokenize: tokenizeGuardedDollarMathText,
+        name: "guardedDollarMathText",
+      },
     },
-  },
-  text: {
-    [BACKSLASH]: {
-      tokenize: tokenizeTexMathText,
-      name: "texMathText",
-    },
-    [DOLLAR]: {
-      tokenize: tokenizeGuardedDollarMathText,
-      name: "guardedDollarMathText",
-    },
-  },
-};
+  };
+}
 
-export const remarkTexMath: Plugin<[], Root> = function remarkTexMath() {
+interface TexMathOptions {
+  /** Keep an unfinished display formula together when locating streaming block boundaries. */
+  allowUnclosedFlow?: boolean;
+}
+
+export const remarkTexMath: Plugin<[TexMathOptions?], Root> = function remarkTexMath(
+  { allowUnclosedFlow = false } = {},
+) {
   const data = this.data() as ProcessorData;
   const micromarkExtensions =
     data.micromarkExtensions || (data.micromarkExtensions = []);
 
-  micromarkExtensions.push(texMathSyntax);
+  micromarkExtensions.push(texMathSyntax(allowUnclosedFlow));
 };
 
 function isLineEnding(code: Code): boolean {
@@ -91,6 +104,19 @@ const texMathFlowClose: Construct = {
 const dollarMathFlowClose: Construct = {
   tokenize: tokenizeDollarMathFlowClose,
   partial: true,
+};
+
+const nonLazyContinuation: Construct = {
+  partial: true,
+  tokenize(effects, ok, nok) {
+    const lineStart: State = (code) => this.parser.lazy[this.now().line] ? nok(code) : ok(code);
+    return (code) => {
+      effects.enter("lineEnding");
+      effects.consume(code);
+      effects.exit("lineEnding");
+      return lineStart;
+    };
+  },
 };
 
 // Model output commonly uses `$...$`; numeric-only spans are usually prices, not formulas.
@@ -178,21 +204,36 @@ function tokenizeTexMathText(effects: Effects, ok: State, nok: State): State {
 
     effects.consume(code);
     effects.exit("mathTextSequence");
+    return between;
+  }
+
+  function between(code: Code): State | undefined {
+    if (code === null) return nok(code);
+
+    if (code === BACKSLASH) {
+      closeSequence = effects.enter("mathTextSequence");
+      effects.consume(code);
+      return close;
+    }
+
+    if (isLineEnding(code)) {
+      effects.enter("lineEnding");
+      effects.consume(code);
+      effects.exit("lineEnding");
+      return between;
+    }
+
+    // Commands can immediately follow the opening delimiter. Only enter a data
+    // token when there is a character to consume; micromark rejects empty tokens.
     effects.enter("mathTextData");
+    effects.consume(code);
     return data;
   }
 
   function data(code: Code): State | undefined {
-    if (code === null) {
+    if (code === null || code === BACKSLASH || isLineEnding(code)) {
       effects.exit("mathTextData");
-      return nok(code);
-    }
-
-    if (code === BACKSLASH) {
-      effects.exit("mathTextData");
-      closeSequence = effects.enter("mathTextSequence");
-      effects.consume(code);
-      return close;
+      return between(code);
     }
 
     effects.consume(code);
@@ -212,18 +253,26 @@ function tokenizeTexMathText(effects: Effects, ok: State, nok: State): State {
   }
 }
 
-function tokenizeTexMathFlow(effects: Effects, ok: State, nok: State): State {
-  return tokenizeMathFlow(effects, ok, nok, LEFT_BRACKET, BACKSLASH, texMathFlowClose);
+function tokenizeTexMathFlow(
+  effects: Effects, ok: State, nok: State, allowUnclosedFlow: boolean,
+): State {
+  return tokenizeMathFlow(
+    effects, ok, nok, LEFT_BRACKET, BACKSLASH, texMathFlowClose, allowUnclosedFlow,
+  );
 }
 
 // Treat text after an opening $$ as formula content, not Markdown fence metadata.
-function tokenizeDollarMathFlow(effects: Effects, ok: State, nok: State): State {
-  return tokenizeMathFlow(effects, ok, nok, DOLLAR, DOLLAR, dollarMathFlowClose);
+function tokenizeDollarMathFlow(
+  effects: Effects, ok: State, nok: State, allowUnclosedFlow: boolean,
+): State {
+  return tokenizeMathFlow(
+    effects, ok, nok, DOLLAR, DOLLAR, dollarMathFlowClose, allowUnclosedFlow,
+  );
 }
 
 function tokenizeMathFlow(
   effects: Effects, ok: State, nok: State,
-  openingTail: number, closingStart: number, closing: Construct,
+  openingTail: number, closingStart: number, closing: Construct, allowUnclosedFlow = false,
 ): State {
   return start;
 
@@ -251,14 +300,9 @@ function tokenizeMathFlow(
   }
 
   function contentStart(code: Code): State | undefined {
-    if (code === null) return nok(code);
+    if (code === null) return allowUnclosedFlow ? done(code) : nok(code);
 
-    if (isLineEnding(code)) {
-      effects.enter("lineEnding");
-      effects.consume(code);
-      effects.exit("lineEnding");
-      return contentStart;
-    }
+    if (isLineEnding(code)) return beforeLineEnding(code);
 
     if (code === closingStart) {
       return effects.attempt(closing, done, contentStartAfterDelimiter)(code);
@@ -271,15 +315,12 @@ function tokenizeMathFlow(
   function content(code: Code): State | undefined {
     if (code === null) {
       effects.exit("mathFlowValue");
-      return nok(code);
+      return allowUnclosedFlow ? done(code) : nok(code);
     }
 
     if (isLineEnding(code)) {
       effects.exit("mathFlowValue");
-      effects.enter("lineEnding");
-      effects.consume(code);
-      effects.exit("lineEnding");
-      return contentStart;
+      return beforeLineEnding(code);
     }
 
     if (code === closingStart) {
@@ -289,6 +330,20 @@ function tokenizeMathFlow(
 
     effects.consume(code);
     return openingTail === DOLLAR && code === BACKSLASH ? escaped : content;
+  }
+
+  function beforeLineEnding(code: Code): State | undefined {
+    // A pending formula must end with its list/quote, not absorb following root blocks.
+    return allowUnclosedFlow
+      ? effects.check(nonLazyContinuation, consumeLineEnding, done)(code)
+      : consumeLineEnding(code);
+  }
+
+  function consumeLineEnding(code: Code): State | undefined {
+    effects.enter("lineEnding");
+    effects.consume(code);
+    effects.exit("lineEnding");
+    return contentStart;
   }
 
   function escaped(code: Code): State | undefined {
@@ -305,12 +360,12 @@ function tokenizeMathFlow(
 
   function done(code: Code): State | undefined {
     effects.exit("mathFlow");
-    if (openingTail === DOLLAR) return factorySpace(effects, afterClose, "whitespace")(code);
-    return ok(code);
+    // Flow constructs must finish at EOL/EOF, including Remend's synthetic link suffixes.
+    return factorySpace(effects, afterClose, "whitespace")(code);
   }
 
   function afterClose(code: Code): State | undefined {
-    // Inline formulas followed by prose belong to remark-math's text tokenizer.
+    // Reject suffixes that would leave the flow tokenizer in the middle of a line.
     return code === null || isLineEnding(code) ? ok(code) : nok(code);
   }
 }

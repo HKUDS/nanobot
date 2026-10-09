@@ -4,7 +4,7 @@
     "officialLabel": "打开 Mattermost 机器人指南",
     "fields": {
       "serverUrl": {
-        "label": "服务器地址",
+        "label": "服务地址",
         "placeholder": "https://mattermost.example.com"
       },
       "token": {
@@ -16,27 +16,27 @@
         "placeholder": "可选的团队 ID"
       },
       "groupPolicy": {
-        "label": "频道行为",
+        "label": "频道规则",
         "choices": {
-          "mention": "仅提及时",
-          "open": "所有消息",
+          "mention": "提及回复",
+          "open": "全部消息",
           "allowlist": "白名单"
         }
       },
       "groupPolicyInThread": {
-        "label": "线程行为",
+        "label": "话题规则",
         "choices": {
-          "mention": "仅提及时",
+          "mention": "提及回复",
           "open": "所有消息（无需提及）",
           "allowlist": "白名单"
         }
       },
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "用户 ID，用逗号分隔"
       },
       "allowFromMatchMode": {
-        "label": "用户匹配方式",
+        "label": "匹配方式",
         "choices": {
           "email": "邮箱",
           "id": "用户 ID",
@@ -44,24 +44,24 @@
         }
       },
       "groupAllowFrom": {
-        "label": "允许的频道"
+        "label": "允许频道"
       },
       "replyInThread": {
-        "label": "在话题中回复",
+        "label": "话题回复",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "includeThreadContext": {
-        "label": "包含话题上下文",
+        "label": "话题上下文",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "threadContextLimit": {
-        "label": "话题上下文上限"
+        "label": "上下文上限"
       },
       "streaming": {
         "label": "流式输出",
@@ -77,14 +77,14 @@
         "label": "完成表情"
       },
       "sendProgress": {
-        "label": "发送进度消息",
+        "label": "发送进度",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "sendToolHints": {
-        "label": "发送工具提示",
+        "label": "工具提示",
         "choices": {
           "true": "开启",
           "false": "关闭"
@@ -105,7 +105,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "允许私聊的用户"
+        "label": "私聊用户"
       }
     }
   }

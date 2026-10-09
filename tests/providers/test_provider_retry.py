@@ -522,6 +522,8 @@ async def test_image_retry_discards_provider_state_with_images(
         provider_context=ProviderCallContext(
             conversation_state=state,
             session_id="webui:cache-test",
+            response_preset="saved fallback",
+            response_is_fallback=True,
         ),
     )
 
@@ -530,6 +532,8 @@ async def test_image_retry_discards_provider_state_with_images(
     assert isinstance(retry_context, ProviderCallContext)
     assert retry_context.conversation_state is None
     assert retry_context.session_id == "webui:cache-test"
+    assert retry_context.response_preset == "saved fallback"
+    assert retry_context.response_is_fallback is True
     public_content = messages[0]["content"]
     if isinstance(public_content, list):
         assert all(block.get("type") != "image_url" for block in public_content)
@@ -615,6 +619,29 @@ def test_extract_retry_after_supports_common_provider_formats() -> None:
     assert LLMProvider._extract_retry_after('{"error":{"retry_after":20}}') == 20.0
     assert LLMProvider._extract_retry_after("Rate limit reached, please try again in 20s") == 20.0
     assert LLMProvider._extract_retry_after("retry-after: 20") == 20.0
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Rate limit reached for gpt-x. Please try again in 1m30s.", 90.0),
+        ("Please try again in 2m0.5s", 120.5),
+        ("Please try again in 1h2m3s", 3723.0),
+        ("Please try again in 6m0s. Visit https://example.com", 360.0),
+        ("Please try again in 1.5s", 1.5),
+        ("Please try again in 20ms", 0.1),
+        ("Please try again in 30 seconds", 30.0),
+        ("Please try again in 2 minutes", 120.0),
+    ],
+)
+def test_extract_retry_after_sums_compound_durations(message: str, expected: float) -> None:
+    assert LLMProvider._extract_retry_after(message) == pytest.approx(expected)
+
+
+def test_extract_retry_after_prefers_retry_after_over_try_again_in() -> None:
+    message = "retry after 5s; otherwise try again in 1m30s"
+
+    assert LLMProvider._extract_retry_after(message) == 5.0
 
 
 def test_extract_retry_after_from_headers_supports_numeric_and_http_date() -> None:

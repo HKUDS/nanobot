@@ -12,21 +12,21 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
       },
       "allowRemoteMediaRedirects": {
-        "label": "미디어 리디렉션 허용",
+        "label": "미디어 리디렉션",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       },
       "remoteMediaRedirectAllowedHosts": {
-        "label": "미디어 리디렉션 호스트"
+        "label": "리디렉션 호스트"
       },
       "groupUserIsolation": {
-        "label": "별도의 그룹 세션",
+        "label": "멤버별 세션",
         "choices": {
           "true": "켜기",
           "false": "끄기"

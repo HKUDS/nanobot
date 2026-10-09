@@ -41,7 +41,7 @@ import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfi
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import type { SessionAutomationJob, SkillSummary } from "@/lib/types";
+import type { ChatSummary, SessionAutomationJob, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
@@ -53,6 +53,8 @@ interface SettingsPageProps {
   onToggleTheme: () => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
+  skillsLoading: boolean;
+  skillsError: boolean;
   onStartAutomationChat?: (
     content: string,
     images?: SendAttachment[],
@@ -60,6 +62,7 @@ interface SettingsPageProps {
     modelPreset?: string | null,
   ) => boolean | void | Promise<boolean | void>;
   titleOverrides?: Record<string, string>;
+  sessions?: ChatSummary[];
   onLogout?: () => void;
   isRestarting: boolean;
   hostChromeInset: boolean;
@@ -74,13 +77,17 @@ export function SettingsPage({
   onToggleTheme,
   onBackToChat,
   skills,
+  skillsLoading,
+  skillsError,
   onStartAutomationChat,
   titleOverrides,
+  sessions,
   onLogout,
   isRestarting,
   hostChromeInset,
 }: SettingsPageProps) {
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
+  const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
   const [automationDetailReturn, setAutomationDetailReturn] =
     useState<SessionAutomationJob | null>(null);
@@ -120,6 +127,7 @@ export function SettingsPage({
     handleApiServiceAction,
     handleAutomationAction,
     handleAutomationEdit,
+    handleAutomationChat,
     handleCliAppAction,
     handleDeleteModelConfiguration,
     handleImportMcpConfig,
@@ -325,7 +333,7 @@ export function SettingsPage({
           />
         );
       case "about":
-        return <AboutSettings currentVersion={settings.version?.current} />;
+        return <AboutSettings settings={settings} />;
       case "appearance":
         return (
           <AppearanceSettings
@@ -485,6 +493,12 @@ export function SettingsPage({
       case "channels":
         return (
           <ChannelsSettings
+            onConfigureMcp={(name) => {
+              setMcpSetupName(name);
+              setAppsKindFilter("mcp");
+              setAppsQuery(name);
+              selectSection("apps");
+            }}
             token={token}
             nanobotFeatures={nanobotFeatures}
             loading={nanobotFeaturesLoading}
@@ -506,6 +520,8 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <AppsCatalogSettings
+              setupName={mcpSetupName}
+              onSetupOpened={() => setMcpSetupName(null)}
               cliApps={cliApps}
               mcpPresets={mcpPresets}
               cliAppsLoading={cliAppsLoading}
@@ -574,6 +590,7 @@ export function SettingsPage({
               token={token}
               payload={automations}
               titleOverrides={titleOverrides}
+              sessions={sessions}
               settingsSnapshot={controller.settings}
               onStartChat={onStartAutomationChat}
               loading={automationsLoading}
@@ -587,6 +604,7 @@ export function SettingsPage({
                 setAutomationPendingEdit(job);
               }}
               onRequestDelete={setAutomationPendingDelete}
+              onChangeChat={handleAutomationChat}
               onManageModels={() => selectSection("models")}
               returnToDetailJob={automationDetailReturn}
               onReturnToDetailHandled={() => setAutomationDetailReturn(null)}
@@ -594,7 +612,7 @@ export function SettingsPage({
           </div>
         );
       case "skills":
-        return <SkillsCatalogSettings skills={skills} />;
+        return <SkillsCatalogSettings skills={skills} loading={skillsLoading} error={skillsError} />;
       case "runtime":
         return (
           <div className="settings-stack">
@@ -742,6 +760,7 @@ export function SettingsPage({
             "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
             "motion-reduce:animate-none sm:py-8 lg:py-12",
             "settings-grid",
+            activeSection === "about" && "flex min-h-full flex-col",
             !showSidebar && "settings-feature-page",
             !showSidebar && activeSection === "automations" && "settings-automations-grid",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
@@ -780,6 +799,7 @@ export function SettingsPage({
             <div
               className={cn(
                 "settings-stack",
+                activeSection === "about" && "flex flex-1 flex-col",
                 activeSection === "channels" &&
                   "flex min-h-0 flex-1 flex-col xl:overflow-hidden",
               )}

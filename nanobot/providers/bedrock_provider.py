@@ -20,6 +20,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
 )
+from nanobot.providers.images import prepare_message_images
 
 _IMAGE_DATA_URL = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 _TEXT_BLOCK_TYPES = {"text", "input_text", "output_text"}
@@ -742,7 +743,7 @@ class BedrockProvider(LLMProvider):
     ) -> LLMResponse:
         try:
             kwargs = self._build_kwargs(
-                messages, tools, model, max_tokens, temperature, reasoning_effort, tool_choice
+                await prepare_message_images(messages), tools, model, max_tokens, temperature, reasoning_effort, tool_choice
             )
             response = cast(
                 dict[str, Any],
@@ -775,7 +776,7 @@ class BedrockProvider(LLMProvider):
 
         try:
             kwargs = self._build_kwargs(
-                messages, tools, model, max_tokens, temperature, reasoning_effort, tool_choice
+                await prepare_message_images(messages), tools, model, max_tokens, temperature, reasoning_effort, tool_choice
             )
             response = cast(
                 dict[str, Any],

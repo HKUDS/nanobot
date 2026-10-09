@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import run_session
+from agent.session_helpers import run_session, save_completed_subagent
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
@@ -35,7 +35,7 @@ from nanobot.webui.metadata import (
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     return AgentLoop(
         bus=bus,
@@ -581,11 +581,12 @@ class TestToolEventProgress:
         assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_iterations", [1, 2])
     async def test_followup_after_truncation_starts_a_new_stream(
-        self, tmp_path: Path,
+        self, tmp_path: Path, max_iterations: int,
     ) -> None:
         loop = _make_loop(tmp_path)
-        loop.max_iterations = 1
+        loop.max_iterations = max_iterations
         loop.tools.get_definitions = MagicMock(return_value=[])
         _attach_webui_runtime_events(loop, loop.bus)
         calls = 0
@@ -597,11 +598,17 @@ class TestToolEventProgress:
                 await on_content_delta("old partial")
                 loop._enqueue_session_message(InboundMessage(
                     channel="websocket", sender_id="u", chat_id="test", content="new question",
+                    metadata={"_wants_stream": True},
                 ))
                 return LLMResponse(content="old partial", finish_reason="length")
+            has_followup = any(
+                "new question" in str(message.get("content", ""))
+                for message in kwargs["messages"]
+            )
+            answer = "new answer" if has_followup else "old ending"
             if on_content_delta is not None:
-                await on_content_delta("new answer")
-            return LLMResponse(content="new answer", finish_reason="stop")
+                await on_content_delta(answer)
+            return LLMResponse(content=answer, finish_reason="stop")
 
         loop.provider.chat_stream_with_retry = chat
         try:
@@ -616,15 +623,25 @@ class TestToolEventProgress:
             endings = [
                 message.event for message in outbound if isinstance(message.event, StreamEndEvent)
             ]
-            assert [event.content for event in deltas] == ["old partial", "new answer"]
-            assert deltas[0].stream_id != deltas[1].stream_id
-            assert [(event.resuming, event.merge_next) for event in endings] == [
-                (True, False), (False, False),
-            ]
+            if max_iterations == 1:
+                assert calls == 3
+                assert [event.content for event in deltas] == [
+                    "old partial", "\n\nold ending", "new answer",
+                ]
+                assert [(event.resuming, event.merge_next) for event in endings] == [
+                    (True, True), (False, False), (False, False),
+                ]
+            else:
+                assert calls == 2
+                assert [event.content for event in deltas] == ["old partial", "new answer"]
+                assert [(event.resuming, event.merge_next) for event in endings] == [
+                    (True, False), (False, False),
+                ]
+            assert deltas[0].stream_id != deltas[-1].stream_id
             assert [
                 message.content for message in outbound
                 if isinstance(message.event, StreamedResponseEvent)
-            ] == ["new answer"]
+            ] == (["old partial\n\nold ending", "new answer"] if max_iterations == 1 else ["new answer"])
         finally:
             await loop.aclose()
 
@@ -852,6 +869,7 @@ class TestToolEventProgress:
         session.add_message("user", "Run this in the background")
         session.metadata.update({"webui": True, "title": "Existing title"})
         loop.sessions.save(session)
+        save_completed_subagent(loop, "sub-1", session_key)
         dispatch = asyncio.create_task(run_session(loop, InboundMessage(
             channel="system",
             sender_id="subagent",
@@ -864,7 +882,7 @@ class TestToolEventProgress:
             },
         )))
 
-        await asyncio.wait_for(first_request_started.wait(), timeout=1)
+        await asyncio.wait_for(first_request_started.wait(), timeout=5)
         await loop._pending_queues[session_key].put(InboundMessage(
             channel="websocket",
             sender_id="user",
@@ -873,7 +891,8 @@ class TestToolEventProgress:
             session_key_override=session_key,
         ))
         release_first_request.set()
-        await asyncio.wait_for(dispatch, timeout=2)
+        # Events synchronize injection; the deadline only guards against a stuck worker.
+        await asyncio.wait_for(dispatch, timeout=5)
 
         outbound = []
         while bus.outbound_size > 0:
@@ -1159,17 +1178,18 @@ class TestToolEventProgress:
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
+        # The blocked title call proves ordering; allow Windows CI time for turn I/O.
         await asyncio.wait_for(run_session(loop, InboundMessage(
             channel="websocket",
             sender_id="u1",
             chat_id="chat1",
             content="say hello",
             metadata={"webui": True},
-        )), timeout=0.5)
+        )), timeout=5.0)
 
         outbound: list = []
         for _ in range(12):
-            outbound.append(await asyncio.wait_for(bus.consume_outbound(), timeout=0.5))
+            outbound.append(await asyncio.wait_for(bus.consume_outbound(), timeout=5.0))
             if isinstance(outbound[-1].event, TurnEndEvent):
                 break
         else:
@@ -1179,11 +1199,11 @@ class TestToolEventProgress:
         assert len(done_with_body) == 1
         assert isinstance(outbound[-1].event, TurnEndEvent)
 
-        await asyncio.wait_for(title_started.wait(), timeout=0.5)
+        await asyncio.wait_for(title_started.wait(), timeout=5.0)
         release_title.set()
         session_updated = None
         for _ in range(10):
-            candidate = await asyncio.wait_for(bus.consume_outbound(), timeout=0.5)
+            candidate = await asyncio.wait_for(bus.consume_outbound(), timeout=5.0)
             if isinstance(candidate.event, SessionUpdatedEvent):
                 session_updated = candidate
                 break

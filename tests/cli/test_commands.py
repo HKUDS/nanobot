@@ -14,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -44,6 +45,13 @@ from nanobot.webui.metadata import (
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def mock_webui_bundle(monkeypatch) -> MagicMock:
+    prepare_bundle = MagicMock()
+    monkeypatch.setattr(cli_webui, "_prepare_webui_bundle_for_gateway", prepare_bundle)
+    return prepare_bundle
+
+
 def _without_rendered_line_breaks(output: str) -> str:
     return "".join(output.splitlines())
 
@@ -71,7 +79,7 @@ def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
 
 def _fake_provider():
     """Return a minimal fake provider that satisfies AgentLoop.__init__."""
-    p = MagicMock()
+    p = MagicMock(aclose=AsyncMock())
     p.generation.max_tokens = 4096
     return p
 
@@ -84,6 +92,10 @@ class _GatewayAgentContractStub:
     """Minimal stable AgentLoop surface required by gateway assembly tests."""
 
     tools = ToolRegistry()
+    subagents = MagicMock(spec=SubagentManager)
+
+    async def discard_session(self, _session_key: str) -> None:
+        pass
 
     @staticmethod
     def mcp_runtime_status() -> dict[str, str]:
@@ -583,6 +595,22 @@ def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkey
     assert "Logged out from OpenAI Codex" in result.stdout
 
 
+def test_provider_logout_github_copilot_removes_local_oauth_files(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "github-copilot.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert not lock_path.exists()
+    assert "Logged out from GitHub Copilot" in result.stdout
+
+
 def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
     token_path = tmp_path / "auth" / "codex.json"
     monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
@@ -632,22 +660,6 @@ def test_provider_logout_xai_grok_uses_explicit_config_path(tmp_path, monkeypatc
     assert default_token.exists()
     assert not selected_token.exists()
     assert "Using config:" in result.stdout
-
-
-def test_provider_logout_github_copilot_removes_local_oauth_files(tmp_path, monkeypatch):
-    token_path = tmp_path / "auth" / "github-copilot.json"
-    lock_path = token_path.with_suffix(".lock")
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text("{}", encoding="utf-8")
-    lock_path.write_text("", encoding="utf-8")
-    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
-
-    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
-
-    assert result.exit_code == 0
-    assert not token_path.exists()
-    assert not lock_path.exists()
-    assert "Logged out from GitHub Copilot" in result.stdout
 
 
 def test_provider_logout_github_copilot_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
@@ -1000,48 +1012,43 @@ def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
     assert config.get_api_base() == "https://ark.cn-beijing.volces.com/api/coding/v3"
 
 
-def test_config_accepts_lm_studio_without_api_key_and_uses_default_localhost_api_base():
+@pytest.mark.parametrize(
+    "provider_name, api_base, config_key",
+    [
+        pytest.param(
+            "lm_studio",
+            "http://localhost:1234/v1",
+            "lmStudio",
+            id="lm_studio_without_api_key_and_uses_default_localhost_api_base",
+        ),
+        pytest.param(
+            "atomic_chat",
+            "http://localhost:1337/v1",
+            "atomicChat",
+            id="atomic_chat_without_api_key_and_uses_default_localhost_api_base",
+        ),
+    ],
+)
+def test_local_provider_defaults_without_api_key(provider_name, api_base, config_key):
     config = Config.model_validate(
         {
             "agents": {
                 "defaults": {
-                    "provider": "lm_studio",
+                    "provider": provider_name,
                     "model": "local-model",
                 }
             },
             "providers": {
-                "lmStudio": {
+                config_key: {
                     "apiKey": None,
                 }
             },
         }
     )
 
-    assert config.get_provider_name() == "lm_studio"
+    assert config.get_provider_name() == provider_name
     assert config.get_api_key() is None
-    assert config.get_api_base() == "http://localhost:1234/v1"
-
-
-def test_config_accepts_atomic_chat_without_api_key_and_uses_default_localhost_api_base():
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "atomic_chat",
-                    "model": "local-model",
-                }
-            },
-            "providers": {
-                "atomicChat": {
-                    "apiKey": None,
-                }
-            },
-        }
-    )
-
-    assert config.get_provider_name() == "atomic_chat"
-    assert config.get_api_key() is None
-    assert config.get_api_base() == "http://localhost:1337/v1"
+    assert config.get_api_base() == api_base
 
 
 def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
@@ -1441,44 +1448,28 @@ def test_make_provider_strips_dynamic_custom_route_prefix_from_request_model():
     assert body["model"] == "gpt-4o-mini"
 
 
-def test_make_provider_preserves_namespaced_model_for_forced_dynamic_provider():
+@pytest.mark.parametrize(
+    "provider_name, model",
+    [
+        pytest.param(
+            "my-company-api",
+            "openai/gpt-4o-mini",
+            id="preserves_namespaced_model_for_forced_dynamic_provider",
+        ),
+        pytest.param(
+            "auto",
+            "my-company-api/openai/gpt-4o-mini",
+            id="strips_dynamic_custom_route_prefix_once",
+        ),
+    ],
+)
+def test_make_provider_preserves_dynamic_provider_model_namespace(provider_name, model):
     config = Config.model_validate(
         {
             "agents": {
                 "defaults": {
-                    "provider": "my-company-api",
-                    "model": "openai/gpt-4o-mini",
-                }
-            },
-            "providers": {
-                "my-company-api": {
-                    "apiBase": "https://example.com/v1",
-                }
-            },
-        }
-    )
-
-    provider = make_provider(config)
-    kwargs = provider._build_kwargs(
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        model=None,
-        max_tokens=16,
-        temperature=0.1,
-        reasoning_effort=None,
-        tool_choice=None,
-    )
-
-    assert kwargs["model"] == "openai/gpt-4o-mini"
-
-
-def test_make_provider_strips_dynamic_custom_route_prefix_once():
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "auto",
-                    "model": "my-company-api/openai/gpt-4o-mini",
+                    "provider": provider_name,
+                    "model": model,
                 }
             },
             "providers": {
@@ -2218,6 +2209,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     )
 
     assert result.exit_code == 0, result.output
+    assert result.stdout.count("Using config:") == 1
     data = json.loads(config_file.read_text(encoding="utf-8"))
     websocket = data["channels"]["websocket"]
     assert websocket["enabled"] is True
@@ -2238,6 +2230,30 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert "ssh -N -L 8899:127.0.0.1:8899 <user>@<server>" in compact_output
     assert seen["lease_release_wait_for_stop"] is False
     assert "stop_timeout" not in seen
+
+
+@pytest.mark.parametrize("explicit_config", [True, False])
+def test_webui_announces_existing_config_once(monkeypatch, tmp_path: Path, explicit_config: bool) -> None:
+    from nanobot.config import loader
+
+    config_file = tmp_path / "instance" / "config.json"
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    loader.save_config(config, config_file)
+    default_config = tmp_path / "default" / "config.json" if explicit_config else config_file
+    monkeypatch.setattr(loader, "_current_config_path", default_config)
+    _patch_webui_provider_ready(monkeypatch)
+    _patch_gateway_ports_free(monkeypatch)
+    _patch_webui_managed_gateway(monkeypatch)
+
+    args = ["webui", "--yes", "--no-open"]
+    if explicit_config:
+        args.extend(["--config", str(config_file)])
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.count("Using config:") == 1
+    assert f"Using config: {config_file}" in _without_rendered_line_breaks(result.stdout)
 
 
 def test_webui_background_points_to_the_single_persistent_gateway_command(
@@ -2852,7 +2868,9 @@ def test_attach_to_background_gateway_checks_owned_sidecar(tmp_path: Path) -> No
         )
 
 
-def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path: Path) -> None:
+def test_webui_foreground_does_not_claim_unmanaged_gateway(
+    monkeypatch, tmp_path: Path, mock_webui_bundle: MagicMock,
+) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
     _patch_webui_provider_ready(monkeypatch)
@@ -2878,6 +2896,8 @@ def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path
 
     assert result.exit_code == 0
     assert "controlled by another foreground command" in result.stdout
+    mock_webui_bundle.assert_called_once()
+    assert mock_webui_bundle.call_args.kwargs == {"mode": "auto"}
 
 
 def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Path) -> None:
@@ -2993,6 +3013,24 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
     assert isinstance(result.exception, _StopGatewayError)
     assert seen["config_path"] == config_file.resolve()
     assert seen["workspace"] == Path(config.agents.defaults.workspace)
+
+
+def test_gateway_starts_tokenizer_warmup_before_provider_setup(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    events = []
+
+    def stop_provider(_config):
+        events.append("provider")
+        raise _StopGatewayError("stop")
+
+    _patch_cli_command_runtime(monkeypatch, config, make_provider=stop_provider)
+    monkeypatch.setattr(cli_gateway_runtime, "warmup_token_encoding", lambda: events.append("warmup"))
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    assert events == ["warmup", "provider"]
 
 
 def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) -> None:
@@ -3478,7 +3516,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         enabled_channels: list[str] = []
 
         def __init__(self, *_args, **_kwargs) -> None:
-            return None
+            seen["webui_subagent_manager"] = _kwargs["webui_subagent_manager"]
+            seen["webui_discard_session"] = _kwargs["webui_discard_session"]
 
         def get_channel(self, name: str) -> object | None:
             return object() if name == "websocket" else None
@@ -3509,6 +3548,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     agent = seen["agent"]
     agent_kwargs = seen["agent_from_config_kwargs"]
     kwargs = seen["local_trigger_queue_kwargs"]
+    assert seen["webui_subagent_manager"] is agent.subagents
+    assert seen["webui_discard_session"] == agent.discard_session
     assert isinstance(agent_kwargs["provider"], UnconfiguredProvider) is bool(setup_error)
     refreshed_snapshot = agent_kwargs["provider_snapshot_loader"]()
     assert not isinstance(refreshed_snapshot.provider, UnconfiguredProvider)

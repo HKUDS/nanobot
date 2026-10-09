@@ -383,6 +383,29 @@ class TestConvertTools:
         assert result[0]["description"] == "Get weather"
         assert "properties" in result[0]["parameters"]
 
+    @pytest.mark.parametrize("wrapped", [False, True])
+    @pytest.mark.parametrize("strict", [None, False, True])
+    def test_preserves_strict_and_optional_parameters(self, wrapped, strict):
+        parameters = {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "customView": {"type": "string", "minLength": 1},
+            },
+            "required": [],
+        }
+        function = {"name": "list_issues", "parameters": parameters}
+        if strict is not None:
+            function["strict"] = strict
+        tool = {"type": "function", "function": function} if wrapped else function
+
+        result = convert_tools([tool])[0]
+
+        assert result["strict"] is (strict if strict is not None else False)
+        assert result["parameters"] == parameters
+        assert parameters["required"] == []
+        assert ("strict" in function) is (strict is not None)
+
     def test_tool_without_name_skipped(self):
         tools = [{"type": "function", "function": {"parameters": {}}}]
         assert convert_tools(tools) == []
@@ -1660,7 +1683,7 @@ class TestConsumeSdkStream:
                 "call_id": "ws_1",
                 "name": "web_search",
                 "arguments": {
-                    "query": "nanobot DeepSeek · nanobot latest release",
+                    "query": "nanobot DeepSeek\nnanobot latest release",
                 },
                 "result": {
                     "status": "completed",

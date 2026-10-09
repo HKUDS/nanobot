@@ -21,7 +21,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 @pytest.fixture
 async def loop(tmp_path):
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = True
@@ -71,6 +71,8 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert started.phase == "started"
     assert completed.phase == "succeeded"
     assert started.compaction_id == completed.compaction_id
+    assert started.notify is True
+    assert completed.notify is True
 
     loop.sessions.invalidate("cli:test")
     reloaded = loop.sessions.get_or_create("cli:test")
@@ -363,6 +365,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
 
 @pytest.mark.asyncio
 async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
+    loop.provider.estimate_prompt_tokens.return_value = (100, "test")
     key = "cli:test"
     session = loop.sessions.get_or_create(key)
     session.add_message("user", "large tool turn")

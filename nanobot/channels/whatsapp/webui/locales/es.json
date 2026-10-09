@@ -9,7 +9,7 @@
         "placeholder": "Números o ID de WhatsApp"
       },
       "groupPolicy": {
-        "label": "Comportamiento en grupos",
+        "label": "Reglas de grupo",
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",

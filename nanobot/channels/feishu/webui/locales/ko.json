@@ -20,7 +20,7 @@
         }
       },
       "groupPolicy": {
-        "label": "그룹 동작",
+        "label": "그룹 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
@@ -28,14 +28,14 @@
         }
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
       },
       "topicIsolation": {
-        "label": "주제별 대화 분리",
+        "label": "주제별 세션",
         "choices": {
-          "true": "주제별로 세션 분리",
-          "false": "그룹에서 하나의 세션 공유"
+          "true": "개별 세션",
+          "false": "공유 세션"
         }
       },
       "name": {
@@ -54,7 +54,7 @@
         "label": "이모티콘 완료"
       },
       "toolHintPrefix": {
-        "label": "도구 힌트 접두사"
+        "label": "힌트 접두사"
       },
       "replyToMessage": {
         "label": "메시지에 답장하기",

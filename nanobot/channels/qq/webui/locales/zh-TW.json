@@ -12,7 +12,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "允許的使用者",
+        "label": "允許使用者",
         "placeholder": "Open ID，以逗號分隔"
       },
       "msgFormat": {
@@ -23,19 +23,19 @@
         }
       },
       "ackMessage": {
-        "label": "處理中提示"
+        "label": "處理提示"
       },
       "mediaDir": {
         "label": "媒體目錄"
       },
       "downloadChunkSize": {
-        "label": "下載分塊大小"
+        "label": "分塊大小（位元組）"
       },
       "downloadMaxBytes": {
-        "label": "下載大小上限"
+        "label": "下載上限（位元組）"
       },
       "showCompactionNotices": {
-        "label": "上下文壓縮通知",
+        "label": "壓縮通知",
         "choices": {
           "true": "開",
           "false": "關"

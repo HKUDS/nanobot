@@ -8,6 +8,7 @@ from nanobot.providers.base import (
     GenerationSettings,
     LLMResponse,
     ProviderConversationState,
+    ToolCallRequest,
 )
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
@@ -87,6 +88,114 @@ async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> No
         "continue the task",
         "done",
     ]
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_runner_pressure_summarizes_without_persisting(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path, estimated_tokens=100, context_window_tokens=1_624, max_tokens=100,
+    )
+    loop.provider.can_resume_conversation_state.return_value = False
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:ephemeral")
+    session.messages = [
+        {"role": role, "content": f"old-{role}-{turn}"}
+        for turn in range(6)
+        for role in ("user", "assistant")
+    ]
+    original_messages = [dict(message) for message in session.messages]
+    loop.sessions.save(session)
+
+    def estimate(messages, _tools, _model):
+        contents = [str(message.get("content")) for message in messages]
+        if contents and "SNIP" in contents[-1]:
+            return 300, "test-counter"
+        if any(content.startswith("old-") for content in contents):
+            return 600, "test-counter"
+        return 100, "test-counter"
+
+    loop.provider.estimate_prompt_tokens.side_effect = estimate
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="Transient checkpoint.", tool_calls=[]),
+        LLMResponse(content="done", tool_calls=[]),
+    ])
+
+    result = await loop.process_direct(
+        "continue the task",
+        session_key="cli:ephemeral",
+        ephemeral=True,
+    )
+
+    assert result.content == "done"
+    assert loop.provider.chat_stream_with_retry.await_count == 2
+    model_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
+    assert "Transient checkpoint." in model_request[0]["content"]
+    assert model_request[1]["content"] == "continue the task"
+
+    reloaded = loop.sessions.get_or_create("cli:ephemeral")
+    assert reloaded.messages[: len(original_messages)] == original_messages
+    assert all(
+        "Transient checkpoint." not in str(message.get("content"))
+        for message in reloaded.messages
+    )
+    assert "_last_summary" not in reloaded.metadata
+    assert loop.context.memory.read_unprocessed_history(since_cursor=0) == []
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_tool_loop_pressure_summarizes_before_next_model_call(
+    tmp_path,
+) -> None:
+    loop = _make_loop(
+        tmp_path, estimated_tokens=100, context_window_tokens=1_624, max_tokens=100,
+    )
+    loop.provider.can_resume_conversation_state.return_value = False
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    loop.tools.execute = AsyncMock(return_value="large-result")
+
+    def estimate(messages, _tools, _model):
+        contents = [str(message.get("content")) for message in messages]
+        if contents and "SNIP" in contents[-1]:
+            return 300, "test-counter"
+        if sum(message.get("role") == "tool" for message in messages) >= 2:
+            return 600, "test-counter"
+        return 100, "test-counter"
+
+    normal_calls = 0
+
+    async def respond(*, messages, **_kwargs):
+        nonlocal normal_calls
+        contents = [str(message.get("content")) for message in messages]
+        if contents and "SNIP" in contents[-1]:
+            return LLMResponse(content="Tool-loop checkpoint.", tool_calls=[])
+        normal_calls += 1
+        if normal_calls <= 2:
+            return LLMResponse(
+                content="checking",
+                tool_calls=[ToolCallRequest(
+                    id=f"call-{normal_calls}",
+                    name="list_dir",
+                    arguments={"path": "."},
+                )],
+            )
+        return LLMResponse(content="done", tool_calls=[])
+
+    loop.provider.estimate_prompt_tokens.side_effect = estimate
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+
+    result = await loop.process_direct(
+        "inspect the workspace",
+        session_key="cli:ephemeral-tool-loop",
+        ephemeral=True,
+    )
+
+    assert result.content == "done"
+    assert loop.provider.chat_stream_with_retry.await_count == 4
+    model_request = loop.provider.chat_stream_with_retry.await_args_list[3].kwargs["messages"]
+    assert "Tool-loop checkpoint." in model_request[0]["content"]
+    assert sum(message.get("role") == "tool" for message in model_request) == 1
+    assert loop.context.memory.read_unprocessed_history(since_cursor=0) == []
 
 
 @pytest.mark.asyncio

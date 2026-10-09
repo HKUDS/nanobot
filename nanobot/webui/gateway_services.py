@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger as default_logger
 
+from nanobot.channels.websocket.attachment_http import AttachmentHTTP
+from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
+from nanobot.config.paths import get_media_dir
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -22,6 +25,7 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
 
 if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
@@ -38,6 +42,7 @@ class GatewayServices:
     settings: WebUISettingsServices
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
+    uploads: AttachmentHTTP
     ingress: WebUIIngressPolicy
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
@@ -74,6 +79,8 @@ def build_gateway_services(
     mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     skill_state_action: Callable[[set[str]], None] | None = None,
     recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
+    subagent_manager: SubagentManager | None = None,
+    discard_session: Callable[[str], Awaitable[None]] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     settings = WebUISettingsServices.create(
@@ -98,8 +105,10 @@ def build_gateway_services(
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
-        attachment_limits=ingress.attachments,
     )
+    uploads = AttachmentHTTP(AttachmentStore(
+        get_media_dir("websocket"), limits=ingress.attachments,
+    ))
     transcripts = WebUITranscriptRecorder(log=logger)
     workspaces = WebUIWorkspaceController(
         session_manager=session_manager,
@@ -112,7 +121,7 @@ def build_gateway_services(
         workspaces=workspaces,
         logger=logger,
     )
-    session_projection = WebUISessionProjection(session_manager, log=logger)
+    session_projection = WebUISessionProjection(session_manager, subagent_manager=subagent_manager, log=logger)
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
@@ -138,6 +147,8 @@ def build_gateway_services(
         mcp_reload=mcp_reload,
         skill_state_action=skill_state_action,
         recovery_action=recovery_action,
+        subagent_manager=subagent_manager,
+        discard_session=discard_session,
         log=logger,
     )
     endpoint = WebUIGatewayEndpoint(config=config, http=http, tokens=tokens)
@@ -147,6 +158,7 @@ def build_gateway_services(
         settings=settings,
         tokens=tokens,
         media=media,
+        uploads=uploads,
         ingress=ingress,
         transcripts=transcripts,
         workspaces=workspaces,

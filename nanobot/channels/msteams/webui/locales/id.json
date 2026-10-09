@@ -8,7 +8,7 @@
         "placeholder": "Microsoft App ID"
       },
       "appPassword": {
-        "label": "Client secret",
+        "label": "Secret klien",
         "placeholder": "••••••"
       },
       "tenantId": {
@@ -20,7 +20,7 @@
         "placeholder": "/api/messages"
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "ID pengguna Teams, dipisahkan koma"
       },
       "host": {
@@ -30,44 +30,44 @@
         "label": "Dengarkan pelabuhan"
       },
       "replyInThread": {
-        "label": "Balas di thread",
+        "label": "Balasan thread",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "mentionOnlyResponse": {
-        "label": "Balasan yang hanya disebutkan saja"
+        "label": "Balasan mention saja"
       },
       "validateInboundAuth": {
-        "label": "Validasi permintaan masuk",
+        "label": "Verifikasi permintaan",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "refTtlDays": {
-        "label": "Percakapan seumur hidup"
+        "label": "Masa referensi (hari)"
       },
       "pruneWebChatRefs": {
-        "label": "Hapus percakapan Obrolan Web",
+        "label": "Hapus referensi Web Chat",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "Hapus percakapan non-pribadi",
+        "label": "Hapus referensi grup",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "refTouchIntervalS": {
-        "label": "Interval penyegaran percakapan"
+        "label": "Interval penyegaran (detik)"
       },
       "trustedServiceUrlHosts": {
-        "label": "Host layanan tepercaya"
+        "label": "Host tepercaya"
       }
     }
   }

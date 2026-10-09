@@ -33,7 +33,7 @@ def test_tui_source_archive_preserves_shared_module_import_path():
     spec.loader.exec_module(module)
     with tarfile.open(fileobj=io.BytesIO(module._source_archive(ROOT / "tui"))) as archive:
         names = set(archive.getnames())
-        assert "nanobot-tui-source/tui/src/protocol.ts" in names
+        assert "nanobot-tui-source/tui/src/client/validation.ts" in names
         assert "nanobot-tui-source/packages/client-events/notifications.ts" in names
         assert "nanobot-tui-source/tui/bun.lock" in names
         assert "nanobot-tui-source/LICENSE" in names

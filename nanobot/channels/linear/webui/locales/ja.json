@@ -4,19 +4,19 @@
   "setup": {
     "docsLabel": "Linear セットアップガイドを開く",
     "officialLabel": "Linear OAuth アプリを作成",
-    "tryIt": "issue のコメントでアプリをメンションしてください。Agent Session 内の続きのメッセージでは、再度メンションする必要はありません。",
-    "summary": "非公開の Linear OAuth アプリを作成し、認証情報と公開 URL を保存してからワークスペースを認証します。新しいセッションの開始には明示的な @メンションが必要で、通常のコメントは無視されます。",
+    "tryIt": "アプリをメンションするか issue を委任してください。Agent Session 内では再度メンションする必要はありません。",
+    "summary": "非公開の Linear OAuth アプリを作成し、認証情報と公開 URL を保存してからワークスペースを認証します。メンションまたは issue の委任でセッションを開始でき、通常のコメントは無視されます。",
     "steps": [
       "この nanobot インスタンスを安定した HTTPS URL で公開します（トンネルも利用できます）。",
-      "Linear で read、write、app:mentionable スコープを持つ非公開 OAuth アプリを作成します。app:assignable は追加しないでください。",
+      "Linear で read、write、app:mentionable、app:assignable スコープを持つ非公開 OAuth アプリを作成します。",
       "生成された URL を使い、アプリの webhook を AgentSessionEvent、PermissionChange、OAuthAuthorization に登録します。",
-      "アプリの認証情報を入力し、自動保存の完了後に OAuth でワークスペースを接続して、issue でアプリを @メンションします。"
+      "OAuth でワークスペースを接続し、アプリをメンションするか issue を委任します。"
     ],
     "fields": {
       "clientId": {
         "label": "OAuth クライアント ID",
         "placeholder": "Linear OAuth クライアント ID",
-        "help": "Linear の非公開 OAuth アプリからコピーします。"
+        "help": "非公開の OAuth アプリからコピーします。\n\nLinear の非公開 OAuth アプリからコピーします。"
       },
       "clientSecret": {
         "label": "OAuth クライアントシークレット",
@@ -26,12 +26,12 @@
       "webhookSigningSecret": {
         "label": "Webhook 署名シークレット",
         "placeholder": "••••••",
-        "help": "Webhook の本文を解析する前に Linear-Signature を検証するために使います。"
+        "help": "Webhook の署名を検証します。\n\nWebhook の本文を解析する前に Linear-Signature を検証するために使います。"
       },
       "publicBaseUrl": {
         "label": "公開 HTTPS URL",
         "placeholder": "https://nanobot.example.com",
-        "help": "下のリスナーへ転送される安定した HTTPS オリジンを指定します。パスは含めないでください。"
+        "help": "パスを含まない HTTPS URL を入力します。\n\n下のリスナーへ転送される安定した HTTPS オリジンを指定します。パスは含めないでください。"
       },
       "host": {
         "label": "リッスンホスト",
@@ -52,25 +52,86 @@
       "allowFrom": {
         "label": "許可する Linear ユーザー",
         "placeholder": "Linear ユーザー ID（カンマ区切り）",
-        "help": "nanobot のペアリングを使う場合は空欄にします。接続済みワークスペースの全ユーザーを許可する場合のみ * を指定してください。"
+        "help": "この接続を使えるユーザーを選びます。\n\nnanobot のペアリングを使う場合は空欄にします。接続済みワークスペースの全ユーザーを許可する場合のみ * を指定してください。"
+      },
+      "showReasoning": {
+        "label": "推論を表示",
+        "help": "推論を思考の活動として公開します。\n\nモデルの推論を Linear の思考アクティビティとして投稿します。静かなセッションにするにはオフにします。"
       }
     }
   },
   "custom": {
-    "qrAlt": "Linear 認証 QR コード",
+    "secretSaved": "保存済み",
+    "replaceSecret": "変更",
+    "replaceSecretLabel": "{{name}}を変更",
+    "enterSecret": "シークレットを入力",
+    "secretSaveFailed": "保存を確認できませんでした。再試行するかキャンセルしてください。",
     "authorizeTitle": "Linear で認証",
-    "authorizeDescription": "このブラウザで Linear を開くか、QR コードを読み取ってください。認証後、nanobot がチャンネルを有効にします。",
+    "authorizeDescription": "Linear で承認してから、ここに戻ります。\n\nLinear でワークスペースを選び、nanobot を認証してください。完了したらここに戻ってください。",
     "waiting": "Linear の認証を待っています...",
     "connected": "Linear に接続しました。",
     "stopped": "認証を中止しました。",
     "connecting": "接続しています...",
-    "reconnect": "別のワークスペースを接続",
     "connect": "Linear に接続",
     "openLinear": "Linear で続行",
-    "createApp": "入力済みの Linear アプリを作成",
-    "savePublicUrl": "公開 HTTPS URL を入力すると、入力済みの Linear アプリを作成できます。",
-    "saveBeforeConnect": "アプリの認証情報を入力し、自動保存が完了してから接続してください。",
-    "removeCredentials": "保存済みの認証情報を削除",
-    "retrySave": "再試行"
+    "createApp": "Linear アプリを作成",
+    "savePublicUrl": "公開 HTTPS URL を入力してから Linear アプリを作成してください。",
+    "retrySave": "再試行",
+    "channelRunning": "チャンネル実行中",
+    "accessAll": "認証済みワークスペースの全メンバーがこのエージェントを実行できます。",
+    "accessRestricted": "詳細設定に記載された Linear ユーザー ID のみがこのエージェントを実行できます。",
+    "accessPairing": "初回にペアリングし、Linear MCP に接続すると issue を検索・編集できます。",
+    "configureTools": "Linear MCP を設定",
+    "workspacesTitle": "認証済みワークスペース",
+    "refreshWorkspaces": "ワークスペースを更新",
+    "loadingWorkspaces": "ワークスペースを読み込み中",
+    "noWorkspaces": "認証済みワークスペースがありません。Linear エージェントのリクエストを受け取るには接続してください。",
+    "refreshRequired": "認証の更新が必要です",
+    "missingScopes": "再接続して権限を付与: {{scopes}}",
+    "authorized": "認証済み",
+    "confirmDisconnect": "ワークスペースを削除",
+    "disconnect": "ワークスペースを削除",
+    "workspaceActions": "{{name}} を管理",
+    "reauthorize": "再認可",
+    "disconnectTitle": "{{name}} を削除しますか？",
+    "disconnectDescription": "ワークスペースの承認を解除し、履歴は残します。\n\nこのワークスペースの認可と nanobot のメンバーアクセス設定を削除します。Issue、コメント、nanobot の会話履歴は保持されます。他のワークスペースには影響しません。後で再認可できます。",
+    "disconnectLast": "接続済みの最後のワークスペースのため、Linear チャンネルも無効になります。",
+    "disconnecting": "削除中…",
+    "addWorkspace": "ワークスペースを接続",
+    "addWorkspaceDetails": "ワークスペース接続について",
+    "addWorkspaceHelp": "現在の Linear アプリを使います。別のワークスペースに接続するには、他のワークスペースへのインストールを許可する必要があります。非公開アプリは所属先のみ接続できます。既存のワークスペースを選ぶと、重複せず認可が更新されます。",
+    "resetConnection": "Linear 接続をリセット",
+    "resetTitle": "Linear をリセット？",
+    "resetDescription": "このアプリの全ワークスペースを切断し、チャンネルを停止します。",
+    "resetClears": "削除",
+    "resetClearsDetail": "メンバーのアクセス設定と、このインスタンスのアプリ設定（保存済み認証情報を含む）。",
+    "resetKeeps": "保持",
+    "resetKeepsDetail": "Linear アプリ、Issue、コメント、会話履歴、承認済みペアリング。",
+    "resetConfirm": "リセット",
+    "resetting": "リセット中…",
+    "resetIncomplete": "リセットは未完了です。削除済みの接続は復元されません。再試行して残りの手順を完了してください。",
+    "resetInspectFailed": "接続済みワークスペースを確認できません。アプリ設定は保持されました。",
+    "resetChanged": "別のワークスペースが接続されました。確認して再試行してください。",
+    "resetStopFailed": "Linear チャネルを停止できません。アプリ設定は保持されました。",
+    "resetSaveFailed": "アプリ設定を消去できません。再試行してください。"
+  },
+  "members": {
+    "title": "メンバーのアクセス",
+    "help": "メンバーはペアリングコードなしで nanobot を利用できます。Linear の既存の認可範囲は変わらず、nanobot の管理画面へのアクセス権は付与されません。無効にすると新しいリクエストは拒否されますが、実行中のタスクは中断されません。",
+    "allowAll": "詳細設定では新規メンバーを含む全員（*）が許可されています。個別のオフ設定が優先されます。新規メンバーに承認を必須とするには * を削除してください。",
+    "search": "メンバーを検索",
+    "refresh": "メンバーを更新",
+    "working": "保存中…",
+    "saved": "保存済み",
+    "retry": "メンバーを更新して現在の状態を確認し、再試行してください。",
+    "empty": "一致する有効なメンバーがいません。",
+    "allow": "{{name}} に nanobot の利用を許可",
+    "saveUnconfirmed": "保存を確認できませんでした。メンバーを更新してから再試行してください。",
+    "guide": "「メンバーのアクセス」でコードなしで同僚を承認できます。既存の承認はオフにしない限り有効です。Issue の検索・編集には Linear MCP を接続してください。",
+    "intro": "Linear で nanobot を使えるメンバーを選びます。ペアリングコードは不要です。",
+    "details": "メンバーのアクセスについて",
+    "summary": "{{allowed}} 人が利用可能",
+    "loading": "メンバーを検索中…",
+    "refreshing": "更新を確認中…"
   }
 }

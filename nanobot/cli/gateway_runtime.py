@@ -36,9 +36,14 @@ from nanobot.config.paths import is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayInstance
 from nanobot.security.network import is_loopback_host
-from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
+from nanobot.session.keys import (
+    HEARTBEAT_SESSION_KEY,
+    UNIFIED_SESSION_KEY,
+    last_channel_from_metadata,
+)
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.token_encoding import warmup_token_encoding
 from nanobot.webui.build import BuildMode
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
@@ -402,6 +407,7 @@ def _run_gateway(
         raise typer.Exit(1)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+    warmup_token_encoding()
     _prepare_webui_bundle_for_gateway(
         config,
         mode=webui_bundle_mode,
@@ -648,7 +654,7 @@ def _run_gateway(
                 await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
-                    session_key="heartbeat",
+                    session_key=HEARTBEAT_SESSION_KEY,
                     channel=channel,
                     chat_id=chat_id,
                     on_progress=_silent,
@@ -729,6 +735,8 @@ def _run_gateway(
         webui_mcp_reload=mcp_provider.reload,
         webui_skill_state_action=_webui_skill_state_action,
         webui_recovery_action=recovery.handle_action,
+        webui_subagent_manager=agent.subagents,
+        webui_discard_session=agent.discard_session,
         config_path=Path(config_path),
     )
 
@@ -1029,6 +1037,7 @@ def _run_gateway(
         gateway_runtime.foreground_instance(gateway_start_options),
         webui_turn_coordinator.connected(),
     ):
+        agent.subagents.recover_interrupted()
         if health_server_enabled:
             gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

@@ -8,13 +8,19 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Globe2 } from "lucide-react";
+import { decodeString } from "micromark-util-decode-string";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { Streamdown, type Components, type StreamdownProps } from "streamdown";
+import remend from "remend";
 
+import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
+
+import { DisplayMath } from "@/components/DisplayMath";
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
+import { WebLink } from "@/components/WebLink";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
@@ -31,6 +37,7 @@ import {
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferMediaKind } from "@/lib/media";
 import { browserSafeFaviconUrls } from "@/lib/provider-brand";
+import { remarkCjkAutolinks } from "@/lib/remark-cjk-autolinks";
 import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +48,7 @@ interface MarkdownTextRendererProps {
   className?: string;
   highlightCode?: boolean;
   streaming?: boolean;
+  preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
 }
 
@@ -48,6 +56,10 @@ type MarkdownAstNode = {
   type: string;
   value?: string;
   children?: MarkdownAstNode[];
+  position?: {
+    start: { offset: number };
+    end: { offset: number };
+  };
   data?: {
     hName?: string;
   };
@@ -239,48 +251,59 @@ function remarkSafeHtmlSubset() {
   };
 }
 
-// Recover a common model-output edge case that CommonMark leaves as literal
-// text: `**结论。**如果`, with no separator after the closing delimiter.
-const CJK_AFTER_STRONG =
-  /(?<!\\)\*\*([^*\r\n]+?)(?<!\\)\*\*(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/gu;
+// Model output can put CJK punctuation or whitespace before a closing `**`
+// followed immediately by a word, which CommonMark leaves as literal text.
+const STRONG_BEFORE_WORD = /(?<!\\)\*\*([^\s*][^*\r\n]*?)(?<!\\)\*\*(?=[\p{L}\p{N}])/gu;
+const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
-function normalizeCjkStrongBoundaries(node: MarkdownAstNode): void {
+function normalizeCjkStrongBoundaries(node: MarkdownAstNode, source: string): void {
   if (!node.children) return;
   node.children = node.children.flatMap((child) => {
-    if (child.type !== "text" || !child.value?.includes("**")) {
-      normalizeCjkStrongBoundaries(child);
+    if (child.type !== "text" || !child.value?.includes("**") || !child.position) {
+      normalizeCjkStrongBoundaries(child, source);
       return [child];
     }
 
+    // Match source delimiters before decoding escapes and character references.
+    // Paragraph continuation indentation is not part of the parsed text value.
+    const textSource = source.slice(child.position.start.offset, child.position.end.offset)
+      .replace(/(\r\n?|\n)[\t ]+/g, "$1");
+
     const replacement: MarkdownAstNode[] = [];
     let cursor = 0;
-    for (const match of child.value.matchAll(CJK_AFTER_STRONG)) {
+    for (const match of textSource.matchAll(STRONG_BEFORE_WORD)) {
       const start = match.index;
-      if (start > cursor) replacement.push(safeText(child.value.slice(cursor, start)));
+      const end = start + match[0].length;
+      const content = decodeString(match[1]);
+      if (!CJK_CHARACTER.test(content + textSource.slice(end, end + 1))) continue;
+      const label = content.trimEnd();
+      if (start > cursor) replacement.push(safeText(decodeString(textSource.slice(cursor, start))));
       replacement.push({
         type: "strong",
-        children: [safeText(match[1])],
+        children: [safeText(label)],
       });
-      cursor = start + match[0].length;
+      if (label.length < content.length) replacement.push(safeText(content.slice(label.length)));
+      cursor = end;
     }
     if (cursor === 0) return [child];
-    if (cursor < child.value.length) replacement.push(safeText(child.value.slice(cursor)));
+    if (cursor < textSource.length) replacement.push(safeText(decodeString(textSource.slice(cursor))));
     return replacement;
   });
 }
 
 function remarkCjkStrongBoundaries() {
-  return (tree: MarkdownAstNode) => {
-    normalizeCjkStrongBoundaries(tree);
+  return (tree: MarkdownAstNode, file: { toString(): string }) => {
+    normalizeCjkStrongBoundaries(tree, file.toString());
   };
 }
 
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
+  remarkCjkStrongBoundaries,
   remarkBreaks,
   remarkGfm,
+  remarkCjkAutolinks,
   [remarkMath, { singleDollarTextMath: false }],
   remarkTexMath,
-  remarkCjkStrongBoundaries,
   remarkSafeHtmlSubset,
 ];
 type MathPlugin = typeof import("@/lib/markdown-math").default;
@@ -451,7 +474,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
     : link.title;
 
   return (
-    <a
+    <WebLink
       href={link.href}
       target="_blank"
       rel="noreferrer noopener"
@@ -487,7 +510,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       <span className="min-w-0 [overflow-wrap:anywhere] leading-normal sm:truncate">
         {label}
       </span>
-    </a>
+    </WebLink>
   );
 }
 
@@ -529,6 +552,7 @@ export default function MarkdownTextRenderer({
   className,
   highlightCode = true,
   streaming = false,
+  preserveStreamingLayout = false,
   onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
@@ -672,7 +696,7 @@ export default function MarkdownTextRenderer({
           return <>{markdownChildren}</>;
         }
         return (
-          <a
+          <WebLink
             href={href}
             target="_blank"
             rel="noreferrer noopener"
@@ -680,8 +704,15 @@ export default function MarkdownTextRenderer({
             {...props}
           >
             {markdownChildren}
-          </a>
+          </WebLink>
         );
+      },
+      span({ children: spanChildren, className: spanClassName, node: _node, ...props }) {
+        void _node;
+        if (spanClassName?.split(" ").includes("katex-display")) {
+          return <DisplayMath>{spanChildren}</DisplayMath>;
+        }
+        return <span className={spanClassName} {...props}>{spanChildren}</span>;
       },
       // Streamdown decorates emphasis with spans by default. Preserve native
       // semantics for accessibility and predictable typography.
@@ -714,11 +745,13 @@ export default function MarkdownTextRenderer({
           >
             <table
               className={cn(
-                "w-full min-w-max border-collapse text-[13px] leading-5",
+                "w-full table-fixed border-collapse text-[13px] leading-5",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
-                "[&_th]:text-left [&_th]:font-medium",
+                "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
+                "[&_th]:[overflow-wrap:anywhere]",
                 "[&_td]:border-b [&_td]:border-border/55 [&_td]:px-3 [&_td]:py-2",
+                "[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]",
                 "[&_th:not(:last-child)]:border-r [&_th:not(:last-child)]:border-border/45",
                 "[&_td:not(:last-child)]:border-r [&_td:not(:last-child)]:border-border/45",
                 "[&_tbody_tr:last-child_td]:border-b-0",
@@ -823,9 +856,9 @@ export default function MarkdownTextRenderer({
   return (
     <Streamdown
       key={needsMath && mathPlugin ? "math" : "text"}
-      mode={streaming ? "streaming" : "static"}
-      parseIncompleteMarkdown
-      remend={REMEND_OPTIONS}
+      mode={streaming || preserveStreamingLayout ? "streaming" : "static"}
+      parseIncompleteMarkdown={false}
+      parseMarkdownIntoBlocksFn={parseMathAwareMarkdownBlocks}
       isAnimating={false}
       animated={false}
       linkSafety={DIRECT_LINKS}
@@ -848,7 +881,8 @@ export default function MarkdownTextRenderer({
         className,
       )}
     >
-      {children}
+      {/* Streamdown 2.5 ignores repair-option changes in its memo comparator. */}
+      {streaming ? remend(children, REMEND_OPTIONS) : children}
     </Streamdown>
   );
 }

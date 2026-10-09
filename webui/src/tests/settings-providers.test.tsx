@@ -52,13 +52,13 @@ describe("Settings providers", () => {
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     await user.type(screen.getByRole("combobox"), "does-not-exist");
     expect(screen.getByRole("status")).toHaveTextContent("No providers match this search.");
-    await user.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Custom", exact: true }));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     await user.type(screen.getByPlaceholderText("My model provider"), "Unsaved gateway");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     expect(screen.getByRole("combobox")).toHaveValue("");
-    await user.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Custom", exact: true }));
     expect(screen.getByPlaceholderText("My model provider")).toHaveValue("");
     expect(requestMutationMock).not.toHaveBeenCalled();
   });
@@ -73,8 +73,8 @@ describe("Settings providers", () => {
     const dialog = screen.getByRole("dialog", { name: "Add provider" });
     expect(dialog).toHaveClass("rounded-t-3xl", "bottom-0");
     expect(screen.getByRole("combobox")).not.toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
-    expect(screen.getByRole("dialog", { name: "Custom provider" })).toBe(dialog);
+    fireEvent.click(screen.getByRole("button", { name: "Custom", exact: true }));
+    expect(screen.getByRole("dialog", { name: "Custom" })).toBe(dialog);
   });
 
   it("adds a built-in provider only after saving and returns focus to Add", async () => {
@@ -105,7 +105,7 @@ describe("Settings providers", () => {
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     await user.click(custom
-      ? screen.getByRole("button", { name: "Custom provider", exact: true })
+      ? screen.getByRole("button", { name: "Custom", exact: true })
       : screen.getByRole("option", { name: "Moonshot" }));
     const dialog = screen.getByRole("dialog");
     if (custom) {
@@ -121,7 +121,7 @@ describe("Settings providers", () => {
     await user.click(within(dialog).getByRole("button", { name: "Back to providers" }));
     expect(screen.getByRole("dialog", { name: "Add provider" })).toBe(dialog);
     await user.click(custom
-      ? screen.getByRole("button", { name: "Custom provider", exact: true })
+      ? screen.getByRole("button", { name: "Custom", exact: true })
       : screen.getByRole("option", { name: "Moonshot" }));
     expect(screen.getByPlaceholderText("Enter API key")).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -501,7 +501,7 @@ describe("Settings providers", () => {
       ).toBeInTheDocument();
       expect(within(dialog).getByText("Paste the callback URL to continue.")).toBeInTheDocument();
       const callbackInput = within(dialog).getByRole("textbox", {
-        name: "Full callback URL",
+        name: "Callback URL",
       });
       expect(callbackInput).toHaveAttribute(
         "placeholder",
@@ -923,7 +923,7 @@ describe("Settings providers", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Add provider" }),
     );
-    const customOption = await screen.findByRole("button", { name: "Custom provider" });
+    const customOption = await screen.findByRole("button", { name: "Custom" });
     const openRouterOption = screen.getByRole("option", { name: "OpenRouter" });
     expect(customOption.querySelector("svg, img")).not.toBeNull();
     expect(openRouterOption.querySelector("svg, img")).not.toBeNull();
@@ -941,9 +941,9 @@ describe("Settings providers", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     for (const [title, value] of [
-      ["Extra headers", '{"X-Tenant":"engineering"}'],
-      ["Additional body parameters", '{"service_tier":"priority"}'],
-      ["Additional query parameters", '{"api-version":"2026-01-01"}'],
+      ["Headers", '{"X-Tenant":"engineering"}'],
+      ["Body parameters", '{"service_tier":"priority"}'],
+      ["Query parameters", '{"api-version":"2026-01-01"}'],
     ]) {
       fireEvent.click(screen.getByRole("button", { name: title }));
       const editor = screen.getByRole("dialog", { name: title });
@@ -954,7 +954,7 @@ describe("Settings providers", () => {
     fireEvent.change(screen.getByLabelText("Network proxy"), {
       target: { value: "http://127.0.0.1:7890" },
     });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Reasoning parameter format" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Reasoning format" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "enable_thinking" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 

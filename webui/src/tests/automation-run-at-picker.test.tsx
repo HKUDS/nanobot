@@ -91,7 +91,7 @@ describe("Automation run time picker", () => {
     render(<AutomationEditDialog job={job} saving={false} onSave={save} onOpenChange={onOpenChange} />);
     await user.click(screen.getByRole("button", { name: "Choose date" }));
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog", { name: "Edit automation" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Edit task" })).toBeVisible();
     expect(onOpenChange).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Choose date" }));
     await user.click(screen.getByRole("button", { name: dayName("2099-09-17") }));

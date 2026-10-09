@@ -183,9 +183,8 @@ function HeaderIconButton({
             size="icon"
             disabled={disabled}
             aria-label={label}
-            title={disabled ? disabledLabel : undefined}
             onClick={onClick}
-            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:text-foreground"
           >
             <Icon className="h-4 w-4" aria-hidden />
           </Button>
@@ -632,7 +631,7 @@ export function PaneWorkbench({
               aria-label={t("workbench.layout", {
                 defaultValue: "Pane layout",
               })}
-              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:text-foreground"
             >
               <currentLayout.icon className="h-4 w-4" aria-hidden />
             </Button>
@@ -688,7 +687,7 @@ export function PaneWorkbench({
       className={cn(
         "thread-workspace relative flex h-full min-h-0 flex-col overflow-hidden bg-background",
         chrome && displayedPanes.length > 1
-          && "[--thread-header-position:relative] [--thread-prompt-inset:1rem]",
+          && "[--thread-header-position:relative]",
       )}
     >
       <TooltipProvider>
@@ -700,7 +699,7 @@ export function PaneWorkbench({
             />
           </header>
         ) : null}
-        <div className="relative min-h-0 flex-1 bg-background">
+        <div className="workbench-body relative min-h-0 flex-1 bg-background">
           <div
             ref={gridRef}
             data-testid="pane-grid"
@@ -732,7 +731,9 @@ export function PaneWorkbench({
                 >
                   {renderPane(pane, {
                     active,
-                    headerPortalTarget: chrome ? headerPortalTarget : undefined,
+                    // A single conversation owns its header, alongside its preview tabs.
+                    // Multiple conversation panes still share the workbench toolbar.
+                    headerPortalTarget: chrome && displayedPanes.length > 1 ? headerPortalTarget : undefined,
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
                     headerActions,
                   })}
@@ -775,7 +776,7 @@ export function PaneWorkbench({
                       {active ? (
                         <TooltipContent side="top">
                           {t("workbench.movePaneHint", {
-                            defaultValue: "Drag to move · Arrow keys also work",
+                            defaultValue: "Drag to move, or use the arrow keys.",
                           })}
                         </TooltipContent>
                       ) : null}
@@ -835,7 +836,7 @@ export function PaneWorkbench({
         </div>
 
         {chrome ? (
-          <footer className="shrink-0 bg-background px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
+          <footer className="workbench-composer-footer shrink-0 bg-background px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
             <div
               ref={setComposerPortalTarget}
               data-testid="workbench-composer-host"

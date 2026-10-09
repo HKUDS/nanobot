@@ -261,6 +261,7 @@ class TestBuildResponsesBodyExtraBody:
                 "name": "read_file",
                 "description": "Read a file",
                 "parameters": {"type": "object"},
+                "strict": False,
             },
             {"type": "web_search"},
         ]
@@ -306,6 +307,7 @@ class TestBuildResponsesBodyExtraBody:
                 "name": "read_file",
                 "description": "Read a file",
                 "parameters": {"type": "object"},
+                "strict": False,
             },
             {"type": "web_search"},
         ]
@@ -369,6 +371,7 @@ class TestBuildResponsesBodyExtraBody:
             "name": "web_search",
             "description": "Search with nanobot's configured backend",
             "parameters": {"type": "object"},
+            "strict": False,
         }]
 
     def test_responses_extra_body_merges_include_without_duplicates(self) -> None:

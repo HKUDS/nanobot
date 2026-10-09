@@ -29,12 +29,14 @@ class AgentProgressHook(AgentHook):
         streaming: bool = False,
         session_key: str | None = None,
         tool_hint_max_length: int = 40,
+        log_content: bool = True,
     ) -> None:
         super().__init__(reraise=True)
         self._publish = events.publish
         self._streaming = streaming
         self._session_key = session_key
         self._tool_hint_max_length = tool_hint_max_length
+        self._log_content = log_content
         self._stream_buf = ""
         self._think_extractor = IncrementalThinkExtractor()
         self._reasoning_open = False
@@ -124,7 +126,8 @@ class AgentProgressHook(AgentHook):
             logger.info(
                 "Provider-hosted tool call: {}({})",
                 name,
-                json.dumps(arguments, ensure_ascii=False)[:200],
+                json.dumps(arguments, ensure_ascii=False)[:200]
+                if self._log_content else "[content hidden]",
             )
             return
         await self._publish(ProgressEvent(tool_events=[payload]))
@@ -141,8 +144,11 @@ class AgentProgressHook(AgentHook):
                 content=tool_hint or "", tool_hint=True, tool_events=tool_events,
             ))
         for tc in context.tool_calls:
-            args_str = json.dumps(tc.arguments, ensure_ascii=False)
-            logger.info("Tool call: {}({})", tc.name, args_str[:200])
+            args_str = (
+                json.dumps(tc.arguments, ensure_ascii=False)[:200]
+                if self._log_content else "[content hidden]"
+            )
+            logger.info("Tool call: {}({})", tc.name, args_str)
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         """Publish a reasoning chunk; channel plugins decide whether to render."""

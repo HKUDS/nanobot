@@ -204,9 +204,56 @@ Recognized fields: `content`, `text`, `message` (checked in that order). Invalid
 
 See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
 
+### Binary attachments (WebUI and TUI)
+
+The gateway advertises `webui.attachments.binary.v1`. WebUI protocol 1 and the
+terminal protocol are unchanged. Bundled clients and their gateway use HTTP on
+the same listener for attachment uploads. After an authorized handshake, `ready`
+includes an `upload` object with `path: "/api/attachments"` and an opaque `token`.
+This token is a short-lived capability tied to that live connection, not the
+one-time handshake token, API token, or client-selected `client_id`.
+
+1. `POST` the raw file bytes to the advertised path with `Authorization: Bearer
+   <upload token>`, the file's `Content-Type`, and an exact `Content-Length`.
+   `X-Attachment-Name` may contain a percent-encoded display filename.
+   Compressed request bodies and chunked transfer encoding are rejected.
+2. The response is `201 {"reference": "<opaque reference>"}`. Use it in a small
+   WebSocket envelope, for example:
+
+   ```json
+   {"type":"message","chat_id":"chat-id","content":"Inspect this","webui":true,"turn_id":"unique-turn-id","media":[{"reference":"opaque-reference","name":"report.pdf"}]}
+   ```
+
+3. Retain the draft and local preview until `message_accepted` confirms the turn.
+   A connection close before confirmation means delivery is uncertain, not that
+   the draft should be discarded. Reconnect obtains a new upload capability;
+   old uncommitted references cannot be used by the new connection. A repeated
+   accepted `(chat_id, turn_id)` is acknowledged without another dispatch within
+   the gateway's bounded ten-minute in-memory retry window.
+
+The upload path accepts the existing image, document, and video MIME whitelist.
+Existing file/count/total limits still apply independently of `maxMessageBytes`.
+Uploads time out after five minutes, or after 30 seconds without receiving more
+data. Uploads are not resumable, so a retry sends the whole file.
+
+Update WebUI and TUI together with the gateway. Existing messages and attachments
+remain available without a history migration. Clients must use HTTP uploads;
+`media.data_url` message uploads are no longer accepted. Local previews and the
+separate audio transcription protocol are unchanged.
+
+Reverse proxies must forward `POST /api/attachments` (including its authorization
+header) to the gateway and permit the configured file sizes. Do not enable public
+CORS for this capability endpoint.
+
+For a remote host opened through the local WebUI, update the local installation
+and the remote gateway together to use binary attachments. An older host's text
+chats and HTTP reads remain available.
+
 ## Configuration Reference
 
 All fields go under `channels.websocket` in `config.json`.
+Unrecognized options retain the existing behavior: they are ignored without
+preventing startup. Active options below remain validated.
 
 ### Connection
 
@@ -217,7 +264,7 @@ All fields go under `channels.websocket` in `config.json`.
 | `port` | int | `8765` | Listen port. |
 | `path` | string | `"/"` | WebSocket upgrade path. Trailing slashes are normalized (root `/` is preserved). |
 | `publicWsUrl` | string | `""` | Exact public `ws://` or `wss://` endpoint returned by `/webui/bootstrap`. Set this when a reverse proxy forwards requests with an origin `Host` header (for example, `wss://claw.example.com/`); its path must match `path`. |
-| `maxMessageBytes` | int | `37748736` | Maximum inbound message size in bytes (1 KB – 40 MB). Default (36 MB) is sized to accept up to 4 base64-encoded image attachments at 8 MB each; lower it if the channel only carries text. |
+| `maxMessageBytes` | int | `37748736` | Maximum inbound WebSocket frame size in bytes (1 KB – 40 MB). The existing 36 MB default is retained. HTTP binary attachments do not count toward this limit; a legacy 1 MB setting no longer prevents larger attachments from being sent. |
 
 ### Authentication
 

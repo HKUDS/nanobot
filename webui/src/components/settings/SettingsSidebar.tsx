@@ -1,20 +1,16 @@
-import { useRef, useState } from "react";
 import {
-  Activity,
-  Info,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  LogOut,
-  Loader2,
-  RotateCcw,
-  Blocks,
-  Palette,
-  Server,
-  ShieldCheck,
-  SlidersHorizontal,
-  type LucideIcon,
-} from "lucide-react";
+  OverviewIcon,
+  AboutIcon,
+  RestartIcon,
+  CapabilitiesIcon,
+  AppearanceIcon,
+  SystemIcon,
+  AdvancedIcon,
+  ModelsIcon,
+} from "@/components/icons/product-icons";
+import { useContext, useRef, useState } from "react";
+import { HostNavigationContext, HostSwitcher } from "@/components/remote/HostSwitcher";
+import { Check, ChevronDown, ChevronLeft, LogOut, Loader2, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -34,13 +30,13 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
 const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fallback: string }> = [
-  { key: "overview", icon: Activity, fallback: "Overview" },
-  { key: "appearance", icon: Palette, fallback: "Appearance" },
-  { key: "models", icon: SlidersHorizontal, fallback: "Models" },
-  { key: "capabilities", icon: Blocks, fallback: "Capabilities" },
-  { key: "runtime", icon: Server, fallback: "System" },
-  { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
-  { key: "about", icon: Info, fallback: "About" },
+  { key: "overview", icon: OverviewIcon, fallback: "Overview" },
+  { key: "appearance", icon: AppearanceIcon, fallback: "Appearance" },
+  { key: "models", icon: ModelsIcon, fallback: "Models" },
+  { key: "capabilities", icon: CapabilitiesIcon, fallback: "Capabilities" },
+  { key: "runtime", icon: SystemIcon, fallback: "System" },
+  { key: "advanced", icon: AdvancedIcon, fallback: "Advanced" },
+  { key: "about", icon: AboutIcon, fallback: "About" },
 ];
 
 export function standaloneSectionTitle(section: SettingsSectionKey): string {
@@ -76,6 +72,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
     isNativeHost,
   } = props;
   const { t } = useTranslation();
+  const hostNavigation = useContext(HostNavigationContext);
   const mobile = useMediaQuery("(max-width: 1023px)");
   const restartLabel = isRestarting
     ? t(isNativeHost ? "app.system.restartingEngine" : "app.system.restarting")
@@ -105,7 +102,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
         onClick={onBackToChat}
         aria-label={t("settings.backToChat")}
         className={cn(
-          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-[13px] leading-5 font-normal text-sidebar-content transition-colors settings-hover hover:text-foreground lg:mb-3",
+          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl text-[13px] leading-5 font-normal text-sidebar-content transition-colors duration-150 motion-reduce:transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ring hover:text-foreground lg:mb-3",
           hostChromeInset && "-ml-1",
         )}
       >
@@ -169,7 +166,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
                   : "text-sidebar-content hover:text-foreground")}
             >
               {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                : <RotateCcw className="h-4 w-4" aria-hidden />}
+                : <RestartIcon className="h-4 w-4" aria-hidden />}
               <span>{restartLabel}</span>
             </Button>
           </div>
@@ -185,6 +182,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
             <span>{t("app.account.logout")}</span>
           </Button>
         ) : null}
+        {hostNavigation && <div className="mt-2 flex min-w-0"><HostSwitcher /></div>}
       </div>
     </aside>
   );
@@ -207,13 +205,14 @@ function MobileSettingsNavigation({
   restartLabel: string;
 }) {
   const { t } = useTranslation();
+  const hostNavigation = useContext(HostNavigationContext);
   const [open, setOpen] = useState(false);
   const restart = () => { setOpen(false); onRestart?.(); };
   const restartTone = restartPending && !isRestarting
     ? "text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
     : "text-muted-foreground hover:text-foreground";
   const restartIcon = isRestarting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-    : <RotateCcw className="h-4 w-4" aria-hidden />;
+    : <RestartIcon className="h-4 w-4" aria-hidden />;
   const restartAction = onRestart ? (
     <Button type="button" variant="ghost" disabled={isRestarting}
       onClick={restart}
@@ -229,9 +228,9 @@ function MobileSettingsNavigation({
       hostChromeInset ? "pt-10" : "pt-[env(safe-area-inset-top)]")}
     >
       <div className="grid h-14 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center px-3">
-        <Button type="button" variant="ghost" onClick={onBackToChat}
+        <Button size="icon" type="button" variant="ghost" onClick={onBackToChat}
           aria-label={t("settings.backToChat")}
-          className="h-11 w-11 rounded-full p-0 text-sidebar-content"
+          className="h-11 w-11 rounded-xl p-0 text-sidebar-content"
         >
           <ChevronLeft className="h-5 w-5" aria-hidden />
         </Button>
@@ -274,6 +273,7 @@ function MobileSettingsNavigation({
             </> : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        {hostNavigation && <HostSwitcher collapsed />}
       </div>
       {onRestart && (restartPending || isRestarting) ? (
         <div className="flex min-h-11 items-center justify-between gap-2 px-4 pb-1">

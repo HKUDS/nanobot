@@ -7,6 +7,7 @@ import os
 import time
 import uuid
 from contextlib import suppress
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Any, Callable, Coroutine, Literal
 from filelock import FileLock
 from loguru import logger
 
+from nanobot.cron.binding import CronBinding, CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import (
     CronJob,
@@ -73,6 +75,8 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
     """Validate schedule fields that would otherwise create non-runnable jobs."""
     if schedule.tz and schedule.kind != "cron":
         raise ValueError("tz can only be used with cron schedules")
+    if schedule.kind == "every" and (schedule.every_ms is None or schedule.every_ms <= 0):
+        raise ValueError("every schedule requires a positive 'every_ms'")
 
     if schedule.kind == "cron":
         if not schedule.expr or not schedule.expr.strip():
@@ -283,6 +287,10 @@ class CronService:
         def _update(params: dict[str, Any]) -> None:
             j = CronJob.from_dict(params)
             _normalize_agent_turn_job(j)
+            current = jobs_map.get(j.id)
+            if current and j.payload.binding_version < current.payload.binding_version:
+                logger.warning("Cron: ignored stale update for moved job {}", j.id)
+                return
             jobs_map[j.id] = j
 
         def _del(params: dict[str, Any]) -> None:
@@ -309,8 +317,9 @@ class CronService:
                         continue
             self._store.jobs = list(jobs_map.values())  # pyright: ignore[reportOptionalMemberAccess]
             if self._should_persist_store() and changed:
-                self._action_path.write_text("", encoding="utf-8")
+                # Keep accepted actions recoverable until the merged snapshot is durable.
                 self._save_store()
+                self._action_path.write_text("", encoding="utf-8")
         return
 
     def _load_store(self, *, reload_during_execution: bool = False) -> CronStore | None:
@@ -375,10 +384,15 @@ class CronService:
         # Set this before serialization/write so every exceptional exit keeps
         # the in-memory snapshot authoritative until a later save succeeds.
         self._store_dirty = True
+        self._write_store(self._store)
+        self._store_dirty = False
+
+    def _write_store(self, store: CronStore) -> None:
+        """Persist a snapshot without publishing it as live state."""
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
-            "version": self._store.version,
+            "version": store.version,
             "jobs": [
                 {
                     "id": j.id,
@@ -402,6 +416,7 @@ class CronService:
                         "originChannel": j.payload.origin_channel,
                         "originChatId": j.payload.origin_chat_id,
                         "originMetadata": j.payload.origin_metadata,
+                        "bindingVersion": j.payload.binding_version,
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
@@ -415,6 +430,7 @@ class CronService:
                                 "durationMs": r.duration_ms,
                                 "error": r.error,
                                 "runId": r.run_id,
+                                "sessionKey": r.session_key,
                             }
                             for r in j.state.run_history
                         ],
@@ -423,12 +439,11 @@ class CronService:
                     "updatedAtMs": j.updated_at_ms,
                     "deleteAfterRun": j.delete_after_run,
                 }
-                for j in self._store.jobs
+                for j in store.jobs
             ]
         }
 
         self._atomic_write(self.store_path, json.dumps(data, indent=2, ensure_ascii=False))
-        self._store_dirty = False
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
@@ -638,6 +653,7 @@ class CronService:
             duration_ms=end_ms - start_ms,
             error=job.state.last_error,
             run_id=result.run_id if isinstance(result, CronRunResult) else None,
+            session_key=job.payload.session_key,
         ))
         job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
 
@@ -665,6 +681,51 @@ class CronService:
 
 
     # ========== Public API ==========
+
+    def change_binding(
+        self, job_id: str, *, revision: str, binding: CronBinding, message: str,
+    ) -> CronJob:
+        """Commit a reviewed move before it becomes visible to the scheduler.
+
+        This is a live-owner operation. Reject while the scheduler owns any
+        execution snapshot, including a turn waiting in a session inbox.
+        No await separates validation, persistence, and publication.
+        """
+        if not self._running or self._active_executions or self._store_dirty:
+            raise CronBindingError("busy", "automation scheduler is busy; try again when tasks finish")
+        with self._lock:
+            store = self._require_store()
+            job = next((j for j in store.jobs if j.id == job_id), None)
+            if job is None or not is_bound_cron_job(job):
+                raise CronBindingError("unavailable", "automation has no movable chat")
+            if binding_revision(job) != revision:
+                raise CronBindingError("conflict", "automation changed; reopen it before changing the chat")
+            if not message.strip():
+                raise CronBindingError("empty", "automation message must not be empty")
+            candidate = deepcopy(store)
+            moved = next(j for j in candidate.jobs if j.id == job_id)
+            for run in moved.state.run_history:
+                if run.session_key is None:
+                    run.session_key = job.payload.session_key
+            moved.payload.session_key = binding.session_key
+            moved.payload.origin_channel = binding.channel
+            moved.payload.origin_chat_id = binding.chat_id
+            moved.payload.origin_metadata = _persistable_origin_metadata(binding.metadata)
+            moved.payload.binding_version += 1
+            moved.payload.message = message
+            moved.updated_at_ms = max(_now_ms(), job.updated_at_ms + 1)
+            try:
+                self._write_store(candidate)
+            except OSError:
+                # Directory fsync can fail after replace. Reconcile that exact
+                # commit instead of claiming that the old binding survived.
+                loaded = self._load_jobs()
+                if loaded is None or loaded[0] != candidate.jobs:
+                    raise
+                logger.warning("Cron: binding saved, but directory sync failed for {}", job_id)
+            self._store = candidate
+            self._arm_timer()
+            return moved
 
     def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
         """List all jobs."""

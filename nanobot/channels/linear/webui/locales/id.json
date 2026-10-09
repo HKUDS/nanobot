@@ -4,19 +4,19 @@
   "setup": {
     "docsLabel": "Buka panduan penyiapan Linear",
     "officialLabel": "Buat aplikasi OAuth Linear",
-    "tryIt": "Mention aplikasi dalam komentar issue. Pesan lanjutan di Agent Session tidak memerlukan mention lagi.",
-    "summary": "Buat aplikasi OAuth Linear privat, simpan kredensial dan URL publiknya, lalu otorisasi workspace. Setiap sesi baru memerlukan @mention eksplisit; komentar biasa akan diabaikan.",
+    "tryIt": "Mention aplikasi atau delegasikan issue kepadanya; percakapan lanjutan di Agent Session tidak memerlukan mention lagi.",
+    "summary": "Buat aplikasi OAuth Linear privat, simpan kredensial dan URL publiknya, lalu otorisasi workspace. Mulai sesi dengan mention aplikasi atau mendelegasikan issue; komentar biasa diabaikan.",
     "steps": [
       "Ekspos instans nanobot ini melalui URL HTTPS yang stabil (tunnel dapat digunakan).",
-      "Buat aplikasi OAuth privat di Linear dengan scope read, write, dan app:mentionable. Jangan tambahkan app:assignable.",
+      "Buat aplikasi OAuth privat di Linear dengan scope read, write, app:mentionable, dan app:assignable.",
       "Daftarkan webhook aplikasi untuk AgentSessionEvent, PermissionChange, dan OAuthAuthorization menggunakan URL yang dibuat.",
-      "Masukkan kredensial aplikasi, tunggu hingga tersimpan otomatis, hubungkan ruang kerja dengan OAuth, lalu sebut aplikasi dengan @ dalam issue."
+      "Hubungkan workspace melalui OAuth, lalu mention aplikasi atau delegasikan issue kepadanya."
     ],
     "fields": {
       "clientId": {
         "label": "ID klien OAuth",
         "placeholder": "ID klien OAuth Linear",
-        "help": "Salin dari aplikasi OAuth privat di Linear."
+        "help": "Salin dari aplikasi OAuth privat.\n\nSalin dari aplikasi OAuth privat di Linear."
       },
       "clientSecret": {
         "label": "Secret klien OAuth",
@@ -26,12 +26,12 @@
       "webhookSigningSecret": {
         "label": "Secret penandatanganan webhook",
         "placeholder": "••••••",
-        "help": "Digunakan untuk memverifikasi Linear-Signature sebelum isi webhook diurai."
+        "help": "Verifikasi tanda tangan Webhook.\n\nDigunakan untuk memverifikasi Linear-Signature sebelum isi webhook diurai."
       },
       "publicBaseUrl": {
         "label": "URL HTTPS publik",
         "placeholder": "https://nanobot.example.com",
-        "help": "Origin HTTPS stabil yang diarahkan ke listener di bawah; jangan sertakan path."
+        "help": "Masukkan URL HTTPS tanpa path.\n\nOrigin HTTPS stabil yang diarahkan ke listener di bawah; jangan sertakan path."
       },
       "host": {
         "label": "Host listener",
@@ -52,25 +52,86 @@
       "allowFrom": {
         "label": "Pengguna Linear yang diizinkan",
         "placeholder": "ID pengguna Linear, dipisahkan koma",
-        "help": "Biarkan kosong untuk memakai pairing nanobot, atau gunakan * untuk mengizinkan semua pengguna di workspace yang terhubung."
+        "help": "Pilih siapa yang boleh memakai koneksi ini.\n\nBiarkan kosong untuk memakai pairing nanobot, atau gunakan * untuk mengizinkan semua pengguna di workspace yang terhubung."
+      },
+      "showReasoning": {
+        "label": "Tampilkan penalaran",
+        "help": "Kirim penalaran sebagai aktivitas berpikir.\n\nKirim penalaran model sebagai aktivitas pemikiran di Linear. Nonaktifkan untuk sesi yang lebih ringkas."
       }
     }
   },
   "custom": {
-    "qrAlt": "Kode QR otorisasi Linear",
+    "secretSaved": "Tersimpan",
+    "replaceSecret": "Ganti",
+    "replaceSecretLabel": "Ganti {{name}}",
+    "enterSecret": "Masukkan rahasia",
+    "secretSaveFailed": "Penyimpanan belum dapat dikonfirmasi. Coba lagi atau batalkan.",
     "authorizeTitle": "Otorisasi di Linear",
-    "authorizeDescription": "Buka Linear di browser ini atau pindai kode QR. nanobot akan mengaktifkan channel setelah otorisasi.",
+    "authorizeDescription": "Otorisasi di Linear, lalu kembali ke sini.\n\nLanjutkan di Linear untuk memilih workspace dan mengizinkan nanobot. Kembali ke sini setelah selesai.",
     "waiting": "Menunggu otorisasi Linear...",
     "connected": "Linear telah terhubung.",
     "stopped": "Otorisasi dihentikan.",
     "connecting": "Menghubungkan...",
-    "reconnect": "Hubungkan workspace lain",
     "connect": "Hubungkan Linear",
     "openLinear": "Lanjutkan di Linear",
-    "createApp": "Buat aplikasi Linear yang sudah diisi",
-    "savePublicUrl": "Masukkan URL HTTPS publik untuk membuat aplikasi Linear yang sudah terisi.",
-    "saveBeforeConnect": "Masukkan kredensial aplikasi dan tunggu hingga tersimpan sebelum menghubungkan.",
-    "removeCredentials": "Hapus kredensial tersimpan",
-    "retrySave": "Coba lagi"
+    "createApp": "Buat aplikasi Linear",
+    "savePublicUrl": "Masukkan URL HTTPS publik untuk membuat aplikasi Linear.",
+    "retrySave": "Coba lagi",
+    "channelRunning": "Channel berjalan",
+    "accessAll": "Semua anggota workspace yang diotorisasi dapat menjalankan agen ini.",
+    "accessRestricted": "Hanya ID pengguna Linear yang tercantum di Lanjutan yang dapat menjalankan agen ini.",
+    "accessPairing": "Lakukan pairing saat pertama digunakan dan hubungkan Linear MCP untuk mencari atau mengedit issue.",
+    "configureTools": "Konfigurasi Linear MCP",
+    "workspacesTitle": "Workspace yang diotorisasi",
+    "refreshWorkspaces": "Muat ulang workspace",
+    "loadingWorkspaces": "Memuat workspace",
+    "noWorkspaces": "Belum ada workspace yang diotorisasi. Hubungkan workspace untuk menerima permintaan agen Linear.",
+    "refreshRequired": "Penyegaran otorisasi diperlukan",
+    "missingScopes": "Hubungkan ulang untuk memberikan: {{scopes}}",
+    "authorized": "Diotorisasi",
+    "confirmDisconnect": "Hapus ruang kerja",
+    "disconnect": "Hapus ruang kerja",
+    "workspaceActions": "Kelola {{name}}",
+    "reauthorize": "Otorisasi ulang",
+    "disconnectTitle": "Hapus {{name}}?",
+    "disconnectDescription": "Hapus akses ruang kerja; simpan riwayat.\n\nCabut otorisasi ruang kerja ini dan hapus pengaturan akses anggotanya di nanobot. Issue, komentar, dan riwayat nanobot tetap disimpan. Ruang kerja lain tidak terpengaruh. Anda dapat mengotorisasi ulang nanti.",
+    "disconnectLast": "Ini adalah ruang kerja terakhir yang terhubung, jadi kanal Linear juga akan dinonaktifkan.",
+    "disconnecting": "Menghapus…",
+    "addWorkspace": "Hubungkan ruang kerja",
+    "addWorkspaceDetails": "Tentang koneksi ruang kerja",
+    "addWorkspaceHelp": "Menggunakan aplikasi Linear saat ini. Aplikasi harus mengizinkan pemasangan di ruang kerja lain; aplikasi privat hanya untuk ruang kerjanya sendiri. Otorisasi ulang memperbarui koneksi tanpa duplikat.",
+    "resetConnection": "Reset koneksi Linear",
+    "resetTitle": "Reset Linear?",
+    "resetDescription": "Putuskan semua workspace yang terhubung melalui aplikasi ini dan hentikan channel.",
+    "resetClears": "Dihapus",
+    "resetClearsDetail": "Pengaturan akses anggota dan konfigurasi aplikasi di instans ini, termasuk kredensial tersimpan.",
+    "resetKeeps": "Disimpan",
+    "resetKeepsDetail": "Aplikasi Linear, issue, komentar, riwayat percakapan, dan persetujuan pairing.",
+    "resetConfirm": "Reset",
+    "resetting": "Mereset…",
+    "resetIncomplete": "Reset belum selesai. Ruang kerja yang sudah dihapus tidak dipulihkan; coba lagi untuk menyelesaikan.",
+    "resetInspectFailed": "Tidak dapat memverifikasi ruang kerja. Konfigurasi aplikasi tetap disimpan.",
+    "resetChanged": "Ruang kerja lain telah terhubung. Periksa koneksi lalu coba lagi.",
+    "resetStopFailed": "Kanal Linear tidak dapat dihentikan. Konfigurasi aplikasi tetap disimpan.",
+    "resetSaveFailed": "Konfigurasi aplikasi tidak dapat dihapus. Coba lagi."
+  },
+  "members": {
+    "title": "Akses anggota",
+    "help": "Izinkan anggota menggunakan nanobot tanpa kode pemasangan. Cakupan izin Linear tetap berlaku dan tidak memberikan akses ke antarmuka admin nanobot. Menonaktifkan akses memblokir permintaan baru, bukan tugas yang sedang berjalan.",
+    "allowAll": "Pengaturan lanjutan mengizinkan semua anggota (*), termasuk anggota baru. Penonaktifan per anggota tetap diutamakan. Hapus * agar anggota baru memerlukan persetujuan.",
+    "search": "Cari anggota",
+    "refresh": "Segarkan anggota",
+    "working": "Menyimpan…",
+    "saved": "Tersimpan",
+    "retry": "Segarkan anggota untuk memeriksa status terkini, lalu coba lagi.",
+    "empty": "Tidak ada anggota aktif yang cocok.",
+    "allow": "Izinkan {{name}} memakai nanobot",
+    "saveUnconfirmed": "Akses belum dikonfirmasi. Segarkan anggota sebelum mencoba lagi.",
+    "guide": "Gunakan Akses anggota untuk menyetujui rekan tanpa kode pairing. Persetujuan lama tetap berlaku kecuali dinonaktifkan. Hubungkan Linear MCP untuk mencari atau mengedit issue.",
+    "intro": "Pilih siapa yang boleh memakai nanobot di Linear, tanpa kode pairing.",
+    "details": "Tentang akses anggota",
+    "summary": "{{allowed}} diizinkan",
+    "loading": "Mencari anggota…",
+    "refreshing": "Memeriksa pembaruan…"
   }
 }

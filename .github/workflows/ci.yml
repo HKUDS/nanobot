@@ -138,6 +138,8 @@ jobs:
     if: needs.changes.outputs.python_required == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed"
     strategy:
       fail-fast: false
       matrix:
@@ -205,6 +207,7 @@ jobs:
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
           --cov=nanobot --cov-report=term-missing:skip-covered
+          -vv -o faulthandler_timeout=60
           --durations=25 --durations-min=1.0
 
       - name: Run serial CLI command tests with coverage

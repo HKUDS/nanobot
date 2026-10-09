@@ -89,6 +89,61 @@ async function togglePresetEditor(name = "primary") {
 describe("Settings models", () => {
   installSettingsViewTestHooks();
 
+  it.each(["manual", "poll", "direct"])("reauthenticates from the catalog and preserves the preset draft (%s)", async (mode) => {
+    const payload = settingsPayload();
+    payload.providers = [{
+      name: "openai_codex", label: "OpenAI Codex", configured: true,
+      auth_type: "oauth", model_catalog: "hybrid", oauth_login_supported: true,
+    }];
+    let recovered = false;
+    const signedIn = () => {
+      recovered = true;
+      return { ...payload, providers: payload.providers.map((row) => ({ ...row })) };
+    };
+    requestMutationMock.mockImplementation(async (action, args) => {
+      if (action === "settings.provider.oauth_login") {
+        return mode === "direct" ? signedIn() : {
+          status: "authorization_required", provider: "openai_codex", flow_id: "flow-test",
+          authorization_url: "https://example.com/authorize", expires_in: 600,
+          completion_input: "callback_url",
+        };
+      }
+      if (action === "settings.provider.oauth_complete") {
+        return mode === "manual" && !args.authorization_response
+          ? { status: "pending", provider: "openai_codex", flow_id: "flow-test" }
+          : signedIn();
+      }
+      throw new Error(`Unexpected mutation: ${action}`);
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/provider-models?")) return jsonResponse({
+        provider: "openai_codex", label: "OpenAI Codex", status: "available", catalog_kind: "hybrid",
+        source: recovered ? "remote" : "fallback", error_kind: recovered ? null : "auth_required",
+        models: [{ id: recovered ? "openai-codex/new-model" : "openai-codex/offline-model" }], model_count: 1,
+      });
+      return jsonResponse(payload);
+    }));
+    renderSettingsView({ initialSection: "models" });
+    fireEvent.click(await screen.findByRole("button", { name: "New preset" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
+      target: { value: "My unsaved preset" },
+    });
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
+    if (mode === "manual") {
+      fireEvent.change(await screen.findByRole("textbox", { name: "Callback URL" }), {
+        target: { value: "http://localhost:1455/auth/callback?code=fixture&state=test" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    }
+    await waitFor(() => expect(recovered).toBe(true), { timeout: 3000 });
+    expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("My unsaved preset");
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    expect(await screen.findByRole("option", { name: /openai-codex\/new-model/ })).toBeVisible();
+    expect(screen.queryByText("Authorization expired. Please sign in again.")).not.toBeInTheDocument();
+    expect(requestMutationMock.mock.calls.every(([action]) => action.startsWith("settings.provider.oauth_"))).toBe(true);
+  });
+
   it("uses the preset name as the canonical identity", async () => {
     const payload = settingsPayload();
     payload.model_presets[0] = {
@@ -228,15 +283,46 @@ describe("Settings models", () => {
 
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByText("Temperature")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "500K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue("200k");
     const reasoningEffort = screen.getByLabelText("Reasoning effort");
     expect(reasoningEffort).toHaveProperty("type", "text");
     fireEvent.change(reasoningEffort, { target: { value: "provider-native-mode" } });
     expect(reasoningEffort).toHaveValue("provider-native-mode");
+  });
+
+  it.each([["128000", 128000], ["131072", 131072], ["272k", 272000], ["256K", 256000], ["1.5m", 1500000], ["1.001k", 1001]] as const)("saves a custom context budget (%s)", async (input, tokens) => {
+    const payload = settingsPayload();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    requestMutationMock.mockResolvedValue({
+      ...payload,
+      model_presets: payload.model_presets.map((preset) => ({ ...preset, context_window_tokens: tokens })),
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Context window" }), {
+      target: { value: input },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", expect.objectContaining({ context_window_tokens: tokens }), expect.any(Number),
+    ));
+    expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue(input);
+  });
+
+  it.each(["", "0", "-1", "1.5", "abc", "2ki", "0.0001k", "9007199254740992"])("keeps invalid context input unsaved (%s)", async (value) => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    await togglePresetEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    const input = screen.getByRole("textbox", { name: "Context window" });
+    fireEvent.change(input, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription("Enter a positive token count, such as 200k, 1m, or 131072.");
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    expect(input).toHaveValue(value);
   });
 
   it("opens the preset editor in a dialog and protects the primary preset", async () => {
@@ -576,15 +662,15 @@ describe("Settings models", () => {
         }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
-    expect(screen.getByRole("dialog", { name: "New model preset" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "Writer" },
     });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, {
       target: { value: "openai/gpt-4o-mini" },
@@ -616,12 +702,12 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     const nameInput = screen.getByRole("textbox", { name: "Preset name" });
     fireEvent.change(nameInput, { target: { value: "PRIMARY" } });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
@@ -723,7 +809,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: freshPayload });
 
     expect(
-      await screen.findByRole("button", { name: "New model preset" }),
+      await screen.findByRole("button", { name: "New preset" }),
     ).toBeInTheDocument();
   });
 
@@ -1111,7 +1197,7 @@ describe("Settings models", () => {
     await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", { name: /open-codex\/gpt-5\.5/i });
     await openPopover(modelButtons[modelButtons.length - 1]);
-    const input = (await screen.findByPlaceholderText("Search or type model ID")) as HTMLInputElement;
+    const input = (await screen.findByPlaceholderText("Choose model")) as HTMLInputElement;
     expect(input.value).toBe("open-codex/gpt-5.5");
 
     fireEvent.change(input, { target: { value: "openai-codex/gpt-5.5" } });
@@ -1194,7 +1280,7 @@ describe("Settings models", () => {
       ),
     ).toBe(false);
 
-    fireEvent.change(screen.getByPlaceholderText("Search or type model ID"), {
+    fireEvent.change(screen.getByPlaceholderText("Choose model"), {
       target: { value: "cl" },
     });
 
@@ -1388,12 +1474,12 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    const createButton = await screen.findByRole("button", { name: "New model preset" });
+    const createButton = await screen.findByRole("button", { name: "New preset" });
     const previousPointerEvents = document.body.style.pointerEvents;
     expect(createButton).toHaveClass("w-full");
     fireEvent.click(createButton);
 
-    expect(screen.getByRole("dialog", { name: "New model preset" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toContainElement(screen.getByTestId("model-preset-editor"));
     expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("");
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
@@ -1402,14 +1488,14 @@ describe("Settings models", () => {
 
     await waitFor(() => expect(document.body.style.pointerEvents).toBe(previousPointerEvents));
 
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     const nameInput = await screen.findByRole("textbox", { name: "Preset name" });
     expect(nameInput).toHaveValue("");
     expect(nameInput).toHaveAttribute("placeholder", "e.g. Fast writing");
 
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
@@ -1420,7 +1506,7 @@ describe("Settings models", () => {
     fireEvent.change(nameInput, { target: { value: "Writer" } });
     await openPopover(screen.getByRole("button", { name: /openai\/gpt-4o-mini/ }));
     const nextModelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(nextModelSearch, { target: { value: "openai/gpt-4.1-mini" } });
     fireEvent.keyDown(nextModelSearch, { key: "Enter" });

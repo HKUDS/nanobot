@@ -8,12 +8,13 @@ export function linearManifestUrl(
     schemaVersion: "1.0.0",
     distribution: "private",
     display: {
-      description: "Use nanobot as a native issue agent.",
+      description: "Mention or delegate issues to nanobot as a native Linear agent.",
+      iconUrl: "https://raw.githubusercontent.com/HKUDS/nanobot/main/images/nanobot_logo.png",
     },
     developer: { name: "nanobot" },
     oauth: {
       client_name: "nanobot Agent",
-      client_uri: publicBaseUrl,
+      client_uri: "https://github.com/HKUDS/nanobot",
       redirect_uris: [`${publicBaseUrl}${callbackPath}`],
       grant_types: ["authorization_code"],
     },

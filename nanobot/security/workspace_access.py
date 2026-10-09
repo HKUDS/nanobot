@@ -125,17 +125,6 @@ class WorkspaceScopeResolver:
             self.default_restrict_to_workspace,
         )
 
-    def for_message(
-        self,
-        msg: Any,
-        session_metadata: Any,
-    ) -> WorkspaceScope:
-        return self.for_turn(
-            channel=getattr(msg, "channel", None),
-            message_metadata=getattr(msg, "metadata", None),
-            session_metadata=session_metadata,
-        )
-
     def for_turn(
         self,
         *,

@@ -62,6 +62,7 @@ interface SheetContentProps
     VariantProps<typeof sheetVariants> {
   closeButtonClassName?: string;
   showCloseButton?: boolean;
+  overlayClassName?: string;
 }
 
 const SheetContent = React.forwardRef<
@@ -74,6 +75,7 @@ const SheetContent = React.forwardRef<
     children,
     closeButtonClassName,
     showCloseButton = true,
+    overlayClassName,
     ...props
   },
   ref,
@@ -81,7 +83,7 @@ const SheetContent = React.forwardRef<
   const { t } = useTranslation();
   return (
     <SheetPortal>
-      <SheetOverlay />
+      <SheetOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(

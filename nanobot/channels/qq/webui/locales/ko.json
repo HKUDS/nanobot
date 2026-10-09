@@ -12,7 +12,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "Open ID, 쉼표로 구분"
       },
       "msgFormat": {
@@ -23,19 +23,19 @@
         }
       },
       "ackMessage": {
-        "label": "확인 메시지"
+        "label": "수신 확인 메시지"
       },
       "mediaDir": {
         "label": "미디어 디렉토리"
       },
       "downloadChunkSize": {
-        "label": "청크 크기 다운로드"
+        "label": "청크 크기(바이트)"
       },
       "downloadMaxBytes": {
-        "label": "최대 다운로드 크기"
+        "label": "다운로드 상한(바이트)"
       },
       "showCompactionNotices": {
-        "label": "컨텍스트 압축 알림",
+        "label": "압축 알림",
         "choices": {
           "true": "켜기",
           "false": "끄기"

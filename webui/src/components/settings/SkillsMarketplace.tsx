@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -125,9 +126,9 @@ export function SkillsMarketplace({
     }
 
     let cancelled = false;
+    setLoading(true);
+    setError("");
     const timer = window.setTimeout(() => {
-      setLoading(true);
-      setError("");
       searchMarketplaceSkills(getToken(), normalized)
         .then((payload) => {
           if (cancelled) return;
@@ -218,7 +219,7 @@ export function SkillsMarketplace({
                 defaultValue: "Searching",
               })}
             >
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
             </span>
           ) : null}
         </div>
@@ -252,7 +253,7 @@ export function SkillsMarketplace({
             ) : null}
           </div>
           {trendingLoading ? (
-            <TrendingSkeleton />
+            <MarketplaceSkeleton ranked />
           ) : visibleTrending.length ? (
             <MarketplaceSkillGroups
               skills={visibleTrending}
@@ -279,14 +280,18 @@ export function SkillsMarketplace({
         </div>
       ) : (
         <div className="overflow-hidden rounded-panel bg-settings-surface">
-          <MarketplaceSkillGroups
-            skills={visibleResults}
-            installedNames={installedNames}
-            installing={installing}
-            trends={trends}
-            grouped={provider === "all"}
-            onSelect={setSelected}
-          />
+          {loading && !visibleResults.length ? (
+            <MarketplaceSkeleton />
+          ) : (
+            <MarketplaceSkillGroups
+              skills={visibleResults}
+              installedNames={installedNames}
+              installing={installing}
+              trends={trends}
+              grouped={provider === "all"}
+              onSelect={setSelected}
+            />
+          )}
         </div>
       )}
 
@@ -519,17 +524,16 @@ function MarketplaceSkillRow({
               provider: providerLabel(skill.provider),
               defaultValue: "Open {{name}} on {{provider}}",
             })}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors settings-hover hover:text-foreground"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           </a>
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-[12px] text-muted-foreground">
           {skill.source}
-          {skill.version ? <span>· v{skill.version}</span> : null}
+          {skill.version ? <span>v{skill.version}</span> : null}
           {skill.provider === "skills_sh" ? (
             <>
-              <span>·</span>
               {skill.metric === "installs_24h"
                 ? t("settings.skills.marketplaceInstalls24h", {
                     count: skill.installs,
@@ -554,7 +558,7 @@ function MarketplaceSkillRow({
         disabled={installed || installBusy || !skill.install_supported}
         onClick={() => onSelect(skill)}
         className={cn(
-          "h-9 w-9 shrink-0 rounded-full bg-muted/70 text-muted-foreground transition-[opacity,color,background-color,transform] hover:scale-[1.03] hover:bg-foreground hover:text-background focus-visible:bg-foreground focus-visible:text-background focus-visible:opacity-100 sm:opacity-[0.55] sm:group-hover:opacity-100",
+          "h-9 w-9 shrink-0 rounded-full bg-muted/70 text-muted-foreground transition-[opacity,color] hover:text-foreground focus-visible:bg-foreground focus-visible:text-background focus-visible:opacity-100 sm:opacity-[0.55] sm:group-hover:opacity-100",
           installed &&
             "bg-emerald-500/10 text-emerald-700 disabled:opacity-100 dark:text-emerald-300",
         )}
@@ -567,7 +571,7 @@ function MarketplaceSkillRow({
         }
       >
         {isInstalling ? (
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
         ) : installed ? (
           <Check className="h-4 w-4" aria-hidden />
         ) : (
@@ -670,19 +674,27 @@ function TrendSparkline({ values }: { values?: number[] }) {
   );
 }
 
-function TrendingSkeleton() {
+function MarketplaceSkeleton({ ranked = false }: { ranked?: boolean }) {
+  const { t } = useTranslation();
   return (
-    <div className="space-y-1 px-5 pb-3" aria-hidden>
+    <SkeletonStatus
+      label={t("settings.skills.loading")}
+      className="space-y-1 px-3 pb-3 sm:px-4"
+    >
       {Array.from({ length: 5 }, (_, index) => (
-        <div key={index} className="flex items-center gap-3 py-4">
-          <div className="h-3 w-5 animate-pulse rounded bg-muted" />
-          <div className="flex-1 space-y-2">
-            <div className="h-3.5 w-48 max-w-[55%] animate-pulse rounded bg-muted" />
-            <div className="h-3 w-32 max-w-[40%] animate-pulse rounded bg-muted/70" />
+        <div key={index} className="flex min-w-0 items-center gap-2 px-1 py-3.5 sm:gap-3 sm:px-2">
+          {ranked ? <div className="h-3 w-6 shrink-0 rounded bg-muted-foreground/20 sm:w-7" /> : null}
+          <div className="min-w-0 flex-1">
+            <div className="flex h-7 items-center">
+              <div className="h-3.5 w-48 max-w-[70%] rounded bg-muted-foreground/20" />
+            </div>
+            <div className="mt-1 flex h-5 items-center">
+              <div className="h-3 w-32 max-w-[55%] rounded bg-muted-foreground/20 opacity-60" />
+            </div>
           </div>
-          <div className="h-8 w-[82px] animate-pulse rounded-full bg-muted sm:w-[92px]" />
+          <div className="h-9 w-9 shrink-0 rounded-full bg-muted-foreground/20" />
         </div>
       ))}
-    </div>
+    </SkeletonStatus>
   );
 }
