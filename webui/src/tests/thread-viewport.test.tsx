@@ -1842,8 +1842,8 @@ describe("ThreadViewport", () => {
 
     expect(promptEls).toHaveLength(5);
 
-    expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
-    const promptMarkers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    expect(screen.getByLabelText("My message navigation")).toBeInTheDocument();
+    const promptMarkers = screen.getAllByRole("button", { name: /Jump to message:/ });
     const markerTops = promptMarkers.map((marker) => Number.parseFloat(marker.style.top));
     expect(markerTops[2]).toBeCloseTo(50);
     expect(markerTops[1] - markerTops[0]).toBeCloseTo(16 / 3);
@@ -1865,7 +1865,7 @@ describe("ThreadViewport", () => {
     fireEvent.pointerLeave(promptMarkers[2]);
     expect(railMarkers.every((marker) => marker.style.width === "9px")).toBe(true);
 
-    const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
+    const targetPrompt = screen.getByRole("button", { name: "Jump to message: message 3" });
     fireEvent.pointerEnter(targetPrompt);
     const preview = screen.getByTestId("prompt-rail-preview");
     expect(within(preview).getByText("message 3")).toBeInTheDocument();
@@ -1884,7 +1884,7 @@ describe("ThreadViewport", () => {
 
     await renderPromptRailViewport({ messages: promptMessages });
 
-    const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
+    const targetPrompt = screen.getByRole("button", { name: "Jump to message: message 3" });
     fireEvent.pointerEnter(targetPrompt);
     const preview = screen.getByTestId("prompt-rail-preview");
 
@@ -1901,7 +1901,7 @@ describe("ThreadViewport", () => {
       .mockReturnValue("started");
     const cancel = vi.spyOn(ThreadCameraController.prototype, "cancel");
     const { scroller } = await renderPromptRailViewport();
-    const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
+    const targetPrompt = screen.getByRole("button", { name: "Jump to message: message 3" });
     const restartNavigation = () => {
       fireEvent.click(targetPrompt);
       cancel.mockClear();
@@ -1960,17 +1960,17 @@ describe("ThreadViewport", () => {
       });
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open prompt navigator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Message navigation" }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText("Prompts")).toBeInTheDocument();
+    expect(within(dialog).getByText("My messages")).toBeInTheDocument();
     expect(within(dialog).getByText("message 4")).toBeInTheDocument();
 
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search prompts" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search messages" }), {
       target: { value: "message 4" },
     });
     expect(within(dialog).queryByText("message 1")).not.toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Jump to prompt: message 4" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Jump to message: message 4" }));
 
     expect(navigateTo).toHaveBeenCalledWith(1200);
   });
@@ -1981,9 +1981,9 @@ describe("ThreadViewport", () => {
 
     expect(screen.queryByText("message 20")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open prompt navigator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Message navigation" }));
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Jump to prompt: message 20" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Jump to message: message 20" }));
 
     await waitFor(() => expect(screen.getByText("message 20")).toBeInTheDocument());
   });
@@ -2021,7 +2021,7 @@ describe("ThreadViewport", () => {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     });
 
-    expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
+    expect(screen.getByLabelText("My message navigation")).toBeInTheDocument();
   });
 
   it.each([2, 3, 100])("keeps %i prompts navigable before a very long answer", async (count) => {
@@ -2042,7 +2042,7 @@ describe("ThreadViewport", () => {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     });
 
-    const markers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    const markers = screen.getAllByRole("button", { name: /Jump to message:/ });
     if (count < 30) {
       expect(markers).toHaveLength(count);
       markers.forEach((marker, index) => {
@@ -2061,7 +2061,7 @@ describe("ThreadViewport", () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
       .mockReturnValue("started");
     const { scroller } = await renderPromptRailViewport();
-    const marker = screen.getByRole("button", { name: "Jump to prompt: message 1" });
+    const marker = screen.getByRole("button", { name: "Jump to message: message 1" });
 
     scroller.style.paddingTop = "16px";
     fireEvent.click(marker);
@@ -2109,7 +2109,7 @@ describe("ThreadViewport", () => {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     });
 
-    const promptMarkers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    const promptMarkers = screen.getAllByRole("button", { name: /Jump to message:/ });
     expect(promptMarkers.length).toBeGreaterThan(3);
     expect(promptMarkers.length).toBeLessThan(100);
     expect(

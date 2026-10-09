@@ -24,7 +24,7 @@
         "placeholder": "面板 ID，以逗號分隔"
       },
       "allowFrom": {
-        "label": "允許的使用者",
+        "label": "允許使用者",
         "placeholder": "使用者 ID，以逗號分隔"
       },
       "socketUrl": {
@@ -44,7 +44,7 @@
         "label": "重連延遲"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "最大重連延遲"
+        "label": "重連上限（毫秒）"
       },
       "socketConnectTimeoutMs": {
         "label": "連線逾時"
@@ -56,26 +56,26 @@
         "label": "拉取超時"
       },
       "watchLimit": {
-        "label": "單次拉取數量"
+        "label": "拉取數量"
       },
       "retryDelayMs": {
         "label": "重試延遲"
       },
       "maxRetryAttempts": {
-        "label": "最大重試次數"
+        "label": "重試上限"
       },
       "mention_requireInGroups": {
-        "label": "群組需要提及",
+        "label": "提及回覆",
         "choices": {
           "true": "開啟",
           "false": "關閉"
         }
       },
       "groups": {
-        "label": "群組規則（JSON）"
+        "label": "群聊規則（JSON）"
       },
       "replyDelayMode": {
-        "label": "回覆延遲方式"
+        "label": "延遲方式"
       },
       "replyDelayMs": {
         "label": "回覆延遲"

@@ -58,7 +58,7 @@ function returnedView() {
 
 async function reviewed() {
   await screen.findByRole("button", { name: "Copy command" });
-  chooseOtherWay("Use a connection code instead");
+  chooseOtherWay("Connection code");
   fireEvent.change(await screen.findByRole("textbox", { name: "Connection code" }), { target: { value: "nbpc1.encrypted" } });
   fireEvent.click(screen.getByRole("button", { name: "Review connection" }));
   await screen.findByRole("heading", { name: "Open this nanobot?" });
@@ -98,7 +98,7 @@ describe("quick pairing", () => {
     });
     view();
     await waitFor(() => expect(screen.getByRole("button", { name: "Copy command" })).toBeEnabled());
-    chooseOtherWay("Use a connection code instead");
+    chooseOtherWay("Connection code");
     fireEvent.change(screen.getByRole("textbox", { name: "Connection code" }), { target: { value: "nbpc1.expired" } });
     fireEvent.click(screen.getByRole("button", { name: "Review connection" }));
     const restart = await screen.findByRole("button", { name: "Get a new command" });
@@ -138,7 +138,7 @@ describe("quick pairing", () => {
   it("uses the same copyable revocation code block in pairing details", async () => {
     returnedView();
     await screen.findByRole("heading", { name: "Open this nanobot?" });
-    fireEvent.click(screen.getByRole("button", { name: "Connection details & revocation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage access" }));
     expect(screen.getByText(preview.revoke_command).closest("pre")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
     expect(await screen.findByRole("button", { name: "Copied" })).toBeVisible();
@@ -181,7 +181,7 @@ describe("quick pairing", () => {
   it("keeps the illustration out of code entry and authorization review", async () => {
     view();
     await waitFor(() => expect(screen.getByRole("button", { name: "Copy command" })).toBeEnabled());
-    chooseOtherWay("Use a connection code instead");
+    chooseOtherWay("Connection code");
     const dialog = screen.getByRole("dialog");
     expect(dialog.querySelector('image[href="/brand/nanobot_mark.svg"]')).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Connection code" }), { target: { value: "nbpc1.encrypted" } });
@@ -332,7 +332,7 @@ describe("quick pairing", () => {
     const ssh = vi.fn();
     view(ssh);
     await waitFor(() => expect(screen.getByRole("button", { name: "Copy command" })).toBeEnabled());
-    chooseOtherWay("Use a connection code instead");
+    chooseOtherWay("Connection code");
     fireEvent.change(screen.getByRole("textbox", { name: "Connection code" }), { target: { value: "nbpc1.unfinished" } });
     mocks.action.mockImplementation(() => new Promise(() => {}));
     vi.useFakeTimers();
@@ -340,7 +340,7 @@ describe("quick pairing", () => {
     act(() => { vi.advanceTimersByTime(200); });
     expect(screen.getByRole("textbox", { name: "Connection code" })).toHaveValue("nbpc1.unfinished");
     expect(screen.getByRole("button", { name: "Checking the connection link…" })).toBeDisabled();
-    chooseOtherWay("Use existing SSH settings");
+    chooseOtherWay("SSH connection");
     expect(ssh).toHaveBeenCalledOnce();
   });
   it("advances only after copying succeeds and never implies a server connection", async () => {
@@ -372,12 +372,12 @@ describe("quick pairing", () => {
   it("keeps a manual code when returning to the simpler command screen", async () => {
     view();
     await waitFor(() => expect(screen.getByRole("button", { name: "Copy command" })).toBeEnabled());
-    chooseOtherWay("Use a connection code instead");
+    chooseOtherWay("Connection code");
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Connection code" })).toHaveFocus());
     fireEvent.change(screen.getByRole("textbox", { name: "Connection code" }), { target: { value: "nbpc1.unfinished" } });
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(screen.queryByRole("textbox")).toBeNull();
-    chooseOtherWay("Use a connection code instead");
+    chooseOtherWay("Connection code");
     expect(screen.getByRole("textbox", { name: "Connection code" })).toHaveValue("nbpc1.unfinished");
   });
   it("replaces copied guidance with recovery when the invitation expires", async () => {
@@ -410,7 +410,7 @@ describe("quick pairing", () => {
     expect(mocks.action.mock.calls.filter(([action]) => action === "remote.pair_start")).toHaveLength(1);
     expect(screen.queryByRole("textbox", { name: /Private key/ })).toBeNull();
     expect(screen.queryByRole("textbox", { name: "Connection code" })).toBeNull();
-    chooseOtherWay("Use existing SSH settings");
+    chooseOtherWay("SSH connection");
     expect(ssh).toHaveBeenCalledOnce();
   });
   it("reviews public details before storing and opening the connection", async () => {
@@ -437,7 +437,7 @@ describe("quick pairing", () => {
       return {};
     });
     view(); await waitFor(() => expect(screen.getByRole("button", { name: "Copy command" })).toBeEnabled());
-    chooseOtherWay("Use a connection code instead");
+    chooseOtherWay("Connection code");
     fireEvent.change(await screen.findByRole("textbox", { name: "Connection code" }), { target: { value: "bad-code" } });
     fireEvent.click(screen.getByRole("button", { name: "Review connection" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/invalid/);

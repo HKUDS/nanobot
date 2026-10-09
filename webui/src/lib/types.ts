@@ -473,14 +473,34 @@ export interface WorkspaceScopePayload {
   };
 }
 
+export interface ProjectDirectory {
+  name: string;
+  path: string;
+}
+
+export interface WorkspaceDirectoriesPayload {
+  partial?: boolean;
+  path: string;
+  parent: string | null;
+  entries: ProjectDirectory[];
+  truncated: boolean;
+  host: string;
+  platform: string;
+}
+
 export interface WorkspacesPayload {
   schema_version: number;
   default_access_mode: WebuiDefaultAccessMode;
   default_scope: WorkspaceScopePayload;
+  recent_projects?: ProjectDirectory[];
+  favorite_projects?: ProjectDirectory[];
+  host?: { name: string; platform: string };
   controls: {
     can_change_project: boolean;
     can_use_full_access: boolean;
-    can_pick_folder?: boolean;
+    can_browse_directories?: boolean;
+    can_resolve_project?: boolean;
+    can_manage_favorites?: boolean;
   };
 }
 
@@ -571,7 +591,6 @@ type SettingsApplyStatus =
 
 export interface RuntimeCapabilities {
   can_restart_engine: boolean;
-  can_pick_folder: boolean;
   can_open_logs: boolean;
   can_export_diagnostics: boolean;
 }

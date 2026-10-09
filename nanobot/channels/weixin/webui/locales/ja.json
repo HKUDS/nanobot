@@ -5,7 +5,7 @@
     "officialLabel": "WeChat を開く",
     "fields": {
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
       },
       "token": {
@@ -16,28 +16,28 @@
         "label": "進捗を送信"
       },
       "sendToolHints": {
-        "label": "ツールの動作概要を送信"
+        "label": "ツールのヒント"
       },
       "streaming": {
         "label": "ストリーミング API を使用"
       },
       "replyProgressMessages": {
-        "label": "構造化された進捗を送信"
+        "label": "項目別の進捗"
       },
       "replyProgressMaxMessages": {
-        "label": "構造化進捗の上限"
+        "label": "進捗メッセージの上限"
       },
       "contextMessageBudget": {
-        "label": "コンテキストに含めるメッセージ数の上限"
+        "label": "コンテキスト件数の上限"
       },
       "blockStreaming": {
-        "label": "応答をブロック単位で送信"
+        "label": "返信を分割"
       },
       "blockStreamingMinChars": {
-        "label": "1 ブロックの最小文字数"
+        "label": "分割する最小文字数（文字）"
       },
       "blockStreamingMaxMessages": {
-        "label": "ブロックメッセージの上限"
+        "label": "分割数の上限"
       },
       "baseUrl": {
         "label": "API URL"

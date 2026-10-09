@@ -15,7 +15,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Permitir que o nanobot leia e envie e-mails",
+        "label": "Acesso ao e-mail",
         "choices": {
           "true": "Concedido",
           "false": "Não concedido"
@@ -58,7 +58,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Intervalo de verificação de e-mails (segundos)",
+        "label": "Intervalo de verificação (segundos)",
         "placeholder": "30"
       },
       "allowFrom": {
@@ -125,41 +125,41 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "Mover para caixa de correio"
+        "label": "Caixa de destino"
       },
       "postActionExpunge": {
-        "label": "Aplicar ação permanentemente",
+        "label": "Exclusão permanente",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "Ignorar mensagens ignoradas",
+        "label": "Manter e-mails ignorados",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "maxBodyChars": {
-        "label": "Comprimento máximo do corpo"
+        "label": "Limite do corpo (caracteres)"
       },
       "subjectPrefix": {
-        "label": "Prefixo do assunto da resposta"
+        "label": "Prefixo do assunto"
       },
       "allowedAttachmentTypes": {
-        "label": "Tipos de anexos permitidos"
+        "label": "Tipos de anexos"
       },
       "maxAttachmentSize": {
-        "label": "Tamanho máximo do anexo"
+        "label": "Limite por anexo (bytes)"
       },
       "maxAttachmentsPerEmail": {
-        "label": "Máximo de anexos"
+        "label": "Limite de anexos"
       },
       "trustedAuthservIds": {
         "label": "Serviços de autenticação confiáveis",
         "placeholder": "mx.google.com, separados por vírgulas",
-        "help": "Valores authserv-id exatos adicionados pelo serviço receptor. Obrigatório ao verificar SPF ou DKIM."
+        "help": "Informe valores authserv-id confiáveis.\n\nValores authserv-id exatos adicionados pelo serviço receptor. Obrigatório ao verificar SPF ou DKIM."
       }
     }
   }

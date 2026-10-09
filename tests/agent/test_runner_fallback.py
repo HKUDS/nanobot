@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
@@ -464,11 +464,13 @@ class TestFallbackWhenPrimaryRaises:
         )
 
         retry = fb.chat_stream_with_retry if stream else fb.chat_with_retry
-        result = await retry(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await retry(messages=[{"role": "user", "content": "hi"}], model="primary-model")
 
         assert result.content == "fallback ok"
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
+        assert sleep.await_args_list == [call(1), call(2), call(4)]
 
     @pytest.mark.asyncio
     async def test_authentication_exception_message_is_classified(self) -> None:
@@ -911,13 +913,15 @@ class TestFallbackOnPrimaryError:
             fallback_model_observer=_observe,
         )
 
-        result = await fb.chat_with_retry(
-            messages=[{"role": "user", "content": "hi"}],
-            model="primary-model",
-        )
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await fb.chat_with_retry(
+                messages=[{"role": "user", "content": "hi"}],
+                model="primary-model",
+            )
 
         assert result.content == "fallback ok"
         assert fallback_models == ["fallback-b"]
+        assert sleep.await_args_list == [call(1), call(2), call(4)]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("provider_name", "status", "code", "kind", "expected"), [

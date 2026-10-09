@@ -34,6 +34,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
+from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
 
 if TYPE_CHECKING:
@@ -1947,6 +1948,7 @@ class OpenAICompatProvider(LLMProvider):
                 reasoning_effort, tool_choice,
                 extra_headers=affinity,
             )
+            kwargs = await prepare_inline_images(kwargs)
             chat_raw = cast(
                 Any,
                 await client.chat.completions.create(**kwargs),
@@ -2005,6 +2007,7 @@ class OpenAICompatProvider(LLMProvider):
                 reasoning_effort, tool_choice,
                 extra_headers=affinity,
             )
+            kwargs = await prepare_inline_images(kwargs)
             if self._spec and self._spec.name == "zhipu" and tools and on_tool_call_delta:
                 # Z.AI/GLM keeps streaming tool-call arguments behind an
                 # explicit provider flag.  Pass it through the OpenAI SDK's

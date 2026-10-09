@@ -43,14 +43,12 @@ _reasoning_effort_values_for = models.reasoning_effort_values_for
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
-    "can_pick_folder": False,
     "can_open_logs": False,
     "can_export_diagnostics": False,
 }
 _NATIVE_RUNTIME_CAPABILITIES = {
     **_RUNTIME_CAPABILITIES,
     "can_restart_engine": True,
-    "can_pick_folder": True,
     "can_open_logs": True,
     "can_export_diagnostics": True,
 }

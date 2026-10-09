@@ -21,22 +21,22 @@
         }
       },
       "groupPolicy": {
-        "label": "群组行为",
+        "label": "群聊规则",
         "choices": {
-          "mention": "仅提及时",
-          "open": "所有消息",
+          "mention": "提及回复",
+          "open": "全部消息",
           "allowlist": "白名单"
         }
       },
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "用户 ID，用逗号分隔"
       },
       "topicIsolation": {
-        "label": "话题隔离",
+        "label": "独立话题",
         "choices": {
-          "true": "每个话题使用独立会话",
-          "false": "群聊共用一个会话"
+          "true": "独立会话",
+          "false": "共享会话"
         }
       },
       "name": {
@@ -55,7 +55,7 @@
         "label": "完成表情"
       },
       "toolHintPrefix": {
-        "label": "工具提示前缀"
+        "label": "提示前缀"
       },
       "replyToMessage": {
         "label": "引用回复",

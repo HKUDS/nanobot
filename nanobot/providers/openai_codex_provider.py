@@ -26,6 +26,7 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
 )
+from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.oauth_model_catalog import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
@@ -176,7 +177,7 @@ class OpenAICodexProvider(LLMProvider):
                 *,
                 emit_deltas: bool,
             ) -> LLMResponse:
-                wire_body = without_response_item_ids(request_body)
+                wire_body = await prepare_inline_images(without_response_item_ids(request_body))
                 if session_id:
                     websocket_result = await self._responses.websocket_request(
                         session_id, DEFAULT_CODEX_URL, headers, wire_body,

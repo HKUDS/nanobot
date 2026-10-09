@@ -12,29 +12,29 @@
         "placeholder": "選填權杖"
       },
       "groupPolicy": {
-        "label": "群組行為",
+        "label": "群聊規則",
         "choices": {
-          "mention": "僅提及時",
-          "open": "所有訊息",
+          "mention": "提及回覆",
+          "open": "全部訊息",
           "allowlist": "允許清單"
         }
       },
       "allowFrom": {
-        "label": "允許的使用者",
+        "label": "允許使用者",
         "placeholder": "QQ ID，以逗號分隔"
       },
       "groupPolicyOverrides": {
-        "label": "群组行为覆盖（JSON）"
+        "label": "群聊例外（JSON）"
       },
       "welcomeNewMembers": {
-        "label": "歡迎新成員",
+        "label": "入群歡迎",
         "choices": {
           "true": "開啟",
           "false": "關閉"
         }
       },
       "maxImageBytes": {
-        "label": "圖片大小上限"
+        "label": "圖片上限（位元組）"
       }
     }
   }

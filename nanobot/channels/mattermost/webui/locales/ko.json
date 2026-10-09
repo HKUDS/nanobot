@@ -16,7 +16,7 @@
         "placeholder": "팀 ID(선택 사항)"
       },
       "groupPolicy": {
-        "label": "채널 동작",
+        "label": "채널 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
@@ -24,7 +24,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "스레드 동작",
+        "label": "스레드 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지(멘션 불필요)",
@@ -32,7 +32,7 @@
         }
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
       },
       "allowFromMatchMode": {
@@ -44,24 +44,24 @@
         }
       },
       "groupAllowFrom": {
-        "label": "허용된 채널"
+        "label": "허용 채널"
       },
       "replyInThread": {
-        "label": "스레드로 답장하기",
+        "label": "스레드 답변",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       },
       "includeThreadContext": {
-        "label": "스레드 컨텍스트 포함",
+        "label": "스레드 컨텍스트",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       },
       "threadContextLimit": {
-        "label": "스레드 컨텍스트 제한"
+        "label": "컨텍스트 상한"
       },
       "streaming": {
         "label": "스트리밍",
@@ -77,14 +77,14 @@
         "label": "이모티콘 완료"
       },
       "sendProgress": {
-        "label": "진행 상황 보내기",
+        "label": "진행 상황 전송",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       },
       "sendToolHints": {
-        "label": "도구 힌트 보내기",
+        "label": "도구 힌트",
         "choices": {
           "true": "켜기",
           "false": "끄기"
@@ -105,7 +105,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "허용된 직접 메시지 사용자"
+        "label": "허용 DM 사용자"
       }
     }
   }

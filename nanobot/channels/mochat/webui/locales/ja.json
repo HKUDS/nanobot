@@ -24,7 +24,7 @@
         "placeholder": "パネル ID（カンマ区切り）"
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
       },
       "socketUrl": {
@@ -44,7 +44,7 @@
         "label": "再接続の遅延"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "最大再接続遅延"
+        "label": "再接続の遅延上限（ms）"
       },
       "socketConnectTimeoutMs": {
         "label": "接続タイムアウト"
@@ -56,26 +56,26 @@
         "label": "ウォッチタイムアウト"
       },
       "watchLimit": {
-        "label": "バッチサイズを監視する"
+        "label": "取得件数"
       },
       "retryDelayMs": {
         "label": "再試行の遅延"
       },
       "maxRetryAttempts": {
-        "label": "最大再試行回数"
+        "label": "再試行の上限"
       },
       "mention_requireInGroups": {
-        "label": "グループでのメンションを必須にする",
+        "label": "グループのメンション必須",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "groups": {
-        "label": "グループルール（JSON）"
+        "label": "グループのルール（JSON）"
       },
       "replyDelayMode": {
-        "label": "返信遅延モード"
+        "label": "返信の遅延方法"
       },
       "replyDelayMs": {
         "label": "返信遅延"

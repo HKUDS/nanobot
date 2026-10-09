@@ -32,7 +32,7 @@ from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.binding import CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
-from nanobot.security.workspace_access import WorkspaceScope
+from nanobot.security.workspace_access import WorkspaceScope, WorkspaceScopeError
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import RecoveryActionError
 from nanobot.session.session_handles import (
@@ -95,11 +95,6 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
-from nanobot.webui.native_folder_picker import (
-    NativeFolderPickerError,
-    native_folder_picker_available,
-    pick_native_folder,
-)
 from nanobot.webui.session_automations import (
     all_automations_payload,
     serialize_automation_jobs,
@@ -140,6 +135,7 @@ from nanobot.webui.transcript import (
     build_webui_trace_detail_response,
     webui_transcript_revision,
 )
+from nanobot.webui.workspace_browser import browse_workspace_directories
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
@@ -196,7 +192,8 @@ _WEBUI_MUTATION_PATHS = {
     "star_prompt.claim": "/api/webui/star-prompt/claim",
     "star_prompt.dismiss": "/api/webui/star-prompt/dismiss",
     "sidebar.update": "/api/webui/sidebar-state/update",
-    "workspace.pick_folder": "/api/workspaces/pick-folder",
+    "workspace.favorite": "/api/workspaces/favorite",
+    "workspace.resolve_project": "/api/workspaces/resolve-project",
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
     "subagent.cancel": "/api/webui/subagents/cancel",
@@ -415,7 +412,6 @@ class GatewayHTTPHandler:
         self.subagent_manager = subagent_manager
         self.discard_session = discard_session
         self._skill_install_lock = asyncio.Lock()
-        self._folder_picker_lock = asyncio.Lock()
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
@@ -473,17 +469,6 @@ class GatewayHTTPHandler:
         if not isinstance(headers, Mapping):
             return False
         return _is_local_browser_request(connection, headers)
-
-    def workspace_folder_picker_available(
-        self,
-        connection: Any,
-        request: WsRequest,
-    ) -> bool:
-        return (
-            _is_loopback_host(self.config.host)
-            and _is_local_browser_request(connection, request.headers)
-            and native_folder_picker_available()
-        )
 
     # -- Token management ---------------------------------------------------
 
@@ -566,7 +551,8 @@ class GatewayHTTPHandler:
             "/api/webui/star-prompt/claim",
             "/api/webui/star-prompt/dismiss",
             "/api/webui/sidebar-state/update",
-            "/api/workspaces/pick-folder",
+            "/api/workspaces/resolve-project",
+            "/api/workspaces/favorite",
             "/api/webui/subagents/cancel",
         }
 
@@ -672,7 +658,7 @@ class GatewayHTTPHandler:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         # A public/reverse-proxied WebUI must never gain access to this machine's
-        # SSH agent, private keys or network. Same checks as local folder picking.
+        # SSH agent, private keys or network.
         if not (_is_loopback_host(self.config.host)
                 and _is_local_browser_request(connection, request.headers)):
             return _http_error(403, "remote_connections_local_only")
@@ -1646,8 +1632,12 @@ class GatewayHTTPHandler:
             return await self._handle_sessions_list(request)
         if got == "/api/commands":
             return self._handle_commands(request)
-        if got == "/api/workspaces/pick-folder":
-            return await self._handle_workspace_folder_picker(connection, request)
+        if got == "/api/workspaces/favorite":
+            return self._handle_workspace_favorite(connection, request)
+        if got == "/api/workspaces/resolve-project":
+            return await self._handle_workspace_resolve_project(connection, request)
+        if got == "/api/workspaces/directories":
+            return await self._handle_workspace_directories(connection, request)
         if got == "/api/workspaces":
             return self._handle_workspaces(connection, request)
         if got == "/api/webui/skills/search":
@@ -1697,30 +1687,53 @@ class GatewayHTTPHandler:
                     connection,
                     request.headers,
                 ),
-                folder_picker_available=self.workspace_folder_picker_available(
-                    connection,
-                    request,
-                ),
             )
         )
 
-    async def _handle_workspace_folder_picker(
-        self,
-        connection: Any,
-        request: WsRequest,
-    ) -> Response:
+    def _handle_workspace_favorite(self, connection: Any, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if not self.workspace_folder_picker_available(connection, request):
-            return _http_error(403, "native folder picker is unavailable for this connection")
-        if self._folder_picker_lock.locked():
-            return _http_error(409, "native folder picker is already open")
+        if not self.workspace_project_selection_available(connection):
+            return _http_error(403, "project selection is unavailable for this connection")
+        payload = _mutation_payload(request) or {}
         try:
-            async with self._folder_picker_lock:
-                path = await pick_native_folder()
-        except NativeFolderPickerError as exc:
-            return _http_error(503, str(exc))
-        return _http_json_response({"path": path})
+            favorites = self.workspaces.set_favorite_project(payload.get("path"), payload.get("pinned"))
+        except WorkspaceScopeError as exc:
+            return _http_error(exc.status, exc.message)
+        except OSError:
+            return _http_error(500, "could not save favorite folders")
+        return _http_json_response({"favorite_projects": favorites})
+
+    async def _handle_workspace_resolve_project(self, connection: Any, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not self.workspace_project_selection_available(connection):
+            return _http_error(403, "project selection is unavailable for this connection")
+        payload = _mutation_payload(request) or {}
+        try:
+            project = self.workspaces.resolve_project(payload.get("path"))
+        except WorkspaceScopeError as exc:
+            return _http_error(exc.status, exc.message)
+        return _http_json_response(project)
+
+    async def _handle_workspace_directories(self, connection: Any, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not self.workspace_project_selection_available(connection):
+            return _http_error(403, "project selection is unavailable for this connection")
+        query = _parse_query(request.path)
+        try:
+            payload = await asyncio.to_thread(
+                browse_workspace_directories,
+                _query_first(query, "path") or "",
+                default_workspace=self.workspaces.default_scope().project_path,
+                query=_query_first(query, "q") or "",
+                show_hidden=_query_first(query, "hidden") == "1",
+                allow_partial=_query_first(query, "partial") == "1",
+            )
+        except WorkspaceScopeError as exc:
+            return _http_error(exc.status, exc.message)
+        return _http_json_response(dict(payload))
 
     def _handle_webui_skills(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

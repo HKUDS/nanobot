@@ -13,6 +13,8 @@ from nanobot.bus.events import (
     InboundMessage,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.command.builtin import register_builtin_commands
+from nanobot.command.router import CommandRouter
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.session.manager import Session, SessionManager
 from nanobot.webui.workspaces import WebUIWorkspaceController
@@ -62,6 +64,8 @@ class WebUITemporaryChats:
         self._workspaces = workspaces
         self._logger = logger
         self._channel_name = channel_name
+        self._commands = CommandRouter()
+        register_builtin_commands(self._commands)
         self._owners: dict[str, object] = {}
         self._owner_chat_ids: dict[object, set[str]] = {}
         # Keep active sessions alive if the bounded manager cache evicts them
@@ -119,8 +123,8 @@ class WebUITemporaryChats:
         if session is None:
             raise TemporaryChatError("temporary_chat_unavailable")
 
-        command = content.strip().split(maxsplit=1)[0].lower() if content.strip() else ""
-        if command.startswith("/") and command not in _TEMPORARY_CHAT_COMMANDS:
+        command = self._commands.command_name(content)
+        if command is not None and command not in _TEMPORARY_CHAT_COMMANDS:
             raise TemporaryChatError("temporary_chat_command_rejected")
 
         return TemporaryChatMessagePolicy(

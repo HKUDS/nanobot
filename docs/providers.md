@@ -86,6 +86,23 @@ You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Ant
 
 Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex` and `xai_grok`, including OAuth token exchange/refresh and model requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
+## Inline Image Requests
+
+Before sending a large inline image batch, providers prepare smaller copies while
+keeping the attachment files intact. This applies to Responses, Chat Completions,
+Anthropic Messages, and Bedrock Converse requests, including images returned by tools
+and images in Responses history replay. Preparation first re-encodes at the original
+dimensions, then reduces each dimension by at most 25% if needed, with JPEG quality
+at least 65. PNG transparency is preserved. The shared 1 MB image data URL budget is
+a best-effort transport target; small image blocks, animated images, and remote
+references keep their original payloads. Gateway logs report image sizes and byte counts.
+
+Preparation preserves each adapter's model and API capability rules. When automatic
+Responses compatibility fallback is allowed, switching to Chat Completions retains
+the images. The shared retry policy can retry a non-transient image request error once
+without images, using text placeholders that explicitly say the images were not delivered.
+Responses state containing images is discarded before that text-only retry.
+
 ## Common Provider Patterns
 
 ### OpenRouter Gateway
@@ -592,6 +609,11 @@ nanobot provider login openai-codex --set-main
 The WebUI reads the account's Codex model catalog online, including current
 context-window and reasoning-effort metadata. A small compatible catalog remains
 available when the service cannot be reached.
+
+After three WebSocket transport failures without a completed reply, the same
+authenticated session uses HTTP for subsequent attempts. The existing retry policy
+controls replay and cancellation. WebSocket logs include request bytes, first-event timing,
+and close codes; unrecognized close reasons are redacted.
 
 For an eligible X Premium / Grok subscription:
 

@@ -821,7 +821,7 @@ def _skillhub_skill(
         "provider": _PROVIDER_SKILLHUB,
         "installs": installs if isinstance(installs, int) and installs >= 0 else 0,
         "downloads": downloads if isinstance(downloads, int) and downloads >= 0 else 0,
-        "url": f"{_SKILLHUB_PAGE_BASE_URL}/{quote(handle.strip(), safe='')}/"
+        "url": f"{_SKILLHUB_PAGE_BASE_URL}/skills/{quote(handle.strip(), safe='')}/"
         f"{quote(skill_id, safe='')}",
         "installed": skill_id in installed,
         "install_supported": True,

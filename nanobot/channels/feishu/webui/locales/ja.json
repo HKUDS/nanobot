@@ -20,22 +20,22 @@
         }
       },
       "groupPolicy": {
-        "label": "グループでの動作",
+        "label": "グループのルール",
         "choices": {
           "mention": "メンションのみ",
-          "open": "すべてのメッセージ",
+          "open": "全メッセージ",
           "allowlist": "許可リスト"
         }
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
       },
       "topicIsolation": {
-        "label": "トピック分離",
+        "label": "トピック別セッション",
         "choices": {
-          "true": "トピックごとにセッションを分離",
-          "false": "グループでセッションを共有"
+          "true": "個別セッション",
+          "false": "共有セッション"
         }
       },
       "name": {
@@ -54,7 +54,7 @@
         "label": "完了絵文字"
       },
       "toolHintPrefix": {
-        "label": "ツールヒントの接頭辞"
+        "label": "ヒントの接頭辞"
       },
       "replyToMessage": {
         "label": "メッセージに返信する",

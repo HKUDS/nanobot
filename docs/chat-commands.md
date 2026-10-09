@@ -28,6 +28,26 @@ These commands work inside chat channels and interactive agent sessions:
 | `/pairing revoke <channel> <user_id>` | Revoke a previously approved user on a specific channel |
 | `/help` | Show available in-chat commands |
 
+## Commands and file paths
+
+The gateway treats a message as a command only when its first word matches a
+registered command name. Names are case-insensitive. Arguments must follow the
+command's supported form.
+
+Other text goes to the agent unchanged. This includes `/tmp`,
+`/home/user/project`, and `/Users/alice/report.md`. Unknown names such as `/neaw`
+also go to the agent; the gateway no longer returns a spelling suggestion.
+Use `/help` or the command menu to find a command.
+
+In the WebUI, Enter queues ordinary text while a response is running. Paths
+follow the same rule. Registered commands still go to the gateway immediately.
+If the command list is unavailable, slash-prefixed input goes to the gateway
+immediately, so commands such as `/stop` do not wait in the queue.
+
+A path can have the same name as a command. For example, `/new` starts a new
+conversation. To discuss that directory, write `/new/` or `Look at /new`.
+Chat platforms can apply their own command rules before a message reaches the gateway.
+
 ## Pairing
 
 When someone sends a DM to the bot and isn't on the allowlist — whether it's a new user or an existing user on a new channel — nanobot automatically replies with a **pairing code** (like `ABCD-EFGH`) that expires in 10 minutes. To grant them access:

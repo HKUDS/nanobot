@@ -63,17 +63,20 @@ interface DialogContentProps
   extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   showCloseButton?: boolean;
   overlayClassName?: string;
+  layoutAnchor?: HTMLElement | null;
+  centerInLayoutAnchor?: boolean;
   placement?: "center" | "bottom";
 }
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, showCloseButton = true, overlayClassName, placement = "center", onOpenAutoFocus, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, overlayClassName, placement = "center", layoutAnchor: explicitLayoutAnchor, centerInLayoutAnchor = false, onOpenAutoFocus, ...props }, ref) => {
   const { t } = useTranslation();
   const [container, setContainer] = React.useState<HTMLDivElement | null>(null);
   const contentNode = React.useRef<HTMLDivElement | null>(null);
-  const layoutAnchor = React.useContext(DialogLayoutContext);
+  const inheritedLayoutAnchor = React.useContext(DialogLayoutContext);
+  const layoutAnchor = explicitLayoutAnchor ?? inheritedLayoutAnchor;
   const [layout, setLayout] = React.useState<React.CSSProperties>();
   React.useLayoutEffect(() => {
     if (!layoutAnchor || placement === "bottom") {
@@ -85,17 +88,30 @@ const DialogContent = React.forwardRef<
       const style = getComputedStyle(layoutAnchor);
       const start = parseFloat(style.paddingLeft) || 0;
       const end = parseFloat(style.paddingRight) || 0;
-      if (rect.width > 0) setLayout({ left: rect.left + start, right: "auto", width: rect.width - start - end, paddingInline: 0 });
+      if (rect.width > 0) {
+        const viewport = window.visualViewport;
+        const top = Math.max(rect.top, viewport?.offsetTop ?? 0);
+        const bottom = Math.min(rect.bottom, (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight));
+        setLayout({
+          left: rect.left + start, right: "auto", width: rect.width - start - end,
+          paddingInline: centerInLayoutAnchor ? 16 : 0,
+          ...(centerInLayoutAnchor ? { top, height: Math.max(0, bottom - top) } : {}),
+        });
+      }
     };
     update();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(layoutAnchor);
     window.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
     };
-  }, [layoutAnchor, placement]);
+  }, [layoutAnchor, placement, centerInLayoutAnchor]);
   const contentRef = React.useCallback((node: HTMLDivElement | null) => {
     contentNode.current = node;
     setContainer(node);

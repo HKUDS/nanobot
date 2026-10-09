@@ -62,6 +62,10 @@ export function SidebarSelectionHighlight({
       const firstPosition = !positionedRef.current;
       if (firstPosition) highlight.style.transitionProperty = "none";
 
+      // Preserve fractional layout coordinates so the highlight shares the
+      // target's edges, including where it meets an adjacent hover background.
+      highlight.style.left = "0px";
+      highlight.style.top = "0px";
       highlight.style.width = `${targetRect.width}px`;
       highlight.style.height = `${targetRect.height}px`;
       highlight.style.transform = `translate3d(${targetRect.left - containerRect.left}px, ${

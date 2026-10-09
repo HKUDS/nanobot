@@ -115,6 +115,8 @@ import type {
   WebUIIngressLimits,
   WorkspaceScopePayload,
   WorkspacesPayload,
+  ProjectDirectory,
+  WorkspaceDirectoriesPayload,
 } from "@/lib/types";
 import {
   logoFallbackUrls,
@@ -123,6 +125,7 @@ import { sessionHandleColor } from "@/lib/session-handle";
 import { mcpPresetBrand } from "@/lib/mcp-preset-brand";
 import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
+  isRegisteredSlashCommand,
   isSideChannelLifecycle,
   slashCommandLifecycle,
 } from "@/lib/slash-command";
@@ -237,11 +240,15 @@ interface ThreadComposerProps {
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceControlsHidden?: boolean;
+  workspacePickerLayoutAnchor?: HTMLElement | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
-  onPickWorkspaceFolder?: () => Promise<string | null>;
+  onFavoriteWorkspaceProject?: (path: string, pinned: boolean) => Promise<ProjectDirectory[]>;
+  onResolveWorkspaceProject?: (path: string) => Promise<ProjectDirectory>;
+  onLoadWorkspaceProjects?: () => Promise<WorkspacesPayload>;
+  onBrowseWorkspaceDirectories?: (path: string, query: string, showHidden: boolean) => Promise<WorkspaceDirectoriesPayload>;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
   draftKey?: string;
@@ -959,11 +966,15 @@ export function ThreadComposer({
   goalState,
   workspaceScope = null,
   workspaceControlsHidden = false,
+  workspacePickerLayoutAnchor,
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
   workspaceError = null,
-  onPickWorkspaceFolder,
+  onLoadWorkspaceProjects,
+  onResolveWorkspaceProject,
+  onFavoriteWorkspaceProject,
+  onBrowseWorkspaceDirectories,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
   draftKey,
@@ -1055,6 +1066,10 @@ export function ThreadComposer({
     isHero
     && !!workspaceDefaultScope
     && !!onWorkspaceScopeChange
+    && !!onLoadWorkspaceProjects
+    && !!onBrowseWorkspaceDirectories
+    && !!onResolveWorkspaceProject
+    && !!onFavoriteWorkspaceProject
     && workspaceControls?.can_change_project !== false;
   const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
 
@@ -1186,7 +1201,10 @@ export function ThreadComposer({
     && !encoding
     && !hasErrors
     && hasComposerContent
-    && !value.trimStart().startsWith("/");
+    // Without command metadata, let the gateway classify slash input immediately.
+    && (slashCommands.length > 0
+      ? !isRegisteredSlashCommand(value, slashCommands)
+      : !value.trimStart().startsWith("/"));
 
   const slashQuery = useMemo(() => {
     if (interactionDisabled || slashMenuDismissed || !value.startsWith("/")) return null;
@@ -2317,7 +2335,10 @@ export function ThreadComposer({
   );
 
   const attachButtonDisabled = interactionDisabled || full;
-  const showVoiceButton = Boolean(onTranscribeAudio);
+  const showVoiceButton = Boolean(onTranscribeAudio) && (
+    voiceRecorder.state !== "idle"
+    || (!hasComposerContent && images.length === 0 && !isStreaming && !modelNeedsSetup)
+  );
   const voiceRecordingStatusLabel = t("thread.composer.voice.recordingStatus", {
     time: voiceRecorder.elapsedLabel,
     defaultValue: `Recording ${voiceRecorder.elapsedLabel}`,
@@ -2368,6 +2389,22 @@ export function ThreadComposer({
       disabled={interactionDisabled || workspaceScopeDisabled}
       canUseFullAccess={workspaceControls?.can_use_full_access !== false}
       isHero={isHero}
+      onChange={onWorkspaceScopeChange}
+    />
+  ) : null;
+  const workspaceControl = showProjectPicker ? (
+    <WorkspaceProjectPicker
+      layoutAnchor={workspacePickerLayoutAnchor}
+      isHero={isHero}
+      disabled={interactionDisabled || workspaceScopeDisabled}
+      scope={workspaceScope}
+      defaultScope={workspaceDefaultScope}
+      controls={workspaceControls}
+      error={workspaceError}
+      onFavoriteProject={onFavoriteWorkspaceProject}
+      onResolveProject={onResolveWorkspaceProject}
+      onLoadProjects={onLoadWorkspaceProjects}
+      onBrowseDirectories={onBrowseWorkspaceDirectories}
       onChange={onWorkspaceScopeChange}
     />
   ) : null;
@@ -2635,7 +2672,7 @@ export function ThreadComposer({
             isHero
               ? cn(
                   "gap-x-1.5 px-3 sm:px-4",
-                  showProjectPicker ? "pb-1.5" : "pb-3.5",
+                  showProjectPicker && compactControls ? "pb-1.5" : "pb-3.5",
                 )
               : "gap-x-2 px-2.5 pb-2 sm:px-3",
           )}
@@ -2662,13 +2699,13 @@ export function ThreadComposer({
               aria-label={t("thread.composer.attachImage")}
               onClick={() => fileInputRef.current?.click()}
               className={cn(
-                "thread-composer-action thread-composer-round-action touch-target rounded-xl text-muted-foreground hover:text-foreground",
+                "thread-composer-action thread-composer-round-action touch-target shrink-0 rounded-xl text-muted-foreground hover:text-foreground",
                 isHero
                   ? "h-8 w-8"
                   : "h-9 w-9",
               )}
             >
-              <AttachIcon className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+              <AttachIcon className="h-3.5 w-3.5" />
             </Button>
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
@@ -2678,7 +2715,12 @@ export function ThreadComposer({
                 isHero={isHero}
                 levels={voiceRecorder.levels}
               />
-            ) : compactControls ? modelControl : accessControl}
+            ) : compactControls ? modelControl : (
+              <div className="thread-composer-workspace-group flex min-w-0 items-center gap-0.5">
+                {workspaceControl}
+                {accessControl}
+              </div>
+            )}
           </div>
           <div
             className={cn(
@@ -2688,37 +2730,61 @@ export function ThreadComposer({
           >
             {!compactControls ? modelControl : null}
             {!compactControls ? usageControl : null}
-            {showVoiceButton ? (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      disabled={voiceRecorder.buttonDisabled}
-                      aria-label={voiceButtonLabel}
-                      aria-keyshortcuts={VOICE_SHORTCUT_ARIA}
-                      onPointerDown={voiceRecorder.beginPress}
-                      onPointerUp={voiceRecorder.endPress}
-                      onPointerCancel={voiceRecorder.endPress}
-                      onClick={voiceRecorder.handleClick}
-                      className={cn(
-                        "thread-composer-action touch-target rounded-xl border border-transparent text-muted-foreground hover:text-foreground",
-                        isHero ? "h-8 w-8" : "h-9 w-9",
-                        voiceRecorder.isRecording &&
-                          "bg-red-500 text-white hover:text-white",
-                      )}
-                    >
-                      {voiceRecorder.state === "transcribing" ? (
-                        <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type={showVoiceButton || showStopButton || modelNeedsSetup ? "button" : "submit"}
+                    size="icon"
+                    disabled={showVoiceButton ? voiceRecorder.buttonDisabled : showStopButton ? interactionDisabled : !canSend && !canOpenModelSettings}
+                    aria-label={
+                      showVoiceButton
+                        ? voiceButtonLabel
+                        : showStopButton
+                          ? t("thread.composer.stop")
+                          : modelNeedsSetup
+                            ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
+                            : t("thread.composer.send")
+                    }
+                    aria-keyshortcuts={showVoiceButton ? VOICE_SHORTCUT_ARIA : undefined}
+                    onPointerDown={showVoiceButton ? voiceRecorder.beginPress : undefined}
+                    onPointerUp={showVoiceButton ? voiceRecorder.endPress : undefined}
+                    onPointerCancel={showVoiceButton ? voiceRecorder.endPress : undefined}
+                    onClickCapture={event => {
+                      if (!voiceRecorder.consumeSuppressedClick()) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={showVoiceButton ? voiceRecorder.handleClick : showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
+                    className={cn(
+                      "thread-composer-action thread-composer-round-action touch-target rounded-full",
+                      showStopButton && !showVoiceButton
+                        ? "border border-border/70 bg-card text-foreground/85 hover:text-foreground disabled:text-muted-foreground/50"
+                        : "border border-foreground bg-foreground text-background disabled:border-foreground disabled:bg-foreground disabled:text-background",
+                      showVoiceButton && voiceRecorder.isRecording && "border-red-500 bg-red-500 text-white hover:bg-red-500 hover:text-white",
+                      isHero ? "h-8 w-8" : "h-9 w-9",
+                    )}
+                  >
+                    {showVoiceButton ? (
+                      voiceRecorder.state === "transcribing" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : voiceRecorder.isRecording ? (
-                        <StopIcon className={cn(isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} fill="currentColor" />
+                        <StopIcon className="h-3.5 w-3.5" fill="currentColor" />
                       ) : (
-                        <VoiceIcon className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
+                        <VoiceIcon className="h-4 w-4" />
+                      )
+                    ) : showStopButton ? (
+                      <StopIcon className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
+                    ) : modelNeedsSetup ? (
+                      <ModelsIcon className="h-4 w-4" />
+                    ) : canSend || !isStreaming ? (
+                      <ArrowUp className="h-4 w-4" />
+                    ) : (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                {showVoiceButton ? (
                   <TooltipContent
                     side="top"
                     align="center"
@@ -2726,49 +2792,17 @@ export function ThreadComposer({
                   >
                     <span>{voiceButtonTooltip}</span>
                     {voiceRecorder.state === "idle" ? (
-                      <kbd className="rounded-full bg-muted px-2 py-0.5 font-sans text-[12px] font-semibold leading-none text-muted-foreground dark:bg-white/10 dark:text-white/80">
+                      <kbd className="rounded-full bg-muted px-2 py-0.5 font-sans text-[12px] font-semibold leading-none text-muted-foreground dark:bg-white/10">
                         {voiceShortcutLabel}
                       </kbd>
                     ) : null}
                   </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ) : null}
-            <Button
-              type={showStopButton || modelNeedsSetup ? "button" : "submit"}
-              size="icon"
-              disabled={showStopButton ? interactionDisabled : !canSend && !canOpenModelSettings}
-              aria-label={
-                showStopButton
-                  ? t("thread.composer.stop")
-                  : modelNeedsSetup
-                    ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
-                    : t("thread.composer.send")
-              }
-              onClick={showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
-              className={cn(
-                "thread-composer-action thread-composer-round-action touch-target rounded-full",
-                showStopButton
-                  ? "border border-border/70 bg-card text-foreground/85 hover:text-foreground disabled:text-muted-foreground/50"
-                  : isHero
-                    ? "border border-foreground bg-foreground text-background disabled:border-foreground disabled:bg-foreground disabled:text-background"
-                    : "border border-foreground bg-foreground text-background disabled:border-foreground disabled:bg-foreground disabled:text-background",
-                isHero ? "h-8 w-8" : "h-9 w-9",
-              )}
-            >
-              {showStopButton ? (
-                <StopIcon className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
-              ) : modelNeedsSetup ? (
-                <ModelsIcon className="h-4 w-4" />
-              ) : canSend || !isStreaming ? (
-                <ArrowUp className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
-              ) : (
-                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
-              )}
-            </Button>
+                ) : null}
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
-        {projectPickerAvailable ? (
+        {compactControls && projectPickerAvailable ? (
           <div
             className="inline-disclosure"
             data-composer-workspace-drawer=""
@@ -2776,25 +2810,17 @@ export function ThreadComposer({
             aria-hidden={showProjectPicker ? undefined : true}
           >
             <div className="inline-disclosure-clip">
-              <div className="inline-disclosure-content">
-                <WorkspaceProjectPicker
-                  isHero={isHero}
-                  disabled={interactionDisabled || workspaceScopeDisabled || !showProjectPicker}
-                  scope={workspaceScope}
-                  defaultScope={workspaceDefaultScope}
-                  controls={workspaceControls}
-                  error={workspaceError}
-                  onPickFolder={onPickWorkspaceFolder}
-                  onChange={onWorkspaceScopeChange}
-                />
+              <div className="inline-disclosure-content thread-composer-workspace-row flex min-w-0 items-center justify-between gap-2 rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4">
+                {workspaceControl}
+                <div className="ml-auto flex min-w-0 justify-end">{accessControl}</div>
               </div>
             </div>
           </div>
         ) : null}
       </div>
-      {compactControls ? (
-        <div className="thread-composer-meta mx-auto flex w-full max-w-[58rem] items-center justify-between gap-2 px-2">
-          {accessControl}
+      {compactControls && (!projectPickerAvailable || usageControl) ? (
+        <div className="thread-composer-meta mx-auto flex w-full max-w-[58rem] items-center justify-between gap-2 px-3">
+          {!projectPickerAvailable ? accessControl : null}
           <div className="ml-auto">{usageControl}</div>
         </div>
       ) : null}

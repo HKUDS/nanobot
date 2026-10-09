@@ -480,7 +480,7 @@ describe("Linear channel UI", () => {
     expect(await screen.findByRole("link", { name: "Continue in Linear" })).toHaveAttribute(
       "href", "https://linear.app/oauth/authorize?client_id=test",
     );
-    expect(screen.getByText("Continue in Linear to choose a workspace and authorize nanobot. Return here when you're done.")).toBeVisible();
+    expect(screen.getByText("Authorize in Linear, then return here. Continue in Linear to choose a workspace and authorize nanobot. Return here when you're done.")).toBeVisible();
     expect(screen.queryByRole("img", { name: /QR/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/scan the QR code/i)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toBeDisabled();

@@ -29,10 +29,10 @@
         "label": "Media directory"
       },
       "downloadChunkSize": {
-        "label": "Download chunk size"
+        "label": "Chunk size (bytes)"
       },
       "downloadMaxBytes": {
-        "label": "Maximum download size"
+        "label": "Download limit (bytes)"
       },
       "showCompactionNotices": {
         "label": "Compaction notices",

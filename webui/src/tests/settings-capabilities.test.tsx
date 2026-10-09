@@ -335,7 +335,6 @@ describe("Settings capabilities", () => {
       runtime_surface: "native" as const,
       runtime_capabilities: {
         can_restart_engine: true,
-        can_pick_folder: true,
         can_open_logs: true,
         can_export_diagnostics: true,
       },

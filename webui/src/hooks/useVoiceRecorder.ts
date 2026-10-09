@@ -266,15 +266,18 @@ export function useVoiceRecorder({
     stopRecordingWhenReady();
   }, [stopRecordingWhenReady, suppressNextClick]);
 
+  const consumeSuppressedClick = useCallback(() => {
+    if (!suppressClickRef.current) return false;
+    clearSuppressClickTimer();
+    suppressClickRef.current = false;
+    return true;
+  }, [clearSuppressClickTimer]);
+
   const handleClick = useCallback(() => {
-    if (suppressClickRef.current) {
-      clearSuppressClickTimer();
-      suppressClickRef.current = false;
-      return;
-    }
+    if (consumeSuppressedClick()) return;
     if (state === "recording") stopRecording();
     else void startRecording();
-  }, [clearSuppressClickTimer, startRecording, state, stopRecording]);
+  }, [consumeSuppressedClick, startRecording, state, stopRecording]);
 
   const beginShortcutHold = useCallback(() => {
     if (!onTranscribeAudio || disabled || state !== "idle" || shortcutActiveRef.current) return;
@@ -308,6 +311,7 @@ export function useVoiceRecorder({
     beginShortcutHold,
     beginPress,
     buttonDisabled: disabled || state === "transcribing",
+    consumeSuppressedClick,
     elapsedLabel: formatVoiceElapsed(elapsedMs),
     endShortcutHold,
     endPress,

@@ -23,19 +23,19 @@
         }
       },
       "ackMessage": {
-        "label": "Mensaje de reconocimiento"
+        "label": "Mensaje de recepción"
       },
       "mediaDir": {
         "label": "Directorio de medios"
       },
       "downloadChunkSize": {
-        "label": "Descargar tamaño de fragmento"
+        "label": "Tamaño de bloque (bytes)"
       },
       "downloadMaxBytes": {
-        "label": "Tamaño máximo de descarga"
+        "label": "Límite de descarga (bytes)"
       },
       "showCompactionNotices": {
-        "label": "Avisos de compactación de contexto",
+        "label": "Avisos de compactación",
         "choices": {
           "true": "Activado",
           "false": "Desactivado"

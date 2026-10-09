@@ -90,7 +90,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(onPresetChange).not.toHaveBeenCalled();
     await user.click(trigger);
     await user.tab();
-    expect(screen.getByRole("button", { name: "Manage models" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Manage presets" })).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onManageModels).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -106,7 +106,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
       expect(screen.queryByTestId("composer-model-pill-viewport")).not.toBeInTheDocument();
       fireEvent.pointerUp(trigger, { pointerId: 1, pointerType: "touch", clientY: 100 });
       fireEvent.click(trigger);
-      expect(screen.getByRole("button", { name: "Manage models" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Manage presets" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -122,7 +122,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     fireEvent.click(current);
     expect(onPresetChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "deepseek-chat" }));
-    fireEvent.click(screen.getByRole("button", { name: "Manage models" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage presets" }));
     expect(onManageModels).toHaveBeenCalledTimes(1);
   });
 

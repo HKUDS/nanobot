@@ -160,7 +160,7 @@ async def test_search_skillhub_skills_normalizes_provider_metadata(
             "provider": "skillhub",
             "installs": 11831,
             "downloads": 142525,
-            "url": "https://skillhub.cn/tencent-adm/ima-skills",
+            "url": "https://skillhub.cn/skills/tencent-adm/ima-skills",
             "installed": False,
             "install_supported": True,
             "metric": "installs_total",
@@ -169,6 +169,46 @@ async def test_search_skillhub_skills_normalizes_provider_metadata(
             "requires_api_key": True,
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("listing", ["search", "trending"])
+async def test_skillhub_listings_link_to_public_skill_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    listing: str,
+) -> None:
+    row = {
+        "slug": "mail-agent-goose",
+        "displayName": "邮件管理器",
+        "namespace": {"handle": "user_a3ed06bc"},
+        "version": "2.2.0",
+        "homepage": "https://api.skillhub.cn/user_a3ed06bc/mail-agent-goose",
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if listing == "search":
+            assert request.url.path == "/api/v1/search"
+            return httpx.Response(200, json={"results": [row]})
+        assert request.url.path == "/api/v1/showcase/trending"
+        return httpx.Response(200, json={"skills": [row]})
+
+    monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace._skillhub_client",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+    )
+
+    if listing == "search":
+        payload = await search_marketplace_skills(
+            "@user_a3ed06bc/mail-agent-goose", tmp_path, provider="skillhub",
+        )
+    else:
+        payload = await trending_marketplace_skills(tmp_path, provider="skillhub")
+
+    assert len(payload["skills"]) == 1
+    assert payload["skills"][0]["url"] == (
+        "https://skillhub.cn/skills/user_a3ed06bc/mail-agent-goose"
+    )
 
 
 @pytest.mark.asyncio

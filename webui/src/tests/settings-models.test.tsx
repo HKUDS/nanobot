@@ -124,14 +124,14 @@ describe("Settings models", () => {
       return jsonResponse(payload);
     }));
     renderSettingsView({ initialSection: "models" });
-    fireEvent.click(await screen.findByRole("button", { name: "New model preset" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New preset" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "My unsaved preset" },
     });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
     if (mode === "manual") {
-      fireEvent.change(await screen.findByRole("textbox", { name: "Full callback URL" }), {
+      fireEvent.change(await screen.findByRole("textbox", { name: "Callback URL" }), {
         target: { value: "http://localhost:1455/auth/callback?code=fixture&state=test" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
@@ -662,15 +662,15 @@ describe("Settings models", () => {
         }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
-    expect(screen.getByRole("dialog", { name: "New model preset" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "Writer" },
     });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, {
       target: { value: "openai/gpt-4o-mini" },
@@ -702,12 +702,12 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     const nameInput = screen.getByRole("textbox", { name: "Preset name" });
     fireEvent.change(nameInput, { target: { value: "PRIMARY" } });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
@@ -809,7 +809,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: freshPayload });
 
     expect(
-      await screen.findByRole("button", { name: "New model preset" }),
+      await screen.findByRole("button", { name: "New preset" }),
     ).toBeInTheDocument();
   });
 
@@ -1197,7 +1197,7 @@ describe("Settings models", () => {
     await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", { name: /open-codex\/gpt-5\.5/i });
     await openPopover(modelButtons[modelButtons.length - 1]);
-    const input = (await screen.findByPlaceholderText("Search or type model ID")) as HTMLInputElement;
+    const input = (await screen.findByPlaceholderText("Choose model")) as HTMLInputElement;
     expect(input.value).toBe("open-codex/gpt-5.5");
 
     fireEvent.change(input, { target: { value: "openai-codex/gpt-5.5" } });
@@ -1280,7 +1280,7 @@ describe("Settings models", () => {
       ),
     ).toBe(false);
 
-    fireEvent.change(screen.getByPlaceholderText("Search or type model ID"), {
+    fireEvent.change(screen.getByPlaceholderText("Choose model"), {
       target: { value: "cl" },
     });
 
@@ -1474,12 +1474,12 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    const createButton = await screen.findByRole("button", { name: "New model preset" });
+    const createButton = await screen.findByRole("button", { name: "New preset" });
     const previousPointerEvents = document.body.style.pointerEvents;
     expect(createButton).toHaveClass("w-full");
     fireEvent.click(createButton);
 
-    expect(screen.getByRole("dialog", { name: "New model preset" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toContainElement(screen.getByTestId("model-preset-editor"));
     expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("");
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
@@ -1488,14 +1488,14 @@ describe("Settings models", () => {
 
     await waitFor(() => expect(document.body.style.pointerEvents).toBe(previousPointerEvents));
 
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     const nameInput = await screen.findByRole("textbox", { name: "Preset name" });
     expect(nameInput).toHaveValue("");
     expect(nameInput).toHaveAttribute("placeholder", "e.g. Fast writing");
 
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
@@ -1506,7 +1506,7 @@ describe("Settings models", () => {
     fireEvent.change(nameInput, { target: { value: "Writer" } });
     await openPopover(screen.getByRole("button", { name: /openai\/gpt-4o-mini/ }));
     const nextModelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(nextModelSearch, { target: { value: "openai/gpt-4.1-mini" } });
     fireEvent.keyDown(nextModelSearch, { key: "Enter" });

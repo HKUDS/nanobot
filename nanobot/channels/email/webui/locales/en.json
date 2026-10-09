@@ -14,7 +14,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Allow nanobot to read and send email",
+        "label": "Email access",
         "choices": {
           "true": "Granted",
           "false": "Not granted"
@@ -57,7 +57,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Check for mail every (seconds)",
+        "label": "Check interval (seconds)",
         "placeholder": "30"
       },
       "allowFrom": {
@@ -124,41 +124,41 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "Move to mailbox"
+        "label": "Target mailbox"
       },
       "postActionExpunge": {
-        "label": "Permanently apply action",
+        "label": "Permanent deletion",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "Ignore skipped messages",
+        "label": "Keep skipped mail",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "maxBodyChars": {
-        "label": "Maximum body length"
+        "label": "Body length limit (characters)"
       },
       "subjectPrefix": {
-        "label": "Reply subject prefix"
+        "label": "Subject prefix"
       },
       "allowedAttachmentTypes": {
-        "label": "Allowed attachment types"
+        "label": "Attachment types"
       },
       "maxAttachmentSize": {
-        "label": "Maximum attachment size"
+        "label": "Attachment limit (bytes)"
       },
       "maxAttachmentsPerEmail": {
-        "label": "Maximum attachments"
+        "label": "Attachment count limit"
       },
       "trustedAuthservIds": {
         "label": "Trusted authentication services",
         "placeholder": "mx.google.com, comma separated",
-        "help": "Exact authserv-id values added by the receiving mail service. Required when SPF or DKIM verification is on."
+        "help": "Enter trusted authserv-id values.\n\nExact authserv-id values added by the receiving mail service. Required when SPF or DKIM verification is on."
       }
     }
   }

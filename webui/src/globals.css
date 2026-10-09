@@ -45,9 +45,10 @@
     --radius-control: 0.75rem;
     --radius-floating: 1.125rem;
     --radius-panel: 1.375rem;
-    --radius-modal: 1.375rem;
+    --radius-modal: 2rem;
     --radius-prominent: 1.75rem;
     --radius-pill: 9999px;
+    --corner-shape: superellipse(1.5);
     --content-column-width: 49.5rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
@@ -110,6 +111,12 @@
 @layer base {
   * {
     @apply border-border;
+  }
+
+  *,
+  ::before,
+  ::after {
+    corner-shape: var(--corner-shape);
   }
 
   html,
@@ -900,6 +907,32 @@
   }
 }
 
+.workspace-picker-favorite {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.workspace-picker-row:hover .workspace-picker-favorite,
+.workspace-picker-row:focus-within .workspace-picker-favorite,
+.workspace-picker-row[data-keyboard-active] .workspace-picker-favorite {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .workspace-picker-favorite {
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-picker-favorite {
+    transition: none;
+  }
+}
+
 @media (pointer: coarse) {
   /* Readable form text avoids Safari's focus zoom without disabling the user's
      pinch zoom. Keep this after utilities so compact desktop overrides cannot
@@ -1151,8 +1184,26 @@
 
 .thread-composer-meta .thread-composer-access {
   max-width: 100%;
-  padding-inline: 0.5rem;
+  padding-inline: 0.625rem 0.5rem;
 }
+
+.thread-composer-workspace-row {
+  padding-inline: 0.75rem;
+}
+
+.thread-composer-workspace-row .touch-target {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.thread-composer-workspace-row .thread-composer-access {
+  padding-inline-end: 0;
+}
+
+.thread-composer-workspace-row .thread-composer-workspace {
+  padding-inline-start: 0.6875rem;
+}
+
 @media (forced-colors: active) {
   [data-workbench-move-handle]:focus-visible {
     outline: 2px solid CanvasText;
@@ -1548,4 +1599,25 @@
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar-scrollbar::-webkit-scrollbar-thumb { transition: none; }
+}
+
+.workspace-directory-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .workspace-directory-loading::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.045), transparent);
+    transform: translateX(-100%);
+    animation: workspace-directory-shimmer 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes workspace-directory-shimmer {
+  to { transform: translateX(100%); }
 }
