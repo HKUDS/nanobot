@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { modelAPIConfigurable, preferredModelAPI, REQUEST_API_LABELS } from "@/components/settings/models/modelAPI";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { SettingsRow } from "@/components/settings/shared/SettingsControls";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ModelAPIConfig, ProviderRequestAPI, SettingsPayload } from "@/lib/types";
@@ -12,12 +13,14 @@ export function ModelAPIControl({
   provider,
   automaticAPI,
   title,
+  description,
   value,
   onChange,
 }: {
   provider: SettingsPayload["providers"][number] | undefined;
   automaticAPI?: ProviderRequestAPI;
   title?: string;
+  description?: string;
   value: ModelAPIConfig | null;
   onChange: (api: ModelAPIConfig | null) => void;
 }) {
@@ -50,7 +53,12 @@ export function ModelAPIControl({
 
   return (
     <div>
-      <SettingsRow title={controlTitle}>
+      <SettingsRow
+        title={controlTitle}
+        description={description ?? (configurable
+          ? t("settings.models.requestAPIDescription")
+          : t("settings.models.fixedAPIDescription", { api: fixedLabel }))}
+      >
         {configurable ? (
           <Select value={selectedAPI} onValueChange={(api) => {
             if (api === selectedAPI) return;
@@ -86,7 +94,11 @@ export function ModelAPIControl({
       {configurable && selectedAPI === "responses" && (!requestAPIs || requestAPIs.includes("chat_completions")) ? (
         <div className="mx-4 mb-3 flex items-start justify-between gap-4 rounded-xl bg-muted/30 px-3 py-3 sm:mx-5">
           <div className="min-w-0">
-            <p className="text-[13px] leading-5 text-foreground">{t("settings.models.apiFallback")}</p>
+            <p className="text-[13px] leading-5 text-foreground">
+              <SettingsHint description={t("settings.models.apiFallbackDescription")}>
+                {t("settings.models.apiFallback")}
+              </SettingsHint>
+            </p>
           </div>
           <div className="pt-0.5">
             <ToggleButton

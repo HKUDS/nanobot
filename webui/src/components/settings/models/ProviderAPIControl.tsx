@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 
 import { MODEL_REQUEST_APIS, REQUEST_API_LABELS } from "@/components/settings/models/modelAPI";
 import { ToggleButton } from "@/components/settings/ToggleButton";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ModelAPIConfig, ModelRequestAPI } from "@/lib/types";
@@ -26,7 +27,9 @@ export function ProviderAPIControl({ value, onChange }: {
     <div className="space-y-3">
       <fieldset className="space-y-3 rounded-xl border border-border/60 p-3">
         <legend className="px-1 text-[12px] font-medium text-muted-foreground">
-          {t("settings.providers.supportedAPIs")}
+          <SettingsHint description={t("settings.providers.supportedAPIsDescription")}>
+            {t("settings.providers.supportedAPIs")}
+          </SettingsHint>
         </legend>
         {MODEL_REQUEST_APIS.map((api) => {
           const checked = supported.includes(api);
@@ -48,7 +51,9 @@ export function ProviderAPIControl({ value, onChange }: {
       </fieldset>
       <div className="space-y-1.5">
         <span className="text-[12px] font-medium text-muted-foreground">
-          {t("settings.providers.defaultAPI")}
+          <SettingsHint description={t("settings.providers.defaultAPIDescription")}>
+            {t("settings.providers.defaultAPI")}
+          </SettingsHint>
         </span>
         <Select value={preferred} onValueChange={(api) => onChange({
           supported_apis: supported, preferred_api: api as ModelRequestAPI,

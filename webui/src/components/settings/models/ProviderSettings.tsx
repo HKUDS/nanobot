@@ -1015,6 +1015,7 @@ export function ProvidersSettings({
                     <ModelAPIControl
                       provider={provider}
                       title={t("settings.providers.defaultAPI")}
+                      description={t("settings.providers.openaiDefaultAPIDescription")}
                       value={form.api}
                       onChange={(api) => onChangeProviderForm(provider.name, { api })}
                     />

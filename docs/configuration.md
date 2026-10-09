@@ -1433,7 +1433,7 @@ Set `agents.defaults.modelPreset` to choose the preset followed by sessions that
 
 ### Custom connection APIs
 
-Custom providers use Chat Completions by default. If your service requires another protocol, open its WebUI connection editor and expand **Advanced options**. Use **Supported APIs** to select the protocols the service accepts and **Default API** to choose the default for Auto presets. Existing connections without a declaration retain their previous Auto behavior; use **Set supported APIs** to add one.
+Custom providers use Chat Completions by default. If your service requires another protocol, open its WebUI connection editor and expand **Advanced options**. Use **Supported APIs** to select the protocols the service accepts and **Default API** to choose the default for Auto presets. Hover, focus, or tap a setting label for help. Existing connections without a declaration retain their previous Auto behavior; use **Set supported APIs** to add one.
 
 In `config.json`, set `providers.<name>.api` for the built-in `custom` provider or a named custom provider:
 
@@ -1462,7 +1462,7 @@ The old field is accepted in the first release containing this migration and the
 
 ### Preset request API
 
-Leave API selection on **Auto** unless your service requires a specific protocol. To change it, open **Settings → Models → a preset → Advanced options → API connection**. Choose **Responses**, **Chat Completions**, or **Anthropic Messages** from the available options. Credentials and endpoint URLs stay in the provider; two presets sharing a provider can select different APIs.
+Leave API selection on **Auto** unless your service requires a specific protocol. To change it, open **Settings → Models → a preset → Advanced options → API connection**. Choose **Responses**, **Chat Completions**, or **Anthropic Messages** from the available options. Hover, focus, or tap a setting label for help. Credentials and endpoint URLs stay in the provider; two presets sharing a provider can select different APIs.
 
 **Auto (Responses)**, for example, shows the default API for the current provider, model, and reasoning settings. Auto uses a configured connection default when present. Otherwise, custom providers use Chat Completions, built-in providers use their known model defaults, and GitHub Copilot uses available account model information. Auto does not test whether a third-party service supports an API. If no preview is available, the label shows **Auto**.
 
