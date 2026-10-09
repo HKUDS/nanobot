@@ -13,6 +13,7 @@ ProviderSpec(
     name="myprovider",
     keywords=("myprovider", "mymodel"),
     env_key="MYPROVIDER_API_KEY",
+    request_apis=("chat_completions", "responses"),
     display_name="My Provider",
     default_api_base="https://api.myprovider.com/v1",
 )
@@ -28,6 +29,8 @@ class ProvidersConfig(BaseModel):
 
 Environment variables, config matching, provider status, and WebUI credential display derive from those two entries.
 
+Every `ProviderSpec` must declare `request_apis`. This lists request formats implemented by the adapter; endpoint and model support are configured separately through connection and preset API declarations. Use `anthropic_messages` for native Anthropic adapters, `bedrock_converse` for Bedrock, and `transcription` for transcription-only providers.
+
 Useful `ProviderSpec` options:
 
 | Field | Description |
@@ -40,7 +43,28 @@ Useful `ProviderSpec` options:
 | `detect_by_base_keyword` | Match configured gateways by API base URL. |
 | `strip_model_prefix` | Strip `provider/` before sending the model to the upstream API. |
 | `supports_max_completion_tokens` | Use `max_completion_tokens` instead of `max_tokens`. |
+| `responses` | `ResponsesCapabilities` with automatic model rules, reasoning replay, and fallback policy. |
 | `is_transcription_only` | Provider has credentials but cannot serve chat completions. |
+
+### Python API migration
+
+Provider integrations must supply `ProviderSpec.request_apis`. Replace the former `responses_models` argument with `responses=ResponsesCapabilities(models=(...))`. Use `models` for rules shared by an endpoint and its proxies. For a rule tied to a specific endpoint, use `endpoint_models`:
+
+```python
+ResponsesCapabilities(
+    endpoint_models=(("https://api.myprovider.com/v1", ("mymodel",)),),
+)
+```
+
+Endpoint rules compare the URL origin and path, treating an optional trailing `/v1` as equivalent. Explicit preset API declarations override automatic rules.
+
+Replace `OpenAICompatProvider(api_type=...)` with `OpenAICompatProvider(model_api=...)`. Omitting `model_api` preserves automatic selection. To require Responses, pass:
+
+```python
+ModelAPICapabilities(supported_apis=("responses",), preferred_api="responses")
+```
+
+These types are defined in `nanobot.providers.registry`. The temporary `apiType` configuration migration applies to JSON configuration and Settings inputs; it does not preserve the old Python constructor arguments.
 
 ## Adding a Transcription Provider
 
@@ -68,6 +92,7 @@ ProviderSpec(
     name="my_stt",
     keywords=("my_stt",),
     env_key="MY_STT_API_KEY",
+    request_apis=("transcription",),
     display_name="My STT",
     default_api_base="https://api.example.com/v1",
     is_transcription_only=True,

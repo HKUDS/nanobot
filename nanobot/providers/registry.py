@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal, cast
+from urllib.parse import urlsplit
 
 from pydantic.alias_generators import to_snake
 
@@ -29,6 +30,18 @@ def is_direct_openai_base(api_base: str | None) -> bool:
         return True
     normalized = api_base.strip().lower().rstrip("/")
     return "api.openai.com" in normalized and "openrouter" not in normalized
+
+
+def _api_base_identity(api_base: str) -> tuple[str, str | None, int | None, str]:
+    """Normalize an endpoint's origin and optional OpenAI-compatible /v1 suffix."""
+    parsed = urlsplit(api_base.strip())
+    port = parsed.port
+    return (
+        parsed.scheme,
+        parsed.hostname,
+        port if port is not None else {"http": 80, "https": 443}.get(parsed.scheme),
+        parsed.path.rstrip("/").removesuffix("/v1"),
+    )
 
 
 def is_hosted_web_search_type(value: object) -> bool:
@@ -82,6 +95,8 @@ class ResponsesCapabilities:
 
     ``reasoning_replay`` selects whether multi-turn reasoning is retained as
     encrypted server content, plaintext local history, or not requested.
+    ``endpoint_models`` limits automatic model rules to named API bases;
+    ``models`` applies those rules regardless of the configured endpoint.
     """
 
     models: tuple[str, ...] = ()
@@ -91,22 +106,30 @@ class ResponsesCapabilities:
     reasoning_replay: Literal["none", "encrypted", "plaintext"] = "none"
     supports_native_compaction: bool = False
     allows_chat_fallback: bool = True
+    endpoint_models: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
-    def matches_model(self, model: str) -> bool:
-        """Return whether *model* is explicitly routed through Responses."""
+    def matches_model(self, model: str, *, api_base: str | None = None) -> bool:
+        """Match curated models, restricting endpoint defaults when a base is supplied."""
         model_name = model.lower()
         wire_name = model_name.rsplit("/", 1)[-1]
+        supported_models = self.models + tuple(
+            model_id
+            for base, models in self.endpoint_models
+            if api_base is None or _api_base_identity(api_base) == _api_base_identity(base)
+            for model_id in models
+        )
         return any(
             model_name == supported.lower()
             or model_name.endswith(f"/{supported.lower()}")
-            for supported in self.models
+            for supported in supported_models
         ) or any(wire_name.startswith(prefix.lower()) for prefix in self.model_prefixes)
 
     def model_api(
         self, model: str, reasoning_effort: str | None = None,
+        *, api_base: str | None = None,
     ) -> ModelAPICapabilities:
         """Resolve the provider's curated API defaults for one model."""
-        if not self.matches_model(model) and not (
+        if not self.matches_model(model, api_base=api_base) and not (
             self.route_reasoning and reasoning_effort and reasoning_effort.lower() != "none"
         ):
             return ModelAPICapabilities()
@@ -253,13 +276,17 @@ class ProviderSpec:
         if capabilities is None:
             return ModelAPICapabilities()
         model_name = self.request_model_name(model)
-        if hosted_web_search_enabled(extra_body or {}, self.responses_default_tools) and (
-            capabilities.route_reasoning or capabilities.matches_model(model_name)
+        body = extra_body or {}
+        effective_base = api_base or self.default_api_base or None
+        # Explicit hosted tools require Responses; defaults follow the endpoint's model rules.
+        search_model_base = None if hosted_web_search_enabled(body) else effective_base
+        if hosted_web_search_enabled(body, self.responses_default_tools) and (
+            capabilities.route_reasoning or capabilities.matches_model(model_name, api_base=search_model_base)
         ):
             return ModelAPICapabilities(("responses",), "responses")
         if capabilities.requires_direct_openai_base and not is_direct_openai_base(api_base):
             return ModelAPICapabilities()
-        return capabilities.model_api(model_name, reasoning_effort)
+        return capabilities.model_api(model_name, reasoning_effort, api_base=effective_base)
 
     @property
     def model_api_configurable(self) -> bool:
@@ -710,11 +737,11 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         thinking_style="thinking_type",
         responses=ResponsesCapabilities(
             models=(
-                "deepseek-flash",
                 "deepseek-v4-flash",
                 "deepseek-v4-pro",
                 "deepseek-v4-flash-vision-exp",
             ),
+            endpoint_models=(("https://api.deepseek.com", ("deepseek-flash",)),),
             reasoning_replay="plaintext",
         ),
         responses_default_tools=("web_search",),

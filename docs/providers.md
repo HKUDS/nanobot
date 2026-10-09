@@ -357,6 +357,8 @@ Use [preset API declarations](./configuration.md#preset-request-api) to choose C
 
 DeepSeek's `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp` automatically use its native Responses API. Its native `web_search` tool is enabled by default and shows its lifecycle in WebUI chat activity; set `providers.deepseek.extraBody.tools` to `[]` to disable it. OpenCode Go's `muse-spark-1.2-contributor` and `muse-spark-1.3-contributor` also use Responses by default.
 
+The `deepseek-flash` alias uses Responses automatically at `https://api.deepseek.com`, including the `/v1` form. With a different `providers.deepseek.apiBase`, Auto uses Chat Completions for this alias. Select Responses in the preset if the proxy supports it. The V4 model names listed above use Responses with either endpoint configuration. Explicitly enabling native web search for this alias also selects Responses.
+
 ### Custom OpenAI-Compatible Endpoint
 
 The `custom` provider fits one OpenAI-compatible endpoint that is not represented by a named provider.

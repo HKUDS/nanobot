@@ -92,13 +92,13 @@ def _answer(request: httpx.Request) -> httpx.Response:
 async def bind_transport():
     clients = []
 
-    def bind(provider, handler):
+    def bind(provider, handler, *, api_base=None):
         original = provider._client
         if original is not None:
             clients.append(original)
         client_type = AsyncAnthropic if isinstance(provider, AnthropicProvider) else AsyncOpenAI
         client = client_type(
-            api_key="fixture", base_url=str(original.base_url) if original else "https://tenant.test/v1",
+            api_key="fixture", base_url=api_base or (str(original.base_url) if original else "https://tenant.test/v1"),
             default_headers=original.default_headers if original else None,
             default_query=original.default_query if original else None,
             max_retries=0,
@@ -144,6 +144,81 @@ async def test_automatic_preview_matches_actual_request(
     assert response.content == "ok"
     assert resolved_provider == provider_name
     assert paths == ["/v1/responses" if api == "responses" else "/v1/chat/completions"]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(("model", "api_base", "api"), [
+    ("deepseek-flash", "https://chat-proxy.test/v1", "chat_completions"),
+    ("deepseek/deepseek-flash", "https://chat-proxy.test/v1", "chat_completions"),
+    ("deepseek-flash", "https://api.deepseek.com", "responses"),
+    ("deepseek-flash", "https://api.deepseek.com/v1/", "responses"),
+    ("deepseek-v4-flash", "https://responses-proxy.test/v1", "responses"),
+])
+async def test_deepseek_automatic_api_preserves_endpoint_routing(
+    bind_transport, tmp_path, stream, model, api_base, api,
+):
+    from nanobot.config.loader import load_config
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "providers": {"deepseek": {"apiBase": api_base, "apiKey": "fixture"}},
+        "modelPresets": {"deepseek": {"provider": "deepseek", "model": model}},
+        "agents": {"defaults": {"modelPreset": "deepseek"}},
+    }), encoding="utf-8")
+    config = load_config(config_path)
+    request_path = "responses" if api == "responses" else "chat/completions"
+    expected_path = f"{httpx.URL(api_base).path.rstrip('/')}/{request_path}"
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path != expected_path:
+            return httpx.Response(404, json={"error": {"message": "Endpoint not supported"}})
+        return _answer(request)
+
+    provider = bind_transport(make_provider(config), handler, api_base=api_base)
+    invoke = provider.chat_stream if stream else provider.chat
+    result = await invoke([{"role": "user", "content": "hello"}])
+    assert result.content == "ok"
+    assert [request.url.path for request in requests] == [expected_path]
+    assert resolve_automatic_model_api(config, preset=config.resolve_preset()) == ("deepseek", api)
+    body = json.loads(requests[0].content)
+    assert body.get("tools", []) == ([{"type": "web_search"}] if api == "responses" else [])
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(("api", "extra_body", "response_supported"), [
+    ({"supportedApis": ["responses"]}, {}, True),
+    (None, {"tools": [{"type": "web_search"}]}, True),
+    ({"supportedApis": ["responses", "chat_completions"]}, {"tools": []}, False),
+])
+async def test_deepseek_proxy_accepts_explicit_responses_and_chat_fallback(
+    bind_transport, stream, api, extra_body, response_supported,
+):
+    config = Config.model_validate({
+        "providers": {"deepseek": {
+            "apiBase": "https://tenant.test/v1", "apiKey": "fixture", "extraBody": extra_body,
+        }},
+    })
+    preset = ModelPresetConfig.model_validate({"provider": "deepseek", "model": "deepseek-flash", "api": api})
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if not response_supported and request.url.path.endswith("/responses"):
+            return httpx.Response(404, json={"error": {"message": "Responses endpoint not supported"}})
+        return _answer(request)
+
+    provider = bind_transport(make_provider(config, preset=preset), handler)
+    invoke = provider.chat_stream if stream else provider.chat
+    result = await invoke([{"role": "user", "content": "hello"}])
+    assert result.content == "ok"
+    expected_paths = ["/v1/responses"] if response_supported else ["/v1/responses", "/v1/chat/completions"]
+    assert [request.url.path for request in requests] == expected_paths
+    expected_tools = [{"type": "web_search"}] if response_supported else []
+    assert json.loads(requests[0].content).get("tools", []) == expected_tools
+    if api is None:
+        assert resolve_automatic_model_api(config, preset=preset) == ("deepseek", "responses")
 
 
 @pytest.mark.parametrize("stream", [False, True])
