@@ -21,6 +21,7 @@ from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequ
 from nanobot.runtime_context import RuntimeContextBlock
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionPolicy
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.temporary_chats import WebUITemporaryChats
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
@@ -51,6 +52,106 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
         cron_service=MagicMock(),
         **kwargs,
     )
+
+
+@pytest.mark.parametrize("restriction", ["none", "session", "request"])
+async def test_delegation_preserves_disabled_tools(tmp_path, monkeypatch, restriction) -> None:
+    monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", lambda **kwargs: [])
+    loop = _loop(tmp_path, [], context_window_tokens=128_000)
+    loop.provider.estimate_prompt_tokens.return_value = (1000, "test")
+    key = "cli:delegation-policy"
+    session = loop.sessions.get_or_create(key)
+    policy = SessionPolicy(disabled_tools=frozenset({"write_file"}))
+    if restriction == "session":
+        session.policy = policy
+    calls = {"parent": 0, "child": 0}
+    definitions = {}
+    results = {}
+
+    async def respond(**kwargs):
+        ctx = current_request_context()
+        who = "child" if ctx.session_key.startswith("subagent:") else "parent"
+        calls[who] += 1
+        definitions[who] = {tool["function"]["name"] for tool in kwargs["tools"]}
+        results[who] = [msg["content"] for msg in kwargs["messages"] if msg["role"] == "tool"]
+        if calls[who] == 1:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(
+                id=f"{who}-write", name="write_file",
+                arguments={"path": f"{who}.txt", "content": f"Written by {who}"},
+            )])
+        if who == "parent" and calls[who] == 2:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(
+                id="delegate", name="subagent",
+                arguments={"action": "create", "task": "Write child.txt", "wait": True},
+            )])
+        return LLMResponse(content="Done.")
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    try:
+        response = await loop.process_direct(
+            "Write a file, then delegate a file write.", session_key=key,
+            _session_policy=policy if restriction == "request" else None,
+        )
+        assert response is not None and response.content == "Done."
+        for who in ("parent", "child"):
+            output = tmp_path / f"{who}.txt"
+            if restriction == "none":
+                assert "write_file" in definitions[who]
+                assert output.read_text(encoding="utf-8") == f"Written by {who}"
+            else:
+                assert not output.exists()
+                assert "write_file" not in definitions[who]
+                assert "Tool 'write_file' not found" in results[who][0]
+    finally:
+        await loop.aclose()
+
+
+async def test_background_subagent_combines_parent_and_requested_tool_restrictions(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", lambda **kwargs: [])
+    loop = _loop(tmp_path, [], context_window_tokens=128_000)
+    loop.provider.estimate_prompt_tokens.return_value = (1000, "test")
+    key = "cli:background-policy"
+    session = loop.sessions.get_or_create(key)
+    session.policy = SessionPolicy(disabled_tools=frozenset({"write_file"}))
+    source = tmp_path / "source.txt"
+    source.write_text("original", encoding="utf-8")
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[
+            ToolCallRequest(id="write", name="write_file", arguments={
+                "path": "child.txt", "content": "unexpected",
+            }),
+            ToolCallRequest(id="edit", name="edit_file", arguments={
+                "path": "source.txt", "old_text": "original", "new_text": "unexpected",
+            }),
+            ToolCallRequest(id="read", name="read_file", arguments={"path": "source.txt"}),
+        ]),
+        LLMResponse(content="Done."),
+    ])
+    try:
+        await loop.subagents.spawn(
+            "Write, edit, and read files.", session_key=key,
+            runtime=LLMRuntime.capture(loop.provider, "test-model", context_window_tokens=128_000),
+            session_policy=SessionPolicy(disabled_tools=frozenset({"edit_file"})),
+        )
+        await asyncio.wait_for(asyncio.gather(*loop.subagents._running_tasks.values()), timeout=10)
+        assert not (tmp_path / "child.txt").exists()
+        assert source.read_text(encoding="utf-8") == "original"
+        requests = loop.provider.chat_stream_with_retry.await_args_list
+        assert len(requests) == 2
+        names = {tool["function"]["name"] for tool in requests[0].kwargs["tools"]}
+        assert {"write_file", "edit_file"}.isdisjoint(names)
+        assert "read_file" in names
+        results = {
+            msg["tool_call_id"]: msg["content"]
+            for msg in requests[1].kwargs["messages"] if msg["role"] == "tool"
+        }
+        assert "Tool 'write_file' not found" in results["write"]
+        assert "Tool 'edit_file' not found" in results["edit"]
+        assert "original" in results["read"]
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio

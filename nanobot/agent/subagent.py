@@ -712,6 +712,8 @@ class SubagentManager:
             cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
         # Construct from the agent workspace; the bound scope below supplies the project cwd.
         tools = self._build_tools(tools_config=cfg, exec_manager=record.exec_manager)
+        for name in record.session.policy.disabled_tools:
+            tools.unregister(name)
         system_prompt = self._build_subagent_prompt(workspace=root)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
@@ -755,6 +757,7 @@ class SubagentManager:
             runtime=runtime,
             log_content=record.session.policy.log_content,
             persist_session=record.session.policy.persist,
+            disabled_tools=record.session.policy.disabled_tools,
         ))
         token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
         try:

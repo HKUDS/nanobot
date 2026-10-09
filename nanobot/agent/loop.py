@@ -743,6 +743,7 @@ class AgentLoop:
             workspace=scope.project_path,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
             persist_session=ctx.session.policy.persist and not ctx.ephemeral,
+            disabled_tools=ctx.session.policy.disabled_tools,
             can_receive_background_results=self._running,
         )
 
@@ -1204,6 +1205,10 @@ class AgentLoop:
             persist_session=(
                 request_ctx.persist_session and not ephemeral
                 and (session is None or session.policy.persist)
+            ),
+            disabled_tools=(
+                request_ctx.disabled_tools
+                | (session.policy.disabled_tools if session is not None else frozenset())
             ),
         )
         effective_tools = tools if tools is not None else self.tools

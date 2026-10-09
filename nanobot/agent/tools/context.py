@@ -44,6 +44,7 @@ class RequestContext:
     # The host can consume completion messages after this request returns.
     can_receive_background_results: bool = True
     persist_session: bool = True
+    disabled_tools: frozenset[str] = frozenset()
 
 
 @runtime_checkable
