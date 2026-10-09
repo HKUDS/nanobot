@@ -285,8 +285,8 @@ async def test_workspace_inspection_matches_registered_file_tool(
         assert status["restrict_to_workspace"] is restricted
         assert status["level"] == ("application" if restricted else "off")
         assert status["enforced"] is False
-        assert str(project.resolve()) in await tool.execute(action="check", key="workspace_sandbox")
-        assert str(project.resolve()) in await tool.execute(action="check")
+        assert repr(str(project.resolve())) in await tool.execute(action="check", key="workspace_sandbox")
+        assert repr(str(project.resolve())) in await tool.execute(action="check")
         assert await tool.execute(action="check", key="workspace_sandbox.restrict_to_workspace") == (
             f"workspace_sandbox.restrict_to_workspace: {restricted!r}"
         )
@@ -328,7 +328,7 @@ async def test_workspace_inspection_is_isolated_between_concurrent_turns(tmp_pat
             await ready.wait()
             await asyncio.sleep(0)
             result = await tool.execute(action="check", key="workspace_sandbox.workspace_root")
-            assert str(project.resolve()) in result
+            assert repr(str(project.resolve())) in result
             return tool._runtime_control.snapshot().workspace_sandbox
         finally:
             reset_workspace_scope(token)
@@ -377,7 +377,7 @@ async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: P
         msg["tool_call_id"]: msg["content"] for msg in calls[1].kwargs["messages"]
         if msg["role"] == "tool"
     }
-    assert str(project.resolve()) in results["inspect"]
+    assert repr(str(project.resolve())) in results["inspect"]
     assert "'restrict_to_workspace': True" in results["inspect"]
     assert "selected project" in results["read"]
     assert calls[0].kwargs["tools"] == calls[1].kwargs["tools"]
