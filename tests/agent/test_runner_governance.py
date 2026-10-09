@@ -27,6 +27,7 @@ from nanobot.providers.base import (
     ToolCallRequest,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
+from nanobot.runtime_context import public_history_message
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
@@ -1028,7 +1029,7 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
             for key, value in message.items()
             if key in {"role", "content", "tool_call_id", "name", "tool_calls"}
         }
-        for message in session_after.messages
+        for message in map(public_history_message, session_after.messages)
     ] == [
         {"role": "user", "content": "old user"},
         {

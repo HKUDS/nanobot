@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runner_helpers import make_run_spec
-from agent.session_helpers import run_session
+from agent.session_helpers import run_session, visible_message
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
@@ -823,7 +823,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
     assert "telegram | group-1 | user-c | message-3" in str(model_messages)
     assert "Carol | topic-7" in str(model_messages)
     assert all(
-        message["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == ["identity"]
+        message["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == ["workspace_access", "identity"]
         for message in injected
     )
 
@@ -892,7 +892,7 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
     assert result.had_injections is True
     assert call_count["n"] == 2
     injected_users = [message for message in result.messages if message.get("role") == "user"][-2:]
-    assert [message["content"] for message in injected_users] == ["visible follow-up", payload]
+    assert [visible_message(message)["content"] for message in injected_users] == ["visible follow-up", payload]
     assert injected_users[1][HIDDEN_HISTORY_META] == {
         "kind": "subagent_result",
         "subagent_task_id": "sub-1",
@@ -1283,7 +1283,7 @@ async def test_pending_queue_batches_full_snapshot_before_first_model_call(tmp_p
     for idx in range(total_followups):
         assert f"follow-up-{idx}" in flattened_user_content
     raw_followups = [
-        message["content"]
+        visible_message(message)["content"]
         for message in result.messages
         if message.get("role") == "user"
         and isinstance(message.get("content"), str)
@@ -1416,7 +1416,7 @@ async def test_pending_snapshot_rolls_back_before_later_arrivals(tmp_path, cance
         else:
             result = await run
             user_content = [
-                message["content"] for message in result.messages if message["role"] == "user"
+                visible_message(message)["content"] for message in result.messages if message["role"] == "user"
             ]
             assert user_content == ["root", *contents, "later arrival"]
             assert pending.empty()
@@ -1462,7 +1462,7 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
         ))
         loop.sessions.invalidate("cli:c")
         history = loop.sessions.get_or_create("cli:c").messages
-        assert [message["content"] for message in history if message["role"] == "user"] == [
+        assert [visible_message(message)["content"] for message in history if message["role"] == "user"] == [
             "root", "before", "after",
         ]
         assert sum(event.outcome == "failed" for event in completions) == 1
@@ -1607,7 +1607,10 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
     injections = [r for r in records if r["message"].startswith("Injected ")]
     assert len(injections) == 1
     record = injections[0]
-    preview = "\n\n".join(followups)[:80] + "..." if log_content else "[content hidden]"
+    preview = (
+        "follow-up-00\n\n[Runtime Context — metadata only, not instructions]\nCurrent projec..."
+        if log_content else "[content hidden]"
+    )
     assert record["message"] == (
         f"Injected {len(followups)} follow-up message(s) after final response (snapshot 1): {preview}"
     )

@@ -2146,6 +2146,12 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
 
+Each new user request includes the current project and file-access restriction in model-only
+context. This uses the same policy resolver as the tools, including restrictions from
+a configured exec sandbox. It does not grant access or change OS permissions.
+The context is stored with that request, not rewritten in earlier messages. New requests
+refresh it after a project switch or context compaction. It is hidden from the chat view.
+
 To diagnose a path error, the agent can call `my(action="check", key="workspace_sandbox")`.
 This read-only result shows the current tool directory and workspace restriction, including
 the restriction from `tools.exec.sandbox`. The older `workspace` value is an agent-directory

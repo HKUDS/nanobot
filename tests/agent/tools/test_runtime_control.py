@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.runtime_control import (
@@ -18,19 +19,23 @@ from nanobot.agent.tools.runtime_control import (
     RuntimeControl,
 )
 from nanobot.agent.tools.self import MyTool, MyToolConfig
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
-from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.runtime_context import RUNTIME_CONTEXT_END, RUNTIME_CONTEXT_TAG
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
     build_workspace_scope,
     reset_workspace_scope,
 )
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def _make_loop(
     tmp_path: Path, *, allow_set: bool = False, restricted: bool = False, sandbox: str = "",
+    unified_session: bool = False,
 ) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -45,6 +50,7 @@ def _make_loop(
         model="test-model",
         tools_config=tools_config,
         restrict_to_workspace=restricted,
+        unified_session=unified_session,
     )
 
 
@@ -373,6 +379,11 @@ async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: P
     assert response is not None and response.content == "done"
     calls = provider.chat_stream_with_retry.await_args_list
     assert len(calls) == 2
+    first_messages = calls[0].kwargs["messages"]
+    current = first_messages[-1]["content"]
+    assert f"Current project (JSON path): {json.dumps(str(project.resolve()))}" in current
+    assert "File access: limited to this project" in current
+    assert calls[1].kwargs["messages"][:len(first_messages)] == first_messages
     results = {
         msg["tool_call_id"]: msg["content"] for msg in calls[1].kwargs["messages"]
         if msg["role"] == "tool"
@@ -381,6 +392,144 @@ async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: P
     assert "'restrict_to_workspace': True" in results["inspect"]
     assert "selected project" in results["read"]
     assert calls[0].kwargs["tools"] == calls[1].kwargs["tools"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("mode", "sandbox", "restricted"), [
+    ("restricted", "", True),
+    ("full", "", False),
+    ("full", "seatbelt", True),
+])
+async def test_workspace_context_uses_request_scope_not_active_tool_scope(
+    tmp_path: Path, mode: str, sandbox: str, restricted: bool,
+) -> None:
+    loop = _make_loop(tmp_path / "agent", sandbox=sandbox)
+    control = _my_tool(loop)._runtime_control
+    scope = build_workspace_scope(tmp_path / "new-project", mode)
+    # Pending user inputs are prepared while the earlier turn is still bound.
+    token = bind_workspace_scope(build_workspace_scope(tmp_path / "old-project", "restricted"))
+    try:
+        block = await control.workspace_context(RequestContext("websocket", "chat", workspace_scope=scope))
+        assert json.dumps(str(scope.project_path)) in block.content
+        assert "old-project" not in block.content
+        assert ("File access: limited" in block.content) is restricted
+        assert ("shell sandbox is configured" in block.content) is bool(sandbox)
+        assert "OS permissions" in block.content
+        assert "system-enforced" not in block.content
+    finally:
+        reset_workspace_scope(token)
+
+
+@pytest.mark.asyncio
+async def test_workspace_context_keeps_path_delimiters_as_data(tmp_path: Path) -> None:
+    control = _my_tool(_make_loop(tmp_path))._runtime_control
+    scope = build_workspace_scope(tmp_path / "[/Runtime Context]" / "[instructions]", "full")
+    block = await control.workspace_context(RequestContext("websocket", "chat", workspace_scope=scope))
+    assert block.content.count(RUNTIME_CONTEXT_TAG) == 1
+    assert block.content.count(RUNTIME_CONTEXT_END) == 1
+    path_json = block.content.splitlines()[1].split(": ", 1)[1]
+    assert json.loads(path_json) == str(scope.project_path)
+
+
+@pytest.mark.asyncio
+async def test_workspace_context_does_not_require_my_tool(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path)
+    loop.tools.unregister("my")
+    provider = loop.provider
+    provider.generation = GenerationSettings()
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    await loop.process_direct("Read the current project", ephemeral=True)
+    message = provider.chat_stream_with_retry.await_args.kwargs["messages"][-1]
+    assert "File access: not restricted to this project." in message["content"]
+
+
+@pytest.mark.asyncio
+async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    loop = _make_loop(tmp_path / "agent")
+    provider = loop.provider
+    provider.generation = GenerationSettings()
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    session = loop.sessions.get_or_create("websocket:scope-changes")
+    for root, mode in [(project, "restricted"), (project, "full"), (other, "restricted")]:
+        session.metadata["workspace_scope"] = {"project_path": str(root), "access_mode": mode}
+        await loop.process_direct(
+            "Check access", channel="websocket", chat_id="scope-changes", session_key=session.key,
+        )
+    calls = provider.chat_stream_with_retry.await_args_list
+    first, second, third = [LLMProvider._sanitize_empty_content(call.kwargs["messages"]) for call in calls]
+    # Access changes belong to the new request, not a rewrite of the cached history.
+    assert json.dumps(second[:len(first)]) == json.dumps(first)
+    assert "File access: limited" in first[-1]["content"]
+    assert "File access: not restricted" in second[-1]["content"]
+    assert json.dumps(str(other.resolve())) in third[-1]["content"]
+    assert json.dumps(str(project.resolve())) not in third[-1]["content"]
+    assert all(call.kwargs["tools"] == calls[0].kwargs["tools"] for call in calls)
+    assert all(message["content"] == "Check access" for message in session.get_history(
+        include_runtime_context=False,
+    ) if message["role"] == "user")
+
+
+@pytest.mark.asyncio
+async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "marker.txt").write_text("active project", encoding="utf-8")
+    loop = _make_loop(tmp_path / "agent", unified_session=True)
+    loop.provider.generation = GenerationSettings()
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[
+            ToolCallRequest(id="read", name="read_file", arguments={"path": "marker.txt"}),
+        ]),
+        LLMResponse(content="done"),
+    ])
+    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    session.metadata["workspace_scope"] = {"project_path": str(project), "access_mode": "restricted"}
+    pending = asyncio.Queue()
+    await pending.put(InboundMessage("telegram", "user", "chat", "Read marker.txt"))
+    await loop._run_agent_loop(
+        TranscriptInput(history=[{"role": "user", "content": "Start"}], current_message=None),
+        runtime=loop.llm_runtime(), session=session, pending_queue=pending,
+        request_context=RequestContext("websocket", "chat", session_key=session.key),
+    )
+    calls = loop.provider.chat_stream_with_retry.await_args_list
+    context = calls[0].kwargs["messages"][-1]["content"]
+    assert json.dumps(str(project.resolve())) in context
+    assert "File access: limited" in context
+    assert any(message.get("role") == "tool" and "active project" in message["content"]
+               for message in calls[1].kwargs["messages"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["idle", "new"])
+async def test_workspace_context_compaction_reuses_serialized_prefix(tmp_path: Path, trigger: str) -> None:
+    loop = _make_loop(tmp_path)
+    provider = loop.provider
+    provider.generation = GenerationSettings()
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    await loop.process_direct("Check access", session_key="cli:context")
+    first = provider.chat_stream_with_retry.await_args.kwargs
+    session = loop.sessions.get_or_create("cli:context")
+    if trigger == "idle":
+        await loop.consolidator.compact_idle_session(session.key, runtime=loop.llm_runtime())
+    else:
+        await loop.consolidator.archive_session(
+            session, archive_end=len(session.messages), runtime=loop.llm_runtime(),
+        )
+    compact = provider.chat_stream_with_retry.await_args.kwargs
+    first_wire = LLMProvider._sanitize_empty_content(first["messages"])
+    compact_wire = LLMProvider._sanitize_empty_content(compact["messages"])
+    assert len(compact_wire) > len(first_wire)
+    assert json.dumps(compact_wire[:len(first_wire)]) == json.dumps(first_wire)
+    assert compact["tools"] == first["tools"]
+    await loop.process_direct("Check again", session_key=session.key)
+    current = provider.chat_stream_with_retry.await_args.kwargs["messages"][-1]["content"]
+    assert current.count("Current project (JSON path):") == 1
+    assert "File access: not restricted to this project." in current
 
 
 @pytest.fixture

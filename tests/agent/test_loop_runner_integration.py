@@ -617,7 +617,7 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
     session = loop.sessions.get_or_create("cli:test")
     assert [
         {key: value for key, value in message.items() if key in {"role", "content"}}
-        for message in session.messages
+        for message in map(public_history_message, session.messages)
     ] == [
         {"role": "user", "content": "first question"},
         {"role": "assistant", "content": _PERSISTED_MODEL_ERROR_PLACEHOLDER},
