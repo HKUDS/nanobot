@@ -428,6 +428,36 @@ If your custom endpoint documents a nonstandard thinking toggle, set `providers.
 
 This named custom provider path is not for Anthropic-compatible endpoints. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` and set the preset provider to `anthropic`.
 
+#### CoreWeave Inference
+
+[CoreWeave Inference](https://docs.coreweave.com/products/inference/serverless/api-reference) works through a named custom provider. You need an account with Serverless Inference credits and a [CoreWeave Forge (W&B) API key](https://forge.coreweave.com/settings). Set `COREWEAVE_API_KEY` in the environment that starts nanobot, then merge this example into your configuration:
+
+```json
+{
+  "providers": {
+    "coreweave": {
+      "apiKey": "${COREWEAVE_API_KEY}",
+      "apiBase": "https://api.inference.wandb.ai/v1"
+    }
+  },
+  "modelPresets": {
+    "coreweave": {
+      "provider": "coreweave",
+      "model": "moonshotai/Kimi-K2.6",
+      "maxTokens": 8192,
+      "contextWindowTokens": 262144
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "coreweave"
+    }
+  }
+}
+```
+
+Keep the explicit `provider` and the complete model ID, including `moonshotai/`; this selects CoreWeave's endpoint rather than the model vendor's endpoint. The service still uses the `wandb.ai` hostname and W&B credentials. Choose a model available to your account and adjust its context limit when changing models.
+
 ### ModelScope
 
 ModelScope (魔搭社区) exposes an OpenAI-compatible LLM endpoint plus a separate async image generation API. Both are covered by the built-in `modelscope` provider.
