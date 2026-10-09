@@ -129,7 +129,6 @@
       },
       "postActionExpunge": {
         "label": "Exclusão permanente",
-        "help": "Permitir a exclusão permanente.\n\nSe UID EXPUNGE estiver indisponível ou falhar, EXPUNGE exclui permanentemente todas as mensagens marcadas como excluídas na caixa atual, incluindo as não processadas pelo nanobot.",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
@@ -137,7 +136,6 @@
       },
       "postActionIgnoreSkipped": {
         "label": "Manter e-mails ignorados",
-        "help": "Não excluir nem mover mensagens ignoradas.",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"

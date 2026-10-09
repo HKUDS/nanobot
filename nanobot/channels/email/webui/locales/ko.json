@@ -129,7 +129,6 @@
       },
       "postActionExpunge": {
         "label": "영구 삭제",
-        "help": "삭제 표시된 메일의 영구 삭제를 허용합니다.\n\nUID EXPUNGE를 사용할 수 없거나 실패하면 현재 메일함에서 삭제 표시된 모든 메일이 영구 삭제됩니다. nanobot이 처리하지 않은 메일도 포함됩니다.",
         "choices": {
           "true": "켜기",
           "false": "끄기"
@@ -137,7 +136,6 @@
       },
       "postActionIgnoreSkipped": {
         "label": "건너뛴 메일 보존",
-        "help": "건너뛴 메일은 삭제하거나 이동하지 않습니다.",
         "choices": {
           "true": "켜기",
           "false": "끄기"

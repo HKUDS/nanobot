@@ -51,7 +51,6 @@
       },
       "pruneWebChatRefs": {
         "label": "Limpar referências Web Chat",
-        "help": "Remover as referências de envio salvas do Web Chat e manter o histórico.",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
@@ -59,7 +58,6 @@
       },
       "pruneNonPersonalRefs": {
         "label": "Limpar referências de grupos",
-        "help": "Remover as referências de envio de conversas não pessoais e manter o histórico.",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"

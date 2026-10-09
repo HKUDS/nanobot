@@ -39,7 +39,7 @@ export function PairRouteSettings({ id, onSaved, showHint = true }: { id: string
     } finally { if (alive.current) setBusy(false); }
   };
   return <div className="space-y-3">
-    {showHint && <p className="whitespace-pre-line text-xs leading-5 text-muted-foreground">{t("remote.pair.routeHint")}</p>}
+    {showHint && <p className="text-xs leading-5 text-muted-foreground">{t("remote.pair.routeHint")}</p>}
     <Select value={route} onValueChange={(value) => { setRoute(value); setError(""); setSaved(false); }} disabled={busy}><SelectTrigger className="w-full min-w-0" aria-label={t("remote.pair.route")}><SelectValue /></SelectTrigger>
       <SelectContent>
         {hasSavedRoute && <SelectItem value="saved">{t("remote.pair.savedRoute")}</SelectItem>}

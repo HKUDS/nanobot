@@ -51,7 +51,6 @@
       },
       "pruneWebChatRefs": {
         "label": "清理 Web Chat",
-        "help": "清理投遞引用，保留聊天記錄",
         "choices": {
           "true": "開啟",
           "false": "關閉"
@@ -59,7 +58,6 @@
       },
       "pruneNonPersonalRefs": {
         "label": "清理群聊",
-        "help": "清理非私聊引用，保留聊天記錄",
         "choices": {
           "true": "開啟",
           "false": "關閉"

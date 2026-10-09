@@ -128,7 +128,6 @@
       },
       "postActionExpunge": {
         "label": "永久清除",
-        "help": "允许永久清除已标记删除的邮件\n\nUID EXPUNGE 不可用或执行失败时，会永久清除当前邮箱中所有标记为删除的邮件，包括未由 nanobot 处理的邮件。",
         "choices": {
           "true": "开启",
           "false": "关闭"
@@ -136,7 +135,6 @@
       },
       "postActionIgnoreSkipped": {
         "label": "跳过处置",
-        "help": "未处理邮件不删除或移动",
         "choices": {
           "true": "开启",
           "false": "关闭"

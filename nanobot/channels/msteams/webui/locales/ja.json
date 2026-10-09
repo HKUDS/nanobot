@@ -51,7 +51,6 @@
       },
       "pruneWebChatRefs": {
         "label": "Web Chat の参照を削除",
-        "help": "保存された Web Chat の送信先情報を削除します。チャット履歴は残ります。",
         "choices": {
           "true": "オン",
           "false": "オフ"
@@ -59,7 +58,6 @@
       },
       "pruneNonPersonalRefs": {
         "label": "グループの参照を削除",
-        "help": "個人チャット以外の保存された送信先情報を削除します。チャット履歴は残ります。",
         "choices": {
           "true": "オン",
           "false": "オフ"

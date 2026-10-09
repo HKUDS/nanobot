@@ -51,7 +51,6 @@
       },
       "pruneWebChatRefs": {
         "label": "Clear Web Chat references",
-        "help": "Remove saved Web Chat delivery references; keep chat history.",
         "choices": {
           "true": "On",
           "false": "Off"
@@ -59,7 +58,6 @@
       },
       "pruneNonPersonalRefs": {
         "label": "Clear group references",
-        "help": "Remove saved delivery references for non-personal chats; keep chat history.",
         "choices": {
           "true": "On",
           "false": "Off"

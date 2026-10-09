@@ -51,7 +51,6 @@
       },
       "pruneWebChatRefs": {
         "label": "Hapus referensi Web Chat",
-        "help": "Hapus referensi pengiriman Web Chat yang tersimpan; pertahankan riwayat chat.",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
@@ -59,7 +58,6 @@
       },
       "pruneNonPersonalRefs": {
         "label": "Hapus referensi grup",
-        "help": "Hapus referensi pengiriman chat nonpribadi yang tersimpan; pertahankan riwayat chat.",
         "choices": {
           "true": "Aktif",
           "false": "Mati"

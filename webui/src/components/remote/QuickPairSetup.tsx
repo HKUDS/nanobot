@@ -190,7 +190,7 @@ export function QuickPairSetup({ returned, active = true, onSSH, onClose }: { re
           <DisclosureContent open={panel === "help"} className="pt-4">
             <div className="space-y-2 rounded-2xl bg-muted/50 p-3 text-xs leading-5 text-muted-foreground">
               <p className="font-medium text-foreground">{t("remote.pair.helpTitle")}</p>
-              <p className="whitespace-pre-line">{t("remote.pair.requirements")}</p>
+              <p>{t("remote.pair.requirements")}</p>
               <p>{t("remote.pair.runHint")}</p>
               <p>{t("remote.pair.validityHint")}</p>
             </div>

@@ -51,7 +51,6 @@
       },
       "pruneWebChatRefs": {
         "label": "Web Chat 참조 정리",
-        "help": "저장된 Web Chat 전송 참조를 삭제합니다. 대화 기록은 유지됩니다.",
         "choices": {
           "true": "켜기",
           "false": "끄기"
@@ -59,7 +58,6 @@
       },
       "pruneNonPersonalRefs": {
         "label": "그룹 참조 정리",
-        "help": "개인 대화 외의 저장된 전송 참조를 삭제합니다. 대화 기록은 유지됩니다.",
         "choices": {
           "true": "켜기",
           "false": "끄기"

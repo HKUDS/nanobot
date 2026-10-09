@@ -128,7 +128,6 @@
       },
       "postActionExpunge": {
         "label": "Permanent deletion",
-        "help": "Allow mailbox-wide expunge.\n\nWhen UID EXPUNGE is unavailable or fails, EXPUNGE permanently removes every message marked Deleted in the current mailbox, including unrelated messages.",
         "choices": {
           "true": "On",
           "false": "Off"
@@ -136,7 +135,6 @@
       },
       "postActionIgnoreSkipped": {
         "label": "Keep skipped mail",
-        "help": "Do not delete or move skipped messages.",
         "choices": {
           "true": "On",
           "false": "Off"

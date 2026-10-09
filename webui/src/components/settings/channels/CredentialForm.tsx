@@ -100,8 +100,7 @@ export function CredentialForm({
         const inputId = channelFieldInputId(field.key);
         const error = errors[field.key];
         const errorId = error ? `${inputId}-error` : undefined;
-        const helpId = field.help ? `${inputId}-help` : undefined;
-        const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
+        const describedBy = errorId;
         const visible = Boolean(visibleSecrets[field.key]);
         const value = values[field.key] ?? "";
         const clearSecret = clearedSecrets.has(field.key);
@@ -129,11 +128,6 @@ export function CredentialForm({
           <span id={errorId} className="mt-1 block text-[11px] leading-4 text-destructive">
             {error}
           </span>
-        ) : null;
-        const helpMessage = field.help ? (
-          <p id={helpId} className="mt-1 whitespace-pre-line text-[11px] leading-4 text-muted-foreground">
-            {field.help}
-          </p>
         ) : null;
         if (field.options?.length) {
           return (
@@ -173,7 +167,6 @@ export function CredentialForm({
                   </label>
                 ))}
               </span>
-              {helpMessage}
               {errorMessage}
               </div>
               </div>
@@ -204,7 +197,6 @@ export function CredentialForm({
                     error && "border-destructive focus-visible:ring-destructive/30",
                   )}
                 />
-                {helpMessage}
                 {errorMessage}
               </div>
             </div>
@@ -258,7 +250,6 @@ export function CredentialForm({
                 </button>
               ) : null}
               </span>
-            {helpMessage}
             {errorMessage}
             {showSecretActions && field.secret && configuredFields?.has(field.key) && !value.trim() && onClearSecret ? (
               <button
