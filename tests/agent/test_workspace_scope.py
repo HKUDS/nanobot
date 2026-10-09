@@ -4,7 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -286,14 +286,18 @@ async def test_filesystem_write_tool_full_scope_allows_outside_project(tmp_path:
     assert (outside / "outside.txt").read_text(encoding="utf-8") == "ok"
 
 
-@pytest.mark.asyncio
-async def test_exec_tool_uses_scope_project_as_default_cwd(
+def test_exec_tool_uses_scope_project_as_default_cwd(
     tmp_path: Path,
     cmd_python: str,
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
-    tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=False, timeout=5)
+    tool = ExecTool(
+        working_dir=str(tmp_path),
+        restrict_to_workspace=False,
+        sandbox="bwrap",
+        timeout=5,
+    )
     scope = validate_workspace_scope_payload(
         {"project_path": str(project), "access_mode": "restricted"},
         default_workspace=tmp_path,
@@ -301,17 +305,22 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(
     )
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(
-            command=(
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+            patch(
+                "nanobot.agent.tools.shell.wrap_command",
+                side_effect=lambda _sandbox, command, *_args, **_kwargs: command,
+            ),
+        ):
+            prepared = tool._prepare_command(
                 f'{cmd_python} -c "from pathlib import Path; '
                 "Path('scoped-marker.txt').write_text('ok')\""
             )
-        )
     finally:
         reset_workspace_scope(token)
 
-    assert "Exit code: 0" in result
-    assert (project / "scoped-marker.txt").read_text() == "ok"
+    assert not isinstance(prepared, str)
+    assert prepared.cwd == str(project.resolve())
 
 
 @pytest.mark.asyncio

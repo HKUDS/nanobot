@@ -8,7 +8,7 @@ Filesystem tools (`read_file`, `write_file`, `edit_file`, `list_dir`, `apply_pat
 
 Additional filesystem roots must be capability-specific. `extra_allowed_dirs` is a legacy read-only alias. Use `extra_read_allowed_dirs` for read-only roots, `extra_write_allowed_dirs` only when a write-capable tool is intentionally allowed to modify an extra directory, and exact file allowlists when a tool may modify only specific files.
 
-Shell execution (`ExecTool`, `agent/tools/shell.py`) also respects `restrict_to_workspace` as an application-level guard: if enabled and `working_dir` is outside the workspace, the command is rejected before execution, and command text is checked for obvious workspace escapes. This is not process-level isolation; use an exec sandbox backend for that.
+Shell execution (`ExecTool`, `agent/tools/shell.py`) also respects `restrict_to_workspace`: if enabled and `working_dir` is outside the workspace, the command is rejected before execution, and command text is checked for obvious workspace escapes. Because command-string inspection cannot prove where relative paths resolve after shell expansion or symlink traversal, restricted shell execution also requires a supported OS-level sandbox (such as `bwrap`) or an explicitly marked external sandbox; it fails closed when neither is available. Full workspace access is an explicit trust decision and is not a process-level sandbox.
 
 **Rule**: Any new path-handling logic must go through the workspace path resolver or perform an equivalent containment check with explicit read/write capability semantics.
 
@@ -24,6 +24,9 @@ HTTP/SSE MCP transports are part of this boundary: validate configured MCP URLs 
 
 ## Shell Sandbox
 
-`tools/sandbox.py` provides optional command wrapping: `bwrap` (bubblewrap) on Linux and `seatbelt` (`sandbox-exec`) on macOS. Seatbelt must not expose shared host temporary directories; scratch stays in the workspace. On Windows a configured backend warns and leaves only the application guard. On Unix a configured backend that cannot start must fail, not silently execute without isolation.
+`tools/sandbox.py` provides optional command wrapping: `bwrap` (bubblewrap) on Linux and `seatbelt` (`sandbox-exec`) on macOS. Seatbelt must not expose shared host temporary directories; scratch stays in the workspace. Restricted shell commands fail closed on hosts without a supported OS-level sandbox (Windows, bare-metal Linux without `bwrap`) instead of falling back to a native shell; commands running with full workspace access still can, but that mode is an explicit trust decision. On Unix a configured backend that cannot start must fail, not silently execute without isolation.
+
+Sandbox launchers are resolved to an absolute path before applying `tools.exec.pathPrepend` or
+`pathAppend`; command-specific PATH configuration must never select the process boundary itself.
 
 **Rule**: If adding a sandbox backend, match the backend callable contract in `nanobot/agent/tools/sandbox.py` and register it in `_BACKENDS`. Preserve read/write root handling and the configured backend's failure behavior.
