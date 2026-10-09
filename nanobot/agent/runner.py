@@ -575,18 +575,6 @@ class AgentRunner:
                     compacted_tool_results=request_state.compacted_tool_results,
                     checkpoint_callback=_on_tool_batch_completed,
                 )
-
-                results, new_events = await execute_tool_calls(
-                    spec.tools,
-                    response.tool_calls,
-                    concurrent=spec.concurrent_tools,
-                    external_lookup_counts=external_lookup_counts,
-                    workspace_violation_counts=workspace_violation_counts,
-                    hook=hook,
-                    context=context,
-                    model_messages=messages_for_model,
-                    compacted_tool_results=request_state.compacted_tool_results,
-                )
                 tool_events.extend(new_events)
                 tools_used.extend(
                     tool_call.name
