@@ -114,6 +114,37 @@ async def test_native_setup_is_authenticated_and_cannot_enable_access(tmp_path, 
 
 
 @pytest.mark.asyncio
+async def test_cua_reconnect_is_authenticated_and_targets_only_its_runtime(tmp_path, monkeypatch):
+    from nanobot.apps.cua_driver import RECONNECT_CAPABILITY, CuaDriver
+
+    path = "/api/settings/mcp-presets/reconnect"
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}")
+    monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
+    stop = AsyncMock()
+    monkeypatch.setattr(CuaDriver, "stop", stop)
+    monkeypatch.setattr(CuaDriver, "check", AsyncMock(return_value={
+        "connected": True, "accessibility": True, "screen_recording": True, "capture_verified": False,
+    }))
+    reload = AsyncMock(return_value={"ok": True, "requires_restart": False})
+    router = _router(config_path=config_path, mcp_reload=reload)
+    router.settings.config.update(lambda cfg: cfg.tools.mcp_servers.update({
+        "cua-driver": CuaDriver(config_path).configuration("observe"),
+    }))
+    payload = {"name": "cua-driver"}
+    denied = await _router(authorized=False, config_path=config_path, mcp_reload=reload).dispatch(
+        None, _mutation_request(path, payload), path)
+    assert denied.status_code == 401
+    stop.assert_not_awaited()
+    reload.assert_not_awaited()
+    response = await router.dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 200
+    assert RECONNECT_CAPABILITY in json.loads(response.body)["capabilities"]
+    reload.assert_awaited_once_with(reconnect="cua-driver")
+    stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_close_releases_channel_connectors() -> None:
     router = _router()
     closed = False

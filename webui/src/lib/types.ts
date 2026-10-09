@@ -1185,6 +1185,7 @@ export interface CuaDriverSetup {
   installed: boolean;
   managed: boolean;
   mode: "observe" | "control" | "custom" | "off";
+  permission_app?: "CuaDriver";
 }
 
 export interface CuaDriverCheck {

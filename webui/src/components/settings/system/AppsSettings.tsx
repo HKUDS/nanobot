@@ -43,7 +43,7 @@ import {
   McpManagementDialog,
   type McpManagementTab,
 } from "@/components/settings/system/McpManagementDialog";
-import { ComputerUseIcon, CuaDriverOverview, CuaDriverSetupPanel, cuaDriverSetup } from "@/components/settings/system/CuaDriverSetupPanel";
+import { ComputerUseIcon, CuaDriverOverview, CuaDriverSetupPanel, cuaDriverSetup, cuaDriverStatus } from "@/components/settings/system/CuaDriverSetupPanel";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -343,6 +343,7 @@ export function AppsCatalogSettings({
                   showTypeBadge={filter !== "mcp"}
                   onFieldChange={onMcpFieldChange}
                   onAction={onMcpAction}
+                  onBackToChat={onBackToChat}
                   onOAuthConnect={onMcpOAuthConnect}
                   onOAuthCancel={onMcpOAuthCancel}
                   onOAuthOpen={onMcpOAuthOpen}
@@ -521,6 +522,7 @@ function McpAppsCatalogRow({
   onOAuthCallbackUrlChange,
   onOAuthComplete,
   onToolsChange,
+  onBackToChat,
 }: {
   openConnection?: boolean;
   onConnectionOpened?: () => void;
@@ -545,6 +547,7 @@ function McpAppsCatalogRow({
   onOAuthCallbackUrlChange: (value: string) => void;
   onOAuthComplete: () => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
+  onBackToChat: () => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -580,14 +583,14 @@ function McpAppsCatalogRow({
   const runtimeConnected = !toggleable && preset.runtime_status === "connected";
   const runtimeConnecting = !toggleable && preset.runtime_status === "connecting";
   const runtimeFailed = !toggleable && preset.installed && preset.runtime_status === "failed";
-  const driverPermissionsPending = managedDriver && preset.configured && driverSetup?.platform === "Darwin"
-    && (driverCheck?.accessibility !== true || driverCheck?.screen_recording !== true);
+  const driverStatus = cuaDriverStatus(preset, driverSetup, driverCheck, error);
+  const driverReady = driverStatus === "ready";
+  const driverActionLabel = t(driverStatus === "permissionPending" ? "cuaDriver.continueSetup"
+    : driverStatus === "connectionIssue" ? "settings.mcp.fixConnection"
+    : preset.configured ? "settings.mcp.manage"
+    : driverSetup?.installed ? "settings.mcp.configure" : "cuaDriver.installAction");
   const statusLabel = managedDriver
-    ? driverPermissionsPending
-      ? t("cuaDriver.permissionPending")
-      : runtimeConnected
-      ? tx("connection.open", "Connected")
-      : t(preset.configured ? "cuaDriver.enabled" : driverSetup?.installed ? "cuaDriver.installed" : "cuaDriver.notInstalled")
+    ? t(`cuaDriver.${driverStatus}`)
     : toggleable
     ? tx("settings.nanobotFeatures.enabled", "Enabled")
     : runtimeConnected
@@ -645,14 +648,14 @@ function McpAppsCatalogRow({
           <p
             className={cn(
               "mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-5 text-muted-foreground",
-              runtimeFailed && "font-medium text-destructive",
+              (managedDriver ? driverStatus === "connectionIssue" : runtimeFailed) && "font-medium text-destructive",
             )}
           >
-            {runtimeFailed ? (
+            {(managedDriver ? driverStatus === "connectionIssue" : runtimeFailed) ? (
               <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
             ) : null}
             <span className="truncate">
-              {runtimeFailed ? failureLabel : detail}
+              {managedDriver && driverSetup?.installed ? statusLabel : runtimeFailed ? failureLabel : detail}
             </span>
             {!runtimeFailed && agentPlugin && description && preset.requires ? (
               <span className="min-w-0 truncate">{preset.requires}</span>
@@ -663,13 +666,13 @@ function McpAppsCatalogRow({
           {managedDriver ? (
             <AppsActionButton
               className="touch-target"
-              ariaLabel={t(preset.configured ? "settings.mcp.manageTitle" : driverSetup?.installed ? "settings.mcp.configure" : "cuaDriver.install", { name: displayName })}
-              visibleLabel={t(preset.configured ? "settings.mcp.manage" : driverSetup?.installed ? "settings.mcp.configure" : "cuaDriver.installAction")}
-              busy={busy}
-              tone={runtimeConnected ? "installed" : "default"}
+              ariaLabel={`${displayName}: ${driverActionLabel}`}
+              visibleLabel={driverActionLabel}
+              busy={busy && !testBusy}
+              tone={driverReady ? "installed" : "default"}
               onClick={() => openManagement("connection")}
             >
-              {preset.configured ? <Check className="h-4 w-4" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
+              {driverReady ? <Check className="h-4 w-4" aria-hidden /> : preset.configured ? <AppActionsIcon className="h-4 w-4" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
             </AppsActionButton>
           ) : oauthFlow ? (
             <>
@@ -915,15 +918,17 @@ function McpAppsCatalogRow({
           preset={managedDriver ? { ...preset, display_name: displayName } : preset}
           values={values}
           actionKey={actionKey}
-          statusLabel={driverPermissionsPending ? statusLabel : runtimeFailed ? failureStatusLabel : statusLabel}
-          statusTone={driverPermissionsPending ? "neutral" : runtimeFailed ? "warning" : runtimeConnected || (toggleable && readyInstalled) ? "success" : "neutral"}
+          statusLabel={managedDriver ? statusLabel : runtimeFailed ? failureStatusLabel : statusLabel}
+          statusTone={managedDriver ? driverReady ? "success" : driverStatus === "connectionIssue" ? "warning" : "neutral"
+            : runtimeFailed ? "warning" : runtimeConnected || (toggleable && readyInstalled) ? "success" : "neutral"}
           tab={managementTab}
           icon={<McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} compact />}
-          overviewContent={managedDriver ? <CuaDriverOverview docsUrl={preset.docs_url} /> : undefined}
-          setupLabel={managedDriver ? t(preset.configured ? "settings.mcp.manage" : driverSetup?.installed ? "settings.mcp.configure" : "cuaDriver.installAction") : undefined}
+          overviewContent={managedDriver ? <CuaDriverOverview docsUrl={preset.docs_url} setup={driverSetup} /> : undefined}
+          setupLabel={managedDriver ? driverActionLabel : undefined}
           connectionPanel={managedDriver ? (
             <CuaDriverSetupPanel preset={preset} capabilities={capabilities} actionKey={actionKey}
-              check={driverCheck} error={error} onAction={onAction} />
+              onBackToChat={() => { setManagementOpen(false); onBackToChat(); }}
+              check={driverCheck} error={error} onAction={onAction} active={managementTab === "connection"} />
           ) : undefined}
           onTabChange={setManagementTab}
           onOpenChange={setManagementOpen}

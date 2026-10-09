@@ -101,6 +101,7 @@ export function createSystemSettingsActions({
     mcpOAuthFlowRef,
     mcpOAuthNavigatedUrlRef,
     mcpOAuthPopupRef,
+    mcpPresetRequestRef,
     nanobotFeatureActionRef,
     nanobotFeatures,
     setApiService,
@@ -459,7 +460,16 @@ export function createSystemSettingsActions({
     }
   };
 
+  const supersedeCuaCheck = () => {
+    // Closing the Cua dialog does not cancel its in-flight request. Custom,
+    // import, tool-scope and OAuth actions also own a newer catalog state.
+    if (mcpPresetRequestRef.current?.key === "test:cua-driver") {
+      mcpPresetRequestRef.current = null;
+    }
+  };
+
   const handleMcpOAuthConnect = async (name: string, reset = false) => {
+    supersedeCuaCheck();
     openMcpOAuthPopup();
     const key = `oauth:${name}`;
     setMcpPresetAction(key);
@@ -562,11 +572,18 @@ export function createSystemSettingsActions({
     values: Record<string, string> = {},
   ) => {
     const key = `${action}:${name}`;
+    // A user action can supersede a background Cua check. Its late snapshot,
+    // error and finally block must not undo the newer action's presentation.
+    const pending = mcpPresetRequestRef.current;
+    if (pending?.pending && (pending.key !== "test:cua-driver" || action === "test")) return;
+    const request = { key, pending: true };
+    mcpPresetRequestRef.current = request;
     setMcpPresetAction(key);
     setMcpMessage(null);
-    setMcpError(null);
+    if (values.quiet !== "true") setMcpError(null);
     try {
       const payload = await runMcpPresetAction(client, action, name, values);
+      if (mcpPresetRequestRef.current !== request) return;
       setMcpPresets(payload);
       applyMcpActionFeedback(payload, action === "test" && !(name === "cua-driver" && values.quiet === "true"));
       if (action !== "test") {
@@ -580,13 +597,17 @@ export function createSystemSettingsActions({
         setMcpFieldValues((prev) => ({ ...prev, [name]: {} }));
       }
     } catch (err) {
-      setMcpError((err as Error).message);
+      if (mcpPresetRequestRef.current === request) setMcpError((err as Error).message);
     } finally {
-      setMcpPresetAction(null);
+      if (mcpPresetRequestRef.current === request) {
+        request.pending = false;
+        setMcpPresetAction(null);
+      }
     }
   };
 
   const handleSaveCustomMcp = async () => {
+    supersedeCuaCheck();
     const name = customMcpForm.name.trim();
     const expectsOAuthAuthorization = (
       customMcpForm.transport !== "stdio" && customMcpForm.auth === "oauth"
@@ -633,6 +654,7 @@ export function createSystemSettingsActions({
   };
 
   const handleImportMcpConfig = async () => {
+    supersedeCuaCheck();
     setMcpPresetAction("import");
     setMcpMessage(null);
     setMcpError(null);
@@ -654,6 +676,7 @@ export function createSystemSettingsActions({
   };
 
   const handleMcpToolsChange = async (name: string, enabledTools: string[]) => {
+    supersedeCuaCheck();
     setMcpPresetAction(`tools:${name}`);
     setMcpMessage(null);
     setMcpError(null);

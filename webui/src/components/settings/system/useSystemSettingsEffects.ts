@@ -30,6 +30,7 @@ export function useSystemSettingsEffects({
   pageVisible,
 }: SystemSettingsEffectsOptions) {
   const {
+    mcpPresetRequestRef,
     setApiService,
     setApiServiceError,
     setApiServiceLoading,
@@ -155,10 +156,12 @@ export function useSystemSettingsEffects({
     let cancelled = false;
     let retry: number | null = null;
     const loadMcpPresets = (showLoading: boolean) => {
+      const request = mcpPresetRequestRef.current;
+      const actionWasPending = request?.pending;
       if (showLoading) setMcpPresetsLoading(true);
       fetchMcpPresets(getToken())
         .then((payload) => {
-          if (cancelled) return;
+          if (cancelled || actionWasPending || mcpPresetRequestRef.current !== request) return;
           setMcpPresets(payload);
           setMcpError(null);
           if (payload.presets.some((preset) => preset.runtime_status === "connecting")) {
@@ -169,7 +172,7 @@ export function useSystemSettingsEffects({
           }
         })
         .catch((err) => {
-          if (!cancelled) setMcpError((err as Error).message);
+          if (!cancelled && !actionWasPending && mcpPresetRequestRef.current === request) setMcpError((err as Error).message);
         })
         .finally(() => {
           if (!cancelled && showLoading) setMcpPresetsLoading(false);
@@ -180,7 +183,7 @@ export function useSystemSettingsEffects({
       cancelled = true;
       if (retry !== null) window.clearTimeout(retry);
     };
-  }, [activeSection, getToken, pageVisible]);
+  }, [activeSection, getToken, pageVisible, mcpPresetRequestRef]);
 
   const refreshAutomations = useCallback(
     async (showLoading = false) => {

@@ -1,5 +1,27 @@
 # Third-Party Notices
 
+## Cua — Computer use integration
+
+- **Source and brand guidance**: https://cua.ai/branding
+- **Bundled assets**: unmodified Cua black and white marks from
+  https://cua.ai/cua_logo_black_new.svg and
+  https://cua.ai/cua_logo_white_new.svg (retrieved 2026-10-06).
+- **Use**: identify Cua Driver in the app overview. The marks remain Cua brand
+  assets, not nanobot MIT artwork. No endorsement or partnership is implied.
+
+Cua Driver 0.33.4 is an optional, separately downloaded executable, not included
+in the nanobot Python distribution. Copyright (c) 2025 Cua AI, Inc.
+Its release carries the MIT license and third-party notices, retained together
+with the unmodified executable by nanobot's installer:
+
+- https://github.com/trycua/cua/blob/cua-driver-rs-v0.33.4/LICENSE.md
+- https://github.com/trycua/cua/blob/cua-driver-rs-v0.33.4/libs/cua-driver/rust/THIRD_PARTY_NOTICES.md
+
+Keep those notices with any redistributed driver installation. Nanobot's MIT
+license does not replace third-party licenses or grant rights to their marks.
+
+---
+
 The following third-party components are redistributed as part of the packaged
 nanobot Python distribution (`pip install nanobot-ai`). Native TUI executables are distributed
 separately in per-platform release archives. Each TUI archive carries its generated

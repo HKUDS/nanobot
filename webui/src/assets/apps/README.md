@@ -6,6 +6,9 @@ pointer). It is a full-bleed square texture; `ComputerUseIcon` applies the share
 control radius so there is no baked-in white matte on dark backgrounds. The
 same local asset is used in the catalog and app header. It is not a Cua mark.
 
+The icon brands nanobot's catalog and dialog only. macOS permission prompts
+keep the upstream CuaDriver name and icon; the signed app is not modified.
+
 ## Upstream attribution
 
 The unmodified black and white Cua marks are from the official brand kit:
@@ -20,3 +23,8 @@ Driver integration, not an endorsement or partnership. Do not recolor the assets
 
 These marks appear in the computer-use overview's engine attribution, not as
 nanobot's app icon. `ComputerUseIcon` does not modify or derive from the Cua mark.
+
+The Cua marks remain Cua brand assets; nanobot's MIT license does not relicense
+them or grant trademark rights. The branding page expressly provides assets for
+announcing integrations. Preserve its contrast, proportion and clear-space rules.
+Packaged attribution is also recorded in the root `THIRD_PARTY_NOTICES.md`.

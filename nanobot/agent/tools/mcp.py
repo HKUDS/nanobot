@@ -64,6 +64,10 @@ MCPServerLoader = Callable[[], Mapping[str, "MCPServerConfig"]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
 
 
+class MCPReload(Protocol):
+    async def __call__(self, *, reconnect: str | None = None) -> dict[str, Any]: ...
+
+
 class MCPConnection(Protocol):
     async def aclose(self) -> None: ...
 
@@ -712,7 +716,8 @@ class MCPToolWrapper(_MCPWrapperBase):
                 # Keep structured images out of string error handling.
                 try:
                     return self._render_call_result(
-                        result.content, kwargs, is_error=bool(getattr(result, "isError", False))
+                        result.content, kwargs, is_error=bool(getattr(result, "isError", False)),
+                        structured_content=getattr(result, "structuredContent", None),
                     )
                 except Exception as exc:
                     logger.opt(exception=tool_log_content_allowed()).error(
@@ -727,6 +732,7 @@ class MCPToolWrapper(_MCPWrapperBase):
 
     def _render_call_result(
         self, content: Any, arguments: Mapping[str, Any], *, is_error: bool = False,
+        structured_content: dict[str, Any] | None = None,
     ) -> str | list[dict[str, Any]]:
         """Persist images; optionally expose successful observations to a vision model."""
         from mcp import types
@@ -752,6 +758,25 @@ class MCPToolWrapper(_MCPWrapperBase):
                     blocks.append({"type": "text", "text": text})
                 continue
             blocks.append({"type": "text", "text": str(block)})
+
+        if structured_content is not None:
+            # MCP's structured result may contain actionable data omitted from
+            # its human-readable summary (e.g. Cua's snapshot-bound tokens).
+            # Servers may also serialize it as text for older clients; retain
+            # that representation without adding a second identical payload.
+            for block in blocks:
+                if block["type"] != "text":
+                    continue
+                try:
+                    if json.loads(block["text"]) == structured_content:
+                        break
+                except json.JSONDecodeError:
+                    continue
+            else:
+                blocks.insert(0, {
+                    "type": "text",
+                    "text": json.dumps({"structuredContent": structured_content}, ensure_ascii=False, separators=(",", ":")),
+                })
 
         if artifacts and self._image_output == "inline" and not is_error:
             return blocks
@@ -1526,7 +1551,7 @@ class MCPProvider:
                     exc,
                 )
 
-    async def reload(self) -> dict[str, Any]:
+    async def reload(self, *, reconnect: str | None = None) -> dict[str, Any]:
         """Reconcile live MCP connections with the current configuration."""
         async with self._lock:
             if self._closing:
@@ -1557,7 +1582,7 @@ class MCPProvider:
             changed = sorted(
                 name
                 for name in current_names & next_names
-                if _server_signature(current_servers[name])
+                if name == reconnect or _server_signature(current_servers[name])
                 != _server_signature(next_servers[name])
             )
 

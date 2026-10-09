@@ -28,6 +28,8 @@ from nanobot.security.network import PinnedDNSAsyncTransport
 NAME = "cua-driver"
 CAPABILITY = "webui.cua-driver.v1"
 SETUP_CAPABILITY = "webui.cua-driver-guided-setup.v1"
+PERMISSIONS_CAPABILITY = "webui.cua-driver-permission-request.v1"
+RECONNECT_CAPABILITY = "webui.cua-driver-reconnect.v1"
 VERSION = "0.33.4"
 DOCS_URL = "https://cua.ai/docs/cua-driver/quickstart"
 _BASE_URL = f"https://github.com/trycua/cua/releases/download/cua-driver-rs-v{VERSION}/"
@@ -102,6 +104,7 @@ class DriverSetup(TypedDict):
     installed: bool
     managed: bool
     mode: Literal["observe", "control", "custom", "off"]
+    permission_app: Literal["CuaDriver"]
 
 
 class DriverCheck(TypedDict):
@@ -154,6 +157,7 @@ class CuaDriver:
             "schema": 1, "version": VERSION, "platform": platform.system(),
             "machine": platform.node(), "supported": self.release is not None,
             "installed": self.installed(), "managed": managed, "mode": mode,
+            "permission_app": "CuaDriver",
         }
 
     def _launch_args(self) -> list[str]:
@@ -201,6 +205,11 @@ class CuaDriver:
                 binary = package / release.executable
                 if not binary.is_file() or not binary.resolve().is_relative_to(package):
                     raise DriverError("The verified archive does not contain the expected driver executable.", 502)
+                # Keep the release's original copyright/license notices beside
+                # the binary. A future package must not silently discard them.
+                for notice in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
+                    if not (package / notice).is_file() or not (package / notice).stat().st_size:
+                        raise DriverError("The driver package is missing its license notices. Nothing was installed.", 502)
                 if os.name != "nt":
                     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
                 if release.target.startswith("darwin-"):
@@ -253,7 +262,9 @@ class CuaDriver:
                             raise DriverError("The driver is missing the expected observation tools.")
                         result["connected"] = True
                         if platform.system() == "Darwin":
-                            permissions = await session.call_tool("check_permissions", {"prompt": False})
+                            permissions = await session.call_tool("check_permissions", {
+                                "prompt": False, "probe_direct_capture": False,
+                            })
                             data = permissions.structuredContent or {}
                             source = data.get("source")
                             if not permissions.isError and isinstance(source, dict) and cast(dict[str, object], source).get("attribution") == "driver-daemon":
@@ -284,15 +295,50 @@ class CuaDriver:
             args = [f"x-apple.systempreferences:com.apple.preference.security?{panes[target]}"]
         else:
             raise DriverError("Choose Accessibility, Screen Recording, or Finder.", 400)
+        await self._open(args)
+
+    async def request_permissions(self) -> None:
+        """Ask macOS from the signed bundle, only after explicit settings consent.
+
+        The pinned 0.33.4 CLI uses this LaunchServices entrypoint for staged
+        permission requests. Unlike `permissions grant`, it neither selects a
+        global installation nor probes direct screen capture. macOS owns consent.
+        """
+        if platform.system() != "Darwin" or not self.installed():
+            raise DriverError("Install Cua Driver on a macOS gateway before requesting system permissions.")
+        from nanobot.apps.cua_driver_stdio import endpoint
+
+        temporary = endpoint(self.config_path).parent
+        # The upstream child requires a result file in its TMPDIR. Keep one
+        # bounded, private diagnostic file, not a new orphan on every request.
+        # It is not grant evidence: readiness comes from the running daemon.
+        result = temporary / "cua-driver-permissions-request.json"
+        descriptor = os.open(result, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        os.close(descriptor)
+        args = ["-n", "-g"]
+        for key, value in {**DRIVER_ENV, "TMPDIR": str(temporary)}.items():
+            args.extend(["--env", f"{key}={value}"])
+        args.extend([
+            "-a", str(self._inside(self.directory / "CuaDriver.app")), "--args",
+            "__permissions-host-request", "--result-file", str(result),
+        ])
+        # Do not wait for the user to respond to native dialogs. The UI's
+        # existing read-only checks observe completion without re-requesting.
+        await self._open(args)
+
+    @staticmethod
+    async def _open(args: list[str]) -> None:
         process = await asyncio.create_subprocess_exec(
             "/usr/bin/open", *args,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         )
         try:
             code = await asyncio.wait_for(process.wait(), timeout=10)
-        except TimeoutError:
+        except (TimeoutError, asyncio.CancelledError) as exc:
             process.kill()
             await process.wait()
+            if isinstance(exc, asyncio.CancelledError):
+                raise
             raise DriverError("System setup did not open. Open System Settings on the gateway computer.") from None
         if code != 0:
             raise DriverError("System setup could not open. Use the signed-in desktop on the gateway computer.")
@@ -300,24 +346,16 @@ class CuaDriver:
     async def stop(self) -> None:
         if platform.system() != "Darwin" or not self.installed():
             return
-        from nanobot.apps.cua_driver_stdio import daemon_listening, endpoint
+        from nanobot.apps.cua_driver_stdio import stop_daemon
 
-        address = endpoint(self.config_path)
-        if not daemon_listening(address):
-            return
-
-        process = await asyncio.create_subprocess_exec(
-            str(self.executable), "stop", "--socket", str(address),
-            env={**os.environ, **DRIVER_ENV}, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-        )
+        stopping = asyncio.create_task(asyncio.to_thread(stop_daemon, self))
         try:
-            returncode = await asyncio.wait_for(process.wait(), timeout=10)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
-            raise DriverError("MCP was disabled, but stopping its driver timed out. Check Cua Driver on the gateway computer.") from None
-        if returncode != 0:
-            raise DriverError("MCP was disabled, but its driver did not acknowledge stopping. Check Cua Driver on the gateway computer.")
+            await asyncio.shield(stopping)
+        except asyncio.CancelledError:
+            await stopping
+            raise
+        except Timeout as exc:
+            raise DriverError("The driver is still starting or stopping. Try again shortly.") from exc
 
 
 async def _download(release: Release, destination: Path) -> None:

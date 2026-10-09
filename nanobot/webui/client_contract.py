@@ -11,6 +11,8 @@ from typing import Literal, TypedDict, cast
 
 from nanobot import __version__
 from nanobot.apps.cua_driver import CAPABILITY as CUA_CAPABILITY
+from nanobot.apps.cua_driver import PERMISSIONS_CAPABILITY as CUA_PERMISSIONS_CAPABILITY
+from nanobot.apps.cua_driver import RECONNECT_CAPABILITY as CUA_RECONNECT_CAPABILITY
 from nanobot.apps.cua_driver import SETUP_CAPABILITY as CUA_SETUP_CAPABILITY
 
 WEBUI_PROTOCOL = 1
@@ -36,7 +38,8 @@ def webui_contract() -> dict[str, object]:
         "capabilities": [
             CORE_CAPABILITY, SUBAGENT_CAPABILITY, SUBAGENT_EVENTS_CAPABILITY,
             SUBAGENT_HISTORY_CAPABILITY, AUTOMATION_CHAT_CAPABILITY,
-            BINARY_ATTACHMENTS_CAPABILITY, CUA_CAPABILITY, CUA_SETUP_CAPABILITY,
+            BINARY_ATTACHMENTS_CAPABILITY, CUA_CAPABILITY, CUA_SETUP_CAPABILITY, CUA_PERMISSIONS_CAPABILITY,
+            CUA_RECONNECT_CAPABILITY,
         ],
     }
 

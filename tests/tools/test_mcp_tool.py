@@ -665,6 +665,31 @@ _PNG_B64 = (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("is_error", [False, True])
+async def test_execute_preserves_structured_only_result(is_error: bool) -> None:
+    payload = {"status": "unavailable" if is_error else "ready"}
+    session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(
+        content=[], structuredContent=payload, isError=is_error,
+    )))
+
+    result = await _make_wrapper(session).execute()
+
+    assert json.loads(result) == {"structuredContent": payload}
+    assert is_tool_error_result(result) is is_error
+
+
+@pytest.mark.asyncio
+async def test_execute_does_not_duplicate_structured_content_already_in_text() -> None:
+    payload = {"result": 1, "status": "ready"}
+    text = json.dumps(payload, indent=2, sort_keys=True)
+    session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(
+        content=[_FakeTextContent(text)], structuredContent=payload,
+    )))
+
+    assert await _make_wrapper(session).execute() == text
+
+
+@pytest.mark.asyncio
 async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
     from nanobot.config.loader import set_config_path
 

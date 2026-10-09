@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import html
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.agent.tools.image_generation import request_image_generation_reload
+from nanobot.agent.tools.mcp import MCPReload
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 from nanobot.api.runtime import ApiRuntime, api_runtime_paths
 from nanobot.bus.queue import MessageBus
@@ -232,7 +233,7 @@ class WebUISettingsRouter:
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
-        mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        mcp_reload: MCPReload | None = None,
         mcp_oauth_redirect_uri: Callable[[WsRequest], str] | None = None,
     ) -> None:
         self.settings = settings
@@ -536,7 +537,7 @@ class WebUISettingsRouter:
             lambda: request_image_generation_reload(self.bus),
         )
 
-    async def _reload_mcp_runtime(self) -> dict[str, Any]:
+    async def _reload_mcp_runtime(self, *, reconnect: str | None = None) -> dict[str, Any]:
         if self._mcp_reload is None:
             return {
                 "ok": False,
@@ -545,7 +546,7 @@ class WebUISettingsRouter:
             }
         try:
             return await asyncio.wait_for(
-                self._mcp_reload(),
+                self._mcp_reload(reconnect=reconnect) if reconnect else self._mcp_reload(),
                 timeout=_MCP_RELOAD_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:

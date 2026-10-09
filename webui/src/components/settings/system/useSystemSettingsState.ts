@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { AutomationFilter } from "@/components/settings/system/AutomationsSettings";
 import {
@@ -37,6 +37,8 @@ export function useSystemSettingsState() {
   const [nanobotFeatureConfirm, setNanobotFeatureConfirm] =
     useState<NanobotFeatureInstallRequest | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
+  const mcpPresetRequestRef = useRef<{ key: string; pending: boolean } | null>(null);
+  useEffect(() => () => { mcpPresetRequestRef.current = null; }, []);
   const [mcpOAuthFlow, setMcpOAuthFlow] = useState<McpOAuthFlowPayload | null>(null);
   const mcpOAuthFlowRef = useRef<McpOAuthFlowPayload | null>(null);
   const mcpOAuthPopupRef = useRef<Window | null>(null);
@@ -102,6 +104,7 @@ export function useSystemSettingsState() {
     mcpOAuthPopupBlocked,
     mcpOAuthPopupRef,
     mcpPresetAction,
+    mcpPresetRequestRef,
     mcpPresets,
     mcpPresetsLoading,
     nanobotFeatureAction,

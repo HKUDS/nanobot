@@ -19,7 +19,8 @@ from pathlib import Path
 
 from filelock import FileLock
 
-from nanobot.apps.cua_driver import DRIVER_ENV, CuaDriver, DriverError
+from nanobot.apps.cua_driver import DRIVER_ENV, NAME, CuaDriver, DriverError
+from nanobot.config.loader import load_config
 
 
 def endpoint(config_path: Path) -> Path:
@@ -47,15 +48,45 @@ def daemon_listening(path: Path) -> bool:
             return False
 
 
+def _require_enabled(driver: CuaDriver) -> None:
+    configured = load_config(driver.config_path).tools.mcp_servers.get(NAME)
+    if configured is None or not driver.owns(configured):
+        raise DriverError("Managed desktop access is disabled. Enable it in Apps before connecting.")
+
+
+def stop_daemon(driver: CuaDriver) -> None:
+    """Serialize stopping with any launcher already waiting for this socket."""
+    address = endpoint(driver.config_path)
+    with FileLock(str(address.with_suffix(".lock")), timeout=20):
+        if not daemon_listening(address):
+            return
+        try:
+            subprocess.run(
+                [str(driver.executable), "stop", "--socket", str(address)],
+                env={**os.environ, **DRIVER_ENV}, timeout=10, check=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            raise DriverError("Could not stop the managed driver. Check Cua Driver on the gateway computer.") from exc
+
+
 def launch(config_path: Path, *, check: bool = False) -> int:
     driver = CuaDriver(config_path)
     if not driver.installed():
         raise DriverError("The managed Cua Driver package is not installed.")
+    if not check:
+        # A stale MCP wrapper may try reconnecting after Disable, especially
+        # when runtime refresh failed. Persisted access owns the launch decision.
+        _require_enabled(driver)
     env = {**os.environ, **DRIVER_ENV}
     args = [str(driver.executable), "mcp"]
     if platform.system() == "Darwin":
         address = endpoint(config_path)
         with FileLock(str(address.with_suffix(".lock")), timeout=20):
+            if not check:
+                # Disable can happen while this process waits for another
+                # launch/stop. Re-read consent inside the same lifecycle lock.
+                _require_enabled(driver)
             if not daemon_listening(address):
                 if check:
                     raise DriverError("The managed driver is not running; enable it before checking permissions.")
@@ -72,8 +103,8 @@ def launch(config_path: Path, *, check: bool = False) -> int:
                     if time.monotonic() > deadline:
                         raise DriverError("Cua Driver did not start. Check system permissions on the gateway computer.")
                     time.sleep(0.1)
-        # Embedded here means 'never auto-launch another app'. The daemon was
-        # started as a standalone signed app, and retains its own TCC identity.
+        # The proxy never owns OS grants or auto-launches another app. The
+        # exact installed CuaDriver app above owns the daemon's TCC identity.
         args.extend(["--embedded", "--socket", str(address)])
     if os.name == "nt":
         # Windows has no POSIX exec replacement; stdio remains inherited.

@@ -173,7 +173,7 @@ export function McpManagementDialog({
         showCloseButton={false}
         className={cn(
           "flex w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0",
-          connectionPanel ? "max-w-[36rem]" : "max-w-[42rem]",
+          connectionPanel ? "max-w-[32rem]" : "max-w-[42rem]",
           connectionPanel ? "max-h-[calc(100dvh-2rem)]" : "h-[min(34rem,calc(100dvh-2rem))]",
         )}
       >
@@ -240,14 +240,20 @@ export function McpManagementDialog({
           aria-label={activePanelLabel}
           className={cn(
             "min-h-0 flex-1",
-            connectionPanel && tab === "connection"
+            connectionPanel
               ? "flex flex-col overflow-hidden"
               : "overflow-y-auto overscroll-contain px-5 py-5 scrollbar-thin scrollbar-track-transparent sm:px-6",
-            managedOverview && "flex-auto pb-4 pt-3 sm:pb-5",
           )}
         >
-          {tab === "overview" ? (
-            managedOverview ? overviewContent : <OverviewPanel
+          {connectionPanel ? <>
+            <div hidden={!managedOverview} className="min-h-0 overflow-y-auto overscroll-contain px-5 pb-5 pt-3 scrollbar-thin scrollbar-track-transparent sm:px-6">
+              {overviewContent}
+            </div>
+            <div className={cn("min-h-0 flex-1 flex-col", managedOverview ? "hidden" : "flex")}>
+              {connectionPanel}
+            </div>
+          </> : tab === "overview" ? (
+            <OverviewPanel
               preset={preset}
               description={description}
               knownToolCount={knownToolCount}

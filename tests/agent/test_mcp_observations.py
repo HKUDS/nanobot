@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -35,10 +36,13 @@ async def test_stdio_observation_and_lost_action_response(tmp_path, monkeypatch)
         await asyncio.wait_for(provider.connect(), timeout=20)
         assert provider.connected_server_names == {"desktop"}
         observation = await registry.execute("mcp_desktop_observe", {})
-        assert [block["type"] for block in observation] == ["text", "image_url", "text"]
-        assert observation[0]["text"] == "Synthetic window, before image"
-        assert observation[2]["text"] == "After image: target 1"
-        image = observation[1]
+        assert [block["type"] for block in observation] == ["text", "text", "image_url", "text"]
+        assert json.loads(observation[0]["text"])["structuredContent"]["elements"] == [
+            {"element_token": "s123:1", "label": "AC"},
+        ]
+        assert observation[1]["text"] == "Synthetic window, before image"
+        assert observation[3]["text"] == "After image: target 1"
+        image = observation[2]
         assert Path(image["_meta"]["path"]).read_bytes() == base64.b64decode(
             image["image_url"]["url"].split(",", 1)[1]
         )
@@ -54,8 +58,9 @@ async def test_stdio_observation_and_lost_action_response(tmp_path, monkeypatch)
         request_content = convert_tool_output(normalized)
         assert request_content == [
             {"type": "input_text", "text": observation[0]["text"]},
+            {"type": "input_text", "text": observation[1]["text"]},
             {"type": "input_image", "image_url": image["image_url"]["url"], "detail": "auto"},
-            {"type": "input_text", "text": observation[2]["text"]},
+            {"type": "input_text", "text": observation[3]["text"]},
         ]
 
         failure = await asyncio.wait_for(
@@ -68,7 +73,7 @@ async def test_stdio_observation_and_lost_action_response(tmp_path, monkeypatch)
 
         # Reconnection remains available; the next call can observe before acting.
         refreshed = await registry.execute("mcp_desktop_observe", {})
-        assert [block["type"] for block in refreshed] == ["text", "image_url", "text"]
+        assert [block["type"] for block in refreshed] == ["text", "text", "image_url", "text"]
         assert actions.read_text() == "action\n"
     finally:
         await asyncio.wait_for(provider.aclose(), timeout=10)
