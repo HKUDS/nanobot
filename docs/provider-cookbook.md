@@ -200,7 +200,7 @@ Verify:
 OPENAI_API_KEY="sk-..." nanobot agent -m "Hello!"
 ```
 
-If your shell cannot use inline environment variables, set `OPENAI_API_KEY` first and then run `nanobot agent -m "Hello!"`. If the provider rejects `apiType`, remove `apiType` unless you are using a documented OpenAI-specific mode.
+If your shell cannot use inline environment variables, set `OPENAI_API_KEY` first and then run `nanobot agent -m "Hello!"`. Use `providers.openai.api` for the connection default or a [preset API declaration](./configuration.md#preset-request-api) for an individual model. Existing `apiType` inputs follow the [two-release migration window](./configuration.md#legacy-openai-api-selector-migration).
 
 ## Recipe: Anthropic Direct
 
@@ -378,7 +378,7 @@ For multiple custom endpoints, do not overload the single `custom` block. Name e
 }
 ```
 
-These custom names behave like direct OpenAI-compatible providers: `apiBase` is required, `apiKey` is optional when the endpoint allows anonymous or placeholder credentials, and `apiType` should be left unset. They do not support Anthropic-compatible endpoints; use the `anthropic` provider with `apiBase` for that case.
+These custom names define direct connections: `apiBase` is required and `apiKey` is optional when the endpoint allows anonymous or placeholder credentials. Declare accepted protocols and a default with [`providers.<name>.api`](./configuration.md#custom-connection-apis). An Anthropic-compatible endpoint uses `supportedApis: ["anthropic_messages"]`; model presets can select any protocol within the connection declaration.
 
 ## Recipe: Ollama Local Model
 
