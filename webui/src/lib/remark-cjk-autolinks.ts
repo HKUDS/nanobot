@@ -10,30 +10,6 @@ function isCjkPunctuation(code: Code): boolean {
   return code !== null && code >= 0 && CJK_PUNCTUATION.test(String.fromCodePoint(code));
 }
 
-// Look ahead without consuming source so ordinary GFM URLs keep their grammar.
-const hasCjkBoundary: Construct = {
-  partial: true,
-  tokenize(effects, ok, nok) {
-    return start;
-    function start(code: Code) {
-      effects.enter("data");
-      return scan(code);
-    }
-    function scan(code: Code): ReturnType<State> {
-      if (isCjkPunctuation(code)) {
-        effects.exit("data");
-        return ok(code);
-      }
-      if (code === null || code < 0 || /[\s<>]/u.test(String.fromCodePoint(code))) {
-        effects.exit("data");
-        return nok(code);
-      }
-      effects.consume(code);
-      return scan;
-    }
-  },
-};
-
 const cjkTrail: Construct = {
   partial: true,
   tokenize(effects, ok, nok) {
@@ -66,10 +42,21 @@ function boundCjkAutolink(construct: Construct): Construct {
     return construct;
   }
   const tokenType = construct.name === "wwwAutolink" ? "literalAutolinkWww" : "literalAutolinkHttp";
+  const cjkAutolink: Construct = {
+    ...construct,
+    tokenize(effects, ok, nok) {
+      return construct.tokenize.call(this, effects, (code) => {
+        // A successful GFM tokenizer has just closed its literalAutolink token.
+        // Inspect only that URL, never text beyond GFM's own link boundary.
+        const token = this.events[this.events.length - 1][1];
+        return CJK_PUNCTUATION.test(this.sliceSerialize(token)) ? ok(code) : nok(code);
+      }, nok);
+    },
+  };
   const tokenize: Tokenizer = function (effects, ok, nok) {
-    // Validate with GFM, then emit its ordinary link tokens up to the prose
-    // boundary. Closing emphasis markers stay available to CommonMark.
-    return effects.check(hasCjkBoundary, effects.check(construct, start, nok), (code) =>
+    // Bound only URLs already accepted by GFM. Closing emphasis markers stay
+    // available to CommonMark, while ordinary text keeps GFM's fast rejection.
+    return effects.check(cjkAutolink, start, (code) =>
       construct.tokenize.call(this, effects, ok, nok)(code));
 
     function start(code: Code) {

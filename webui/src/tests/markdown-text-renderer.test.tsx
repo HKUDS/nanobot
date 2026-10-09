@@ -635,6 +635,14 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("code")?.textContent).toBe(`**${url}**`);
   });
 
+  it("keeps GFM link boundaries before a partial Markdown resource containing CJK text", () => {
+    const url = "https://example.com/path";
+    const source = `${url}](中文，后续说明。`;
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(container.textContent).toBe(source);
+  });
+
   it("renders bold CJK text when more CJK text follows immediately", () => {
     render(
       <MarkdownTextRenderer streaming>
