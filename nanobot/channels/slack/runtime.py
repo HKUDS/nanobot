@@ -40,11 +40,19 @@ def _as_json_list(value: Any) -> list[Any] | None:
     return cast(list[Any], value) if isinstance(value, list) else None
 
 
+def _response_ts(response: Any) -> str | None:
+    """Extract a message ts from a chat.postMessage / chat.update response."""
+    getter = getattr(response, "get", None)
+    ts = getter("ts") if callable(getter) else None
+    return str(ts) if ts else None
+
+
 class _SlackWebAPI(Protocol):
     """Subset of slack-sdk's dynamically typed Web API used by this channel."""
 
     async def auth_test(self, **kwargs: Any) -> Any: ...
     async def chat_postMessage(self, **kwargs: Any) -> Any: ...  # noqa: N802
+    async def chat_update(self, **kwargs: Any) -> Any: ...
     async def conversations_list(self, **kwargs: Any) -> Any: ...
     async def conversations_open(self, **kwargs: Any) -> Any: ...
     async def conversations_replies(self, **kwargs: Any) -> Any: ...
@@ -128,6 +136,9 @@ class SlackChannel(BaseChannel):
         self._bot_user_id: str | None = None
         self._target_cache: dict[str, str] = {}
         self._thread_context_attempted: set[str] = set()
+        # (chat_id, compaction_id) -> (message_ts, thread_ts) of a start notice
+        # that its outcome phase replaces in place via chat.update.
+        self._compaction_notices: dict[tuple[str, str], tuple[str, str | None]] = {}
 
     def _require_web_api(self) -> _SlackWebAPI:
         if self._web_client is None:
@@ -194,6 +205,7 @@ class SlackChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the Slack client."""
         self._running = False
+        self._compaction_notices.clear()
         if self._socket_client:
             try:
                 await self._socket_client.close()
@@ -201,11 +213,37 @@ class SlackChannel(BaseChannel):
                 self.logger.warning("socket close failed: {}", e)
             self._socket_client = None
 
+    def _remember_compaction_notice(
+        self,
+        chat_id: str,
+        compaction_id: str,
+        message_ts: str,
+        thread_ts: str | None,
+    ) -> None:
+        """Keep a start notice until its matching outcome consumes it."""
+        self._compaction_notices[(chat_id, compaction_id)] = (message_ts, thread_ts)
+
+    async def _edit_compaction_notice(
+        self,
+        web_api: _SlackWebAPI,
+        channel_id: str,
+        message_ts: str,
+        content: str,
+    ) -> bool:
+        """Replace a start notice's text with the outcome; False when Slack refused."""
+        if not content:
+            return False
+        try:
+            await web_api.chat_update(channel=channel_id, ts=message_ts, text=content)
+        except Exception as e:
+            self.logger.warning("compaction notice edit failed, sending instead: {}", e)
+            return False
+        return True
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
-        if isinstance(msg.event, ContextCompactionEvent) and not (
-            msg.event.notify or self.show_compaction_notices
-        ):
+        compaction = msg.event if isinstance(msg.event, ContextCompactionEvent) else None
+        if compaction is not None and not (compaction.notify or self.show_compaction_notices):
             return
         if not self._web_client:
             self.logger.warning("client not running")
@@ -227,6 +265,19 @@ class SlackChannel(BaseChannel):
             # is forwarding to a different channel, drop thread_ts because it
             # only makes sense within the originating conversation.
             thread_ts_param = thread_ts if thread_ts and target_chat_id == origin_chat_id else None
+
+            # A compaction's outcome replaces its own start notice in place, so
+            # the lifecycle stays visible as one message instead of two (#6084).
+            # Without a stored notice (restart, edit refused) it is sent as usual.
+            if compaction is not None and compaction.phase != "started":
+                notice = self._compaction_notices.pop(
+                    (msg.chat_id, compaction.compaction_id),
+                    None,
+                )
+                if notice is not None and await self._edit_compaction_notice(
+                    web_api, target_chat_id, notice[0], msg.content or ""
+                ):
+                    return
 
             is_progress = isinstance(msg.event, ProgressEvent)
             if is_progress and not msg.content:
@@ -254,7 +305,22 @@ class SlackChannel(BaseChannel):
                     )
                     if buttons and index == len(chunks) - 1:
                         kwargs["blocks"] = self._build_button_blocks(chunk, buttons)
-                    await web_api.chat_postMessage(**kwargs)
+                    response = await web_api.chat_postMessage(**kwargs)
+                    # Only a single-chunk start notice stays editable; editing
+                    # one chunk of a split message would drop the rest.
+                    if (
+                        compaction is not None
+                        and compaction.phase == "started"
+                        and len(chunks) == 1
+                    ):
+                        notice_ts = _response_ts(response)
+                        if notice_ts:
+                            self._remember_compaction_notice(
+                                msg.chat_id,
+                                compaction.compaction_id,
+                                notice_ts,
+                                thread_ts_param,
+                            )
 
             for media_path in msg.media or []:
                 try:
