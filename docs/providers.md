@@ -328,6 +328,35 @@ If you use an Anthropic-compatible proxy, keep the provider as `anthropic` and o
 
 Arbitrary custom provider names are OpenAI-compatible only; they do not use the Anthropic Messages API request format.
 
+### Claude on Google Vertex AI
+
+Install the optional dependency and authenticate with Google Application Default Credentials:
+
+```bash
+pip install "nanobot-ai[vertex]"
+gcloud auth application-default login
+```
+
+```json
+{
+  "providers": {
+    "googleVertexAi": {
+      "project": "my-gcp-project",
+      "region": "us-east5"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "google_vertex_ai",
+      "model": "google_vertex_ai/claude-sonnet-4-5@20250929"
+    }
+  }
+}
+```
+
+`project` also falls back to `ANTHROPIC_VERTEX_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT`.
+`region` falls back to `CLOUD_ML_REGION` or `GOOGLE_CLOUD_LOCATION`, then `us-central1`.
+
 ### OpenAI Direct
 
 ```json

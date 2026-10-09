@@ -99,6 +99,14 @@ class AnthropicProvider(LLMProvider):
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
+        self._client = self._create_client(api_key, api_base, extra_headers)
+
+    def _create_client(
+        self,
+        api_key: str | None,
+        api_base: str | None,
+        extra_headers: dict[str, str] | None,
+    ) -> Any:
         from anthropic import AsyncAnthropic
 
         client_kw: dict[str, Any] = {}
@@ -110,7 +118,7 @@ class AnthropicProvider(LLMProvider):
             client_kw["default_headers"] = extra_headers
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
-        self._client = AsyncAnthropic(**client_kw)
+        return AsyncAnthropic(**client_kw)
 
     @staticmethod
     def _normalize_base_url(api_base: str) -> str:
@@ -747,7 +755,7 @@ class AnthropicProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         try:
-            response = cast(Any, await self._client.messages.create(**kwargs))
+            response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
         except Exception as e:
             if self._is_streaming_required_error(e):
