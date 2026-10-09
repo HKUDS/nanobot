@@ -1287,20 +1287,21 @@ def test_provider_proxy_rejects_unsupported_backend():
         {
             "agents": {
                 "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/claude-opus-4-5",
+                    "provider": "azure_openai",
+                    "model": "gpt-4.1",
                 }
             },
             "providers": {
-                "anthropic": {
+                "azureOpenai": {
                     "apiKey": "sk-test",
+                    "apiBase": "https://azure.example/openai/v1",
                     "proxy": "http://127.0.0.1:23458",
                 }
             },
         }
     )
 
-    with pytest.raises(ValueError, match=r"providers\.anthropic\.proxy"):
+    with pytest.raises(ValueError, match=r"providers\.azure_openai\.proxy"):
         make_provider(config)
 
 
