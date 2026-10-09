@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, TypedDict, cast
 
 from nanobot.session.manager import SessionManager
+from nanobot.session.types import SessionTypes
 
 SESSION_HANDLE_METADATA_KEY = "session_handle"
 
@@ -128,7 +129,7 @@ def _candidate_indexes(syllable_count: int):
         yield (start + offset * step) % size
 
 
-def _allocate_name(used: set[str]) -> str:
+def allocate_session_handle_name(used: set[str]) -> str:
     for syllable_count in _SYLLABLE_COUNTS:
         for index in _candidate_indexes(syllable_count):
             parts = _name_parts_at(syllable_count, index)
@@ -143,6 +144,51 @@ def _allocate_name(used: set[str]) -> str:
             return name
 
 
+# Backward-compatible alias for callers that used the original private helper.
+_allocate_name = allocate_session_handle_name
+
+
+def allocate_session_handles(
+    rows: list[dict[str, Any]], types: SessionTypes,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return valid existing names and metadata updates for missing handles."""
+    used: set[str] = set()
+    names: dict[str, str] = {}
+    pending: list[str] = []
+    for row in sorted(
+        rows,
+        key=lambda item: (
+            str(item.get("created_at", "")),
+            str(item.get("key", "")),
+        ),
+    ):
+        raw_key = row.get("key")
+        if not isinstance(raw_key, str):
+            continue
+        raw_metadata = row.get("metadata")
+        metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
+        if not types.needs_handle(metadata):
+            continue
+        raw_name = metadata.get(SESSION_HANDLE_METADATA_KEY)
+        try:
+            name = normalize_session_handle(raw_name) if isinstance(raw_name, str) else ""
+        except ValueError:
+            name = ""
+        if not name or name in used:
+            pending.append(raw_key)
+            continue
+        names[raw_key] = name
+        used.add(name)
+
+    updates: dict[str, str] = {}
+    for key in pending:
+        name = allocate_session_handle_name(used)
+        names[key] = name
+        updates[key] = name
+        used.add(name)
+    return names, updates
+
+
 class SessionHandleResolver:
     """Allocate and resolve handles stored in canonical session metadata."""
 
@@ -150,71 +196,53 @@ class SessionHandleResolver:
         self._sessions = sessions
 
     def _ensure_all(self) -> dict[str, SessionHandle]:
-        with self._sessions.locked_session_files():
-            rows = sorted(
-                self._sessions.list_sessions(),
-                key=lambda row: (
-                    str(row.get("created_at", "")),
-                    str(row.get("key", "")),
-                ),
-            )
-            used: set[str] = set()
-            names: dict[str, str] = {}
-            pending: list[str] = []
-            for row in rows:
-                raw_key: Any = row.get("key")
-                if not isinstance(raw_key, str):
-                    continue
-                payload = self._sessions.read_session_metadata(raw_key)
-                raw_metadata = payload.get("metadata") if payload is not None else None
-                metadata = (
-                    cast(dict[str, Any], raw_metadata)
-                    if isinstance(raw_metadata, dict)
-                    else {}
-                )
-                if not self._sessions.types.needs_handle(metadata):
-                    continue
-                raw_name = metadata.get(SESSION_HANDLE_METADATA_KEY)
-                try:
-                    name = normalize_session_handle(raw_name) if isinstance(raw_name, str) else ""
-                except ValueError:
-                    name = ""
-                if not name or name in used:
-                    pending.append(raw_key)
-                    continue
-                names[raw_key] = name
-                used.add(name)
+        names = self._sessions.ensure_session_handles_offline()
+        return {
+            key: session_handle_for_name(key, name)
+            for key, name in names.items()
+        }
 
-            for key in pending:
-                name = _allocate_name(used)
-                if not self._sessions.update_session_metadata(
-                    key,
-                    {SESSION_HANDLE_METADATA_KEY: name},
-                    fsync=True,
-                ):
-                    continue
-                names[key] = name
-                used.add(name)
-
-            return {
-                key: session_handle_for_name(key, name)
-                for key, name in names.items()
-            }
+    async def _ensure_all_async(self) -> dict[str, SessionHandle]:
+        names = await self._sessions.state.ensure_session_handles()
+        return {
+            key: session_handle_for_name(key, name)
+            for key, name in names.items()
+        }
 
     def handle_for_session(self, session_key: str) -> SessionHandle | None:
+        """Offline compatibility API; runtime callers must use ahandle_for_session()."""
         try:
             key = _clean_session_key(session_key)
         except ValueError:
             return None
         return self._ensure_all().get(key)
 
+    async def ahandle_for_session(self, session_key: str) -> SessionHandle | None:
+        try:
+            key = _clean_session_key(session_key)
+        except ValueError:
+            return None
+        return (await self._ensure_all_async()).get(key)
+
     def list_all(self) -> list[SessionHandle]:
+        """Offline compatibility API; runtime callers must use alist_all()."""
         return sorted(self._ensure_all().values(), key=lambda handle: handle.name)
 
+    async def alist_all(self) -> list[SessionHandle]:
+        return sorted(
+            (await self._ensure_all_async()).values(),
+            key=lambda handle: handle.name,
+        )
+
     def list_all_by_key(self) -> dict[str, SessionHandle]:
+        """Offline compatibility API; runtime callers must use alist_all_by_key()."""
         return self._ensure_all()
 
+    async def alist_all_by_key(self) -> dict[str, SessionHandle]:
+        return await self._ensure_all_async()
+
     def resolve(self, name: str) -> SessionHandle | None:
+        """Offline compatibility API; runtime callers must use aresolve()."""
         try:
             normalized = normalize_session_handle(name)
         except ValueError:
@@ -223,6 +251,20 @@ class SessionHandleResolver:
             (
                 handle
                 for handle in self._ensure_all().values()
+                if handle.name == normalized
+            ),
+            None,
+        )
+
+    async def aresolve(self, name: str) -> SessionHandle | None:
+        try:
+            normalized = normalize_session_handle(name)
+        except ValueError:
+            return None
+        return next(
+            (
+                handle
+                for handle in (await self._ensure_all_async()).values()
                 if handle.name == normalized
             ),
             None,

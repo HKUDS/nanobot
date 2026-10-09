@@ -2032,7 +2032,7 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
             },
         },
     )
-    channel.gateway.workspaces.persist_scope(
+    await channel.gateway.workspaces.persist_scope(
         "chat-running",
         channel.gateway.workspaces.scope_for_session_key("websocket:chat-running"),
     )
@@ -3917,7 +3917,8 @@ async def test_hydrate_noop_without_session_manager() -> None:
 async def test_hydrate_skips_when_no_goal_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_metadata.return_value = None
+    sm.state.read_metadata = AsyncMock()
+    sm.state.read_metadata.return_value = None
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
@@ -3933,7 +3934,8 @@ async def test_hydrate_skips_when_no_goal_on_disk() -> None:
 async def test_hydrate_notifies_when_goal_active_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_metadata.return_value = {
+    sm.state.read_metadata = AsyncMock()
+    sm.state.read_metadata.return_value = {
         "metadata": {
             "goal_state": {
                 "status": "active",
@@ -3964,7 +3966,8 @@ async def test_hydrate_notifies_when_goal_active_on_disk() -> None:
 async def test_hydrate_restores_blocked_attention_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_metadata.return_value = {
+    sm.state.read_metadata = AsyncMock()
+    sm.state.read_metadata.return_value = {
         "metadata": {
             "goal_state": {
                 "status": "blocked",
@@ -5674,7 +5677,9 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
         ws_http_module,
         "SessionHandleResolver",
         lambda _session_manager: SimpleNamespace(
-            list_all_by_key=lambda: {handle.session_key: handle}
+            alist_all_by_key=AsyncMock(
+                return_value={handle.session_key: handle}
+            )
         ),
     )
     channel = WebSocketChannel(
@@ -6652,3 +6657,48 @@ async def test_full_access_requires_local_handshake(bus, tmp_path, headers, allo
         assert result["event"] == "error"
         assert result["reason"] == "full workspace access is unavailable for this connection"
         assert sessions.read_session_file("websocket:handshake-scope") is None
+
+
+@pytest.mark.parametrize("command_type", ["new_chat", "attach", "set_workspace_scope", "message"])
+async def test_webui_commands_keep_session_io_off_event_loop(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command_type: str,
+) -> None:
+    import threading
+
+    sessions = SessionManager(tmp_path / "sessions")
+    sessions.save(sessions.get_or_create("websocket:io-chat"))
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+    loop_thread = threading.get_ident()
+    calls: list[str] = []
+
+    def require_worker(name):
+        operation = getattr(sessions._store, name)
+
+        def checked(*args, **kwargs):
+            assert threading.get_ident() != loop_thread, name
+            calls.append(name)
+            return operation(*args, **kwargs)
+
+        return checked
+
+    for name in ("read_metadata", "load", "save", "replace_metadata"):
+        monkeypatch.setattr(sessions._store, name, require_worker(name))
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": command_type, "chat_id": "io-chat", "content": "/help", "webui": True},
+    )
+
+    assert "read_metadata" in calls
+    if command_type in {"set_workspace_scope", "message"}:
+        assert "load" in calls
+        assert "save" in calls or "replace_metadata" in calls
+    assert all(json.loads(call.args[0])["event"] != "error" for call in conn.send.await_args_list)
+    await channel._cleanup_connection(conn)

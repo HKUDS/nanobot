@@ -73,8 +73,7 @@ async def test_process_message_hands_complete_replay_to_runner(tmp_path: Path) -
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
-    session = loop.sessions.get_or_create("cli:test")
-    with patch.object(session, "get_history", wraps=session.get_history) as get_history:
+    with patch.object(Session, "get_history", autospec=True, return_value=[]) as get_history:
         result = await loop._process_message(
             InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
         )

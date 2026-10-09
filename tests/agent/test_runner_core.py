@@ -811,7 +811,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        continuation_callback=lambda: "Continue working.",
+        continuation_callback=AsyncMock(return_value="Continue working."),
         terminal_injection_callback=terminal_injection_callback,
     ))
 

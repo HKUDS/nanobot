@@ -1,6 +1,7 @@
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -1009,3 +1010,37 @@ def test_cast_nullable_param_no_crash() -> None:
     assert result["name"] == "hello"
     result = tool.cast_params({"name": None})
     assert result["name"] is None
+
+
+@pytest.mark.parametrize("command", [
+    "cat ~unknown/file.txt",
+    "cat --config=~unknown/file.txt",
+    "cat <~unknown/file.txt",
+    "cat ~/file.txt",
+])
+def test_exec_guard_rejects_unresolvable_home_path(tmp_path, monkeypatch, command) -> None:
+    original = Path.expanduser
+
+    def expanduser(path):
+        if str(path).startswith("~"):
+            raise RuntimeError("Could not determine home directory.")
+        return original(path)
+
+    monkeypatch.setattr(Path, "expanduser", expanduser)
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command(command, str(tmp_path))
+    assert error is not None
+    assert error.startswith("Error: Command blocked by safety guard (path outside working dir)")
+
+
+def test_exec_guard_allows_resolved_home_inside_workspace(tmp_path, monkeypatch) -> None:
+    original = Path.expanduser
+
+    def expanduser(path):
+        if str(path).startswith("~"):
+            return tmp_path / "file.txt"
+        return original(path)
+
+    monkeypatch.setattr(Path, "expanduser", expanduser)
+    tool = ExecTool(restrict_to_workspace=True)
+    assert tool._guard_command("cat ~/file.txt", str(tmp_path)) is None

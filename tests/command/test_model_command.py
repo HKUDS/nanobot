@@ -163,6 +163,7 @@ async def test_model_command_reports_provider_configuration_errors(tmp_path) -> 
     switched = await cmd_model(_ctx(loop, "/model fast", args="fast"))
     session = loop.sessions.get_or_create("cli:direct")
     session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
+    loop.sessions.save(session)
     status = await cmd_model(_ctx(loop, "/model"))
 
     assert "Could not switch model preset" in switched.content
@@ -264,8 +265,7 @@ async def test_goal_command_preserves_task_and_visible_command(tmp_path, with_se
     task = "检查 /tmp/project\n保留现有文件。"
     command = f"/goal {task}"
     ctx = _ctx_session(loop, command, args=task)
-    if not with_session:
-        ctx.session = None
+    ctx.session = await loop.sessions.state.get(ctx.key) if with_session else None
     out = await cmd_goal(ctx)
     assert isinstance(out, InboundMessage)
     assert ctx.msg.content == command
@@ -287,6 +287,7 @@ async def test_goal_command_registered_on_router(tmp_path) -> None:
     register_builtin_commands(router)
     loop = _make_loop(tmp_path)
     ctx = _ctx_session(loop, "/goal ship it", args="ship it")
+    ctx.session = await loop.sessions.state.get(ctx.key)
     out = await router.dispatch(ctx)
     assert isinstance(out, InboundMessage)
     assert out.content == "ship it"

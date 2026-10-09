@@ -64,7 +64,7 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
             default_restrict_to_workspace=True,
         ),
     )
-    key = f"websocket:{temporary_chats.create(object(), trusted_webui=True)}"
+    key = f"websocket:{await temporary_chats.create(object(), trusted_webui=True)}"
 
     await loop._process_message(_message(key, "first question"))
     await loop._process_message(_message(key, "second question"))
@@ -111,8 +111,8 @@ async def test_turn_tool_selection_preserves_empty_registries(tmp_path, monkeypa
     if selection == "explicit_empty":
         kwargs["tools"] = ToolRegistry()
     elif selection == "disable_all":
-        session = loop.sessions.get_or_create(key)
-        session.policy = SessionPolicy(disabled_tools=frozenset(loop.tools.tool_names))
+        await loop.sessions.state.get(key)
+        await loop.sessions.state.set_policy(key, SessionPolicy(disabled_tools=frozenset(loop.tools.tool_names)))
 
     try:
         response = await loop.process_direct("Handle this request", session_key=key, **kwargs)
@@ -152,10 +152,10 @@ async def test_session_policy_controls_tool_logs_and_result_offload(
     loop.max_tool_result_chars = 2048
     key = "websocket:privacy-regression"
     if privacy == "temporary":
-        loop.sessions.get_or_create_transient(key)
+        await loop.sessions.state.register_transient(key)
     else:
-        session = loop.sessions.get_or_create(key)
-        session.policy = SessionPolicy(log_content=privacy != "quiet")
+        await loop.sessions.state.get(key)
+        await loop.sessions.state.set_policy(key, SessionPolicy(log_content=privacy != "quiet"))
     secret = "synthetic-private-query-测试"
     text = "synthetic-private-result-" * 1000
     image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,c3ludGhldGlj"}}
@@ -198,7 +198,7 @@ async def test_session_policy_controls_tool_logs_and_result_offload(
 
 async def test_direct_transient_run_never_spills_before_cancellation(tmp_path) -> None:
     loop = _loop(tmp_path, [])
-    session = loop.sessions.get_or_create_transient("websocket:cancel-private")
+    session = await loop.sessions.state.register_transient("websocket:cancel-private")
     loop.max_tool_result_chars = 100
     loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
     loop.tools.execute = AsyncMock(return_value="synthetic large result" * 1000)
@@ -244,9 +244,9 @@ async def test_session_worker_errors_keep_private_content_out_of_logs(
     loop = _loop(tmp_path, [])
     key = "websocket:synthetic-worker-error"
     if private:
-        loop.sessions.get_or_create_transient(key)
+        await loop.sessions.state.register_transient(key)
     else:
-        loop.sessions.get_or_create(key)
+        await loop.sessions.state.get(key)
     secret = "synthetic-private-worker-content"
     if failure == "runner":
         loop.provider.chat_stream_with_retry = AsyncMock(side_effect=ValueError(secret))
@@ -278,10 +278,11 @@ async def test_transient_session_stays_outside_unified_session(tmp_path) -> None
     durable.add_message("user", "durable question")
     loop.sessions.save(durable)
     key = "websocket:transient-unified"
-    transient = loop.sessions.get_or_create_transient(key)
+    await loop.sessions.state.register_transient(key)
 
     await run_session(loop, _message(key, "private question"))
 
+    transient = await loop.sessions.state.get(key)
     assert [message["content"] for message in transient.messages] == [
         "private question",
         "private answer",
@@ -294,7 +295,7 @@ async def test_transient_session_stays_outside_unified_session(tmp_path) -> None
 async def test_missing_required_session_cannot_fall_back_to_disk(tmp_path) -> None:
     loop = _loop(tmp_path, [])
     key = "websocket:transient-stale"
-    loop.sessions.get_or_create_transient(key)
+    await loop.sessions.state.register_transient(key)
     loop.sessions.invalidate(key)
 
     with pytest.raises(RuntimeError, match="required session is not active"):
@@ -331,12 +332,12 @@ async def test_deleted_child_cannot_notify_a_recreated_parent(tmp_path) -> None:
         task_id, = loop.subagents.statuses_for_session(key)
         notice = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=2)
         assert notice.require_existing_session
-        assert loop.sessions.delete_session(key)
+        assert await loop.sessions.state.delete(key)
         assert loop.sessions.read_session_file(SubagentSessions.key(task_id)) is None
-        loop.sessions.save(loop.sessions.get_or_create(key))
+        await loop.sessions.state.get(key)
 
         assert loop.subagents.statuses_for_session(key) == {}
-        loop._enqueue_session_message(notice)
+        await loop._enqueue_session_message(notice)
         assert key not in loop._pending_queues
         assert await loop._process_message(notice) is None
         loop.provider.chat_stream_with_retry.assert_not_awaited()
@@ -370,7 +371,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
     )
     key = "websocket:transient-cancelled"
     previous_file_state = loop._file_state_store.for_session(key)
-    loop.sessions.get_or_create_transient(
+    await loop.sessions.state.register_transient(
         key,
         disabled_tools={"create_goal", "update_goal", "subagent", "cron"},
     )

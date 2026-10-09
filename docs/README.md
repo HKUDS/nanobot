@@ -50,6 +50,7 @@ For shorter, outcome-focused walkthroughs, browse the [task guide index](./guide
 |---|---|
 | Commands and flags | [CLI Reference](./cli-reference.md) |
 | In-chat slash commands | [In-Chat Commands](./chat-commands.md) |
+| Session storage, JSONL migration, and backups | [Session Storage](./session-storage.md) |
 | Config, workspace, gateway, sessions, tools, and memory in plain language | [Concepts](./concepts.md) |
 | Provider/model matching and selection | [Providers and Models](./providers.md) |
 | Setup and runtime diagnosis | [Troubleshooting](./troubleshooting.md) |

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
@@ -19,7 +19,7 @@ class AutomationTurnCoordinator:
     def __init__(
         self,
         *,
-        enqueue: Callable[[InboundMessage], None],
+        enqueue: Callable[[InboundMessage], Awaitable[None]],
         turn_id: Callable[[InboundMessage], str | None],
         pending_id: Callable[[InboundMessage], str | None],
         should_defer_turn: Callable[[InboundMessage, str, Iterable[str]], bool],
@@ -54,7 +54,7 @@ class AutomationTurnCoordinator:
         self._waiters[turn_id] = future
         self._pending_messages_by_turn_id[turn_id] = msg
         try:
-            self._enqueue(msg)
+            await self._enqueue(msg)
             try:
                 return await future
             except asyncio.CancelledError:

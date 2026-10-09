@@ -186,10 +186,7 @@ class ReadSessionTool(_SessionTool):
                 handle_name = normalize_session_handle(session_key)
             except ValueError as exc:
                 return ToolResult.error(f"Error: {exc}")
-            handle = await asyncio.to_thread(
-                self._handles.resolve,
-                handle_name,
-            )
+            handle = await self._handles.aresolve(handle_name)
             if handle is None:
                 return ToolResult.error(f"Error: session @{handle_name} was not found")
             session_handle = f"@{handle_name}"

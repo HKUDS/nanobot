@@ -25,7 +25,6 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
@@ -722,28 +721,6 @@ class MemoryStore:
             return prefix
         return f"{prefix}\n\n{diff_body}"
 
-    @staticmethod
-    def prune_dream_sessions(sessions: SessionManager, *, keep: int = 10) -> None:
-        """Remove the oldest Dream session files, keeping only the N most recent.
-
-        Only current base64url-encoded Dream session keys are considered.
-        Non-dream session files are never touched.
-        """
-        with sessions.locked_session_files() as sessions_dir:
-            dream_files: list[tuple[Path, str]] = []
-            for path in sessions_dir.glob("*.jsonl"):
-                decoded_key = SessionManager.decode_storage_key(path.stem)
-                if decoded_key is not None and is_dream_session(decoded_key):
-                    dream_files.append((path, decoded_key))
-            dream_files.sort(key=lambda item: item[0].stat().st_mtime)
-
-            for path, key in dream_files[: max(0, len(dream_files) - keep)]:
-                if sessions.delete_session(key):
-                    logger.debug("Pruned old dream session: {}", path.stem)
-                else:
-                    logger.warning("Failed to prune dream session {}", path)
-
-
 # ---------------------------------------------------------------------------
 # Memory ingestion and context-pressure coordination
 # ---------------------------------------------------------------------------
@@ -1253,8 +1230,8 @@ class Consolidator:
         """
         lock = self.get_lock(session_key)
         async with lock:
-            self.sessions.invalidate(session_key)
-            session = self.sessions.get_or_create(session_key)
+            await self.sessions.state.discard(session_key)
+            session = await self.sessions.state.get(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1269,20 +1246,15 @@ class Consolidator:
             await events.emit(
                 ContextCompactionEvent(compaction_id=compaction_id, phase="started", notify=notify),
             )
-            last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
             try:
                 summary = await self.archive_session(
                     session, archive_end=archive_end, runtime=runtime,
                 )
                 if summary:
-                    # Concurrent appends remain after the captured boundary.
-                    session.commit_summary_checkpoint(
-                        summary, insert_at=archive_end, last_active=last_active,
+                    await self.sessions.state.commit_summary(
+                        session, summary, archive_end=archive_end,
                     )
-                    # Resume from the summary and retained transcript, not the old provider history.
-                    session.provider_state = None
-                    self.sessions.save(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await events.emit(
                     ContextCompactionEvent(

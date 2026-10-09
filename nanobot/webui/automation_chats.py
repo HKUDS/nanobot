@@ -9,7 +9,7 @@ from nanobot.cron.binding import CronBinding
 from nanobot.cron.types import CronJob
 from nanobot.session.manager import (
     SessionManager,
-    _metadata_title,  # pyright: ignore[reportPrivateUsage]
+    metadata_title,
 )
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.utils.helpers import truncate_text
@@ -30,7 +30,7 @@ class AutomationChat:
                 **({"unavailable": True} if not self.available else {})}
 
 
-def automation_chats(
+async def automation_chats(
     job: CronJob, sessions: SessionManager, workspaces: WebUIWorkspaceController,
     channel_status: dict[str, Any],
 ) -> list[AutomationChat]:
@@ -50,7 +50,7 @@ def automation_chats(
     )
     result: list[AutomationChat] = []
     previews = {row["key"]: row.get("preview", "") for row in sessions.list_sessions()}
-    for handle in SessionHandleResolver(sessions).list_all():
+    for handle in await SessionHandleResolver(sessions).alist_all():
         key = handle.session_key
         data = sessions.read_session_metadata(key)
         metadata: dict[str, Any] = data.get("metadata", {}) if data else {}
@@ -76,7 +76,7 @@ def automation_chats(
             continue
         result.append(AutomationChat(
             id=handle.id,
-            title=(_metadata_title(metadata)
+            title=(metadata_title(metadata)
                    or truncate_text(" ".join(previews.get(key, "").split()), 60)
                    or f"@{handle.name}"),
             binding=CronBinding(key, channel, chat_id, route_metadata),

@@ -65,12 +65,12 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
             channel="cli", sender_id="user", chat_id="test", content=command,
         ))
         async with asyncio.timeout(3):
-            while loop._pending_queues["cli:test"].empty():
+            while "cli:test" not in loop._pending_queues or loop._pending_queues["cli:test"].empty():
                 await asyncio.sleep(0)
         assert len(calls) == 1
         release.set()
         await asyncio.wait_for(asyncio.gather(*loop._active_tasks["cli:test"]), 5)
-        session = loop.sessions.get_or_create("cli:test")
+        session = (await loop.sessions.state.get("cli:test"))
         assert process.await_count == 1
         assert permissions[:3] == [False, True, True]
         assert "Discuss the migration" in calls[1]
@@ -105,7 +105,7 @@ async def test_scheduled_goal_command_cannot_generate_internal_input(tmp_path):
         assert "only be started by a user" in response.content
         assert loop._pending_queues == {}
         assert goal_mutation_allowed() is False
-        assert loop.sessions.get_or_create(msg.session_key).messages == []
+        assert (await loop.sessions.state.get(msg.session_key)).messages == []
     finally:
         await loop.aclose()
 
@@ -142,7 +142,7 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
             if boundary == "empty":
                 return LLMResponse(content="")
             return LLMResponse(content="The migration plan is ready.")
-        if kwargs.get("tools") and GOAL_STATE_KEY not in loop.sessions.get_or_create("cli:test").metadata:
+        if kwargs.get("tools") and GOAL_STATE_KEY not in (await loop.sessions.state.get("cli:test")).metadata:
             assert goal_mutation_allowed() is True
             return LLMResponse(content=None, tool_calls=[ToolCallRequest(
                 id="create", name="create_goal",
@@ -160,7 +160,7 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
         await run_session(loop, InboundMessage(
             channel="cli", sender_id="user", chat_id="test", content="Discuss the migration.",
         ))
-        session = loop.sessions.get_or_create("cli:test")
+        session = (await loop.sessions.state.get("cli:test"))
         assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
         goal_calls = [call for call in calls if "Goal Runtime Guidance" in call]
         assert goal_calls
@@ -173,7 +173,7 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
 
 async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path):
     from nanobot.command.router import CommandContext
-    from nanobot.session.recovery import pending_followups, record_pending_followup
+    from nanobot.session.recovery import pending_followups
 
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
@@ -189,14 +189,12 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
             raw=message.content, loop=loop, is_user_turn=True,
         ))
         assert isinstance(generated, InboundMessage)
-        session = loop.sessions.get_or_create(message.session_key)
-        assert record_pending_followup(session, generated)
-        loop.sessions.save(session)
+        assert await loop.sessions.state.queue_followup(message.session_key, generated)
     finally:
         await loop.aclose()
 
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    session = loop.sessions.get_or_create(message.session_key)
+    session = (await loop.sessions.state.get(message.session_key))
     recovered, = pending_followups(session)
     responses = iter([
         LLMResponse(content=None, tool_calls=[ToolCallRequest(
@@ -225,6 +223,7 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
         async with asyncio.timeout(5):
             while (await loop.bus.consume_outbound()).content != "done":
                 pass
+        session = await loop.sessions.state.get(message.session_key)
         assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
         assert pending_followups(session) == []
         assert sum(row.get("content") == message.content for row in session.messages) == 1
@@ -255,7 +254,7 @@ async def test_internal_continuation_cannot_inherit_goal_permission(tmp_path):
         with goal_mutation_permission(True):
             await loop._process_message(message, session_key="cli:test")
             assert goal_mutation_allowed() is True
-        assert GOAL_STATE_KEY not in loop.sessions.get_or_create("cli:test").metadata
+        assert GOAL_STATE_KEY not in (await loop.sessions.state.get("cli:test")).metadata
         final_request = provider.chat_stream_with_retry.await_args.kwargs["messages"]
         assert "create_goal is unavailable for this turn" in str(final_request)
         assert goal_mutation_allowed() is False

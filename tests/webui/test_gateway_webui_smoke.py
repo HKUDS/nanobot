@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import signal
 import socket
 import subprocess
 import sys
@@ -144,6 +145,7 @@ def _start_gateway(config_path: Path, log_path: Path) -> subprocess.Popen[bytes]
             cwd=Path(__file__).resolve().parents[2],
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
         )
     finally:
         log_file.close()
@@ -153,12 +155,19 @@ def _start_gateway(config_path: Path, log_path: Path) -> subprocess.Popen[bytes]
 def _stop_gateway(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
+    if sys.platform == "win32":
+        # Target only this gateway's console group and let it close its SQLite worker.
+        # TerminateProcess also races the child behind a venv's Python launcher.
+        process.send_signal(signal.CTRL_BREAK_EVENT)
+    else:
+        process.terminate()
     try:
-        process.wait(timeout=10)
+        returncode = process.wait(timeout=30)
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=10)
+        pytest.fail("gateway did not shut down gracefully within 30s")
+    assert returncode == 0, f"gateway shutdown failed with exit code {returncode}"
 
 
 def _get_json(url: str, *, token: str | None = None) -> dict:
@@ -195,13 +204,14 @@ def _wait_for_bootstrap(base_url: str, process: subprocess.Popen[bytes], log_pat
 
 
 async def _recv_until(ws: websockets.WebSocketClientProtocol, event: str) -> dict:
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        raw = await asyncio.wait_for(ws.recv(), timeout=5)
-        payload = json.loads(raw)
-        if payload.get("event") == event:
-            return payload
-    raise AssertionError(f"websocket event {event!r} was not received")
+    try:
+        async with asyncio.timeout(20):
+            while True:
+                payload = json.loads(await ws.recv())
+                if payload.get("event") == event:
+                    return payload
+    except TimeoutError as exc:
+        raise AssertionError(f"websocket event {event!r} was not received within 20s") from exc
 
 
 @pytest.mark.asyncio
@@ -295,11 +305,11 @@ async def test_gateway_recovers_private_children_and_deletes_them_with_parent(tm
     sessions.save(parent)
     children = SubagentSessions(sessions)
     now = time.monotonic()
-    children.create(SubagentStatus(
+    await children.create(SubagentStatus(
         task_id="finished", label="Finished", task_description="inspect", owner=parent.key,
         started_at=now, finished_at=now, completed_at=time.time(), state="done", phase="done", result="Verified",
     ))
-    children.create(SubagentStatus(
+    await children.create(SubagentStatus(
         task_id="abandoned", label="Abandoned", task_description="inspect", owner=parent.key,
         started_at=now, state="running", phase="thinking", result="Partial findings", partial=True,
         receipts={"follow-up": "accepted"},
@@ -425,7 +435,7 @@ def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
         "completed_tool_results": [],
         "pending_tool_calls": [],
     }
-    sessions.save(session, fsync=True)
+    sessions.save(session)
 
     second = _start_gateway(config_path, second_log)
     try:

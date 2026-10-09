@@ -8,12 +8,12 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from nanobot.config.loader import load_config
-from nanobot.session.manager import JsonlSessionStore, SessionManager
+from nanobot.session.location import SessionLocation
+from nanobot.session.manager import SessionManager
 
 
 def _write_legacy_session(
@@ -25,7 +25,7 @@ def _write_legacy_session(
 ) -> Path:
     """Write a valid session file in the legacy in-workspace location."""
     old_dir.mkdir(parents=True, exist_ok=True)
-    path = old_dir / f"{JsonlSessionStore.storage_key(key)}.jsonl"
+    path = old_dir / f"{SessionLocation.storage_key(key)}.jsonl"
     path.write_text(
         json.dumps(
             {
@@ -126,7 +126,7 @@ def test_sessions_follow_active_custom_config_data_root(
     manager.save(session)
 
     assert manager.sessions_dir.parent == custom_instance / "sessions"
-    assert manager._get_session_path(session.key).exists()
+    assert (manager.sessions_dir / "sessions.sqlite3").exists()
     assert not (default_home / ".nanobot" / "sessions").exists()
 
 
@@ -220,126 +220,22 @@ def test_equivalent_workspace_paths_share_one_store(tmp_path: Path) -> None:
     assert via_link.messages[-1]["content"] == "via-real"
 
 
-def test_legacy_in_workspace_sessions_are_migrated(tmp_path: Path) -> None:
+def test_migration_rejects_symlinked_session_file(tmp_path, create_symlink):
     workspace = tmp_path / "workspace"
-    key = "telegram:1"
-    old_file = _write_legacy_session(workspace / "sessions", key, "migrated-msg")
-
-    manager = SessionManager(workspace=workspace)
-
-    # The session is readable through the normal store.
-    loaded = manager.get_or_create(key)
-    assert loaded.messages[-1]["content"] == "migrated-msg"
-    # The legacy in-workspace file has been moved away...
-    assert not old_file.exists()
-    # ...into the out-of-workspace store.
-    assert (manager.sessions_dir / old_file.name).exists()
-
-    # Migration is idempotent: a second construction must not corrupt anything.
-    again = SessionManager(workspace=workspace).get_or_create(key)
-    assert again.messages[-1]["content"] == "migrated-msg"
+    path = _write_legacy_session(workspace / "sessions", "cli:test", "original")
+    target = tmp_path / "outside.jsonl"
+    path.rename(target)
+    create_symlink(path, target)
+    with pytest.raises(RuntimeError, match="migration failed"):
+        SessionManager(workspace)
+    assert "original" in target.read_text()
 
 
-def test_migration_keeps_source_when_install_fails(tmp_path: Path) -> None:
+def test_migration_rejects_symlinked_source_directory(tmp_path, create_symlink):
     workspace = tmp_path / "workspace"
-    key = "telegram:partial"
-    old_file = _write_legacy_session(workspace / "sessions", key, "still-safe")
-
-    with patch.object(JsonlSessionStore, "_install_snapshot", side_effect=OSError("disk full")):
-        manager = SessionManager(workspace=workspace)
-
-    assert old_file.exists()
-    assert not (manager.sessions_dir / old_file.name).exists()
-
-    retried = SessionManager(workspace=workspace)
-    assert retried.get_or_create(key).messages[-1]["content"] == "still-safe"
-    assert not old_file.exists()
-
-
-def test_migration_preserves_newest_valid_conflict(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    key = "telegram:conflict"
-    old_file = _write_legacy_session(workspace / "sessions", key, "newer-workspace")
-    manager = SessionManager(workspace=workspace)
-
-    # Recreate an older legacy source while a newer destination already exists.
-    manager_session = manager.get_or_create(key)
-    manager_session.add_message("assistant", "newer-destination")
-    manager.save(manager_session)
-    _write_legacy_session(
-        workspace / "sessions",
-        key,
-        "older-workspace",
-        updated_at="2025-01-01T00:00:00",
-    )
-
-    retried = SessionManager(workspace=workspace)
-    loaded = retried.get_or_create(key)
-
-    assert loaded.messages[-1]["content"] == "newer-destination"
-    conflicts = list((retried.sessions_dir / ".migration-conflicts").glob("*.jsonl"))
-    assert len(conflicts) == 1
-    assert "older-workspace" in conflicts[0].read_text(encoding="utf-8")
-    assert not old_file.exists()
-
-
-def test_explicit_rollback_restore_copies_sessions_back_without_deleting_new_store(
-    tmp_path: Path,
-) -> None:
-    workspace = tmp_path / "workspace"
-    manager = SessionManager(workspace=workspace)
-    session = manager.get_or_create("telegram:rollback")
-    session.add_message("user", "available-to-old-version")
-    manager.save(session, fsync=True)
-
-    result = manager.restore_sessions_to_workspace()
-    legacy_file = workspace / "sessions" / manager._get_session_path(session.key).name
-
-    assert result.restored == 1
-    assert result.unchanged == 0
-    assert result.conflicts == ()
-    assert legacy_file.exists()
-    assert manager._get_session_path(session.key).exists()
-    assert "available-to-old-version" in legacy_file.read_text(encoding="utf-8")
-
-    repeated = manager.restore_sessions_to_workspace()
-    assert repeated.restored == 0
-    assert repeated.unchanged == 1
-    assert repeated.conflicts == ()
-
-
-def test_legacy_migration_rejects_symlinked_session_file(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    old_dir = workspace / "sessions"
-    old_dir.mkdir(parents=True)
-    key = "telegram:symlink"
-    outside = _write_legacy_session(tmp_path / "outside", key, "outside-secret")
-    source = old_dir / outside.name
-    try:
-        source.symlink_to(outside)
-    except OSError as exc:
-        pytest.skip(f"file symlink unavailable: {exc}")
-
-    manager = SessionManager(workspace=workspace)
-
-    assert source.is_symlink()
-    assert not (manager.sessions_dir / source.name).exists()
-    assert manager.get_or_create(key).messages == []
-
-
-def test_legacy_migration_rejects_symlinked_sessions_directory(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    outside = tmp_path / "outside"
-    key = "telegram:directory-symlink"
-    outside_file = _write_legacy_session(outside, key, "outside-secret")
     workspace.mkdir()
-    try:
-        (workspace / "sessions").symlink_to(outside, target_is_directory=True)
-    except OSError as exc:
-        pytest.skip(f"directory symlink unavailable: {exc}")
-
-    manager = SessionManager(workspace=workspace)
-
-    assert outside_file.exists()
-    assert not (manager.sessions_dir / outside_file.name).exists()
-    assert manager.get_or_create(key).messages == []
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    create_symlink(workspace / "sessions", outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        SessionManager(workspace)

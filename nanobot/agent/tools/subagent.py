@@ -115,7 +115,7 @@ class SubagentTool(Tool):
                 if not task_id:
                     return ToolResult.error(f"Error: {action} requires task_id")
                 if action == "send":
-                    return json.dumps(self._manager.send(task_id, owner, message))
+                    return json.dumps(await self._manager.send(task_id, owner, message))
                 status = await self._manager.cancel(task_id, owner)
                 return json.dumps(status.as_dict(), ensure_ascii=False)
             return ToolResult.error("Error: unknown subagent action")

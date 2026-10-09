@@ -311,7 +311,7 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
         key,
         {"event": "message", "chat_id": "restored-history", "text": "original answer"},
     )
-    assert not sm._get_session_path(key).exists()
+    assert sm.read_session_snapshot(key) is None
 
     port = _free_port()
     channel = _ch(bus, session_manager=sm, port=port)
@@ -342,7 +342,7 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
             "original question",
             "original answer",
         ]
-        assert not sm._get_session_path(key).exists()
+        assert sm.read_session_snapshot(key) is None
     finally:
         await channel.stop()
         await server_task
@@ -2250,7 +2250,7 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         rows = {row["key"]: row for row in sessions}
         handles = {
             handle.session_key: handle
-            for handle in SessionHandleResolver(sm).list_all()
+            for handle in await SessionHandleResolver(sm).alist_all()
         }
         assert rows["websocket:alpha"]["handle"] == handles[
             "websocket:alpha"
@@ -2329,8 +2329,8 @@ async def test_session_delete_removes_file(
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:doomed")
-        assert path.exists()
+        session_key = "websocket:doomed"
+        assert sm.read_session_snapshot(session_key) is not None
         webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
         assert webui_path.is_file()
         resp = await _webui_mutate(
@@ -2340,7 +2340,7 @@ async def test_session_delete_removes_file(
         )
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
-        assert not path.exists()
+        assert sm.read_session_snapshot(session_key) is None
         assert not webui_path.exists()
     finally:
         await channel.stop()
@@ -2360,7 +2360,7 @@ async def test_session_delete_removes_transcript_without_canonical_file(
         key,
         {"event": "user", "chat_id": "transcript-only", "text": "recover me"},
     )
-    assert not sm._get_session_path(key).exists()
+    assert sm.read_session_snapshot(key) is None
     webui_path = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
     assert webui_path.is_file()
 
@@ -2945,7 +2945,7 @@ async def test_session_delete_blocks_when_bound_automation_exists(
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29915)
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:doomed")
+        session_key = "websocket:doomed"
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -2957,7 +2957,7 @@ async def test_session_delete_blocks_when_bound_automation_exists(
         assert body["deleted"] is False
         assert body["blocked_by_automations"] is True
         assert [job["name"] for job in body["automations"]] == ["Daily check"]
-        assert path.exists()
+        assert sm.read_session_snapshot(session_key) is not None
         assert cron.list_bound_cron_jobs_for_session("websocket:doomed")
     finally:
         await channel.stop()
@@ -3033,7 +3033,7 @@ async def test_session_delete_can_cascade_bound_automations(
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29916)
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:doomed")
+        session_key = "websocket:doomed"
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -3042,7 +3042,7 @@ async def test_session_delete_can_cascade_bound_automations(
 
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
-        assert not path.exists()
+        assert sm.read_session_snapshot(session_key) is None
         assert cron.list_bound_cron_jobs_for_session("websocket:doomed") == []
         assert cron.list_jobs(include_disabled=True) == []
     finally:
@@ -3073,7 +3073,7 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
     )
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:doomed")
+        session_key = "websocket:doomed"
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -3085,7 +3085,7 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
         assert body["deleted"] is False
         assert body["blocked_by_automations"] is True
         assert [job["name"] for job in body["automations"]] == ["Chat daily check"]
-        assert path.exists()
+        assert sm.read_session_snapshot(session_key) is not None
         assert [job.name for job in cron.list_bound_cron_jobs_for_session("websocket:doomed")] == [
             "Chat daily check"
         ]
@@ -3102,8 +3102,8 @@ async def test_session_delete_action_accepts_websocket_keys(
     channel = _ch(bus, session_manager=sm, port=29910)
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:encoded-key")
-        assert path.exists()
+        session_key = "websocket:encoded-key"
+        assert sm.read_session_snapshot(session_key) is not None
         deleted = await _webui_mutate(
             channel,
             "session.delete",
@@ -3111,7 +3111,7 @@ async def test_session_delete_action_accepts_websocket_keys(
         )
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
-        assert not path.exists()
+        assert sm.read_session_snapshot(session_key) is None
     finally:
         await channel.stop()
         await server_task
@@ -3458,8 +3458,8 @@ async def test_session_delete_rejects_non_websocket_keys(
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
-        doomed = sm._get_session_path("slack:C123")
-        assert doomed.exists()
+        session_key = "slack:C123"
+        assert sm.read_session_snapshot(session_key) is not None
         get_delete = await _http_get(
             "http://127.0.0.1:29909/api/sessions/slack:C123/delete",
             headers=auth,
@@ -3472,7 +3472,7 @@ async def test_session_delete_rejects_non_websocket_keys(
             {"key": "slack:C123"},
         )
         assert deny_delete.status_code == 404
-        assert doomed.exists()
+        assert sm.read_session_snapshot(session_key) is not None
     finally:
         await channel.stop()
         await server_task
@@ -4203,3 +4203,42 @@ async def test_project_favorites_mutation_persists_without_selecting_project(
     response = await _webui_mutate(channel, "workspace.favorite", {"path": str(project), "pinned": False}, connection=connection)
     assert response.status_code == 200
     assert response.json() == {"favorite_projects": []}
+
+
+@pytest.mark.asyncio
+async def test_session_delete_waiting_on_sqlite_does_not_block_event_loop(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    sm = _seed_session(tmp_path, key="websocket:locked-delete")
+    channel = _ch(bus, session_manager=sm, port=_free_port())
+    blocker = sqlite3.connect(sm._store.path, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        deletion = asyncio.create_task(
+            _webui_mutate(
+                channel,
+                "session.delete",
+                {"key": "websocket:locked-delete"},
+            )
+        )
+        ticked = False
+
+        async def tick() -> None:
+            nonlocal ticked
+            await asyncio.sleep(0.05)
+            ticked = True
+
+        await asyncio.wait_for(tick(), timeout=0.25)
+        assert ticked
+        assert not deletion.done()
+        blocker.rollback()
+        response = await asyncio.wait_for(deletion, timeout=2)
+        assert response.status_code == 200
+        assert sm.read_session_snapshot("websocket:locked-delete") is None
+    finally:
+        if blocker.in_transaction:
+            blocker.rollback()
+        blocker.close()

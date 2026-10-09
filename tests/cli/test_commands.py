@@ -125,8 +125,13 @@ class _EmptyGatewaySessionManager:
     def list_sessions(self) -> list[dict[str, object]]:
         return []
 
-    def flush_all(self) -> int:
-        return 0
+    @property
+    def state(self):
+        return SimpleNamespace(
+            list_sessions=AsyncMock(return_value=[]),
+            record_delivery=AsyncMock(),
+            aclose=AsyncMock(),
+        )
 
 
 def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
@@ -150,9 +155,11 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
         task = asyncio.create_task(never.wait())
         output: list[str] = []
 
+        tasks: list[asyncio.Task[object]] = []
         restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
-            loop, shutdown_event, [task], output.append,
+            loop, shutdown_event, tasks, output.append,
         )
+        tasks.extend([task])
         try:
             callback, args = loop.handlers[int(signal.SIGINT)]
             assert callable(callback)
@@ -175,6 +182,41 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
         assert int(signal.SIGTERM) in loop.removed
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+async def test_gateway_sigbreak_fallback_drains_before_forcing_and_restores(monkeypatch) -> None:
+    sigbreak = getattr(signal, "SIGBREAK", 21)
+    monkeypatch.setattr(signal, "SIGBREAK", sigbreak, raising=False)
+    previous = object()
+    handlers = {}
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: previous)
+    monkeypatch.setattr(signal, "signal", lambda signum, handler: handlers.update({signum: handler}))
+    loop = MagicMock()
+    loop.add_signal_handler.side_effect = NotImplementedError
+    shutdown_event = asyncio.Event()
+    task = asyncio.create_task(asyncio.Event().wait())
+    await asyncio.sleep(0)
+
+    tasks: list[asyncio.Task[object]] = []
+    restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
+        loop, shutdown_event, tasks, lambda _status: None,
+    )
+    tasks.extend([task])
+    try:
+        handlers[sigbreak](sigbreak, None)
+        assert shutdown_event.is_set()
+        assert not task.done()
+        handlers[sigbreak](sigbreak, None)
+        await asyncio.sleep(0)
+        assert task.cancelled()
+    finally:
+        restore()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    assert handlers == dict.fromkeys((signal.SIGINT, signal.SIGTERM, sigbreak), previous)
 
 
 def test_interactive_tty_mode_restores_line_input(monkeypatch) -> None:
@@ -2105,7 +2147,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
     bus.publish_outbound = AsyncMock()
     seen: dict[str, object] = {}
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def __init__(self, _workspace: Path) -> None:
             pass
 
@@ -3119,7 +3161,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
         def add_message(self, role: str, content: str, **kwargs) -> None:
             self.messages.append({"role": role, "content": content, **kwargs})
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def __init__(self, _workspace: Path) -> None:
             self.session = _FakeSession()
             seen["session_manager"] = self
@@ -3240,7 +3282,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     )
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def __init__(self, _workspace: Path) -> None:
             pass
 
@@ -3455,7 +3497,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     class _FakeContext:
         memory = _FakeMemory()
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def flush_all(self) -> int:
             return 0
 
@@ -3736,7 +3778,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     config.gateway.port = 18791
     captured: dict[str, object] = {}
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def flush_all(self) -> int:
             return 0
 
@@ -3939,7 +3981,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     config.gateway.port = 18791
     seen: dict[str, object] = {}
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def flush_all(self) -> int:
             return 0
 
@@ -4079,7 +4121,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     seen: dict[str, object] = {}
     shutdown_order: list[str] = []
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def flush_all(self) -> int:
             return 0
 

@@ -123,7 +123,11 @@ def _install_gateway_shutdown_handlers(
         print_status("\nShutting down... Press Ctrl+C again to force.")
         shutdown_event.set()
 
-    for signum in (signal.SIGINT, signal.SIGTERM):
+    shutdown_signals = [signal.SIGINT, signal.SIGTERM]
+    if sigbreak := getattr(signal, "SIGBREAK", None):
+        shutdown_signals.append(sigbreak)
+
+    for signum in shutdown_signals:
         try:
             loop.add_signal_handler(signum, request_shutdown, signum)
         except (NotImplementedError, RuntimeError, ValueError):
@@ -523,11 +527,21 @@ def _run_gateway(
         )
 
     async def _deliver_to_channel(
-        msg: OutboundMessage, *, record: bool = False, session_key: str | None = None,
+        msg: OutboundMessage,
+        *,
+        record: bool = False,
+        session_key: str | None = None,
+        session_generation: str | None = None,
     ) -> None:
         """Publish a user-visible message and mirror it into that channel's session."""
         metadata = dict(msg.metadata or {})
         record = record or bool(metadata.pop("_record_channel_delivery", False))
+        raw_generation = metadata.pop("_session_generation", None)
+        expected_generation = (
+            session_generation
+            if session_generation is not None
+            else raw_generation if isinstance(raw_generation, str) else None
+        )
         if metadata != (msg.metadata or {}):
             msg = OutboundMessage(
                 channel=msg.channel,
@@ -542,16 +556,24 @@ def _run_gateway(
             record
             and msg.channel != "cli"
             and msg.content.strip()
-            and hasattr(session_manager, "get_or_create")
-            and hasattr(session_manager, "save")
         ):
             key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            session = session_manager.get_or_create(key)
+            if expected_generation is None:
+                # A cross-channel send selects its target when delivery begins.
+                # Turn-bound sends and heartbeat results carry their original identity.
+                target = await session_manager.state.read(key)
+                if target is None:
+                    raise RuntimeError("delivery target session does not exist")
+                expected_generation = target.generation
             extra: dict[str, Any] = {"_channel_delivery": True}
             if msg.media:
                 extra["media"] = list(msg.media)
-            session.add_message("assistant", msg.content, **extra)
-            session_manager.save(session)
+            await session_manager.state.record_delivery(
+                key,
+                msg.content,
+                extra,
+                expected_generation=expected_generation,
+            )
         await bus.publish_outbound(msg)
 
     message_tool = agent.tools.get("message")
@@ -569,7 +591,6 @@ def _run_gateway(
             from nanobot.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
-            prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
             resp = None
@@ -621,7 +642,7 @@ def _run_gateway(
                 if sha:
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
-                prune_dream_sessions(agent.sessions)
+                await agent.sessions.state.prune_dream_sessions()
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
@@ -636,9 +657,14 @@ def _run_gateway(
                 logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
                 return None
 
-            channel, chat_id = _pick_heartbeat_target()
+            channel, chat_id = await _pick_heartbeat_target()
             if channel == "cli":
                 return None
+            delivery_key = _channel_session_key(channel, chat_id)
+            delivery_session = await session_manager.state.read(delivery_key)
+            if delivery_session is None:
+                return None
+            delivery_generation = delivery_session.generation
 
             prompt = (
                 _HEARTBEAT_PREAMBLE
@@ -686,6 +712,8 @@ def _run_gateway(
                 await _deliver_to_channel(
                     OutboundMessage(channel=channel, chat_id=chat_id, content=response),
                     record=True,
+                    session_key=delivery_key,
+                    session_generation=delivery_generation,
                 )
             else:
                 logger.info("Heartbeat: silenced by post-run evaluation")
@@ -740,17 +768,17 @@ def _run_gateway(
         config_path=Path(config_path),
     )
 
-    def _pick_heartbeat_target() -> tuple[str, str]:
+    async def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        sidebar_state = read_webui_sidebar_state()
+        sidebar_state = await asyncio.to_thread(read_webui_sidebar_state)
         unified_metadata = None
         if config.agents.defaults.unified_session:
-            record = session_manager.read_session_metadata(UNIFIED_SESSION_KEY)
+            record = await session_manager.state.read_metadata(UNIFIED_SESSION_KEY)
             if isinstance(record, dict) and isinstance(record.get("metadata"), dict):
                 unified_metadata = record["metadata"]
         return _pick_heartbeat_target_from_sessions(
             enabled_channels=channels.enabled_channels,
-            sessions=session_manager.list_sessions(),
+            sessions=await session_manager.state.list_sessions(),
             archived_keys=sidebar_state.get("archived_keys", []),
             unified_session_metadata=unified_metadata,
         )
@@ -915,6 +943,7 @@ def _run_gateway(
             console.print,
         )
         try:
+            await agent.subagents.recover_interrupted()
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
@@ -937,7 +966,9 @@ def _run_gateway(
                 if orphaned:
                     logger.info("Last local client disappeared; stopping on-demand gateway")
 
-            tasks = [
+            # The signal handlers retain this list object. Populate it in place
+            # so a repeated shutdown signal can cancel tasks created after setup.
+            tasks.extend([
                 asyncio.create_task(
                     watch_config_file(
                         Path(config_path),
@@ -959,7 +990,7 @@ def _run_gateway(
                     _monitor_local_clients(),
                     name="nanobot-gateway-client-monitor",
                 ),
-            ]
+            ])
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),
@@ -1024,12 +1055,6 @@ def _run_gateway(
                     runtime_tasks,
                 )
                 await bus.drain()
-                # Flush all cached sessions to durable storage before exit.
-                # This prevents data loss on filesystems with write-back
-                # caching (rclone VFS, NFS, FUSE mounts, etc.).
-                flushed = agent.sessions.flush_all()
-                if flushed:
-                    logger.info("Shutdown: flushed {} session(s) to disk", flushed)
             finally:
                 restore_shutdown_handlers()
 
@@ -1037,7 +1062,6 @@ def _run_gateway(
         gateway_runtime.foreground_instance(gateway_start_options),
         webui_turn_coordinator.connected(),
     ):
-        agent.subagents.recover_interrupted()
         if health_server_enabled:
             gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

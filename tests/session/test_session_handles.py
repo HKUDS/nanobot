@@ -138,7 +138,7 @@ def test_session_snapshot_and_handle_sync_share_one_lock(
     resolver.list_all()
     snapshot_taken = Event()
     release_snapshot = Event()
-    original_list = manager.list_sessions
+    original_list = manager._store.list_metadata
 
     def paused_list():
         rows = original_list()
@@ -146,7 +146,7 @@ def test_session_snapshot_and_handle_sync_share_one_lock(
         assert release_snapshot.wait(timeout=2)
         return rows
 
-    monkeypatch.setattr(manager, "list_sessions", paused_list)
+    monkeypatch.setattr(manager._store, "list_metadata", paused_list)
     with ThreadPoolExecutor(max_workers=2) as pool:
         old_sync = pool.submit(resolver.list_all)
         assert snapshot_taken.wait(timeout=2)
