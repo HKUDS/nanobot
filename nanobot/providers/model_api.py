@@ -44,15 +44,11 @@ def is_hosted_web_search_tool(tool: object) -> bool:
     return is_hosted_web_search_type(cast(dict[object, object], tool).get("type"))
 
 
-def hosted_web_search_enabled(
-    extra_body: dict[str, Any], default_tools: tuple[str, ...] = (),
-) -> bool:
-    if "tools" in extra_body:
-        tools = extra_body["tools"]
-        return isinstance(tools, list) and any(
-            is_hosted_web_search_tool(tool) for tool in cast(list[object], tools)
-        )
-    return any(is_hosted_web_search_type(value) for value in default_tools)
+def hosted_web_search_enabled(extra_body: dict[str, Any]) -> bool:
+    tools = extra_body.get("tools")
+    return isinstance(tools, list) and any(
+        is_hosted_web_search_tool(tool) for tool in cast(list[object], tools)
+    )
 
 
 @dataclass(frozen=True)
@@ -79,8 +75,19 @@ class ResponsesCapabilities:
     requires_direct_openai_base: bool = False
     reasoning_replay: Literal["none", "encrypted", "plaintext"] = "none"
     supports_native_compaction: bool = False
+    supports_hosted_web_search: bool = True
     allows_chat_fallback: bool = True
     endpoint_models: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    def request_extra_body(self, extra_body: dict[str, Any] | None) -> dict[str, Any]:
+        """Omit hosted search settings when the endpoint ignores that tool type."""
+        body = dict(extra_body or {})
+        tools = body.get("tools")
+        if not self.supports_hosted_web_search and isinstance(tools, list):
+            body["tools"] = [
+                tool for tool in cast(list[object], tools) if not is_hosted_web_search_tool(tool)
+            ]
+        return body
 
     def matches_model(self, model: str, *, api_base: str | None = None) -> bool:
         """Match curated models, restricting endpoint defaults when a base is supplied."""
@@ -120,14 +127,12 @@ class ResponsesCapabilities:
         api_base: str | None = None,
         default_api_base: str = "",
         extra_body: dict[str, Any] | None = None,
-        default_tools: tuple[str, ...] = (),
     ) -> ModelAPICapabilities:
         """Apply endpoint, reasoning, and hosted-tool rules to automatic selection."""
-        body = extra_body or {}
+        body = self.request_extra_body(extra_body)
         effective_base = api_base or default_api_base or None
-        # Explicit hosted tools require Responses; defaults follow the endpoint's model rules.
         search_model_base = None if hosted_web_search_enabled(body) else effective_base
-        if hosted_web_search_enabled(body, default_tools) and (
+        if hosted_web_search_enabled(body) and (
             self.route_reasoning or self.matches_model(model, api_base=search_model_base)
         ):
             return ModelAPICapabilities(("responses",), "responses")

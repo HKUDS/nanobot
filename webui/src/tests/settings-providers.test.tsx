@@ -748,15 +748,8 @@ describe("Settings providers", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: /^DeepSeek/ }));
-    expect(screen.getByText(/DeepSeek V4 Flash/)).toBeInTheDocument();
-    const deepSeekSearch = screen.getByRole("switch", { name: "DeepSeek web search" });
-    expect(deepSeekSearch).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(deepSeekSearch);
-    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
-    await waitFor(() => expect(
-      screen.getByRole("button", { name: "DeepSeek", exact: true }),
-    ).toBeVisible());
-
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
@@ -781,7 +774,6 @@ describe("Settings providers", () => {
       expect(requestUpdates).toEqual([
         ["xai_grok", { extraBody: { tools: [] } }],
         ["openai_codex", { extraBody: { service_tier: "priority" } }],
-        ["deepseek", { extraBody: { tools: [] } }],
         ["openai", {
           api: { supported_apis: ["responses"], preferred_api: "responses" },
           extraBody: { tools: [{ type: "web_search" }] },

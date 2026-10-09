@@ -1212,8 +1212,6 @@
       "extraQuery": "Query parameters",
       "capabilityFastMode": "Fast mode",
       "capabilityFastModeHelp": "Faster replies use credits faster.\n\nUse OpenAI's priority service tier for faster responses. This consumes credits faster.",
-      "capabilityDeepSeekSearch": "DeepSeek web search",
-      "capabilityDeepSeekSearchHelp": "Supported DeepSeek models can search the web.\n\nLet DeepSeek V4 Flash search the web through its Responses API. Search activity appears in chat.",
       "capabilityXSearch": "X Search",
       "capabilityXSearchHelp": "Supported Grok models can search X.\n\nAllow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
       "capabilityOpenAISearch": "OpenAI web search",

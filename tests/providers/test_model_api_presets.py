@@ -8,6 +8,7 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
+from nanobot.agent.tools.web import WebSearchTool
 from nanobot.config.schema import (
     Config,
     InlineFallbackConfig,
@@ -178,12 +179,16 @@ async def test_deepseek_automatic_api_preserves_endpoint_routing(
 
     provider = bind_transport(make_provider(config), handler, api_base=api_base)
     invoke = provider.chat_stream if stream else provider.chat
-    result = await invoke([{"role": "user", "content": "hello"}])
+    result = await invoke(
+        [{"role": "user", "content": "hello"}], tools=[WebSearchTool().to_schema()],
+    )
     assert result.content == "ok"
     assert [request.url.path for request in requests] == [expected_path]
     assert resolve_automatic_model_api(config, preset=config.resolve_preset()) == ("deepseek", api)
     body = json.loads(requests[0].content)
-    assert body.get("tools", []) == ([{"type": "web_search"}] if api == "responses" else [])
+    search_tool = body["tools"][0]
+    assert search_tool["type"] == "function"
+    assert (search_tool if api == "responses" else search_tool["function"])["name"] == "web_search"
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -213,12 +218,15 @@ async def test_deepseek_proxy_accepts_explicit_responses_and_chat_fallback(
     invoke = provider.chat_stream if stream else provider.chat
     result = await invoke([{"role": "user", "content": "hello"}])
     assert result.content == "ok"
-    expected_paths = ["/v1/responses"] if response_supported else ["/v1/responses", "/v1/chat/completions"]
+    expected_paths = (
+        ["/v1/chat/completions"] if api is None
+        else ["/v1/responses"] if response_supported
+        else ["/v1/responses", "/v1/chat/completions"]
+    )
     assert [request.url.path for request in requests] == expected_paths
-    expected_tools = [{"type": "web_search"}] if response_supported else []
-    assert json.loads(requests[0].content).get("tools", []) == expected_tools
+    assert json.loads(requests[0].content).get("tools", []) == []
     if api is None:
-        assert resolve_automatic_model_api(config, preset=preset) == ("deepseek", "responses")
+        assert resolve_automatic_model_api(config, preset=preset) == ("deepseek", "chat_completions")
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -566,3 +574,32 @@ async def test_migrated_openai_default_routes_and_allows_model_override(bind_tra
     override = bind_transport(make_provider(config, preset_name="override"), handler)
     assert (await override.chat([{"role": "user", "content": "hello"}])).content == "ok"
     assert requests[-1] == ("/v1/responses" if opposite == "responses" else "/v1/chat/completions")
+
+
+@pytest.mark.parametrize("env_field", ["API_TYPE", "APITYPE"])
+@pytest.mark.parametrize("legacy,path", [
+    ("auto", "/v1/chat/completions"),
+    ("chat_completions", "/v1/chat/completions"),
+    ("responses", "/v1/responses"),
+])
+async def test_legacy_openai_environment_selector_keeps_request_api(
+    bind_transport, tmp_path, monkeypatch, env_field, legacy, path,
+):
+    from nanobot.config.loader import load_config
+
+    monkeypatch.setenv(f"NANOBOT_PROVIDERS__OPENAI__{env_field}", legacy)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "providers": {"openai": {"apiKey": "fixture", "apiBase": "https://tenant.test/v1"}},
+        "agents": {"defaults": {"model": "gpt-4o", "provider": "openai"}},
+    }), encoding="utf-8")
+    config = load_config(config_path)
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        return _answer(request)
+
+    provider = bind_transport(make_provider(config), handler)
+    assert (await provider.chat([{"role": "user", "content": "hello"}])).content == "ok"
+    assert requests == [path]

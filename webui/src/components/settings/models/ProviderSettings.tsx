@@ -106,15 +106,6 @@ const PROVIDER_REQUEST_OPTIONS: Partial<Record<string, ProviderRequestOption[]>>
     toolType: "web_search",
     forceResponses: true,
   }],
-  deepseek: [{
-    kind: "hosted_tool",
-    titleKey: "settings.providers.capabilityDeepSeekSearch",
-    title: "DeepSeek web search",
-    helpKey: "settings.providers.capabilityDeepSeekSearchHelp",
-    help: "Let DeepSeek V4 Flash search the web through its Responses API. Search activity appears in chat.",
-    toolType: "web_search",
-    defaultEnabled: true,
-  }],
   xai_grok: [{
     kind: "hosted_tool",
     titleKey: "settings.providers.capabilityXSearch",

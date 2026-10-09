@@ -502,7 +502,10 @@ class OpenAICompatProvider(LLMProvider):
         self.extra_headers = extra_headers or {}
         self._spec = spec
         self._preset_model_api = model_api
-        self._extra_body = dict(extra_body or {})
+        self._extra_body = (
+            spec.responses.request_extra_body(extra_body)
+            if spec and spec.responses is not None else dict(extra_body or {})
+        )
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
         self._responses = ResponsesBackend()
@@ -1099,9 +1102,7 @@ class OpenAICompatProvider(LLMProvider):
         return "chat_completions" not in api.supported_apis or self._hosted_web_search_enabled()
 
     def _hosted_web_search_enabled(self) -> bool:
-        return hosted_web_search_enabled(
-            self._extra_body, self._spec.responses_default_tools if self._spec else (),
-        )
+        return hosted_web_search_enabled(self._extra_body)
 
     def _responses_capabilities(self) -> ResponsesCapabilities | None:
         capabilities = self._spec.responses if self._spec is not None else None
@@ -1276,12 +1277,6 @@ class OpenAICompatProvider(LLMProvider):
             body.setdefault("reasoning", {})["context"] = "all_turns"
 
         extra_body = getattr(self, "_extra_body", {})
-        default_tools = getattr(self._spec, "responses_default_tools", ())
-        if "tools" not in extra_body and default_tools:
-            body["tools"] = [
-                *cast(list[object], body.get("tools", [])),
-                *({"type": tool_type} for tool_type in default_tools),
-            ]
         if extra_body:
             body = _merge_responses_extra_body(body, extra_body)
 

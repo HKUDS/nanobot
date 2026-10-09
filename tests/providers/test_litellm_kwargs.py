@@ -364,7 +364,7 @@ async def test_deepseek_v4_pro_uses_responses_api() -> None:
     call_kwargs = mock_responses.call_args.kwargs
     assert call_kwargs["model"] == "deepseek-v4-pro"
     assert call_kwargs["reasoning"] == {"effort": "none"}
-    assert call_kwargs["tools"] == [{"type": "web_search"}]
+    assert "tools" not in call_kwargs
     assert "include" not in call_kwargs
 
 

@@ -355,11 +355,11 @@ For a named custom provider serving Anthropic Messages, set `providers.<name>.ap
 
 Replace the model with a model ID available to your account. Leave API selection on Auto unless you need to choose Chat Completions or Responses in the preset's **Advanced options**. See [preset API settings](./configuration.md#preset-request-api) for WebUI and JSON configuration. `providers.openai.api` sets the connection default; explicit presets override it. If your configuration still uses `apiType`, follow the [migration instructions](./configuration.md#legacy-openai-api-selector-migration).
 
-Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models can retain server-provided conversation state; [native context compaction](./configuration.md#responses-state-and-compaction) depends on provider support. The WebUI offers switches for OpenAI web search, Codex Fast mode, DeepSeek web search, and Grok X Search.
+Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models can retain server-provided conversation state; [native context compaction](./configuration.md#responses-state-and-compaction) depends on provider support. The WebUI offers switches for OpenAI web search, Codex Fast mode, and Grok X Search.
 
-DeepSeek's `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp` automatically use its native Responses API. Its native `web_search` tool is enabled by default and shows its lifecycle in WebUI chat activity; set `providers.deepseek.extraBody.tools` to `[]` to disable it. OpenCode Go's `muse-spark-1.2-contributor` and `muse-spark-1.3-contributor` also use Responses by default.
+DeepSeek's `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp` automatically use its native Responses API. For web search, use nanobot's [web search tool](./configuration.md#web-search). OpenCode Go's `muse-spark-1.2-contributor` and `muse-spark-1.3-contributor` also use Responses by default.
 
-The `deepseek-flash` alias uses Responses automatically at `https://api.deepseek.com`, including the `/v1` form. With a different `providers.deepseek.apiBase`, Auto uses Chat Completions for this alias. Select Responses in the preset if the proxy supports it. The V4 model names listed above use Responses with either endpoint configuration. Explicitly enabling native web search for this alias also selects Responses.
+The `deepseek-flash` alias uses Responses automatically at `https://api.deepseek.com`, including the `/v1` form. With a different `providers.deepseek.apiBase`, Auto uses Chat Completions for this alias. Select Responses in the preset if the proxy supports it. The V4 model names listed above use Responses with either endpoint configuration.
 
 ### Custom OpenAI-Compatible Endpoint
 

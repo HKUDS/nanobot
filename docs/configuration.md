@@ -352,32 +352,6 @@ The WebUI's OpenAI web-search switch selects Responses without Chat fallback. Pr
 
 </details>
 
-<details>
-<summary><b>DeepSeek native web search</b></summary>
-
-DeepSeek V4 Flash and Pro use DeepSeek's native Responses API. Their provider-hosted web search is
-enabled by default because it does not require a separate paid add-on. Turn it off from the
-WebUI provider settings, or with:
-
-```json
-{
-  "providers": {
-    "deepseek": {
-      "apiKey": "${DEEPSEEK_API_KEY}",
-      "extraBody": {
-        "tools": []
-      }
-    }
-  }
-}
-```
-
-The switch applies to `deepseek-v4-flash` and `deepseek-v4-pro`; DeepSeek models that remain on
-Chat Completions cannot use this Responses tool. Native search calls appear in the WebUI activity
-stream, and their opaque output items are preserved for multi-turn Responses state replay.
-
-</details>
-
 <a id="responses-state-and-compaction"></a>
 
 ### Responses conversation state and compaction
@@ -1457,6 +1431,8 @@ In `config.json`, set `providers.<name>.api` for the built-in `custom` provider 
 ### Legacy OpenAI API selector migration
 
 If your configuration uses `providers.openai.apiType` (or `api_type`), save it with a version that supports the migration before upgrading further. Saving replaces the old field with `api`: `chat_completions` or `responses` becomes a single-API declaration, while `auto` keeps automatic selection. If both fields are present, `api` takes precedence, including `api: null`.
+
+The migration also accepts the `NANOBOT_PROVIDERS__OPENAI__API_TYPE` and `NANOBOT_PROVIDERS__OPENAI__APITYPE` environment variables.
 
 The old field is accepted in the first release containing this migration and the immediately following release. The third release will require the current `api` format.
 

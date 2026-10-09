@@ -11,11 +11,13 @@ def migrate_legacy_provider_api(
     values: dict[str, Any], *, provider_name: str,
 ) -> dict[str, Any]:
     """Consume old input keys; all callers receive the current API declaration."""
-    if "apiType" not in values and "api_type" not in values:
+    if "apiType" not in values and "api_type" not in values and "apitype" not in values:
         return values
     migrated = dict(values)
-    legacy = migrated.pop("apiType", migrated.get("api_type", "auto"))
+    # Case-insensitive settings sources normalize the former apiType env alias.
+    legacy = migrated.pop("apiType", migrated.get("api_type", migrated.get("apitype", "auto")))
     migrated.pop("api_type", None)
+    migrated.pop("apitype", None)
     if "api" in migrated:
         return migrated
     if legacy not in ("auto", "chat_completions", "responses"):

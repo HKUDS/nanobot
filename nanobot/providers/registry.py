@@ -130,10 +130,6 @@ class ProviderSpec:
     # Capabilities for providers/models served through the shared Responses path.
     responses: ResponsesCapabilities | None = None
 
-    # Provider-hosted Responses tools sent unless extraBody.tools explicitly
-    # supplies the hosted-tool selection. Values are raw Responses tool types.
-    responses_default_tools: tuple[str, ...] = ()
-
     # When the model returns content as a list of {"type":"thinking",...} +
     # {"type":"text",...} blocks, extract the thinking text into
     # reasoning_content. Mistral's Magistral / reasoning-enabled responses use
@@ -179,7 +175,7 @@ class ProviderSpec:
         return self.responses.default_model_api(
             self.request_model_name(model), reasoning_effort,
             api_base=api_base, default_api_base=self.default_api_base,
-            extra_body=extra_body, default_tools=self.responses_default_tools,
+            extra_body=extra_body,
         )
 
     @property
@@ -637,8 +633,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             ),
             endpoint_models=(("https://api.deepseek.com", ("deepseek-flash",)),),
             reasoning_replay="plaintext",
+            supports_hosted_web_search=False,
         ),
-        responses_default_tools=("web_search",),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(

@@ -1026,8 +1026,6 @@
       "extraQuery": "Parâmetros de consulta",
       "capabilityFastMode": "Modo rápido",
       "capabilityFastModeHelp": "Respostas mais rápidas consomem créditos mais rápido.\n\nUsa o nível de serviço prioritário da OpenAI para respostas mais rápidas. Isso consome créditos mais rapidamente.",
-      "capabilityDeepSeekSearch": "Pesquisa web do DeepSeek",
-      "capabilityDeepSeekSearchHelp": "Modelos DeepSeek compatíveis podem pesquisar na web.\n\nPermite que o DeepSeek V4 Flash pesquise na web pela Responses API. A atividade de pesquisa aparece no chat.",
       "capabilityXSearch": "Pesquisa no X",
       "capabilityXSearchHelp": "Modelos Grok compatíveis podem pesquisar no X.\n\nPermite que modelos Grok compatíveis usem o X Search hospedado pela xAI. A atividade de pesquisa aparece no chat.",
       "capabilityOpenAISearch": "Pesquisa web da OpenAI",

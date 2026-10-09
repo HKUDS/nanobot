@@ -789,8 +789,6 @@
       "extraQuery": "Parameter kueri",
       "capabilityFastMode": "Mode cepat",
       "capabilityFastModeHelp": "Balasan lebih cepat menghabiskan kredit lebih cepat.\n\nGunakan tingkat layanan prioritas OpenAI agar respons lebih cepat. Kredit akan terpakai lebih cepat.",
-      "capabilityDeepSeekSearch": "Pencarian web DeepSeek",
-      "capabilityDeepSeekSearchHelp": "Model DeepSeek yang didukung dapat mencari di web.\n\nIzinkan DeepSeek V4 Flash mencari di web melalui Responses API. Aktivitas pencarian ditampilkan di chat.",
       "capabilityXSearch": "Pencarian X",
       "capabilityXSearchHelp": "Model Grok yang didukung dapat mencari di X.\n\nIzinkan model Grok yang didukung menggunakan X Search yang dihosting xAI. Aktivitas pencarian ditampilkan di chat.",
       "capabilityOpenAISearch": "Pencarian web OpenAI",
