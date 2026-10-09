@@ -586,6 +586,63 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByRole("link", { name: "links" })).not.toHaveAttribute("node");
   });
 
+  it("keeps CJK prose outside a bold bare URL through stream completion", () => {
+    const url = "https://github.com/HKUDS/nanobot";
+    const source = `实际跳转到 **${url}**，不是推文页面。`;
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    const assertLink = () => {
+      const link = screen.getByRole("link", { name: url });
+      expect(link).toHaveAttribute("href", url);
+      expect(link.closest("strong")).not.toBeNull();
+      expect(container.textContent).toBe(`实际跳转到 ${url}，不是推文页面。`);
+    };
+    assertLink();
+
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    assertLink();
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    assertLink();
+  });
+
+  it.each([
+    ["https://example.com/中文?q=测试", "，后续说明。"],
+    ["https://example.com/a_(b)?x=1&y=2#section", "。后续说明"],
+    ["www.example.com/path", "；后续说明"],
+    ["https://例子.测试/路径", "，后续说明"],
+    ["http://localhost:7891/path", "，后续说明"],
+    ["https://example.com/foo*bar*baz", "，后续说明"],
+    ["https://example.com/escaped%EF%BC%8Cpath", "，后续说明"],
+  ])("bounds bare URL %s before CJK punctuation", (url, following) => {
+    const { container } = render(<MarkdownTextRenderer>{url + following}</MarkdownTextRenderer>);
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute(
+      "href", encodeURI(url.startsWith("www.") ? `http://${url}` : url).replace(/%25/g, "%"),
+    );
+    expect(container.textContent).toBe(url + following);
+  });
+
+  it("preserves explicit URL punctuation and literal URLs in code and escapes", () => {
+    const url = "https://example.com/中文，测试";
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {`[Explicit](${url}) <${url}>\n\n\`**${url}**\`\n\n\`\`\`text\n**${url}**\n\`\`\`\n\n\\*\\*${url}\\*\\*`}
+      </MarkdownTextRenderer>,
+    );
+    expect(screen.getByRole("link", { name: "Explicit" })).toHaveAttribute("href", encodeURI(url));
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", encodeURI(url));
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container.querySelector("code")?.textContent).toBe(`**${url}**`);
+  });
+
+  it("keeps GFM link boundaries before a partial Markdown resource containing CJK text", () => {
+    const url = "https://example.com/path";
+    const source = `${url}](中文，后续说明。`;
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(container.textContent).toBe(source);
+  });
+
   it("renders bold CJK text when more CJK text follows immediately", () => {
     render(
       <MarkdownTextRenderer streaming>
