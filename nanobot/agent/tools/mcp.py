@@ -528,6 +528,9 @@ class _MCPWrapperBase(Tool):
     def set_reconnect_handler(self, reconnect: _ReconnectCallback) -> None:
         self._reconnect = reconnect
 
+    def _adopt_refreshed_tool(self, refreshed_tool: Tool | None) -> None:
+        """Refresh wrapper-specific state after the shared session is replaced."""
+
     async def _refresh_session_after_termination(
         self,
         exc: BaseException,
@@ -553,8 +556,7 @@ class _MCPWrapperBase(Tool):
             )
             return False
         self._session = refreshed_session
-        if isinstance(self, MCPToolWrapper):
-            self._native_turn = getattr(refreshed_tool, "_native_turn", None)
+        self._adopt_refreshed_tool(refreshed_tool)
         return True
 
 
@@ -631,6 +633,11 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._image_output = image_output
         self._retry_tool_calls = retry_tool_calls
         self._native_turn = native_turn
+
+    def _adopt_refreshed_tool(self, refreshed_tool: Tool | None) -> None:
+        self._native_turn = (
+            refreshed_tool._native_turn if isinstance(refreshed_tool, MCPToolWrapper) else None
+        )
 
     @property
     def name(self) -> str:

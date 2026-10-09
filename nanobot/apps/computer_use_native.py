@@ -15,7 +15,7 @@ import shutil
 import stat
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 REVISION = "d27f6a89d8aeef0f56363ee9bb60bbc565912b1e"
 VERSION = "0.1.0"
@@ -29,8 +29,11 @@ def package_digest(root: Path) -> str | None:
     marker = root / "native-package.json"
     if not marker.exists():
         return None
-    value = json.loads(marker.read_text())
-    if (not isinstance(value, dict) or value.get("schema") != 1 or value.get("revision") != REVISION
+    decoded = json.loads(marker.read_text())
+    if not isinstance(decoded, dict):
+        raise ValueError("The local Computer Use build manifest is invalid. Rebuild and stage it locally.")
+    value = cast(dict[str, Any], decoded)
+    if (value.get("schema") != 1 or value.get("revision") != REVISION
             or value.get("version") != VERSION or not isinstance(value.get("sha256"), str)
             or value.get("architecture") != platform.machine().lower()
             or len(value["sha256"]) != 64 or any(c not in "0123456789abcdef" for c in value["sha256"])):
@@ -92,8 +95,11 @@ class NativeConnection:
                 await self.writer.drain()
                 assert self.reader is not None
                 line = await asyncio.wait_for(self.reader.readline(), timeout=55)
-                reply = json.loads(line)
-                if not isinstance(reply, dict) or type(reply.get("ok")) is not bool:
+                decoded = json.loads(line)
+                if not isinstance(decoded, dict):
+                    raise ValueError("Invalid native host response.")
+                reply = cast(dict[str, Any], decoded)
+                if type(reply.get("ok")) is not bool:
                     raise ValueError("Invalid native host response.")
                 if not reply["ok"]:
                     raise RuntimeError(str(reply.get("error", "Native operation failed.")))

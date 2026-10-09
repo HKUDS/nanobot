@@ -127,7 +127,6 @@ class DriverCheck(TypedDict):
 class CuaDriver:
     def __init__(self, config_path: Path):
         self.config_path = config_path.resolve()
-        self.root = self.config_path.parent / "apps" / NAME
         self.release = host_release()
         if platform.system() == "Darwin":
             from nanobot.apps.computer_use_native import package_digest
@@ -139,6 +138,10 @@ class CuaDriver:
             if digest:
                 version = tuple(int(part) for part in platform.mac_ver()[0].split(".")[:2])
                 self.release = Release("darwin-native", digest, native=True) if version >= (14, 2) else None
+
+    @property
+    def root(self) -> Path:
+        return self._inside(self.config_path.parent / "apps" / NAME)
 
     @property
     def native(self) -> bool:

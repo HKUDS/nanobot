@@ -17,6 +17,8 @@ from nanobot.apps.computer_use_turn import NativeTurnTransport
 
 @pytest.fixture
 def socket_path():
+    if sys.platform == "win32":
+        pytest.skip("Native host transport uses macOS/POSIX asyncio Unix sockets")
     # macOS AF_UNIX paths are limited to 104 bytes; pytest's nested tmp_path is longer.
     with tempfile.TemporaryDirectory(prefix="nb-native-", dir="/tmp") as directory:
         yield Path(directory) / "native.sock"
@@ -57,7 +59,8 @@ async def test_native_task_scope_is_shared_by_tools_isolated_by_run_and_closed_o
 
 
 @pytest.mark.asyncio
-async def test_stdio_mcp_passes_only_host_owned_task_scope_and_releases_channel(socket_path):
+@pytest.mark.parametrize("malformed", [False, True])
+async def test_stdio_mcp_passes_only_host_owned_task_scope_and_releases_channel(socket_path, malformed):
     address = socket_path
     requests = []
     closed = asyncio.Event()
@@ -73,6 +76,8 @@ async def test_stdio_mcp_passes_only_host_owned_task_scope_and_releases_channel(
                 else:
                     was_call = True
                     result = {"content": [{"type": "text", "text": "window result"}], "isError": False}
+                    if malformed:
+                        result = {"content": [{"type": "invalid"}]}
                 writer.write(json.dumps({"ok": True, "result": result}).encode() + b"\n")
                 await writer.drain()
         finally:
@@ -93,8 +98,13 @@ async def test_stdio_mcp_passes_only_host_owned_task_scope_and_releases_channel(
                 transport = NativeTurnTransport(session)
                 async with tool_run_scope():
                     result = await transport.call_tool("get_window_state", {"pid": 10, "window_id": 20})
-                    assert not result.isError
-                    assert not closed.is_set()
+                    assert bool(result.isError) is malformed
+                    if malformed:
+                        # A malformed SDK reply must release its active window
+                        # immediately, not leak it until the idle deadline.
+                        await asyncio.wait_for(closed.wait(), 2)
+                    else:
+                        assert not closed.is_set()
                 await asyncio.wait_for(closed.wait(), 2)
     finally:
         listener.close()

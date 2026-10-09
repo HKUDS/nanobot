@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
@@ -21,7 +22,7 @@ async def serve(address: Path) -> None:
         return [Tool.model_validate(tool) for tool in result["tools"]]
 
     @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict) -> CallToolResult:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         meta = server.request_context.meta
         metadata = meta.model_dump() if meta else {}
         scope = metadata.get("nanobot/turn")
@@ -42,6 +43,7 @@ async def serve(address: Path) -> None:
             raise
         except Exception as exc:
             connections.pop(scope, None)
+            await connection.close()
             return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
 
     try:

@@ -140,7 +140,7 @@ describe("Cua Driver through Apps settings", () => {
     const dialog = screen.getByRole("dialog", { name: "Computer Use" });
     expect(within(dialog).getByText("Let nanobot observe and operate your computer.")).toBeVisible();
     expect(within(dialog).getByRole("button", { name: "下载并安装" })).toBeEnabled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "概览" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "总览" }));
     expect(within(dialog).getByText("由 Cua Driver 驱动 · nanobot 集成")).toBeVisible();
     await act(() => setAppLanguage("en"));
     expect(screen.getByRole("dialog", { name: "Computer Use" })).toBeVisible();

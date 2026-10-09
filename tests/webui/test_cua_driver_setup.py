@@ -160,6 +160,36 @@ async def test_enable_disable_reload_only_the_selected_host(settings, tmp_path, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stop_fails", [False, True])
+async def test_native_scope_change_stops_old_access_before_publishing_new_mode(settings, monkeypatch, tmp_path, stop_fails):
+    from nanobot.apps.cua_driver import DriverError, Release
+
+    monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
+    monkeypatch.setattr("nanobot.apps.cua_driver.host_release", lambda: Release("darwin-native", "digest", native=True))
+    monkeypatch.setattr("nanobot.apps.cua_driver_stdio.endpoint", lambda path: tmp_path / "native.sock")
+    settings.update(lambda cfg: cfg.tools.mcp_servers.update({
+        "cua-driver": CuaDriver(settings.path).configuration("control"),
+    }))
+    async def stop():
+        assert "click" in settings.load().tools.mcp_servers["cua-driver"].enabled_tools
+        if stop_fails:
+            raise DriverError("Computer Use did not stop")
+
+    monkeypatch.setattr(CuaDriver, "stop", AsyncMock(side_effect=stop))
+    reload = AsyncMock(return_value={"ok": True, "requires_restart": False})
+    query = {"name": ["cua-driver"], "mode": ["observe"], "consent": [f"{CAPABILITY}:observe"]}
+    if stop_fails:
+        with pytest.raises(McpPresetError, match="did not stop"):
+            await mcp_presets_settings_action("enable", query, config=settings, reload_mcp=reload)
+        assert "click" in settings.load().tools.mcp_servers["cua-driver"].enabled_tools
+        reload.assert_not_awaited()
+    else:
+        await mcp_presets_settings_action("enable", query, config=settings, reload_mcp=reload)
+        assert "click" not in settings.load().tools.mcp_servers["cua-driver"].enabled_tools
+        reload.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_disable_stops_native_driver_even_when_runtime_refresh_fails(settings, monkeypatch):
     monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
     settings.update(lambda cfg: cfg.tools.mcp_servers.update({

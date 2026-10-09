@@ -1764,7 +1764,7 @@ async def _cua_driver_action(
         return await _cua_driver_action_locked(action, query, config=config,
             reload_mcp=reload_mcp, mcp_runtime_status=mcp_runtime_status)
     driver = CuaDriver(config.path if config is not None else get_config_path())
-    driver._inside(driver.root).mkdir(parents=True, exist_ok=True)
+    driver.root.mkdir(parents=True, exist_ok=True)
     lock = FileLock(str(driver.root / "action.lock"))
     try:
         lock.acquire(timeout=0)
@@ -1816,6 +1816,11 @@ async def _cua_driver_action_locked(
                     raise McpPresetError("The Cua Driver configuration changed. Refresh before continuing.", 409)
                 current.tools.mcp_servers["cua-driver"] = server
 
+            # Do not publish a reduced access mode while the previous native
+            # process may still accept input. A failed stop preserves the old
+            # configuration and its visible access mode for recovery.
+            if driver.native:
+                await driver.stop()
             await asyncio.to_thread(settings.update, enable)
             if driver.native:
                 from nanobot.apps.computer_use_native import clear_pause
@@ -1823,7 +1828,6 @@ async def _cua_driver_action_locked(
 
                 # Scope belongs to the native process too. Close the old
                 # runtime before a confirmed scope change or explicit enable.
-                await driver.stop()
                 clear_pause(endpoint(settings.path))
             # Persist consent before starting the one native permission flow.
             # The MCP reload reuses that daemon instead of launching a second

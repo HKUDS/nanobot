@@ -20,6 +20,14 @@ with the unmodified executable by nanobot's installer:
 Keep those notices with any redistributed driver installation. Nanobot's MIT
 license does not replace third-party licenses or grant rights to their marks.
 
+The optional local host in `native/computer-use` instead embeds the Cua SDK at
+commit `d27f6a89d8aeef0f56363ee9bb60bbc565912b1e` (upstream PR #3019, SDK 0.22.1).
+Its cursor theme adapts Cua's MIT-licensed theme authoring helpers. It is not
+the official 0.33.4 binary. The build retains Cua's MIT license, nanobot's MIT
+license, and dependency notices in the app. UniFFI dependencies use MPL-2.0;
+the build includes their unchanged source and licenses in `MPL-SOURCES.tar.gz`.
+See `native/computer-use/README.md` for source, packaging, and distribution limits.
+
 ---
 
 The following third-party components are redistributed as part of the packaged
