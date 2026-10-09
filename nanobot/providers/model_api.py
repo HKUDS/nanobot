@@ -129,13 +129,12 @@ class ResponsesCapabilities:
         extra_body: dict[str, Any] | None = None,
     ) -> ModelAPICapabilities:
         """Apply endpoint, reasoning, and hosted-tool rules to automatic selection."""
-        body = self.request_extra_body(extra_body)
-        effective_base = api_base or default_api_base or None
-        search_model_base = None if hosted_web_search_enabled(body) else effective_base
-        if hosted_web_search_enabled(body) and (
-            self.route_reasoning or self.matches_model(model, api_base=search_model_base)
+        if (
+            self.supports_hosted_web_search
+            and hosted_web_search_enabled(extra_body or {})
+            and (self.route_reasoning or self.matches_model(model))
         ):
             return ModelAPICapabilities(("responses",), "responses")
         if self.requires_direct_openai_base and not is_direct_openai_base(api_base):
             return ModelAPICapabilities()
-        return self.model_api(model, reasoning_effort, api_base=effective_base)
+        return self.model_api(model, reasoning_effort, api_base=api_base or default_api_base or None)

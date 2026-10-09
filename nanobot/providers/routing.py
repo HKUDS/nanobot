@@ -41,7 +41,11 @@ def _provider_spec_for_config(
         # Before OrcaRouter became a built-in provider, this name was valid for a
         # dynamic custom provider. Preserve that provider's model-prefix behavior
         # when an existing config points the name at a different endpoint.
-        return create_dynamic_spec(
+        spec = None
+    if spec is None and provider_config is not None:
+        if not provider_config.api_base:
+            raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
+        spec = create_dynamic_spec(
             provider_name,
             display_name=provider_config.display_name or "",
             thinking_style=provider_config.thinking_style or "",
@@ -55,11 +59,12 @@ def resolve_model_api(
     preset_api: ModelAPIConfig | None,
 ) -> ModelAPICapabilities | None:
     """Apply the connection's API ceiling and default to a model declaration."""
-    connection_api = provider_config.api if provider_config else None
-    if connection_api is not None:
+    connection_api = None
+    if provider_config is not None and provider_config.api is not None:
         if not spec.provider_api_configurable:
             raise ValueError(f"Provider '{spec.name}' does not support connection API declarations.")
-        spec.validate_model_api(connection_api.to_capabilities())
+        connection_api = provider_config.api.to_capabilities()
+        spec.validate_model_api(connection_api)
     if preset_api is not None:
         api = preset_api.to_capabilities()
         spec.validate_model_api(api)
@@ -73,14 +78,13 @@ def resolve_model_api(
         return api
     if connection_api is None:
         return None
-    api = connection_api.to_capabilities()
     # Selecting a default adapter does not authorize fallback across API families.
-    if api.preferred_api == "anthropic_messages":
+    if connection_api.preferred_api == "anthropic_messages":
         return ModelAPICapabilities(("anthropic_messages",), "anthropic_messages")
     supported: tuple[RequestAPI, ...] = tuple(
-        item for item in api.supported_apis if item != "anthropic_messages"
+        item for item in connection_api.supported_apis if item != "anthropic_messages"
     )
-    return ModelAPICapabilities(supported_apis=supported, preferred_api=api.preferred_api)
+    return ModelAPICapabilities(supported_apis=supported, preferred_api=connection_api.preferred_api)
 
 
 def resolve_provider_route(
@@ -96,14 +100,6 @@ def resolve_provider_route(
     if not provider_name:
         raise ValueError(f"No provider is configured for model '{model}'.")
     spec = _provider_spec_for_config(provider_name, provider_config)
-    if not spec and provider_config:
-        if not provider_config.api_base:
-            raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-        spec = create_dynamic_spec(
-            provider_name,
-            display_name=provider_config.display_name or "",
-            thinking_style=provider_config.thinking_style or "",
-        )
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
