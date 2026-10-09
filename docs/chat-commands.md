@@ -41,6 +41,8 @@ Use `/help` or the command menu to find a command.
 
 In the WebUI, Enter queues ordinary text while a response is running. Paths
 follow the same rule. Registered commands still go to the gateway immediately.
+If the command list is unavailable, slash-prefixed input goes to the gateway
+immediately, so commands such as `/stop` do not wait in the queue.
 
 A path can have the same name as a command. For example, `/new` starts a new
 conversation. To discuss that directory, write `/new/` or `Look at /new`.

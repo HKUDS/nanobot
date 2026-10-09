@@ -2929,6 +2929,19 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("/status", undefined, undefined);
   });
 
+  it("sends a possible stop command without waiting when command metadata is unavailable", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    render(<ThreadComposer onSend={onSend} onStop={onStop} isStreaming />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/stop" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("/stop", undefined, { continueActiveTurn: true });
+    expect(onStop).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+  });
+
   it("marks new chat commands as side-channel sends that finalize the active turn", () => {
     const onSend = vi.fn();
     render(

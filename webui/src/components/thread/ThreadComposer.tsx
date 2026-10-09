@@ -1200,7 +1200,10 @@ export function ThreadComposer({
     && !encoding
     && !hasErrors
     && hasComposerContent
-    && !isRegisteredSlashCommand(value, slashCommands);
+    // Without command metadata, let the gateway classify slash input immediately.
+    && (slashCommands.length > 0
+      ? !isRegisteredSlashCommand(value, slashCommands)
+      : !value.trimStart().startsWith("/"));
 
   const slashQuery = useMemo(() => {
     if (interactionDisabled || slashMenuDismissed || !value.startsWith("/")) return null;
