@@ -440,6 +440,14 @@ endpoint and exposes `web_search` and `web_fetch` without requiring an API key.
 It is an optional integration and does not replace nanobot's built-in web search
 provider; mention `@parallel-search` when a turn should use it.
 
+The FXMacroData preset connects to FXMacroData's hosted MCP endpoint for
+official-source macroeconomic data: central-bank rates, inflation, jobs and GDP
+releases, release calendars and FX rates. USD data works without an API key
+(each release is readable 15 minutes after publication, covering the last 90
+days); other currencies and FX rates need an FXMacroData key, which you can
+send as an `Authorization: Bearer` header on a custom MCP server. Mention
+`@fxmacrodata` when a turn needs macro data.
+
 After a CLI App or MCP server is available, mention it from the composer with
 `@` to attach that tool to the next message. Plugin-provided skills participate
 in normal skill discovery and can be invoked with `$skill-name`.
