@@ -543,7 +543,7 @@ describe("webui i18n", () => {
 
     expect(screen.getByRole("listbox", { name: "斜杠命令" })).toBeInTheDocument();
     expect(screen.getByText("压缩上下文")).toBeInTheDocument();
-    expect(screen.getByText("压缩当前对话的上下文并继续对话。")).toBeInTheDocument();
+    expect(screen.getByText("压缩上下文后继续对话")).toBeInTheDocument();
     expect(screen.getByText("/compact")).toBeInTheDocument();
   });
 
@@ -661,13 +661,13 @@ describe("webui i18n", () => {
     expect(settings.sections.webSearch).toBe("网络搜索");
     expect(settings.byok.tabs.webSearch).toBe("网络搜索");
     expect(settings.overview.webSearch).toBe("网络搜索");
-    expect(settings.overview.workspace).toBe("工作区");
+    expect(settings.overview.workspace).toBe("工作目录");
     expect(settings.skills.installedTab).toBe("已安装");
     expect(settings.skills.discoverTab).toBe("发现");
     expect(settings.skills.marketplaceProviderFilter).toBe("技能来源");
     expect(settings.skills.marketplaceProviderAll).toBe("全部");
     expect(settings.skills.marketplaceSearchPlaceholder).toBe("搜索技能");
-    expect(settings.skills.marketplaceTrendingTitle).toBe("各市场热门技能");
+    expect(settings.skills.marketplaceTrendingTitle).toBe("热门技能");
   });
 
   it("keeps the Simplified Chinese group workflow localized", () => {
@@ -675,7 +675,7 @@ describe("webui i18n", () => {
 
     expect(workbench.tabAria).toBe("分组：{{title}}");
     expect(workbench.createGroup).toBe("创建分组");
-    expect(workbench.renameGroupTitle).toBe("重命名分组");
+    expect(workbench.renameGroupTitle).toBe("分组改名");
     expect(workbench.renameGroupDescription).toBe("为这个分组命名。");
     expect(workbench.renameGroupPlaceholder).toBe("分组名称");
     expect(workbench.moveTo).toBe("移动到");

@@ -8,26 +8,26 @@
         "placeholder": "Discord 机器人令牌"
       },
       "allowChannels": {
-        "label": "允许的频道",
+        "label": "允许频道",
         "placeholder": "频道 ID，用逗号分隔"
       },
       "groupPolicy": {
-        "label": "群组行为",
+        "label": "群聊规则",
         "choices": {
-          "mention": "仅提及时",
-          "open": "所有消息",
+          "mention": "提及回复",
+          "open": "全部消息",
           "allowlist": "白名单"
         }
       },
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "用户 ID，用逗号分隔"
       },
       "proxy": {
         "label": "网络代理"
       },
       "proxyUsername": {
-        "label": "代理用户名"
+        "label": "代理账号"
       },
       "proxyPassword": {
         "label": "代理密码"
@@ -39,10 +39,10 @@
         "label": "已读表情"
       },
       "workingEmoji": {
-        "label": "处理中表情"
+        "label": "处理表情"
       },
       "workingEmojiDelay": {
-        "label": "处理中表情延迟"
+        "label": "表情延迟"
       },
       "streaming": {
         "label": "流式输出",

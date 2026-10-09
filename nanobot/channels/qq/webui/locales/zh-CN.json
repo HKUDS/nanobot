@@ -12,7 +12,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "Open ID，用逗号分隔"
       },
       "msgFormat": {
@@ -23,19 +23,19 @@
         }
       },
       "ackMessage": {
-        "label": "处理中提示"
+        "label": "处理提示"
       },
       "mediaDir": {
         "label": "媒体目录"
       },
       "downloadChunkSize": {
-        "label": "下载分块大小"
+        "label": "分块大小"
       },
       "downloadMaxBytes": {
-        "label": "下载大小上限"
+        "label": "下载上限"
       },
       "showCompactionNotices": {
-        "label": "上下文压缩通知",
+        "label": "压缩通知",
         "choices": {
           "true": "开",
           "false": "关"

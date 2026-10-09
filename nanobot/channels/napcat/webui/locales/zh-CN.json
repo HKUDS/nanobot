@@ -12,29 +12,29 @@
         "placeholder": "可选令牌"
       },
       "groupPolicy": {
-        "label": "群组行为",
+        "label": "群聊规则",
         "choices": {
-          "mention": "仅提及时",
-          "open": "所有消息",
+          "mention": "提及回复",
+          "open": "全部消息",
           "allowlist": "白名单"
         }
       },
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "QQ ID，用逗号分隔"
       },
       "groupPolicyOverrides": {
-        "label": "群组行为覆盖（JSON）"
+        "label": "群聊例外（JSON）"
       },
       "welcomeNewMembers": {
-        "label": "欢迎新成员",
+        "label": "入群欢迎",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "maxImageBytes": {
-        "label": "图片大小上限"
+        "label": "图片上限"
       }
     }
   }

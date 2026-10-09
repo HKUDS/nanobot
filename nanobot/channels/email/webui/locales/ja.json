@@ -129,6 +129,7 @@
       },
       "postActionExpunge": {
         "label": "アクションを永続的に適用する",
+        "help": "削除済みメールの完全削除を許可します。\n\nUID EXPUNGE が利用できない場合や失敗した場合、EXPUNGE は現在のメールボックスで削除済みとされたすべてのメールを完全に削除します。nanobot が処理していないメールも含まれます。",
         "choices": {
           "true": "オン",
           "false": "オフ"
@@ -136,6 +137,7 @@
       },
       "postActionIgnoreSkipped": {
         "label": "スキップされたメッセージを無視する",
+        "help": "スキップしたメールを削除・移動しません。",
         "choices": {
           "true": "オン",
           "false": "オフ"

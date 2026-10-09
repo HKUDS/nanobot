@@ -16,7 +16,7 @@ export function SettingsHint({ children, description }: { children: ReactNode; d
             {children}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[min(22rem,calc(100vw-2rem))] whitespace-normal text-pretty leading-5">
+        <TooltipContent side="top" className="max-w-[min(22rem,calc(100vw-2rem))] whitespace-pre-line text-pretty leading-5">
           {description}
         </TooltipContent>
       </Tooltip>

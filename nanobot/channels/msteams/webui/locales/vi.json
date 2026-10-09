@@ -51,6 +51,7 @@
       },
       "pruneWebChatRefs": {
         "label": "Xóa cuộc hội thoại Trò chuyện trên web",
+        "help": "Xóa tham chiếu gửi Web Chat đã lưu, giữ lại lịch sử trò chuyện.",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
@@ -58,6 +59,7 @@
       },
       "pruneNonPersonalRefs": {
         "label": "Xóa các cuộc trò chuyện không mang tính cá nhân",
+        "help": "Xóa tham chiếu gửi của cuộc trò chuyện không phải cá nhân, giữ lại lịch sử trò chuyện.",
         "choices": {
           "true": "Bật",
           "false": "Tắt"

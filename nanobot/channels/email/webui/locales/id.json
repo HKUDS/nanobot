@@ -129,6 +129,7 @@
       },
       "postActionExpunge": {
         "label": "Terapkan tindakan secara permanen",
+        "help": "Izinkan penghapusan permanen.\n\nJika UID EXPUNGE tidak tersedia atau gagal, EXPUNGE menghapus permanen semua pesan bertanda dihapus dalam kotak surat saat ini, termasuk pesan yang tidak diproses nanobot.",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
@@ -136,6 +137,7 @@
       },
       "postActionIgnoreSkipped": {
         "label": "Abaikan pesan yang dilewati",
+        "help": "Jangan hapus atau pindahkan pesan yang dilewati.",
         "choices": {
           "true": "Aktif",
           "false": "Mati"

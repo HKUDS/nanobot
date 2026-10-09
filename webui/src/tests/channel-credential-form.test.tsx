@@ -26,6 +26,47 @@ const fields: ChannelConfigField[] = [
 ];
 
 describe("CredentialForm", () => {
+  it("shows localized deletion rules and associates them with the option controls", () => {
+    const key = "channels.email.postActionExpunge";
+    const setup = channelSetup({
+      name: "email", display_name: "Email", type: "channel", enabled: false,
+      installed: true, ready: false, status: "not_enabled",
+      install_supported: true, requires_restart: false,
+      setup: { fields: [{ key, field: "postActionExpunge", kind: "bool", choices: [], required: false }] },
+    }, "zh-CN");
+    const field = setup.fields![0]!;
+    render(<CredentialForm fields={[field]} values={{ [key]: "false" }}
+      visibleSecrets={{}} onChange={vi.fn()} onToggleSecret={vi.fn()} />);
+
+    const group = screen.getByRole("group", { name: `${field.label} Optional` });
+    const help = document.getElementById("channel-field-channels-email-postActionExpunge-help");
+    expect(help).toBeVisible();
+    expect(help).toHaveTextContent("UID EXPUNGE");
+    expect(help).toHaveTextContent("未由 nanobot 处理的邮件");
+    const description = field.help!.replace(/\s+/g, " ");
+    expect(group).toHaveAccessibleDescription(description);
+    for (const radio of within(group).getAllByRole("radio")) {
+      expect(radio).toHaveAccessibleDescription(description);
+    }
+  });
+
+  it("keeps help and validation errors associated with text and JSON fields", () => {
+    const formFields: ChannelConfigField[] = [
+      { key: "channels.linear.publicBaseUrl", label: "Public URL", help: "Use HTTPS without a path." },
+      { key: "channels.mochat.groups", label: "Group rules", kind: "json", help: "Enter a JSON object." },
+    ];
+    render(<CredentialForm fields={formFields} values={{}} visibleSecrets={{}}
+      onChange={vi.fn()} onToggleSecret={vi.fn()}
+      errors={{ "channels.linear.publicBaseUrl": "This field is required." }} />);
+
+    expect(screen.getByRole("textbox", { name: "Public URL" })).toHaveAccessibleDescription(
+      "Use HTTPS without a path. This field is required.",
+    );
+    expect(screen.getByRole("textbox", { name: "Group rules" })).toHaveAccessibleDescription(
+      "Enter a JSON object.",
+    );
+  });
+
   it("preserves inherited notices and lets an explicit override return to the default", () => {
     const key = "channels.qq.showCompactionNotices";
     const setup = channelSetup({

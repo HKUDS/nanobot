@@ -129,6 +129,7 @@
       },
       "postActionExpunge": {
         "label": "Appliquer l'action de manière permanente",
+        "help": "Autoriser la suppression définitive.\n\nSi UID EXPUNGE est indisponible ou échoue, EXPUNGE supprime définitivement tous les messages marqués comme supprimés dans la boîte actuelle, y compris ceux non traités par nanobot.",
         "choices": {
           "true": "Sur",
           "false": "Désactivé"
@@ -136,6 +137,7 @@
       },
       "postActionIgnoreSkipped": {
         "label": "Ignorer les messages ignorés",
+        "help": "Ne pas supprimer ni déplacer les messages ignorés.",
         "choices": {
           "true": "Sur",
           "false": "Désactivé"

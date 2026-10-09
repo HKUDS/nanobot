@@ -786,8 +786,8 @@ describe("remote instance UX", () => {
     expect(screen.getByText("本地 nanobot")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "连接远程 nanobot" }));
     chooseExistingSSH();
-    expect(screen.getByRole("heading", { name: "连接服务器" })).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "连接服务器" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "添加连接" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "添加连接" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getByRole("heading", { name: "远程连接" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "SSH 地址" })).not.toBeInTheDocument();

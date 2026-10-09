@@ -6,7 +6,7 @@
     "officialLabel": "打开微信",
     "fields": {
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "用户 ID，用逗号分隔"
       },
       "token": {
@@ -14,31 +14,31 @@
         "placeholder": "二维码登录后自动保存"
       },
       "sendProgress": {
-        "label": "发送进度消息"
+        "label": "发送进度"
       },
       "sendToolHints": {
-        "label": "发送工具执行提示"
+        "label": "工具提示"
       },
       "streaming": {
         "label": "使用流式 API"
       },
       "replyProgressMessages": {
-        "label": "发送结构化进度"
+        "label": "分项进度"
       },
       "replyProgressMaxMessages": {
-        "label": "结构化进度消息上限"
+        "label": "进度上限"
       },
       "contextMessageBudget": {
-        "label": "上下文消息数量上限"
+        "label": "上下文条数"
       },
       "blockStreaming": {
-        "label": "分块发送回复"
+        "label": "分段回复"
       },
       "blockStreamingMinChars": {
-        "label": "最小分块字符数"
+        "label": "分段字数"
       },
       "blockStreamingMaxMessages": {
-        "label": "分块消息上限"
+        "label": "分段上限"
       },
       "baseUrl": {
         "label": "API 地址"

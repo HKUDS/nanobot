@@ -80,6 +80,7 @@ export type ChannelConfigField = {
   key: string;
   label: string;
   placeholder?: string;
+  help?: string;
   secret?: boolean;
   optional?: boolean;
   inputType?: "text" | "number" | "url" | "email" | "tel";

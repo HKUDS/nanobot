@@ -51,6 +51,7 @@
       },
       "pruneWebChatRefs": {
         "label": "Supprimer les conversations de chat Web",
+        "help": "Supprimer les références de livraison Web Chat enregistrées, en conservant l’historique.",
         "choices": {
           "true": "Sur",
           "false": "Désactivé"
@@ -58,6 +59,7 @@
       },
       "pruneNonPersonalRefs": {
         "label": "Supprimer les conversations non personnelles",
+        "help": "Supprimer les références de livraison des conversations non personnelles, en conservant l’historique.",
         "choices": {
           "true": "Sur",
           "false": "Désactivé"

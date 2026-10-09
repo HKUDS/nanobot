@@ -40,6 +40,7 @@ export function channelSetup(
       key,
       label: copy?.label ?? fieldLabel(key.split(".").at(-1) ?? key),
       placeholder: copy?.placeholder,
+      help: copy?.help,
     };
   };
   const localizePresentedField = (

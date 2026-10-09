@@ -150,7 +150,7 @@ describe("channelSetup", () => {
     expect(setup.officialLabel).toBe("打开钉钉开发者后台");
     expect(setup.fields).toContainEqual(expect.objectContaining({
       key: "channels.dingtalk.allowFrom",
-      label: "允许的用户",
+      label: "允许用户",
     }));
   });
 

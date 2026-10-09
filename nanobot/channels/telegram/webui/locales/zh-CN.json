@@ -12,14 +12,14 @@
         "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "* 或 Telegram 用户 ID"
       },
       "groupPolicy": {
-        "label": "群组行为",
+        "label": "群聊规则",
         "choices": {
-          "mention": "仅提及时",
-          "open": "所有消息",
+          "mention": "提及回复",
+          "open": "全部消息",
           "allowlist": "白名单"
         }
       },
@@ -54,7 +54,7 @@
         }
       },
       "inlineKeyboards": {
-        "label": "内联键盘",
+        "label": "消息按钮",
         "choices": {
           "true": "开启",
           "false": "关闭"
@@ -68,7 +68,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "流式更新间隔"
+        "label": "更新间隔"
       },
       "webhookUrl": {
         "label": "Webhook 地址"
@@ -86,7 +86,7 @@
         "label": "Webhook 密钥"
       },
       "webhookMaxConnections": {
-        "label": "Webhook 最大连接数"
+        "label": "Webhook 连接上限"
       }
     }
   }

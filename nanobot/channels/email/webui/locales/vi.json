@@ -129,6 +129,7 @@
       },
       "postActionExpunge": {
         "label": "Áp dụng hành động vĩnh viễn",
+        "help": "Cho phép xóa thư vĩnh viễn.\n\nKhi UID EXPUNGE không khả dụng hoặc thất bại, EXPUNGE xóa vĩnh viễn mọi thư được đánh dấu xóa trong hộp thư hiện tại, kể cả thư không được nanobot xử lý.",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
@@ -136,6 +137,7 @@
       },
       "postActionIgnoreSkipped": {
         "label": "Bỏ qua tin nhắn bị bỏ qua",
+        "help": "Không xóa hoặc di chuyển thư bị bỏ qua.",
         "choices": {
           "true": "Bật",
           "false": "Tắt"

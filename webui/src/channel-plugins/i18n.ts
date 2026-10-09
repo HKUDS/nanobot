@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 type ChannelFieldMessages = {
   label: string;
   placeholder?: string;
+  help?: string;
   choices?: Record<string, string>;
 };
 

@@ -82,7 +82,7 @@ it("uses Chinese for the task menu and the change/cancel path", async () => {
   expect(screen.getByRole("menuitem", { name: "停用" })).toBeInTheDocument();
   expect(screen.getByRole("menuitem", { name: "删除" })).toBeInTheDocument();
   await user.keyboard("{Escape}");
-  const picker = screen.getByRole("combobox", { name: "运行与回复" });
+  const picker = screen.getByRole("combobox", { name: "运行对话" });
   await waitFor(() => expect(picker).toBeEnabled());
   fireEvent.keyDown(picker, { key: "ArrowDown" });
   await user.click(await screen.findByRole("option", { name: /Product team/ }));
@@ -95,7 +95,7 @@ it("uses Chinese for the task menu and the change/cancel path", async () => {
   expect(screen.getByRole("button", { name: "保存并更换" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "取消" }));
   expect(screen.getByRole("heading", { name: "Daily report" })).toBeInTheDocument();
-  expect(screen.getByRole("combobox", { name: "运行与回复" })).toHaveFocus();
+  expect(screen.getByRole("combobox", { name: "运行对话" })).toHaveFocus();
   expect(save).not.toHaveBeenCalled();
 });
 

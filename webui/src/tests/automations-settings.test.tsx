@@ -569,7 +569,7 @@ describe("Automation task list and detail sheet", () => {
     await act(() => i18n.changeLanguage("zh-CN"));
     render(<Harness payload={{ jobs: [] }} onStartChat={() => {}} settingsSnapshot={modelSettings} />);
     expect(screen.getByRole("textbox", { name: "描述一个自动任务" })).toHaveAttribute(
-      "placeholder", "想让 nanobot 自动帮你做什么？",
+      "placeholder", "想让 nanobot 自动做什么？",
     );
   });
 

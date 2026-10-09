@@ -129,6 +129,7 @@
       },
       "postActionExpunge": {
         "label": "Aplicar permanentemente la acción",
+        "help": "Permitir la eliminación definitiva.\n\nSi UID EXPUNGE no está disponible o falla, EXPUNGE elimina definitivamente todos los mensajes marcados como eliminados del buzón actual, incluidos los no procesados por nanobot.",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
@@ -136,6 +137,7 @@
       },
       "postActionIgnoreSkipped": {
         "label": "Ignorar mensajes omitidos",
+        "help": "No borrar ni mover los mensajes omitidos.",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
