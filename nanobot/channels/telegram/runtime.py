@@ -870,7 +870,8 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
-        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        filename = urlparse(path).path if path.startswith(("http://", "https://")) else path
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext in ("jpg", "jpeg", "png", "gif", "webp"):
             return "photo"
         if ext in ("mp4", "mov", "avi", "mkv", "webm", "3gp"):
