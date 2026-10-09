@@ -2151,6 +2151,10 @@ context. This uses the same policy resolver as the tools, including restrictions
 a configured exec sandbox. It does not grant access or change OS permissions.
 The context is stored with that request, not rewritten in earlier messages. New requests
 refresh it after a project switch or context compaction. It is hidden from the chat view.
+This adds a small amount of input text per user request. Tool continuations and transient
+retries reuse the stored context; they do not add another copy. Access-mode changes do not
+rewrite the system prompt, tool definitions, or previous messages. Changing the project or
+compacting history can change the prompt prefix. Cache hits still depend on the provider.
 
 To diagnose a path error, the agent can call `my(action="check", key="workspace_sandbox")`.
 This read-only result shows the current tool directory and workspace restriction, including

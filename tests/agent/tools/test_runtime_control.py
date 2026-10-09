@@ -23,6 +23,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.runtime_context import RUNTIME_CONTEXT_END, RUNTIME_CONTEXT_TAG
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -58,6 +59,26 @@ def _my_tool(loop: AgentLoop) -> MyTool:
     tool = loop.tools.get("my")
     assert isinstance(tool, MyTool)
     return tool
+
+
+@pytest.fixture(params=["chat", "responses"])
+def wire_request(request):
+    """Use real provider conversion without contacting a model service."""
+    provider = OpenAICompatProvider(api_key="test-key")
+    build = provider._build_kwargs if request.param == "chat" else provider._build_responses_body
+
+    def convert(call):
+        body = build(
+            messages=call["messages"], tools=call["tools"], model="gpt-4o",
+            max_tokens=100, temperature=0.7, reasoning_effort=None,
+            tool_choice=call.get("tool_choice"),
+        )
+        # Keep the protocol's real item shape, but use one name for prefix comparisons.
+        if "input" in body:
+            body["messages"] = body.pop("input")
+        return body
+
+    return convert
 
 
 def test_agent_loop_assembles_my_tool_with_runtime_control(tmp_path: Path) -> None:
@@ -349,7 +370,7 @@ async def test_workspace_inspection_is_isolated_between_concurrent_turns(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: Path) -> None:
+async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: Path, wire_request) -> None:
     project = tmp_path / "project"
     project.mkdir()
     (project / "marker.txt").write_text("selected project", encoding="utf-8")
@@ -392,6 +413,11 @@ async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: P
     assert "'restrict_to_workspace': True" in results["inspect"]
     assert "selected project" in results["read"]
     assert calls[0].kwargs["tools"] == calls[1].kwargs["tools"]
+    first_wire, continuation = [wire_request(call.kwargs) for call in calls]
+    assert json.dumps(
+        continuation["messages"][:len(first_wire["messages"])], sort_keys=True,
+    ) == json.dumps(first_wire["messages"], sort_keys=True)
+    assert continuation["tools"] == first_wire["tools"]
 
 
 @pytest.mark.asyncio
@@ -444,7 +470,7 @@ async def test_workspace_context_does_not_require_my_tool(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_path: Path) -> None:
+async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_path: Path, wire_request) -> None:
     project = tmp_path / "project"
     project.mkdir()
     other = tmp_path / "other"
@@ -468,6 +494,13 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
     assert json.dumps(str(other.resolve())) in third[-1]["content"]
     assert json.dumps(str(project.resolve())) not in third[-1]["content"]
     assert all(call.kwargs["tools"] == calls[0].kwargs["tools"] for call in calls)
+    before, after = [wire_request(call.kwargs) for call in calls[:2]]
+    assert json.dumps(
+        after["messages"][:len(before["messages"])], sort_keys=True,
+    ) == json.dumps(before["messages"], sort_keys=True)
+    assert {key: value for key, value in before.items() if key != "messages"} == {
+        key: value for key, value in after.items() if key != "messages"
+    }
     assert all(message["content"] == "Check access" for message in session.get_history(
         include_runtime_context=False,
     ) if message["role"] == "user")
@@ -504,32 +537,95 @@ async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("trigger", ["idle", "new"])
-async def test_workspace_context_compaction_reuses_serialized_prefix(tmp_path: Path, trigger: str) -> None:
+@pytest.mark.parametrize("trigger", ["idle", "new", "pressure"])
+async def test_workspace_context_compaction_reuses_serialized_prefix(
+    tmp_path: Path, trigger: str, wire_request,
+) -> None:
     loop = _make_loop(tmp_path)
     provider = loop.provider
-    provider.generation = GenerationSettings()
+    provider.generation = GenerationSettings(max_tokens=100)
     provider.estimate_prompt_tokens.return_value = (100, "test")
-    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    provider.can_resume_conversation_state.return_value = False
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="inspect", name="my", arguments={"action": "check", "key": "workspace_sandbox"},
+        )]),
+        LLMResponse(content="done"),
+        LLMResponse(content="Access checked."),
+        LLMResponse(content="done"),
+    ])
+    loop.schedule_background = lambda coro: coro.close()
     await loop.process_direct("Check access", session_key="cli:context")
     first = provider.chat_stream_with_retry.await_args.kwargs
     session = loop.sessions.get_or_create("cli:context")
     if trigger == "idle":
         await loop.consolidator.compact_idle_session(session.key, runtime=loop.llm_runtime())
-    else:
+    elif trigger == "new":
         await loop.consolidator.archive_session(
             session, archive_end=len(session.messages), runtime=loop.llm_runtime(),
         )
-    compact = provider.chat_stream_with_retry.await_args.kwargs
+    else:
+        loop.set_runtime_context_window(1_624)
+        loop.consolidator._SAFETY_BUFFER = 0
+
+        def estimate(messages, _tools, _model):
+            if "SNIP" in str(messages[-1].get("content")):
+                return 300, "test"
+            if any(message.get("role") == "tool" for message in messages):
+                return 600, "test"
+            return 100, "test"
+
+        provider.estimate_prompt_tokens.side_effect = estimate
+        await loop.process_direct("Check again", session_key=session.key)
+    compact = provider.chat_stream_with_retry.await_args_list[2].kwargs
     first_wire = LLMProvider._sanitize_empty_content(first["messages"])
     compact_wire = LLMProvider._sanitize_empty_content(compact["messages"])
     assert len(compact_wire) > len(first_wire)
-    assert json.dumps(compact_wire[:len(first_wire)]) == json.dumps(first_wire)
+    assert compact_wire[:len(first_wire)] == first_wire
     assert compact["tools"] == first["tools"]
-    await loop.process_direct("Check again", session_key=session.key)
+    before, after = wire_request(first), wire_request(compact)
+    # JSON object field order is not model input; preserve every value and array order.
+    assert json.dumps(
+        after["messages"][:len(before["messages"])], sort_keys=True,
+    ) == json.dumps(before["messages"], sort_keys=True)
+    assert after["tools"] == before["tools"]
+    assert after.get("instructions") == before.get("instructions")
+    if trigger != "pressure":
+        await loop.process_direct("Check again", session_key=session.key)
     current = provider.chat_stream_with_retry.await_args.kwargs["messages"][-1]["content"]
     assert current.count("Current project (JSON path):") == 1
     assert "File access: not restricted to this project." in current
+
+
+@pytest.mark.asyncio
+async def test_workspace_context_transient_retry_keeps_exact_wire_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wire_request,
+) -> None:
+    loop = _make_loop(tmp_path)
+    provider = OpenAICompatProvider(api_key="test-key")
+    requests = []
+
+    async def respond(**kwargs):
+        requests.append(wire_request(kwargs))
+        if len(requests) == 1:
+            return LLMResponse(
+                content="Temporarily unavailable", finish_reason="error",
+                error_status_code=503, error_should_retry=True,
+            )
+        return LLMResponse(content="done")
+
+    # Keep the production retry policy; replace only transport and backoff waiting.
+    monkeypatch.setattr(provider, "chat_stream_with_context", respond)
+    monkeypatch.setattr(provider, "_sleep_with_heartbeat", AsyncMock())
+    loop.provider.chat_stream_with_retry = provider.chat_stream_with_retry
+    loop.provider.generation = GenerationSettings()
+    result = await loop.process_direct("Check access", session_key="cli:retry")
+
+    assert result.content == "done"
+    assert len(requests) == 2
+    assert json.dumps(requests[0]) == json.dumps(requests[1])
+    assert json.dumps(requests[0]).count("Current project (JSON path):") == 1
+    provider._sleep_with_heartbeat.assert_awaited_once()
 
 
 @pytest.fixture
