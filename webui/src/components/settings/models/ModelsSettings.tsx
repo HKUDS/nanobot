@@ -6,7 +6,6 @@ import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import {
-  ChevronDown,
   GripVertical,
   ListOrdered,
   Loader2,
@@ -34,6 +33,7 @@ import {
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
 import { Button } from "@/components/ui/button";
+import { ControlChevron } from "@/components/ui/control-chevron";
 import {
   Dialog,
   DialogContent,
@@ -530,9 +530,9 @@ export function ModelsSettings({
         aria-expanded={advancedOpen}
         aria-controls={advancedId}
         onClick={() => setAdvancedOpen((value) => !value)}
-        className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors settings-hover sm:px-5"
+        className="settings-disclosure-row w-full text-left transition-colors settings-hover"
       >
-        <span>
+        <span className="min-w-0">
           <span className="block text-[14px] font-medium text-foreground">
             {tx("settings.models.advancedOptions", "Advanced options")}
           </span>
@@ -545,13 +545,16 @@ export function ModelsSettings({
             })}</span>
           </span>
         </span>
-        <ChevronDown
-          className={cn(
-            "me-3 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
-            advancedOpen && "rotate-180",
-          )}
-          aria-hidden
-        />
+        <span className="settings-control">
+          <span className="control-layout justify-end border-transparent">
+            <ControlChevron
+              className={cn(
+                "transition-transform duration-200 motion-reduce:transition-none",
+                advancedOpen && "rotate-180",
+              )}
+            />
+          </span>
+        </span>
       </button>
       <DisclosureContent id={advancedId} open={advancedOpen}>
         <div className="bg-muted/12 px-4 py-4 sm:px-5">

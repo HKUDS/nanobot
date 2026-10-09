@@ -1398,7 +1398,15 @@
   }
   .settings-section-heading > .settings-section-title { margin: 0; padding: 0; }
   .settings-stack > .settings-section-heading + :not([hidden]) { margin-block-start: 20px; }
-  .settings-row, .settings-footer {
+  .control-layout {
+    display: flex;
+    height: 2.25rem;
+    align-items: center;
+    gap: 0.5rem;
+    border-width: 1px;
+    padding-inline: 0.75rem;
+  }
+  .settings-row, .settings-footer, .settings-disclosure-row {
     display: grid;
     grid-template-columns: repeat(var(--settings-columns, 4), minmax(0, 1fr));
     column-gap: var(--settings-gutter, 16px);
@@ -1408,6 +1416,7 @@
     min-block-size: 60px;
   }
   .settings-row > *, .settings-footer > * { grid-column: 1 / -1; min-inline-size: 0; }
+  .settings-disclosure-row { grid-template-columns: minmax(0, 1fr) auto; }
   .settings-control { display: flex; align-items: center; max-inline-size: 100%; }
   .settings-control > * { max-inline-size: 100%; }
   .settings-control input, .settings-control textarea { max-inline-size: 100%; text-align: start; }
