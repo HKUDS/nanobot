@@ -121,6 +121,8 @@ async def bind_transport():
     ("openai", "gpt-6-luna", "https://tenant.test/v1", "high"),
     ("openai", "gpt-4o", "https://api.openai.com/v1", "high"),
     ("opencode_go", "opencode-go/muse-spark-1.3-contributor", "https://opencode.ai/zen/go/v1", None),
+    ("deepseek", "deepseek-flash", "https://api.deepseek.com/v1", None),
+    ("deepseek", "deepseek/deepseek-flash", "https://api.deepseek.com/v1", None),
 ])
 async def test_automatic_preview_matches_actual_request(
     bind_transport, stream, provider_name, model, api_base, effort,

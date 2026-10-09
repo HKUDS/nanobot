@@ -710,6 +710,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         thinking_style="thinking_type",
         responses=ResponsesCapabilities(
             models=(
+                "deepseek-flash",
                 "deepseek-v4-flash",
                 "deepseek-v4-pro",
                 "deepseek-v4-flash-vision-exp",

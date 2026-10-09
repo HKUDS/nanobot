@@ -37,7 +37,7 @@ def test_responses_api_available_by_default(provider):
 
 @pytest.mark.parametrize(
     "model",
-    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
 )
 def test_deepseek_v4_models_use_responses_by_model(provider, model):
     provider._spec = find_by_name("deepseek")
@@ -50,7 +50,7 @@ def test_deepseek_v4_models_use_responses_by_model(provider, model):
 
 @pytest.mark.parametrize(
     "model",
-    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
 )
 def test_deepseek_v4_models_match_provider_prefixed_model(provider, model):
     provider._spec = find_by_name("deepseek")
