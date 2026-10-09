@@ -18,6 +18,9 @@ from telegram import (
     BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputFile,
+    InputMediaPhoto,
+    InputMediaVideo,
     Message,
     MessageEntity,
     ReactionTypeEmoji,
@@ -53,6 +56,7 @@ TELEGRAM_HTML_MAX_LEN = 4096
 TELEGRAM_RICH_MAX_LEN = 32768
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 TELEGRAM_RICH_DRAFT_MIN_INTERVAL = 0.75  # 40 draft updates per 30 seconds per chat
+TELEGRAM_MEDIA_GROUP_MAX_ITEMS = 10
 # Bound for in-flight compaction notices in case a terminal phase never arrives.
 COMPACTION_NOTICES_MAX = 64
 
@@ -885,6 +889,158 @@ class TelegramChannel(BaseChannel):
     def _is_remote_media_url(path: str) -> bool:
         return path.startswith(("http://", "https://"))
 
+    def _album_media_groups(self, media_paths: list[str]) -> list[list[str]]:
+        """Group consecutive photos and videos into Telegram albums."""
+        groups: list[list[str]] = []
+        current: list[str] = []
+        for media_path in media_paths:
+            if self._get_media_type(media_path) in {"photo", "video"}:
+                current.append(media_path)
+                if len(current) == TELEGRAM_MEDIA_GROUP_MAX_ITEMS:
+                    groups.append(current)
+                    current = []
+                continue
+            if current:
+                groups.append(current)
+                current = []
+            groups.append([media_path])
+        if current:
+            groups.append(current)
+        return groups
+
+    def _as_input_media(self, media_path: str) -> InputMediaPhoto | InputMediaVideo:
+        """Create one album item, preserving local filenames for Telegram."""
+        media_type = self._get_media_type(media_path)
+        if self._is_remote_media_url(media_path):
+            media: str | InputFile = media_path
+        else:
+            path = Path(media_path)
+            media = InputFile(path.read_bytes(), filename=path.name)
+        if media_type == "photo":
+            return InputMediaPhoto(media)
+        return InputMediaVideo(media)
+
+    async def _send_media(
+        self,
+        chat_id: int,
+        media_path: str,
+        reply_params: ReplyParameters | None,
+        thread_kwargs: dict[str, int],
+    ) -> None:
+        """Send one media item and report failures to the chat."""
+        app = self._require_app()
+        media_type = self._get_media_type(media_path)
+        filename = Path(urlparse(media_path).path).name or "attachment"
+        remote = self._is_remote_media_url(media_path)
+        self.logger.debug(
+            "Sending Telegram media chat_id={} filename={} type={} remote={}",
+            chat_id, filename, media_type, remote,
+        )
+        try:
+            sender = {
+                "photo": app.bot.send_photo,
+                "video": app.bot.send_video,
+                "voice": app.bot.send_voice,
+                "audio": app.bot.send_audio,
+            }.get(media_type, app.bot.send_document)
+            param = {
+                "photo": "photo",
+                "video": "video",
+                "voice": "voice",
+                "audio": "audio",
+            }.get(media_type, "document")
+            extra: dict[str, Any] = {}
+            if media_type == "video":
+                extra["supports_streaming"] = True
+
+            if self._is_remote_media_url(media_path):
+                ok, error = validate_url_target(media_path)
+                if not ok:
+                    raise ValueError(f"unsafe media URL: {error}")
+                await self._call_with_retry(
+                    sender,
+                    chat_id=chat_id,
+                    **{param: media_path},
+                    reply_parameters=reply_params,
+                    **thread_kwargs,
+                    **extra,
+                )
+                self.logger.debug(
+                    "Sent Telegram media chat_id={} filename={} type={}",
+                    chat_id, filename, media_type,
+                )
+                return
+
+            path = Path(media_path)
+            await self._call_with_retry(
+                sender,
+                chat_id=chat_id,
+                reply_parameters=reply_params,
+                **thread_kwargs,
+                **extra,
+                **{param: path.read_bytes(), "filename": path.name},
+            )
+            self.logger.debug(
+                "Sent Telegram media chat_id={} filename={} type={}",
+                chat_id, filename, media_type,
+            )
+        except Exception:
+            self.logger.exception(
+                "Failed to send Telegram media chat_id={} filename={} type={} remote={}",
+                chat_id, filename, media_type, remote,
+            )
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text=f"[Failed to send: {filename}]",
+                reply_parameters=reply_params,
+                **thread_kwargs,
+            )
+
+    async def _send_media_group(
+        self,
+        chat_id: int,
+        media_paths: list[str],
+        reply_params: ReplyParameters | None,
+        thread_kwargs: dict[str, int],
+    ) -> None:
+        """Send an album, reverting to individual messages if Telegram rejects it."""
+        if len(media_paths) == 1:
+            await self._send_media(chat_id, media_paths[0], reply_params, thread_kwargs)
+            return
+
+        app = self._require_app()
+        filenames = [Path(urlparse(path).path).name or "attachment" for path in media_paths]
+        media_types = [self._get_media_type(path) for path in media_paths]
+        self.logger.debug(
+            "Sending Telegram media group chat_id={} count={} files={} types={}",
+            chat_id, len(media_paths), filenames, media_types,
+        )
+        try:
+            for media_path in media_paths:
+                if self._is_remote_media_url(media_path):
+                    ok, error = validate_url_target(media_path)
+                    if not ok:
+                        raise ValueError(f"unsafe media URL: {error}")
+            await self._call_with_retry(
+                app.bot.send_media_group,
+                chat_id=chat_id,
+                media=[self._as_input_media(media_path) for media_path in media_paths],
+                reply_parameters=reply_params,
+                **thread_kwargs,
+            )
+            self.logger.debug(
+                "Sent Telegram media group chat_id={} count={} files={}",
+                chat_id, len(media_paths), filenames,
+            )
+        except Exception:
+            self.logger.exception(
+                "Failed to send Telegram media group chat_id={} count={} files={}; "
+                "sending items separately",
+                chat_id, len(media_paths), filenames,
+            )
+            for media_path in media_paths:
+                await self._send_media(chat_id, media_path, reply_params, thread_kwargs)
+
     @staticmethod
     def _is_rich_capability_error(exc: Exception) -> bool:
         """True when the Bot API does not support rich-message endpoints."""
@@ -1115,61 +1271,9 @@ class TelegramChannel(BaseChannel):
             )
             return
 
-        # Send media files
-        for media_path in (msg.media or []):
-            try:
-                media_type = self._get_media_type(media_path)
-                sender = {
-                    "photo": app.bot.send_photo,
-                    "video": app.bot.send_video,
-                    "voice": app.bot.send_voice,
-                    "audio": app.bot.send_audio,
-                }.get(media_type, app.bot.send_document)
-                param = {
-                    "photo": "photo",
-                    "video": "video",
-                    "voice": "voice",
-                    "audio": "audio",
-                }.get(media_type, "document")
-                extra: dict[str, Any] = {}
-                if media_type == "video":
-                    extra["supports_streaming"] = True
-
-                # Telegram Bot API accepts HTTP(S) URLs directly for media params.
-                if self._is_remote_media_url(media_path):
-                    ok, error = validate_url_target(media_path)
-                    if not ok:
-                        raise ValueError(f"unsafe media URL: {error}")
-                    await self._call_with_retry(
-                        sender,
-                        chat_id=chat_id,
-                        **{param: media_path},
-                        reply_parameters=reply_params,
-                        **thread_kwargs,
-                        **extra,
-                    )
-                    continue
-
-                media_bytes = Path(media_path).read_bytes()
-                filename = Path(media_path).name
-                send_kwargs = {param: media_bytes, "filename": filename}
-                await self._call_with_retry(
-                    sender,
-                    chat_id=chat_id,
-                    reply_parameters=reply_params,
-                    **thread_kwargs,
-                    **extra,
-                    **send_kwargs,
-                )
-            except Exception:
-                filename = media_path.rsplit("/", 1)[-1]
-                self.logger.exception("Failed to send media {}", media_path)
-                await app.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params,
-                    **thread_kwargs,
-                )
+        # Send consecutive photos and videos as albums; other media stays individual.
+        for media_group in self._album_media_groups(msg.media or []):
+            await self._send_media_group(chat_id, media_group, reply_params, thread_kwargs)
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
