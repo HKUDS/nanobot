@@ -445,7 +445,7 @@ async def test_goal_tools_registered_in_base_registry(tmp_path):
     update = loop.tools.get("update_goal")
     assert create is not None and create.name == "create_goal"
     assert update is not None and update.name == "update_goal"
-    assert set(create.parameters["properties"]) == {"objective", "ui_summary"}
+    assert set(create.parameters["properties"]) == {"objective", "ui_summary", "acceptance_criteria"}
     assert create.parameters["required"] == ["objective"]
     assert (
         create.parameters["properties"]["objective"]["maxLength"]

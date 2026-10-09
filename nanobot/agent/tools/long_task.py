@@ -4,10 +4,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from nanobot.agent.completion import (
+    CompletionVerdict,
+    CompletionVerifier,
+    current_completion_evidence,
+)
 from nanobot.agent.goal_permission import (
     goal_mutation_allowed,
     revoke_goal_mutation_permission,
@@ -32,10 +39,19 @@ from nanobot.session.turn_continuation import reset_goal_continuation_rounds
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
-    from nanobot.session.manager import SessionManager
+    from nanobot.session.manager import Session, SessionManager
 
 
 _GOAL_ACTIONS = ("complete", "cancel", "block", "replace")
+_MAX_VERIFICATION_ATTEMPTS = 2
+
+
+def _criteria_error(criteria: str | None) -> str | None:
+    if criteria is not None and not (0 < len(criteria.strip()) <= 4000):
+        return "Error: acceptance_criteria must contain between 1 and 4000 characters."
+    return None
+
+
 _CREATE_UNAVAILABLE_ERROR = (
     "Error: create_goal is unavailable for this turn. Ask the user to submit the complete "
     "objective as `/goal <task>`."
@@ -127,6 +143,11 @@ class _GoalToolsMixin:
             max_length=120,
             nullable=True,
         ),
+        acceptance_criteria=StringSchema(
+            "Optional concrete acceptance criteria, frozen when the goal is created. "
+            "Enables up to two independent completion reviews of the result and observed tool evidence.",
+            min_length=1, max_length=4000, nullable=True,
+        ),
         required=["objective"],
     )
 )
@@ -165,6 +186,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             "you to record it. Consolidate relevant prior discussion into a durable objective "
             "that is self-contained, bounded, safe under repetition, and explicit about "
             "completion criteria. Do not retry after a successful creation."
+            " Supply acceptance_criteria to require an independent review before completion."
         )
 
     def runtime_context_provider(self):
@@ -196,6 +218,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         self,
         objective: str,
         ui_summary: str | None = None,
+        acceptance_criteria: str | None = None,
         **kwargs: Any,
     ) -> str:
         sess = self._session()
@@ -220,13 +243,19 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
                 f"Error: objective must not exceed {MAX_GOAL_OBJECTIVE_CHARS} characters."
             )
         summary = (ui_summary or "").strip()[:120]
+        if criteria_error := _criteria_error(acceptance_criteria):
+            return ToolResult.error(criteria_error)
         blob = {
             "status": "active",
             "objective": objective_text,
             "ui_summary": summary,
             "started_at": _iso_now(),
         }
+        if acceptance_criteria is not None:
+            blob["acceptance_criteria"] = acceptance_criteria.strip()
         self._save_goal_state(sess, blob, reset_continuation=True)
+        if acceptance_criteria is not None:
+            revoke_goal_mutation_permission()
         await self._publish_goal_state_changed(sess.metadata)
         extra = f"\nSummary line: {summary}" if summary else ""
         return (
@@ -257,6 +286,10 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             "Optional one-line display label for a replacement goal.",
             max_length=120,
             nullable=True,
+        ),
+        acceptance_criteria=StringSchema(
+            "Acceptance criteria for a replacement goal only. Completion cannot change the criteria.",
+            min_length=1, max_length=4000, nullable=True,
         ),
         required=["action"],
     )
@@ -296,6 +329,8 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
             "is actually achieved and verified. Use action='cancel' when the user cancels, "
             "action='block' when progress is genuinely blocked, and action='replace' only when "
             "the requested objective changes."
+            " For a goal with acceptance_criteria, complete runs an independent review; "
+            "call it on its own after the work and verification tools finish."
         )
 
     async def execute(
@@ -304,6 +339,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         recap: str | None = None,
         objective: str | None = None,
         ui_summary: str | None = None,
+        acceptance_criteria: str | None = None,
         **kwargs: Any,
     ) -> str:
         sess = self._session()
@@ -318,6 +354,8 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
             return ToolResult.error(
                 "Error: action must be one of complete, cancel, block, or replace."
             )
+        if acceptance_criteria is not None and normalized != "replace":
+            return ToolResult.error("Error: acceptance_criteria can only change when replacing the goal.")
 
         if normalized == "replace":
             if not self._goal_mutation_allowed():
@@ -332,6 +370,8 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                     f"Error: objective must not exceed {MAX_GOAL_OBJECTIVE_CHARS} characters."
                 )
             summary = (ui_summary or "").strip()[:120]
+            if criteria_error := _criteria_error(acceptance_criteria):
+                return ToolResult.error(criteria_error)
             blob = {
                 "status": "active",
                 "objective": objective_text,
@@ -341,10 +381,21 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                 "previous_objective": str(prior.get("objective") or ""),
                 "recap": (recap or "").strip(),
             }
+            if acceptance_criteria is not None:
+                blob["acceptance_criteria"] = acceptance_criteria.strip()
             self._save_goal_state(sess, blob, reset_continuation=True)
+            if acceptance_criteria is not None:
+                revoke_goal_mutation_permission()
             await self._publish_goal_state_changed(sess.metadata)
             extra = f"\nSummary line: {summary}" if summary else ""
             return "Goal replaced. Continue toward the new objective using ordinary tools." + extra
+
+        verdict: CompletionVerdict | None = None
+        if normalized == "complete" and prior.get("acceptance_criteria"):
+            reviewed = await self._review_completion(sess, prior, (recap or "").strip())
+            if isinstance(reviewed, str):
+                return ToolResult.error(reviewed)
+            prior, verdict = reviewed
 
         ended = _iso_now()
         status = {
@@ -363,6 +414,10 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         self._save_goal_state(sess, blob)
         revoke_goal_mutation_permission()
         await self._publish_goal_state_changed(sess.metadata)
+        if verdict is not None:
+            evidence = current_completion_evidence()
+            assert evidence is not None
+            evidence.verified_goal = ((recap or "").strip(), verdict)
 
         tail = (recap or "").strip()
         label = {
@@ -373,3 +428,56 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         if tail:
             return f"Goal marked {label} ({ended}). Recap:\n{tail}"
         return f"Goal marked {label} ({ended})."
+
+    async def _review_completion(
+        self, sess: Session, prior: dict[str, Any], recap: str,
+    ) -> tuple[dict[str, Any], CompletionVerdict] | str:
+        request = current_request_context()
+        evidence = current_completion_evidence()
+        if request is None or request.runtime is None or evidence is None:
+            return "Error: completion review requires an active agent run and model runtime."
+        if not recap:
+            return "Error: provide a result recap for completion review."
+        messages = evidence.snapshot()
+        # A batch is recorded only after all its calls return. Do not accept a
+        # proof while another tool in this batch can still change the result.
+        pending = {
+            call["id"]: call.get("function", {}).get("name")
+            for message in messages
+            for call in message.get("tool_calls", [])
+        }
+        for message in messages:
+            if message.get("role") == "tool":
+                pending.pop(message.get("tool_call_id"), None)
+        if pending and (len(pending) != 1 or next(iter(pending.values())) != "update_goal"):
+            return "Error: call update_goal complete on its own after all other tools finish."
+
+        snapshot = deepcopy(prior)
+        attempts = int(prior.get("verification_attempts", 0))
+        verifier = CompletionVerifier(
+            request.runtime,
+            f"Objective:\n{prior['objective']}\n\nAcceptance criteria:\n{prior['acceptance_criteria']}",
+            max_attempts=max(0, _MAX_VERIFICATION_ATTEMPTS - attempts),
+        )
+        verdict = await verifier.verify(recap, messages)
+        evidence.record_usage(verifier.usage)
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            raise asyncio.CancelledError
+        if parse_goal_state(goal_state_raw(sess.metadata)) != snapshot:
+            return "Error: the goal changed during completion review; the result was not applied."
+        attempts += verifier.attempts
+        if verdict.status == "needs_revision" and attempts >= _MAX_VERIFICATION_ATTEMPTS:
+            verdict = replace(verdict, status="exhausted")
+        reviewed = {
+            **prior,
+            "verification_attempts": attempts,
+            "completion": verdict.as_dict(),
+        }
+        if verdict.status == "verified":
+            return reviewed, verdict
+        if verdict.status in {"blocked", "exhausted"}:
+            reviewed.update(status="blocked", ended_at=_iso_now(), recap=verdict.reason)
+        self._save_goal_state(sess, reviewed)
+        await self._publish_goal_state_changed(sess.metadata)
+        return f"Completion was not verified ({verdict.status}): {verdict.reason}"

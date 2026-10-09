@@ -168,8 +168,8 @@ async def test_llm_arrearage_error_surfaces_clear_message():
 @pytest.mark.parametrize(
     ("finish_reason", "expected_stop_reason"),
     [
-        ("refusal", "completed"),
-        ("content_filter", "completed"),
+        ("refusal", "refusal"),
+        ("content_filter", "content_filter"),
         ("error", "error"),
     ],
 )

@@ -32,6 +32,13 @@ if TYPE_CHECKING:
     ),
     task=StringSchema("Required for create: the task for the subagent to complete.", min_length=1),
     label=StringSchema("Optional short label for create (for display)."),
+    acceptance_criteria=StringSchema(
+        "Optional for create: fixed, observable acceptance criteria for an independent completion review. "
+        "The reviewer checks the final response and recorded tool evidence, with at most two review attempts. "
+        "Omit to run without independent verification.",
+        min_length=1,
+        max_length=4000,
+    ),
     temperature=NumberSchema(
         description="Optional sampling temperature for create. Defaults to the parent's model runtime.",
         minimum=0.0,
@@ -83,6 +90,8 @@ class SubagentTool(Tool):
             "use a known task_id to read an older result. "
             "Background results arrive automatically; do not repeatedly poll check while waiting. "
             "A partial result or iteration limit does not mean the task completed. "
+            "Set acceptance_criteria on create to require an independent completion review; "
+            "a finished task without that review is not independently verified. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
@@ -94,12 +103,15 @@ class SubagentTool(Tool):
     async def execute(
         self, action: str, task_id: str | None = None, message: str | None = None,
         task: str | None = None, label: str | None = None,
-        temperature: float | None = None, wait: bool = False, **kwargs: Any,
+        temperature: float | None = None, wait: bool = False,
+        acceptance_criteria: str | None = None, **kwargs: Any,
     ) -> str:
         if action == "create":
             if not task or not task.strip():
                 return ToolResult.error("Error: create requires a non-empty task")
-            return await self._create_task(task, label, temperature, wait)
+            return await self._create_task(task, label, temperature, wait, acceptance_criteria)
+        if acceptance_criteria is not None:
+            return ToolResult.error("Error: acceptance_criteria is only supported for create")
         owner = current_request_session_key()
         try:
             if action == "check":
@@ -124,6 +136,7 @@ class SubagentTool(Tool):
 
     async def _create_task(
         self, task: str, label: str | None, temperature: float | None, wait: bool,
+        acceptance_criteria: str | None = None,
     ) -> str:
         request_ctx = current_request_context()
         if request_ctx is None or request_ctx.runtime is None:
@@ -139,6 +152,7 @@ class SubagentTool(Tool):
         method = self._manager.run_inline if inline else self._manager.spawn
         return await method(
             task=task,
+            acceptance_criteria=acceptance_criteria,
             runtime=request_ctx.runtime,
             label=label,
             origin_channel=origin_channel,

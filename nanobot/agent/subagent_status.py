@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Literal
 
+from nanobot.agent.completion import CompletionVerdict
 from nanobot.providers.base import LLMUsage
 
 SubagentState = Literal["queued", "running", "stopping", "done", "incomplete", "error", "cancelled", "interrupted"]
@@ -41,6 +42,9 @@ class SubagentStatus:
     created_at: float = field(default_factory=time.time)
     completed_at: float | None = None
     revision: int = 0
+    # Frozen at creation; follow-up messages cannot relax the acceptance contract.
+    acceptance_criteria: str | None = None
+    completion: CompletionVerdict | None = None
 
     def as_dict(self) -> dict[str, object]:
         """Serialize task observations without exposing ownership or resources."""
@@ -65,4 +69,6 @@ class SubagentStatus:
             "partial": self.partial,
             "stop_reason": self.stop_reason,
             "error": self.error,
+            "acceptance_criteria": self.acceptance_criteria,
+            "completion": self.completion.as_dict() if self.completion is not None else None,
         }
