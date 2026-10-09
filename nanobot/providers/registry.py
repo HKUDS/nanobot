@@ -17,7 +17,7 @@ from typing import Any, Literal, cast
 
 from pydantic.alias_generators import to_snake
 
-RequestAPI = Literal["chat_completions", "responses"]
+RequestAPI = Literal["chat_completions", "responses", "anthropic_messages"]
 ProviderAPI = Literal[
     "chat_completions", "responses", "anthropic_messages", "bedrock_converse", "transcription",
 ]
@@ -130,8 +130,8 @@ class ProviderSpec:
     name: str  # config field name, e.g. "dashscope"
     keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
-    # Request formats implemented by this adapter. Remote model support is
-    # separate: a compatible adapter does not guarantee both endpoint APIs.
+    # Request formats available through this provider's adapters. Remote model
+    # support is separate: an adapter does not guarantee endpoint support.
     request_apis: tuple[ProviderAPI, ...]
     display_name: str = ""  # shown in `nanobot status`
     model_catalog: str = "auto"  # WebUI model-list source, including builtin/hybrid
@@ -270,7 +270,11 @@ class ProviderSpec:
 
     @property
     def model_api_configurable(self) -> bool:
-        return "chat_completions" in self.request_apis and "responses" in self.request_apis
+        return len(self.request_apis) > 1
+
+    @property
+    def provider_api_configurable(self) -> bool:
+        return self.is_direct and self.backend == "openai_compat" and "anthropic_messages" in self.request_apis
 
     def validate_model_api(self, api: ModelAPICapabilities) -> None:
         unsupported = set(api.supported_apis).difference(self.request_apis)
@@ -291,7 +295,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="custom",
         keywords=(),
         env_key="",
-        request_apis=("chat_completions", "responses"),
+        request_apis=("chat_completions", "responses", "anthropic_messages"),
         display_name="Custom",
         backend="openai_compat",
         is_direct=True,
@@ -1022,7 +1026,7 @@ def create_dynamic_spec(
         name=normalized,
         keywords=(),
         env_key="",
-        request_apis=("chat_completions", "responses"),
+        request_apis=("chat_completions", "responses", "anthropic_messages"),
         display_name=display_name or name.replace("-", " ").replace("_", " ").title(),
         backend="openai_compat",
         is_direct=True,

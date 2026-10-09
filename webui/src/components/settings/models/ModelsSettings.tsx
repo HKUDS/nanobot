@@ -242,14 +242,15 @@ export function ModelsSettings({
     scope: string;
     result: AutomaticModelAPIPayload;
   } | null>(null);
+  const { provider: apiProvider, model: apiModel, reasoningEffort: apiReasoningEffort } = form;
   const automaticAPIScope = JSON.stringify([
-    token, form.provider, form.model, form.reasoningEffort, settings.providers,
+    token, apiProvider, apiModel, apiReasoningEffort, settings.providers,
   ]);
   useEffect(() => {
-    if (!editorOpen || settings.model_api_resolution_supported !== true || !form.model.trim()) return;
+    if (!editorOpen || settings.model_api_resolution_supported !== true || !apiModel.trim()) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void fetchAutomaticModelAPI(token, form.provider, form.model, form.reasoningEffort)
+      void fetchAutomaticModelAPI(token, apiProvider, apiModel, apiReasoningEffort)
         .then((result) => {
           if (!cancelled) setAutomaticAPI({ scope: automaticAPIScope, result });
         })
@@ -258,7 +259,7 @@ export function ModelsSettings({
         });
     }, 150);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [editorOpen, settings.model_api_resolution_supported, automaticAPIScope, token, form]);
+  }, [editorOpen, settings.model_api_resolution_supported, automaticAPIScope, token, apiProvider, apiModel, apiReasoningEffort]);
   const resolvedAutomaticAPI = settings.model_api_resolution_supported === true
     && automaticAPI?.scope === automaticAPIScope ? automaticAPI.result : null;
   const editorTriggerRef = useRef<HTMLElement | null>(null);

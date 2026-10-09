@@ -595,9 +595,11 @@ export interface RuntimeCapabilities {
   can_export_diagnostics: boolean;
 }
 
+export type ModelRequestAPI = "chat_completions" | "responses" | "anthropic_messages";
+
 export interface ModelAPIConfig {
-  supported_apis: Array<"chat_completions" | "responses">;
-  preferred_api?: "chat_completions" | "responses" | null;
+  supported_apis: ModelRequestAPI[];
+  preferred_api?: ModelRequestAPI | null;
 }
 
 export type ProviderRequestAPI =
@@ -712,6 +714,7 @@ export interface SettingsPayload {
   model_configuration_migratable?: boolean;
   /** Host can resolve the default request API for an unsaved model configuration. */
   model_api_resolution_supported?: boolean;
+  provider_api_configuration_supported?: boolean;
   created_model_preset?: string;
   created_provider?: string;
   providers: Array<{
@@ -727,8 +730,11 @@ export interface SettingsPayload {
     model_selectable?: boolean;
     model_catalog?: ProviderModelsPayload["catalog_kind"];
     model_api_configurable?: boolean;
-    /** Request formats implemented by the host's provider adapter. */
+    /** Request formats allowed by this connection, or adapter formats when undeclared. */
     request_apis?: ProviderRequestAPI[];
+    adapter_request_apis?: ProviderRequestAPI[];
+    provider_api_configurable?: boolean;
+    api?: ModelAPIConfig | null;
     api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
@@ -1349,6 +1355,7 @@ export interface ProviderSettingsUpdate {
   apiKey?: string;
   apiBase?: string;
   apiType?: "auto" | "chat_completions" | "responses";
+  api?: ModelAPIConfig | null;
   proxy?: string;
   extraHeaders?: string;
   extraBody?: string;
@@ -1362,6 +1369,7 @@ export interface ProviderCreationUpdate {
   name: string;
   apiKey?: string;
   apiBase: string;
+  api?: ModelAPIConfig | null;
   proxy?: string;
   extraHeaders?: string;
   extraBody?: string;

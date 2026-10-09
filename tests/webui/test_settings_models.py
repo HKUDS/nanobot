@@ -58,6 +58,7 @@ def test_model_domain_owns_dto_and_config_updates() -> None:
         "model_call_order_editable",
         "model_configuration_migratable",
         "model_api_resolution_supported",
+        "provider_api_configuration_supported",
         "providers",
     }
     assert payload["agent"]["model"] == "openai/gpt-5.4"

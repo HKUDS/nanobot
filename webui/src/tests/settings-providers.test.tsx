@@ -981,4 +981,61 @@ describe("Settings providers", () => {
       screen.getByRole("button", { name: "Add provider" }),
     ).toBeInTheDocument();
   });
+  it("declares custom connection APIs on creation and preserves them when editing", async () => {
+    const user = userEvent.setup();
+    let payload = settingsPayload();
+    payload.provider_api_configuration_supported = true;
+    const api = { supported_apis: ["anthropic_messages" as const], preferred_api: "anthropic_messages" as const };
+    requestMutationMock.mockImplementation(async (action, args) => {
+      if (action === "settings.provider.create") {
+        payload = {
+          ...payload,
+          providers: [...payload.providers, {
+            name: "tenant", label: "Tenant", is_custom: true, configured: true,
+            api_base: args.apiBase, api: args.api,
+            provider_api_configurable: true,
+            request_apis: args.api.supported_apis,
+          }],
+        };
+      }
+      if (action === "settings.provider.update") {
+        payload = { ...payload, providers: payload.providers.map((row) => row.name === "tenant"
+          ? { ...row, api: args.api, request_apis: args.api.supported_apis } : row) };
+      }
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.click(screen.getByRole("button", { name: "Custom provider" }));
+    await user.type(screen.getByPlaceholderText("My model provider"), "Tenant");
+    await user.type(screen.getByPlaceholderText("https://api.example.com/v1"), "https://tenant.test");
+    expect(screen.getByRole("switch", { name: "Chat Completions" })).toBeDisabled();
+    await user.click(screen.getByRole("switch", { name: "Anthropic Messages" }));
+    await user.click(screen.getByRole("switch", { name: "Chat Completions" }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Anthropic Messages");
+    expect(screen.getByRole("switch", { name: "Anthropic Messages" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.create", expect.objectContaining({ api }), 20_000);
+    await user.click(screen.getByRole("button", { name: "Tenant", exact: true }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Anthropic Messages");
+    await user.click(screen.getByRole("switch", { name: "Responses" }));
+    await user.click(screen.getByRole("combobox", { name: "Default API" }));
+    await user.click(screen.getByRole("option", { name: "Responses" }));
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
+      provider: "tenant", api: { supported_apis: ["anthropic_messages", "responses"], preferred_api: "responses" },
+    }), 20_000));
+    await user.click(screen.getByRole("button", { name: "Tenant", exact: true }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Responses");
+  });
+
+  it("hides connection API declarations on hosts without the capability", async () => {
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom provider" }));
+    expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Supported APIs" })).not.toBeInTheDocument();
+  });
+
 });

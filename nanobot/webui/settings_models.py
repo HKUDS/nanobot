@@ -32,7 +32,7 @@ from nanobot.config.schema import (
     ModelPresetConfig,
     ProviderConfig,
 )
-from nanobot.providers.factory import resolve_automatic_model_api
+from nanobot.providers.factory import resolve_automatic_model_api, resolve_model_api
 from nanobot.providers.image_generation import get_image_gen_provider
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 from nanobot.providers.oauth_model_catalog import (
@@ -91,6 +91,7 @@ class ModelSettingsPayload(TypedDict):
     model_call_order_editable: bool
     model_configuration_migratable: bool
     model_api_resolution_supported: bool
+    provider_api_configuration_supported: bool
     providers: list[dict[str, Any]]
 
 
@@ -226,6 +227,11 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     ):
         if query_has_alias(query, snake, camel):
             updates[snake] = _provider_json_setting(query, snake, camel)
+    if query_has_alias(query, "api", "api"):
+        try:
+            updates["api"] = json.loads(query_first(query, "api") or "null")
+        except ValueError as exc:
+            raise WebUISettingsError("api must declare supportedApis and a preferredApi from that list") from exc
     return updates
 
 
@@ -439,9 +445,9 @@ def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
     fields: list[str] = []
     if spec.backend in {"openai_compat", "anthropic"}:
         fields.append("extra_headers")
-    if spec.backend in {"openai_compat", "bedrock", "openai_codex", "xai_grok"}:
+    if spec.backend in {"openai_compat", "anthropic", "bedrock", "openai_codex", "xai_grok"}:
         fields.append("extra_body")
-    if spec.backend == "openai_compat":
+    if spec.backend in {"openai_compat", "anthropic"}:
         fields.extend(("extra_query", "proxy"))
     if spec.name in _OAUTH_PROXY_PROVIDERS and "proxy" not in fields:
         fields.append("proxy")
@@ -478,8 +484,11 @@ def _provider_settings_row(
         "default_api_base": spec.default_api_base or None,
         "model_selectable": not spec.is_transcription_only,
         "model_catalog": model_catalog_kind(spec),
-        "request_apis": list(spec.request_apis),
-        "model_api_configurable": spec.model_api_configurable,
+        "request_apis": list(provider_config.api.supported_apis if provider_config.api else spec.request_apis),
+        "adapter_request_apis": list(spec.request_apis),
+        "api": provider_config.api.model_dump(mode="json") if provider_config.api else None,
+        "provider_api_configurable": spec.provider_api_configurable,
+        "model_api_configurable": len(provider_config.api.supported_apis) > 1 if provider_config.api else spec.model_api_configurable,
         "advanced_fields": _provider_advanced_field_names(name, spec),
         "extra_headers": _redact_provider_secret_values(provider_config.extra_headers),
         "extra_body": _redact_provider_secret_values(provider_config.extra_body),
@@ -1125,6 +1134,7 @@ def model_settings_payload(
     model_call_order, model_call_order_editable = _model_call_order_state(config)
     return {
         "model_api_resolution_supported": True,
+        "provider_api_configuration_supported": True,
         "agent": {
             "model": effective_preset.model,
             "provider": selected_provider,
@@ -1233,7 +1243,7 @@ def _parse_preset_api(
     if entry is None:
         raise WebUISettingsError("unknown provider")
     try:
-        entry[0].validate_model_api(api.to_capabilities())
+        resolve_model_api(entry[0], entry[2], api)
     except ValueError as exc:
         raise WebUISettingsError(str(exc)) from None
     return api
@@ -1533,6 +1543,7 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
         "extra_query",
         "thinking_style",
         "display_name",
+        "api",
     }
     unsupported = set(updates) - allowed
     if unsupported:
@@ -1583,6 +1594,8 @@ def update_provider_settings(
         }
         if find_by_name(provider_key) is None:
             allowed.add("display_name")
+        if spec.provider_api_configurable:
+            allowed.add("api")
         unsupported = set(updates) - allowed
         if unsupported:
             field = sorted(unsupported)[0]
@@ -1598,6 +1611,19 @@ def update_provider_settings(
             raise WebUISettingsError("provider already exists", status=409)
 
     updated_provider_config = _validated_provider_config(provider_config, updates)
+    if updated_provider_config.api != provider_config.api:
+        candidates = [
+            *config.model_presets.values(), config.agents.defaults,
+            *(fallback for fallback in config.agents.defaults.fallback_models if not isinstance(fallback, str)),
+        ]
+        try:
+            resolve_model_api(spec, updated_provider_config, None)
+            for candidate in candidates:
+                preset = ModelPresetConfig(model=candidate.model, provider=candidate.provider, api=candidate.api)
+                if config.get_provider_name(preset.model, preset=preset) == provider_key:
+                    resolve_model_api(spec, updated_provider_config, preset.api)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     changed = updated_provider_config != provider_config
     if changed:
         setattr(config.providers, provider_key, updated_provider_config)

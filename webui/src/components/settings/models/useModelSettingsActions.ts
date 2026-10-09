@@ -7,7 +7,7 @@ import type {
   PendingRestartSections,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
-import { modelAPIConfigurable, modelAPISelection } from "@/components/settings/models/ModelAPIControl";
+import { modelAPISelection } from "@/components/settings/models/ModelAPIControl";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
   providerFormFromRow,
@@ -196,8 +196,7 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
-          api: modelAPIConfigurable(settings.providers.find((row) => row.name === provider))
-            ? form.api : undefined,
+          api: form.api ?? undefined,
         });
         const createdPreset = payload.created_model_preset;
         const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
@@ -260,10 +259,7 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
-        api: modelAPIConfigurable(settings.providers.find((row) => row.name === (
-          form.provider === "auto" ? selectedPreset.resolved_provider : form.provider
-        ))) &&
-          modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
+        api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
           ? form.api : undefined,
       });
       applyPayload(payload);
@@ -411,6 +407,7 @@ export function useModelSettingsActions({
         update.apiKey = apiKey || undefined;
         update.apiBase = providerForm.apiBase.trim();
         if (provider.is_custom) update.displayName = providerForm.displayName.trim();
+        if (provider.provider_api_configurable) update.api = providerForm.api;
       }
       for (const field of provider.advanced_fields ?? []) {
         if (field === "api_type") update.apiType = providerForm.apiType;
@@ -464,6 +461,7 @@ export function useModelSettingsActions({
         name: draft.name.trim(),
         apiKey: draft.apiKey.trim() || undefined,
         apiBase: draft.apiBase.trim(),
+        ...(settings?.provider_api_configuration_supported ? { api: draft.api } : {}),
         proxy: draft.proxy.trim(),
         extraHeaders: draft.extraHeaders.trim(),
         extraBody: draft.extraBody.trim(),

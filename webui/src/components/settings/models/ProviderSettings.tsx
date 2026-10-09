@@ -25,6 +25,7 @@ import {
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
 import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -54,6 +55,7 @@ import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import type {
   NanobotFeaturesPayload,
+  ModelAPIConfig,
   ProviderOAuthAuthorizationRequired,
   SettingsPayload,
 } from "@/lib/types";
@@ -67,6 +69,7 @@ export type ProviderForm = {
   apiKey: string;
   apiBase: string;
   apiType: ProviderApiType;
+  api: ModelAPIConfig | null;
   proxy: string;
   extraHeaders: string;
   extraBody: string;
@@ -208,6 +211,7 @@ export function providerFormFromRow(
     apiKey: "",
     apiBase: provider.api_base ?? provider.default_api_base ?? "",
     apiType: provider.api_type ?? "auto",
+    api: provider.api ?? null,
     proxy: provider.proxy ?? "",
     extraHeaders: providerJsonValue(provider.extra_headers),
     extraBody: providerJsonValue(provider.extra_body),
@@ -225,6 +229,7 @@ function emptyCustomProviderDraft(): CustomProviderDraft {
     apiKey: "",
     apiBase: "",
     apiType: "auto",
+    api: { supported_apis: ["chat_completions"], preferred_api: "chat_completions" },
     proxy: "",
     extraHeaders: "",
     extraBody: "",
@@ -1038,6 +1043,12 @@ export function ProvidersSettings({
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
+                {provider.provider_api_configurable && (
+                  <ProviderAPIControl
+                    value={form.api}
+                    onChange={(api) => onChangeProviderForm(provider.name, { api })}
+                  />
+                )}
                 <ProviderAdvancedOptions
                   fields={advancedFields}
                   form={form}
@@ -1178,6 +1189,12 @@ export function ProvidersSettings({
             </Button>
           </div>
         </label>
+        {settings.provider_api_configuration_supported && (
+          <ProviderAPIControl
+            value={customProviderDraft.api}
+            onChange={(api) => setCustomProviderDraft((current) => ({ ...current, api }))}
+          />
+        )}
         <ProviderAdvancedOptions
           fields={CUSTOM_PROVIDER_ADVANCED_FIELDS}
           form={customProviderDraft}

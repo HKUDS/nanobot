@@ -5,10 +5,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import (
+    Config,
+    InlineFallbackConfig,
+    ModelAPIConfig,
+    ModelPresetConfig,
+    ProviderConfig,
+)
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.registry import ProviderAPI, ProviderSpec, create_dynamic_spec, find_by_name
+from nanobot.providers.registry import (
+    ModelAPICapabilities,
+    ProviderAPI,
+    ProviderSpec,
+    RequestAPI,
+    create_dynamic_spec,
+    find_by_name,
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +41,7 @@ class _ProviderSetup:
     provider_config: ProviderConfig | None
     spec: ProviderSpec | None
     backend: str
+    model_api: ModelAPICapabilities | None
 
 
 def _resolve_model_preset(
@@ -73,6 +87,37 @@ def _provider_spec_for_config(
     return spec
 
 
+def resolve_model_api(
+    spec: ProviderSpec,
+    provider_config: ProviderConfig | None,
+    preset_api: ModelAPIConfig | None,
+) -> ModelAPICapabilities | None:
+    """Apply the connection's API ceiling and default to a model declaration."""
+    connection_api = provider_config.api if provider_config else None
+    if connection_api is not None:
+        if not spec.provider_api_configurable:
+            raise ValueError(f"Provider '{spec.name}' does not support connection API declarations.")
+        spec.validate_model_api(connection_api.to_capabilities())
+    if preset_api is not None:
+        api = preset_api.to_capabilities()
+        spec.validate_model_api(api)
+        if connection_api is not None:
+            unsupported = set(api.supported_apis) - set(connection_api.supported_apis)
+            if unsupported:
+                raise ValueError(
+                    f"Provider '{spec.name}' does not accept request APIs: {', '.join(sorted(unsupported))}"
+                )
+        return api
+    if connection_api is None:
+        return None
+    api = connection_api.to_capabilities()
+    # Selecting a default adapter does not authorize fallback across API families.
+    supported: tuple[RequestAPI, ...] = ("anthropic_messages",) if api.preferred_api == "anthropic_messages" else tuple(
+        item for item in api.supported_apis if item != "anthropic_messages"
+    )
+    return ModelAPICapabilities(supported_apis=supported, preferred_api=api.preferred_api)
+
+
 def _resolve_provider_setup(
     config: Config,
     *,
@@ -97,19 +142,20 @@ def _resolve_provider_setup(
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
-    if preset.api is not None and spec is not None:
-        spec.validate_model_api(preset.api.to_capabilities())
-    if p and p.proxy and backend not in {"openai_compat", "openai_codex", "xai_grok"}:
+    model_api = resolve_model_api(spec, p, preset.api) if spec is not None else None
+    if model_api is not None and model_api.preferred_api == "anthropic_messages":
+        backend = "anthropic"
+    if p and p.proxy and backend not in {"openai_compat", "openai_codex", "xai_grok", "anthropic"}:
         raise ValueError(
             f"providers.{provider_name}.proxy is only supported for "
-            "OpenAI-compatible providers, OpenAI Codex, and xAI Grok."
+            "OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI Grok."
         )
 
     if backend == "azure_openai":
         if not p or not p.api_base:
             raise ValueError("Azure OpenAI requires api_base in config.")
     elif (
-        backend == "openai_compat"
+        backend in {"openai_compat", "anthropic"}
         and spec
         and spec.is_direct
         and not spec.default_api_base
@@ -130,6 +176,7 @@ def _resolve_provider_setup(
         provider_config=p,
         spec=spec,
         backend=backend,
+        model_api=model_api,
     )
 
 
@@ -137,7 +184,9 @@ def resolve_automatic_model_api(
     config: Config, *, preset: ModelPresetConfig,
 ) -> tuple[str, ProviderAPI]:
     """Preview the default request API without live requests or circuit-breaker state."""
-    setup = _resolve_provider_setup(config, preset=preset)
+    setup = _resolve_provider_setup(config, preset=preset.model_copy(update={"api": None}))
+    if setup.model_api is not None:
+        return setup.provider_name, setup.model_api.preferred_api
     spec = setup.spec
     if spec is None:
         return setup.provider_name, "chat_completions"
@@ -229,16 +278,24 @@ def _make_provider_core(
 
         provider = GitHubCopilotProvider(
             default_model=model, provider_name=provider_name,
-            model_api=preset.api.to_capabilities() if preset.api is not None else None,
+            model_api=setup.model_api,
         )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
+        custom_spec = spec if spec and spec.backend == "openai_compat" else None
+        api_key = p.api_key if p else None
+        if custom_spec is not None:
+            api_key = api_key or "no-key"
         provider = AnthropicProvider(
-            api_key=p.api_key if p else None,
+            api_key=api_key,
             api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
+            extra_body=p.extra_body if p else None,
+            extra_query=p.extra_query if p else None,
+            proxy=p.proxy if p else None,
+            spec=custom_spec,
             provider_name=provider_name,
         )
     elif backend == "bedrock":
@@ -264,7 +321,7 @@ def _make_provider_core(
             spec=spec,
             extra_body=p.extra_body if p else None,
             api_type=p.api_type if p else "auto",
-            model_api=preset.api.to_capabilities() if preset.api is not None else None,
+            model_api=setup.model_api,
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
             provider_name=provider_name,
@@ -375,6 +432,7 @@ def provider_signature(
             _provider_extra_headers(find_by_name(provider_name) if provider_name else None, fp),
             fp.extra_body if fp else None,
             fp.api_type if fp else "auto",
+            fp.api.model_dump_json() if fp and fp.api is not None else None,
             fp.extra_query if fp else None,
             getattr(fp, "region", None) if fp else None,
             getattr(fp, "profile", None) if fp else None,
@@ -397,6 +455,7 @@ def provider_signature(
         _provider_extra_headers(find_by_name(provider_name) if provider_name else None, p),
         p.extra_body if p else None,
         p.api_type if p else "auto",
+        p.api.model_dump_json() if p and p.api is not None else None,
         p.extra_query if p else None,
         getattr(p, "region", None) if p else None,
         getattr(p, "profile", None) if p else None,

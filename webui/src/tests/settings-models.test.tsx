@@ -148,6 +148,82 @@ describe("Settings models", () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/model-api?"))).toBe(false);
   });
 
+  it("saves and restores Anthropic Messages for a custom gateway", async () => {
+    let payload = settingsPayload();
+    payload.providers = [{
+      name: "tenant", label: "Tenant", configured: true,
+      request_apis: ["chat_completions", "responses", "anthropic_messages"],
+    }];
+    payload.model_presets[0].provider = "tenant";
+    payload.model_presets[0].resolved_provider = "tenant";
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    requestMutationMock.mockImplementation(async (action, args) => {
+      expect(action).toBe("settings.model_configuration.update");
+      payload = {
+        ...payload,
+        model_presets: payload.model_presets.map((preset) => ({ ...preset, api: args.api })),
+      };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models" });
+    await togglePresetEditor();
+    await openPopover(screen.getByLabelText("API connection"));
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    fireEvent.click(screen.getByRole("option", { name: "Anthropic Messages" }));
+    expect(screen.queryByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update",
+      { name: "primary", api: { supported_apis: ["anthropic_messages"], preferred_api: "anthropic_messages" } },
+      20_000,
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await togglePresetEditor();
+    expect(screen.getByLabelText("API connection")).toHaveTextContent("Anthropic Messages");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await openPopover(screen.getByLabelText("API connection"));
+    fireEvent.click(screen.getByRole("option", { name: "Responses" }));
+    expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).not.toBeChecked();
+  });
+
+  it("saves an explicit API after an Auto provider resolves the changed model to a new connection", async () => {
+    const payload = settingsPayload();
+    payload.model_api_resolution_supported = true;
+    payload.model_presets[0] = {
+      ...payload.model_presets[0], provider: "auto", model: "anthropic/claude-sonnet-4",
+      resolved_provider: "anthropic",
+    };
+    payload.providers = [
+      { name: "anthropic", label: "Anthropic", configured: true, request_apis: ["anthropic_messages"] },
+      { name: "openai", label: "OpenAI", configured: true, request_apis: ["chat_completions", "responses"] },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname !== "/api/settings/model-api") return jsonResponse(payload);
+      return jsonResponse(url.searchParams.get("model")?.startsWith("gpt")
+        ? { provider: "openai", api: "chat_completions" }
+        : { provider: "anthropic", api: "anthropic_messages" });
+    }));
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+    await openPopover(screen.getByRole("button", { name: "anthropic/claude-sonnet-4", exact: true }));
+    const search = screen.getByRole("combobox", { name: "Search or type model ID" });
+    fireEvent.change(search, { target: { value: "gpt-4o" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));
+    await openPopover(screen.getByLabelText("API connection"));
+    fireEvent.click(screen.getByRole("option", { name: "Responses" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", {
+        name: "primary", model: "gpt-4o",
+        api: { supported_apis: ["responses"], preferred_api: "responses" },
+      }, 20_000,
+    ));
+  });
+
   it("shows the host's automatic API and discards an older reasoning resolution", async () => {
     const payload = settingsPayload();
     payload.model_api_resolution_supported = true;
@@ -228,7 +304,7 @@ describe("Settings models", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it.each([undefined, ["future_api"], "responses"])("hides API controls when host support is unconfirmed (%s)", async (requestAPIs) => {
+  it.each([undefined, ["future_api"], ["future_api", "future_api_v2"], "responses"])("hides API controls when host support is unconfirmed (%s)", async (requestAPIs) => {
     const payload = settingsPayload();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
       ...payload,

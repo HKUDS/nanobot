@@ -82,14 +82,14 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
-class ModelAPIConfig(Base):
-    """Allowed request APIs and preference for a model preset's endpoint."""
+class ProviderAPIConfig(Base):
+    """Request APIs accepted by a custom endpoint and its default API."""
 
     supported_apis: tuple[RequestAPI, ...] = Field(min_length=1)
     preferred_api: RequestAPI | None = None
 
     @model_validator(mode="after")
-    def _validate_preference(self) -> "ModelAPIConfig":
+    def _validate_preference(self) -> "ProviderAPIConfig":
         if self.preferred_api is not None and self.preferred_api not in self.supported_apis:
             raise ValueError("preferred_api must be one of supported_apis")
         return self
@@ -99,6 +99,18 @@ class ModelAPIConfig(Base):
             supported_apis=self.supported_apis,
             preferred_api=self.preferred_api or self.supported_apis[0],
         )
+
+
+class ModelAPIConfig(ProviderAPIConfig):
+    """Allowed request APIs and preference for a model preset's endpoint."""
+
+    @model_validator(mode="after")
+    def _validate_api_family(self) -> "ModelAPIConfig":
+        if "anthropic_messages" in self.supported_apis and set(self.supported_apis) != {
+            "anthropic_messages",
+        }:
+            raise ValueError("anthropic_messages cannot be combined with OpenAI request APIs")
+        return self
 
 
 class InlineFallbackConfig(Base):
@@ -224,6 +236,7 @@ class ProviderConfig(Base):
     )
     api_key: str | None = Field(default=None, repr=False)
     api_base: str | None = None
+    api: ProviderAPIConfig | None = Field(default=None, exclude_if=lambda value: value is None)
     api_type: Literal["auto", "chat_completions", "responses"] = "auto"  # Request API surface
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface

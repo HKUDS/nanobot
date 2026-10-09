@@ -746,14 +746,15 @@ def test_model_configuration_advanced_options_round_trip(
     assert row["reasoning_effort"] is None
 
 
-def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch):
+@pytest.mark.parametrize("protocol", ["responses", "anthropic_messages"])
+def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch, protocol):
     config_path = tmp_path / "config.json"
     config = Config.model_validate({"providers": {
         "tenant": {"apiBase": "https://tenant.test/v1"},
     }})
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    api = {"supported_apis": ["responses"], "preferred_api": "responses"}
+    api = {"supported_apis": [protocol], "preferred_api": protocol}
     created = create_model_configuration({
         "name": ["reasoning"], "provider": ["tenant"], "model": ["gpt-6-luna"],
         "api": [json.dumps(api)],
@@ -764,14 +765,14 @@ def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch):
     assert providers["tenant"]["model_api_configurable"] is True
     assert providers["github_copilot"]["model_api_configurable"] is True
     assert providers["anthropic"]["model_api_configurable"] is False
-    assert providers["tenant"]["request_apis"] == ["chat_completions", "responses"]
+    assert providers["tenant"]["request_apis"] == ["chat_completions", "responses", "anthropic_messages"]
     assert providers["openai_codex"]["request_apis"] == ["responses"]
     assert providers["anthropic"]["request_apis"] == ["anthropic_messages"]
     assert providers["bedrock"]["request_apis"] == ["bedrock_converse"]
     saved = load_config(config_path)
-    assert saved.model_presets["reasoning"].api.to_capabilities().preferred_api == "responses"
+    assert saved.model_presets["reasoning"].api.to_capabilities().preferred_api == protocol
     assert json.loads(config_path.read_text(encoding="utf-8"))["modelPresets"]["reasoning"]["api"] == {
-        "supportedApis": ["responses"], "preferredApi": "responses",
+        "supportedApis": [protocol], "preferredApi": protocol,
     }
 
     update_model_call_order({"order": [json.dumps(["reasoning"])]})
@@ -789,6 +790,8 @@ def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch):
 @pytest.mark.parametrize("provider,api,error", [
     ("openai", {"supportedApis": ["chat_completions"], "preferredApi": "responses"}, "api must declare"),
     ("anthropic", {"supportedApis": ["responses"]}, "does not support"),
+    ("openai", {"supportedApis": ["anthropic_messages"]}, "does not support"),
+    ("anthropic", {"supportedApis": ["anthropic_messages", "responses"]}, "api must declare"),
 ])
 def test_create_preset_rejects_invalid_api_without_saving(tmp_path, monkeypatch, provider, api, error):
     config_path = tmp_path / "config.json"
@@ -2656,3 +2659,86 @@ def test_azure_openai_spec_no_longer_requires_api_key() -> None:
     spec = find_by_name("azure_openai")
     assert spec is not None
     assert _provider_requires_api_key(spec) is False
+
+
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses", "anthropic_messages"])
+def test_custom_connection_api_create_edit_and_preset_ceiling(tmp_path, monkeypatch, protocol):
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    api = {"supported_apis": [protocol], "preferred_api": protocol}
+    payload = create_provider_settings({
+        "name": ["Protocol Gateway"], "apiBase": ["https://tenant.test/v1"],
+        "api": [json.dumps(api)],
+    })
+    key = payload["created_provider"]
+    row = next(row for row in payload["providers"] if row["name"] == key)
+    assert payload["provider_api_configuration_supported"] is True
+    assert row["api"] == api
+    assert row["request_apis"] == [protocol]
+    assert row["adapter_request_apis"] == ["chat_completions", "responses", "anthropic_messages"]
+    assert row["provider_api_configurable"] is True
+    assert row["model_api_configurable"] is False
+    assert load_config(config_path).providers.model_extra[key].api.to_capabilities().preferred_api == protocol
+    create_model_configuration({
+        "name": ["supported"], "provider": [key], "model": ["served-model"],
+        "api": [json.dumps(api)],
+    })
+    other = "responses" if protocol != "responses" else "anthropic_messages"
+    before = config_path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="does not accept request APIs"):
+        create_model_configuration({
+            "name": ["unsupported"], "provider": [key], "model": ["served-model"],
+            "api": [json.dumps({"supportedApis": [other]})],
+        })
+    with pytest.raises(WebUISettingsError, match="does not accept request APIs"):
+        update_provider_settings({
+            "provider": [key], "api": [json.dumps({"supportedApis": [other]})],
+        })
+    assert config_path.read_bytes() == before
+    expanded = {"supported_apis": [protocol, other], "preferred_api": other}
+    update_provider_settings({"provider": [key], "api": [json.dumps(expanded)]})
+    update_provider_settings({"provider": [key], "apiBase": ["https://changed.test/v1"]})
+    assert load_config(config_path).providers.model_extra[key].api.model_dump(mode="json") == expanded
+    update_provider_settings({"provider": [key], "api": ["null"]})
+    assert load_config(config_path).providers.model_extra[key].api is None
+
+
+@pytest.mark.parametrize("api", [
+    {"supportedApis": []},
+    {"supportedApis": ["responses"], "preferredApi": "anthropic_messages"},
+    {"supportedApis": ["unknown"]},
+])
+def test_custom_connection_invalid_api_is_not_saved(tmp_path, monkeypatch, api):
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    before = config_path.read_bytes()
+    with pytest.raises(WebUISettingsError):
+        create_provider_settings({
+            "name": ["Invalid"], "apiBase": ["https://tenant.test/v1"], "api": [json.dumps(api)],
+        })
+    assert config_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("target", ["default", "inline_fallback"])
+def test_custom_connection_cannot_remove_api_used_by_legacy_or_inline_model(tmp_path, monkeypatch, target):
+    config = Config.model_validate({"providers": {"tenant": {"apiBase": "https://tenant.test/v1"}}})
+    api = ModelAPIConfig(supported_apis=("anthropic_messages",))
+    if target == "default":
+        config.agents.defaults.provider = "tenant"
+        config.agents.defaults.model = "served-model"
+        config.agents.defaults.api = api
+    else:
+        config.agents.defaults.fallback_models = [InlineFallbackConfig(
+            provider="tenant", model="served-model", api=api,
+        )]
+    config_path = tmp_path / "config.json"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    before = config_path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="does not accept request APIs"):
+        update_provider_settings({
+            "provider": ["tenant"], "api": [json.dumps({"supportedApis": ["responses"]})],
+        })
+    assert config_path.read_bytes() == before

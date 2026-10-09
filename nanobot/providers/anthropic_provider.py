@@ -10,7 +10,7 @@ import secrets
 import string
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -23,6 +23,9 @@ from nanobot.providers.base import (
     tool_arguments_object_for_replay,
 )
 from nanobot.providers.images import prepare_message_images
+
+if TYPE_CHECKING:
+    from nanobot.providers.registry import ProviderSpec
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -94,12 +97,18 @@ class AnthropicProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         *,
         provider_name: str = "anthropic",
+        extra_body: dict[str, Any] | None = None,
+        extra_query: dict[str, str] | None = None,
+        proxy: str | None = None,
+        spec: ProviderSpec | None = None,
     ):
         super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._extra_body = dict(extra_body or {})
+        self._spec = spec
 
-        from anthropic import AsyncAnthropic
+        from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
         client_kw: dict[str, Any] = {}
         if api_key:
@@ -108,6 +117,10 @@ class AnthropicProvider(LLMProvider):
             client_kw["base_url"] = self._normalize_base_url(api_base)
         if extra_headers:
             client_kw["default_headers"] = extra_headers
+        if extra_query:
+            client_kw["default_query"] = extra_query
+        if proxy:
+            client_kw["http_client"] = DefaultAsyncHttpxClient(proxy=proxy, trust_env=False)
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
@@ -586,7 +599,10 @@ class AnthropicProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None,
         supports_caching: bool = True,
     ) -> dict[str, Any]:
-        model_name = self._strip_prefix(model or self.default_model)
+        model_name = (
+            self._spec.request_model_name(model or self.default_model)
+            if self._spec is not None else self._strip_prefix(model or self.default_model)
+        )
         system, anthropic_msgs = self._convert_messages(self._sanitize_empty_content(messages))
         anthropic_tools = self._convert_tools(tools)
 
@@ -649,6 +665,8 @@ class AnthropicProvider(LLMProvider):
 
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
+        if self._extra_body:
+            kwargs["extra_body"] = self._extra_body
 
         return kwargs
 
@@ -867,3 +885,6 @@ class AnthropicProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self.default_model
+
+    async def aclose(self) -> None:
+        await self._client.close()

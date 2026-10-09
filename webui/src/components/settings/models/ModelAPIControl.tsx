@@ -9,13 +9,16 @@ import type { ModelAPIConfig, ProviderRequestAPI, SettingsPayload } from "@/lib/
 
 export function modelAPIConfigurable(provider: SettingsPayload["providers"][number] | undefined): boolean {
   if (Array.isArray(provider?.request_apis)) {
-    return provider.request_apis.includes("chat_completions") && provider.request_apis.includes("responses");
+    const supported = provider.request_apis;
+    return (["chat_completions", "responses", "anthropic_messages"] as const)
+      .filter((api) => supported.includes(api)).length > 1;
   }
   return provider?.model_api_configurable === true;
 }
 
 export function modelAPISelection(api: ModelAPIConfig | null | undefined): string {
   if (!api) return "auto";
+  if (api.supported_apis.includes("anthropic_messages")) return "anthropic_messages";
   if (!api.supported_apis.includes("responses")) return "chat_completions";
   if (!api.supported_apis.includes("chat_completions")) return "responses";
   return (api.preferred_api ?? api.supported_apis[0]) === "responses"
@@ -58,8 +61,9 @@ export function ModelAPIControl({
         ? `${t("settings.models.apiAuto")} (${labels[automaticAPI]})`
         : t("settings.models.apiAuto"),
     },
-    { value: "responses", label: "Responses" },
-    { value: "chat_completions", label: "Chat Completions" },
+    ...(["responses", "chat_completions", "anthropic_messages"] as const)
+      .filter((api) => requestAPIs ? requestAPIs.includes(api) : api !== "anthropic_messages")
+      .map((api) => ({ value: api, label: labels[api] })),
   ];
   if (!configurable && !fixedLabel) return null;
 
@@ -70,7 +74,7 @@ export function ModelAPIControl({
           <Select value={selectedAPI} onValueChange={(api) => {
             if (api === selectedAPI) return;
             if (api === "auto") onChange(null);
-            else if (api === "responses" || api === "chat_completions") {
+            else if (api === "responses" || api === "chat_completions" || api === "anthropic_messages") {
               onChange({ supported_apis: [api], preferred_api: api });
             }
           }}>
@@ -98,7 +102,7 @@ export function ModelAPIControl({
           <span className="block text-[13px] text-muted-foreground sm:text-right">{fixedLabel}</span>
         )}
       </SettingsRow>
-      {configurable && selectedAPI === "responses" ? (
+      {configurable && selectedAPI === "responses" && (!requestAPIs || requestAPIs.includes("chat_completions")) ? (
         <div className="mx-4 mb-3 flex items-start justify-between gap-4 rounded-xl bg-muted/30 px-3 py-3 sm:mx-5">
           <div className="min-w-0">
             <p className="text-[13px] leading-5 text-foreground">{t("settings.models.apiFallback")}</p>
