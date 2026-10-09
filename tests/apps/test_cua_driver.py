@@ -393,6 +393,7 @@ def test_read_only_check_does_not_launch_app_or_substitute_terminal_grants(tmp_p
 
     monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
     monkeypatch.setattr(cua_driver_stdio.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cua_driver, "host_release", lambda: cua_driver._RELEASES["darwin-universal"])
     monkeypatch.setattr(cua_driver_stdio, "endpoint", lambda path: tmp_path / "driver.sock")
     monkeypatch.setattr(cua_driver_stdio, "daemon_listening", lambda path: False)
     run = Mock()
@@ -447,6 +448,7 @@ def test_waiting_macos_launcher_rechecks_access_after_acquiring_lifecycle_lock(t
     address = tmp_path / "driver.sock"
     monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
     monkeypatch.setattr(cua_driver_stdio.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cua_driver, "host_release", lambda: cua_driver._RELEASES["darwin-universal"])
     monkeypatch.setattr(cua_driver_stdio, "endpoint", lambda path: address)
     monkeypatch.setattr(cua_driver_stdio, "daemon_listening", lambda path: True)
     execute = Mock()
