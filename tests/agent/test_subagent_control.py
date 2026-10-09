@@ -97,7 +97,7 @@ async def test_sdk_ephemeral_delegation_never_persists_on_later_flush(
     if existing_parent:
         parent.add_message("user", "Earlier durable question")
         loop.sessions.save(parent)
-    before = {path.name: path.read_bytes() for path in loop.sessions.sessions_dir.glob("*.jsonl")}
+    before = loop.sessions.read_session_file(key)
     secret = "private-delegation-marker"
     source = loop.workspace / f"{secret}.txt"
     source.write_text(secret * 1000, encoding="utf-8")
@@ -134,19 +134,18 @@ async def test_sdk_ephemeral_delegation_never_persists_on_later_flush(
         assert result.content == f"Parent conclusion: {secret}"
         assert all(ctx is not None and not ctx.log_content and not ctx.persist_session for ctx in requests)
         assert secret not in "\n".join(logs)
-        assert {path.name: path.read_bytes() for path in loop.sessions.sessions_dir.glob("*.jsonl")} == before
+        assert loop.sessions.read_session_file(key) == before
         assert not list(loop.sessions.sessions_dir.glob("*.checkpoint.json"))
         assert not (loop.workspace / ".nanobot" / "tool-results").exists()
         assert loop.bus.inbound_size == 0
 
         loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Durable answer"))
         await bot.run("Durable follow-up", session_key=key)
-        bot.sessions.flush()
-        saved = "\n".join(path.read_text() for path in loop.sessions.sessions_dir.glob("*.jsonl"))
+        saved = json.dumps(loop.sessions.read_session_file(key))
         assert "Durable answer" in saved
         assert ("Earlier durable question" in saved) is existing_parent
         assert secret not in saved
-        assert len(list(loop.sessions.sessions_dir.glob("*.jsonl"))) == 1
+        assert [row["key"] for row in loop.sessions.list_sessions()] == [key]
     finally:
         loop.stop()
         await asyncio.wait_for(consumer, timeout=2)
@@ -181,7 +180,7 @@ async def test_owner_canonical_fallback_and_absent_context(tmp_path):
     manager, _, ctx = setup(tmp_path)
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="private"))
     task_id = await spawn(manager, ctx)
-    receipt = manager.send(task_id, "owner", "follow-up")
+    receipt = await manager.send(task_id, "owner", "follow-up")
     snapshot = manager.statuses_for_session("owner")[task_id]
     snapshot.state = "cancelled"
     snapshot.owner = "other"

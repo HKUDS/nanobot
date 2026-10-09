@@ -432,7 +432,7 @@ class SessionManager:
         if self._state is None:
             from nanobot.session.state import SessionState
 
-            self._state = SessionState(self._store, on_delete=self._notify_delete)
+            self._state = SessionState(self._store, on_delete=self._notify_delete, types=self.types)
         return self._state
 
     def _notify_delete(self, key: str) -> None:
@@ -538,7 +538,7 @@ class SessionManager:
     def delete_session(self, key: str) -> bool:
         """Delete a session and its persisted descendants in one transaction."""
         self._require_offline_mutation()
-        with self.transaction():
+        def delete() -> bool:
             pending = [key]
             collected: set[str] = set()
             while pending:
@@ -553,6 +553,8 @@ class SessionManager:
                 self.invalidate(current)
                 self._notify_delete(current)
             return deleted
+
+        return self._store.run_write(delete)
 
     def export_sessions_to_workspace(self) -> int:
         """Export portable JSONL copies; SQLite remains authoritative."""
@@ -598,7 +600,7 @@ class SessionManager:
         self._require_offline_mutation()
 
         def ensure() -> dict[str, str]:
-            names, updates = allocate_session_handles(self._store.list_metadata())
+            names, updates = allocate_session_handles(self._store.list_metadata(), self.types)
             for key, name in updates.items():
                 self._store.update_metadata(key, {SESSION_HANDLE_METADATA_KEY: name})
             return names

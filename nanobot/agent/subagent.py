@@ -7,7 +7,7 @@ import json
 import time
 import uuid
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -158,7 +158,7 @@ class _SubagentHook(AgentHook):
     def __init__(self, status: SubagentStatus | None = None,
                  *, check_active: Callable[[], None] | None = None,
                  max_result_chars: int = 16000,
-                 on_status: Callable[[SubagentStatus], None] | None = None) -> None:
+                 on_status: Callable[[SubagentStatus], Awaitable[None]] | None = None) -> None:
         super().__init__()
         self._status = status
         self._check_active = check_active
@@ -180,7 +180,7 @@ class _SubagentHook(AgentHook):
                 {"name": call.name, "status": "running"} for call in context.tool_calls
             ]
         if self._status is not None and self._on_status is not None:
-            self._on_status(self._status)
+            await self._on_status(self._status)
 
     async def before_execute_tool(
         self, context: AgentHookContext, tool_call: ToolCallRequest,
@@ -199,7 +199,7 @@ class _SubagentHook(AgentHook):
         if context.error:
             self._status.error = str(context.error)
         if self._on_status is not None:
-            self._on_status(self._status)
+            await self._on_status(self._status)
 
 
 class SubagentManager:
@@ -273,6 +273,7 @@ class SubagentManager:
         self._terminal_statuses: dict[str, SubagentStatus] = {}
         self._closed = False
         self._close_task: asyncio.Task[int] | None = None
+        self._admitting = 0
         self.sessions = SubagentSessions(session_manager) if session_manager is not None else None
 
     MAX_ACTIVE = 128
@@ -283,11 +284,11 @@ class SubagentManager:
 
     CANCEL_WAIT_SECONDS = 5.0
 
-    def _save_status(
-        self, status: SubagentStatus, *, fsync: bool = False,
+    async def _save_status(
+        self, status: SubagentStatus,
     ) -> None:
         status.revision += 1
-        if self.sessions is not None and not self.sessions.save(status, fsync=fsync):
+        if self.sessions is not None and not await self.sessions.save(status):
             return
         self._publish_status(status)
 
@@ -300,10 +301,10 @@ class SubagentManager:
             task_id=status.task_id,
         ))
 
-    def recover_interrupted(self) -> None:
+    async def recover_interrupted(self) -> None:
         """Recover observations only after the host has claimed execution ownership."""
         if self.sessions is not None:
-            self.sessions.interrupt_pending()
+            await self.sessions.interrupt_pending()
 
     def _start_cleanup(self, record: _SubagentTask, *, retry: bool = False) -> asyncio.Task[int]:
         cleanup = record.cleanup_task
@@ -326,10 +327,11 @@ class SubagentManager:
                 and not cleanup.cancelled() and cleanup.exception() is None):
             self._tasks.pop(record.status.task_id, None)
 
-    def _finish(self, record: _SubagentTask,
+    async def _finish(self, record: _SubagentTask,
                 cleanup_error: str | None = None) -> _SubagentOutcome:
         outcome = record.finish(self.max_tool_result_chars, cleanup_error)
-        self._save_status(record.status, fsync=True)
+        await self._save_transcript(record)
+        await self._save_status(record.status)
         self._terminal_statuses[record.status.task_id] = record.snapshot()
         while len(self._terminal_statuses) > self.MAX_TERMINAL:
             del self._terminal_statuses[next(iter(self._terminal_statuses))]
@@ -341,7 +343,7 @@ class SubagentManager:
         for message_id, _ in snapshot:
             record.status.receipts[message_id] = "delivered"
         if snapshot:
-            self._save_status(record.status)
+            await self._save_status(record.status)
         return [{"role": "user", "content": content} for _, content in snapshot]
 
     def _owned_status(self, task_id: str, owner: str | None) -> SubagentStatus:
@@ -377,7 +379,7 @@ class SubagentManager:
             raise SubagentControlError("task unavailable")
         return status, child
 
-    def send(self, task_id: str, owner: str | None,
+    async def send(self, task_id: str, owner: str | None,
              message: str | None) -> SubagentMessageReceipt:
         """Accept a bounded follow-up only while execution is open."""
         status = self._owned_status(task_id, owner)
@@ -391,7 +393,7 @@ class SubagentManager:
         message_id = str(uuid.uuid4())
         record.inbox.append((message_id, message))
         status.receipts[message_id] = "accepted"
-        self._save_status(status)
+        await self._save_status(status)
         return {"task_id": task_id, "message_id": message_id,
                 "receipt": "accepted", "delivered": False}
 
@@ -410,7 +412,7 @@ class SubagentManager:
         task_id = record.status.task_id
         task = self._running_tasks.get(task_id)
         if record.decide(_SubagentOutcome("cancelled", "Task cancelled.", "cancelled")):
-            self._save_status(record.status, fsync=True)
+            await self._save_status(record.status)
             if task is not None and record.begun and not task.done():
                 task.cancel()
         if record.status.finished_at is None:
@@ -511,7 +513,7 @@ class SubagentManager:
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
 
-    def _create_task(
+    async def _create_task(
         self, task: str, label: str | None, origin_channel: str, origin_chat_id: str,
         session_key: str | None, origin_message_id: str | None,
         temperature: float | None, workspace_scope: WorkspaceScope | None,
@@ -523,7 +525,7 @@ class SubagentManager:
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         # A failed cleanup owns admission even after its status has been evicted.
-        if self._closed or len(self._tasks) >= self.MAX_ACTIVE:
+        if self._closed or len(self._tasks) + self._admitting >= self.MAX_ACTIVE:
             raise SubagentControlError("subagent manager is closed or at task capacity")
         owner = session_key or f"{origin_channel}:{origin_chat_id}"
         task_id = str(uuid.uuid4())
@@ -537,11 +539,19 @@ class SubagentManager:
             origin_message_id=origin_message_id,
             origin_turn_id=origin_turn_id,
         )
-        if self.sessions is not None:
-            child = self.sessions.create(status, policy=session_policy)
-        else:
-            child = Session(key=SubagentSessions.key(task_id), policy=session_policy or SessionPolicy())
-            child.add_message("user", task)
+        self._admitting += 1
+        try:
+            if self.sessions is not None:
+                child = await self.sessions.create(status, policy=session_policy)
+            else:
+                child = Session(key=SubagentSessions.key(task_id), policy=session_policy or SessionPolicy())
+                child.add_message("user", task)
+        finally:
+            self._admitting -= 1
+        if self._closed:
+            if self.sessions is not None:
+                await self.sessions.sessions.state.delete(child.key, expected_generation=child.generation)
+            raise SubagentControlError("subagent manager is closed")
         record = _SubagentTask(
             status=status,
             session=child,
@@ -580,7 +590,7 @@ class SubagentManager:
     ) -> str:
         """Start background work and route its terminal result to the parent."""
         try:
-            record = self._create_task(
+            record = await self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=True, origin_turn_id=origin_turn_id,
                 session_policy=session_policy,
@@ -607,7 +617,7 @@ class SubagentManager:
     ) -> str:
         """Wait for the same task lifecycle without a background notice."""
         try:
-            record = self._create_task(
+            record = await self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=False, origin_turn_id=origin_turn_id,
                 session_policy=session_policy,
@@ -647,8 +657,24 @@ class SubagentManager:
                 else _SubagentOutcome("cancelled", "Task cancelled.", "cancelled")
             )
             self._start_cleanup(record)
-            self._finish(record)
+            settlement = asyncio.create_task(self._settle_unfinished_task(record))
+            self._running_tasks[record.status.task_id] = settlement
+            settlement.add_done_callback(partial(self._task_done, record))
         self._release_task(record)
+
+    async def _save_transcript(self, record: _SubagentTask) -> None:
+        if self.sessions is not None:
+            from nanobot.session.sqlite_store import SessionConflictError
+
+            try:
+                await self.sessions.sessions.state.finish_turn(record.session)
+            except SessionConflictError:
+                # A removed child must not be recreated by a late observation.
+                return
+
+    async def _settle_unfinished_task(self, record: _SubagentTask) -> str:
+        outcome = await self._finish(record)
+        return outcome.result
 
     async def _run_subagent(self, record: _SubagentTask) -> str:
         """Execute once, seal the outcome, then clean up and publish once."""
@@ -661,7 +687,7 @@ class SubagentManager:
                 record.raise_if_stopping()
                 status.state = "running"
                 status.phase = "initializing"
-                self._save_status(status)
+                await self._save_status(status)
                 outcome = await self._run_admitted_subagent(record)
                 record.decide(outcome)
         except asyncio.CancelledError:
@@ -677,7 +703,7 @@ class SubagentManager:
                 "Subagent [{}] exec cleanup failed", status.task_id,
             )
             cleanup_error = f"Error cleaning up task processes: {exc}"
-        outcome = self._finish(record, cleanup_error)
+        outcome = await self._finish(record, cleanup_error)
         if record.announce and not record.suppress_notice and not self._closed:
             await self._announce_result(
                 status.task_id, label, task_text, outcome.result, record.origin,
@@ -703,7 +729,7 @@ class SubagentManager:
             iteration = payload.get("iteration", status.iteration)
             if (phase, iteration) != (status.phase, status.iteration):
                 status.phase, status.iteration = phase, iteration
-                self._save_status(status)
+                await self._save_status(status)
 
         root = workspace_scope.project_path if workspace_scope is not None else self.workspace
         cfg = None
@@ -719,13 +745,14 @@ class SubagentManager:
         ]
         activity = SessionActivity()
 
-        def save_observation(status: SubagentStatus) -> None:
+        async def save_observation(status: SubagentStatus) -> None:
             record.session.messages = activity.transcript()
-            self._save_status(status)
+            await self._save_transcript(record)
+            await self._save_status(status)
 
         async def publish_activity(event: AgentEvent) -> None:
             if activity.remember(event):
-                save_observation(status)
+                await save_observation(status)
 
         events = EventSink(publish_activity)
         hook = build_agent_turn_hook(AgentTurnHookSpec(

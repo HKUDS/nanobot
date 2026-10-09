@@ -1333,7 +1333,7 @@ class GatewayHTTPHandler:
                     if self.local_trigger_store is not None:
                         await asyncio.to_thread(self.local_trigger_store.delete, job.id)
                 elif self.cron_service is not None:
-                    await asyncio.to_thread(self.cron_service.remove_job, job.id)
+                    self.cron_service.remove_job(job.id)
         draft_deleted = self.workspaces.discard_draft_scope(decoded_key)
         if self.discard_session is not None:
             await self.discard_session(decoded_key)
@@ -1357,7 +1357,7 @@ class GatewayHTTPHandler:
         if got == "/api/webui/automations/result":
             return await self._handle_webui_automation_result(request)
         if got == "/api/webui/automations/chats":
-            return self._handle_webui_automation_chats(request)
+            return await self._handle_webui_automation_chats(request)
         m = re.match(r"^/api/webui/automations/(enable|disable|delete|run|update|change-chat)$", got)
         if m:
             return await self._handle_webui_automation_action(request, m.group(1))
@@ -1409,22 +1409,22 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _automation_chats(self, job: CronJob) -> list[AutomationChat]:
+    async def _automation_chats(self, job: CronJob) -> list[AutomationChat]:
         if self.session_manager is None:
             return []
-        return automation_chats(
+        return await automation_chats(
             job, self.session_manager, self.workspaces,
             self.channel_runtime_status() if self.channel_runtime_status else {},
         )
 
-    def _handle_webui_automation_chats(self, request: WsRequest) -> Response:
+    async def _handle_webui_automation_chats(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         job_id = _query_first(_request_query(request), "id") or ""
         job = self.cron_service.get_job(job_id) if self.cron_service else None
         if job is None or not is_bound_cron_job(job):
             return _http_error(404, "automation has no movable chat")
-        chats = self._automation_chats(job)
+        chats = await self._automation_chats(job)
         current = next((chat for chat in chats
                         if chat.binding.session_key == job.payload.session_key), None)
         return _http_json_response({
@@ -1528,7 +1528,7 @@ class GatewayHTTPHandler:
                 return _http_error(400, "invalid automation chat payload")
             if job.id in self._pending_cron_job_ids_for_all():
                 return _http_error(409, "automation_chat_busy")
-            target = next((chat for chat in self._automation_chats(job)
+            target = next((chat for chat in await self._automation_chats(job)
                            if chat.id == values["target_id"]), None)
             if target is None or not target.available:
                 return _http_error(409, "automation_chat_unavailable")

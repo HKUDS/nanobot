@@ -186,9 +186,11 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         self,
         request: RequestContext,
     ) -> RuntimeContextBlock | None:
-        if not request.session_key:
+        if not request.session_key or not request.persist_session:
             return None
-        session = await self._sessions.state.get(request.session_key)
+        session = await self._sessions.state.read(request.session_key)
+        if session is None:
+            return None
         goal_start_requested = explicit_goal_requested(request.metadata)
         goal_active = sustained_goal_active(session.metadata)
         if not goal_start_requested and not goal_active:

@@ -305,11 +305,11 @@ async def test_gateway_recovers_private_children_and_deletes_them_with_parent(tm
     sessions.save(parent)
     children = SubagentSessions(sessions)
     now = time.monotonic()
-    children.create(SubagentStatus(
+    await children.create(SubagentStatus(
         task_id="finished", label="Finished", task_description="inspect", owner=parent.key,
         started_at=now, finished_at=now, completed_at=time.time(), state="done", phase="done", result="Verified",
     ))
-    children.create(SubagentStatus(
+    await children.create(SubagentStatus(
         task_id="abandoned", label="Abandoned", task_description="inspect", owner=parent.key,
         started_at=now, state="running", phase="thinking", result="Partial findings", partial=True,
         receipts={"follow-up": "accepted"},

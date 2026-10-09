@@ -943,6 +943,7 @@ def _run_gateway(
             console.print,
         )
         try:
+            await agent.subagents.recover_interrupted()
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
@@ -1061,7 +1062,6 @@ def _run_gateway(
         gateway_runtime.foreground_instance(gateway_start_options),
         webui_turn_coordinator.connected(),
     ):
-        agent.subagents.recover_interrupted()
         if health_server_enabled:
             gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

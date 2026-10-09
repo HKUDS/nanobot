@@ -320,9 +320,9 @@ async def test_task_changes_use_parent_chat_events_and_saved_child_observations(
                 await asyncio.wait_for(entered.get(), 2)
             first, sibling = manager.statuses_for_session("websocket:parent")
             foreign, = manager.statuses_for_session("websocket:other")
-            parent = sessions.get_existing("websocket:parent")
+            parent = await sessions.state.read("websocket:parent")
             parent.add_message("assistant", "Parent reply already delivered")
-            sessions.save(parent)
+            await sessions.state.finish_turn(parent)
             original_messages = parent.messages.copy()
             routed = await deliver()
             assert {payload["task"]["task_id"] for conn, payload in routed if conn is parent_connection} == {first, sibling}
@@ -358,7 +358,7 @@ async def test_task_changes_use_parent_chat_events_and_saved_child_observations(
             )
             await manager.bus.drain()
             assert manager.bus.outbound_size > 0
-            sessions.delete_session("websocket:parent")
+            await sessions.state.delete("websocket:parent")
             assert await deliver() == []
     finally:
         await manager.close()
@@ -390,7 +390,7 @@ async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pen
             sessions = SessionManager(workspace, sessions_root=Path(sys.argv[2]))
             parent = sessions.get_or_create("websocket:parent")
             parent.add_message("user", "Delegate the inspection", webui_turn_id="turn-1")
-            sessions.save(parent, fsync=True)
+            sessions.save(parent)
             manager = SubagentManager(workspace=workspace, bus=MessageBus(), max_tool_result_chars=16000,
                 max_concurrent_subagents=1, consolidator=MagicMock(spec=Consolidator), session_manager=sessions)
             provider = MagicMock(spec=LLMProvider)
@@ -410,7 +410,7 @@ async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pen
             await manager.spawn("queued", session_key=parent.key, origin_turn_id="turn-1", runtime=runtime)
             statuses = manager.statuses_for_session(parent.key)
             ids = {status.task_description: task_id for task_id, status in statuses.items()}
-            manager.send(ids["running"], parent.key, "Not yet delivered")
+            await manager.send(ids["running"], parent.key, "Not yet delivered")
             Path(sys.argv[3]).write_text(json.dumps(ids))
             os._exit(0)
         asyncio.run(main())
@@ -420,7 +420,7 @@ async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pen
     manager, sessions, _ = manager_with_storage(workspace, sessions_root)
     manager.runner.run = AsyncMock()
     assert manager.check(ids["running"], "websocket:parent").state == "running"
-    manager.recover_interrupted()
+    await manager.recover_interrupted()
     gateway, connection, headers = gateway_for(manager, sessions, workspace)
     path = f"/api/sessions/{quote('websocket:parent', safe='')}/subagents"
     try:
@@ -449,7 +449,7 @@ async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pen
         assert {row["key"] for row in sessions.list_sessions()} == {
             "websocket:parent", *(SubagentSessions.key(task_id) for task_id in ids.values()),
         }
-        assert [handle.session_key for handle in SessionHandleResolver(sessions).list_all()] == ["websocket:parent"]
+        assert [handle.session_key for handle in await SessionHandleResolver(sessions).alist_all()] == ["websocket:parent"]
         assert not list(sessions.sessions_dir.glob("*.subagents.json"))
         with pytest.raises(SubagentControlError, match="task unavailable"):
             manager.check(ids["completed"], "websocket:other")
@@ -514,7 +514,7 @@ async def test_child_is_unavailable_to_public_session_tools(tmp_path):
         await manager.run_inline("Private investigation", session_key="websocket:parent", runtime=runtime)
         task_id, = manager.statuses_for_session("websocket:parent")
         child_key = SubagentSessions.key(task_id)
-        public_handle = SessionHandleResolver(sessions).handle_for_session("websocket:other")
+        public_handle = await SessionHandleResolver(sessions).ahandle_for_session("websocket:other")
         sender = SendSessionMessageTool(sessions=sessions, bus=manager.bus)
         with request_context(RequestContext(channel="websocket", chat_id="other", session_key="websocket:other")):
             assert json.loads(await SearchSessionsTool(sessions).execute(query="Private investigation"))["results"] == []
@@ -546,16 +546,16 @@ async def test_constructing_another_reader_does_not_interrupt_running_work(tmp_p
         await manager.spawn("inspect", session_key="websocket:parent", runtime=runtime)
         await entered.wait()
         task_id, = manager.statuses_for_session("websocket:parent")
-        receipt = manager.send(task_id, "websocket:parent", "Follow-up")
-        path = sessions._get_session_path(SubagentSessions.key(task_id))
-        before = path.read_bytes()
+        receipt = await manager.send(task_id, "websocket:parent", "Follow-up")
+        child_key = SubagentSessions.key(task_id)
+        before = sessions.read_session_file(child_key)
         reader, _, _ = manager_with_storage(workspace, root)
         observed = reader.check(task_id, "websocket:parent")
         assert observed.state == "running"
         assert observed.receipts[receipt["message_id"]] == "accepted"
-        assert path.read_bytes() == before
+        assert sessions.read_session_file(child_key) == before
         await reader.close()
-        assert path.read_bytes() == before
+        assert sessions.read_session_file(child_key) == before
     finally:
         release.set()
         await manager.close()
@@ -611,19 +611,19 @@ async def test_history_outlives_the_runtime_cache_and_follows_parent_deletion(tm
         assert len(manager.statuses_for_session("websocket:parent", include_history=False)) == 1
         first = next(status for status in tasks.values() if status.task_description == "first")
         assert manager.check(first.task_id, "websocket:parent").result == "Verified"
-        fork = sessions.fork_session_before_user_index("websocket:parent", "websocket:fork", 0)
+        fork = await sessions.state.fork("websocket:parent", "websocket:fork", 0)
         assert TASK_METADATA_KEY not in fork.metadata
         assert sessions.child_session_keys(fork.key) == []
-        child_paths = [sessions._get_session_path(SubagentSessions.key(task_id)) for task_id in tasks]
-        assert all(path.exists() for path in child_paths)
-        assert sessions.delete_session("websocket:parent")
-        assert not any(path.exists() for path in child_paths)
+        child_keys = [SubagentSessions.key(task_id) for task_id in tasks]
+        assert all(sessions.read_session_file(key) is not None for key in child_keys)
+        assert await sessions.state.delete("websocket:parent")
+        assert all(sessions.read_session_file(key) is None for key in child_keys)
         assert manager.statuses_for_session("websocket:parent") == {}
         with pytest.raises(SubagentControlError):
             manager.check(first.task_id, "websocket:parent")
-        manager.sessions.save(first)
+        assert not await manager.sessions.save(first)
         assert sessions.read_session_file("websocket:parent") is None
-        assert not any(path.exists() for path in child_paths)
+        assert all(sessions.read_session_file(key) is None for key in child_keys)
     finally:
         await manager.close()
 
@@ -634,23 +634,17 @@ async def test_task_progress_does_not_rewrite_parent_history_or_invalidate_check
     parent = sessions.get_or_create("websocket:parent")
     parent.add_message("user", "Inspect config", webui_turn_id="turn-1")
     sessions.save(parent)
-    path = sessions._get_session_path(parent.key)
-    before, stamp = path.read_bytes(), path.stat()
-    parent.metadata["runtime_checkpoint"] = {"phase": "tools_completed"}
+    parent = await sessions.state.read(parent.key)
     parent.provider_state = ProviderConversationState(
         kind="openai_responses", provider="openai:test", model="test", version=1,
         payload={"response_id": "private-response"},
     )
-    sessions.save_runtime_checkpoint(parent)
-    checkpoint_path = sessions._get_runtime_checkpoint_path(parent.key)
-    checkpoint = checkpoint_path.read_bytes()
+    await sessions.state.checkpoint_view(parent, {"phase": "tools_completed"})
+    before = sessions.read_session_file(parent.key)
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Verified"))
     try:
         await manager.run_inline("check", session_key=parent.key, runtime=runtime)
-        assert path.read_bytes() == before
-        assert path.stat().st_ino == stamp.st_ino
-        assert path.stat().st_mtime_ns == stamp.st_mtime_ns
-        assert checkpoint_path.read_bytes() == checkpoint
+        assert sessions.read_session_file(parent.key) == before
         restored = SessionManager(tmp_path / "agent", sessions_root=tmp_path / "sessions").get_or_create(parent.key)
         assert restored.metadata["runtime_checkpoint"]["phase"] == "tools_completed"
         assert restored.provider_state.payload == {"response_id": "private-response"}
@@ -662,7 +656,7 @@ async def test_task_progress_does_not_rewrite_parent_history_or_invalidate_check
 @pytest.mark.asyncio
 async def test_temporary_parent_never_persists_task_content(tmp_path):
     manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
-    parent = sessions.get_or_create_transient("websocket:temporary")
+    parent = await sessions.state.register_transient("websocket:temporary")
     async def run(_spec):
         assert current_request_context().log_content is False
         return AgentRunResult(messages=[], final_content="Private findings")
@@ -695,16 +689,14 @@ async def test_child_sessions_use_common_restore_and_migration(tmp_path):
         await manager.run_inline("inspect", session_key=parent.key, runtime=runtime)
         task_id, = manager.statuses_for_session(parent.key)
         child_key = SubagentSessions.key(task_id)
-        paths = [sessions._get_session_path(key) for key in (parent.key, child_key)]
-        result = sessions.restore_sessions_to_workspace()
-        assert result.restored == 2 and result.conflicts == ()
-        for path in paths:
-            assert (workspace / "sessions" / path.name).read_bytes() == path.read_bytes()
-            path.unlink()
-        reopened, migrated, _ = manager_with_storage(workspace, root)
+        assert sessions.export_sessions_to_workspace() == 2
+        exports = list((workspace / "sessions").glob("*.jsonl"))
+        assert len(exports) == 2
+        fresh_root = tmp_path / "migrated"
+        reopened, migrated, _ = manager_with_storage(workspace, fresh_root)
         assert migrated.child_session_keys(parent.key) == [child_key]
         assert reopened.check(task_id, parent.key).result == "Verified"
-        assert not list((workspace / "sessions").glob("*.jsonl"))
+        assert len(list((workspace / "sessions").glob("*.jsonl"))) == 2
         await reopened.close()
     finally:
         await manager.close()
@@ -720,7 +712,7 @@ async def test_unreadable_task_history_is_not_an_empty_list(tmp_path):
     task_id, = manager.statuses_for_session(parent.key)
     child = sessions.get_existing(SubagentSessions.key(task_id))
     child.metadata[TASK_METADATA_KEY] = "damaged"
-    sessions.save(child)
+    await sessions.state.update_metadata(child.key, {TASK_METADATA_KEY: "damaged"})
     gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
     try:
         path = f"/api/sessions/{quote(parent.key, safe='')}/subagents"

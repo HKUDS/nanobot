@@ -11,7 +11,6 @@ import time
 import weakref
 from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
@@ -165,6 +164,8 @@ class TurnContext:
     provider_compaction_applied: bool = False
 
     ephemeral: bool = False
+    # SDK temporary turns use an isolated draft; gateway temporary chats retain owner state.
+    commit_session: bool = True
     run_extra_hooks_for_ephemeral: bool = False
     hooks: list[AgentHook] = field(default_factory=list)
     hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
@@ -1788,10 +1789,17 @@ class AgentLoop:
             key = session_key or msg.session_key
         if not self.subagents.accepts_result(msg, key):
             return None
-        session = (self.sessions.state.peek(key) if msg.require_existing_session
-                   else await self.sessions.state.get(key))
+        commit_session = session is None or session.policy.persist
+        if session is None:
+            session = (await self.sessions.state.read(key)
+                       if msg.require_existing_session or msg.session_generation is not None
+                       else await self.sessions.state.get(key))
         if msg.require_existing_session and session is None:
             raise RuntimeError("required session is not active")
+        if msg.session_generation is not None and (
+            session is None or session.generation != msg.session_generation
+        ):
+            raise RuntimeError("required session generation was replaced")
         if delivery is None:
             delivery = self.turn_delivery_factory.create(msg, key)
         elif delivery.session_key != key:
@@ -1825,6 +1833,7 @@ class AgentLoop:
             on_runtime_admitted=on_runtime_admitted,
             pending_queue=pending_queue,
             ephemeral=ephemeral,
+            commit_session=commit_session,
             run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
             hooks=list(hooks or []),
             hook_factories=list(hook_factories or []),
@@ -2024,15 +2033,18 @@ class AgentLoop:
         if ctx.kind is TurnKind.USER:
             self.workspace_scopes.persist_message_scope(session, msg)
 
-        if restore_runtime_checkpoint(session):
+        if restore_runtime_checkpoint(session) and ctx.commit_session:
             await self.sessions.state.restore_interruption(session)
         if (
             RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
             and restore_pending_interruption(session)
+            and ctx.commit_session
         ):
             await self.sessions.state.restore_interruption(session)
 
     async def _compact_session(self, ctx: TurnContext) -> None:
+        if not ctx.commit_session:
+            return
         session = ctx.require_session()
         ctx.session, pending = await self.auto_compact.prepare_session(
             session,
@@ -2077,7 +2089,7 @@ class AgentLoop:
             # message.  Mark messages with _command so get_history can filter
             # them out of LLM context.  /new is excluded because it
             # intentionally clears the session.
-            if cmd_ctx.raw.lower() != "/new":
+            if cmd_ctx.raw.lower() != "/new" and ctx.commit_session:
                 ctx.input_persisted_early = await self._persist_user_message_early(
                     ctx.msg, session, _command=True
                 )
@@ -2190,7 +2202,7 @@ class AgentLoop:
                 staged_provider_state = True
         elif stored_state is not None:
             session.provider_state = None
-        if ctx.kind is TurnKind.USER:
+        if ctx.kind is TurnKind.USER and ctx.commit_session:
             ctx.input_persisted_early = await self._persist_user_message_early(
                 ctx.msg,
                 session,
@@ -2202,7 +2214,7 @@ class AgentLoop:
             # Upgrade the replay-safe baseline to the resumable state before
             # prompt assembly and the first model checkpoint.
             await self.sessions.state.prepare_input(session)
-        if not session.persisted:
+        if not session.persisted and ctx.commit_session:
             await self.sessions.state.prepare_input(session)
         ctx.transcript_input = self._build_transcript_input(ctx)
 
@@ -2290,7 +2302,8 @@ class AgentLoop:
             session.provider_state = None
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
-        await self.sessions.state.finish_turn(session)
+        if ctx.commit_session:
+            await self.sessions.state.finish_turn(session)
         if not ctx.ephemeral:
             await self.runtime_event_publisher.session_turn_persisted(
                 ctx.msg,
@@ -2595,6 +2608,7 @@ class AgentLoop:
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._get_session_lock(session_key)
+        temporary_parent = False
         try:
             async with lock:
                 kwargs: dict[str, Any] = {
@@ -2607,7 +2621,10 @@ class AgentLoop:
                 if _session_policy is not None:
                     # Isolate per-run state before any early save or checkpoint;
                     # the cached conversation must survive a temporary SDK turn.
-                    session = deepcopy(self.sessions.get_or_create(session_key))
+                    session = (await self.sessions.state.read(session_key) or Session(key=session_key)
+                               if not _session_policy.persist
+                               else await self.sessions.state.get(session_key))
+                    temporary_parent = not _session_policy.persist and not session.persisted
                     session.policy = SessionPolicy(
                         persist=session.policy.persist and _session_policy.persist,
                         log_content=session.policy.log_content and _session_policy.log_content,
@@ -2628,10 +2645,13 @@ class AgentLoop:
                     kwargs["on_runtime_admitted"] = on_runtime_admitted
                 if attributes is not None:
                     kwargs["attributes"] = dict(attributes)
-                return await self._process_message(
-                    msg,
-                    **kwargs,
-                )
+                try:
+                    return await self._process_message(msg, **kwargs)
+                finally:
+                    if temporary_parent:
+                        parent = self.sessions.state.peek(session_key)
+                        if parent is not None and not parent.policy.persist:
+                            await self.sessions.state.delete(session_key, expected_generation=parent.generation)
         finally:
             await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
             self.runtime_event_publisher.clear_turn(session_key)

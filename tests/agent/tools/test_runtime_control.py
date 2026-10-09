@@ -267,6 +267,8 @@ async def test_subagent_check_is_session_scoped(tmp_path, single_task, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
     # Queued tasks must be scoped before their runner starts.
+    for _ in range(manager.max_concurrent_subagents):
+        await manager._run_slots.acquire()
     await manager.spawn("ALPHA_PRIVATE_TASK", label="ALPHA_LABEL", session_key="owner:a", runtime=runtime)
     await manager.spawn("BETA_PRIVATE_TASK", label="BETA_LABEL", session_key="owner:b", runtime=runtime)
     try:

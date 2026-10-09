@@ -1120,7 +1120,7 @@ async def test_subagent_followup_stages_provider_state_before_turn_runs(
     session = loop.sessions.get_or_create("cli:subagent-crash")
     session.provider_state = _provider_state()
     loop.sessions.save(session)
-    save_completed_subagent(loop, "sub-1", session.key)
+    await save_completed_subagent(loop, "sub-1", session.key)
 
     msg = InboundMessage(
         channel="system",
@@ -1152,7 +1152,7 @@ async def test_subagent_followup_state_is_durable_before_prompt_assembly(
     session = loop.sessions.get_or_create("cli:subagent-prompt-crash")
     session.provider_state = _provider_state()
     loop.sessions.save(session)
-    save_completed_subagent(loop, "sub-1", session.key)
+    await save_completed_subagent(loop, "sub-1", session.key)
 
     msg = InboundMessage(
         channel="system",
@@ -1186,7 +1186,7 @@ async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
     session = loop.sessions.get_or_create("cli:subagent-redelivery")
     session.provider_state = _provider_state()
     loop.sessions.save(session)
-    save_completed_subagent(loop, "sub-1", session.key)
+    await save_completed_subagent(loop, "sub-1", session.key)
     msg = InboundMessage(
         channel="system",
         sender_id="subagent",
@@ -1236,7 +1236,7 @@ async def test_subagent_followup_clears_state_before_compatibility_failure(
     session = loop.sessions.get_or_create("cli:subagent-compat-crash")
     session.provider_state = _provider_state()
     loop.sessions.save(session)
-    save_completed_subagent(loop, "sub-1", session.key)
+    await save_completed_subagent(loop, "sub-1", session.key)
 
     msg = InboundMessage(
         channel="system",
@@ -1977,7 +1977,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     session.add_message("user", "question")
     session.add_message("assistant", "working")
     loop.sessions.save(session)
-    save_completed_subagent(loop, "sub-1", session.key)
+    await save_completed_subagent(loop, "sub-1", session.key)
 
     runtime = loop.llm_runtime()
     seen: dict[str, object] = {}
@@ -2078,7 +2078,7 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    save_completed_subagent(loop, "sub-logs", "cli:logs")
+    await save_completed_subagent(loop, "sub-logs", "cli:logs")
 
     async def fake_run_agent_loop(transcript_input, **_kwargs):
         initial_messages = _assembled_messages(loop.context, transcript_input)
@@ -2115,7 +2115,7 @@ async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> 
 @pytest.mark.asyncio
 async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    save_completed_subagent(loop, "sub-1", "cli:test")
+    await save_completed_subagent(loop, "sub-1", "cli:test")
     visited: list[str] = []
 
     for name in (
@@ -2244,7 +2244,7 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
     for idx in range(3):
-        save_completed_subagent(loop, f"sub-{idx}", "cli:multi")
+        await save_completed_subagent(loop, f"sub-{idx}", "cli:multi")
         await loop._process_message(
             InboundMessage(
                 channel="system",
@@ -2362,7 +2362,7 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
     thread_session = loop.sessions.get_or_create("slack:C123:1700.42")
     thread_session.add_message("user", "thread question")
     loop.sessions.save(thread_session)
-    save_completed_subagent(loop, "sub-1", thread_session.key)
+    await save_completed_subagent(loop, "sub-1", thread_session.key)
 
     seen: dict[str, object] = {}
 
