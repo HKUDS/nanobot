@@ -180,6 +180,7 @@ export function SettingsPage({
     networkSafetyForm,
     networkSafetySaving,
     pendingRestartSections: controllerPendingRestartSections,
+    providerApiTypesBeforeResponsesRef,
     providerForms,
     providerOAuthCompleting,
     providerOAuthDialogError,
@@ -384,6 +385,7 @@ export function SettingsPage({
               capabilityError={nanobotFeaturesError}
               expandedProvider={expandedProvider}
               providerForms={providerForms}
+              providerApiTypesBeforeResponsesRef={providerApiTypesBeforeResponsesRef}
               visibleProviderKeys={visibleProviderKeys}
               editingProviderKeys={editingProviderKeys}
               providerSaving={providerSaving}
