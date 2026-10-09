@@ -80,7 +80,7 @@ export function ModelAPIControl({
             </SelectContent>
           </Select>
         ) : (
-          <span className="block text-[13px] text-muted-foreground sm:text-right">{fixedLabel}</span>
+          <span className="block pe-3 text-[13px] text-muted-foreground sm:text-right">{fixedLabel}</span>
         )}
       </SettingsRow>
       {configurable && selectedAPI === "responses" && (!requestAPIs || requestAPIs.includes("chat_completions")) ? (
