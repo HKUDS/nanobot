@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, TypedDict, cast
 
 from nanobot.session.manager import SessionManager
+from nanobot.session.types import SessionTypes
 
 SESSION_HANDLE_METADATA_KEY = "session_handle"
 
@@ -148,7 +149,7 @@ _allocate_name = allocate_session_handle_name
 
 
 def allocate_session_handles(
-    rows: list[dict[str, Any]],
+    rows: list[dict[str, Any]], types: SessionTypes,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Return valid existing names and metadata updates for missing handles."""
     used: set[str] = set()
@@ -166,6 +167,8 @@ def allocate_session_handles(
             continue
         raw_metadata = row.get("metadata")
         metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
+        if not types.needs_handle(metadata):
+            continue
         raw_name = metadata.get(SESSION_HANDLE_METADATA_KEY)
         try:
             name = normalize_session_handle(raw_name) if isinstance(raw_name, str) else ""

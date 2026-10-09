@@ -111,8 +111,8 @@ async def test_turn_tool_selection_preserves_empty_registries(tmp_path, monkeypa
     if selection == "explicit_empty":
         kwargs["tools"] = ToolRegistry()
     elif selection == "disable_all":
-        session = loop.sessions.get_or_create(key)
-        session.policy = SessionPolicy(disabled_tools=frozenset(loop.tools.tool_names))
+        await loop.sessions.state.get(key)
+        await loop.sessions.state.set_policy(key, SessionPolicy(disabled_tools=frozenset(loop.tools.tool_names)))
 
     try:
         response = await loop.process_direct("Handle this request", session_key=key, **kwargs)
@@ -332,12 +332,12 @@ async def test_deleted_child_cannot_notify_a_recreated_parent(tmp_path) -> None:
         task_id, = loop.subagents.statuses_for_session(key)
         notice = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=2)
         assert notice.require_existing_session
-        assert loop.sessions.delete_session(key)
+        assert await loop.sessions.state.delete(key)
         assert loop.sessions.read_session_file(SubagentSessions.key(task_id)) is None
-        loop.sessions.save(loop.sessions.get_or_create(key))
+        await loop.sessions.state.get(key)
 
         assert loop.subagents.statuses_for_session(key) == {}
-        loop._enqueue_session_message(notice)
+        await loop._enqueue_session_message(notice)
         assert key not in loop._pending_queues
         assert await loop._process_message(notice) is None
         loop.provider.chat_stream_with_retry.assert_not_awaited()

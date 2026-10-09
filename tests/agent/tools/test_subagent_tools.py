@@ -767,6 +767,7 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
             content="result",
         )
 
+    loop.tools.get_runtime_context_providers = MagicMock(return_value=[])
     fake_loop = MagicMock(wraps=asyncio.get_running_loop())
     fake_loop.time = clock
     loop_asyncio = SimpleNamespace(**vars(asyncio))

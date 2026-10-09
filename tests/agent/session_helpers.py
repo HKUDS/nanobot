@@ -21,11 +21,11 @@ def visible_message(message: dict) -> dict:
     return public_history_message(message)
 
 
-def save_completed_subagent(loop: AgentLoop, task_id: str, owner: str) -> None:
+async def save_completed_subagent(loop: AgentLoop, task_id: str, owner: str) -> None:
     """Persist the child that owns a synthetic completion notification."""
     assert loop.subagents.sessions is not None
     now = time.monotonic()
-    loop.subagents.sessions.create(SubagentStatus(
+    await loop.subagents.sessions.create(SubagentStatus(
         task_id=task_id, label=task_id, task_description="Background work",
         owner=owner, started_at=now, finished_at=now, completed_at=time.time(),
         state="done", phase="done",

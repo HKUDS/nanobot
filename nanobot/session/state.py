@@ -16,6 +16,7 @@ from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionPolicy, fork_session
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
+from nanobot.session.types import PARENT_SESSION_KEY, SessionTypes
 from nanobot.utils.cancellation import shield_and_drain
 
 _T = TypeVar("_T")
@@ -42,11 +43,13 @@ class SessionState:
         self, store: SqliteSessionStore, *, capacity: int = _DEFAULT_CAPACITY,
         workers: int = _DEFAULT_WORKERS,
         on_delete: Callable[[str], None] | None = None,
+        types: SessionTypes | None = None,
     ) -> None:
         if capacity < 1:
             raise ValueError("session operation capacity must be positive")
         if workers < 1:
             raise ValueError("session operation worker count must be positive")
+        self._types = types if types is not None else SessionTypes()
         self._store = store
         self._on_delete = on_delete
         self._snapshots: dict[str, Session] = {}
@@ -359,6 +362,39 @@ class SessionState:
             self._publish(session)
             return self._draft(session)
         return await self._execute(key, get)
+
+    async def create_child(
+        self, parent_key: str, key: str, *, metadata: Mapping[str, Any],
+        content: str, policy: SessionPolicy,
+    ) -> Session:
+        """Establish a child and its parent before execution leaves the owner."""
+        values = deepcopy(dict(metadata))
+
+        def create() -> Session:
+            def write() -> Session:
+                parent = self._load(parent_key, history=False)
+                if parent is None:
+                    with self._cache_lock:
+                        if parent_key in self._retired:
+                            raise SessionConflictError("parent session was deleted")
+                    parent = Session(key=parent_key, policy=policy)
+                    self._commit(parent)
+                effective = SessionPolicy(
+                    persist=parent.policy.persist and policy.persist,
+                    log_content=parent.policy.log_content and policy.log_content,
+                    disabled_tools=parent.policy.disabled_tools | policy.disabled_tools,
+                )
+                child = Session(key=key, policy=effective, metadata=values)
+                child.metadata[PARENT_SESSION_KEY] = parent_key
+                child.add_message("user", content)
+                self._commit(child)
+                return child
+
+            child = self._store.run_write(write)
+            self._publish(child)
+            return self._draft(child)
+
+        return await self._execute((parent_key, key), create, operation_name="create_child")
 
     @staticmethod
     def _refresh(draft: Session, fresh: Session) -> None:
@@ -690,7 +726,7 @@ class SessionState:
             changed: list[str] = []
 
             def write() -> dict[str, str]:
-                names, updates = allocate_session_handles(self._store.list_metadata())
+                names, updates = allocate_session_handles(self._store.list_metadata(), self._types)
                 for key, name in updates.items():
                     if self._store.update_metadata(
                         key,
@@ -781,27 +817,47 @@ class SessionState:
         *,
         expected_generation: str | None = None,
     ) -> bool:
-        def delete() -> bool:
-            def write() -> bool:
+        def delete() -> tuple[bool, set[str]]:
+            def write() -> tuple[bool, set[str]]:
                 session = self._load(key, history=False)
-                if (
-                    expected_generation is not None
-                    and (session is None or session.generation != expected_generation)
+                if expected_generation is not None and (
+                    session is None or session.generation != expected_generation
                 ):
                     raise SessionConflictError("delete belongs to a replaced session")
-                return self._store.delete(key)
+                rows = self._store.list_metadata()
+                with self._cache_lock:
+                    rows.extend({"key": child.key, "metadata": child.metadata}
+                                for child in self._transients.values())
+                children: dict[str, list[str]] = {}
+                for row in rows:
+                    parent = row["metadata"].get(PARENT_SESSION_KEY)
+                    if isinstance(parent, str):
+                        children.setdefault(parent, []).append(row["key"])
+                pending = [key]
+                removed: set[str] = set()
+                deleted = False
+                while pending:
+                    current = pending.pop()
+                    if current in removed:
+                        continue
+                    removed.add(current)
+                    pending.extend(children.get(current, ()))
+                    deleted = self._store.delete(current) or deleted
+                return deleted, removed
 
-            deleted = self._store.run_write(write)
+            deleted, removed = self._store.run_write(write)
             with self._cache_lock:
-                self._transients.pop(key, None)
-                self._snapshots.pop(key, None)
-                self._policies.pop(key, None)
-                self._retired.add(key)
-            return deleted
+                for current in removed:
+                    self._transients.pop(current, None)
+                    self._snapshots.pop(current, None)
+                    self._policies.pop(current, None)
+                    self._retired.add(current)
+            return deleted, removed
 
-        deleted = await self._execute(key, delete, operation_name="delete")
+        deleted, removed = await self._execute(None, delete, operation_name="delete")
         if self._on_delete is not None:
-            self._on_delete(key)
+            for current in removed:
+                self._on_delete(current)
         return deleted
 
     async def update_metadata(
