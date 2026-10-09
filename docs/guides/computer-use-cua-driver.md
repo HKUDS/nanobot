@@ -37,8 +37,9 @@ public native distribution needs its own release/signing work.
 Each gateway agent run owns one native connection, shared across its desktop
 tools. `get_window_state(pid, window_id)` selects a real window stream before
 observing or acting. macOS supplies the purple sharing indicator; the SDK supplies
-the cursor for supported actions. No full-display fallback, audio recording or
-saved capture is used. Other tasks cannot replace an active task's window.
+the cursor for supported actions. The sharing stream has no full-display fallback,
+records no audio and saves no preview frames. Agent screenshots still use nanobot's
+normal media artifacts, as described below. Other tasks cannot replace an active task's window.
 Task completion, cancellation and MCP disconnect release the stream. Idle sharing
 expires after 60 seconds. **Stop Sharing** revokes the SDK session and persists a
 pause; tool calls and automatic reconnection cannot clear it. Only an explicit
