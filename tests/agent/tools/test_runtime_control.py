@@ -403,7 +403,7 @@ async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: P
     first_messages = calls[0].kwargs["messages"]
     current = first_messages[-1]["content"]
     assert f"Current project (JSON path): {json.dumps(str(project.resolve()))}" in current
-    assert "File access: limited to this project" in current
+    assert "File access: project and tool-specific allowed paths only." in current
     assert calls[1].kwargs["messages"][:len(first_messages)] == first_messages
     results = {
         msg["tool_call_id"]: msg["content"] for msg in calls[1].kwargs["messages"]
@@ -438,8 +438,8 @@ async def test_workspace_context_uses_request_scope_not_active_tool_scope(
         block = await control.workspace_context(RequestContext("websocket", "chat", workspace_scope=scope))
         assert json.dumps(str(scope.project_path)) in block.content
         assert "old-project" not in block.content
-        assert ("File access: limited" in block.content) is restricted
-        assert ("shell sandbox is configured" in block.content) is bool(sandbox)
+        assert ("File access: project and tool-specific allowed paths only." in block.content) is restricted
+        assert ("Shell sandbox configured" in block.content) is bool(sandbox)
         assert "OS permissions" in block.content
         assert "system-enforced" not in block.content
     finally:
@@ -466,7 +466,7 @@ async def test_workspace_context_does_not_require_my_tool(tmp_path: Path) -> Non
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
     await loop.process_direct("Read the current project", ephemeral=True)
     message = provider.chat_stream_with_retry.await_args.kwargs["messages"][-1]
-    assert "File access: not restricted to this project." in message["content"]
+    assert "File access: no workspace restriction." in message["content"]
 
 
 @pytest.mark.asyncio
@@ -489,8 +489,8 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
     first, second, third = [LLMProvider._sanitize_empty_content(call.kwargs["messages"]) for call in calls]
     # Access changes belong to the new request, not a rewrite of the cached history.
     assert json.dumps(second[:len(first)]) == json.dumps(first)
-    assert "File access: limited" in first[-1]["content"]
-    assert "File access: not restricted" in second[-1]["content"]
+    assert "File access: project and tool-specific allowed paths only." in first[-1]["content"]
+    assert "File access: no workspace restriction." in second[-1]["content"]
     assert json.dumps(str(other.resolve())) in third[-1]["content"]
     assert json.dumps(str(project.resolve())) not in third[-1]["content"]
     assert all(call.kwargs["tools"] == calls[0].kwargs["tools"] for call in calls)
@@ -531,7 +531,7 @@ async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) 
     calls = loop.provider.chat_stream_with_retry.await_args_list
     context = calls[0].kwargs["messages"][-1]["content"]
     assert json.dumps(str(project.resolve())) in context
-    assert "File access: limited" in context
+    assert "File access: project and tool-specific allowed paths only." in context
     assert any(message.get("role") == "tool" and "active project" in message["content"]
                for message in calls[1].kwargs["messages"])
 
@@ -594,7 +594,7 @@ async def test_workspace_context_compaction_reuses_serialized_prefix(
         await loop.process_direct("Check again", session_key=session.key)
     current = provider.chat_stream_with_retry.await_args.kwargs["messages"][-1]["content"]
     assert current.count("Current project (JSON path):") == 1
-    assert "File access: not restricted to this project." in current
+    assert "File access: no workspace restriction." in current
 
 
 @pytest.mark.asyncio

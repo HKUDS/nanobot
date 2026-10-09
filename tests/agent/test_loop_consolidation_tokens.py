@@ -77,7 +77,7 @@ async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> No
     assert "Current checkpoint." in model_request[0]["content"]
     assert [message["role"] for message in model_request] == ["system", "user"]
     assert model_request[1]["content"].startswith("continue the task\n\n")
-    assert "File access: not restricted to this project." in model_request[1]["content"]
+    assert "File access: no workspace restriction." in model_request[1]["content"]
 
     reloaded = loop.sessions.get_or_create("cli:test")
     assert reloaded.messages[0]["content"] == "old-user-0"
@@ -133,7 +133,7 @@ async def test_ephemeral_runner_pressure_summarizes_without_persisting(tmp_path)
     model_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
     assert "Transient checkpoint." in model_request[0]["content"]
     assert model_request[1]["content"].startswith("continue the task\n\n")
-    assert "File access: not restricted to this project." in model_request[1]["content"]
+    assert "File access: no workspace restriction." in model_request[1]["content"]
 
     reloaded = loop.sessions.get_or_create("cli:ephemeral")
     assert reloaded.messages[: len(original_messages)] == original_messages

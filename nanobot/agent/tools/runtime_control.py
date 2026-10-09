@@ -190,15 +190,15 @@ class AgentRuntimeControl:
         lines = [
             f"Current project (JSON path): {root}",
             (
-                "File access: limited to this project, plus tool-specific allowed paths."
+                "File access: project and tool-specific allowed paths only."
                 if status.restrict_to_workspace
-                else "File access: not restricted to this project."
+                else "File access: no workspace restriction."
             ),
-            "OS permissions and tool-specific rules still apply.",
+            "OS permissions and tool rules still apply.",
         ]
         if self.__target.exec_config.sandbox:
             lines.append(
-                "A shell sandbox is configured. Extra shell binds do not grant file-tool access."
+                "Shell sandbox configured; extra binds do not grant file-tool access."
             )
         return RuntimeContextBlock(source="workspace_access", content=wrap_runtime_context_lines(lines))
 

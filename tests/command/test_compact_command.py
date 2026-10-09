@@ -141,7 +141,7 @@ async def test_compacted_session_waits_for_new_input_without_continuation(
     }
     assert [message["role"] for message in sent] == ["system", "user"]
     assert sent[1]["content"].startswith("hi\n\n")
-    assert "File access: not restricted to this project." in sent[1]["content"]
+    assert "File access: no workspace restriction." in sent[1]["content"]
 
     loop.sessions.invalidate(key)
     resumed = loop.sessions.get_or_create(key)
