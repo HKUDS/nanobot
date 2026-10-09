@@ -262,8 +262,8 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), set `"apiBase": "https://api.stepfun.com/v1"` in your stepfun provider config.
 > - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
 > - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, set `"apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"` in your xiaomi_mimo provider config.
-> - **Custom OpenAI-compatible providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own OpenAI-compatible endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. This named-custom path uses the OpenAI-compatible request format only. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` with `provider: "anthropic"`.
-> - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers, `openai_codex`, and `xai_grok`. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`.
+> - **Custom providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. Declare accepted protocols with `providers.<name>.api`; custom connections can use Chat Completions, Responses, or Anthropic Messages. See [custom connection APIs](#custom-connection-apis).
+> - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers, Anthropic Messages, `openai_codex`, and `xai_grok`. Native `bedrock`, `azure_openai`, and `github_copilot` backends reject `proxy`.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -316,33 +316,29 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 <details>
 <summary><b>OpenAI</b></summary>
 
-By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normally and routes GPT-5/o-series or explicit `reasoningEffort` requests through the Responses API when useful. You can force a specific API surface:
+Without an API declaration, direct OpenAI calls Chat Completions normally and routes GPT-5/GPT-6/o-series or explicit `reasoningEffort` requests through Responses. Set `providers.openai.api` to change the connection default, or use [preset API declarations](#preset-request-api) for individual models:
 
 ```json
 {
   "providers": {
     "openai": {
       "apiKey": "${OPENAI_API_KEY}",
-      "apiType": "chat_completions"
+      "api": { "supportedApis": ["chat_completions"], "preferredApi": "chat_completions" }
     }
   }
 }
 ```
 
-Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
+Use only `chat_completions` and/or `responses` for OpenAI. The connection declaration sets a default; an explicit preset declaration overrides it. Omit `api` or set it to `null` for Auto. A Responses-only declaration prevents Chat fallback; include both APIs to permit it.
 
-`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes
-ordinary fields through as the SDK `extra_body` value; list-valued `extraBody.tools` is handled
-specially and appended after generated function tools. With Responses, configure it in Responses
-API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends
-`extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
+Use fields accepted by the selected API in `extraBody`. Set `extraBody.tools` to add provider-hosted tools alongside nanobot's function tools. Responses also accepts `extraBody.include` to request additional output fields:
 
 ```json
 {
   "providers": {
     "openai": {
       "apiKey": "${OPENAI_API_KEY}",
-      "apiType": "responses",
+      "api": { "supportedApis": ["responses"], "preferredApi": "responses" },
       "extraBody": {
         "tools": [{ "type": "web_search" }],
         "include": ["web_search_call.action.sources"]
@@ -352,35 +348,7 @@ API body shape; nanobot merges ordinary top-level fields into the Responses requ
 }
 ```
 
-The WebUI's OpenAI web-search switch writes the corresponding `apiType` and `extraBody.tools`
-fields. A hosted search tool replaces nanobot's same-name local `web_search` function for that
-request, while other tools such as `web_fetch` remain available.
-
-</details>
-
-<details>
-<summary><b>DeepSeek native web search</b></summary>
-
-DeepSeek V4 Flash and Pro use DeepSeek's native Responses API. Their provider-hosted web search is
-enabled by default because it does not require a separate paid add-on. Turn it off from the
-WebUI provider settings, or with:
-
-```json
-{
-  "providers": {
-    "deepseek": {
-      "apiKey": "${DEEPSEEK_API_KEY}",
-      "extraBody": {
-        "tools": []
-      }
-    }
-  }
-}
-```
-
-The switch applies to `deepseek-v4-flash` and `deepseek-v4-pro`; DeepSeek models that remain on
-Chat Completions cannot use this Responses tool. Native search calls appear in the WebUI activity
-stream, and their opaque output items are preserved for multi-turn Responses state replay.
+The WebUI's OpenAI web-search switch selects Responses without Chat fallback. Provider-hosted search replaces nanobot's local `web_search` for those requests; other tools such as `web_fetch` remain available.
 
 </details>
 
@@ -1089,36 +1057,7 @@ Connects directly to any OpenAI-compatible endpoint — llama.cpp, Together AI, 
 
 > For local servers that don't require authentication, set `apiKey` to `null`.
 >
-> `custom` is the right choice for providers that expose an OpenAI-compatible **chat completions** API. It does **not** force third-party endpoints onto the OpenAI/Azure **Responses API**.
->
-> If your proxy or gateway is specifically Responses-API-compatible, configure the `azure_openai` provider shape and point `apiBase` at that endpoint:
->
-> ```json
-> {
->   "providers": {
->     "azure_openai": {
->       "apiKey": "your-api-key",
->       "apiBase": "https://api.your-provider.com",
->       "defaultModel": "your-model-name"
->     }
->   },
->   "modelPresets": {
->     "responsesProxy": {
->       "provider": "azure_openai",
->       "model": "your-model-name"
->     }
->   },
->   "agents": {
->     "defaults": {
->       "modelPreset": "responsesProxy"
->     }
->   }
-> }
-> ```
->
-> Anthropic-compatible endpoints are separate: use `providers.anthropic.apiBase` and set the preset provider to `anthropic`. Arbitrary custom provider names do not use the Anthropic Messages API format.
->
-> In short: **chat-completions-compatible endpoint → `custom` or a named custom provider**; **Responses-compatible endpoint → `azure_openai`**; **Anthropic-compatible endpoint → `anthropic` with `apiBase`**.
+> Custom connections default to Chat Completions when no API declaration is configured. For a Responses-only endpoint, set `providers.custom.api.supportedApis` to `["responses"]`. For an Anthropic-compatible endpoint, use `["anthropic_messages"]`. Named custom providers accept the same declaration. Native Anthropic credentials and proxies can also use `providers.anthropic`. See [custom connection APIs](#custom-connection-apis).
 
 Some OpenAI-compatible gateways expose request-body extensions such as vLLM guided decoding or local sampling controls. Put those under `extraBody`; nanobot merges them into the chat-completions request body after its provider defaults:
 
@@ -1460,10 +1399,86 @@ Older configs may still contain a `label` inside a preset. It is accepted when l
 | `contextWindowTokens` | Context window size used by prompt building and consolidation decisions. |
 | `temperature` | Sampling temperature. |
 | `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
+| `api` | Optional supported APIs and preferred API for this model at the configured endpoint. |
 
 `default` is reserved and always means the implicit preset built from direct `agents.defaults.*` fields; do not define `modelPresets.default`. Use `/model default` to switch back to those direct fields in an existing config.
 
 Set `agents.defaults.modelPreset` to choose the preset followed by sessions that have no saved model selection. When `modelPreset` is `null` or omitted, such sessions follow the implicit `default` preset from direct `agents.defaults.*` fields. `/model <preset>` saves an override in the current session, so its future turns keep that preset across process restarts while other sessions remain unchanged. The command does not write the selection back to `config.json`.
+
+### Custom connection APIs
+
+Custom providers use Chat Completions by default. If your service requires another protocol, open its WebUI connection editor and expand **Advanced options**. Use **Supported APIs** to select the protocols the service accepts and **Default API** to choose the default for Auto presets. Hover, focus, or tap a setting label for help. Existing connections without a declaration retain their previous behavior until you change these controls.
+
+In `config.json`, set `providers.<name>.api` for the built-in `custom` provider or a named custom provider:
+
+```json
+{
+  "providers": {
+    "companyProxy": {
+      "apiBase": "https://gateway.example.com",
+      "apiKey": "${COMPANY_API_KEY}",
+      "api": {
+        "supportedApis": ["responses", "anthropic_messages"],
+        "preferredApi": "anthropic_messages"
+      }
+    }
+  }
+}
+```
+
+`supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Auto presets inherit this default; explicit presets can only use protocols in the connection's list. Before removing a protocol used by an explicit preset, update that preset first.
+
+### Legacy OpenAI API selector migration
+
+If your configuration uses `providers.openai.apiType` (or `api_type`), save it with a version that supports the migration before upgrading further. Saving replaces the old field with `api`: `chat_completions` or `responses` becomes a single-API declaration, while `auto` keeps automatic selection. If both fields are present, `api` takes precedence, including `api: null`.
+
+The migration also accepts the `NANOBOT_PROVIDERS__OPENAI__API_TYPE` and `NANOBOT_PROVIDERS__OPENAI__APITYPE` environment variables.
+
+The old field is accepted in the first release containing this migration and the immediately following release. The third release will require the current `api` format.
+
+### Preset request API
+
+Leave API selection on **Auto** unless your service requires a specific protocol. To change it, open **Settings → Models → a preset → Advanced options → API connection**. Choose **Responses**, **Chat Completions**, or **Anthropic Messages** from the available options. Hover, focus, or tap a setting label for help. Credentials and endpoint URLs stay in the provider; two presets sharing a provider can select different APIs.
+
+**Auto (Responses)**, for example, shows the default API for the current provider, model, and reasoning settings. Auto uses a configured connection default when present. Otherwise, custom providers use Chat Completions, built-in providers use their known model defaults, and GitHub Copilot uses available account model information. Auto does not test whether a third-party service supports an API. If no preview is available, the label shows **Auto**.
+
+Selecting Responses also offers **Try Chat Completions if Responses is unsupported**, off by default. Enable it only if the service supports the same model through both APIs. The Auto label shows the default preference; permitted Chat fallback can still change the API used for a request.
+
+To configure presets in `config.json`:
+
+```json
+{
+  "modelPresets": {
+    "gatewayReasoning": {
+      "provider": "companyProxy",
+      "model": "gpt-6-luna",
+      "reasoningEffort": "high",
+      "api": {
+        "supportedApis": ["responses"],
+        "preferredApi": "responses"
+      }
+    },
+    "gatewayClaude": {
+      "provider": "companyProxy",
+      "model": "claude-sonnet-4-6",
+      "api": {
+        "supportedApis": ["anthropic_messages"],
+        "preferredApi": "anthropic_messages"
+      }
+    }
+  }
+}
+```
+
+`supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Omit `api` or set it to `null` for Auto. An explicit preset declaration overrides the OpenAI connection default; for custom connections, it must stay within the connection's supported APIs.
+
+A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Other errors do not trigger this API fallback. Provider-hosted search uses Responses when the preset allows it.
+
+Declare `anthropic_messages` alone in a preset. Requests use the same provider connection settings and go to `/v1/messages`; `apiBase` may include a trailing `/v1`. Automatic API fallback between Anthropic Messages and OpenAI formats is not supported; use separate [fallback presets](#model-fallbacks) when needed.
+
+OpenAI Codex, xAI Grok subscriptions, and Azure OpenAI use Responses; Anthropic uses Messages, and Bedrock uses Converse. These connections show their protocol name instead of an editable selector. Selecting Responses for a custom service does not enable OpenAI-native [context compaction](#responses-state-and-compaction).
+
+Advanced options is collapsed by default; opening or closing it preserves API settings. Changing a preset's model or provider resets its API selection to Auto unless the same update supplies a new declaration. Each fallback preset keeps its own API settings. Existing `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
 
 ### Model Fallbacks
 

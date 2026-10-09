@@ -71,7 +71,7 @@ def _response_object(value: object) -> dict[str, Any] | None:
         return object_value
     dump = getattr(value, "model_dump", None)
     if callable(dump):
-        dumped = _as_json_object(dump())
+        dumped = _as_json_object(dump(by_alias=True))
         if dumped is not None:
             return dumped
     try:
@@ -362,7 +362,7 @@ async def consume_sse_with_reasoning(
     on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     capture: ResponsesStreamCapture | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
-    """Consume a Responses API SSE stream, including visible reasoning summaries."""
+    """Consume a Responses API SSE stream, including reasoning text and summaries."""
     return await consume_responses_events(
         iter_sse(response),
         on_content_delta=on_content_delta,

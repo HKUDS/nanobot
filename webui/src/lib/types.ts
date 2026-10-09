@@ -595,6 +595,21 @@ export interface RuntimeCapabilities {
   can_export_diagnostics: boolean;
 }
 
+export type ModelRequestAPI = "chat_completions" | "responses" | "anthropic_messages";
+
+export interface ModelAPIConfig {
+  supported_apis: ModelRequestAPI[];
+  preferred_api?: ModelRequestAPI | null;
+}
+
+export type ProviderRequestAPI =
+  "chat_completions" | "responses" | "anthropic_messages" | "bedrock_converse" | "transcription";
+
+export interface AutomaticModelAPIPayload {
+  provider: string;
+  api: ProviderRequestAPI;
+}
+
 interface ProviderModelInfo {
   id: string;
   label?: string | null;
@@ -603,6 +618,7 @@ interface ProviderModelInfo {
   context_window?: number | null;
   reasoning_efforts?: string[];
   supports_backend_search?: boolean;
+  api?: ModelAPIConfig | null;
 }
 
 export interface ProviderModelsPayload {
@@ -672,6 +688,7 @@ export interface SettingsPayload {
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
+    api?: ModelAPIConfig | null;
     timezone: string;
     tool_hint_max_length: number;
   };
@@ -689,11 +706,15 @@ export interface SettingsPayload {
     temperature: number;
     reasoning_effort: string | null;
     reasoning_effort_values?: string[];
+    api?: ModelAPIConfig | null;
   }>;
   model_call_order: string[];
   model_call_order_editable: boolean;
   /** Whether an actual legacy model configuration is available to convert. */
   model_configuration_migratable?: boolean;
+  /** Host can resolve the default request API for an unsaved model configuration. */
+  model_api_resolution_supported?: boolean;
+  provider_api_configuration_supported?: boolean;
   created_model_preset?: string;
   created_provider?: string;
   providers: Array<{
@@ -708,13 +729,17 @@ export interface SettingsPayload {
     default_api_base?: string | null;
     model_selectable?: boolean;
     model_catalog?: ProviderModelsPayload["catalog_kind"];
-    api_type?: "auto" | "chat_completions" | "responses";
+    model_api_configurable?: boolean;
+    /** Request formats allowed by this connection, or adapter formats when undeclared. */
+    request_apis?: ProviderRequestAPI[];
+    adapter_request_apis?: ProviderRequestAPI[];
+    provider_api_configurable?: boolean;
+    api?: ModelAPIConfig | null;
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
     oauth_login_supported?: boolean;
     proxy?: string | null;
     advanced_fields?: Array<
-      | "api_type"
       | "extra_headers"
       | "extra_body"
       | "extra_query"
@@ -1307,6 +1332,7 @@ export interface ModelConfigurationCreate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  api?: ModelAPIConfig | null;
 }
 
 export interface ModelConfigurationUpdate {
@@ -1318,6 +1344,7 @@ export interface ModelConfigurationUpdate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  api?: ModelAPIConfig | null;
 }
 
 export interface ProviderSettingsUpdate {
@@ -1325,7 +1352,7 @@ export interface ProviderSettingsUpdate {
   displayName?: string;
   apiKey?: string;
   apiBase?: string;
-  apiType?: "auto" | "chat_completions" | "responses";
+  api?: ModelAPIConfig | null;
   proxy?: string;
   extraHeaders?: string;
   extraBody?: string;
@@ -1339,6 +1366,7 @@ export interface ProviderCreationUpdate {
   name: string;
   apiKey?: string;
   apiBase: string;
+  api?: ModelAPIConfig | null;
   proxy?: string;
   extraHeaders?: string;
   extraBody?: string;

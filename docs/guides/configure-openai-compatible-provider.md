@@ -69,7 +69,8 @@ nanobot agent -m "Hello!"
 - Use separate provider names for separate endpoints.
 - Use a placeholder key such as `EMPTY` only when the endpoint requires a
   non-empty key but does not validate it.
-- Leave `apiType` unset for OpenAI-compatible custom endpoints.
+- Leave the preset's API selection on Auto for ordinary Chat Completions services.
+- If the service requires Responses or Anthropic Messages, set its supported APIs and default in the connection's **Advanced options**. To choose an API for an individual model, use **Settings → Models → a preset → Advanced options → API connection**. See [connection settings](../configuration.md#custom-connection-apis) and [preset settings](../configuration.md#preset-request-api) for JSON examples.
 
 ## Security notes
 

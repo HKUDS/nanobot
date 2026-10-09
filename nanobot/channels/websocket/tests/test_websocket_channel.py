@@ -47,7 +47,7 @@ from nanobot.channels.websocket.runtime import (
     _parse_inbound_payload,
 )
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig
 from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
@@ -4842,18 +4842,19 @@ def test_settings_payload_normalizes_camel_case_provider(
     assert body["agent"]["provider"] == "minimax_anthropic"
 
 
-def test_settings_payload_exposes_api_type_only_for_openai(monkeypatch, tmp_path) -> None:
+def test_settings_payload_exposes_openai_api_defaults(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.providers.openai.api_type = "responses"
+    config.providers.openai.api = ModelAPIConfig(supported_apis=("responses",), preferred_api="responses")
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     body = settings_payload()
     providers = {provider["name"]: provider for provider in body["providers"]}
 
-    assert providers["openai"]["api_type"] == "responses"
-    assert "api_type" not in providers["custom"]
+    assert providers["openai"]["api"] == {"supported_apis": ["responses"], "preferred_api": "responses"}
+    assert providers["openai"]["request_apis"] == ["chat_completions", "responses"]
+    assert providers["custom"]["api"] is None
 
 
 def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> None:
@@ -4908,7 +4909,7 @@ def test_update_provider_settings_ignores_api_type_for_non_openai(monkeypatch, t
     assert body["providers"]
     config = load_config(config_path)
     assert config.providers.custom.api_base == "https://example.test/v1"
-    assert config.providers.custom.api_type == "auto"
+    assert config.providers.custom.api is None
 
 
 @pytest.mark.asyncio
