@@ -60,6 +60,32 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
+async def test_driver_uninstall_reaches_authenticated_mutation_route(tmp_path, monkeypatch):
+    from nanobot.apps.cua_driver import UNINSTALL_CAPABILITY, CuaDriver
+    from nanobot.webui.ws_http import GatewayHTTPHandler
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}")
+    remove = AsyncMock()
+    monkeypatch.setattr(CuaDriver, "uninstall", remove)
+    monkeypatch.setattr(CuaDriver, "stop", AsyncMock())
+    payload = {"name": "cua-driver", "consent": UNINSTALL_CAPABILITY}
+    path = GatewayHTTPHandler._webui_mutation_path("settings.mcp.uninstall", payload)
+    assert path == "/api/settings/mcp-presets/uninstall"
+    router = _router(config_path=config_path)
+    response = await _router(authorized=False, config_path=config_path).dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 401
+    response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
+    assert response.status_code == 405
+    response = await router.dispatch(None, _mutation_request(path, {"name": "cua-driver"}), path)
+    assert response.status_code == 409
+    remove.assert_not_awaited()
+    response = await router.dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 200
+    remove.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_driver_install_is_authenticated_consented_and_separate_from_enable(tmp_path, monkeypatch):
     from nanobot.apps.cua_driver import CAPABILITY, CuaDriver
 

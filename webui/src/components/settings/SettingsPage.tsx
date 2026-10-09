@@ -149,7 +149,9 @@ export function SettingsPage({
     installCapabilities,
     loading,
     localPrefs,
+    cuaCheckFeedback,
     mcpConfigImport,
+    mcpActionError,
     mcpError,
     mcpFieldValues,
     mcpMessage,
@@ -539,6 +541,8 @@ export function SettingsPage({
               cliError={cliAppsError}
               cliFocusName={cliAppsFocusName}
               mcpMessage={mcpMessage}
+              cuaCheckFeedback={cuaCheckFeedback}
+              mcpActionError={mcpActionError}
               mcpError={mcpError}
               mcpFieldValues={mcpFieldValues}
               customMcpForm={customMcpForm}

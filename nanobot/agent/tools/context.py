@@ -1,11 +1,12 @@
 """Runtime context for tool construction."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
+from uuid import uuid4
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -24,6 +25,31 @@ _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
     "nanobot_tool_request_context",
     default=None,
 )
+
+
+@dataclass
+class ToolRunScope:
+    """Resources acquired by tools live no longer than their owning run."""
+    id: str = field(default_factory=lambda: uuid4().hex)
+    cleanup: AsyncExitStack = field(default_factory=AsyncExitStack)
+
+
+_CURRENT_TOOL_RUN: ContextVar[ToolRunScope | None] = ContextVar("nanobot_tool_run", default=None)
+
+
+def current_tool_run() -> ToolRunScope | None:
+    return _CURRENT_TOOL_RUN.get()
+
+
+@asynccontextmanager
+async def tool_run_scope():
+    scope = ToolRunScope()
+    token = _CURRENT_TOOL_RUN.set(scope)
+    try:
+        async with scope.cleanup:
+            yield scope
+    finally:
+        _CURRENT_TOOL_RUN.reset(token)
 
 
 @dataclass(frozen=True)

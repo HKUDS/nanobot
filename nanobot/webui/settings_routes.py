@@ -94,6 +94,7 @@ def _channel_connect_route(path: str) -> tuple[str, str] | None:
 _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/setup": "setup",
     "/api/settings/mcp-presets/install": "install",
+    "/api/settings/mcp-presets/uninstall": "uninstall",
     "/api/settings/mcp-presets/enable": "enable",
     "/api/settings/mcp-presets/disable": "disable",
     "/api/settings/mcp-presets/remove": "remove",

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
+import computerUseIcon from "@/assets/apps/computer-use.webp";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { setAppLanguage } from "@/i18n";
 import * as clipboard from "@/lib/clipboard";
@@ -737,6 +738,21 @@ describe("MessageBubble", () => {
     const logo = screen.getByTestId("message-mcp-mention-logo-browserbase");
     expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
     expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
+  });
+
+  it.each(["Cua Driver", "nanobot Computer Use", "Computer Use"])("uses current Computer Use branding for saved %s mentions", (displayName) => {
+    const message: UIMessage = {
+      id: "computer-use", role: "user", content: "Use @cua-driver please",
+      mcpPresets: [{ name: "cua-driver", display_name: displayName, logo_url: null }],
+    };
+    render(<MessageBubble message={message} mcpPresets={[{
+      ...MCP_PRESETS[0], name: "cua-driver", display_name: "Cua Driver", source: "preset", logo_url: null,
+    }]} />);
+    const token = screen.getByTestId("message-mcp-mention-cua-driver");
+    expect(token).toHaveTextContent("@Computer Use");
+    expect(token).toHaveAttribute("title", "MCP server: Computer Use (@cua-driver)");
+    expect(token.querySelector("img")).toHaveAttribute("src", computerUseIcon);
+    expect(message.content).toBe("Use @cua-driver please");
   });
 
   it.each((["cli", "mcp"] as const).flatMap((kind) => [

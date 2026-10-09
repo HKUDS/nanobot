@@ -55,6 +55,117 @@ def serve(monkeypatch, release, data):
 
 
 @pytest.mark.asyncio
+async def test_uninstall_removes_only_verified_package_and_allows_reinstall(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+
+    release, data = package()
+    serve(monkeypatch, release, data)
+    driver = CuaDriver(tmp_path / "config.json")
+    save_config(Config(), driver.config_path)
+    await driver.install()
+    stop = AsyncMock()
+    monkeypatch.setattr(driver, "stop", stop)
+    other = driver.root / "separately-installed"
+    other.mkdir()
+    (other / "keep").write_text("user data")
+    await driver.uninstall()
+    stop.assert_awaited_once()
+    assert not driver.directory.exists()
+    assert (other / "keep").read_text() == "user data"
+    await driver.install()
+    assert driver.installed()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("returncodes", [(0, 0, 0), (0, 0, 1)])
+async def test_native_uninstall_resets_only_own_desktop_grants_before_removal(tmp_path, monkeypatch, returncodes):
+    from unittest.mock import AsyncMock
+
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+
+    driver = CuaDriver(tmp_path / "config.json")
+    driver.release = Release("darwin-native", "verified", native=True)
+    save_config(Config(), driver.config_path)
+    driver.executable.parent.mkdir(parents=True)
+    driver.executable.write_bytes(b"native")
+    (driver.directory / ".nanobot-verified").write_text("verified")
+    stop = AsyncMock()
+    monkeypatch.setattr(driver, "stop", stop)
+
+    async def spawn(*args, **kwargs):
+        stop.assert_awaited_once()
+        assert driver.installed()  # Keep the bundle for reset and error recovery.
+        return AsyncMock(wait=AsyncMock(return_value=returncodes[len(process.call_args_list) - 1]))
+
+    process = AsyncMock(side_effect=spawn)
+    monkeypatch.setattr(cua_driver.asyncio, "create_subprocess_exec", process)
+    if returncodes[-1]:
+        with pytest.raises(DriverError, match="Some grants may already be reset"):
+            await driver.uninstall(reset_permissions=True)
+        assert driver.installed()
+    else:
+        await driver.uninstall(reset_permissions=True)
+        assert not driver.directory.exists()
+    assert process.call_args_list[0].args == (
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+        "-f", str(driver.bundle),
+    )
+    assert [call.args for call in process.call_args_list[1:]] == [
+        ("/usr/bin/tccutil", "reset", service, "io.nanobot.computer-use")
+        for service in ("Accessibility", "ScreenCapture")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_uninstall_cannot_reset_shared_official_grants(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+
+    driver = CuaDriver(tmp_path / "config.json")
+    save_config(Config(), driver.config_path)
+    process = AsyncMock()
+    monkeypatch.setattr(cua_driver.asyncio, "create_subprocess_exec", process)
+    with pytest.raises(DriverError, match="independent nanobot"):
+        await driver.uninstall(reset_permissions=True)
+    process.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_uninstall_refuses_enabled_unverified_and_unstoppable_driver(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+
+    release, data = package()
+    serve(monkeypatch, release, data)
+    driver = CuaDriver(tmp_path / "config.json")
+    config = Config()
+    save_config(config, driver.config_path)
+    await driver.install()
+    config.tools.mcp_servers[cua_driver.NAME] = driver.configuration("observe")
+    save_config(config, driver.config_path)
+    with pytest.raises(DriverError, match="Disable"):
+        await driver.uninstall()
+    config.tools.mcp_servers.clear()
+    save_config(config, driver.config_path)
+    monkeypatch.setattr(driver, "stop", AsyncMock(side_effect=DriverError("stop failed")))
+    with pytest.raises(DriverError, match="stop failed"):
+        await driver.uninstall()
+    assert driver.installed()
+    (driver.directory / ".nanobot-verified").unlink()
+    with pytest.raises(DriverError, match="not a verified"):
+        await driver.uninstall()
+    assert driver.executable.exists()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("target", ["darwin-universal", "linux-x86_64", "linux-arm64", "windows-x86_64", "windows-arm64"])
 async def test_install_is_verified_idempotent_and_does_not_enable(tmp_path, monkeypatch, target):
     from unittest.mock import AsyncMock
@@ -432,36 +543,51 @@ async def test_setup_opens_only_fixed_panes_or_this_gateways_bundle(tmp_path, mo
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(cua_driver.platform.system() != "Darwin", reason="macOS staged permission request")
-async def test_permission_request_uses_exact_signed_app_without_capture_or_bypass(tmp_path, monkeypatch):
-    from unittest.mock import AsyncMock
+@pytest.mark.skipif(cua_driver.platform.system() != "Darwin", reason="macOS native permission flow")
+async def test_permission_setup_and_mcp_share_one_native_startup(tmp_path, monkeypatch):
+    import asyncio
+    from unittest.mock import Mock
 
     from nanobot.apps import cua_driver_stdio
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
 
     monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
     temporary = tmp_path / "private socket"
     temporary.mkdir(mode=0o700)
     monkeypatch.setattr(cua_driver_stdio, "endpoint", lambda path: temporary / "driver.sock")
-    spawn = AsyncMock(return_value=AsyncMock(wait=AsyncMock(return_value=0)))
-    monkeypatch.setattr(cua_driver.asyncio, "create_subprocess_exec", spawn)
     driver = CuaDriver(tmp_path / "中文 config.json")
-    await driver.request_permissions()
-    args = spawn.call_args.args
-    assert args[0:3] == ("/usr/bin/open", "-n", "-g")
+    config = Config()
+    config.tools.mcp_servers["cua-driver"] = driver.configuration("observe")
+    save_config(config, driver.config_path)
+    # Socket availability is independent of grants: upstream binds before
+    # waiting for the user. A second tab must join this in-progress setup.
+    listening = False
+
+    def start(*_args, **_kwargs):
+        nonlocal listening
+        listening = True
+
+    run = Mock(side_effect=start)
+    monkeypatch.setattr(cua_driver_stdio.subprocess, "run", run)
+    monkeypatch.setattr(cua_driver_stdio, "daemon_listening", lambda path: listening)
+    execute = Mock()
+    monkeypatch.setattr(cua_driver_stdio.os, "execve", execute)
+    await asyncio.gather(driver.request_permissions(), CuaDriver(driver.config_path).request_permissions())
+    cua_driver_stdio.launch(driver.config_path)
+    run.assert_called_once()
+    args = run.call_args.args[0]
+    assert args[0:3] == ["/usr/bin/open", "-n", "-g"]
     assert args[args.index("-a") + 1] == str(driver.directory / "CuaDriver.app")
-    assert args[args.index("--args") + 1] == "__permissions-host-request"
-    assert f"TMPDIR={temporary}" in args
+    assert args[args.index("--args") + 1] == "serve"
     assert "DO_NOT_TRACK=1" in args
     assert "--probe-direct-capture" not in args and "--no-permissions-gate" not in args
-    result = Path(args[args.index("--result-file") + 1])
-    assert result.parent == temporary and result.stat().st_mode & 0o077 == 0
+    execute.assert_called_once()
+    # Recovery while a daemon is already waiting cannot multiply prompts.
     await driver.request_permissions()
-    assert list(temporary.iterdir()) == [result]  # no unbounded result-file accumulation
-    result.unlink()
-    untouched = tmp_path / "keep"
-    untouched.write_text("keep")
-    result.symlink_to(untouched)
-    with pytest.raises(OSError):
+    run.assert_called_once()
+    config.tools.mcp_servers.clear()
+    save_config(config, driver.config_path)
+    with pytest.raises(DriverError, match="disabled"):
         await driver.request_permissions()
-    assert untouched.read_text() == "keep"
-    assert spawn.await_count == 2
+    run.assert_called_once()

@@ -1174,7 +1174,7 @@ interface McpPresetField {
   env_var?: string | null;
 }
 
-export type McpPresetAction = "enable" | "disable" | "remove" | "test" | "reconnect" | "install" | "setup";
+export type McpPresetAction = "enable" | "disable" | "remove" | "test" | "reconnect" | "install" | "setup" | "uninstall";
 
 export interface CuaDriverSetup {
   schema: 1;
@@ -1185,7 +1185,7 @@ export interface CuaDriverSetup {
   installed: boolean;
   managed: boolean;
   mode: "observe" | "control" | "custom" | "off";
-  permission_app?: "CuaDriver";
+  permission_app?: "CuaDriver" | "nanobot Computer Use";
 }
 
 export interface CuaDriverCheck {
@@ -1193,6 +1193,7 @@ export interface CuaDriverCheck {
   accessibility: boolean | null;
   screen_recording: boolean | null;
   capture_verified: boolean;
+  sharing_paused?: boolean;
 }
 
 export interface McpPresetInfo {

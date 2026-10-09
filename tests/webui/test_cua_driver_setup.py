@@ -6,6 +6,8 @@ from nanobot.apps.cua_driver import (
     CAPABILITY,
     PERMISSIONS_CAPABILITY,
     RECONNECT_CAPABILITY,
+    UNINSTALL_CAPABILITY,
+    UNINSTALL_RESET_CAPABILITY,
     CuaDriver,
 )
 from nanobot.config.schema import Config, MCPServerConfig
@@ -27,6 +29,88 @@ def settings(tmp_path):
     path = tmp_path / "config.json"
     save_config(config, path)
     return WebUISettingsConfig(path)
+
+
+@pytest.mark.asyncio
+async def test_two_tabs_cannot_uninstall_during_install(settings, monkeypatch):
+    import asyncio
+
+    started, finish = asyncio.Event(), asyncio.Event()
+
+    async def install(_self):
+        started.set()
+        await finish.wait()
+
+    monkeypatch.setattr(CuaDriver, "install", install)
+    remove = AsyncMock()
+    monkeypatch.setattr(CuaDriver, "uninstall", remove)
+    pending = asyncio.create_task(mcp_presets_settings_action("install", {
+        "name": ["cua-driver"], "consent": [f"{CAPABILITY}:install"],
+    }, config=settings))
+    await started.wait()
+    try:
+        with pytest.raises(McpPresetError, match="already in progress"):
+            await mcp_presets_settings_action("uninstall", {
+                "name": ["cua-driver"], "consent": [UNINSTALL_CAPABILITY],
+            }, config=settings)
+        remove.assert_not_awaited()
+    finally:
+        finish.set()
+        await pending
+
+
+@pytest.mark.asyncio
+async def test_uninstall_has_explicit_consent_and_revokes_before_removal(settings, monkeypatch):
+    monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
+    settings.update(lambda cfg: cfg.tools.mcp_servers.update({"cua-driver": CuaDriver(settings.path).configuration("observe")}))
+    events = []
+
+    async def stop():
+        assert "cua-driver" not in settings.load().tools.mcp_servers
+        events.append("stop")
+
+    async def remove():
+        assert events == ["reload", "stop"]
+        events.append("uninstall")
+
+    async def reload():
+        events.append("reload")
+        return {"ok": True, "requires_restart": False}
+
+    monkeypatch.setattr(CuaDriver, "stop", AsyncMock(side_effect=stop))
+    monkeypatch.setattr(CuaDriver, "uninstall", AsyncMock(side_effect=remove))
+    with pytest.raises(McpPresetError, match="Confirm removing"):
+        await mcp_presets_settings_action("uninstall", {"name": ["cua-driver"]}, config=settings)
+    assert "cua-driver" in settings.load().tools.mcp_servers
+    result = await mcp_presets_settings_action("uninstall", {
+        "name": ["cua-driver"], "consent": [UNINSTALL_CAPABILITY],
+    }, config=settings, reload_mcp=reload)
+    assert events == ["reload", "stop", "uninstall"]
+    assert result["last_action"]["verification"] == ["config_absent", "managed_package_absent"]
+    assert UNINSTALL_CAPABILITY in result["capabilities"]
+
+
+@pytest.mark.asyncio
+async def test_reset_uninstall_needs_native_identity_and_new_consent(settings, monkeypatch):
+    from nanobot.apps.cua_driver import Release
+
+    monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
+    settings.update(lambda cfg: cfg.tools.mcp_servers.update({"cua-driver": CuaDriver(settings.path).configuration("observe")}))
+    uninstall = AsyncMock()
+    monkeypatch.setattr(CuaDriver, "uninstall", uninstall)
+    monkeypatch.setattr(CuaDriver, "stop", AsyncMock())
+    query = {"name": ["cua-driver"], "consent": [UNINSTALL_RESET_CAPABILITY]}
+    with pytest.raises(McpPresetError, match="independent nanobot"):
+        await mcp_presets_settings_action("uninstall", query, config=settings)
+    assert "cua-driver" in settings.load().tools.mcp_servers
+    uninstall.assert_not_awaited()
+    monkeypatch.setattr("nanobot.apps.cua_driver.host_release", lambda: Release("darwin-native", "digest", native=True))
+    result = await mcp_presets_settings_action("uninstall", query, config=settings)
+    uninstall.assert_awaited_once_with(reset_permissions=True)
+    assert "cua-driver" not in settings.load().tools.mcp_servers
+    assert "desktop_permissions_reset" in result["last_action"]["verification"]
+    assert UNINSTALL_RESET_CAPABILITY in result["capabilities"]
+    assert UNINSTALL_RESET_CAPABILITY in webui_contract()["capabilities"]
 
 
 @pytest.mark.asyncio
@@ -94,7 +178,10 @@ async def test_disable_stops_native_driver_even_when_runtime_refresh_fails(setti
 @pytest.mark.asyncio
 async def test_native_request_needs_explicit_consent_and_preserves_tool_scope(settings, monkeypatch):
     monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
-    request = AsyncMock()
+    async def request_after_consent():
+        assert settings.load().tools.mcp_servers["cua-driver"].enabled_tools
+
+    request = AsyncMock(side_effect=request_after_consent)
     monkeypatch.setattr(CuaDriver, "request_permissions", request)
     values = {"name": ["cua-driver"], "target": ["permissions"]}
     for consent in ({}, {"consent": [PERMISSIONS_CAPABILITY]}):

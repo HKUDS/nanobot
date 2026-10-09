@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from mcp.types import Tool as MCPToolDefinition
 
     from nanobot.agent.tools.mcp_oauth import MCPOAuthHandlers
+    from nanobot.apps.computer_use_turn import NativeTurnTransport
     from nanobot.config.schema import Config, MCPServerConfig
 
 # Transient connection errors that warrant a single retry.
@@ -552,6 +553,8 @@ class _MCPWrapperBase(Tool):
             )
             return False
         self._session = refreshed_session
+        if isinstance(self, MCPToolWrapper):
+            self._native_turn = getattr(refreshed_tool, "_native_turn", None)
         return True
 
 
@@ -616,6 +619,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         *,
         image_output: Literal["artifact", "inline"] = "artifact",
         retry_tool_calls: bool = True,
+        native_turn: NativeTurnTransport | None = None,
     ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
@@ -626,6 +630,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._tool_timeout = tool_timeout
         self._image_output = image_output
         self._retry_tool_calls = retry_tool_calls
+        self._native_turn = native_turn
 
     @property
     def name(self) -> str:
@@ -653,7 +658,8 @@ class MCPToolWrapper(_MCPWrapperBase):
         while True:
             try:
                 result = await asyncio.wait_for(
-                    self._session.call_tool(self._original_name, arguments=kwargs),
+                    self._native_turn.call_tool(self._original_name, kwargs) if self._native_turn is not None
+                    else self._session.call_tool(self._original_name, arguments=kwargs),
                     timeout=self._tool_timeout,
                 )
             except asyncio.TimeoutError:
@@ -1219,6 +1225,11 @@ async def connect_mcp_servers(
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tool_defs]
             available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tool_defs]
+            native_turn = None
+            if cfg.env.get("NANOBOT_COMPUTER_USE_NATIVE") == "1":
+                from nanobot.apps.computer_use_turn import NativeTurnTransport
+
+                native_turn = NativeTurnTransport(session)
             for tool_def in tool_defs:
                 wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                 if (
@@ -1235,6 +1246,7 @@ async def connect_mcp_servers(
                 wrapper = MCPToolWrapper(
                     session, name, tool_def, tool_timeout=cfg.tool_timeout,
                     image_output=cfg.image_output, retry_tool_calls=cfg.retry_tool_calls,
+                    native_turn=native_turn,
                 )
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)

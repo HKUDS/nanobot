@@ -10,6 +10,7 @@ import type {
   ApiServicePayload,
   AutomationsPayload,
   CliAppsPayload,
+  CuaDriverCheck,
   McpOAuthFlowPayload,
   McpPresetsPayload,
   NanobotFeatureInfo,
@@ -21,6 +22,14 @@ export type NanobotFeatureInstallRequest = {
   feature: NanobotFeatureInfo;
   installOnly: boolean;
 };
+
+/** The explicit check's receipt is separate from background connection snapshots. */
+export type CuaCheckFeedback =
+  | { state: "checking" }
+  | { state: "done"; check?: CuaDriverCheck; runtimeConnected: boolean; error: string | null };
+
+/** A server action's error, distinct from catalog-wide reload diagnostics. */
+export type McpActionError = { name: string; message: string };
 
 export function useSystemSettingsState() {
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
@@ -60,6 +69,8 @@ export function useSystemSettingsState() {
   const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("cli");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
+  const [mcpActionError, setMcpActionError] = useState<McpActionError | null>(null);
+  const [cuaCheckFeedback, setCuaCheckFeedback] = useState<CuaCheckFeedback | null>(null);
   const [automationsError, setAutomationsError] = useState<string | null>(null);
   const [automationAction, setAutomationAction] = useState<string | null>(null);
   const [automationPendingDelete, setAutomationPendingDelete] =
@@ -91,7 +102,9 @@ export function useSystemSettingsState() {
     cliAppsLoading,
     cliAppsMessage,
     customMcpForm,
+    cuaCheckFeedback,
     mcpConfigImport,
+    mcpActionError,
     mcpError,
     mcpFieldValues,
     mcpMessage,
@@ -133,7 +146,9 @@ export function useSystemSettingsState() {
     setCliAppsLoading,
     setCliAppsMessage,
     setCustomMcpForm,
+    setCuaCheckFeedback,
     setMcpConfigImport,
+    setMcpActionError,
     setMcpError,
     setMcpFieldValues,
     setMcpMessage,

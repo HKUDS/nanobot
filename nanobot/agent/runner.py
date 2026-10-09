@@ -23,7 +23,7 @@ from nanobot.agent.context_governance import (
     TranscriptBuilder,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.agent.tools.context import tool_log_content_allowed, tool_run_scope
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.events import NO_EVENTS, EventSink
@@ -290,6 +290,10 @@ class AgentRunner:
         return True
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        async with tool_run_scope():
+            return await self._run_scoped(spec)
+
+    async def _run_scoped(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
         messages, compaction = self._initial_transcript_and_compaction(spec)
         context = AgentRunHookContext(messages=deepcopy(messages))

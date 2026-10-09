@@ -7,6 +7,7 @@ import {
 } from "@/components/InlineTokenHighlight";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { logoFallbackUrls } from "@/lib/provider-brand";
+import { mcpPresetBrand } from "@/lib/mcp-preset-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
 import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -35,8 +36,8 @@ export function cliAppInitials(app: CliAppInfo): string {
       .join("") || app.name.slice(0, 2).toUpperCase()
   );
 }
-export function mcpPresetInitials(preset: Pick<McpPresetInfo, "name" | "display_name">): string {
-  const value = preset.display_name || preset.name;
+export function mcpPresetInitials(preset: Pick<McpPresetInfo, "name" | "display_name" | "source" | "driver_setup">): string {
+  const value = mcpPresetBrand(preset).display_name || preset.name;
   return (
     value
       .split(/\s+/)
@@ -260,11 +261,12 @@ function McpPresetMentionToken({
 }) {
   const { t } = useTranslation();
   const color = preset.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const displayName = preset.display_name?.trim() || preset.name;
+  const brand = mcpPresetBrand(preset);
+  const displayName = brand.display_name?.trim() || preset.name;
   const mentionName = variant === "message"
     ? displayName
     : composerMentionLabel({ kind: "mcp", text: label, preset }).slice(1);
-  const logoUrls = useMemo(() => logoFallbackUrls(preset.logo_url), [preset.logo_url]);
+  const logoUrls = useMemo(() => logoFallbackUrls(brand.logo_url), [brand.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const showLogo = Boolean(logoUrl);
   const testIdPrefix = variant === "composer" ? "composer" : "message";

@@ -26,10 +26,13 @@ from nanobot.agent.tools.mcp_oauth import (
     mcp_oauth_has_credentials,
 )
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.apps.computer_use_native import CAPABILITY as CUA_NATIVE_CAPABILITY
 from nanobot.apps.cua_driver import CAPABILITY as CUA_CAPABILITY
 from nanobot.apps.cua_driver import PERMISSIONS_CAPABILITY as CUA_PERMISSIONS_CAPABILITY
 from nanobot.apps.cua_driver import RECONNECT_CAPABILITY as CUA_RECONNECT_CAPABILITY
 from nanobot.apps.cua_driver import SETUP_CAPABILITY as CUA_SETUP_CAPABILITY
+from nanobot.apps.cua_driver import UNINSTALL_CAPABILITY as CUA_UNINSTALL_CAPABILITY
+from nanobot.apps.cua_driver import UNINSTALL_RESET_CAPABILITY as CUA_UNINSTALL_RESET_CAPABILITY
 from nanobot.apps.cua_driver import CuaDriver, DriverError
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
@@ -997,7 +1000,7 @@ def mcp_presets_payload(
         if f"plugin-{plugin.name}" not in existing_names
     ]
     payload: dict[str, Any] = {
-        "capabilities": [CUA_CAPABILITY, CUA_SETUP_CAPABILITY, CUA_PERMISSIONS_CAPABILITY, CUA_RECONNECT_CAPABILITY],
+        "capabilities": [CUA_CAPABILITY, CUA_SETUP_CAPABILITY, CUA_PERMISSIONS_CAPABILITY, CUA_RECONNECT_CAPABILITY, CUA_UNINSTALL_CAPABILITY, CUA_NATIVE_CAPABILITY, CUA_UNINSTALL_RESET_CAPABILITY],
         "presets": [*preset_rows, *custom_rows, *plugin_rows],
         "installed_count": len(config.tools.mcp_servers)
         + sum(int(row["enabled"]) for row in plugin_rows),
@@ -1691,7 +1694,7 @@ async def mcp_presets_settings_action(
         saved_config = load_config(config_path)
         saved_driver = saved_config.tools.mcp_servers.get(name)
         managed_driver = saved_driver is None or CuaDriver(config_path or get_config_path()).owns(saved_driver)
-        if managed_driver or action in {"enable", "install", "disable", "setup"}:
+        if managed_driver or action in {"enable", "install", "disable", "setup", "uninstall"}:
             return await _cua_driver_action(action, query, config=config, reload_mcp=reload_mcp,
                                             mcp_runtime_status=mcp_runtime_status)
     if action == "setup":
@@ -1752,6 +1755,32 @@ async def _cua_driver_action(
     action: str, query: QueryParams, *, config: WebUISettingsConfig | None,
     reload_mcp: MCPReload | None, mcp_runtime_status: McpRuntimeStatus | None,
 ) -> dict[str, Any]:
+    """Serialize settings operations across tabs and gateway processes."""
+    from filelock import FileLock, Timeout
+
+    # A read-only permission probe must never delay disabling desktop access.
+    # Its completion already rechecks current configuration before reloading.
+    if action == "test":
+        return await _cua_driver_action_locked(action, query, config=config,
+            reload_mcp=reload_mcp, mcp_runtime_status=mcp_runtime_status)
+    driver = CuaDriver(config.path if config is not None else get_config_path())
+    driver._inside(driver.root).mkdir(parents=True, exist_ok=True)
+    lock = FileLock(str(driver.root / "action.lock"))
+    try:
+        lock.acquire(timeout=0)
+    except Timeout as exc:
+        raise McpPresetError("Computer Use setup is already in progress. Wait for it to finish.", 409) from exc
+    try:
+        return await _cua_driver_action_locked(action, query, config=config,
+            reload_mcp=reload_mcp, mcp_runtime_status=mcp_runtime_status)
+    finally:
+        lock.release()
+
+
+async def _cua_driver_action_locked(
+    action: str, query: QueryParams, *, config: WebUISettingsConfig | None,
+    reload_mcp: MCPReload | None, mcp_runtime_status: McpRuntimeStatus | None,
+) -> dict[str, Any]:
     """Own installer consent and configuration; do not expose native setup to the agent."""
     from nanobot.webui.settings_services import WebUISettingsConfig
 
@@ -1761,13 +1790,14 @@ async def _cua_driver_action(
     if existing is not None and not driver.owns(existing):
         raise McpPresetError("This Cua Driver connection is managed manually. Its configuration has not been changed.", 409)
     check = None
-    changed = action in {"enable", "disable", "remove", "reconnect"}
+    reset_permissions = False
+    changed = action in {"enable", "disable", "remove", "reconnect", "uninstall"}
     try:
         if action == "install":
             if _query_first(query, "consent") != f"{CUA_CAPABILITY}:install":
                 raise McpPresetError("Confirm the driver download and installation on the gateway computer first.", 409)
             await driver.install()
-            message = "nanobot Computer Use installed and verified. Desktop access is still disabled."
+            message = "Computer Use installed and verified. Desktop access is still disabled."
         elif action == "enable":
             mode = _query_first(query, "mode") or ""
             if _query_first(query, "consent") != f"{CUA_CAPABILITY}:{mode}":
@@ -1779,10 +1809,6 @@ async def _cua_driver_action(
             if permissions:
                 if permissions != CUA_PERMISSIONS_CAPABILITY:
                     raise McpPresetError("Confirm the macOS permission request first.", 409)
-                # Changing the tool scope is not a new macOS setup. This also
-                # prevents older clients from re-prompting on every mode change.
-                if existing is None:
-                    await driver.request_permissions()
 
             def enable(current: Config) -> None:
                 saved = current.tools.mcp_servers.get("cua-driver")
@@ -1791,8 +1817,28 @@ async def _cua_driver_action(
                 current.tools.mcp_servers["cua-driver"] = server
 
             await asyncio.to_thread(settings.update, enable)
-            message = "nanobot Computer Use enabled. Complete OS permissions on the gateway computer, then check the connection."
-        elif action in {"disable", "remove"}:
+            if driver.native:
+                from nanobot.apps.computer_use_native import clear_pause
+                from nanobot.apps.cua_driver_stdio import endpoint
+
+                # Scope belongs to the native process too. Close the old
+                # runtime before a confirmed scope change or explicit enable.
+                await driver.stop()
+                clear_pause(endpoint(settings.path))
+            # Persist consent before starting the one native permission flow.
+            # The MCP reload reuses that daemon instead of launching a second
+            # prompt-capable process. Scope changes do not request OS grants.
+            if permissions and existing is None:
+                await driver.request_permissions()
+            message = "Computer Use enabled. Complete OS permissions on the gateway computer, then check the connection."
+        elif action in {"disable", "remove", "uninstall"}:
+            if action == "uninstall":
+                consent = _query_first(query, "consent")
+                if consent not in {CUA_UNINSTALL_CAPABILITY, CUA_UNINSTALL_RESET_CAPABILITY}:
+                    raise McpPresetError("Confirm removing this gateway's Computer Use installation first.", 409)
+                reset_permissions = consent == CUA_UNINSTALL_RESET_CAPABILITY
+                if reset_permissions and not driver.native:
+                    raise McpPresetError("Only the independent nanobot Computer Use app can reset its Mac permissions.", 409)
             def disable(current: Config) -> None:
                 saved = current.tools.mcp_servers.get("cua-driver")
                 if saved is not None and not driver.owns(saved):
@@ -1809,7 +1855,12 @@ async def _cua_driver_action(
             # An explicit repair, never a side effect of a background check.
             # Preserve configured scope; do not request new OS permissions.
             await driver.stop()
-            message = "Reconnected nanobot Computer Use with the existing desktop access."
+            if driver.native:
+                from nanobot.apps.computer_use_native import clear_pause
+                from nanobot.apps.cua_driver_stdio import endpoint
+
+                clear_pause(endpoint(settings.path))
+            message = "Reconnected Computer Use with the existing desktop access."
         elif action == "test":
             if existing is None:
                 raise McpPresetError("Enable Cua Driver before checking the connection.", 409)
@@ -1817,7 +1868,7 @@ async def _cua_driver_action(
             message = "Connection checked. This check does not capture your screen or verify model vision."
             # An initial MCP connection can fail while the signed app is waiting
             # for OS grants. Reconnect once the read-only probe confirms them.
-            if (check["connected"] and check["accessibility"] is True
+            if (not check.get("sharing_paused") and check["connected"] and check["accessibility"] is True
                     and check["screen_recording"] is True and mcp_runtime_status is not None
                     and mcp_runtime_status().get("cua-driver") == "failed"
                     and settings.load().tools.mcp_servers.get("cua-driver") == existing):
@@ -1850,8 +1901,27 @@ async def _cua_driver_action(
             finally:
                 # A failed runtime refresh must not leave the native driver
                 # running after the user has removed its configured access.
-                if action in {"disable", "remove"}:
+                if action in {"disable", "remove", "uninstall"}:
                     await driver.stop()
+        if action == "uninstall":
+            if reset_permissions:
+                await driver.uninstall(reset_permissions=True)
+            else:
+                await driver.uninstall()
+            refreshed = mcp_presets_payload(config_path=settings.path, last_action={
+                "ok": True, "message": (
+                    "Computer Use uninstalled. Its Accessibility and Screen Recording decisions were reset. "
+                    "Approve them again after reinstalling. Other apps were not changed."
+                    if reset_permissions else "Computer Use uninstalled. macOS permissions and other apps were not changed."
+                ),
+                "verification": ["config_absent", "managed_package_absent"] + (
+                    ["desktop_permissions_reset"] if reset_permissions else []
+                ),
+            })
+            for key in ("hot_reload", "requires_restart"):
+                if key in payload:
+                    refreshed[key] = payload[key]
+            payload = refreshed
         return attach_mcp_runtime_status(
             payload, mcp_runtime_status() if mcp_runtime_status is not None else None,
         )

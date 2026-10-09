@@ -612,6 +612,7 @@ function mergeMcpMentionPresets(
     if (!name) continue;
     const existing = byName.get(name.toLowerCase());
     byName.set(name.toLowerCase(), {
+      ...existing,
       name,
       display_name: attachment.display_name || existing?.display_name || name,
       category: attachment.category || existing?.category || "mcp",

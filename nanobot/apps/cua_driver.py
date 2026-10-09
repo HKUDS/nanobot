@@ -10,14 +10,16 @@ import asyncio
 import hashlib
 import os
 import platform
+import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 
 import httpx
 from filelock import FileLock, Timeout
@@ -30,6 +32,8 @@ CAPABILITY = "webui.cua-driver.v1"
 SETUP_CAPABILITY = "webui.cua-driver-guided-setup.v1"
 PERMISSIONS_CAPABILITY = "webui.cua-driver-permission-request.v1"
 RECONNECT_CAPABILITY = "webui.cua-driver-reconnect.v1"
+UNINSTALL_CAPABILITY = "webui.cua-driver-uninstall.v1"
+UNINSTALL_RESET_CAPABILITY = "webui.computer-use-uninstall-reset.v1"
 VERSION = "0.33.4"
 DOCS_URL = "https://cua.ai/docs/cua-driver/quickstart"
 _BASE_URL = f"https://github.com/trycua/cua/releases/download/cua-driver-rs-v{VERSION}/"
@@ -59,9 +63,12 @@ class DriverError(Exception):
 class Release:
     target: str
     digest: str
+    native: bool = False
 
     @property
     def directory(self) -> str:
+        if self.native:
+            return "nanobot-computer-use-0.1.0-darwin"
         return f"cua-driver-rs-{VERSION}-{self.target}"
 
     @property
@@ -70,6 +77,8 @@ class Release:
 
     @property
     def executable(self) -> str:
+        if self.native:
+            return "nanobot Computer Use.app/Contents/MacOS/nanobot-computer-use"
         if self.target.startswith("darwin-"):
             return "CuaDriver.app/Contents/MacOS/cua-driver"
         return "cua-driver.exe" if self.target.startswith("windows-") else "cua-driver"
@@ -104,7 +113,7 @@ class DriverSetup(TypedDict):
     installed: bool
     managed: bool
     mode: Literal["observe", "control", "custom", "off"]
-    permission_app: Literal["CuaDriver"]
+    permission_app: Literal["CuaDriver", "nanobot Computer Use"]
 
 
 class DriverCheck(TypedDict):
@@ -112,6 +121,7 @@ class DriverCheck(TypedDict):
     accessibility: bool | None
     screen_recording: bool | None
     capture_verified: bool
+    sharing_paused: NotRequired[bool]
 
 
 class CuaDriver:
@@ -119,6 +129,24 @@ class CuaDriver:
         self.config_path = config_path.resolve()
         self.root = self.config_path.parent / "apps" / NAME
         self.release = host_release()
+        if platform.system() == "Darwin":
+            from nanobot.apps.computer_use_native import package_digest
+
+            try:
+                digest = package_digest(self._inside(self.root))
+            except (ValueError, OSError) as exc:
+                raise DriverError("The local Computer Use package manifest is invalid. Restage the verified build.") from exc
+            if digest:
+                version = tuple(int(part) for part in platform.mac_ver()[0].split(".")[:2])
+                self.release = Release("darwin-native", digest, native=True) if version >= (14, 2) else None
+
+    @property
+    def native(self) -> bool:
+        return bool(self.release and self.release.native)
+
+    @property
+    def bundle(self) -> Path:
+        return self.directory / ("nanobot Computer Use.app" if self.native else "CuaDriver.app")
 
     def _inside(self, path: Path) -> Path:
         # Do not follow redirected managed directories outside this instance.
@@ -154,10 +182,10 @@ class CuaDriver:
             mode = "observe" if config.enabled_tools == OBSERVE_TOOLS else (
                 "control" if config.enabled_tools == CONTROL_TOOLS else "custom")
         return {
-            "schema": 1, "version": VERSION, "platform": platform.system(),
+            "schema": 1, "version": "0.1.0" if self.native else VERSION, "platform": platform.system(),
             "machine": platform.node(), "supported": self.release is not None,
             "installed": self.installed(), "managed": managed, "mode": mode,
-            "permission_app": "CuaDriver",
+            "permission_app": "nanobot Computer Use" if self.native else "CuaDriver",
         }
 
     def _launch_args(self) -> list[str]:
@@ -170,7 +198,8 @@ class CuaDriver:
             raise DriverError("Install the verified Cua Driver package on this gateway first.")
         return MCPServerConfig(
             type="stdio", command=sys.executable, args=self._launch_args(),
-            env=dict(DRIVER_ENV), tool_timeout=60, image_output="inline", retry_tool_calls=False,
+            env={**DRIVER_ENV, **({"NANOBOT_COMPUTER_USE_NATIVE": "1"} if self.native else {})},
+            tool_timeout=60, image_output="inline", retry_tool_calls=False,
             enabled_tools=list(OBSERVE_TOOLS if mode == "observe" else CONTROL_TOOLS),
         )
 
@@ -192,7 +221,20 @@ class CuaDriver:
                 staging = Path(temporary)
                 archive = staging / release.filename
                 async with asyncio.timeout(600):
-                    await _download(release, archive)
+                    if self.native:
+                        source = self._inside(self.root / "native-package.tar.gz")
+                        with source.open("rb") as stream:
+                            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+                        if digest != release.digest:
+                            raise DriverError("The staged native package checksum failed. Nothing was installed.", 502)
+                        copying = asyncio.create_task(asyncio.to_thread(shutil.copyfile, source, archive))
+                        try:
+                            await asyncio.shield(copying)
+                        except asyncio.CancelledError:
+                            await copying
+                            raise
+                    else:
+                        await _download(release, archive)
                 unpack = asyncio.create_task(asyncio.to_thread(_unpack, archive, staging / "unpacked"))
                 try:
                     await asyncio.shield(unpack)
@@ -215,7 +257,7 @@ class CuaDriver:
                 if release.target.startswith("darwin-"):
                     # Preserve Apple's signature; never remove quarantine or re-sign.
                     process = await asyncio.create_subprocess_exec(
-                        "/usr/bin/codesign", "--verify", "--deep", "--strict", str(package / "CuaDriver.app"),
+                        "/usr/bin/codesign", "--verify", "--deep", "--strict", str(package / self.bundle.name),
                         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
                     )
                     try:
@@ -248,7 +290,26 @@ class CuaDriver:
             # The signed app can be waiting at its first-run permissions gate.
             # Absence is not evidence that either grant was denied.
             if not daemon_listening(endpoint(self.config_path)):
+                if self.native:
+                    result["sharing_paused"] = endpoint(self.config_path).with_suffix(".paused").exists()
                 return result
+            if self.native:
+                from nanobot.apps.computer_use_native import admin
+
+                try:
+                    native = await admin(endpoint(self.config_path), "status")
+                except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
+                    raise DriverError("Computer Use did not respond. Reconnect from Apps and try again.") from exc
+                if native.get("protocol") != 1 or native.get("permission_app") != "nanobot Computer Use":
+                    raise DriverError("The native host did not report the expected identity.")
+                for key in ("connected", "accessibility", "screen_recording"):
+                    if type(native.get(key)) is not bool:
+                        raise DriverError("The native host returned an invalid permission status.")
+                return {
+                    "connected": native["connected"], "accessibility": native["accessibility"],
+                    "screen_recording": native["screen_recording"], "capture_verified": False,
+                    "sharing_paused": native.get("sharing_paused") is True,
+                }
         # A check never auto-launches a macOS app or substitutes the terminal's grants.
         args = [*cfg.args, "--check"]
         try:
@@ -290,41 +351,42 @@ class CuaDriver:
             "screen_recording": "Privacy_ScreenCapture",
         }
         if target == "finder":
-            args = ["-R", str(self._inside(self.directory / "CuaDriver.app"))]
+            args = ["-R", str(self._inside(self.bundle))]
         elif target in panes:
+            if self.native:
+                from nanobot.apps.computer_use_native import admin
+                from nanobot.apps.cua_driver_stdio import ensure_daemon
+
+                address = await asyncio.to_thread(ensure_daemon, self)
+                result = await admin(address, "request_permission", target)
+                if result.get("prompted") is True:
+                    return  # Finish this system prompt before opening a pane.
             args = [f"x-apple.systempreferences:com.apple.preference.security?{panes[target]}"]
         else:
             raise DriverError("Choose Accessibility, Screen Recording, or Finder.", 400)
         await self._open(args)
 
     async def request_permissions(self) -> None:
-        """Ask macOS from the signed bundle, only after explicit settings consent.
-
-        The pinned 0.33.4 CLI uses this LaunchServices entrypoint for staged
-        permission requests. Unlike `permissions grant`, it neither selects a
-        global installation nor probes direct screen capture. macOS owns consent.
-        """
+        """Start or reuse the signed daemon's own first-run permission flow."""
         if platform.system() != "Darwin" or not self.installed():
             raise DriverError("Install Cua Driver on a macOS gateway before requesting system permissions.")
-        from nanobot.apps.cua_driver_stdio import endpoint
+        from nanobot.apps.cua_driver_stdio import ensure_daemon
 
-        temporary = endpoint(self.config_path).parent
-        # The upstream child requires a result file in its TMPDIR. Keep one
-        # bounded, private diagnostic file, not a new orphan on every request.
-        # It is not grant evidence: readiness comes from the running daemon.
-        result = temporary / "cua-driver-permissions-request.json"
-        descriptor = os.open(result, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-        os.close(descriptor)
-        args = ["-n", "-g"]
-        for key, value in {**DRIVER_ENV, "TMPDIR": str(temporary)}.items():
-            args.extend(["--env", f"{key}={value}"])
-        args.extend([
-            "-a", str(self._inside(self.directory / "CuaDriver.app")), "--args",
-            "__permissions-host-request", "--result-file", str(result),
-        ])
-        # Do not wait for the user to respond to native dialogs. The UI's
-        # existing read-only checks observe completion without re-requesting.
-        await self._open(args)
+        starting = asyncio.create_task(asyncio.to_thread(ensure_daemon, self))
+        try:
+            # Only wait for its socket, not for the user to approve access.
+            # Repeated setup requests and MCP reload share its lifecycle lock.
+            await asyncio.shield(starting)
+            if self.native:
+                from nanobot.apps.computer_use_native import admin
+                from nanobot.apps.cua_driver_stdio import endpoint
+
+                await admin(endpoint(self.config_path), "request_permission", "accessibility")
+        except asyncio.CancelledError:
+            await starting
+            raise
+        except (Timeout, subprocess.SubprocessError, OSError) as exc:
+            raise DriverError("System setup could not start. Check Cua Driver on the gateway computer.") from exc
 
     @staticmethod
     async def _open(args: list[str]) -> None:
@@ -356,6 +418,83 @@ class CuaDriver:
             raise
         except Timeout as exc:
             raise DriverError("The driver is still starting or stopping. Try again shortly.") from exc
+
+    async def uninstall(self, *, reset_permissions: bool = False) -> None:
+        """Remove only this instance's verified package after access is disabled.
+
+        Only the independent native app supports explicitly resetting its two
+        desktop grants. Never reset the shared upstream CuaDriver identity.
+        A failed stop or reset leaves the package available for recovery.
+        """
+        from nanobot.config.loader import load_config
+
+        if load_config(self.config_path).tools.mcp_servers.get(NAME) is not None:
+            raise DriverError("Disable Computer Use before uninstalling its driver.")
+        if reset_permissions and not self.native:
+            raise DriverError("Only the independent nanobot Computer Use app can reset its Mac permissions.")
+        if not self.release:
+            return
+        self._inside(self.root)
+        self.root.mkdir(parents=True, exist_ok=True)
+        lock = FileLock(str(self.root / "install.lock"))
+        try:
+            lock.acquire(timeout=0)
+        except Timeout as exc:
+            raise DriverError("Computer Use is being installed or removed. Wait for it to finish.") from exc
+        try:
+            if not self.directory.exists():
+                if reset_permissions:
+                    raise DriverError("The native app is not installed. Manage any remaining grants in System Settings.")
+                return
+            if not self.installed() or self.directory.is_symlink():
+                raise DriverError("The driver directory is not a verified managed installation. No files were removed.")
+            await self.stop()
+            if reset_permissions:
+                await self._reset_native_permissions()
+            removal = asyncio.create_task(asyncio.to_thread(shutil.rmtree, self.directory))
+            try:
+                await asyncio.shield(removal)
+            except asyncio.CancelledError:
+                await removal
+                raise
+        except OSError as exc:
+            raise DriverError("Computer Use is disabled, but its package could not be removed. Check file access and retry.") from exc
+        finally:
+            lock.release()
+
+    async def _reset_native_permissions(self) -> None:
+        # Fixed services and identity: settings callers cannot choose an app,
+        # reset other apps, or grant access. Run before removing the app bundle.
+        # A just-installed app may never have been launched. tccutil requires
+        # its identity in Launch Services; registering the exact bundle is inert.
+        operations = [
+            ("app registration", [
+                "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                "-f", str(self.bundle),
+            ]),
+            *[(service, ["/usr/bin/tccutil", "reset", service, "io.nanobot.computer-use"])
+              for service in ("Accessibility", "ScreenCapture")],
+        ]
+        for service, command in operations:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                )
+                try:
+                    returncode = await asyncio.wait_for(process.wait(), timeout=15)
+                except (TimeoutError, asyncio.CancelledError):
+                    process.kill()
+                    await process.wait()
+                    raise
+                if returncode:
+                    raise OSError("macOS refused the permission reset")
+            except (OSError, TimeoutError) as exc:
+                raise DriverError(
+                    f"Computer Use is disabled, but macOS could not reset {service}. "
+                    "Some grants may already be reset. The app was kept; retry uninstalling "
+                    "or revoke its permissions in System Settings."
+                ) from exc
 
 
 async def _download(release: Release, destination: Path) -> None:

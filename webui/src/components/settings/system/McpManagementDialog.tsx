@@ -1,7 +1,7 @@
 import {
   AppActionsIcon,
 } from "@/components/icons/product-icons";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   Check,
   ExternalLink,
@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { McpPresetInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ export type McpManagementTab = "overview" | "tools" | "connection";
 type McpAction = "enable" | "disable" | "remove" | "test" | "reconnect";
 
 interface McpManagementDialogProps {
+  fallbackFocusRef?: RefObject<HTMLElement>;
   preset: McpPresetInfo;
   values: Record<string, string>;
   actionKey: string | null;
@@ -41,7 +43,6 @@ interface McpManagementDialogProps {
   tab: McpManagementTab;
   icon: ReactNode;
   overviewContent?: ReactNode;
-  setupLabel?: string;
   /** Managed connections own their permission flow instead of raw MCP/tool editing. */
   connectionPanel?: ReactNode;
   onTabChange: (tab: McpManagementTab) => void;
@@ -53,6 +54,7 @@ interface McpManagementDialogProps {
 }
 
 export function McpManagementDialog({
+  fallbackFocusRef,
   preset,
   values,
   actionKey,
@@ -61,7 +63,6 @@ export function McpManagementDialog({
   tab,
   icon,
   overviewContent,
-  setupLabel,
   connectionPanel,
   onTabChange,
   onOpenChange,
@@ -116,20 +117,16 @@ export function McpManagementDialog({
     }] : []),
     { value: "connection", label: tx("settings.mcp.connectionTab", "Connection") },
   ];
-  const activePanelLabel = tab === "overview"
-    ? tx("settings.mcp.overviewTab", "Overview")
-    : tab === "tools"
-      ? tx("settings.mcp.toolScope", "Tools")
-      : tx("settings.mcp.connectionTab", "Connection");
+  const activePanelLabel = connectionPanel
+    ? tx("settings.mcp.connectionTab", "Connection")
+    : tab === "overview"
+      ? tx("settings.mcp.overviewTab", "Overview")
+      : tab === "tools"
+        ? tx("settings.mcp.toolScope", "Tools")
+        : tx("settings.mcp.connectionTab", "Connection");
   const managedOverview = Boolean(connectionPanel) && tab === "overview";
-  const managedNavigationRef = useRef<HTMLButtonElement>(null);
-  const previousTabRef = useRef(tab);
-
-  useEffect(() => {
-    const changed = previousTabRef.current !== tab;
-    previousTabRef.current = tab;
-    if (connectionPanel && changed) managedNavigationRef.current?.focus({ preventScroll: true });
-  }, [connectionPanel, tab]);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   const toggleTool = (toolName: string) => {
     const next = new Set(allowAllTools ? toolNames : draftEnabledTools);
@@ -170,46 +167,67 @@ export function McpManagementDialog({
   return (
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent
+        ref={contentRef}
         showCloseButton={false}
+        onOpenAutoFocus={(event) => {
+          returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          event.preventDefault();
+          contentRef.current?.focus({ preventScroll: true });
+        }}
+        onCloseAutoFocus={(event) => {
+          const target = returnFocusRef.current?.isConnected ? returnFocusRef.current : fallbackFocusRef?.current;
+          if (target?.isConnected) {
+            event.preventDefault();
+            target.focus({ preventScroll: true });
+          }
+        }}
         className={cn(
-          "flex w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0",
+          "flex w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 outline-none",
           connectionPanel ? "max-w-[32rem]" : "max-w-[42rem]",
           connectionPanel ? "max-h-[calc(100dvh-2rem)]" : "h-[min(34rem,calc(100dvh-2rem))]",
         )}
       >
         <div className={cn(
           "grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] gap-x-3 px-5 sm:px-6",
-          connectionPanel ? managedOverview ? "items-start pb-4 pt-6" : "items-center pb-3 pt-5" : "items-center border-b border-border/45 py-3.5 sm:flex",
+          connectionPanel ? "items-start pb-4 pt-5" : "items-center border-b border-border/45 py-3.5 sm:flex",
         )}>
-          <div className="row-span-2 shrink-0" aria-hidden>{icon}</div>
-          <div className="min-w-0 flex-1">
+          <div className={cn("row-span-2 shrink-0", connectionPanel && "max-[380px]:row-span-1")} aria-hidden>{icon}</div>
+          <div className={cn("min-w-0 flex-1", connectionPanel && "max-[380px]:col-span-3 max-[380px]:row-start-2 max-[380px]:pt-3")}>
             <DialogTitle className={cn("text-[17px] leading-6 tracking-[-0.01em]", connectionPanel ? "break-words" : "truncate")}>
               {preset.display_name}
             </DialogTitle>
-            <DialogDescription className={managedOverview ? "mt-1 text-[13px] leading-5 text-muted-foreground" : "sr-only"}>
+            <DialogDescription className={connectionPanel ? "mt-1 text-[13px] leading-5 text-muted-foreground" : "sr-only"}>
               {description}
             </DialogDescription>
-            {managedOverview && setupLabel && <div className="mt-4 flex flex-wrap items-center gap-3">
-              <Button ref={managedNavigationRef} size="sm" className="touch-target rounded-full px-5" onClick={() => onTabChange("connection")}>
-                {setupLabel}
-              </Button>
-              {statusTone !== "neutral" && <StatusPill tone={statusTone}>{statusLabel}</StatusPill>}
-            </div>}
           </div>
           {!connectionPanel && <div className="col-start-2 row-start-2 mt-1 sm:mt-0">
             <StatusPill tone={statusTone}>{statusLabel}</StatusPill>
           </div>}
-          <div className="col-start-3 row-start-1 row-span-2 -mr-2 flex shrink-0 items-center">
-          {connectionPanel && !managedOverview && <Button
-            ref={managedNavigationRef}
+          <div className={cn("col-start-3 row-start-1 row-span-2 -mr-2 flex shrink-0 items-center", connectionPanel && "max-[380px]:row-span-1")}>
+          {connectionPanel && <Popover open={managedOverview} onOpenChange={(open) => onTabChange(open ? "overview" : "connection")} modal>
+          <PopoverTrigger asChild><Button
             type="button"
             size="icon"
             variant="ghost"
             aria-label={tx("settings.mcp.overviewTab", "Overview")}
             title={tx("settings.mcp.overviewTab", "Overview")}
-            onClick={() => onTabChange("overview")}
             className="touch-target h-10 w-10 rounded-full text-muted-foreground"
-          ><Info className="h-4 w-4" aria-hidden /></Button>}
+          ><Info className="h-4 w-4" aria-hidden /></Button></PopoverTrigger>
+          <PopoverContent
+            side="bottom" align="end" sideOffset={8} collisionPadding={24}
+            aria-label={tx("settings.mcp.overviewTab", "Overview")}
+            className="w-[min(24rem,calc(100vw-3rem))] p-4 duration-200 ease-out data-[state=open]:slide-in-from-top-1 data-[state=closed]:slide-out-to-top-1 motion-reduce:animate-none"
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-[13px] font-semibold">{tx("settings.mcp.overviewTab", "Overview")}</h3>
+              <Button type="button" variant="ghost" size="icon" className="touch-target -mr-2 -mt-2 h-9 w-9 rounded-full text-muted-foreground"
+                aria-label={tx("common.close", "Close")} onClick={() => onTabChange("connection")}>
+                <X className="h-4 w-4" aria-hidden />
+              </Button>
+            </div>
+            {overviewContent}
+          </PopoverContent>
+          </Popover>}
           <Button
             type="button"
             size="icon"
@@ -239,20 +257,13 @@ export function McpManagementDialog({
           role={connectionPanel ? "region" : "tabpanel"}
           aria-label={activePanelLabel}
           className={cn(
-            "min-h-0 flex-1",
+            "min-h-0",
             connectionPanel
               ? "flex flex-col overflow-hidden"
-              : "overflow-y-auto overscroll-contain px-5 py-5 scrollbar-thin scrollbar-track-transparent sm:px-6",
+              : "flex-1 overflow-y-auto overscroll-contain px-5 py-5 scrollbar-thin scrollbar-track-transparent sm:px-6",
           )}
         >
-          {connectionPanel ? <>
-            <div hidden={!managedOverview} className="min-h-0 overflow-y-auto overscroll-contain px-5 pb-5 pt-3 scrollbar-thin scrollbar-track-transparent sm:px-6">
-              {overviewContent}
-            </div>
-            <div className={cn("min-h-0 flex-1 flex-col", managedOverview ? "hidden" : "flex")}>
-              {connectionPanel}
-            </div>
-          </> : tab === "overview" ? (
+          {connectionPanel ?? (tab === "overview" ? (
             <OverviewPanel
               preset={preset}
               description={description}
@@ -261,7 +272,7 @@ export function McpManagementDialog({
               onOpenTools={() => onTabChange("tools")}
               content={overviewContent}
             />
-          ) : tab === "tools" && !connectionPanel ? (
+          ) : tab === "tools" ? (
             <ToolsPanel
               preset={preset}
               toolNames={toolNames}
@@ -279,7 +290,7 @@ export function McpManagementDialog({
               onTest={inspectTools}
               onOpenConnection={() => onTabChange("connection")}
             />
-          ) : connectionPanel ?? (
+          ) : (
             <ConnectionPanel
               preset={preset}
               values={values}
@@ -294,16 +305,10 @@ export function McpManagementDialog({
                 onAction("remove", preset.name);
               }}
             />
-          )}
+          ))}
         </div>
 
-        {tab === "overview" && setupLabel && !connectionPanel ? (
-          <div className="flex shrink-0 justify-end border-t border-border/45 px-5 py-3 sm:px-6">
-            <Button className="touch-target" onClick={() => onTabChange("connection")}>
-              {setupLabel}
-            </Button>
-          </div>
-        ) : tab === "tools" && toolsDirty ? (
+        {!connectionPanel && tab === "tools" && toolsDirty ? (
           <div className="flex shrink-0 items-center justify-end border-t border-border/45 bg-background/95 px-5 py-3 sm:px-6">
             <Button
               type="button"

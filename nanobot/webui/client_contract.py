@@ -10,10 +10,13 @@ from __future__ import annotations
 from typing import Literal, TypedDict, cast
 
 from nanobot import __version__
+from nanobot.apps.computer_use_native import CAPABILITY as CUA_NATIVE_CAPABILITY
 from nanobot.apps.cua_driver import CAPABILITY as CUA_CAPABILITY
 from nanobot.apps.cua_driver import PERMISSIONS_CAPABILITY as CUA_PERMISSIONS_CAPABILITY
 from nanobot.apps.cua_driver import RECONNECT_CAPABILITY as CUA_RECONNECT_CAPABILITY
 from nanobot.apps.cua_driver import SETUP_CAPABILITY as CUA_SETUP_CAPABILITY
+from nanobot.apps.cua_driver import UNINSTALL_CAPABILITY as CUA_UNINSTALL_CAPABILITY
+from nanobot.apps.cua_driver import UNINSTALL_RESET_CAPABILITY as CUA_UNINSTALL_RESET_CAPABILITY
 
 WEBUI_PROTOCOL = 1
 CORE_CAPABILITY = "webui.core.v1"
@@ -39,7 +42,7 @@ def webui_contract() -> dict[str, object]:
             CORE_CAPABILITY, SUBAGENT_CAPABILITY, SUBAGENT_EVENTS_CAPABILITY,
             SUBAGENT_HISTORY_CAPABILITY, AUTOMATION_CHAT_CAPABILITY,
             BINARY_ATTACHMENTS_CAPABILITY, CUA_CAPABILITY, CUA_SETUP_CAPABILITY, CUA_PERMISSIONS_CAPABILITY,
-            CUA_RECONNECT_CAPABILITY,
+            CUA_RECONNECT_CAPABILITY, CUA_UNINSTALL_CAPABILITY, CUA_NATIVE_CAPABILITY, CUA_UNINSTALL_RESET_CAPABILITY,
         ],
     }
 

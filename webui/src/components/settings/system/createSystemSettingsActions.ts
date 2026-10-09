@@ -32,6 +32,7 @@ import {
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
+import { mcpPresetBrand } from "@/lib/mcp-preset-brand";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type {
   AutomationUpdatePayload,
@@ -118,7 +119,9 @@ export function createSystemSettingsActions({
     setCliAppsFocusName,
     setCliAppsMessage,
     setCustomMcpForm,
+    setCuaCheckFeedback,
     setMcpConfigImport,
+    setMcpActionError,
     setMcpError,
     setMcpFieldValues,
     setMcpMessage,
@@ -466,6 +469,8 @@ export function createSystemSettingsActions({
     if (mcpPresetRequestRef.current?.key === "test:cua-driver") {
       mcpPresetRequestRef.current = null;
     }
+    setCuaCheckFeedback(null);
+    setMcpActionError(null);
   };
 
   const handleMcpOAuthConnect = async (name: string, reset = false) => {
@@ -564,6 +569,7 @@ export function createSystemSettingsActions({
         ? null
         : payload.last_action?.message ?? null,
     );
+    return actionError || null;
   };
 
   const handleMcpPresetAction = async (
@@ -576,16 +582,49 @@ export function createSystemSettingsActions({
     // error and finally block must not undo the newer action's presentation.
     const pending = mcpPresetRequestRef.current;
     if (pending?.pending && (pending.key !== "test:cua-driver" || action === "test")) return;
+    const cuaCheck = name === "cua-driver" && action === "test";
+    const manualCuaCheck = cuaCheck && values.quiet !== "true";
+    if (manualCuaCheck) setCuaCheckFeedback({ state: "checking" });
+    else if (!cuaCheck) setCuaCheckFeedback(null);
     const request = { key, pending: true };
+    const requestToken = getToken();
     mcpPresetRequestRef.current = request;
     setMcpPresetAction(key);
     setMcpMessage(null);
-    if (values.quiet !== "true") setMcpError(null);
+    if (values.quiet !== "true") {
+      setMcpError(null);
+      setMcpActionError(null);
+    }
     try {
       const payload = await runMcpPresetAction(client, action, name, values);
       if (mcpPresetRequestRef.current !== request) return;
       setMcpPresets(payload);
-      applyMcpActionFeedback(payload, action === "test" && !(name === "cua-driver" && values.quiet === "true"));
+      // Reload reconciles every MCP server. Keep its aggregate diagnostics in
+      // the catalog; only this server's failure belongs in its setup panel.
+      applyMcpActionFeedback(payload, action === "test" && !cuaCheck);
+      let actionError = payload.last_action?.ok === false
+        ? payload.last_action.error || payload.last_action.message
+        : null;
+      if (!actionError && payload.hot_reload?.ok === false) {
+        const { failed, requires_restart, message } = payload.hot_reload;
+        if (failed?.length && !requires_restart) {
+          if (failed.includes(name)) {
+            const preset = payload.presets.find(item => item.name === name);
+            const displayName = preset ? mcpPresetBrand(preset).display_name : name;
+            actionError = `${displayName}: ${t("settings.mcp.connectionFailed")}`;
+          }
+        } else {
+          // A config-load/shutdown failure has no per-server result and can
+          // prevent this action too. Do not hide it as an unrelated failure.
+          actionError = message;
+        }
+      }
+      setMcpActionError(actionError ? { name, message: actionError } : null);
+      if (manualCuaCheck) setCuaCheckFeedback({
+        state: "done", check: payload.last_action?.driver_check,
+        runtimeConnected: payload.presets.some(preset => preset.name === name && preset.runtime_status === "connected"),
+        error: actionError,
+      });
       if (action !== "test") {
         notifyMcpPresetsChanged(payload);
       }
@@ -597,7 +636,22 @@ export function createSystemSettingsActions({
         setMcpFieldValues((prev) => ({ ...prev, [name]: {} }));
       }
     } catch (err) {
-      if (mcpPresetRequestRef.current === request) setMcpError((err as Error).message);
+      if (mcpPresetRequestRef.current !== request) return;
+      setMcpError((err as Error).message);
+      setMcpActionError({ name, message: (err as Error).message });
+      if (manualCuaCheck) setCuaCheckFeedback({ state: "done", runtimeConnected: false, error: (err as Error).message });
+      // Enabling/disabling persists consent before native startup/shutdown.
+      // A failed native step must not leave the UI showing the previous access.
+      if (name === "cua-driver" && ["install", "enable", "disable", "remove", "reconnect", "uninstall"].includes(action)) {
+        try {
+          const snapshot = await fetchMcpPresets(requestToken);
+          if (mcpPresetRequestRef.current !== request) return;
+          setMcpPresets(snapshot);
+          notifyMcpPresetsChanged(snapshot);
+        } catch {
+          // Keep the original actionable failure if the gateway is unreachable.
+        }
+      }
     } finally {
       if (mcpPresetRequestRef.current === request) {
         request.pending = false;
