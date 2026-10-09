@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { MODEL_REQUEST_APIS, REQUEST_API_LABELS } from "@/components/settings/models/modelAPI";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ModelAPIConfig, ModelRequestAPI } from "@/lib/types";
 
@@ -12,17 +11,8 @@ export function ProviderAPIControl({ value, onChange }: {
   onChange: (api: ModelAPIConfig) => void;
 }) {
   const { t } = useTranslation();
-  if (value === null) {
-    return (
-      <Button variant="outline" className="rounded-full" onClick={() => onChange({
-        supported_apis: ["chat_completions"], preferred_api: "chat_completions",
-      })}>
-        {t("settings.providers.declareAPIs")}
-      </Button>
-    );
-  }
-  const supported = value.supported_apis;
-  const preferred = value.preferred_api ?? supported[0];
+  const supported = value?.supported_apis ?? [...MODEL_REQUEST_APIS];
+  const preferred = value?.preferred_api ?? supported[0];
   return (
     <div className="space-y-3">
       <fieldset className="space-y-3 rounded-xl border border-border/60 p-3">

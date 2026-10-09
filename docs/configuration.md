@@ -1433,7 +1433,7 @@ Set `agents.defaults.modelPreset` to choose the preset followed by sessions that
 
 ### Custom connection APIs
 
-Custom providers use Chat Completions by default. If your service requires another protocol, open its WebUI connection editor and expand **Advanced options**. Use **Supported APIs** to select the protocols the service accepts and **Default API** to choose the default for Auto presets. Hover, focus, or tap a setting label for help. Existing connections without a declaration retain their previous Auto behavior; use **Set supported APIs** to add one.
+Custom providers use Chat Completions by default. If your service requires another protocol, open its WebUI connection editor and expand **Advanced options**. Use **Supported APIs** to select the protocols the service accepts and **Default API** to choose the default for Auto presets. Hover, focus, or tap a setting label for help. Existing connections without a declaration retain their previous behavior until you change these controls.
 
 In `config.json`, set `providers.<name>.api` for the built-in `custom` provider or a named custom provider:
 
