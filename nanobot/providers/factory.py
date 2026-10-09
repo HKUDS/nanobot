@@ -8,20 +8,16 @@ from pathlib import Path
 from nanobot.config.schema import (
     Config,
     InlineFallbackConfig,
-    ModelAPIConfig,
     ModelPresetConfig,
     ProviderConfig,
 )
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.registry import (
-    ModelAPICapabilities,
-    ProviderAPI,
-    ProviderSpec,
-    RequestAPI,
-    create_dynamic_spec,
-    find_by_name,
-)
+from nanobot.providers.registry import ProviderSpec, find_by_name
+from nanobot.providers.routing import resolve_automatic_model_api as resolve_automatic_model_api
+from nanobot.providers.routing import resolve_model_api as resolve_model_api
+from nanobot.providers.routing import resolve_provider_route
+from nanobot.providers.routing import validate_provider_setup as validate_provider_setup
 
 
 @dataclass(frozen=True)
@@ -32,16 +28,6 @@ class ProviderSnapshot:
     signature: tuple[object, ...]
     generation: GenerationSettings | None = None
     model_preset: str | None = None
-
-
-@dataclass(frozen=True)
-class _ProviderSetup:
-    model: str
-    provider_name: str
-    provider_config: ProviderConfig | None
-    spec: ProviderSpec | None
-    backend: str
-    model_api: ModelAPICapabilities | None
 
 
 def _resolve_model_preset(
@@ -63,169 +49,6 @@ def _provider_extra_headers(
     return headers or None
 
 
-def _provider_spec_for_config(
-    provider_name: str,
-    provider_config: ProviderConfig | None,
-) -> ProviderSpec | None:
-    spec = find_by_name(provider_name)
-    if (
-        spec is not None
-        and spec.name == "orcarouter"
-        and provider_config is not None
-        and provider_config.api_base
-        and provider_config.api_base.rstrip("/").lower()
-        != spec.default_api_base.rstrip("/").lower()
-    ):
-        # Before OrcaRouter became a built-in provider, this name was valid for a
-        # dynamic custom provider. Preserve that provider's model-prefix behavior
-        # when an existing config points the name at a different endpoint.
-        return create_dynamic_spec(
-            provider_name,
-            display_name=provider_config.display_name or "",
-            thinking_style=provider_config.thinking_style or "",
-        )
-    return spec
-
-
-def resolve_model_api(
-    spec: ProviderSpec,
-    provider_config: ProviderConfig | None,
-    preset_api: ModelAPIConfig | None,
-) -> ModelAPICapabilities | None:
-    """Apply the connection's API ceiling and default to a model declaration."""
-    connection_api = provider_config.api if provider_config else None
-    if connection_api is not None:
-        if not spec.provider_api_configurable:
-            raise ValueError(f"Provider '{spec.name}' does not support connection API declarations.")
-        spec.validate_model_api(connection_api.to_capabilities())
-    if preset_api is not None:
-        api = preset_api.to_capabilities()
-        spec.validate_model_api(api)
-        if connection_api is not None:
-            unsupported = set(api.supported_apis) - set(connection_api.supported_apis)
-            if unsupported:
-                raise ValueError(
-                    f"Provider '{spec.name}' does not accept request APIs: {', '.join(sorted(unsupported))}"
-                )
-        return api
-    if connection_api is None:
-        return None
-    api = connection_api.to_capabilities()
-    # Selecting a default adapter does not authorize fallback across API families.
-    supported: tuple[RequestAPI, ...] = ("anthropic_messages",) if api.preferred_api == "anthropic_messages" else tuple(
-        item for item in api.supported_apis if item != "anthropic_messages"
-    )
-    return ModelAPICapabilities(supported_apis=supported, preferred_api=api.preferred_api)
-
-
-def _resolve_provider_setup(
-    config: Config,
-    *,
-    preset: ModelPresetConfig,
-    model: str | None = None,
-) -> _ProviderSetup:
-    """Resolve and validate provider configuration without constructing a client."""
-    model = model or preset.model
-    provider_name = config.get_provider_name(model, preset=preset)
-    p = config.get_provider(model, preset=preset)
-    if not provider_name:
-        raise ValueError(f"No provider is configured for model '{model}'.")
-    spec = _provider_spec_for_config(provider_name, p)
-    if not spec and p:
-        if not p.api_base:
-            raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-        spec = create_dynamic_spec(
-            provider_name,
-            display_name=(p.display_name or "") if p else "",
-            thinking_style=(p.thinking_style or "") if p else "",
-        )
-    if spec and spec.is_transcription_only:
-        raise ValueError(f"Provider '{provider_name}' only supports transcription.")
-    backend = spec.backend if spec else "openai_compat"
-    model_api = resolve_model_api(spec, p, preset.api) if spec is not None else None
-    if model_api is not None and model_api.preferred_api == "anthropic_messages":
-        backend = "anthropic"
-    if p and p.proxy and backend not in {"openai_compat", "openai_codex", "xai_grok", "anthropic"}:
-        raise ValueError(
-            f"providers.{provider_name}.proxy is only supported for "
-            "OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI Grok."
-        )
-
-    if backend == "azure_openai":
-        if not p or not p.api_base:
-            raise ValueError("Azure OpenAI requires api_base in config.")
-    elif (
-        backend in {"openai_compat", "anthropic"}
-        and spec
-        and spec.is_direct
-        and not spec.default_api_base
-        and not (p and p.api_base)
-    ):
-        raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-    elif backend in {"anthropic", "openai_compat"} and not (
-        backend == "openai_compat" and model.startswith("bedrock/")
-    ):
-        needs_key = not (p and p.api_key)
-        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
-        if needs_key and not exempt:
-            raise ValueError(f"No API key configured for provider '{provider_name}'.")
-
-    return _ProviderSetup(
-        model=model,
-        provider_name=provider_name,
-        provider_config=p,
-        spec=spec,
-        backend=backend,
-        model_api=model_api,
-    )
-
-
-def resolve_automatic_model_api(
-    config: Config, *, preset: ModelPresetConfig,
-) -> tuple[str, ProviderAPI]:
-    """Preview the default request API without live requests or circuit-breaker state."""
-    setup = _resolve_provider_setup(config, preset=preset.model_copy(update={"api": None}))
-    if setup.model_api is not None:
-        return setup.provider_name, setup.model_api.preferred_api
-    spec = setup.spec
-    if spec is None:
-        return setup.provider_name, "chat_completions"
-    if len(spec.request_apis) == 1:
-        return setup.provider_name, spec.request_apis[0]
-    provider_config = setup.provider_config
-    if setup.backend == "github_copilot":
-        from nanobot.providers.github_copilot_provider import cached_github_copilot_model_api
-
-        api = cached_github_copilot_model_api(
-            setup.model, provider_config.proxy if provider_config else None,
-        )
-        if api is not None:
-            return setup.provider_name, api.preferred_api
-    api = spec.default_model_api(
-        setup.model, preset.reasoning_effort,
-        api_base=config.get_api_base(setup.model, preset=preset),
-        api_type=provider_config.api_type if provider_config else "auto",
-        extra_body=provider_config.extra_body if provider_config else None,
-    )
-    return setup.provider_name, api.preferred_api
-
-
-def validate_provider_setup(
-    config: Config,
-    *,
-    preset_name: str | None = None,
-    preset: ModelPresetConfig | None = None,
-    model: str | None = None,
-) -> None:
-    """Validate local provider/model settings without loading a provider client."""
-    resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    _resolve_provider_setup(
-        config,
-        preset=resolved,
-        model=model,
-    )
-
-
 def _make_provider_core(
     config: Config,
     *,
@@ -233,7 +56,7 @@ def _make_provider_core(
     model: str | None = None,
 ) -> LLMProvider:
     """Create a plain LLM provider without failover wrapping."""
-    setup = _resolve_provider_setup(
+    setup = resolve_provider_route(
         config,
         preset=preset,
         model=model,
@@ -409,6 +232,34 @@ def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> Pr
     )
 
 
+def _preset_provider_signature(
+    config: Config, preset: ModelPresetConfig,
+) -> tuple[object, ...]:
+    provider_config = config.get_provider(preset.model, preset=preset)
+    provider_name = config.get_provider_name(preset.model, preset=preset)
+    return (
+        preset.model,
+        preset.provider,
+        provider_name,
+        config.get_api_key(preset.model, preset=preset),
+        config.get_api_base(preset.model, preset=preset),
+        _provider_extra_headers(find_by_name(provider_name) if provider_name else None, provider_config),
+        provider_config.extra_body if provider_config else None,
+        provider_config.api_type if provider_config else "auto",
+        provider_config.api.model_dump_json() if provider_config and provider_config.api is not None else None,
+        provider_config.extra_query if provider_config else None,
+        getattr(provider_config, "region", None) if provider_config else None,
+        getattr(provider_config, "profile", None) if provider_config else None,
+        preset.max_tokens,
+        preset.temperature,
+        preset.reasoning_effort,
+        preset.context_window_tokens,
+        preset.api.model_dump_json() if preset.api is not None else None,
+        getattr(provider_config, "proxy", None) if provider_config else None,
+        provider_config.thinking_style if provider_config else None,
+    )
+
+
 def provider_signature(
     config: Config,
     *,
@@ -417,60 +268,14 @@ def provider_signature(
 ) -> tuple[object, ...]:
     """Return the config fields that affect the active provider chain."""
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    p = config.get_provider(resolved.model, preset=resolved)
     fallback_presets = _resolve_fallback_presets(config, resolved)
-
-    def _fallback_signature(fallback: ModelPresetConfig) -> tuple[object, ...]:
-        fp = config.get_provider(fallback.model, preset=fallback)
-        provider_name = config.get_provider_name(fallback.model, preset=fallback)
-        return (
-            fallback.model,
-            fallback.provider,
-            provider_name,
-            config.get_api_key(fallback.model, preset=fallback),
-            config.get_api_base(fallback.model, preset=fallback),
-            _provider_extra_headers(find_by_name(provider_name) if provider_name else None, fp),
-            fp.extra_body if fp else None,
-            fp.api_type if fp else "auto",
-            fp.api.model_dump_json() if fp and fp.api is not None else None,
-            fp.extra_query if fp else None,
-            getattr(fp, "region", None) if fp else None,
-            getattr(fp, "profile", None) if fp else None,
-            fallback.max_tokens,
-            fallback.temperature,
-            fallback.reasoning_effort,
-            fallback.context_window_tokens,
-            fallback.api.model_dump_json() if fallback.api is not None else None,
-            getattr(fp, "proxy", None) if fp else None,
-            fp.thinking_style if fp else None,
-        )
-
-    provider_name = config.get_provider_name(resolved.model, preset=resolved)
     return (
-        resolved.model,
-        resolved.provider,
-        provider_name,
-        config.get_api_key(resolved.model, preset=resolved),
-        config.get_api_base(resolved.model, preset=resolved),
-        _provider_extra_headers(find_by_name(provider_name) if provider_name else None, p),
-        p.extra_body if p else None,
-        p.api_type if p else "auto",
-        p.api.model_dump_json() if p and p.api is not None else None,
-        p.extra_query if p else None,
-        getattr(p, "region", None) if p else None,
-        getattr(p, "profile", None) if p else None,
-        resolved.max_tokens,
-        resolved.temperature,
-        resolved.reasoning_effort,
-        resolved.context_window_tokens,
-        resolved.api.model_dump_json() if resolved.api is not None else None,
-        getattr(p, "proxy", None) if p else None,
-        p.thinking_style if p else None,
+        *_preset_provider_signature(config, resolved),
         tuple(
             fallback if isinstance(fallback, str) else None
             for fallback in config.agents.defaults.fallback_models
         ),
-        tuple(_fallback_signature(fallback) for fallback in fallback_presets),
+        tuple(_preset_provider_signature(config, fallback) for fallback in fallback_presets),
     )
 
 

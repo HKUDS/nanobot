@@ -1,15 +1,10 @@
 import { useTranslation } from "react-i18next";
 
+import { MODEL_REQUEST_APIS, REQUEST_API_LABELS } from "@/components/settings/models/modelAPI";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ModelAPIConfig, ModelRequestAPI } from "@/lib/types";
-
-const APIS: Array<{ value: ModelRequestAPI; label: string }> = [
-  { value: "chat_completions", label: "Chat Completions" },
-  { value: "responses", label: "Responses" },
-  { value: "anthropic_messages", label: "Anthropic Messages" },
-];
 
 export function ProviderAPIControl({ value, onChange }: {
   value: ModelAPIConfig | null;
@@ -33,17 +28,17 @@ export function ProviderAPIControl({ value, onChange }: {
         <legend className="px-1 text-[12px] font-medium text-muted-foreground">
           {t("settings.providers.supportedAPIs")}
         </legend>
-        {APIS.map((api) => {
-          const checked = supported.includes(api.value);
+        {MODEL_REQUEST_APIS.map((api) => {
+          const checked = supported.includes(api);
           return (
-            <div key={api.value} className="flex items-center justify-between gap-3 text-[13px]">
-              <span>{api.label}</span>
+            <div key={api} className="flex items-center justify-between gap-3 text-[13px]">
+              <span>{REQUEST_API_LABELS[api]}</span>
               <ToggleButton
-                label={api.label}
+                label={REQUEST_API_LABELS[api]}
                 checked={checked}
                 disabled={checked && supported.length === 1}
                 onChange={(enabled) => {
-                  const next = enabled ? [...supported, api.value] : supported.filter((item) => item !== api.value);
+                  const next = enabled ? [...supported, api] : supported.filter((item) => item !== api);
                   onChange({ supported_apis: next, preferred_api: next.includes(preferred) ? preferred : next[0] });
                 }}
               />
@@ -62,8 +57,8 @@ export function ProviderAPIControl({ value, onChange }: {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {APIS.filter((api) => supported.includes(api.value)).map((api) => (
-              <SelectItem key={api.value} value={api.value}>{api.label}</SelectItem>
+            {MODEL_REQUEST_APIS.filter((api) => supported.includes(api)).map((api) => (
+              <SelectItem key={api} value={api}>{REQUEST_API_LABELS[api]}</SelectItem>
             ))}
           </SelectContent>
         </Select>

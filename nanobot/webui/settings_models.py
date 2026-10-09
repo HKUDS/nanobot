@@ -32,14 +32,14 @@ from nanobot.config.schema import (
     ModelPresetConfig,
     ProviderConfig,
 )
-from nanobot.providers.factory import resolve_automatic_model_api, resolve_model_api
 from nanobot.providers.image_generation import get_image_gen_provider
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 from nanobot.providers.oauth_model_catalog import (
     get_oauth_model_catalog,
     invalidate_oauth_model_catalog,
 )
-from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
+from nanobot.providers.registry import PROVIDERS, ProviderSpec, create_dynamic_spec, find_by_name
+from nanobot.providers.routing import resolve_automatic_model_api, resolve_model_api
 from nanobot.webui.settings_contracts import (
     QueryParams,
     SettingsRequest,
@@ -418,7 +418,7 @@ def _dynamic_provider_items(config: Config) -> list[tuple[str, ProviderConfig]]:
 def resolve_settings_provider(
     config: Config,
     provider_name: str,
-) -> tuple[Any, str, ProviderConfig] | None:
+) -> tuple[ProviderSpec, str, ProviderConfig] | None:
     spec = find_by_name(provider_name)
     if spec is not None:
         provider_config = getattr(config.providers, spec.name, None)
@@ -462,12 +462,13 @@ def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
 
 def _provider_settings_row(
     name: str,
-    spec: Any,
+    spec: ProviderSpec,
     provider_config: ProviderConfig,
     oauth_status_reader: OAuthStatusReader,
 ) -> dict[str, Any]:
     oauth_status = oauth_status_reader(spec) if spec.is_oauth else None
     is_custom = find_by_name(name) is None
+    request_apis = provider_config.api.supported_apis if provider_config.api else spec.request_apis
     row = {
         "name": name,
         "label": spec.label,
@@ -484,11 +485,11 @@ def _provider_settings_row(
         "default_api_base": spec.default_api_base or None,
         "model_selectable": not spec.is_transcription_only,
         "model_catalog": model_catalog_kind(spec),
-        "request_apis": list(provider_config.api.supported_apis if provider_config.api else spec.request_apis),
+        "request_apis": list(request_apis),
         "adapter_request_apis": list(spec.request_apis),
         "api": provider_config.api.model_dump(mode="json") if provider_config.api else None,
         "provider_api_configurable": spec.provider_api_configurable,
-        "model_api_configurable": len(provider_config.api.supported_apis) > 1 if provider_config.api else spec.model_api_configurable,
+        "model_api_configurable": len(request_apis) > 1,
         "advanced_fields": _provider_advanced_field_names(name, spec),
         "extra_headers": _redact_provider_secret_values(provider_config.extra_headers),
         "extra_body": _redact_provider_secret_values(provider_config.extra_body),
@@ -1242,8 +1243,9 @@ def _parse_preset_api(
     entry = resolve_settings_provider(config, provider_name)
     if entry is None:
         raise WebUISettingsError("unknown provider")
+    spec, _, provider_config = entry
     try:
-        resolve_model_api(entry[0], entry[2], api)
+        resolve_model_api(spec, provider_config, api)
     except ValueError as exc:
         raise WebUISettingsError(str(exc)) from None
     return api

@@ -20,7 +20,7 @@ import type {
   SettingsSectionKey,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
-import { modelAPISelection } from "@/components/settings/models/ModelAPIControl";
+import { modelAPISelection } from "@/components/settings/models/modelAPI";
 import { useModelSettingsActions } from "@/components/settings/models/useModelSettingsActions";
 import {
   useProviderFormsSync,

@@ -1111,9 +1111,12 @@ class OpenAICompatProvider(LLMProvider):
         )
 
     def _responses_capabilities(self) -> ResponsesCapabilities | None:
+        capabilities = self._spec.responses if self._spec is not None else None
+        if capabilities is not None:
+            return capabilities
         if self._preset_model_api is not None and "responses" in self._preset_model_api.supported_apis:
-            return self._spec.responses if self._spec and self._spec.responses else ResponsesCapabilities()
-        return self._spec.responses if self._spec is not None else None
+            return ResponsesCapabilities()
+        return None
 
     def _responses_state_provider(self) -> str:
         spec_name = self._spec.name if self._spec is not None else "custom"
@@ -1139,20 +1142,16 @@ class OpenAICompatProvider(LLMProvider):
         capabilities = self._responses_capabilities()
         if (
             not self._responses.native_compaction_available
-            or (
-                self._preset_model_api is not None
-                and (
-                    "responses" not in self._preset_model_api.supported_apis
-                    or (
-                        self._preset_model_api.preferred_api != "responses"
-                        and not self._hosted_web_search_enabled()
-                    )
-                )
-            )
-            or (self._preset_model_api is None and self._api_type == "chat_completions")
             or capabilities is None
             or not capabilities.supports_native_compaction
         ):
+            return False
+        if self._preset_model_api is not None:
+            if "responses" not in self._preset_model_api.supported_apis:
+                return False
+            if self._preset_model_api.preferred_api != "responses" and not self._hosted_web_search_enabled():
+                return False
+        elif self._api_type == "chat_completions":
             return False
         if (
             capabilities.requires_direct_openai_base

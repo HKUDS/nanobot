@@ -1,30 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { modelAPIConfigurable, preferredModelAPI, REQUEST_API_LABELS } from "@/components/settings/models/modelAPI";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ModelAPIConfig, ProviderRequestAPI, SettingsPayload } from "@/lib/types";
-
-export function modelAPIConfigurable(provider: SettingsPayload["providers"][number] | undefined): boolean {
-  if (Array.isArray(provider?.request_apis)) {
-    const supported = provider.request_apis;
-    return (["chat_completions", "responses", "anthropic_messages"] as const)
-      .filter((api) => supported.includes(api)).length > 1;
-  }
-  return provider?.model_api_configurable === true;
-}
-
-export function modelAPISelection(api: ModelAPIConfig | null | undefined): string {
-  if (!api) return "auto";
-  if (api.supported_apis.includes("anthropic_messages")) return "anthropic_messages";
-  if (!api.supported_apis.includes("responses")) return "chat_completions";
-  if (!api.supported_apis.includes("chat_completions")) return "responses";
-  return (api.preferred_api ?? api.supported_apis[0]) === "responses"
-    ? "prefer_responses"
-    : "prefer_chat";
-}
 
 export function ModelAPIControl({
   provider,
@@ -43,17 +25,13 @@ export function ModelAPIControl({
   const configurable = modelAPIConfigurable(provider);
   const fixedAPI = requestAPIs?.length === 1 ? requestAPIs[0] : undefined;
   const labels = {
-    responses: "Responses",
-    chat_completions: "Chat Completions",
-    anthropic_messages: "Anthropic Messages",
+    ...REQUEST_API_LABELS,
     bedrock_converse: "Bedrock Converse",
     transcription: t("settings.models.apiTranscription"),
   };
   const fixedLabel = fixedAPI ? labels[fixedAPI] : undefined;
-  const selection = modelAPISelection(value);
-  const selectedAPI = selection === "prefer_responses" ? "responses"
-    : selection === "prefer_chat" ? "chat_completions" : selection;
-  const allowChatFallback = selection === "prefer_responses";
+  const selectedAPI = preferredModelAPI(value);
+  const allowChatFallback = selectedAPI === "responses" && value?.supported_apis.includes("chat_completions") === true;
   const options = [
     {
       value: "auto",

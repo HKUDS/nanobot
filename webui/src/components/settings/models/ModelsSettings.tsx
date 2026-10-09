@@ -1,5 +1,6 @@
 import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
 import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
+import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticModelAPI";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -43,8 +44,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { fetchAutomaticModelAPI } from "@/lib/api";
-import type { AutomaticModelAPIPayload, ModelAPIConfig, SettingsPayload } from "@/lib/types";
+import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
 
 export interface AgentSettingsDraft {
   model: string;
@@ -238,30 +238,15 @@ export function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
-  const [automaticAPI, setAutomaticAPI] = useState<{
-    scope: string;
-    result: AutomaticModelAPIPayload;
-  } | null>(null);
-  const { provider: apiProvider, model: apiModel, reasoningEffort: apiReasoningEffort } = form;
-  const automaticAPIScope = JSON.stringify([
-    token, apiProvider, apiModel, apiReasoningEffort, settings.providers,
-  ]);
-  useEffect(() => {
-    if (!editorOpen || settings.model_api_resolution_supported !== true || !apiModel.trim()) return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void fetchAutomaticModelAPI(token, apiProvider, apiModel, apiReasoningEffort)
-        .then((result) => {
-          if (!cancelled) setAutomaticAPI({ scope: automaticAPIScope, result });
-        })
-        .catch(() => {
-          if (!cancelled) setAutomaticAPI(null);
-        });
-    }, 150);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [editorOpen, settings.model_api_resolution_supported, automaticAPIScope, token, apiProvider, apiModel, apiReasoningEffort]);
-  const resolvedAutomaticAPI = settings.model_api_resolution_supported === true
-    && automaticAPI?.scope === automaticAPIScope ? automaticAPI.result : null;
+  const resolvedAutomaticAPI = useAutomaticModelAPI({
+    token,
+    provider: form.provider,
+    model: form.model,
+    reasoningEffort: form.reasoningEffort,
+    providers: settings.providers,
+    supported: settings.model_api_resolution_supported === true,
+    editorOpen,
+  });
   const editorTriggerRef = useRef<HTMLElement | null>(null);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
   const suggestedPresetNameRef = useRef<string | null>(null);

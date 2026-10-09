@@ -7,7 +7,7 @@ import type {
   PendingRestartSections,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
-import { modelAPISelection } from "@/components/settings/models/ModelAPIControl";
+import { modelAPISelection } from "@/components/settings/models/modelAPI";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
   providerFormFromRow,
