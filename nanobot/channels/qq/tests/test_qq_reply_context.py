@@ -282,6 +282,42 @@ async def test_c2c_quote_is_prefixed_onto_content(captured):
 
 @pytest.mark.asyncio
 @requires_botpy
+async def test_quote_survives_payload_eviction_during_attachment_download(captured, monkeypatch):
+    from botpy.message import C2CMessage
+
+    channel = QQChannel(
+        QQConfig(app_id="app", secret="secret", allow_from=["user1"], ack_message=""),
+        MessageBus(),
+    )
+    channel._handle_message = AsyncMock()
+    payload = dict(
+        C2C_QUOTING_BOT,
+        author={"user_openid": "user1"},
+        attachments=[{"url": "https://example.com/image.png", "filename": "image.png"}],
+    )
+    message = C2CMessage(api=None, event_id="quoted", data=payload)
+
+    async def download_with_new_messages(url, filename_hint=""):
+        for index in range(qq_runtime.QQ_RAW_PAYLOAD_CACHE):
+            C2CMessage(
+                api=None,
+                event_id=f"plain-{index}",
+                data={"id": f"plain-{index}", "content": "plain message"},
+            )
+        return None
+
+    monkeypatch.setattr(channel, "_download_to_media_dir_chunked", download_with_new_messages)
+
+    await channel._on_message(message, is_group=False)
+
+    content = channel._handle_message.await_args.kwargs["content"]
+    assert content.startswith("[Reply to: 查完了，两处都没有叫 reference 的东西。]\n")
+    assert "test reference agent" in content
+    assert "Received files:\n- image.png\n  saved: [download failed]" in content
+
+
+@pytest.mark.asyncio
+@requires_botpy
 async def test_group_quote_is_prefixed_onto_content(captured):
     channel = QQChannel(
         QQConfig(app_id="app", secret="secret", allow_from=["user1"]), MessageBus()

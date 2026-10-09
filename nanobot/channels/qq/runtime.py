@@ -707,6 +707,13 @@ class QQChannel(BaseChannel):
                     )
                 return
 
+            # Resolve the quote before attachment downloads let newer messages
+            # evict this message's captured payload.
+            quoted = _quoted_content_for(message)
+            if quoted:
+                quote_tag = f"[Reply to: {quoted}]"
+                content = f"{quote_tag}\n{content}" if content else quote_tag
+
             # the data used by tests don't contain attachments property
             # so we use getattr with a default of [] to avoid AttributeError in tests
             attachments = cast(
@@ -714,14 +721,6 @@ class QQChannel(BaseChannel):
                 getattr(message, "attachments", None) or [],
             )
             media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
-
-            # Surface the quoted message to the agent.  The inbound reply context
-            # is always on, matching Telegram; QQ needs the payload hook above
-            # because it exposes no way to fetch a message by id.
-            quoted = _quoted_content_for(message)
-            if quoted:
-                quote_tag = f"[Reply to: {quoted}]"
-                content = f"{quote_tag}\n{content}" if content else quote_tag
 
             # Compose content that always contains actionable saved paths
             if recv_lines:
