@@ -209,7 +209,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await togglePresetEditor();
     await openPopover(screen.getByRole("button", { name: "anthropic/claude-sonnet-4", exact: true }));
-    const search = screen.getByRole("combobox", { name: "Search or type model ID" });
+    const search = screen.getByRole("combobox", { name: "Choose model" });
     fireEvent.change(search, { target: { value: "gpt-4o" } });
     fireEvent.keyDown(search, { key: "Enter" });
     await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));

@@ -1008,7 +1008,7 @@ describe("Settings providers", () => {
     });
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await user.click(screen.getByRole("button", { name: "Add provider" }));
-    await user.click(screen.getByRole("button", { name: "Custom provider" }));
+    await user.click(screen.getByRole("button", { name: "Custom" }));
     await user.type(screen.getByPlaceholderText("My model provider"), "Tenant");
     await user.type(screen.getByPlaceholderText("https://api.example.com/v1"), "https://tenant.test");
     expect(screen.getByRole("switch", { name: "Chat Completions" })).toBeDisabled();
@@ -1035,7 +1035,7 @@ describe("Settings providers", () => {
   it("hides connection API declarations on hosts without the capability", async () => {
     renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
     fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
-    fireEvent.click(screen.getByRole("button", { name: "Custom provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
     expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Supported APIs" })).not.toBeInTheDocument();
   });
@@ -1086,7 +1086,7 @@ describe("Settings providers", () => {
     fireEvent.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
     expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "OpenAI web search" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("API base URL"), { target: { value: "https://gateway.test/v1" } });
+    fireEvent.change(screen.getByLabelText("API URL"), { target: { value: "https://gateway.test/v1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
       provider: "openai", apiBase: "https://gateway.test/v1",
