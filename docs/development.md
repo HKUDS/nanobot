@@ -72,7 +72,7 @@ Replace `OpenAICompatProvider(api_type=...)` with `OpenAICompatProvider(model_ap
 ModelAPICapabilities(supported_apis=("responses",), preferred_api="responses")
 ```
 
-These types are defined in `nanobot.providers.registry`. The temporary `apiType` configuration migration applies to JSON configuration and Settings inputs; it does not preserve the old Python constructor arguments.
+API types and automatic selection rules are defined in `nanobot.providers.model_api`. The registry owns `ProviderSpec`, model metadata, and provider declarations; it also re-exports the API types. The temporary `apiType` configuration migration applies to JSON configuration and Settings inputs; it does not preserve the old Python constructor arguments.
 
 ## Adding a Transcription Provider
 

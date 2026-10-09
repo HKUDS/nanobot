@@ -11,7 +11,7 @@ from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
-from nanobot.providers.registry import ModelAPICapabilities, RequestAPI
+from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.cli_apps import CliAppsToolConfig

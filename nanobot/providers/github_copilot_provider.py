@@ -19,18 +19,14 @@ from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot.providers.base import LLMResponse, ProviderCallContext
+from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 from nanobot.providers.oauth_model_catalog import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
 )
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import (
-    ModelAPICapabilities,
-    ProviderModelSpec,
-    RequestAPI,
-    find_by_name,
-)
+from nanobot.providers.registry import ProviderModelSpec, find_by_name
 
 DEFAULT_GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
 DEFAULT_GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"

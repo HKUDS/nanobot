@@ -34,14 +34,14 @@ from nanobot.providers.base import (
     tool_arguments_json_for_replay,
 )
 from nanobot.providers.images import prepare_inline_images
-from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
-from nanobot.providers.registry import (
+from nanobot.providers.model_api import (
     ModelAPICapabilities,
     ResponsesCapabilities,
     hosted_web_search_enabled,
     is_direct_openai_base,
     is_hosted_web_search_tool,
 )
+from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType

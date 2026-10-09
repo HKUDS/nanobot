@@ -5,14 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig, ProviderConfig
-from nanobot.providers.registry import (
-    ModelAPICapabilities,
-    ProviderAPI,
-    ProviderSpec,
-    RequestAPI,
-    create_dynamic_spec,
-    find_by_name,
-)
+from nanobot.providers.model_api import ModelAPICapabilities, ProviderAPI, RequestAPI
+from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
 
 
 @dataclass(frozen=True)
