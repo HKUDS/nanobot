@@ -25,7 +25,7 @@ describe("Workspace project picker", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={vi.fn().mockResolvedValue(directory)} onChange={onChange} />);
-    const trigger = screen.getByRole("button", { name: "Switch working directory" });
+    const trigger = screen.getByRole("button", { name: "Switch directory" });
     if (entry === "pointer") await user.click(trigger);
     else {
       act(() => trigger.focus());
@@ -57,7 +57,7 @@ describe("Workspace project picker", () => {
       return Promise.resolve({ ...directory, path, parent: path === "/" ? null : path.slice(0, path.lastIndexOf("/")) || "/", entries: [] });
     });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onLoadProjects={vi.fn().mockResolvedValue(catalog)} onBrowseDirectories={browse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(await screen.findByRole("button", { name: "/srv/beta" }));
     await screen.findByRole("listbox", { name: "/srv/beta" });
     await user.click(screen.getByRole("button", { name: "Back", exact: true }));
@@ -80,7 +80,7 @@ describe("Workspace project picker", () => {
     const onChange = vi.fn();
     const browse = vi.fn((raw: string) => Promise.resolve({ ...directory, path: raw.replace(/\/$/, ""), entries: [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onLoadProjects={vi.fn().mockResolvedValue(catalog)} onBrowseDirectories={browse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     const lastVisited = screen.getByRole("button", { name: "Last visited folder" });
     expect(lastVisited).toBeDisabled();
     await user.click(await screen.findByRole("button", { name: "/srv/alpha" }));
@@ -96,7 +96,7 @@ describe("Workspace project picker", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Cancel", exact: true }));
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     expect(screen.getByRole("button", { name: "Last visited folder" })).toBeDisabled();
   });
 
@@ -110,7 +110,7 @@ describe("Workspace project picker", () => {
       return Promise.resolve({ ...directory, path, entries: names.map(name => ({ name, path: `${path}/${name}` })) });
     });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={browse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(await screen.findByRole("option", { name: "/srv/workspace/memory" }));
     await screen.findByRole("option", { name: "/srv/workspace/memory/reference" });
     const parent = screen.getByRole("listbox", { name: scope.project_path });
@@ -150,7 +150,7 @@ describe("Workspace project picker", () => {
     const onChange = vi.fn();
     const browse = vi.fn((path: string) => Promise.resolve({ ...directory, path: path.replace(/\/$/, ""), entries: [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={browse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await screen.findByText("No subfolders");
     await user.click(screen.getByRole("button", { name: `Edit path: ${scope.project_path}` }));
     const input = screen.getByRole("combobox") as HTMLInputElement;
@@ -183,13 +183,13 @@ describe("Workspace project picker", () => {
     const browse = vi.fn().mockRejectedValueOnce(new Error("Permission denied"))
       .mockResolvedValue({ ...directory, entries: [] });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={browse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Permission denied");
     expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByText("No subfolders");
     expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
-    await user.type(screen.getByRole("textbox", { name: "Filter this folder" }), "missing");
+    await user.type(screen.getByRole("textbox", { name: "Filter folders" }), "missing");
     await screen.findByText("No matching folders.");
     expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
   });
@@ -204,7 +204,7 @@ describe("Workspace project picker", () => {
     const resolve = vi.fn().mockResolvedValue(project);
     const onChange = vi.fn();
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={{ ...catalog.controls, can_resolve_project: true }} onBrowseDirectories={browse} onResolveProject={resolve} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(await screen.findByRole("option", { name: project.path }));
     await waitFor(() => expect(screen.getByRole("listbox", { name: project.path })).toHaveAttribute("aria-busy", "true"));
     expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
@@ -219,7 +219,7 @@ describe("Workspace project picker", () => {
     const onChange = vi.fn();
     const browse = vi.fn((path: string) => Promise.resolve({ ...directory, path: path.replace(/\/$/, ""), entries: [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={browse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await screen.findByText("No subfolders");
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     await user.clear(screen.getByRole("combobox"));
@@ -239,7 +239,7 @@ describe("Workspace project picker", () => {
       const user = userEvent.setup();
       const browse = vi.fn((raw: string) => Promise.resolve(raw.replace(/\/$/, "") === scope.project_path ? directory : { ...directory, path: raw.replace(/\/$/, ""), entries: [] }));
       render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onLoadProjects={vi.fn().mockResolvedValue(catalog)} onBrowseDirectories={browse} onChange={vi.fn()} />);
-      await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+      await user.click(screen.getByRole("button", { name: "Switch directory" }));
       await user.click(await screen.findByRole("option", { name: "/srv/workspace/alpha" }));
       expect(screen.getAllByRole("listbox")).toHaveLength(1);
       await screen.findByText("No subfolders");
@@ -264,7 +264,7 @@ describe("Workspace project picker", () => {
       { name: "src", path: firstPath }, { name: "src", path: secondPath },
     ] });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onLoadProjects={onLoadProjects} onBrowseDirectories={onBrowse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     const first = await screen.findByRole("button", { name: firstPath });
     const second = screen.getByRole("button", { name: secondPath });
     expect(first).toHaveTextContent(/^src$/);
@@ -282,9 +282,9 @@ describe("Workspace project picker", () => {
     const onChange = vi.fn();
     const onBrowse = vi.fn().mockResolvedValue(directory);
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onLoadProjects={vi.fn().mockResolvedValue(catalog)} onBrowseDirectories={onBrowse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     const shortcut = await screen.findByRole("button", { name: "/srv/beta" });
-    await user.type(screen.getByRole("textbox", { name: "Filter this folder" }), "al");
+    await user.type(screen.getByRole("textbox", { name: "Filter folders" }), "al");
     await waitFor(() => expect(onBrowse).toHaveBeenLastCalledWith("/srv/workspace", "al", false, true));
     expect(shortcut).toBeInTheDocument();
     expect(screen.getAllByRole("listbox")).toHaveLength(1);
@@ -292,9 +292,9 @@ describe("Workspace project picker", () => {
     await user.click(shortcut);
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
     expect(screen.getAllByRole("listbox")).toHaveLength(1);
-    expect(screen.getByRole("textbox", { name: "Filter this folder" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Filter folders" })).toHaveValue("");
     expect(onChange).not.toHaveBeenCalled();
-    await user.type(screen.getByRole("textbox", { name: "Filter this folder" }), "oth");
+    await user.type(screen.getByRole("textbox", { name: "Filter folders" }), "oth");
     await waitFor(() => expect(onBrowse).toHaveBeenLastCalledWith("/srv/beta", "oth", false, true));
     expect(shortcut).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
@@ -307,7 +307,7 @@ describe("Workspace project picker", () => {
     const onBrowse = vi.fn((path: string) => Promise.resolve(path.replace(/\/$/, "") === scope.project_path
       ? directory : { ...directory, path: "/srv/workspace/alpha", entries: [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(await screen.findByRole("option", { name: "/srv/workspace/alpha" }));
     await screen.findByText("No subfolders");
     expect(onBrowse).toHaveBeenCalledTimes(2);
@@ -316,7 +316,7 @@ describe("Workspace project picker", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(onBrowse).toHaveBeenCalledTimes(2);
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     expect(screen.getByRole("option", { name: "/srv/workspace/alpha" })).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(onBrowse).toHaveBeenCalledTimes(2);
@@ -327,7 +327,7 @@ describe("Workspace project picker", () => {
     const onBrowse = vi.fn((path: string) => Promise.resolve(path.replace(/\/$/, "") === scope.project_path
       ? directory : { ...directory, path: "/srv/workspace/alpha", entries: [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(await screen.findByRole("option", { name: "/srv/workspace/alpha" }));
     await screen.findByText("No subfolders");
     const viewport = screen.getAllByRole("listbox")[0].closest("[data-workspace-columns]") as HTMLElement;
@@ -357,7 +357,7 @@ describe("Workspace project picker", () => {
       return Promise.resolve({ ...directory, path, entries: path === scope.project_path ? entries : [{ name: "child", path: `${path}/child` }] });
     });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     const first = await screen.findByRole("option", { name: entries[0].path });
     expect(first).toHaveAttribute("aria-setsize", "500");
     expect(first).toHaveAttribute("aria-posinset", "1");
@@ -380,17 +380,17 @@ describe("Workspace project picker", () => {
     const onChange = vi.fn();
     const onBrowse = vi.fn().mockResolvedValue(directory);
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await screen.findByRole("option", { name: "/srv/workspace/alpha" });
     expect(onBrowse).toHaveBeenLastCalledWith("/srv/workspace", "", false, true);
-    await user.click(screen.getByRole("switch", { name: "Show hidden folders" }));
+    await user.click(screen.getByRole("switch", { name: "Show hidden" }));
     await waitFor(() => expect(onBrowse).toHaveBeenLastCalledWith("/srv/workspace", "", true, true));
     onBrowse.mockResolvedValue({ ...directory, path: "/srv/workspace/alpha", entries: [] });
     await user.click(screen.getByRole("option", { name: "/srv/workspace/alpha" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ project_path: "/srv/workspace/alpha" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Switch working directory" })).not.toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Switch directory" })).not.toHaveFocus());
   });
 
   it("keeps invalid paths editable and validates the project before closing", async () => {
@@ -399,7 +399,7 @@ describe("Workspace project picker", () => {
     const onResolve = vi.fn().mockRejectedValueOnce(new Error("project_path must be an existing directory"))
       .mockResolvedValueOnce({ name: "alpha", path: "/srv/alpha" });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={{ ...catalog.controls, can_resolve_project: true }} onResolveProject={onResolve} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.clear(screen.getByRole("combobox"));
     await user.type(screen.getByRole("combobox"), "/srv/missing");
     await user.keyboard("{Enter}");
@@ -420,7 +420,7 @@ describe("Workspace project picker", () => {
     const onBrowse = vi.fn();
     const onResolve = vi.fn();
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={{ can_change_project: true, can_use_full_access: false }} onBrowseDirectories={onBrowse} onResolveProject={onResolve} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     expect(screen.queryByRole("option", { name: "Browse folders…" })).not.toBeInTheDocument();
     await user.type(screen.getByRole("combobox"), "relative-path");
     expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
@@ -441,7 +441,7 @@ describe("Workspace project picker", () => {
     let finish!: (value: WorkspaceDirectoriesPayload) => void;
     const onBrowse = vi.fn(() => new Promise<WorkspaceDirectoriesPayload>((resolve) => { finish = resolve; }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await waitFor(() => expect(onBrowse).toHaveBeenCalled());
     await user.keyboard("{Escape}");
     finish(directory);
@@ -454,7 +454,7 @@ describe("Workspace project picker", () => {
     const favorites = [{ name: "beta", path: "/srv/beta" }];
     const onFavorite = vi.fn().mockResolvedValueOnce(favorites).mockRejectedValueOnce(new Error("disk full")).mockResolvedValueOnce([]);
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onLoadProjects={vi.fn().mockResolvedValue({ ...catalog, controls: { ...catalog.controls, can_manage_favorites: true } })} onFavoriteProject={onFavorite} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(await screen.findByRole("button", { name: "Pin beta" }));
     expect(onFavorite).toHaveBeenLastCalledWith("/srv/beta", true);
     await screen.findByRole("button", { name: "Unpin beta" });
@@ -479,7 +479,7 @@ describe("Workspace project picker", () => {
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls}
       onLoadProjects={vi.fn().mockResolvedValue({ ...catalog, controls: { ...catalog.controls, can_manage_favorites: true } })}
       onBrowseDirectories={vi.fn().mockResolvedValue(directory)} onFavoriteProject={onFavorite} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     const option = await screen.findByRole("option", { name: "/srv/workspace/alpha" });
     const star = await within(option.parentElement!).findByRole("button", { name: "Pin alpha" });
     act(() => star.focus());
@@ -500,7 +500,7 @@ describe("Workspace project picker", () => {
     const onChange = vi.fn();
     const onBrowse = vi.fn((path: string) => Promise.resolve({ ...directory, path: completed, partial: path === draft, entries: path === draft ? [{ name: "alpha", path: completed }] : [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const input = screen.getByRole("combobox");
     await user.clear(input);
@@ -521,7 +521,7 @@ describe("Workspace project picker", () => {
     const user = userEvent.setup();
     const onBrowse = vi.fn((path: string) => Promise.resolve({ ...directory, path: path === "/srv/al" ? "/srv" : path, parent: "/srv", partial: path === "/srv/al", entries: path === "/srv/al" ? [{ name: "alpha", path: "/srv/alpha" }, { name: "alpine", path: "/srv/alpine" }] : [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const input = screen.getByRole("combobox");
     await user.clear(input);
@@ -544,7 +544,7 @@ describe("Workspace project picker", () => {
       return Promise.resolve({ ...directory, path, partial: false, entries: [{ name: "docs", path: `${path}/docs` }] });
     });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await screen.findByRole("option", { name: "/srv/workspace/docs" });
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const input = screen.getByRole("combobox");
@@ -565,7 +565,7 @@ describe("Workspace project picker", () => {
     let finish!: (value: WorkspaceDirectoriesPayload) => void;
     const onBrowse = vi.fn((path: string) => path === "/srv/al" ? new Promise<WorkspaceDirectoriesPayload>(resolve => { finish = resolve; }) : Promise.resolve({ ...directory, entries: [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const input = screen.getByRole("combobox");
     await user.clear(input);
@@ -584,7 +584,7 @@ describe("Workspace project picker", () => {
       ? new Promise<WorkspaceDirectoriesPayload>(resolve => { finish = resolve; })
       : Promise.resolve({ ...directory, path, entries: [] }));
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const input = screen.getByRole("combobox");
     await user.clear(input);
@@ -603,7 +603,7 @@ describe("Workspace project picker", () => {
     const onBrowse = vi.fn((path: string) => path === "/srv/old/" ? new Promise<WorkspaceDirectoriesPayload>(resolve => { finishOld = resolve; }) : Promise.resolve({ ...directory, path, entries: [{ name: path === "/srv/new/" ? "new-child" : "initial-child", path: `${path.replace(/\/$/, "")}/child` }] }));
     const onChange = vi.fn();
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await screen.findByRole("option", { name: "/srv/workspace/child" });
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const input = screen.getByRole("combobox");
@@ -632,9 +632,9 @@ describe("Workspace project picker", () => {
       return Promise.resolve({ ...directory, path, entries: names.filter(name => name.includes(query)).map(name => ({ name, path: `${path}/${name}` })) });
     });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await screen.findByRole("option", { name: "/srv/workspace/alpha" });
-    const input = screen.getByRole("textbox", { name: "Filter this folder" });
+    const input = screen.getByRole("textbox", { name: "Filter folders" });
     await user.type(input, "alp");
     await waitFor(() => expect(onBrowse).toHaveBeenLastCalledWith("/srv/workspace", "alp", false, true));
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
@@ -661,7 +661,7 @@ describe("Workspace project picker", () => {
       return Promise.resolve({ ...directory, path, entries: entries.filter(entry => entry.name.includes(query)) });
     });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={browse} onChange={onChange} />);
-    const trigger = screen.getByRole("button", { name: "Switch working directory" });
+    const trigger = screen.getByRole("button", { name: "Switch directory" });
     await user.click(trigger);
     const alpha = await screen.findByRole("option", { name: "/srv/workspace/alpha" });
     const column = screen.getByRole("listbox");
@@ -674,7 +674,7 @@ describe("Workspace project picker", () => {
     expect(browse).toHaveBeenCalledTimes(requests);
     expect(trigger).not.toHaveFocus();
     expect(onChange).not.toHaveBeenCalled();
-    const filter = screen.getByRole("textbox", { name: "Filter this folder" });
+    const filter = screen.getByRole("textbox", { name: "Filter folders" });
     await user.type(filter, "hjkl");
     expect(filter).toHaveValue("hjkl");
     expect(screen.getByRole("listbox", { name: "/srv/workspace", exact: true })).toBeInTheDocument();
@@ -697,7 +697,7 @@ describe("Workspace project picker", () => {
       return Promise.resolve({ ...directory, path, entries: names.map(name => ({ name, path: `${path}/${name}` })) });
     });
     render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={onBrowse} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(await screen.findByRole("option", { name: "/srv/workspace/alpha" }));
     await user.click(await screen.findByRole("option", { name: "/srv/workspace/alpha/child" }));
     expect(screen.getAllByRole("listbox")).toHaveLength(3);
@@ -716,7 +716,7 @@ describe("Workspace project picker", () => {
     expect(screen.getByRole("option", { name: "/srv/workspace/alpha" })).toHaveAttribute("aria-selected", "true");
     expect(onChange).not.toHaveBeenCalled();
     expect(onBrowse.mock.calls.filter(call => call[0].replace(/\/$/, "") === scope.project_path)).toHaveLength(1);
-    await user.click(screen.getByRole("switch", { name: "Show hidden folders" }));
+    await user.click(screen.getByRole("switch", { name: "Show hidden" }));
     await screen.findByRole("option", { name: "/srv/workspace/.hidden" });
     await screen.findByRole("option", { name: "/srv/workspace/alpha/.hidden" });
     await screen.findByRole("option", { name: "/srv/workspace/alpha/child/.hidden" });

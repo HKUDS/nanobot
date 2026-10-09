@@ -15,7 +15,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Cho phép nanobot đọc và gửi email",
+        "label": "Đọc và gửi email",
         "choices": {
           "true": "Đã đồng ý",
           "false": "Chưa đồng ý"
@@ -58,7 +58,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Chu kỳ kiểm tra thư (giây)",
+        "label": "Khoảng kiểm tra (giây)",
         "placeholder": "30"
       },
       "allowFrom": {
@@ -125,10 +125,10 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "Di chuyển tới hộp thư"
+        "label": "Hộp thư đích"
       },
       "postActionExpunge": {
-        "label": "Áp dụng hành động vĩnh viễn",
+        "label": "Xóa vĩnh viễn",
         "help": "Cho phép xóa thư vĩnh viễn.\n\nKhi UID EXPUNGE không khả dụng hoặc thất bại, EXPUNGE xóa vĩnh viễn mọi thư được đánh dấu xóa trong hộp thư hiện tại, kể cả thư không được nanobot xử lý.",
         "choices": {
           "true": "Bật",
@@ -136,7 +136,7 @@
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "Bỏ qua tin nhắn bị bỏ qua",
+        "label": "Giữ thư chưa xử lý",
         "help": "Không xóa hoặc di chuyển thư bị bỏ qua.",
         "choices": {
           "true": "Bật",
@@ -144,24 +144,24 @@
         }
       },
       "maxBodyChars": {
-        "label": "Chiều dài cơ thể tối đa"
+        "label": "Giới hạn nội dung (ký tự)"
       },
       "subjectPrefix": {
-        "label": "Trả lời tiền tố chủ đề"
+        "label": "Tiền tố tiêu đề"
       },
       "allowedAttachmentTypes": {
-        "label": "Các loại tệp đính kèm được phép"
+        "label": "Loại tệp đính kèm"
       },
       "maxAttachmentSize": {
-        "label": "Kích thước tệp đính kèm tối đa"
+        "label": "Giới hạn mỗi tệp (byte)"
       },
       "maxAttachmentsPerEmail": {
-        "label": "Tệp đính kèm tối đa"
+        "label": "Giới hạn số tệp"
       },
       "trustedAuthservIds": {
         "label": "Dịch vụ xác thực tin cậy",
         "placeholder": "mx.google.com, phân tách bằng dấu phẩy",
-        "help": "Giá trị authserv-id chính xác do dịch vụ nhận thư thêm vào. Bắt buộc khi xác minh SPF hoặc DKIM."
+        "help": "Nhập các authserv-id đáng tin cậy.\n\nGiá trị authserv-id chính xác do dịch vụ nhận thư thêm vào. Bắt buộc khi xác minh SPF hoặc DKIM."
       }
     }
   }

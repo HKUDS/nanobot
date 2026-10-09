@@ -111,7 +111,7 @@ describe("host switcher", () => {
     const group = screen.getByRole("group", { name: "Switch host" });
     expect(within(group).getAllByRole("menuitem")).toHaveLength(count + 1);
     expect(group).toHaveClass("overflow-y-auto", "min-h-0");
-    expect(group).not.toContainElement(screen.getByRole("menuitem", { name: "Manage connections…" }));
+    expect(group).not.toContainElement(screen.getByRole("menuitem", { name: "Manage connections" }));
     await userEvent.type(input, "HOST-6.TEST");
     expect(within(group).getAllByRole("menuitem")).toHaveLength(1);
     expect(within(group).getByText("Server 6")).toBeVisible();

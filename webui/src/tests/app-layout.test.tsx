@@ -655,15 +655,15 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    await user.click(await screen.findByRole("button", { name: "Choose your AI" }));
+    await user.click(await screen.findByRole("button", { name: "Choose model" }));
 
     expect(
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Model providers")).toBeInTheDocument();
+    expect(screen.getByText("Providers")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add provider" }))
       .toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "Choose your AI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
   it("places Automations after Skills in the main sidebar", async () => {
@@ -719,16 +719,16 @@ describe("App layout", () => {
     const originalTitle = document.title;
     expect(within(sidebar).queryByRole("button", { name: "Remote connections" })).not.toBeInTheDocument();
     fireEvent.pointerDown(await within(sidebar).findByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections" }));
     expect(await screen.findByRole("heading", { name: "Remote connections" })).toBeVisible();
     expect(screen.getByRole("main")).toContainElement(screen.getByRole("region", { name: "Remote connections" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(sidebar).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "Connect to remote nanobot" }));
     fireEvent.pointerDown(screen.getByRole("button", { name: "Other ways" }), { button: 0, ctrlKey: false });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Use existing SSH settings" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "SSH connection" }));
     const host = await screen.findByRole("textbox", { name: "SSH address" });
-    expect(screen.getByRole("dialog", { name: "Connect to a server" })).toContainElement(host);
+    expect(screen.getByRole("dialog", { name: "Add connection" })).toContainElement(host);
     expect(window.location.hash).toBe(originalHash);
     expect(document.title).toBe(originalTitle);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -753,7 +753,7 @@ describe("App layout", () => {
     render(<App />);
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.pointerDown(await within(sidebar).findByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections" }));
     expect(await screen.findByRole("region", { name: "Remote connections" })).toBeVisible();
     fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
     expect(await screen.findByRole("heading", { name: "Apps" })).toBeVisible();
@@ -778,7 +778,7 @@ describe("App layout", () => {
     await user.click(await screen.findByRole("button", { name: "Toggle sidebar" }));
     const sheet = await screen.findByRole("dialog");
     fireEvent.pointerDown(await within(sheet).findByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections" }));
     await waitFor(() => expect(sheet).not.toBeInTheDocument());
     expect(screen.getByRole("main")).toContainElement(screen.getByRole("region", { name: "Remote connections" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -976,7 +976,7 @@ describe("App layout", () => {
     expect(temporaryTooltip).toHaveTextContent("Temporary chat");
     expect(temporaryTooltip).toHaveTextContent("Not saved to history or memory");
     expect(within(temporaryTooltip).getByText(
-      "Reloading, closing, or losing the connection ends these chats.",
+      "Ends on reload, close, or disconnection.",
     )).toHaveClass("font-medium");
     await user.unhover(heroTemporaryToggle);
 
@@ -1014,7 +1014,7 @@ describe("App layout", () => {
     await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
 
     expect(screen.queryByText("Not saved")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Clear temporary chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear chat" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
   });
 
@@ -1088,7 +1088,7 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/new");
     // Let queued browser navigation events settle before sending the first message.
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
-    expect(await screen.findByRole("button", { name: "Switch working directory" })).toHaveTextContent("selected-project");
+    expect(await screen.findByRole("button", { name: "Switch directory" })).toHaveTextContent("selected-project");
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "project topic" },
     });
@@ -1113,7 +1113,7 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect(await screen.findByRole("button", { name: "Switch working directory" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Switch directory" })).toBeInTheDocument();
     act(() => {
       sessionUpdateHandlers.forEach((handler) => handler("selected-chat", "metadata", {
         project_path: "/tmp/selected-project",
@@ -1124,7 +1124,7 @@ describe("App layout", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Temporary chat" }));
 
-    expect(screen.queryByRole("button", { name: "Switch working directory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
     expect(screen.queryByText("Full Access")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "temporary project check" },
@@ -1172,7 +1172,7 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    fireEvent.click(await screen.findByRole("button", { name: "Switch working directory" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Switch directory" }));
     fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
     fireEvent.change(await screen.findByRole("combobox"), {
       target: { value: projectPath },
@@ -1187,7 +1187,7 @@ describe("App layout", () => {
 
     await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
     expect(message).toHaveValue("keep this first message");
-    const projectButton = screen.getByRole("button", { name: "Switch working directory" });
+    const projectButton = screen.getByRole("button", { name: "Switch directory" });
     await waitFor(() => expect(projectButton).toHaveFocus());
     expect(screen.getByRole("alert")).toHaveTextContent(
       "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.",
@@ -1627,7 +1627,7 @@ describe("App layout", () => {
     expect(discoverTab.querySelector("svg")).toBeNull();
     fireEvent.click(discoverTab);
     expect(
-      await screen.findByRole("heading", { name: "Trending by marketplace" }),
+      await screen.findByRole("heading", { name: "Popular skills" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Each marketplace keeps its own ranking and install metrics."),
@@ -1930,7 +1930,7 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Tasks", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await screen.findByRole("dialog", { name: "Edit automation" });
+    await screen.findByRole("dialog", { name: "Edit task" });
     expect(screen.queryByText("Run time must be in the future.")).not.toBeInTheDocument();
     expect(
       screen.queryByText("Update the prompt and schedule. The linked chat stays unchanged."),
@@ -2429,10 +2429,10 @@ describe("App layout", () => {
     );
     expect(getSessionAutomationsSpy).toHaveBeenCalledWith("websocket:chat-a");
     expect(
-      screen.getByText("这个话题有关联的自动任务。删除话题也会删除这些自动任务。"),
+      screen.getByText("删除话题也会删除关联的自动任务"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("This chat has scheduled automations. Deleting it will also delete them."),
+      screen.queryByText("Deleting this topic also deletes its linked automations."),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
@@ -2949,7 +2949,7 @@ describe("App layout", () => {
     expect(
       requestMutationSpy.mock.calls.some(([action]) => action === "settings.agent.update"),
     ).toBe(false);
-    expect(screen.queryByRole("heading", { name: "Regional" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Region and timezone" })).not.toBeInTheDocument();
     expect(
       screen.queryByText("Used for schedules and time-aware replies."),
     ).not.toBeInTheDocument();
@@ -3442,7 +3442,7 @@ describe("App layout", () => {
     await waitFor(() => expect(Array.from(grid.children).map(
       (pane) => pane.getAttribute("aria-label"),
     )).toEqual(["Alpha child"]));
-    expect(screen.queryByRole("button", { name: "Pane layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Layout" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
 
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
@@ -3625,7 +3625,7 @@ describe("App layout", () => {
     const grid = await screen.findByTestId("pane-grid");
     expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
       .toEqual(["Alpha"]);
-    expect(screen.queryByRole("button", { name: "Pane layout" }))
+    expect(screen.queryByRole("button", { name: "Layout" }))
       .not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Add pane" }));
@@ -3633,7 +3633,7 @@ describe("App layout", () => {
     await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
 
     await waitFor(() => expect(grid.children).toHaveLength(2));
-    expect(screen.getByRole("button", { name: "Pane layout" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Layout" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/chat/websocket%3Achat-pane");
     expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
       .toEqual(["Alpha", "New topic"]);
@@ -3648,7 +3648,7 @@ describe("App layout", () => {
     await waitFor(() => expect(sendMessageSpy).toHaveBeenCalled());
     expect(sendMessageSpy.mock.calls.at(-1)?.[0]).toBe("chat-pane");
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Pane layout" }), {
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Layout" }), {
       button: 0,
       ctrlKey: false,
     });

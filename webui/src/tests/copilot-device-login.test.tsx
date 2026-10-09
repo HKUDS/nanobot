@@ -45,7 +45,7 @@ describe("Copilot device sign-in", () => {
       return jsonResponse(payload);
     }));
     renderSettingsView({ initialSection: "models" });
-    fireEvent.click(await screen.findByRole("button", { name: "New model preset" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New preset" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), { target: { value: "Draft" } });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));

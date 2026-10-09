@@ -86,10 +86,10 @@ describe("Runtime configuration settings", () => {
   it("edits lists in a dialog, cancels drafts, and retains failed saves for retry", async () => {
     const payload = runtimeSettings();
     renderSettingsView({ initialSection: "advanced", initialSettings: payload });
-    const trigger = screen.getByRole("button", { name: "Allowed environment variables", expanded: false });
-    expect(screen.queryByRole("textbox", { name: "Allowed environment variables" })).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Environment variables", expanded: false });
+    expect(screen.queryByRole("textbox", { name: "Environment variables" })).not.toBeInTheDocument();
     fireEvent.click(trigger);
-    let dialog = screen.getByRole("dialog", { name: "Allowed environment variables" });
+    let dialog = screen.getByRole("dialog", { name: "Environment variables" });
     let editor = within(dialog).getByRole("textbox");
     expect(editor).toHaveValue("TERM");
     await waitFor(() => expect(editor).toHaveFocus());
@@ -99,7 +99,7 @@ describe("Runtime configuration settings", () => {
     expect(requestMutationMock).not.toHaveBeenCalled();
 
     fireEvent.click(trigger);
-    dialog = screen.getByRole("dialog", { name: "Allowed environment variables" });
+    dialog = screen.getByRole("dialog", { name: "Environment variables" });
     editor = within(dialog).getByRole("textbox");
     expect(editor).toHaveValue("TERM");
     fireEvent.change(editor, { target: { value: " TERM \n\n COLORTERM " } });
@@ -142,7 +142,7 @@ describe("Runtime configuration settings", () => {
     requestMutationMock.mockResolvedValue({ ...payload, requires_restart: true,
       runtime_config: { ...payload.runtime_config, "tools.exec.timeout": 90 } });
     renderSettingsView({ initialSection: "advanced", initialSettings: payload });
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Command timeout (seconds)" }), { target: { value: "90" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Command timeout" }), { target: { value: "90" } });
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: { "tools.exec.timeout": 90 } }, 20_000,
     ));
@@ -152,7 +152,7 @@ describe("Runtime configuration settings", () => {
   it("validates numbers and keeps a failed draft editable", async () => {
     requestMutationMock.mockRejectedValue(new Error("Could not save settings"));
     renderSettingsView({ initialSection: "advanced", initialSettings: runtimeSettings() });
-    const field = screen.getByRole("spinbutton", { name: "Command timeout (seconds)" });
+    const field = screen.getByRole("spinbutton", { name: "Command timeout" });
     fireEvent.change(field, { target: { value: "-1" } });
     await waitFor(() => expect(field).toHaveFocus());
     expect(field).toHaveAttribute("aria-invalid", "true");
@@ -194,7 +194,7 @@ describe("Runtime configuration settings", () => {
       jsonResponse(String(input) === "/api/settings" ? payload : {})));
     requestMutationMock.mockResolvedValue(payload);
     renderSettingsView({ initialSection: "runtime", initialSettings: payload });
-    fireEvent.click(screen.getByRole("switch", { name: "Use system timezone" }));
+    fireEvent.click(screen.getByRole("switch", { name: "System timezone" }));
     const field = screen.getByRole("button", { name: "Timezone", expanded: false });
     expect(field).toBeEnabled();
     fireEvent.click(field);

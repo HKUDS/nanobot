@@ -4,7 +4,7 @@
     "officialLabel": "Abrir lista de clientes Matrix",
     "fields": {
       "homeserver": {
-        "label": "Servidor da conta",
+        "label": "Homeserver",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -24,7 +24,7 @@
         "placeholder": "Obrigatório com token"
       },
       "groupPolicy": {
-        "label": "Comportamento em grupos",
+        "label": "Regras de grupo",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
@@ -49,19 +49,19 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "Período de carência para interrupção da sincronização"
+        "label": "Espera de parada sync (segundos)"
       },
       "maxMediaBytes": {
-        "label": "Tamanho máximo da mídia"
+        "label": "Limite de mídia (bytes)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "Downloads simultâneos de mídia"
+        "label": "Downloads simultâneos"
       },
       "groupAllowFrom": {
         "label": "Grupos permitidos"
       },
       "allowRoomMentions": {
-        "label": "Permitir menções à sala",
+        "label": "Menções de sala",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"

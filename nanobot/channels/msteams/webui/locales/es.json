@@ -8,7 +8,7 @@
         "placeholder": "Microsoft App ID"
       },
       "appPassword": {
-        "label": "Secreto de cliente",
+        "label": "Secreto del cliente",
         "placeholder": "••••••"
       },
       "tenantId": {
@@ -30,27 +30,27 @@
         "label": "Puerto de escucha"
       },
       "replyInThread": {
-        "label": "Responder en el hilo",
+        "label": "Respuestas en hilo",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
         }
       },
       "mentionOnlyResponse": {
-        "label": "Respuesta de solo mención"
+        "label": "Respuesta a mención sola"
       },
       "validateInboundAuth": {
-        "label": "Validar solicitudes entrantes",
+        "label": "Verificar solicitudes",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
         }
       },
       "refTtlDays": {
-        "label": "Duración de la conversación"
+        "label": "Duración de referencias (días)"
       },
       "pruneWebChatRefs": {
-        "label": "Eliminar conversaciones de chat web",
+        "label": "Limpiar referencias Web Chat",
         "help": "Eliminar las referencias de envío guardadas de Web Chat y conservar el historial.",
         "choices": {
           "true": "encendido",
@@ -58,7 +58,7 @@
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "Eliminar conversaciones no personales",
+        "label": "Limpiar referencias de grupos",
         "help": "Eliminar las referencias de envío de chats no personales y conservar el historial.",
         "choices": {
           "true": "encendido",
@@ -66,10 +66,10 @@
         }
       },
       "refTouchIntervalS": {
-        "label": "Intervalo de actualización de la conversación"
+        "label": "Intervalo de actualización (segundos)"
       },
       "trustedServiceUrlHosts": {
-        "label": "Anfitriones de servicios confiables"
+        "label": "Hosts de confianza"
       }
     }
   }

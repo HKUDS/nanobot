@@ -705,6 +705,6 @@ describe("webui i18n", () => {
     expect(settings.sections.webSearch).toBe("Busca na web");
     expect(settings.byok.tabs.webSearch).toBe("Busca na web");
     expect(settings.overview.webSearch).toBe("Busca na web");
-    expect(settings.overview.workspace).toBe("Espaço de trabalho");
+    expect(settings.overview.workspace).toBe("Diretório de trabalho");
   });
 });

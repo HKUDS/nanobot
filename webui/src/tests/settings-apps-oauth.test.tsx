@@ -400,7 +400,7 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.change(screen.getByLabelText("Headers (JSON)"), {
       target: { value: '{"Authorization":"Bearer stale"}' },
     });
-    expect(screen.getByText("Add the request headers used by this server.")).toBeInTheDocument();
+    expect(screen.getByText("Enter the headers required by the service.")).toBeInTheDocument();
 
     fireEvent.click(oauth);
     expect(oauth).toHaveAttribute("aria-pressed", "true");
@@ -507,7 +507,7 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
     fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
 
-    const callbackInput = await screen.findByRole("textbox", { name: "Full callback URL" });
+    const callbackInput = await screen.findByRole("textbox", { name: "Callback URL" });
     expect(screen.getByText(/localhost page will not load/i)).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
       "Finish signing in, then paste the callback URL into nanobot.",

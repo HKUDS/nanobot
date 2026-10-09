@@ -16,7 +16,7 @@
         "placeholder": "ID nhóm tùy chọn"
       },
       "groupPolicy": {
-        "label": "Hành vi trong kênh",
+        "label": "Quy tắc kênh",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
@@ -24,7 +24,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "Cách trả lời trong chuỗi thảo luận",
+        "label": "Quy tắc luồng",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn (không cần nhắc)",
@@ -36,7 +36,7 @@
         "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
       },
       "allowFromMatchMode": {
-        "label": "So khớp người dùng",
+        "label": "Khớp người dùng",
         "choices": {
           "email": "Email",
           "id": "ID người dùng",
@@ -44,24 +44,24 @@
         }
       },
       "groupAllowFrom": {
-        "label": "Các kênh được phép"
+        "label": "Kênh được phép"
       },
       "replyInThread": {
-        "label": "Trả lời trong chủ đề",
+        "label": "Trả lời trong luồng",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
         }
       },
       "includeThreadContext": {
-        "label": "Bao gồm bối cảnh chủ đề",
+        "label": "Ngữ cảnh luồng",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
         }
       },
       "threadContextLimit": {
-        "label": "Giới hạn bối cảnh của chủ đề"
+        "label": "Giới hạn ngữ cảnh"
       },
       "streaming": {
         "label": "Truyền phát",
@@ -77,14 +77,14 @@
         "label": "biểu tượng cảm xúc xong"
       },
       "sendProgress": {
-        "label": "Gửi tiến trình",
+        "label": "Gửi tiến độ",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
         }
       },
       "sendToolHints": {
-        "label": "Gửi gợi ý công cụ",
+        "label": "Gợi ý công cụ",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
@@ -105,7 +105,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Cho phép người dùng nhắn tin trực tiếp"
+        "label": "Người dùng DM được phép"
       }
     }
   }

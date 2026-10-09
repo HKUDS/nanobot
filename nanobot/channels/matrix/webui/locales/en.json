@@ -24,9 +24,9 @@
         "placeholder": "Required with an access token"
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Group rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }
@@ -49,19 +49,19 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "Sync stop grace period"
+        "label": "Sync stop wait (seconds)"
       },
       "maxMediaBytes": {
-        "label": "Maximum media size"
+        "label": "Media size limit (bytes)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "Concurrent media downloads"
+        "label": "Parallel downloads"
       },
       "groupAllowFrom": {
         "label": "Allowed groups"
       },
       "allowRoomMentions": {
-        "label": "Allow room mentions",
+        "label": "Room mentions",
         "choices": {
           "true": "On",
           "false": "Off"

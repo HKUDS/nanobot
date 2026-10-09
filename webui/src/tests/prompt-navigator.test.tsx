@@ -21,16 +21,16 @@ it("lets users type into prompt search immediately after opening it", async () =
   ]} onJumpToPrompt={onJumpToPrompt} />);
 
   await user.tab();
-  expect(screen.getByRole("button", { name: "Open prompt navigator" })).toHaveFocus();
+  expect(screen.getByRole("button", { name: "Message navigation" })).toHaveFocus();
   await user.keyboard("{Enter}");
-  const search = await screen.findByRole("textbox", { name: "Search prompts" });
+  const search = await screen.findByRole("textbox", { name: "Search messages" });
   await waitFor(() => expect(search).toHaveFocus());
   await user.keyboard("beta");
   expect(search).toHaveValue("beta");
-  expect(screen.queryByRole("button", { name: "Jump to prompt: alpha" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Jump to message: alpha" })).not.toBeInTheDocument();
 
   await user.tab();
-  expect(screen.getByRole("button", { name: "Jump to prompt: beta" })).toHaveFocus();
+  expect(screen.getByRole("button", { name: "Jump to message: beta" })).toHaveFocus();
   await user.keyboard("{Enter}");
   expect(onJumpToPrompt).toHaveBeenCalledWith("two");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

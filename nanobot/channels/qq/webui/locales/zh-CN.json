@@ -29,10 +29,10 @@
         "label": "媒体目录"
       },
       "downloadChunkSize": {
-        "label": "分块大小"
+        "label": "分块大小（字节）"
       },
       "downloadMaxBytes": {
-        "label": "下载上限"
+        "label": "下载上限（字节）"
       },
       "showCompactionNotices": {
         "label": "压缩通知",

@@ -12,7 +12,7 @@
         "placeholder": "액세스 토큰(선택 사항)"
       },
       "groupPolicy": {
-        "label": "그룹 동작",
+        "label": "그룹 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
@@ -20,21 +20,21 @@
         }
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "QQ ID, 쉼표로 구분"
       },
       "groupPolicyOverrides": {
-        "label": "그룹 동작 재정의(JSON)"
+        "label": "그룹 예외(JSON)"
       },
       "welcomeNewMembers": {
-        "label": "새로운 회원을 환영합니다",
+        "label": "새 멤버 환영",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       },
       "maxImageBytes": {
-        "label": "최대 이미지 크기"
+        "label": "이미지 크기 상한(바이트)"
       }
     }
   }

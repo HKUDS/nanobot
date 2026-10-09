@@ -44,7 +44,7 @@
         "label": "重连延迟"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "重连上限"
+        "label": "重连上限（毫秒）"
       },
       "socketConnectTimeoutMs": {
         "label": "连接超时"

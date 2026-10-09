@@ -15,7 +15,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "允許 nanobot 讀取及傳送電子郵件",
+        "label": "郵件讀寫",
         "choices": {
           "true": "已授權",
           "false": "未授權"
@@ -58,11 +58,11 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "收件檢查間隔（秒）",
+        "label": "收件間隔（秒）",
         "placeholder": "30"
       },
       "allowFrom": {
-        "label": "允許的寄件者",
+        "label": "允許郵箱",
         "placeholder": "電子郵件地址，以逗號分隔"
       },
       "verifyDkim": {
@@ -125,18 +125,18 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "移至信箱"
+        "label": "目標郵箱"
       },
       "postActionExpunge": {
-        "label": "永久執行操作",
-        "help": "允許永久清除已標記刪除的郵件\n\nUID EXPUNGE 無法使用或執行失敗時，會永久清除目前信箱中所有標記為刪除的郵件，包括未由 nanobot 處理的郵件。",
+        "label": "永久清除",
+        "help": "允許永久清除已標記刪除的郵件\n\nUID EXPUNGE 不可用或執行失敗時，會永久清除當前郵箱中所有標記為刪除的郵件，包括未由 nanobot 處理的郵件。",
         "choices": {
           "true": "開啟",
           "false": "關閉"
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "忽略未處理郵件",
+        "label": "跳過處置",
         "help": "未處理郵件不刪除或移動",
         "choices": {
           "true": "開啟",
@@ -144,24 +144,24 @@
         }
       },
       "maxBodyChars": {
-        "label": "正文長度上限"
+        "label": "正文上限（字元）"
       },
       "subjectPrefix": {
-        "label": "回覆主題前綴"
+        "label": "主題字首"
       },
       "allowedAttachmentTypes": {
-        "label": "允許的附件類型"
+        "label": "附件型別"
       },
       "maxAttachmentSize": {
-        "label": "附件大小上限"
+        "label": "單件上限（位元組）"
       },
       "maxAttachmentsPerEmail": {
-        "label": "附件數量上限"
+        "label": "數量上限"
       },
       "trustedAuthservIds": {
         "label": "可信郵件驗證服務",
         "placeholder": "mx.google.com，以逗號分隔",
-        "help": "接收郵件服務加入的正確 authserv-id。啟用 SPF 或 DKIM 驗證時必填。"
+        "help": "填寫可信的 authserv-id\n\n接收郵件服務新增的準確 authserv-id。啟用 SPF 或 DKIM 驗證時必填。"
       }
     }
   }

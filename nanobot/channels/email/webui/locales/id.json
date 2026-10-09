@@ -15,7 +15,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Izinkan nanobot membaca dan mengirim email",
+        "label": "Akses email",
         "choices": {
           "true": "Diberikan",
           "false": "Belum diberikan"
@@ -58,11 +58,11 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Interval pemeriksaan email (detik)",
+        "label": "Interval pemeriksaan (detik)",
         "placeholder": "30"
       },
       "allowFrom": {
-        "label": "Pengirim yang diizinkan",
+        "label": "Pengirim diizinkan",
         "placeholder": "Alamat email, dipisahkan koma"
       },
       "verifyDkim": {
@@ -125,10 +125,10 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "Pindah ke kotak surat"
+        "label": "Kotak surat tujuan"
       },
       "postActionExpunge": {
-        "label": "Terapkan tindakan secara permanen",
+        "label": "Penghapusan permanen",
         "help": "Izinkan penghapusan permanen.\n\nJika UID EXPUNGE tidak tersedia atau gagal, EXPUNGE menghapus permanen semua pesan bertanda dihapus dalam kotak surat saat ini, termasuk pesan yang tidak diproses nanobot.",
         "choices": {
           "true": "Aktif",
@@ -136,7 +136,7 @@
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "Abaikan pesan yang dilewati",
+        "label": "Simpan email terlewati",
         "help": "Jangan hapus atau pindahkan pesan yang dilewati.",
         "choices": {
           "true": "Aktif",
@@ -144,24 +144,24 @@
         }
       },
       "maxBodyChars": {
-        "label": "Panjang tubuh maksimal"
+        "label": "Batas panjang isi (karakter)"
       },
       "subjectPrefix": {
-        "label": "Awalan subjek balasan"
+        "label": "Awalan subjek"
       },
       "allowedAttachmentTypes": {
-        "label": "Jenis lampiran yang diizinkan"
+        "label": "Jenis lampiran"
       },
       "maxAttachmentSize": {
-        "label": "Ukuran lampiran maksimum"
+        "label": "Batas per lampiran (byte)"
       },
       "maxAttachmentsPerEmail": {
-        "label": "Lampiran maksimum"
+        "label": "Batas jumlah lampiran"
       },
       "trustedAuthservIds": {
         "label": "Layanan autentikasi tepercaya",
         "placeholder": "mx.google.com, pisahkan dengan koma",
-        "help": "Nilai authserv-id persis yang ditambahkan layanan penerima. Wajib saat verifikasi SPF atau DKIM aktif."
+        "help": "Masukkan nilai authserv-id tepercaya.\n\nNilai authserv-id persis yang ditambahkan layanan penerima. Wajib saat verifikasi SPF atau DKIM aktif."
       }
     }
   }

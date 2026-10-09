@@ -561,7 +561,7 @@ describe("ThreadComposer", () => {
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "keep this draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Remove quoted context" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove quote" }));
 
     expect(onQuotedContextChange).toHaveBeenCalledWith(null);
     expect(input).toHaveValue("keep this draft");
@@ -579,7 +579,7 @@ describe("ThreadComposer", () => {
 
     expect(screen.getByText("claude-opus-4-5")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reason" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thinking" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deep research" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
     const input = screen.getByPlaceholderText("Ask anything...");
@@ -832,7 +832,7 @@ describe("ThreadComposer", () => {
     expect(badge).toHaveClass("h-9");
     expect(badge).toHaveClass("w-fit");
     fireEvent.click(badge);
-    const picker = screen.getByRole("dialog", { name: "Switch model for this chat" });
+    const picker = screen.getByRole("dialog", { name: "Switch model" });
     expect(picker).toHaveClass("w-[min(18rem,calc(100vw-2rem))]");
     expect(badge).toHaveClass("w-fit");
     expect(badge.querySelector(".composer-model-pill")).not.toHaveClass("w-full");
@@ -856,8 +856,8 @@ describe("ThreadComposer", () => {
     const { badge } = renderPresetComposer("thread", onManageModels);
 
     fireEvent.click(badge);
-    const picker = screen.getByRole("dialog", { name: "Switch model for this chat" });
-    fireEvent.click(within(picker).getByRole("button", { name: "Manage models" }));
+    const picker = screen.getByRole("dialog", { name: "Switch model" });
+    fireEvent.click(within(picker).getByRole("button", { name: "Manage presets" }));
 
     expect(onManageModels).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -1396,8 +1396,8 @@ describe("ThreadComposer", () => {
   });
 
   it.each([
-    ["restricted", "Default Permission", "File access and command execution are restricted to the current working directory."],
-    ["full", "Full Access", "Allows file access and command execution outside the current working directory."],
+    ["restricted", "Default Permission", "Read files, edit files, and run commands only inside the working directory."],
+    ["full", "Full Access", "Allow file access and commands outside the working directory."],
   ] as const)("explains %s workspace access on hover", async (mode, label, explanation) => {
     const user = userEvent.setup();
     render(<ThreadComposer onSend={vi.fn()} workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: mode, restrict_to_workspace: mode === "restricted" }} onWorkspaceScopeChange={vi.fn()} />);
@@ -1495,7 +1495,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
 
     expect(await screen.findByRole("button", { name: "/Users/test/.nanobot/workspace" })).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -1517,7 +1517,7 @@ describe("ThreadComposer", () => {
       restrict_to_workspace: false,
     }));
 
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
     await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
     const reopenedInput = await screen.findByRole("combobox");
     fireEvent.change(reopenedInput, { target: { value: "~/Pictures/Photos" } });
@@ -1560,7 +1560,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
 
     fireEvent.change(await screen.findByRole("combobox"), { target: { value: selectedPath } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
@@ -1589,16 +1589,16 @@ describe("ThreadComposer", () => {
       />
     );
     const { container, rerender } = render(composer(false));
-    const trigger = screen.getByRole("button", { name: "Switch working directory" });
+    const trigger = screen.getByRole("button", { name: "Switch directory" });
     expect(trigger).toHaveTextContent("workspace");
     expect(trigger.closest(".thread-composer-footer-primary")).not.toBeNull();
     expect(trigger.closest(".thread-composer-workspace-group")).toContainElement(screen.getByRole("button", { name: "Workspace access mode: Full Access" }));
     expect(container.querySelector("[data-composer-workspace-drawer]")).not.toBeInTheDocument();
     rerender(composer(true));
-    expect(screen.queryByRole("button", { name: "Switch working directory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Workspace access mode: Full Access" })).not.toBeInTheDocument();
     rerender(composer(false));
-    expect(screen.getByRole("button", { name: "Switch working directory" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Switch directory" })).toBeEnabled();
   });
 
   it("places the directory left and access right on narrow composers, moving them into the toolbar on desktop", () => {
@@ -1610,7 +1610,7 @@ describe("ThreadComposer", () => {
         {...workspacePickerProps(defaultScope)} workspaceControls={{ can_change_project: true }} onWorkspaceScopeChange={vi.fn()} />);
     const input = screen.getByRole("textbox");
     const row = container.querySelector(".thread-composer-workspace-row")!;
-    const trigger = screen.getByRole("button", { name: "Switch working directory" });
+    const trigger = screen.getByRole("button", { name: "Switch directory" });
     expect(row).toContainElement(trigger);
     expect(trigger.closest(".ml-auto")).toBeNull();
     const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
@@ -1618,10 +1618,10 @@ describe("ThreadComposer", () => {
     expect(access.closest(".ml-auto")).not.toBeNull();
     width = 800;
     fireEvent(window, new Event("resize"));
-    expect(screen.getByRole("button", { name: "Switch working directory" }).closest(".thread-composer-footer-primary")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Switch directory" }).closest(".thread-composer-footer-primary")).not.toBeNull();
     expect(container.querySelector("[data-composer-workspace-drawer]")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox")).toBe(input);
-    expect(screen.getAllByRole("button", { name: "Switch working directory" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Switch directory" })).toHaveLength(1);
   });
 
   it("browses and selects the connected host's project in one dialog on a native client", async () => {
@@ -1673,13 +1673,13 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
-    expect(screen.getByRole("dialog", { name: "Choose a working folder" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
+    expect(screen.getByRole("dialog", { name: "Choose directory" })).toBeInTheDocument();
     await user.click(await screen.findByRole("option", { name: project.path }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
     expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Confirm" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose a working folder" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose directory" })).not.toBeInTheDocument());
     expect(onResolveWorkspaceProject).toHaveBeenCalledWith(project.path);
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
       project_path: project.path,
@@ -1714,7 +1714,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Switch working directory" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
 
     expect(await screen.findByRole("combobox")).toBeInTheDocument();
 
@@ -1889,7 +1889,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "/" } });
 
-    expect(screen.getByRole("option", { name: /Stop current task/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /Stop task/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -2886,7 +2886,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Toggle image generation mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Image mode" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Image aspect ratio" })).not.toBeInTheDocument();
 
     const input = screen.getByLabelText("Message input");
@@ -3440,7 +3440,7 @@ describe("ThreadComposer", () => {
     expect(queue.parentElement?.className).toContain("group/composer");
     expect(within(queue).getByText("first follow-up")).toBeInTheDocument();
     expect(within(queue).getByText("second follow-up")).toBeInTheDocument();
-    expect(within(queue).getAllByRole("button", { name: "Edit guidance" })).toHaveLength(2);
+    expect(within(queue).getAllByRole("button", { name: "Edit message" })).toHaveLength(2);
     expect(within(queue).getAllByRole("button", { name: "Send now" })).toHaveLength(2);
 
     rerender(
@@ -3498,7 +3498,7 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "rough follow-up" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    const editButton = screen.getByRole("button", { name: "Edit guidance" });
+    const editButton = screen.getByRole("button", { name: "Edit message" });
     const textarea = input as HTMLTextAreaElement;
     const setSelection = textarea.setSelectionRange.bind(textarea);
     const focusedSelections: boolean[] = [];
@@ -3548,7 +3548,7 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "second follow-up" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit guidance" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]);
     await waitFor(() => {
       expect(input).toHaveValue("first follow-up");
     });
@@ -3619,7 +3619,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByText("look at this")).toBeInTheDocument();
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit guidance" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     expect(input).toHaveValue("look at this");
     expect(screen.getByTestId("composer-chip")).toHaveTextContent("draft.png");
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
@@ -3789,7 +3789,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "remember this follow-up" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Edit guidance" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     fireEvent.change(input, { target: { value: "remember this edited follow-up" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("remember this edited follow-up")).toBeInTheDocument();

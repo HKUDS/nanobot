@@ -14,7 +14,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Allow nanobot to read and send email",
+        "label": "Email access",
         "choices": {
           "true": "Granted",
           "false": "Not granted"
@@ -57,7 +57,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Check for mail every (seconds)",
+        "label": "Check interval (seconds)",
         "placeholder": "30"
       },
       "allowFrom": {
@@ -124,10 +124,10 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "Move to mailbox"
+        "label": "Target mailbox"
       },
       "postActionExpunge": {
-        "label": "Permanently apply action",
+        "label": "Permanent deletion",
         "help": "Allow mailbox-wide expunge.\n\nWhen UID EXPUNGE is unavailable or fails, EXPUNGE permanently removes every message marked Deleted in the current mailbox, including unrelated messages.",
         "choices": {
           "true": "On",
@@ -135,7 +135,7 @@
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "Ignore skipped messages",
+        "label": "Keep skipped mail",
         "help": "Do not delete or move skipped messages.",
         "choices": {
           "true": "On",
@@ -143,24 +143,24 @@
         }
       },
       "maxBodyChars": {
-        "label": "Maximum body length"
+        "label": "Body length limit (characters)"
       },
       "subjectPrefix": {
-        "label": "Reply subject prefix"
+        "label": "Subject prefix"
       },
       "allowedAttachmentTypes": {
-        "label": "Allowed attachment types"
+        "label": "Attachment types"
       },
       "maxAttachmentSize": {
-        "label": "Maximum attachment size"
+        "label": "Attachment limit (bytes)"
       },
       "maxAttachmentsPerEmail": {
-        "label": "Maximum attachments"
+        "label": "Attachment count limit"
       },
       "trustedAuthservIds": {
         "label": "Trusted authentication services",
         "placeholder": "mx.google.com, comma separated",
-        "help": "Exact authserv-id values added by the receiving mail service. Required when SPF or DKIM verification is on."
+        "help": "Enter trusted authserv-id values.\n\nExact authserv-id values added by the receiving mail service. Required when SPF or DKIM verification is on."
       }
     }
   }

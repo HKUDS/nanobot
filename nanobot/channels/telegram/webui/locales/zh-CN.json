@@ -68,7 +68,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "更新间隔"
+        "label": "更新间隔（秒）"
       },
       "webhookUrl": {
         "label": "Webhook 地址"

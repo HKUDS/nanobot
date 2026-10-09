@@ -81,7 +81,7 @@ describe("Settings overview and appearance", () => {
       showSidebar: true,
     });
 
-    expect(screen.getByText("File edit display")).toBeInTheDocument();
+    expect(screen.getByText("Edit preview")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Diff" }));
 
     await waitFor(() => {
@@ -150,7 +150,7 @@ describe("Settings overview and appearance", () => {
 
     expect(await screen.findByText("No apps available.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
-    expect(await screen.findByText("Add MCP server")).toBeInTheDocument();
+    expect(await screen.findByText("Add MCP")).toBeInTheDocument();
   });
 
   it("shows token activity on the overview", async () => {

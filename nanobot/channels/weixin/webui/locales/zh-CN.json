@@ -35,7 +35,7 @@
         "label": "分段回复"
       },
       "blockStreamingMinChars": {
-        "label": "分段字数"
+        "label": "分段下限（字符）"
       },
       "blockStreamingMaxMessages": {
         "label": "分段上限"

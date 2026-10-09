@@ -20,7 +20,7 @@
         "placeholder": "/api/messages"
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "Teams ユーザー ID（カンマ区切り）"
       },
       "host": {
@@ -30,27 +30,27 @@
         "label": "リッスンポート"
       },
       "replyInThread": {
-        "label": "スレッド内で返信する",
+        "label": "スレッドで返信",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "mentionOnlyResponse": {
-        "label": "メンションのみの返信"
+        "label": "メンションのみへの返信"
       },
       "validateInboundAuth": {
-        "label": "受信リクエストを検証する",
+        "label": "リクエストを検証",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "refTtlDays": {
-        "label": "会話の存続期間"
+        "label": "参照の保持期間（日）"
       },
       "pruneWebChatRefs": {
-        "label": "Web チャットの会話を削除する",
+        "label": "Web Chat の参照を削除",
         "help": "保存された Web Chat の送信先情報を削除します。チャット履歴は残ります。",
         "choices": {
           "true": "オン",
@@ -58,7 +58,7 @@
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "個人的ではない会話を削除する",
+        "label": "グループの参照を削除",
         "help": "個人チャット以外の保存された送信先情報を削除します。チャット履歴は残ります。",
         "choices": {
           "true": "オン",
@@ -66,10 +66,10 @@
         }
       },
       "refTouchIntervalS": {
-        "label": "会話の更新間隔"
+        "label": "更新間隔（秒）"
       },
       "trustedServiceUrlHosts": {
-        "label": "信頼できるサービスホスト"
+        "label": "信頼するホスト"
       }
     }
   }

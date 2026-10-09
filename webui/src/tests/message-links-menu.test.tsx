@@ -111,8 +111,8 @@ describe("message link actions", () => {
     expect(container.querySelectorAll("[data-message-mobile-actions]")).toHaveLength(2);
     fireEvent.click(screen.getAllByRole("button", { name: "Message actions" })[1]);
     const menu = screen.getByRole("dialog");
-    expect(within(menu).getByRole("button", { name: "Fork" })).toHaveTextContent("Fork");
-    fireEvent.click(within(menu).getByRole("button", { name: "Fork" }));
+    expect(within(menu).getByRole("button", { name: "New chat from here" })).toHaveTextContent("New chat from here");
+    fireEvent.click(within(menu).getByRole("button", { name: "New chat from here" }));
     expect(fork).toHaveBeenCalledWith(1);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });

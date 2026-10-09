@@ -16,7 +16,7 @@
       "clientId": {
         "label": "OAuth client ID",
         "placeholder": "Linear OAuth client ID",
-        "help": "Copy it from the private OAuth app in Linear."
+        "help": "Copy from the private OAuth app.\n\nCopy it from the private OAuth app in Linear."
       },
       "clientSecret": {
         "label": "OAuth client secret",
@@ -26,12 +26,12 @@
       "webhookSigningSecret": {
         "label": "Webhook signing secret",
         "placeholder": "••••••",
-        "help": "Used to verify Linear-Signature before any webhook body is parsed."
+        "help": "Verify the Webhook signature.\n\nUsed to verify Linear-Signature before any webhook body is parsed."
       },
       "publicBaseUrl": {
         "label": "Public HTTPS URL",
         "placeholder": "https://nanobot.example.com",
-        "help": "A stable HTTPS origin routed to the listener below; do not include a path."
+        "help": "Enter an HTTPS URL without a path.\n\nA stable HTTPS origin routed to the listener below; do not include a path."
       },
       "host": {
         "label": "Listen host",
@@ -52,11 +52,11 @@
       "allowFrom": {
         "label": "Allowed Linear users",
         "placeholder": "Linear user IDs, comma separated",
-        "help": "Leave empty to use nanobot pairing, or use * to allow every user in connected workspaces."
+        "help": "Choose who can use this connection.\n\nLeave empty to use nanobot pairing, or use * to allow every user in connected workspaces."
       },
       "showReasoning": {
         "label": "Show reasoning",
-        "help": "Post model reasoning as thought activities in Linear. Turn this off for a quieter session."
+        "help": "Post reasoning as thought activity.\n\nPost model reasoning as thought activities in Linear. Turn this off for a quieter session."
       }
     }
   },
@@ -67,7 +67,7 @@
     "enterSecret": "Enter secret",
     "secretSaveFailed": "Could not confirm the save. Try again or cancel.",
     "authorizeTitle": "Authorize in Linear",
-    "authorizeDescription": "Continue in Linear to choose a workspace and authorize nanobot. Return here when you're done.",
+    "authorizeDescription": "Authorize in Linear, then return here.\n\nContinue in Linear to choose a workspace and authorize nanobot. Return here when you're done.",
     "waiting": "Waiting for Linear authorization...",
     "connected": "Linear is connected.",
     "stopped": "Authorization stopped.",
@@ -94,7 +94,7 @@
     "workspaceActions": "Manage {{name}}",
     "reauthorize": "Reauthorize",
     "disconnectTitle": "Remove {{name}}?",
-    "disconnectDescription": "Revoke this workspace's authorization and clear its member access settings in nanobot. Linear issues, comments, and nanobot conversation history will be kept. Other workspaces are not affected. You can authorize this workspace again later.",
+    "disconnectDescription": "Remove workspace access; keep history.\n\nRevoke this workspace's authorization and clear its member access settings in nanobot. Linear issues, comments, and nanobot conversation history will be kept. Other workspaces are not affected. You can authorize this workspace again later.",
     "disconnectLast": "This is the last connected workspace, so the Linear channel will also be turned off.",
     "disconnecting": "Removing…",
     "addWorkspace": "Connect workspace",

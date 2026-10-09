@@ -20,7 +20,7 @@
         }
       },
       "groupPolicy": {
-        "label": "Comportamento em grupos",
+        "label": "Regras de grupo",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
@@ -32,10 +32,10 @@
         "placeholder": "IDs de usuário separados por vírgulas"
       },
       "topicIsolation": {
-        "label": "Isolamento por tópico",
+        "label": "Sessões por tópico",
         "choices": {
-          "true": "Uma sessão separada por tópico",
-          "false": "Uma sessão compartilhada para o grupo"
+          "true": "Sessões separadas",
+          "false": "Sessão compartilhada"
         }
       },
       "name": {
@@ -54,7 +54,7 @@
         "label": "Emoji pronto"
       },
       "toolHintPrefix": {
-        "label": "Prefixo de dica de ferramenta"
+        "label": "Prefixo de dica"
       },
       "replyToMessage": {
         "label": "Responder à mensagem",

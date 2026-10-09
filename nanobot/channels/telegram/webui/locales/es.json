@@ -16,7 +16,7 @@
         "placeholder": "* o ID de usuario de Telegram"
       },
       "groupPolicy": {
-        "label": "Comportamiento en grupos",
+        "label": "Reglas de grupo",
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
@@ -54,7 +54,7 @@
         }
       },
       "inlineKeyboards": {
-        "label": "teclados en línea",
+        "label": "Botones de mensaje",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
@@ -68,7 +68,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "Intervalo de actualización de la transmisión"
+        "label": "Intervalo de actualización (segundos)"
       },
       "webhookUrl": {
         "label": "URL de webhook"
@@ -86,7 +86,7 @@
         "label": "Token secreto de webhook"
       },
       "webhookMaxConnections": {
-        "label": "Conexiones máximas de webhooks"
+        "label": "Límite de conexiones Webhook"
       }
     }
   }

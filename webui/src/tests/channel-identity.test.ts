@@ -132,7 +132,7 @@ describe("channelSetup", () => {
     expect(setup.fields).toEqual([
       expect.objectContaining({
         key: "channels.discord.groupPolicy",
-        label: "Group behavior",
+        label: "Group rules",
         defaultValue: "open",
         options: [{ value: "open", label: "All messages" }],
       }),

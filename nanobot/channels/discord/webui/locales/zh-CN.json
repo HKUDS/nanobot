@@ -42,7 +42,7 @@
         "label": "处理表情"
       },
       "workingEmojiDelay": {
-        "label": "表情延迟"
+        "label": "表情延迟（秒）"
       },
       "streaming": {
         "label": "流式输出",

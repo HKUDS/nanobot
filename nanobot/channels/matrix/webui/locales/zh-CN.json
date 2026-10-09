@@ -49,10 +49,10 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "停止等待"
+        "label": "停止等待（秒）"
       },
       "maxMediaBytes": {
-        "label": "媒体上限"
+        "label": "媒体上限（字节）"
       },
       "maxConcurrentMediaDownloads": {
         "label": "下载并发"

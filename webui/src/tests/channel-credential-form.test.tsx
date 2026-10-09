@@ -164,7 +164,7 @@ describe("CredentialForm", () => {
     const password = screen.getByLabelText("Password");
     expect(password).toHaveAttribute("aria-invalid", "true");
     expect(password).toHaveAccessibleDescription("Required to complete setup.");
-    fireEvent.click(screen.getByRole("button", { name: "Remove saved credential" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials" }));
     expect(onClearSecret).toHaveBeenCalledWith("channels.matrix.password", true);
   });
 

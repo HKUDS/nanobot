@@ -30,27 +30,27 @@
         "label": "Cổng nghe"
       },
       "replyInThread": {
-        "label": "Trả lời trong chủ đề",
+        "label": "Trả lời trong luồng",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
         }
       },
       "mentionOnlyResponse": {
-        "label": "Trả lời chỉ đề cập"
+        "label": "Trả lời khi chỉ được nhắc"
       },
       "validateInboundAuth": {
-        "label": "Xác thực các yêu cầu đến",
+        "label": "Xác minh yêu cầu",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
         }
       },
       "refTtlDays": {
-        "label": "Cuộc trò chuyện trọn đời"
+        "label": "Thời gian giữ tham chiếu (ngày)"
       },
       "pruneWebChatRefs": {
-        "label": "Xóa cuộc hội thoại Trò chuyện trên web",
+        "label": "Xóa tham chiếu Web Chat",
         "help": "Xóa tham chiếu gửi Web Chat đã lưu, giữ lại lịch sử trò chuyện.",
         "choices": {
           "true": "Bật",
@@ -58,7 +58,7 @@
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "Xóa các cuộc trò chuyện không mang tính cá nhân",
+        "label": "Xóa tham chiếu nhóm",
         "help": "Xóa tham chiếu gửi của cuộc trò chuyện không phải cá nhân, giữ lại lịch sử trò chuyện.",
         "choices": {
           "true": "Bật",
@@ -66,10 +66,10 @@
         }
       },
       "refTouchIntervalS": {
-        "label": "Khoảng thời gian làm mới cuộc hội thoại"
+        "label": "Khoảng làm mới (giây)"
       },
       "trustedServiceUrlHosts": {
-        "label": "Máy chủ dịch vụ đáng tin cậy"
+        "label": "Máy chủ đáng tin cậy"
       }
     }
   }

@@ -20,22 +20,22 @@
         }
       },
       "groupPolicy": {
-        "label": "Perilaku grup",
+        "label": "Aturan grup",
         "choices": {
-          "mention": "Hanya saat disebut",
+          "mention": "Hanya mention",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "ID pengguna, dipisahkan koma"
       },
       "topicIsolation": {
-        "label": "Isolasi topik",
+        "label": "Sesi topik",
         "choices": {
-          "true": "Sesi terpisah untuk setiap topik",
-          "false": "Satu sesi bersama untuk grup"
+          "true": "Sesi terpisah",
+          "false": "Sesi bersama"
         }
       },
       "name": {
@@ -54,7 +54,7 @@
         "label": "Selesai emoji"
       },
       "toolHintPrefix": {
-        "label": "Awalan petunjuk alat"
+        "label": "Awalan petunjuk"
       },
       "replyToMessage": {
         "label": "Membalas pesan",

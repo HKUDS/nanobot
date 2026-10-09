@@ -16,15 +16,15 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Pengirim pesan langsung yang diizinkan",
+        "label": "Pengguna DM diizinkan",
         "placeholder": "Nomor telepon atau UUID"
       },
       "group_allowFrom": {
-        "label": "Grup yang diizinkan",
+        "label": "Grup diizinkan",
         "placeholder": "ID grup"
       },
       "groupMessageBufferSize": {
-        "label": "Pesan konteks grup"
+        "label": "Pesan konteks"
       },
       "attachmentsDir": {
         "label": "Direktori lampiran"
@@ -58,7 +58,7 @@
         }
       },
       "group_requireMention": {
-        "label": "Perlu disebutkan dalam kelompok",
+        "label": "Wajib mention di grup",
         "choices": {
           "true": "Aktif",
           "false": "Mati"

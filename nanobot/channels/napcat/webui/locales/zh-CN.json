@@ -34,7 +34,7 @@
         }
       },
       "maxImageBytes": {
-        "label": "图片上限"
+        "label": "图片上限（字节）"
       }
     }
   }
