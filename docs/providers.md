@@ -84,7 +84,7 @@ These fields answer different questions:
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
-Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for Anthropic Messages, `openai_codex`, and `xai_grok`, including OAuth token exchange/refresh and model requests. Native `bedrock`, `azure_openai`, and `github_copilot` backends reject `proxy`; use their endpoint-specific configuration instead.
+Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. Supported providers include `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, Anthropic Messages, `openai_codex`, and `xai_grok`. For OAuth providers, this also covers exchanging and refreshing tokens. `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
 ## Inline Image Requests
 
@@ -326,7 +326,7 @@ If you use an Anthropic-compatible proxy, keep the provider as `anthropic` and o
 }
 ```
 
-Named custom providers can also serve Anthropic Messages: declare `providers.<name>.api.supportedApis: ["anthropic_messages"]`. Auto presets then use the Anthropic adapter with that connection's credentials and endpoint.
+For a named custom provider serving Anthropic Messages, set `providers.<name>.api.supportedApis` to `["anthropic_messages"]`. Auto presets then use Messages with that connection's credentials and endpoint.
 
 ### OpenAI Direct
 
@@ -353,7 +353,9 @@ Named custom providers can also serve Anthropic Messages: declare `providers.<na
 }
 ```
 
-Use [preset API declarations](./configuration.md#preset-request-api) to choose Chat Completions or Responses for each model and endpoint. Set `providers.openai.api` for the connection default; explicit presets override it. The old `apiType` input is converted during the [two-release compatibility window](./configuration.md#legacy-openai-api-selector-migration). Replace the model with a model ID available to your account. Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models share [opaque Responses state retention](./configuration.md#responses-state-and-compaction); native compaction is enabled only where the backend supports it. The WebUI exposes provider-native switches for OpenAI web search, Codex Fast mode, DeepSeek web search, and Grok X Search. These switches write the corresponding raw provider request fields under `extraBody`.
+Replace the model with a model ID available to your account. Leave API selection on Auto unless you need to choose Chat Completions or Responses in the preset's **Advanced options**. See [preset API settings](./configuration.md#preset-request-api) for WebUI and JSON configuration. `providers.openai.api` sets the connection default; explicit presets override it. If your configuration still uses `apiType`, follow the [migration instructions](./configuration.md#legacy-openai-api-selector-migration).
+
+Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models can retain server-provided conversation state; [native context compaction](./configuration.md#responses-state-and-compaction) depends on provider support. The WebUI offers switches for OpenAI web search, Codex Fast mode, DeepSeek web search, and Grok X Search.
 
 DeepSeek's `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp` automatically use its native Responses API. Its native `web_search` tool is enabled by default and shows its lifecycle in WebUI chat activity; set `providers.deepseek.extraBody.tools` to `[]` to disable it. OpenCode Go's `muse-spark-1.2-contributor` and `muse-spark-1.3-contributor` also use Responses by default.
 
@@ -427,8 +429,6 @@ If you have more than one custom OpenAI-compatible endpoint, give each endpoint 
 Custom provider keys define direct connections. Without an API declaration, they use OpenAI-compatible Chat Completions. `apiBase` is required because nanobot cannot know the endpoint URL. `apiKey` is optional for local servers or private proxies that do not require one. Choose a name that does not conflict with a built-in provider name or alias, such as `openai`, `openai-codex`, `github-copilot`, or `lm-studio`. Declare the accepted protocols under `api` as described in [connection request APIs](./configuration.md#custom-connection-apis).
 
 If your custom endpoint documents a nonstandard thinking toggle, set `providers.<name>.thinkingStyle` to `thinking_type`, `enable_thinking`, or `reasoning_split`; nanobot then maps `reasoningEffort` onto that provider-specific request body. Leave it unset for ordinary OpenAI-compatible endpoints.
-
-Set `providers.<name>.api` to declare the connection's accepted protocols and default protocol. It accepts `chat_completions`, `responses`, and `anthropic_messages`; see [custom connection APIs](configuration.md#custom-connection-apis).
 
 ### ModelScope
 

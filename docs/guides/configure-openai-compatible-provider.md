@@ -69,9 +69,8 @@ nanobot agent -m "Hello!"
 - Use separate provider names for separate endpoints.
 - Use a placeholder key such as `EMPTY` only when the endpoint requires a
   non-empty key but does not validate it.
-- Declare the endpoint's supported protocols and default with [`providers.<name>.api`](../configuration.md#custom-connection-apis), or use Supported APIs and Default API in the WebUI connection editor. Auto model presets inherit this default.
-- For models requiring Responses, declare `api.supportedApis: ["responses"]` in their [model preset](../configuration.md#preset-request-api), or select Responses in the WebUI preset editor.
-- Custom gateways serving Anthropic Messages can use `api.supportedApis: ["anthropic_messages"]` in the preset, or select Anthropic Messages in the editor. This uses `/v1/messages` with the same provider connection.
+- Leave the preset's API selection on Auto for ordinary Chat Completions services.
+- If the service requires Responses or Anthropic Messages, set its supported APIs and default in the connection's **Advanced options**. To choose an API for an individual model, use **Settings → Models → a preset → Advanced options → API connection**. See [connection settings](../configuration.md#custom-connection-apis) and [preset settings](../configuration.md#preset-request-api) for JSON examples.
 
 ## Security notes
 

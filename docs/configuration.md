@@ -329,13 +329,9 @@ Without an API declaration, direct OpenAI calls Chat Completions normally and ro
 }
 ```
 
-For OpenAI, the connection declaration is a default: explicit model presets can select any API supported by the adapter. Use only `chat_completions` and/or `responses`. Omit `api` or set it to `null` for automatic routing. A Responses-only declaration prevents Chat compatibility fallback; include both APIs to permit that fallback.
+Use only `chat_completions` and/or `responses` for OpenAI. The connection declaration sets a default; an explicit preset declaration overrides it. Omit `api` or set it to `null` for Auto. A Responses-only declaration prevents Chat fallback; include both APIs to permit it.
 
-`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes
-ordinary fields through as the SDK `extra_body` value; list-valued `extraBody.tools` is handled
-specially and appended after generated function tools. With Responses, configure it in Responses
-API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends
-`extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
+Use fields accepted by the selected API in `extraBody`. Set `extraBody.tools` to add provider-hosted tools alongside nanobot's function tools. Responses also accepts `extraBody.include` to request additional output fields:
 
 ```json
 {
@@ -352,9 +348,7 @@ API body shape; nanobot merges ordinary top-level fields into the Responses requ
 }
 ```
 
-The WebUI's OpenAI web-search switch writes a Responses-only `api` declaration and `extraBody.tools`
-fields. A hosted search tool replaces nanobot's same-name local `web_search` function for that
-request, while other tools such as `web_fetch` remain available.
+The WebUI's OpenAI web-search switch selects Responses without Chat fallback. Provider-hosted search replaces nanobot's local `web_search` for those requests; other tools such as `web_fetch` remain available.
 
 </details>
 
@@ -1439,7 +1433,9 @@ Set `agents.defaults.modelPreset` to choose the preset followed by sessions that
 
 ### Custom connection APIs
 
-For the built-in `custom` connection or any named custom provider, declare the protocols accepted by the endpoint under `providers.<name>.api`:
+Custom providers use Chat Completions by default. If your service requires another protocol, open its WebUI connection editor and expand **Advanced options**. Use **Supported APIs** to select the protocols the service accepts and **Default API** to choose the default for Auto presets. Existing connections without a declaration retain their previous Auto behavior; use **Set supported APIs** to add one.
+
+In `config.json`, set `providers.<name>.api` for the built-in `custom` provider or a named custom provider:
 
 ```json
 {
@@ -1456,27 +1452,23 @@ For the built-in `custom` connection or any named custom provider, declare the p
 }
 ```
 
-`supportedApis` is a nonempty list of `chat_completions`, `responses`, and/or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. A model preset using Auto inherits this default. A preset's explicit API list must be a subset of the connection's list. A connection can accept both Anthropic and OpenAI formats; automatic fallback stays within the selected API family.
-
-The WebUI custom provider creation and editing forms expose **Supported APIs** and **Default API** under **Advanced options**, collapsed by default. New connections start with Chat Completions; select the protocols your endpoint accepts. Existing connections without an `api` declaration retain their previous automatic routing. Use **Set supported APIs** to add a declaration. Removing a protocol used by an existing explicit model configuration is rejected; update the model configuration first.
+`supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Auto presets inherit this default; explicit presets can only use protocols in the connection's list. Before removing a protocol used by an explicit preset, update that preset first.
 
 ### Legacy OpenAI API selector migration
 
-`providers.openai.apiType` (or `api_type`) is accepted only as temporary input compatibility.
-`chat_completions` and `responses` convert to a single-API connection declaration; `auto`
-leaves automatic routing enabled. If `api` is also present, it wins, including `api: null`.
-Saving configuration writes only the current declaration. Runtime adapters and the WebUI
-use `api`; the OpenAI connection default remains overridable by explicit model presets.
+If your configuration uses `providers.openai.apiType` (or `api_type`), save it with a version that supports the migration before upgrading further. Saving replaces the old field with `api`: `chat_completions` or `responses` becomes a single-API declaration, while `auto` keeps automatic selection. If both fields are present, `api` takes precedence, including `api: null`.
 
-The conversion is supported for the first release containing this migration and the immediately
-following release. It will be removed before the third release. During this window, older clients'
-OpenAI settings mutations using `apiType` are converted at the settings input boundary as well.
-Save the configuration with a supported release to migrate it before upgrading beyond this window.
-See the [release removal checklist](./releasing.md#openai-api-selector-compatibility-window).
+The old field is accepted in the first release containing this migration and the immediately following release. The third release will require the current `api` format.
 
 ### Preset request API
 
-Leave API selection on **Auto** unless your provider requires a specific endpoint. For OpenAI-compatible providers and GitHub Copilot, a preset can choose Responses or Chat Completions. Custom gateways also allow Anthropic Messages. Credentials and endpoint URLs stay in the provider. Two presets sharing a provider can select different APIs.
+Leave API selection on **Auto** unless your service requires a specific protocol. To change it, open **Settings → Models → a preset → Advanced options → API connection**. Choose **Responses**, **Chat Completions**, or **Anthropic Messages** from the available options. Credentials and endpoint URLs stay in the provider; two presets sharing a provider can select different APIs.
+
+**Auto (Responses)**, for example, shows the default API for the current provider, model, and reasoning settings. Auto uses a configured connection default when present. Otherwise, custom providers use Chat Completions, built-in providers use their known model defaults, and GitHub Copilot uses available account model information. Auto does not test whether a third-party service supports an API. If no preview is available, the label shows **Auto**.
+
+Selecting Responses also offers **Try Chat Completions if Responses is unsupported**, off by default. Enable it only if the service supports the same model through both APIs. The Auto label shows the default preference; permitted Chat fallback can still change the API used for a request.
+
+To configure presets in `config.json`:
 
 ```json
 {
@@ -1502,17 +1494,15 @@ Leave API selection on **Auto** unless your provider requires a specific endpoin
 }
 ```
 
-`supportedApis` is a nonempty list of APIs this preset is allowed to use: `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list; when omitted, it defaults to the first entry. A Responses-only preset never falls back to Chat Completions. Declare both OpenAI APIs with `preferredApi: "responses"` to allow Chat fallback for classified Responses compatibility errors, when the endpoint serves that model through both APIs. Anthropic Messages must be declared alone; automatic fallback across Anthropic and OpenAI protocols is not supported. Separate fallback presets can use different protocols. Other failures retain their normal error handling. Native hosted search uses Responses when it is allowed by the preset.
+`supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Omit `api` or set it to `null` for Auto. An explicit preset declaration overrides the OpenAI connection default; for custom connections, it must stay within the connection's supported APIs.
 
-A custom preset declaring `anthropic_messages` uses the Anthropic adapter for message history, tools, thinking, and streaming. Its connection retains the provider's key, base URL, headers, query parameters, body additions, and explicit proxy. Anthropic requests target `/v1/messages`; a trailing `/v1` in the configured base is normalized by the adapter. Model names use the connection's existing prefix rules. Selecting this protocol does not change other presets sharing the connection.
+A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Other errors do not trigger this API fallback. Provider-hosted search uses Responses when the preset allows it.
 
-Omit `api` or set it to `null` for automatic routing. An explicit model declaration overrides the OpenAI connection default. Automatic Copilot routing uses the account's last successfully discovered `supported_endpoints` when available; other automatic routes use registry defaults. Custom gateways use their connection API default when declared, otherwise Chat Completions. A preset can override that default only within the connection's declared supported APIs. Protocol behavior such as reasoning replay and native compaction remains provider-owned; declaring Responses support does not enable OpenAI-native compaction on a custom gateway.
+Declare `anthropic_messages` alone in a preset. Requests use the same provider connection settings and go to `/v1/messages`; `apiBase` may include a trailing `/v1`. Automatic API fallback between Anthropic Messages and OpenAI formats is not supported; use separate [fallback presets](#model-fallbacks) when needed.
 
-In the WebUI, open **Settings → Models → a preset → Advanced options → API connection**. Advanced options is collapsed by default; opening or closing it preserves the preset's API declaration. Choose **Auto**, **Responses**, **Chat Completions**, or **Anthropic Messages**, according to the host's declared adapter support. Auto shows the default API in parentheses, such as **Auto (Responses)**, and updates when the provider, model, or reasoning setting changes while Advanced options is open. The gateway resolves this default using the same rules as model requests, without probing remote endpoints. The label describes the default preference; compatibility failures can still activate permitted Chat fallback. Hosts that do not advertise API resolution show **Auto** without a resolved label. Selecting Responses also reveals **Try Chat Completions if Responses is unsupported**, which starts off when selecting Responses and requires the same model to support both endpoints.
+OpenAI Codex, xAI Grok subscriptions, and Azure OpenAI use Responses; Anthropic uses Messages, and Bedrock uses Converse. These connections show their protocol name instead of an editable selector. Selecting Responses for a custom service does not enable OpenAI-native [context compaction](#responses-state-and-compaction).
 
-Every provider adapter declares its request formats in `nanobot/providers/registry.py`. OpenAI Codex, xAI Grok subscriptions, and the Azure OpenAI adapter use Responses; Anthropic uses Messages, and Bedrock uses Converse. The WebUI shows the protocol name for these fixed connections instead of an editable selector. Preset declarations cannot enable a format the adapter does not implement. An OpenAI-compatible adapter implementing both formats does not guarantee that a particular remote model supports both.
-
-Changing a preset's model or provider resets its API declaration to automatic unless the same update supplies a new declaration. Each fallback preset retains its own declaration. Legacy direct `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
+Advanced options is collapsed by default; opening or closing it preserves API settings. Changing a preset's model or provider resets its API selection to Auto unless the same update supplies a new declaration. Each fallback preset keeps its own API settings. Existing `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
 
 ### Model Fallbacks
 

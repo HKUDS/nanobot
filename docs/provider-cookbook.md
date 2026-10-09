@@ -200,7 +200,7 @@ Verify:
 OPENAI_API_KEY="sk-..." nanobot agent -m "Hello!"
 ```
 
-If your shell cannot use inline environment variables, set `OPENAI_API_KEY` first and then run `nanobot agent -m "Hello!"`. Use `providers.openai.api` for the connection default or a [preset API declaration](./configuration.md#preset-request-api) for an individual model. Existing `apiType` inputs follow the [two-release migration window](./configuration.md#legacy-openai-api-selector-migration).
+If your shell cannot use inline environment variables, set `OPENAI_API_KEY` first and then run `nanobot agent -m "Hello!"`. Leave API selection on Auto unless you need a specific API in the preset's **Advanced options**; see [preset API settings](./configuration.md#preset-request-api). If your configuration still uses `apiType`, follow the [migration instructions](./configuration.md#legacy-openai-api-selector-migration).
 
 ## Recipe: Anthropic Direct
 

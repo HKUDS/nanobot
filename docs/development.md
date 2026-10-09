@@ -46,6 +46,14 @@ Useful `ProviderSpec` options:
 | `responses` | `ResponsesCapabilities` with automatic model rules, reasoning replay, and fallback policy. |
 | `is_transcription_only` | Provider has credentials but cannot serve chat completions. |
 
+### Request API routing
+
+`resolve_provider_route` in `nanobot/providers/routing.py` validates connection and preset declarations and selects the adapter. Built-in OpenAI connection declarations set an overridable default; custom connection declarations also limit the preset's allowed APIs.
+
+`ProviderSpec.default_model_api` resolves automatic model rules from the registry. Copilot uses the account's last successfully discovered `supported_endpoints` when available. The WebUI preview calls `resolve_automatic_model_api` without probing endpoints or consulting circuit-breaker state; it reports a preference, not a guarantee of remote support.
+
+Custom presets selecting `anthropic_messages` use the Anthropic adapter for history, tools, thinking, and streaming. They retain the connection's credentials, base URL, headers, query parameters, body additions, proxy, and model-prefix rules. Reasoning replay and native compaction remain provider-owned; a Responses declaration alone does not enable OpenAI-native compaction on a custom gateway.
+
 ### Python API migration
 
 Provider integrations must supply `ProviderSpec.request_apis`. Replace the former `responses_models` argument with `responses=ResponsesCapabilities(models=(...))`. Use `models` for rules shared by an endpoint and its proxies. For a rule tied to a specific endpoint, use `endpoint_models`:
