@@ -78,13 +78,13 @@ def test_legacy_provider_api_migrates_and_saves_current_format(tmp_path, field, 
     from nanobot.config.loader import load_config, save_config
 
     path = tmp_path / "config.json"
-    path.write_text(json.dumps({"providers": {"openai": {"apiKey": "sk-test", field: legacy}}}))
+    path.write_text(json.dumps({"providers": {"openai": {"apiKey": "sk-test", field: legacy}}}), encoding="utf-8")
     config = load_config(path)
     expected = None if legacy == "auto" else {
         "supportedApis": [legacy], "preferredApi": legacy,
     }
     save_config(config, path)
-    saved = json.loads(path.read_text())["providers"]["openai"]
+    saved = json.loads(path.read_text(encoding="utf-8"))["providers"]["openai"]
     assert saved.get("api") == expected
     assert field not in saved  # The seeded legacy field must not survive a save.
     assert load_config(path).providers.openai.api == config.providers.openai.api

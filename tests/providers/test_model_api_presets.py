@@ -466,7 +466,7 @@ async def test_migrated_openai_default_routes_and_allows_model_override(bind_tra
     config_path.write_text(json.dumps({
         "providers": {"openai": {"apiKey": "fixture", "apiType": legacy}},
         "agents": {"defaults": {"model": "gpt-4o", "provider": "openai"}},
-    }))
+    }), encoding="utf-8")
     config = load_config(config_path)
     save_config(config, config_path)
     config = load_config(config_path)
