@@ -1227,7 +1227,7 @@ async def connect_mcp_servers(
                         )
                 except Exception as e:
                     logger.debug(
-                        "MCP server '{}': resources not supported or failed: {}", name, e
+                        "MCP server '{}': resources not supported or failed: {}", name, type(e).__name__
                     )
 
                 try:
@@ -1245,7 +1245,7 @@ async def connect_mcp_servers(
                         )
                 except Exception as e:
                     logger.debug(
-                        "MCP server '{}': prompts not supported or failed: {}", name, e
+                        "MCP server '{}': prompts not supported or failed: {}", name, type(e).__name__
                     )
             else:
                 logger.info(
