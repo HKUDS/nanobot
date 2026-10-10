@@ -1907,7 +1907,7 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
             channel="telegram",
             chat_id="123",
             content="",
-            media=["https://example.com/cat.jpg"],
+            media=["https://example.com/cat.jpg?width=672"],
         )
     )
 
@@ -1915,7 +1915,7 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
         {
             "kind": "photo",
             "chat_id": 123,
-            "photo": "https://example.com/cat.jpg",
+            "photo": "https://example.com/cat.jpg?width=672",
             "reply_parameters": None,
         }
     ]
