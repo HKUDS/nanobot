@@ -1,0 +1,79 @@
+{
+  "setup": {
+    "docsLabel": "エージェント設定ガイドを開く",
+    "officialLabel": "WhatsApp エージェントのヘルプを開く",
+    "summary": "nanobot を公式のサードパーティエージェントとして自分の WhatsApp アカウントに接続します。会話できるのは本人だけで、他のチャットにはアクセスできません。",
+    "fields": {
+      "token": {
+        "label": "API トークン",
+        "placeholder": "WhatsApp で 設定 → エージェント を開き、エージェントを作成して、エージェントのチャット → チャット情報 → API キー からキーをコピーします。",
+        "help": "WhatsApp で 設定 → エージェント を開き、エージェントを作成して、エージェントのチャット → チャット情報 → API キー からキーをコピーします。"
+      },
+      "allowFrom": {
+        "label": "許可する送信者",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "状態ディレクトリ",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "ポーリング タイムアウト（秒）",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "メディア最大サイズ（MB）",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "既読通知を送信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "typingIndicator": {
+        "label": "入力中表示を表示",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "downloadMedia": {
+        "label": "受信メディアをダウンロード",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "ダウンロード後にメディアを削除",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "結果不明な送信を再試行",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "sendProgress": {
+        "label": "進捗メッセージを送信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "sendToolHints": {
+        "label": "ツールのヒントを送信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      }
+    }
+  }
+}

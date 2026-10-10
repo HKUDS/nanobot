@@ -24,6 +24,7 @@ Use **Settings → Channels** in the WebUI for guided setup. These guides explai
 | Connect Slack | [Slack AI agent](./slack-ai-agent.md) |
 | Connect Feishu | [Feishu AI agent](./feishu-ai-agent.md) |
 | Connect WhatsApp | [WhatsApp AI agent](./whatsapp-ai-agent.md) |
+| Connect an official WhatsApp agent | [Official WhatsApp agent](./whatsapp-agent-platform.md) |
 | Connect WeChat | [WeChat AI agent](./wechat-ai-agent.md) |
 | Connect QQ | [QQ AI agent](./qq-ai-agent.md) |
 | Connect Email | [Email AI agent](./email-ai-agent.md) |

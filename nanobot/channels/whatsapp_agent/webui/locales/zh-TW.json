@@ -1,0 +1,79 @@
+{
+  "setup": {
+    "docsLabel": "開啟代理設定指南",
+    "officialLabel": "開啟 WhatsApp 代理說明",
+    "summary": "將 nanobot 作為官方第三方代理連結到你的 WhatsApp 帳號。只有你可以與它對話，它無法存取你的其他聊天。",
+    "fields": {
+      "token": {
+        "label": "API 權杖",
+        "placeholder": "在 WhatsApp 中開啟 設定 → 代理，建立代理，然後從代理聊天 → 聊天資訊 → API 金鑰 複製金鑰。",
+        "help": "在 WhatsApp 中開啟 設定 → 代理，建立代理，然後從代理聊天 → 聊天資訊 → API 金鑰 複製金鑰。"
+      },
+      "allowFrom": {
+        "label": "允許的寄件者",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "狀態目錄",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "輪詢逾時（秒）",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "媒體大小上限（MB）",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "傳送已讀回條",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "typingIndicator": {
+        "label": "顯示正在輸入",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "downloadMedia": {
+        "label": "下載傳入媒體",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "下載後刪除媒體",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "重試結果不明的傳送",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "sendProgress": {
+        "label": "傳送進度訊息",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "sendToolHints": {
+        "label": "傳送工具提示",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      }
+    }
+  }
+}

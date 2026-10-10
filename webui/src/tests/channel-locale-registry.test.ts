@@ -24,6 +24,7 @@ const expectedChannels = [
   "wecom",
   "weixin",
   "whatsapp",
+  "whatsapp_agent",
 ];
 
 function flatten(value: unknown, prefix = ""): Map<string, string> {
