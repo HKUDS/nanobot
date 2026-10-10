@@ -17,11 +17,14 @@ import { SearchInput } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useProviderModelCatalog } from "@/hooks/useProviderModelCatalog";
+import { formatContextWindow } from "@/lib/model-context-format";
 import { providerBrand } from "@/lib/provider-brand";
 import { PROVIDER_ICONS } from "@/lib/provider-icons";
-export { PROVIDER_ICONS } from "@/lib/provider-icons";
 import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+export { formatContextWindow, formatModelContextWindow } from "@/lib/model-context-format";
+export { PROVIDER_ICONS } from "@/lib/provider-icons";
 
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
@@ -573,25 +576,6 @@ export function ModelIdPicker({
       </PopoverContent>
     </Popover>
   );
-}
-
-export function formatContextWindow(tokens: number): string {
-  if (tokens >= 1_000_000) {
-    const value = tokens / 1_000_000;
-    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}M`;
-  }
-  if (tokens >= 1_000) {
-    const value = tokens / 1_000;
-    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}K`;
-  }
-  return String(tokens);
-}
-
-export function formatModelContextWindow(tokens: number): string {
-  if (tokens === 65_536) return "64K";
-  if (tokens === 262_144) return "256K";
-  if (tokens === 1_048_576) return "1M";
-  return formatContextWindow(tokens);
 }
 
 export function ProviderPickerIcon({

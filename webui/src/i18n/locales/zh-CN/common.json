@@ -1218,7 +1218,7 @@
       "extraBody": "请求体参数",
       "extraQuery": "查询参数",
       "capabilityFastMode": "快速模式",
-      "capabilityFastModeHelp": "回复更快，额度消耗也更快\n\n通过 OpenAI 优先服务层获取更快响应，会更快消耗额度。",
+      "capabilityFastModeHelp": "更快响应，用量更高",
       "capabilityXSearch": "X 搜索",
       "capabilityXSearchHelp": "支持的 Grok 模型可搜索 X\n\n允许受支持的 Grok 模型使用 xAI 托管的 X Search，并在对话中展示搜索过程。",
       "capabilityOpenAISearch": "OpenAI 联网搜索",

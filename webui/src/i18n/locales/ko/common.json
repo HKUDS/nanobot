@@ -795,7 +795,7 @@
       "extraBody": "본문 매개변수",
       "extraQuery": "쿼리 매개변수",
       "capabilityFastMode": "고속 모드",
-      "capabilityFastModeHelp": "더 빠른 답변은 크레딧도 더 빨리 소모합니다.\n\nOpenAI 우선 서비스 등급을 사용해 더 빠르게 응답합니다. 크레딧도 더 빠르게 소모됩니다.",
+      "capabilityFastModeHelp": "응답이 빨라지고 사용량이 늘어납니다.",
       "capabilityXSearch": "X 검색",
       "capabilityXSearchHelp": "지원되는 Grok 모델은 X를 검색할 수 있습니다.\n\n지원되는 Grok 모델이 xAI 호스팅 X Search를 사용하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
       "capabilityOpenAISearch": "OpenAI 웹 검색",

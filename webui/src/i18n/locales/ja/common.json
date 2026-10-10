@@ -795,7 +795,7 @@
       "extraBody": "本文のパラメーター",
       "extraQuery": "クエリパラメーター",
       "capabilityFastMode": "高速モード",
-      "capabilityFastModeHelp": "応答が速くなり、クレジットの消費も速くなります。\n\nOpenAI の優先サービス階層を使用して応答を高速化します。クレジットの消費も速くなります。",
+      "capabilityFastModeHelp": "応答が速くなり、使用量が増えます。",
       "capabilityXSearch": "X 検索",
       "capabilityXSearchHelp": "対応する Grok モデルが X を検索できます。\n\n対応する Grok モデルが xAI ホストの X Search を使用できるようにします。検索状況はチャットに表示されます。",
       "capabilityOpenAISearch": "OpenAI ウェブ検索",

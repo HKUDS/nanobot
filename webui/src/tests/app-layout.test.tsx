@@ -660,9 +660,10 @@ describe("App layout", () => {
     expect(
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Providers")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add provider" }))
-      .toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model presets" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Manage providers" }));
+    expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
   });
 

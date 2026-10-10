@@ -90,7 +90,6 @@ export function useModelSettingsActions({
     return () => { oauthMounted.current = false; };
   }, []);
   const {
-    expandedProvider,
     form,
     modelCallOrder,
     modelCallOrderSaving,
@@ -107,7 +106,6 @@ export function useModelSettingsActions({
     providerSaving,
     saving,
     setEditingProviderKeys,
-    setExpandedProvider,
     setForm,
     setModelCallOrder,
     setModelCallOrderSaving,
@@ -369,7 +367,7 @@ export function useModelSettingsActions({
       modelCallOrderSaving ||
       modelConfigurationSaving
     ) {
-      return;
+      return false;
     }
     setSaving(true);
     try {
@@ -377,8 +375,10 @@ export function useModelSettingsActions({
       applyPayload(payload);
       setModelPresetPendingDelete(null);
       setError(null);
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -436,7 +436,6 @@ export function useModelSettingsActions({
       });
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
       setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-      if (!isOauthProvider || provider.configured) setExpandedProvider(null);
       setError(null);
       return true;
     } catch (err) {
@@ -463,7 +462,6 @@ export function useModelSettingsActions({
         thinkingStyle: draft.thinkingStyle.trim(),
       });
       applyPayload(payload, { preserveAgentForm: true });
-      setExpandedProvider(null);
       setError(null);
       return payload;
     } catch (err) {
@@ -566,11 +564,6 @@ export function useModelSettingsActions({
     setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
   }, [settings]);
 
-  const handleToggleProvider = useCallback((providerName: string) => {
-    if (expandedProvider) resetProviderDraft(expandedProvider);
-    setExpandedProvider(expandedProvider === providerName ? null : providerName);
-  }, [expandedProvider, resetProviderDraft]);
-
   const toggleProviderKeyVisibility = (providerName: string) => {
     const isVisible = visibleProviderKeys[providerName];
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: !isVisible }));
@@ -603,7 +596,6 @@ export function useModelSettingsActions({
     createCustomProvider,
     handleDeleteModelConfiguration,
     handleMigrateModelConfigurations,
-    handleToggleProvider,
     resetProviderDraft,
     runProviderOAuth,
     saveModelSettings,

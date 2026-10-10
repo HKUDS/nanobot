@@ -89,6 +89,7 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
+  const presetDeletedCallback = useRef<(() => void) | null>(null);
   const [providerPanel, setProviderPanel] = useState<ProviderSettingsEntry | null>(null);
   const providerSetupOrigin = useRef<{
     trigger: HTMLButtonElement | null;
@@ -128,7 +129,6 @@ export function SettingsPage({
     customMcpForm,
     editingProviderKeys,
     error,
-    expandedProvider,
     featureCatalog,
     form,
     handleApiServiceAction,
@@ -147,7 +147,7 @@ export function SettingsPage({
     handleMigrateModelConfigurations,
     handleNanobotFeatureAction,
     handleSaveCustomMcp,
-    handleToggleProvider,
+    resetProviderDraft,
     handleWebSearchProviderChange,
     hostEngineApplying,
     imageGenerationDirty,
@@ -377,7 +377,7 @@ export function SettingsPage({
               }}
               onConfigureProvider={(provider, trigger) => {
                 providerSetupOrigin.current = { trigger };
-                handleToggleProvider(provider);
+                resetProviderDraft(provider);
                 setProviderPanel({ kind: "edit", provider });
               }}
               onManageProviders={(trigger) => {
@@ -395,7 +395,10 @@ export function SettingsPage({
                 setModelPresetNameError(null);
                 modelPresetBeforeCreateRef.current = null;
               }}
-              onDeleteConfiguration={setModelPresetPendingDelete}
+              onDeleteConfiguration={(preset, onDeleted) => {
+                presetDeletedCallback.current = onDeleted;
+                setModelPresetPendingDelete(preset);
+              }}
             />
             {providerPanel ? <ProvidersSettings
               entry={providerPanel}
@@ -414,14 +417,13 @@ export function SettingsPage({
               nanobotFeatures={nanobotFeatures}
               featureAction={nanobotFeatureAction}
               capabilityError={nanobotFeaturesError}
-              expandedProvider={expandedProvider}
               providerForms={providerForms}
               visibleProviderKeys={visibleProviderKeys}
               editingProviderKeys={editingProviderKeys}
               providerSaving={providerSaving}
               showBrandLogos={localPrefs.brandLogos}
               remoteBrowserAccess={remoteBrowserAccess}
-              onToggleProvider={handleToggleProvider}
+              onResetProviderDraft={resetProviderDraft}
               onToggleProviderKey={toggleProviderKeyVisibility}
               onToggleProviderKeyEditing={toggleProviderKeyEditing}
               onChangeProviderForm={(provider, value) => {
@@ -707,9 +709,17 @@ export function SettingsPage({
         preset={modelPresetPendingDelete}
         deleting={saving}
         onOpenChange={(open) => {
-          if (!open) setModelPresetPendingDelete(null);
+          if (!open) {
+            setModelPresetPendingDelete(null);
+            presetDeletedCallback.current = null;
+          }
         }}
-        onConfirm={handleDeleteModelConfiguration}
+        onConfirm={async () => {
+          if (await handleDeleteModelConfiguration()) {
+            presetDeletedCallback.current?.();
+            presetDeletedCallback.current = null;
+          }
+        }}
       />
 
       <ProviderOAuthLoginDialog

@@ -795,7 +795,7 @@
       "extraBody": "Parameter body",
       "extraQuery": "Parameter kueri",
       "capabilityFastMode": "Mode cepat",
-      "capabilityFastModeHelp": "Balasan lebih cepat menghabiskan kredit lebih cepat.\n\nGunakan tingkat layanan prioritas OpenAI agar respons lebih cepat. Kredit akan terpakai lebih cepat.",
+      "capabilityFastModeHelp": "Respons lebih cepat, penggunaan meningkat.",
       "capabilityXSearch": "Pencarian X",
       "capabilityXSearchHelp": "Model Grok yang didukung dapat mencari di X.\n\nIzinkan model Grok yang didukung menggunakan X Search yang dihosting xAI. Aktivitas pencarian ditampilkan di chat.",
       "capabilityOpenAISearch": "Pencarian web OpenAI",

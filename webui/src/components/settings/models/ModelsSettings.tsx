@@ -7,7 +7,6 @@ import { RemoveActionButton } from "@/components/settings/shared/RemoveActionBut
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { Fragment, useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   GripVertical,
   ListOrdered,
@@ -36,7 +35,7 @@ import {
 } from "@/components/settings/shared/SettingsControls";
 import { Button } from "@/components/ui/button";
 import { HoverHint } from "@/components/ui/hover-hint";
-import { ControlChevron } from "@/components/ui/control-chevron";
+import { TruncatedTextTooltip } from "@/components/ui/truncated-text-tooltip";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +43,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -240,7 +240,7 @@ export function ModelsSettings({
   onCancelCreate: () => void;
   onClearPresetNameError: () => void;
   onSelectConfiguration: (name: string) => void;
-  onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number]) => void;
+  onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number], onDeleted: () => void) => void;
 }) {
   const { t } = useTranslation();
   useAutoSave(form, dirty, saving, onSave, !creating && !!form.model.trim());
@@ -263,7 +263,6 @@ export function ModelsSettings({
   const suggestedPresetNameRef = useRef<string | null>(null);
   const presetContextInitializedRef = useRef(false);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
-  const advancedId = useId();
 
   useEffect(() => {
     if (presetNameError) presetNameInputRef.current?.focus();
@@ -528,58 +527,58 @@ export function ModelsSettings({
           onChange={(reasoningEffort) => setForm((prev) => ({ ...prev, reasoningEffort }))}
         />
       </SettingsRow>
-      <button
-        type="button"
-        aria-expanded={advancedOpen}
-        aria-controls={advancedId}
-        onClick={() => setAdvancedOpen((value) => !value)}
-        className="settings-disclosure-row w-full text-left transition-colors settings-hover"
-      >
-        <span className="min-w-0 pl-3">
-          <span className="block text-[14px] font-medium text-foreground">
-            {tx("settings.models.advancedOptions", "Advanced options")}
-          </span>
-          <span className="mt-0.5 flex flex-wrap gap-x-3 text-[12px] tabular-nums text-muted-foreground">
-            <span>{tx("settings.models.contextSummary", "Context {{context}}", {
-              context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
-            })}</span>{" "}
-            <span>{tx("settings.models.outputSummary", "Max {{max}} tokens", {
-              max: Number.isFinite(form.maxTokens) ? formatContextWindow(form.maxTokens) : "—",
-            })}</span>
-          </span>
-        </span>
-        <span className="settings-control">
-          <span className="control-layout justify-end border-transparent">
-            <ControlChevron
-              className={cn(
-                "transition-transform duration-200 motion-reduce:transition-none",
-                advancedOpen && "rotate-180",
+      <Dialog open={advancedOpen} onOpenChange={setAdvancedOpen}>
+        <DialogTrigger asChild>
+          <button
+            type="button"
+            className="settings-disclosure-row w-full text-left transition-colors settings-hover"
+          >
+            <span className="min-w-0 pl-3">
+              <span className="block text-[14px] font-medium text-foreground">
+                {tx("settings.models.advancedOptions", "Advanced options")}
+              </span>
+              <span className="mt-0.5 flex flex-wrap gap-x-3 text-[12px] tabular-nums text-muted-foreground">
+                <span>{tx("settings.models.contextSummary", "Context {{context}}", {
+                  context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
+                })}</span>{" "}
+                <span>{tx("settings.models.outputSummary", "Max {{max}} tokens", {
+                  max: Number.isFinite(form.maxTokens) ? formatContextWindow(form.maxTokens) : "—",
+                })}</span>
+              </span>
+            </span>
+            <span className="settings-control">
+              <span className="control-layout justify-end border-transparent">
+                <Pencil className="h-4 w-4 text-muted-foreground" aria-hidden />
+              </span>
+            </span>
+          </button>
+        </DialogTrigger>
+        <DialogContent aria-describedby={undefined}
+          className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0">
+          <DialogHeader className="px-6 pb-2 pt-6 pr-12 text-left">
+            <DialogTitle>{tx("settings.models.advancedOptions", "Advanced options")}</DialogTitle>
+          </DialogHeader>
+          <div className="settings-grid !px-0 pb-4 [&_.settings-row>div:first-child]:pl-3">
+            <ModelAPIControl
+              provider={selectedProvider ?? settings.providers.find(
+                (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
               )}
+              automaticAPI={resolvedAutomaticAPI?.api}
+              value={form.api}
+              onChange={(api) => setForm((prev) => ({ ...prev, api }))}
             />
-          </span>
-        </span>
-      </button>
-      <DisclosureContent id={advancedId} open={advancedOpen}>
-        <div className="bg-muted/12">
-          <ModelAPIControl
-            provider={selectedProvider ?? settings.providers.find(
-              (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
-            )}
-            automaticAPI={resolvedAutomaticAPI?.api}
-            value={form.api}
-            onChange={(api) => setForm((prev) => ({ ...prev, api }))}
-          />
-          <ModelAdvancedFields
-            maxTokens={form.maxTokens}
-            contextWindowTokens={form.contextWindowTokens}
-            temperature={form.temperature}
-            onChange={(value) => {
-              if (creating && value.contextWindowTokens !== undefined) presetContextInitializedRef.current = true;
-              setForm((prev) => ({ ...prev, ...value }));
-            }}
-          />
-        </div>
-      </DisclosureContent>
+            <ModelAdvancedFields
+              maxTokens={form.maxTokens}
+              contextWindowTokens={form.contextWindowTokens}
+              temperature={form.temperature}
+              onChange={(value) => {
+                if (creating && value.contextWindowTokens !== undefined) presetContextInitializedRef.current = true;
+                setForm((prev) => ({ ...prev, ...value }));
+              }}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="settings-list-inset flex min-h-[58px] flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         {creating ? (
           <Button
@@ -606,7 +605,10 @@ export function ModelsSettings({
                   aria-describedby={
                     selectedPresetReferenced ? "model-preset-delete-hint" : undefined
                   }
-                  onClick={() => onDeleteConfiguration(selectedPreset)}
+                  onClick={() => onDeleteConfiguration(selectedPreset, () => {
+                    setEditorOpen(false);
+                    setEditorRowKey(null);
+                  })}
                 >
                   {tx("settings.actions.delete", "Delete")}
                 </RemoveActionButton>
@@ -741,7 +743,7 @@ export function ModelsSettings({
                             }
                           }}
                           className={cn(
-                            "settings-list-inset group relative grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] gap-x-3 select-none outline-none transition-[padding,background-color] [transition-duration:240ms] motion-reduce:transition-none",
+                            "settings-list-inset group relative grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-x-3 select-none outline-none transition-[padding,background-color] [transition-duration:240ms] motion-reduce:transition-none",
                             primary ? "py-5 [--preset-title-size:1.375rem] sm:py-6 sm:[--preset-title-size:1.625rem]" : "py-4",
                             ordered && (callOrderBusy ? "cursor-wait" : "cursor-grab active:cursor-grabbing"),
                             !isDragging && "settings-hover",
@@ -749,14 +751,14 @@ export function ModelsSettings({
                             !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                           )}
                         >
-                          <div className="col-span-full grid grid-cols-subgrid items-center">
+                          <div className="contents">
                             <button
                               type="button"
                               aria-pressed={selectedPreset?.name === name}
                               aria-haspopup="dialog"
                               disabled={!preset}
                               onClick={() => preset && selectPreset(preset, key)}
-                              className={cn("col-span-3 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none",
+                              className={cn("col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none",
                                 !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-ring")}
                             >
                               {presetConfigured ? (
@@ -772,10 +774,8 @@ export function ModelsSettings({
                               )}
                               <span className="min-w-0 flex-1">
                                 <span className="flex min-w-0 items-center gap-x-2">
-                                  <span title={name} className={cn("truncate font-medium text-foreground transition-[font-size,line-height,letter-spacing] [transition-duration:240ms] motion-reduce:transition-none",
-                                    primary ? "text-[length:var(--preset-title-size)] leading-snug tracking-tight" : "text-[14px]")}>
-                                    {name}
-                                  </span>
+                                  <TruncatedTextTooltip text={name} className={cn("font-medium text-foreground transition-[font-size,line-height,letter-spacing] [transition-duration:240ms] motion-reduce:transition-none",
+                                    primary ? "text-[length:var(--preset-title-size)] leading-snug tracking-tight" : "text-[14px]")} />
                                   {primary ? (
                                     <span className="shrink-0 whitespace-nowrap"><StatusPill tone="success">{t("settings.models.primary")}</StatusPill></span>
                                   ) : !ordered ? (
@@ -785,16 +785,21 @@ export function ModelsSettings({
                                   ) : null}
                                 </span>
                                 {preset ? (
-                                  <span className={cn("mt-1 block truncate text-muted-foreground", primary ? "text-[13px] leading-5" : "text-[12px]")} title={preset.model}>
-                                    {preset.model}
-                                  </span>
+                                  <TruncatedTextTooltip
+                                    text={primary
+                                      ? `${preset.model}  ${formatModelContextWindow(preset.context_window_tokens)}  ${preset.reasoning_effort || t("settings.values.default")}`
+                                      : preset.model}
+                                    className={cn("mt-1 block whitespace-pre text-muted-foreground", primary ? "text-[13px] leading-5" : "text-[12px]")} />
                                 ) : null}
                               </span>
-                              <span className="shrink-0 text-[13px] font-normal leading-5 text-muted-foreground">
-                                <span className="sr-only sm:not-sr-only">{t("settings.configure")}</span>
-                                <Pencil className="h-4 w-4 sm:hidden" aria-hidden />
-                              </span>
                             </button>
+                            <Button type="button" variant="link" size="sm"
+                              className="h-auto px-0 text-[13px] font-normal text-muted-foreground hover:text-foreground hover:no-underline"
+                              disabled={!preset}
+                              onClick={() => preset && selectPreset(preset, key)}>
+                              <span className="sr-only sm:not-sr-only">{t("settings.configure")}</span>
+                              <Pencil className="h-4 w-4 sm:hidden" aria-hidden />
+                            </Button>
                             {ordered ? (
                               <GripVertical
                                 className="h-4 w-4 shrink-0 touch-none text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
@@ -817,32 +822,6 @@ export function ModelsSettings({
                             <p className="col-[2/-1] mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
                               {t("settings.models.providerSetupRequired")}
                             </p>
-                          ) : null}
-                          {preset ? (
-                            <div className="col-[2/-1] min-w-0">
-                              <DisclosureContent open={primary} className="pt-6">
-                                <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-x-3 gap-y-4 border-t border-border/45 pt-5 sm:gap-x-4">
-                                  <div>
-                                    <dt className="text-[12px] leading-5 text-muted-foreground">{t("settings.rows.contextWindow")}</dt>
-                                    <dd className="mt-1 text-[20px] font-medium leading-7 tabular-nums text-foreground">
-                                      {formatModelContextWindow(preset.context_window_tokens)}
-                                    </dd>
-                                  </div>
-                                  <div>
-                                    <dt className="text-[12px] leading-5 text-muted-foreground">{t("settings.models.maxTokens")}</dt>
-                                    <dd className="mt-1 text-[20px] font-medium leading-7 tabular-nums text-foreground">
-                                      {formatContextWindow(preset.max_tokens)}
-                                    </dd>
-                                  </div>
-                                  <div className="min-w-0">
-                                    <dt className="break-words text-[12px] leading-5 text-muted-foreground">{t("settings.models.reasoningEffort")}</dt>
-                                    <dd className="mt-1 break-words text-[20px] font-medium leading-7 text-foreground">
-                                      {preset.reasoning_effort || t("settings.values.default")}
-                                    </dd>
-                                  </div>
-                                </dl>
-                              </DisclosureContent>
-                            </div>
                           ) : null}
                         </div>
                       </SettingsGroup>

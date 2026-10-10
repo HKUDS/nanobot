@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 
 interface PresetDrag {
   key: string;
+  surface: HTMLElement;
   pointerId: number;
   startY: number;
   pointerY: number;
@@ -38,8 +39,7 @@ export function useModelPresetDrag({
   const followPointer = () => {
     const current = drag.current;
     if (!current?.active) return;
-    const surface = surfaces().find((element) => element.dataset.presetSortSurface === current.key);
-    if (!surface) return;
+    const surface = current.surface;
     const top = surface.parentElement!.getBoundingClientRect().top;
     surface.style.transform = `translateY(${current.pointerY - current.grabOffset - top}px)`;
   };
@@ -101,7 +101,7 @@ export function useModelPresetDrag({
         || (event.target as HTMLElement).closest('[role="switch"]')) return;
       const surface = surfaces().find((element) => element.dataset.presetSortSurface === key)!;
       drag.current = {
-        key, pointerId: event.pointerId, startY: event.clientY, pointerY: event.clientY,
+        key, surface, pointerId: event.pointerId, startY: event.clientY, pointerY: event.clientY,
         grabOffset: event.clientY - surface.getBoundingClientRect().top,
         active: false, keys,
       };

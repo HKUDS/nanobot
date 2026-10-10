@@ -24,6 +24,7 @@ import { ToggleButton } from "@/components/settings/ToggleButton";
 import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
 import { Button } from "@/components/ui/button";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import {
   Dialog,
   DialogContent,
@@ -82,7 +83,7 @@ const PROVIDER_REQUEST_OPTIONS: Partial<Record<string, ProviderRequestOption[]>>
     titleKey: "settings.providers.capabilityFastMode",
     title: "Fast mode",
     helpKey: "settings.providers.capabilityFastModeHelp",
-    help: "Use OpenAI's priority service tier for faster responses. This consumes credits faster.",
+    help: "Faster responses, increased usage.",
   }],
   openai: [{
     kind: "hosted_tool",
@@ -348,15 +349,21 @@ function ProviderRequestOptions({
             key={option.titleKey}
             className="flex items-center justify-between gap-4 rounded-control px-4 py-3 transition-colors settings-hover focus-within:bg-sidebar-accent/60"
           >
-            <div className="flex min-w-0 items-start gap-3">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
                 <Icon className="h-4 w-4" aria-hidden />
               </span>
               <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-foreground">{title}</p>
-                <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-                  {tx(option.helpKey, option.help)}
-                </p>
+                <div className="text-[13px] font-semibold text-foreground">
+                  {option.kind === "priority"
+                    ? <SettingsHint description={tx(option.helpKey, option.help)}>{title}</SettingsHint>
+                    : title}
+                </div>
+                {option.kind !== "priority" ? (
+                  <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
+                    {tx(option.helpKey, option.help)}
+                  </p>
+                ) : null}
               </div>
             </div>
             <ToggleButton
@@ -537,14 +544,13 @@ export function ProvidersSettings({
   nanobotFeatures,
   featureAction,
   capabilityError,
-  expandedProvider,
   providerForms,
   visibleProviderKeys,
   editingProviderKeys,
   providerSaving,
   showBrandLogos,
   remoteBrowserAccess,
-  onToggleProvider,
+  onResetProviderDraft,
   onToggleProviderKey,
   onToggleProviderKeyEditing,
   onChangeProviderForm,
@@ -562,14 +568,13 @@ export function ProvidersSettings({
   nanobotFeatures: NanobotFeaturesPayload | null;
   featureAction: string | null;
   capabilityError: string | null;
-  expandedProvider: string | null;
   providerForms: Record<string, ProviderForm>;
   visibleProviderKeys: Record<string, boolean>;
   editingProviderKeys: Record<string, boolean>;
   providerSaving: string | null;
   showBrandLogos: boolean;
   remoteBrowserAccess: boolean;
-  onToggleProvider: (provider: string) => void;
+  onResetProviderDraft: (provider: string) => void;
   onToggleProviderKey: (provider: string) => void;
   onToggleProviderKeyEditing: (provider: string) => void;
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
@@ -606,12 +611,12 @@ export function ProvidersSettings({
     if (view.kind === "provider" && view.adding && selectedProvider?.auth_type === "oauth"
       && selectedProvider.configured && !providerSaving && onProviderAdded) {
       onProviderAdded(view.name);
-      if (expandedProvider) onToggleProvider(expandedProvider);
+      onResetProviderDraft(view.name);
       onClose();
     }
-  }, [view, selectedProvider?.auth_type, selectedProvider?.configured, providerSaving, onProviderAdded, expandedProvider, onToggleProvider, onClose]);
+  }, [view, selectedProvider?.auth_type, selectedProvider?.configured, providerSaving, onProviderAdded, onResetProviderDraft, onClose]);
   const closePanel = () => {
-    if (expandedProvider) onToggleProvider(expandedProvider);
+    if (view.kind === "provider") onResetProviderDraft(view.name);
     onClose();
   };
   const returnToOrigin = () => {
@@ -619,17 +624,17 @@ export function ProvidersSettings({
     else onClose();
   };
   const returnFromEditor = () => {
-    if (expandedProvider) onToggleProvider(expandedProvider);
+    if (view.kind === "provider") onResetProviderDraft(view.name);
     returnToOrigin();
   };
   const goBack = () => {
-    if (expandedProvider) onToggleProvider(expandedProvider);
+    if (view.kind === "provider") onResetProviderDraft(view.name);
     setView({ kind: view.kind === "custom" || (view.kind === "provider" && view.adding)
       ? "picker" : "list" });
   };
   const editProvider = (provider: string, adding: boolean) => {
     lastProvider.current = provider;
-    onToggleProvider(provider);
+    onResetProviderDraft(provider);
     setView({ kind: "provider", name: provider, adding });
   };
   const saveProvider = async (provider: string) => {
@@ -716,15 +721,14 @@ export function ProvidersSettings({
               <>
                 <div className="flex flex-col gap-3 rounded-floating border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-foreground">
-                      {tx("settings.oauth.authentication", "OAuth authentication")}
-                    </p>
-                    <p className="mt-1 text-[12px] text-muted-foreground">
+                    {!oauthAuthenticated ? (
+                      <p className="text-[13px] font-semibold text-foreground">
+                        {tx("settings.oauth.authentication", "OAuth authentication")}
+                      </p>
+                    ) : null}
+                    <p className={oauthAuthenticated ? "text-[13px] text-foreground" : "mt-1 text-[12px] text-muted-foreground"}>
                       {oauthAuthenticated
-                        ? t("settings.oauth.signedInAs", {
-                            account: provider.oauth_account || provider.label,
-                            defaultValue: "Signed in as {{account}}",
-                          })
+                        ? t("settings.oauth.signedIn")
                         : provider.name === "openai_codex" && remoteBrowserAccess
                           ? tx(
                               "settings.oauth.codexRemoteSignInHelp",

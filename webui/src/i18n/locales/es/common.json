@@ -795,7 +795,7 @@
       "extraBody": "Parámetros del cuerpo",
       "extraQuery": "Parámetros de consulta",
       "capabilityFastMode": "Modo rápido",
-      "capabilityFastModeHelp": "Las respuestas más rápidas consumen créditos más rápido.\n\nUsa el nivel de servicio prioritario de OpenAI para responder más rápido. Esto consume créditos más deprisa.",
+      "capabilityFastModeHelp": "Respuestas más rápidas, mayor consumo.",
       "capabilityXSearch": "Búsqueda en X",
       "capabilityXSearchHelp": "Los modelos Grok compatibles pueden buscar en X.\n\nPermite que los modelos Grok compatibles usen X Search alojado por xAI. La actividad de búsqueda aparece en el chat.",
       "capabilityOpenAISearch": "Búsqueda web de OpenAI",

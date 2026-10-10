@@ -795,7 +795,7 @@
       "extraBody": "請求體引數",
       "extraQuery": "查詢引數",
       "capabilityFastMode": "快速模式",
-      "capabilityFastModeHelp": "回覆更快，額度消耗也更快\n\n透過 OpenAI 優先服務層獲取更快響應，會更快消耗額度。",
+      "capabilityFastModeHelp": "回應更快，用量更高",
       "capabilityXSearch": "X 搜尋",
       "capabilityXSearchHelp": "支援的 Grok 模型可搜尋 X\n\n允許受支援的 Grok 模型使用 xAI 託管的 X Search，並在對話中展示搜尋過程。",
       "capabilityOpenAISearch": "OpenAI 網路搜尋",

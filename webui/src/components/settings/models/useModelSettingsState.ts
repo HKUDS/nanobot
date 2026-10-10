@@ -34,7 +34,6 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
   const [providerOAuthResponse, setProviderOAuthResponse] = useState("");
   const [providerOAuthCompleting, setProviderOAuthCompleting] = useState(false);
   const [providerOAuthDialogError, setProviderOAuthDialogError] = useState<string | null>(null);
-  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerForms, setProviderForms] = useState<Record<string, ProviderForm>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
@@ -48,7 +47,6 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
 
   return {
     editingProviderKeys,
-    expandedProvider,
     form,
     modelCallOrder,
     modelCallOrderSaving,
@@ -69,7 +67,6 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     providerOperation,
     saving,
     setEditingProviderKeys,
-    setExpandedProvider,
     setForm,
     setModelCallOrder,
     setModelCallOrderSaving,

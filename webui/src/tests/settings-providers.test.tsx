@@ -425,7 +425,7 @@ describe("Settings providers", () => {
       expect(screen.getByRole("combobox", { name: "xAI Grok" })).toHaveFocus();
       expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("OAuth preset");
     } else {
-      expect(await screen.findByText("Signed in as user@example.com")).toBeInTheDocument();
+      expect(await screen.findByText("Signed in")).toBeInTheDocument();
     }
   });
 
@@ -582,7 +582,7 @@ describe("Settings providers", () => {
     expect(within(dialog).getByText("Waiting for the browser callback…")).toBeInTheDocument();
 
     expect(
-      await screen.findByText("Signed in as acct-codex", {}, { timeout: 2500 }),
+      await screen.findByText("Signed in", {}, { timeout: 2500 }),
     ).toBeInTheDocument();
   });
 
@@ -705,7 +705,7 @@ describe("Settings providers", () => {
           20_000,
         ),
       );
-      expect(await screen.findByText("Signed in as acct-codex")).toBeInTheDocument();
+      expect(await screen.findByText("Signed in")).toBeInTheDocument();
     } finally {
       happyWindow.happyDOM.setURL(originalUrl);
     }
