@@ -137,9 +137,6 @@ def webui(
 
     _validate_session_storage(resolved_setup_config, workspace_override=workspace)
     provider_error = _provider_setup_error(resolved_setup_config)
-    if provider_error:
-        console.print(f"[yellow]Model setup is incomplete: {provider_error}[/yellow]")
-        console.print("Configure a provider and model in WebUI Settings → Models.")
 
     try:
         changed_webui = _ensure_local_webui_channel(
@@ -210,6 +207,7 @@ def webui(
     def announce_ready(url: str, *, managed: bool) -> None:
         _print_webui_ready(
             runtime_config, config_path, url, workspace=workspace, dev=dev, managed=managed,
+            provider_error=provider_error,
         )
         if not no_open:
             _open_webui_browser(url, wait=False)

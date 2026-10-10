@@ -1,3 +1,4 @@
+import shlex
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,7 +68,8 @@ def test_webui_ready_keeps_the_complete_login_url_copyable(monkeypatch, width: i
     assert output.getvalue().count("bootstrapSecret=") == 1
     assert "Access: This device only" in output.getvalue()
     assert f"Config: {config_path}" in lines
-    assert f"Logs: nanobot gateway logs --config {config_path}" in lines
+    log_command = next(line.removeprefix("Logs: ") for line in lines if line.startswith("Logs: "))
+    assert shlex.split(log_command) == ["nanobot", "gateway", "logs", "--config", str(config_path)]
 
 
 @pytest.mark.parametrize(

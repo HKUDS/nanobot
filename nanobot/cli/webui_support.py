@@ -517,12 +517,18 @@ def _print_webui_ready(
     workspace: str | None,
     dev: bool,
     managed: bool,
+    provider_error: str | None = None,
 ) -> None:
     """Show one ready state and a complete browser handoff in the local terminal."""
     ws_cfg = _webui_config_dict(config)
     host = str(ws_cfg.get("host") or "127.0.0.1")
     console.print()
     console.print("[bold green]WebUI ready[/bold green]" + (" [dim](development)[/dim]" if dev else ""))
+    scope = "This device only" if is_loopback_host(host) else f"Other devices allowed ({host})"
+    console.print(Text(f"Access: {scope}"))
+    if dev and not is_loopback_host(host):
+        console.print("[dim]The development page is available only on this device.[/dim]")
+    console.print()
     if webui_bootstrap_secret(config):
         # Terminal wrapping keeps this one copyable line, including in narrow panes.
         console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
@@ -532,12 +538,15 @@ def _print_webui_ready(
         console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
         if ws_cfg.get("trustedProxyAuth"):
             console.print("Sign in through your configured trusted proxy.")
+    if provider_error:
+        console.print()
+        console.print("[bold]Next step[/bold]")
+        if config.get_provider_name():
+            console.print(Text(f"Model setup is incomplete:\n{provider_error}", style="yellow"))
+        console.print("Configure a provider and model in WebUI Settings → Models.")
     console.print()
-    scope = "This device only" if is_loopback_host(host) else f"Other devices allowed ({host})"
-    console.print(Text(f"Access: {scope}"))
-    if dev and not is_loopback_host(host):
-        console.print("[dim]The development page is available only on this device.[/dim]")
     console.print(Text(f"Config: {config_path}", style="dim"), soft_wrap=True)
+    console.print()
     log_command = _gateway_instance_command("logs", config_path=config_path, workspace=workspace)
     console.print(Text(f"Logs: {log_command}", style="dim"), soft_wrap=True)
     if managed:
@@ -550,7 +559,9 @@ def _print_webui_ready(
         lifecycle = "Ctrl+C stops Vite; the existing gateway keeps running."
     else:
         lifecycle = "The gateway is controlled by another foreground command; stop it from that terminal."
+    console.print()
     console.print(Text(lifecycle, style="dim"))
+    console.print()
 
 
 _LOG_ANCHOR_BYTES = 64

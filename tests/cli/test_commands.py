@@ -2471,14 +2471,6 @@ def test_webui_resumes_first_run_without_provider_setup(
     config_file = tmp_path / "config.json"
     seen: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        "nanobot.cli.webui_support._provider_setup_error",
-        lambda _config: "No API key configured for provider 'custom'.",
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.webui._provider_setup_error",
-        lambda _config: "No API key configured for provider 'custom'.",
-    )
     _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path, **_kwargs: None)
     _patch_webui_managed_gateway(monkeypatch, seen)
@@ -2490,6 +2482,9 @@ def test_webui_resumes_first_run_without_provider_setup(
     assert config_file.exists()
     assert seen["start_options"].config_path == str(config_file.resolve(strict=False))
     assert "Configure a provider and model in WebUI Settings → Models." in result.stdout
+    assert "anthropic" not in result.stdout.lower()
+    assert "Model setup is incomplete" not in result.stdout
+    assert result.stdout.index("WebUI ready") < result.stdout.index("Next step")
 
     saved_config = json.loads(config_file.read_text(encoding="utf-8"))
     seen.clear()
@@ -2498,6 +2493,8 @@ def test_webui_resumes_first_run_without_provider_setup(
     assert resumed.exit_code == 0, resumed.stdout
     assert seen["start_options"].config_path == str(config_file.resolve(strict=False))
     assert "Configure a provider and model in WebUI Settings → Models." in resumed.stdout
+    assert "anthropic" not in resumed.stdout.lower()
+    assert "Model setup is incomplete" not in resumed.stdout
     assert "Quick Start" not in resumed.stdout
     assert json.loads(config_file.read_text(encoding="utf-8")) == saved_config
     assert saved_config["channels"]["websocket"]["host"] == "127.0.0.1"
