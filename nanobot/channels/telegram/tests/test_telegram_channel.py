@@ -16,6 +16,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram.runtime import (
+    TELEGRAM_HTML_MAX_LEN,
     TELEGRAM_MAX_MESSAGE_LEN,
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
     TELEGRAM_RICH_DRAFT_MIN_INTERVAL,
@@ -913,6 +914,26 @@ async def test_rich_messages_default_skips_send_rich_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_html_expansion_does_not_overflow() -> None:
+    """Non-streamed replies stay within Telegram's rendered payload limit."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    # Rendering pads every table cell to its column width, so this ~3K-char
+    # Markdown reply becomes more text than one Telegram message accepts.
+    content = "| Name | Description |\n| --- | --- |\n" + "| a | b |\n" * 300
+    assert len(_markdown_to_telegram_html(content)) > TELEGRAM_HTML_MAX_LEN
+
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content=content))
+
+    sent = channel._app.bot.sent_messages
+    assert all(message.get("parse_mode") == "HTML" for message in sent)
+    assert max(len(message["text"]) for message in sent) <= TELEGRAM_HTML_MAX_LEN
+
+
+@pytest.mark.asyncio
 async def test_send_delta_rich_stream_updates_one_draft_then_persists_final() -> None:
     channel = TelegramChannel(
         TelegramConfig(
@@ -1017,6 +1038,29 @@ async def test_send_delta_rich_draft_rejection_falls_back_to_legacy_preview() ->
     assert channel._app.bot.sent_messages[0]["text"] == "head\nbody"
     assert channel._stream_bufs["123"].message_id == 1
     assert channel._stream_bufs["123"].draft_id is None
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_fallback_does_not_overflow() -> None:
+    """The legacy fallback for a rejected rich draft also fits Telegram's payload limit."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    content = "| Name | Description |\n| --- | --- |\n" + "| a | b |\n" * 300
+    channel._stream_bufs["123"] = _StreamBuf(
+        text=content, draft_id=17, last_edit=0.0, stream_id="s:0",
+    )
+    channel._app.bot.do_api_request = AsyncMock(side_effect=BadRequest("can't parse rich message"))
+
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True)
+
+    sent = channel._app.bot.sent_messages
+    assert all(message.get("parse_mode") == "HTML" for message in sent)
+    assert max(len(message["text"]) for message in sent) <= TELEGRAM_HTML_MAX_LEN
 
 
 @pytest.mark.asyncio
