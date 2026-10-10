@@ -673,6 +673,14 @@ def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
     if actual_ws == old_ws:
         return new_text
 
+    if old_ws.startswith(actual_ws):
+        # old_text was indented deeper than the file; drop that excess from new_text.
+        extra = old_ws[len(actual_ws):]
+        new_lines = new_text.split("\n")
+        if all(line.startswith(extra) for line in new_lines if line.strip()):
+            return "\n".join(line.removeprefix(extra) for line in new_lines)
+        return new_text
+
     if old_ws:
         if not actual_ws.startswith(old_ws):
             return new_text

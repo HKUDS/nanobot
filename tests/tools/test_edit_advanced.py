@@ -160,6 +160,21 @@ class TestIndentationPreservation:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("indent", ["", "    "], ids=["top-level", "nested"])
+    async def test_trim_fallback_preserves_shallower_outer_indentation(
+        self, tool, tmp_path, indent,
+    ):
+        f = tmp_path / "indent.py"
+        f.write_text(f"{indent}def foo():\n{indent}    pass\n", encoding="utf-8")
+        result = await tool.execute(
+            path=str(f),
+            old_text="        def foo():\n            pass",
+            new_text="        def bar():\n            return 1",
+        )
+        assert "Patch applied:" in result
+        assert f.read_text(encoding="utf-8") == f"{indent}def bar():\n{indent}    return 1\n"
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
     @pytest.mark.parametrize("ending", ["", "\n"], ids=["no-request-newline", "request-newline"])
     @pytest.mark.parametrize(
