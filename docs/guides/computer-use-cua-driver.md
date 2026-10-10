@@ -271,8 +271,9 @@ and work without loading a remote logo. This attribution does not imply an
 official partnership or change the selected model provider. The MCP identifier
 remains `cua-driver`; existing configurations do not need renaming.
 
-Packages are selected for macOS 14+ (universal), Windows x64/ARM64, and Linux
-x64/ARM64. Download/install support does not supply a desktop session, Linux
+New packages are selected for macOS 14.2+ (arm64 or x86_64), Windows x64/ARM64,
+and Linux x64/ARM64. Existing official macOS 14+ universal installations are
+preserved. Download/install support does not supply a desktop session, Linux
 system libraries, Windows elevated privileges, or OS permission approvals.
 Headless servers and unsupported architectures need a supported desktop host.
 
@@ -292,10 +293,12 @@ host without the capability.
 Explicit reconnect additionally requires `webui.cua-driver-reconnect.v1`.
 Clients on hosts without it keep the existing check and disable/enable flow;
 the optional capability does not raise the core protocol floor.
-The gateway starts the exact managed `CuaDriver.app` through LaunchServices.
+The gateway starts the exact managed app through LaunchServices, using its
+actual bundle path rather than choosing another installation by name.
 Native setup, MCP launch and shutdown share the same per-instance lifecycle lock.
-The upstream first-run gate remains enabled and owns system permission requests;
-the gateway does not run an additional permissions helper, a global
+The native host owns sequential permission requests; an existing official
+installation retains the upstream first-run gate. The gateway does not run
+an additional permissions helper, a global
 `permissions grant` command, bypass OS consent, or run the separate direct-capture
 probe. Read-only checks remain non-launching and non-prompting.
 macOS may request additional screen-capture consent on first use. A successful
@@ -303,13 +306,19 @@ connection check is not a completed screenshot or model acceptance test.
 
 ## Licenses and attribution
 
-Nanobot's integration code remains under the repository's MIT license. Cua
-Driver is downloaded separately, not bundled into nanobot's Python package.
-The pinned 0.33.4 release carries the [Cua MIT license](https://github.com/trycua/cua/blob/cua-driver-rs-v0.33.4/LICENSE.md)
+Nanobot's integration code remains under the repository's MIT license. The
+macOS wheel bundles the native host, Cua/nanobot MIT notices, dependency/font/runtime
+licenses and the source materials described above. The release packager refuses
+missing materials. Third-party licenses are not replaced by nanobot's MIT license.
+
+The official Cua Driver binary used on Linux/Windows and by existing macOS
+installations is downloaded separately. Its pinned 0.33.4 release carries the
+[Cua MIT license](https://github.com/trycua/cua/blob/cua-driver-rs-v0.33.4/LICENSE.md)
 and [third-party notices](https://github.com/trycua/cua/blob/cua-driver-rs-v0.33.4/libs/cua-driver/rust/THIRD_PARTY_NOTICES.md).
 Installation preserves both files beside the binary and rejects a package
 missing either notice. Keep them when copying or redistributing an installation.
-The managed binary and its Apple signature are not modified.
+The official binary and its signature are not modified. Native builds use their
+own nanobot identity and signature; they do not borrow Cua's signature or grants.
 
 The Cua logo is a separate brand asset, used unmodified to identify the engine
 under its published branding guidance. It is not relicensed under nanobot's MIT
@@ -418,8 +427,8 @@ and permission changes still need the user's approval.
   `get_window_state` observation and element references; do not silently switch
   to foreground or full-desktop capture when background delivery fails.
 - The macOS purple sharing indicator belongs to the operating system. The
-  default official-driver path takes individual window screenshots and does not
-  promise a persistent indicator. The optional local native build above owns a
+  legacy/manual official-driver path takes individual window screenshots and does not
+  promise a persistent indicator. The default macOS native host above owns a
   real window-sharing stream with a system stop callback.
 - **Disable** stays visible in the connection panel's footer. It removes this
   gateway's tool connection and stops its managed macOS driver, retaining the
@@ -427,9 +436,9 @@ and permission changes still need the user's approval.
 - `retryToolCalls: false` prevents nanobot's MCP wrapper from automatically
   replaying a failed action. It cannot provide exactly-once execution or prevent
   a model from requesting the action again. Reconnection is not rollback.
-- Run **one desktop workflow at a time**. The default official-driver path does not lock a whole
+- Run **one desktop workflow at a time**. The official-driver path does not lock a whole
   observe–act workflow across chats, subagents, gateways, or other MCP clients.
-  The local native host enforces one active task per gateway, not across gateways.
+  The macOS native host enforces one active task per gateway, not across gateways.
 - `enabledTools` restricts which tools nanobot exposes; it does not restrict the
   applications those tools can control. Nanobot's workspace path and HTTP SSRF
   guards do not sandbox a separate desktop driver. Enforce desktop scope in the

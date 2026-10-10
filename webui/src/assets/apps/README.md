@@ -6,8 +6,10 @@ pointer). It is a full-bleed square texture; `ComputerUseIcon` applies the share
 control radius so there is no baked-in white matte on dark backgrounds. The
 same local asset is used in the catalog and app header. It is not a Cua mark.
 
-The icon brands nanobot's catalog and dialog only. macOS permission prompts
-keep the upstream CuaDriver name and icon; the signed app is not modified.
+The icon brands nanobot's catalog, dialog and native macOS app. New macOS
+installations show **nanobot Computer Use** in permission prompts. Existing
+official CuaDriver installations retain their upstream name, icon and signature;
+they are not silently rebranded or migrated.
 
 ## Upstream attribution
 
