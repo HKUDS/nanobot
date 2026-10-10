@@ -122,6 +122,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         child_env[BACKGROUND_LOG_PATH_ENV] = str(self.paths.log_path)
         child_env[BACKGROUND_LOG_MAX_BYTES_ENV] = str(DEFAULT_MAX_BYTES)
         child_env[BACKGROUND_LOG_BACKUP_COUNT_ENV] = str(DEFAULT_BACKUP_COUNT)
+        child_env["PYTHONUNBUFFERED"] = "1"
         with self.paths.log_path.open("a", encoding="utf-8") as log_handle:
             process = self._popen(
                 command,
