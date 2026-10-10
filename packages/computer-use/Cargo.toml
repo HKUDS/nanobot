@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace]
+exclude = [".cua-source"]
 
 [dependencies]
 anyhow = "1"
@@ -13,7 +14,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 libc = "0.2"
 uuid = { version = "1", features = ["v4"] }
-cua-driver-sdk = { path = "../.cua-source/libs/cua-driver/rust/crates/cua-driver-sdk" }
-cursor-overlay = { path = "../.cua-source/libs/cua-driver/rust/crates/cursor-overlay" }
-platform-macos = { path = "../.cua-source/libs/cua-driver/rust/crates/platform-macos" }
+cua-driver-sdk = { path = ".cua-source/libs/cua-driver/rust/crates/cua-driver-sdk" }
+cursor-overlay = { path = ".cua-source/libs/cua-driver/rust/crates/cursor-overlay" }
+platform-macos = { path = ".cua-source/libs/cua-driver/rust/crates/platform-macos" }
 screencapturekit = { version = "6", features = ["macos_15_0"] }

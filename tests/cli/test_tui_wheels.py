@@ -19,7 +19,9 @@ import pytest
 
 from nanobot.cli import tui_launcher
 from scripts import build_tui_wheels as packager
-from scripts.computer_use_release import verified_bundle
+
+COMPUTER_USE = runpy.run_path(str(packager.ROOT / "packages/computer-use/package_materials.py"))
+verified_bundle = COMPUTER_USE["verified_bundle"]
 
 
 def make_computer_use_bundle(directory, target, *, omit=None):
@@ -27,7 +29,7 @@ def make_computer_use_bundle(directory, target, *, omit=None):
 
     output = directory / target
     output.mkdir()
-    source = runpy.run_path(str(packager.ROOT / "native/computer-use/package_materials.py"))["application_source"]()
+    source = COMPUTER_USE["application_source"]()
     prefix = f"nanobot-computer-use-{VERSION}-darwin/"
     contents = prefix + APP + "/Contents/"
     resources = contents + "Resources/"

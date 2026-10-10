@@ -7,12 +7,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+from package_materials import verified_bundle
+
 from nanobot.apps import computer_use_native
 from nanobot.apps.computer_use_native import NativeConnection, admin
 from nanobot.apps.cua_driver import CuaDriver, DriverError
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
-from scripts.computer_use_release import verified_bundle
 
 
 async def verify(manifest: Path, runtime: bool):

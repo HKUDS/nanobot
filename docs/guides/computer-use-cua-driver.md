@@ -18,7 +18,7 @@ API is required. No SDK or model installation is required on the user's computer
 
 ## macOS native sharing
 
-The host in [`native/computer-use`](../../native/computer-use/README.md)
+The host in [`packages/computer-use`](../../packages/computer-use/README.md)
 embeds the pinned MIT Cua SDK and the branded orange/pink cursor. It is **not**
 the official 0.33.4 binary. Its permission identity is **nanobot Computer Use**;
 it never renames the upstream app or borrows its signature or macOS grants.

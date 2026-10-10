@@ -1,5 +1,12 @@
 # nanobot Computer Use native host
 
+This package owns the native executable, SDK patches, build tools and license
+materials. Python installation and runtime integration stay in `nanobot/apps/`;
+Apps uses the shared WebUI. Generated SDK sources (`.cua-source/`), Cargo output
+(`target/`) and release output (`dist/`) are local build inputs, not tracked source
+or contents of the first-party source archive. Moving this package does not change
+installed paths, app identity or macOS permissions.
+
 This is nanobot's macOS host, **not an official Cua release**. It embeds Cua's
 MIT SDK at `d27f6a89d8aeef0f56363ee9bb60bbc565912b1e` (SDK 0.22.1, the tested
 [PR #3019 snapshot](https://github.com/trycua/cua/pull/3019)), including its
@@ -34,8 +41,8 @@ On a Mac matching the desired architecture, use a Git checkout containing the
 exact Cua revision and the checked-in downstream Cargo.lock:
 
 ```bash
-python3 native/computer-use/build.py --source /path/to/cua --output /new/payloads/darwin-arm64
-PYTHONPATH=. python native/computer-use/verify_package.py /new/payloads/darwin-arm64/native-package.json --runtime
+python3 packages/computer-use/build.py --source /path/to/cua --output /new/payloads/darwin-arm64
+PYTHONPATH=. python packages/computer-use/verify_package.py /new/payloads/darwin-arm64/native-package.json --runtime
 ```
 
 Use `darwin-x64` on an Intel Mac. The output directory must not exist. Rust,

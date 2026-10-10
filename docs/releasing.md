@@ -41,9 +41,9 @@ Repeat for `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-
 
 #### Computer Use payloads for macOS
 
-Before packaging the two macOS wheels, build `native/computer-use` from this exact
+Before packaging the two macOS wheels, build `packages/computer-use` from this exact
 release checkout on the matching Mac architectures. Use the pinned Cua source
-revision and committed Cargo.lock, following its [build guide](../native/computer-use/README.md).
+revision and committed Cargo.lock, following its [build guide](../packages/computer-use/README.md).
 Keep `native-package.json` and `native-package.tar.gz` under
 `<verified-computer-use>/darwin-arm64/` and `darwin-x64/`. These are inert wheel
 payloads, not a second user-visible installer. Linux/Windows use the pinned

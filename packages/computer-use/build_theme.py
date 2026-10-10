@@ -13,7 +13,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parent
-SOURCE = ROOT.parent / ".cua-source/libs/cua-driver/rust/crates/cursor-overlay/assets/build_default_theme.py"
+SOURCE = ROOT / ".cua-source/libs/cua-driver/rust/crates/cursor-overlay/assets/build_default_theme.py"
 SPEC = importlib.util.spec_from_file_location("cua_theme_authoring", SOURCE)
 UPSTREAM = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(UPSTREAM)

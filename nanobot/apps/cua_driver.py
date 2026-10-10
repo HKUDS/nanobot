@@ -242,7 +242,7 @@ class CuaDriver:
                 async with asyncio.timeout(600):
                     if self.native:
                         if not self.native_package or not release.digest:
-                            raise DriverError("This nanobot distribution is missing its native Computer Use package. Install the matching macOS platform wheel. For a source checkout, build native/computer-use into nanobot/apps/computer_use_bundle first.")
+                            raise DriverError("This nanobot distribution is missing its native Computer Use package. Install the matching macOS platform wheel. For a source checkout, build packages/computer-use into nanobot/apps/computer_use_bundle first.")
                         source = self.native_package / "native-package.tar.gz"
                         if self.native_package == self.root:
                             source = self._inside(source)

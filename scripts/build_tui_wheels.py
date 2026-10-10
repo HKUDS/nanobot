@@ -22,7 +22,6 @@ from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 
 from nanobot.cli.tui_launcher import _verified_release_archive
-from scripts.computer_use_release import verified_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 # Minimums verified against BOTH the Bun executable and its embedded OpenTUI library.
@@ -141,7 +140,8 @@ def build_wheel(wheel: Path, tui_dir: Path, out_dir: Path, target: str, *,
         if computer_use_dir is None:
             raise ValueError("macOS wheels require --computer-use-dir with both verified native payloads")
         architecture = "arm64" if target == "darwin-arm64" else "x86_64"
-        for name, content in verified_bundle(computer_use_dir / target, architecture, root=root).items():
+        native_packager = runpy.run_path(str(root / "packages/computer-use/package_materials.py"))
+        for name, content in native_packager["verified_bundle"](computer_use_dir / target, architecture).items():
             path = f"nanobot/apps/computer_use_bundle/{name}"
             files[path], modes[path] = content, stat.S_IFREG | 0o644
     metadata = BytesParser().parsebytes(files[f"{info_dir}/WHEEL"])

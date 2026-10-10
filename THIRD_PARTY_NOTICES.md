@@ -20,7 +20,7 @@ with the unmodified executable by nanobot's installer:
 Keep those notices with any redistributed driver installation. Nanobot's MIT
 license does not replace third-party licenses or grant rights to their marks.
 
-The macOS host in `native/computer-use` instead embeds the Cua SDK at
+The macOS host in `packages/computer-use` instead embeds the Cua SDK at
 commit `d27f6a89d8aeef0f56363ee9bb60bbc565912b1e` (upstream PR #3019, SDK 0.22.1).
 Its cursor theme adapts Cua's MIT-licensed theme authoring helpers. It is not
 the official 0.33.4 binary. macOS platform wheels carry its verified payload in
@@ -28,12 +28,12 @@ the official 0.33.4 binary. macOS platform wheels carry its verified payload in
 nanobot's MIT license, and full target-specific dependency notices in the app,
 including upstream derived-code credits (notably yabai), objc2's original
 notices, and the Inter font's SIL Open Font License. Exact-revision license
-supplements live in `native/computer-use/licenses/`; missing material fails the build.
+supplements live in `packages/computer-use/licenses/`; missing material fails the build.
 UniFFI dependencies use MPL-2.0; the build includes their unchanged source and
 full license in `MPL-SOURCES.tar.gz`. `NANOBOT-SOURCES.tar` contains this host's
 source, artwork, lockfile and build/compliance inputs. No third-party code or
 font is relicensed by nanobot's MIT license.
-See `native/computer-use/README.md` for source, packaging, and distribution limits.
+See `packages/computer-use/README.md` for source, packaging, and distribution limits.
 
 ---
 

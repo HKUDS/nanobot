@@ -16,7 +16,7 @@ from package_materials import application_source, dependency_notices, rust_notic
 
 ROOT = Path(__file__).resolve().parent
 REVISION = "d27f6a89d8aeef0f56363ee9bb60bbc565912b1e"
-UPSTREAM = ROOT.parent / ".cua-source"
+UPSTREAM = ROOT / ".cua-source"
 RUST = UPSTREAM / "libs/cua-driver/rust"
 
 
@@ -40,16 +40,12 @@ def main():
     if (UPSTREAM / ".revision").read_text() != REVISION:
         raise SystemExit("Prepared source revision differs; use a separate clean build directory.")
     for patch in sorted((ROOT / "patches").glob("*.patch")):
-        command = ["git", "apply", "--directory=native/.cua-source"]
+        command = ["git", "apply", f"--directory={UPSTREAM.relative_to(ROOT.parents[1]).as_posix()}"]
         applied = subprocess.run([*command, "--reverse", "--check", str(patch)],
             cwd=ROOT.parents[1], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if applied.returncode:
             run(*command, "--check", str(patch), cwd=ROOT.parents[1])
             run(*command, str(patch), cwd=ROOT.parents[1])
-    # Initialize downstream resolution with the upstream's exact dependency
-    # versions; subsequent builds use the committed downstream lockfile.
-    if not (ROOT / "Cargo.lock").exists():
-        shutil.copyfile(RUST / "Cargo.lock", ROOT / "Cargo.lock")
     if options.prepare_only:
         return
     destination = options.output.resolve()
@@ -93,7 +89,7 @@ def main():
     metadata = json.loads(run("cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", triple,
         "--manifest-path", str(ROOT / "Cargo.toml"), stdout=subprocess.PIPE).stdout)
     notices = (f"Cua source: https://github.com/trycua/cua/tree/{REVISION}\n"
-        "Nanobot's MIT SDK patch is in NANOBOT-SOURCES.tar (native/computer-use/patches).\n\n"
+        "Nanobot's MIT SDK patch is in NANOBOT-SOURCES.tar (packages/computer-use/patches).\n\n"
         "Rust runtime attribution is in RUST-NOTICES.txt and RUST-COPYRIGHT-library.html.\n\n"
         + dependency_notices(metadata, UPSTREAM, resources))
     (package / "THIRD_PARTY_NOTICES.md").write_text(notices)

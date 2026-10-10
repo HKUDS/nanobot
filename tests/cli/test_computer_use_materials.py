@@ -1,4 +1,5 @@
 """Native distribution must retain source/attribution, not only SPDX labels."""
+import io
 import json
 import runpy
 import tarfile
@@ -9,7 +10,7 @@ import pytest
 
 @pytest.fixture
 def collector():
-    path = Path(__file__).resolve().parents[2] / "native/computer-use/package_materials.py"
+    path = Path(__file__).resolve().parents[2] / "packages/computer-use/package_materials.py"
     return runpy.run_path(str(path))["dependency_notices"]
 
 
@@ -23,6 +24,34 @@ def dependency(directory, name, license_id="MIT"):
 
 def graph(*packages):
     return {"packages": list(packages), "resolve": {"nodes": [{"id": p["id"]} for p in packages]}}
+
+
+def test_application_source_contains_build_inputs_not_generated_cache(tmp_path):
+    path = Path(__file__).resolve().parents[2] / "packages/computer-use/package_materials.py"
+    collect = runpy.run_path(str(path))["application_source"]
+    root = tmp_path / "packages/computer-use"
+    inputs = {"Cargo.lock": "pinned dependencies", "build.py": "# builder",
+              "src/main.rs": "fn main() {}", "patches/sdk.patch": "SDK patch",
+              "licenses/cua-derived.txt": "derived attribution"}
+    for name, content in inputs.items():
+        file = root / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(content)
+    for cache in (".cua-source", "target", ".build", "dist", "__pycache__"):
+        file = root / cache / "generated.rs"
+        file.parent.mkdir()
+        file.write_text("not first-party source")
+    for name in ("LICENSE", "webui/src/assets/apps/computer-use.webp"):
+        file = tmp_path / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(b"source material")
+    raw = collect(root)
+    assert raw == collect(root)
+    with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
+        assert set(archive.getnames()) == {
+            *("packages/computer-use/" + name for name in inputs),
+            "LICENSE", "webui/src/assets/apps/computer-use.webp",
+        }
 
 
 def test_missing_exact_license_and_unreviewed_license_stop_packaging(tmp_path, collector):

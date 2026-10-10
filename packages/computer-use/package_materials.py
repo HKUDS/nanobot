@@ -1,10 +1,13 @@
-"""Collect reviewed license material; missing attribution is a build failure."""
+"""Collect and verify this package's source, licenses and native release payload."""
+import hashlib
 import io
 import json
 import os
+import plistlib
 import re
+import struct
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent
 LICENSES = ROOT / "licenses"
@@ -14,18 +17,18 @@ REVIEWED_LICENSES = {
 }
 
 
-def source_files(root):
+def source_files(root, *, exclude=()):
     for directory, names, files in os.walk(root):
-        names[:] = sorted(name for name in names if name not in {"target", "__pycache__", ".git"})
+        names[:] = sorted(name for name in names if name not in {"target", "__pycache__", ".git", ".cua-source", *exclude})
         for name in sorted(files):
             yield Path(directory) / name
 
 
 def application_source(root=ROOT):
     """Deterministic first-party source, lockfile, artwork and compliance inputs."""
-    paths = [p for p in source_files(root)
+    paths = [p for p in source_files(root, exclude=(".build", "dist"))
              if p.suffix in {".py", ".rs", ".toml", ".lock", ".md", ".json", ".txt", ".patch"}]
-    files = {"native/computer-use/" + p.relative_to(root).as_posix(): p.read_bytes() for p in paths}
+    files = {"packages/computer-use/" + p.relative_to(root).as_posix(): p.read_bytes() for p in paths}
     for name in ("LICENSE", "webui/src/assets/apps/computer-use.webp"):
         files[name] = (root.parents[1] / name).read_bytes()
     output = io.BytesIO()
@@ -127,3 +130,71 @@ def dependency_notices(metadata, upstream, resources):
     if not sources:
         raise ValueError("Expected pinned UniFFI source material")
     return "\n".join(notices)
+
+
+def verified_bundle(directory: Path, architecture: str) -> dict[str, bytes]:
+    """Verify the native payload against this package before wheel assembly."""
+    from nanobot.apps.computer_use_native import APP, VERSION, package_digest
+
+    digest = package_digest(directory, architecture=architecture)
+    if not digest:
+        raise ValueError(f"Missing Computer Use payload for {architecture}")
+    manifest = json.loads((directory / "native-package.json").read_text())
+    raw = (directory / "native-package.tar.gz").read_bytes()
+    if len(raw) > 200 * 1024 * 1024 or hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError("Computer Use archive checksum mismatch")
+    if manifest.get("profile") != "release" or manifest.get("minimum_macos") != "14.2":
+        raise ValueError("Computer Use requires a reviewed release profile and minimum OS")
+    files: dict[str, bytes] = {}
+    total = 0
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive:
+        for member in archive:
+            path = PurePosixPath(member.name)
+            if path.is_absolute() or ".." in path.parts or "\\" in member.name:
+                raise ValueError("Unsafe Computer Use package path")
+            if member.isdir():
+                continue
+            total += member.size
+            if not member.isfile() or member.name in files or total > 512 * 1024 * 1024:
+                raise ValueError("Invalid Computer Use package entry")
+            stream = archive.extractfile(member)
+            assert stream is not None
+            files[member.name] = stream.read()
+    prefix = f"nanobot-computer-use-{VERSION}-darwin/"
+    contents = prefix + APP + "/Contents/"
+    resources = contents + "Resources/"
+    required = [prefix + "LICENSE", prefix + "THIRD_PARTY_NOTICES.md",
+        resources + "Cua-MIT-LICENSE.md", resources + "nanobot-MIT-LICENSE",
+        resources + "THIRD_PARTY_NOTICES.md", resources + "MPL-SOURCES.tar.gz",
+        resources + "RUST-NOTICES.txt", resources + "RUST-COPYRIGHT-library.html",
+        resources + "NANOBOT-SOURCES.tar", resources + "PROVENANCE.md",
+        resources + "AppIcon.png", resources + "cursor-themes/io.nanobot.computer-use.cua-theme",
+        contents + "Info.plist", contents + "MacOS/nanobot-computer-use",
+        contents + "_CodeSignature/CodeResources"]
+    if any(not files.get(name) for name in required):
+        raise ValueError("Computer Use package is missing executable, signature, source or license material")
+    info = plistlib.loads(files[contents + "Info.plist"])
+    if (info.get("CFBundleIdentifier") != "io.nanobot.computer-use"
+            or info.get("CFBundleDisplayName") != "nanobot Computer Use"
+            or info.get("LSMinimumSystemVersion") != "14.2"):
+        raise ValueError("Computer Use application identity does not match")
+    binary = files[contents + "MacOS/nanobot-computer-use"]
+    cpu = {"arm64": 0x0100000C, "x86_64": 0x01000007}[architecture]
+    if len(binary) < 8 or binary[:4] != b"\xcf\xfa\xed\xfe" or struct.unpack_from("<I", binary, 4)[0] != cpu:
+        raise ValueError("Computer Use executable architecture does not match")
+    source = application_source()
+    if (source != files[resources + "NANOBOT-SOURCES.tar"]
+            or hashlib.sha256(source).hexdigest() != manifest.get("source_sha256")):
+        raise ValueError("Computer Use sources do not match the release checkout; rebuild it")
+    notices = files[prefix + "THIRD_PARTY_NOTICES.md"]
+    if notices != files[resources + "THIRD_PARTY_NOTICES.md"] or any(
+        word not in notices for word in (b"yabai", b"Steven Sheldon", b"Inter Project Authors", b"Mozilla Public License Version 2.0")
+    ):
+        raise ValueError("Computer Use attribution is incomplete")
+    with tarfile.open(fileobj=io.BytesIO(files[resources + "MPL-SOURCES.tar.gz"]), mode="r:gz") as mpl:
+        names = mpl.getnames()
+        if "LICENSE-MPL-2.0" not in names or not any(name.startswith("uniffi_core-") and name.endswith(".rs") for name in names):
+            raise ValueError("Computer Use MPL source is incomplete")
+    # Relative, relocatable inputs only. No developer paths enter a wheel.
+    manifest["archive"] = "native-package.tar.gz"
+    return {"native-package.tar.gz": raw, "native-package.json": (json.dumps(manifest, indent=2) + "\n").encode()}
