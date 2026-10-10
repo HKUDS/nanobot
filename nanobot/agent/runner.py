@@ -1112,7 +1112,8 @@ class AgentRunner:
         # Advancing it after dropping even one call would replay an unmatched
         # call without a corresponding tool output on the next request.
         response.provider_state = None
-        if not valid:
+        # Preserve truncation and terminal signals when removing invalid calls.
+        if not valid and original_finish_reason in ("tool_calls", "function_call"):
             response.finish_reason = "stop"
         return (dropped, not valid, original_finish_reason)
 

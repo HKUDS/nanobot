@@ -1198,22 +1198,73 @@ def test_drop_malformed_tool_calls_trims_response():
     assert orig == "tool_calls"
 
 
-def test_drop_malformed_tool_calls_all_bad_disables_execution():
+@pytest.mark.parametrize("finish_reason, expected_finish_reason", [
+    ("tool_calls", "stop"),
+    ("function_call", "stop"),
+    ("stop", "stop"),
+    ("length", "length"),
+    ("error", "error"),
+    ("refusal", "refusal"),
+    ("content_filter", "content_filter"),
+])
+def test_drop_malformed_tool_calls_all_bad_disables_execution(
+    finish_reason, expected_finish_reason,
+):
     """If every tool call is malformed, execution is disabled (no empty exec)."""
     from nanobot.agent.runner import AgentRunner
 
     response = LLMResponse(
         content="some text",
         tool_calls=[ToolCallRequest(id="1", name=None, arguments={})],
-        finish_reason="tool_calls",
+        finish_reason=finish_reason,
     )
     dropped, all_dropped, orig = AgentRunner._drop_malformed_tool_calls(response)
     assert response.tool_calls == []
-    assert response.finish_reason == "stop"
+    assert response.finish_reason == expected_finish_reason
     assert response.should_execute_tools is False
     assert dropped == 1
     assert all_dropped is True
-    assert orig == "tool_calls"
+    assert orig == finish_reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial_content", ["", "The answer is "])
+async def test_malformed_tool_call_preserves_length_recovery(partial_content):
+    """Discarding an incomplete call must not turn truncation into completion."""
+    from nanobot.utils.runtime import LENGTH_RECOVERY_PROMPT
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content=partial_content,
+            finish_reason="length",
+            tool_calls=[ToolCallRequest(id="partial", name="", arguments={})],
+        ),
+        LLMResponse(content="42.", finish_reason="stop"),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock()
+
+    result = await AgentRunner().run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "Give the answer"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert provider.chat_stream_with_retry.await_count == 2
+    retry_messages = provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
+    assert any(
+        message.get("role") == "user" and LENGTH_RECOVERY_PROMPT in message.get("content", "")
+        for message in retry_messages
+    )
+    assert result.final_content == partial_content + "42."
+    assert result.stop_reason == "completed"
+    assert result.error is None
+    tools.execute.assert_not_awaited()
+    assert not any(message.get("tool_calls") for message in result.messages)
 
 
 def test_drop_malformed_returns_tuple_no_calls():
