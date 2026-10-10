@@ -361,6 +361,43 @@ class ProvidersConfig(Base):
         }
 
 
+class StructuredDecisionConfig(Base):
+    """Settings for the structured decision client."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    provider: str = "openrouter"
+    # Add each supported protocol to this Literal.
+    protocol: Literal["system_one"] = "system_one"
+    model: str = "typesafe/jev-1.13"
+    timeout_s: float = Field(
+        default=15.0,
+        gt=0,
+        le=120,
+        validation_alias=AliasChoices("timeoutS", "timeout_s"),
+        serialization_alias="timeoutS",
+    )
+
+    @field_validator("model")
+    @classmethod
+    def _validate_model(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("structuredDecision.model cannot be empty")
+        return value
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider_name(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("structuredDecision.provider cannot be empty")
+        from nanobot.utils.structured_decision.providers import is_registered_decision_provider
+
+        if not is_registered_decision_provider(value):
+            raise ValueError(f"Unsupported structuredDecision.provider {value!r}")
+        return value
+
+
 class HeartbeatConfig(Base):
     """Heartbeat service configuration (now backed by cron)."""
 
@@ -466,6 +503,11 @@ class Config(BaseSettings):
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    structured_decision: StructuredDecisionConfig = Field(
+        default_factory=StructuredDecisionConfig,
+        validation_alias=AliasChoices("structuredDecision", "structured_decision"),
+        serialization_alias="structuredDecision",
+    )
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
