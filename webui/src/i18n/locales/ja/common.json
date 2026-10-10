@@ -314,19 +314,6 @@
       "required": "パスワードを入力",
       "invalid": "パスワードが違います"
     },
-    "setup": {
-      "title": "アクセスパスワードを設定",
-      "description": "このコンピューターでパスワードを設定して nanobot を使い始めましょう。",
-      "confirmPassword": "パスワードを確認",
-      "submit": "設定して続ける",
-      "submitting": "保存中…",
-      "required": "アクセスパスワードを入力してください。",
-      "mismatch": "パスワードが一致しません。もう一度入力してください。",
-      "invalidPassword": "前後の空白を除き、1〜1024文字のパスワードを使用してください。${ は使用できません。",
-      "localOnly": "nanobot を実行しているコンピューターで localhost のアドレスを開き、初期設定を完了してください。",
-      "saveFailed": "パスワードを保存できませんでした。もう一度お試しください。",
-      "alreadyInitialized": "別のページですでにパスワードが設定されています。そのパスワードを入力して接続してください。"
-    },
     "account": {
       "section": "アカウント",
       "logoutHint": "このブラウザーとゲートウェイの接続を切ります。",
@@ -1079,7 +1066,15 @@
       "pendingEnable": "保存しました。再起動すると他のデバイスから接続できるようになります。",
       "pendingDisable": "保存しました。再起動すると他のデバイスは切断されます。このコンピューターで localhost のアドレスを開いて再接続してください。",
       "networkScope": "WebUI の待ち受け範囲のみを変更します。ファイアウォール、ルーター、公開トンネルの設定は変更しません。",
-      "saveFailed": "アクセス設定を保存できませんでした。もう一度お試しください。"
+      "saveFailed": "アクセス設定を保存できませんでした。もう一度お試しください。",
+      "passwordTitle": "アクセスパスワードを設定",
+      "passwordDescription": "他のデバイスからの接続を許可する前に、パスワードを設定してください。",
+      "passwordConfirm": "パスワードを確認",
+      "passwordSubmit": "パスワードを設定してアクセスを許可",
+      "passwordInvalid": "前後の空白を除き、8〜1024文字のパスワードを使用してください。${ は使用できません。",
+      "passwordMismatch": "パスワードが一致しません。もう一度入力してください。",
+      "passwordAlreadySet": "別のページですでにパスワードが設定されています。ページを再読み込みしてからアクセス設定を変更してください。",
+      "passwordLocalOnly": "nanobot を実行しているコンピューターでパスワードを設定してください。"
     },
     "api": {
       "title": "API サーバー", "openaiCompatible": "OpenAI 互換 API", "description": "OpenAI 互換の API で接続します。",

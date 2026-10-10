@@ -11,34 +11,6 @@ export class BootstrapAuthRequiredError extends Error {
   }
 }
 
-export class BootstrapSetupRequiredError extends Error {
-  constructor() {
-    super("WebUI access setup required");
-    this.name = "BootstrapSetupRequiredError";
-  }
-}
-
-export class WebuiSetupError extends Error {
-  constructor(public readonly code: "already_initialized" | "invalid_password" | "local_only" | "save_failed") {
-    super(code);
-    this.name = "WebuiSetupError";
-  }
-}
-
-export async function initializeWebui(password: string): Promise<void> {
-  const res = await fetchWithTimeout("/webui/setup", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
-  if (res.ok) return;
-  if (res.status === 409) throw new WebuiSetupError("already_initialized");
-  if (res.status === 400) throw new WebuiSetupError("invalid_password");
-  if (res.status === 403) throw new WebuiSetupError("local_only");
-  throw new WebuiSetupError("save_failed");
-}
-
 /** Read a previously saved bootstrap secret from localStorage. */
 export function loadSavedSecret(): string {
   if (typeof window === "undefined") return "";
@@ -115,7 +87,6 @@ export async function fetchBootstrap(
     headers,
   }, timeoutMs);
   if (!res.ok) {
-    if (res.status === 428) throw new BootstrapSetupRequiredError();
     if (res.status === 401 || res.status === 403) {
       throw new BootstrapAuthRequiredError(`bootstrap failed: HTTP ${res.status}`);
     }

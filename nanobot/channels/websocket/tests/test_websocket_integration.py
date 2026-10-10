@@ -30,7 +30,6 @@ def _ch(bus: Any, port: int, **kw: Any) -> WebSocketChannel:
         "port": port,
         "path": "/",
         "websocketRequiresToken": False,
-        "tokenIssueSecret": "synthetic-access-secret",
     }
     cfg.update(kw)
     parsed = WebSocketConfig.model_validate(cfg)

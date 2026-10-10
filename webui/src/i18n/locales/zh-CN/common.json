@@ -314,19 +314,6 @@
       "required": "请输入密码",
       "invalid": "密码不正确，请重试"
     },
-    "setup": {
-      "title": "设置访问密码",
-      "description": "在本机设置访问密码后开始使用。",
-      "confirmPassword": "确认密码",
-      "submit": "设置并进入",
-      "submitting": "正在保存…",
-      "required": "请输入访问密码。",
-      "mismatch": "两次密码不一致，请重新输入。",
-      "invalidPassword": "密码去掉前后空白后须为 1–1024 个字符，且不能包含 ${。",
-      "localOnly": "请在运行 nanobot 的电脑上打开 localhost 地址，完成首次设置。",
-      "saveFailed": "密码保存失败，请重试。",
-      "alreadyInitialized": "其他页面已完成密码设置，请输入该密码连接。"
-    },
     "account": {
       "section": "账户",
       "logoutHint": "断开此浏览器与网关的连接",
@@ -1268,7 +1255,15 @@
       "pendingEnable": "已保存，重启后允许其他设备连接。",
       "pendingDisable": "已保存，重启后其他设备将断开连接，请在本机打开 localhost 地址重新连接。",
       "networkScope": "此设置只更改 WebUI 的监听范围，不会配置防火墙、路由器或公网隧道。",
-      "saveFailed": "访问设置保存失败，请重试。"
+      "saveFailed": "访问设置保存失败，请重试。",
+      "passwordTitle": "设置访问密码",
+      "passwordDescription": "开启前先设置访问密码。",
+      "passwordConfirm": "确认密码",
+      "passwordSubmit": "设置密码并开启",
+      "passwordInvalid": "密码去掉前后空白后须为 8–1024 个字符，且不能包含 ${。",
+      "passwordMismatch": "两次密码不一致，请重新输入。",
+      "passwordAlreadySet": "其他页面已设置密码，请刷新后再更改访问设置。",
+      "passwordLocalOnly": "请在运行 nanobot 的本机设置访问密码。"
     },
     "api": {
       "title": "API 服务",

@@ -273,7 +273,7 @@ Open:
 http://127.0.0.1:8765
 ```
 
-For first access, open the printed localhost address and set your access password. In WSL, you can enter that address manually in a Windows browser if automatic opening fails. After signing in, enable **Allow access from other devices** in **Settings → System**, save, and restart. The WebSocket channel refuses non-loopback binds without a token, token issue secret, or trusted-proxy authentication.
+For first access, copy the complete login link printed by `nanobot webui`, including the fragment after `#`. In WSL, open that link in your Windows browser if automatic opening fails. The plain page address does not sign in a new browser. To use another device, enable **Allow access from other devices** in **Settings → System**, set a password when prompted, and restart. The WebSocket channel refuses non-loopback binds without a token, token issue secret, or trusted-proxy authentication.
 
 | Symptom | Check |
 |---|---|

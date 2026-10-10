@@ -314,19 +314,6 @@
       "required": "Saisissez le mot de passe",
       "invalid": "Mot de passe incorrect"
     },
-    "setup": {
-      "title": "Définir votre mot de passe",
-      "description": "Définissez un mot de passe sur cet ordinateur pour commencer à utiliser nanobot.",
-      "confirmPassword": "Confirmer le mot de passe",
-      "submit": "Définir et continuer",
-      "submitting": "Enregistrement…",
-      "required": "Saisissez un mot de passe d’accès.",
-      "mismatch": "Les mots de passe ne correspondent pas. Saisissez-les à nouveau.",
-      "invalidPassword": "Utilisez de 1 à 1024 caractères, sans compter les espaces au début et à la fin. Le mot de passe ne doit pas contenir ${.",
-      "localOnly": "Ouvrez l’adresse localhost sur l’ordinateur qui exécute nanobot pour terminer la configuration.",
-      "saveFailed": "Impossible d’enregistrer le mot de passe. Réessayez.",
-      "alreadyInitialized": "Une autre page a déjà défini le mot de passe. Saisissez-le pour vous connecter."
-    },
     "account": {
       "section": "Compte",
       "logoutHint": "Déconnectez ce navigateur de la passerelle.",
@@ -1079,7 +1066,15 @@
       "pendingEnable": "Enregistré. Redémarrez pour autoriser les autres appareils à se connecter.",
       "pendingDisable": "Enregistré. Après le redémarrage, les autres appareils seront déconnectés. Ouvrez l’adresse localhost sur cet ordinateur pour vous reconnecter.",
       "networkScope": "Ce réglage modifie uniquement l’écoute de la WebUI. Il ne configure pas les pare-feu, les routeurs ni les tunnels publics.",
-      "saveFailed": "Impossible d’enregistrer les paramètres d’accès. Réessayez."
+      "saveFailed": "Impossible d’enregistrer les paramètres d’accès. Réessayez.",
+      "passwordTitle": "Définir un mot de passe d’accès",
+      "passwordDescription": "Définissez un mot de passe avant d’autoriser les autres appareils à se connecter.",
+      "passwordConfirm": "Confirmer le mot de passe",
+      "passwordSubmit": "Définir le mot de passe et autoriser l’accès",
+      "passwordInvalid": "Utilisez de 8 à 1024 caractères, sans compter les espaces au début et à la fin. Le mot de passe ne doit pas contenir ${.",
+      "passwordMismatch": "Les mots de passe ne correspondent pas. Saisissez-les à nouveau.",
+      "passwordAlreadySet": "Une autre page a déjà défini le mot de passe. Actualisez cette page avant de modifier l’accès.",
+      "passwordLocalOnly": "Définissez le mot de passe sur l’ordinateur qui exécute nanobot."
     },
     "api": {
       "title": "Serveur API", "openaiCompatible": "API compatible OpenAI", "description": "Connectez-vous via une API compatible OpenAI.",

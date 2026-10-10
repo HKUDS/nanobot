@@ -36,6 +36,7 @@ const sessionUpdateHandlers = new Set<(
 ) => void>();
 const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>();
 let mockSessions: ChatSummary[] = [];
+let reauthenticate: (() => Promise<string | null>) | undefined;
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
@@ -231,12 +232,14 @@ vi.mock("@/lib/bootstrap", async (importOriginal) => ({
   loadSavedSecret: vi.fn(() => ""),
   saveSecret: vi.fn(),
   clearSavedSecret: vi.fn(),
-  initializeWebui: vi.fn(),
 }));
 
 vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/nanobot-client")>();
   class MockClient {
+    constructor(options: { onReauth?: () => Promise<string | null> }) {
+      reauthenticate = options.onReauth;
+    }
     status = "idle" as const;
     defaultChatId: string | null = null;
     connect = connectSpy;
@@ -284,11 +287,9 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
 
 import {
   BootstrapAuthRequiredError,
-  BootstrapSetupRequiredError,
-  WebuiSetupError,
   deriveWsUrl,
   fetchBootstrap,
-  initializeWebui,
+  loadSavedSecret,
   saveSecret,
 } from "@/lib/bootstrap";
 import App from "@/App";
@@ -299,6 +300,7 @@ describe("App layout", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     mockSessions = [];
+    reauthenticate = undefined;
     connectSpy.mockClear();
     updateUrlSpy.mockClear();
     refreshSpy.mockReset();
@@ -332,6 +334,7 @@ describe("App layout", () => {
     localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
     localStorage.removeItem("nanobot-webui.restartStartedAt");
     localStorage.removeItem("nanobot-webui.restartRoute");
+    localStorage.removeItem("nanobot-webui.bootstrap-secret");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       api_token: "api-tok",
@@ -339,7 +342,6 @@ describe("App layout", () => {
       expires_in: 300,
     });
     vi.mocked(deriveWsUrl).mockReset().mockReturnValue("ws://test");
-    vi.mocked(initializeWebui).mockReset().mockResolvedValue(undefined);
     vi.mocked(saveSecret).mockClear();
     mockFetchRoutes({});
   });
@@ -408,42 +410,6 @@ describe("App layout", () => {
     );
     expect(password).not.toHaveAttribute("placeholder");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(connectSpy).not.toHaveBeenCalled();
-  });
-
-  it("requires password setup before connecting and enters with the saved password", async () => {
-    vi.mocked(fetchBootstrap).mockRejectedValueOnce(new BootstrapSetupRequiredError());
-    render(<App />);
-
-    await screen.findByRole("heading", { name: "Set your access password" });
-    expect(connectSpy).not.toHaveBeenCalled();
-    expect(saveSecret).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: "  新密码🔐  " } });
-    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "新密码🔐" } });
-    fireEvent.click(screen.getByRole("button", { name: "Set password and continue" }));
-
-    await waitFor(() => expect(connectSpy).toHaveBeenCalledTimes(1));
-    expect(initializeWebui).toHaveBeenCalledWith("新密码🔐");
-    expect(fetchBootstrap).toHaveBeenLastCalledWith("", "新密码🔐");
-    expect(saveSecret).toHaveBeenCalledWith("新密码🔐");
-    expect(window.location.href).not.toContain("新密码");
-  });
-
-  it("returns to login when another tab has already initialized access", async () => {
-    vi.mocked(fetchBootstrap).mockRejectedValueOnce(new BootstrapSetupRequiredError());
-    vi.mocked(initializeWebui).mockRejectedValueOnce(new WebuiSetupError("already_initialized"));
-    render(<App />);
-
-    fireEvent.change(await screen.findByLabelText("WebUI password"), { target: { value: "second-tab" } });
-    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "second-tab" } });
-    fireEvent.click(screen.getByRole("button", { name: "Set password and continue" }));
-
-    await screen.findByRole("heading", { name: "Connect to nanobot" });
-    expect(screen.getByRole("status")).toHaveTextContent("Another page has already set the password");
-    expect(screen.getByLabelText("WebUI password")).toHaveValue("");
-    expect(initializeWebui).toHaveBeenCalledTimes(1);
-    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
-    expect(saveSecret).not.toHaveBeenCalled();
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
@@ -4076,6 +4042,84 @@ describe("App layout", () => {
     expect(fetchBootstrap).toHaveBeenCalledTimes(2);
     expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=tok-2");
     unmount();
+  });
+
+  it("persists an access password and uses it for reauthentication and reloads", async () => {
+    const actualBootstrap = await vi.importActual<typeof import("@/lib/bootstrap")>("@/lib/bootstrap");
+    vi.mocked(saveSecret).mockImplementationOnce(actualBootstrap.saveSecret);
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 300,
+      terminal: { webui: { capabilities: ["webui.core.v1", "webui.access.v1"] } },
+    });
+    const initialSettings = {
+      ...baseSettingsPayload(),
+      webui_access: {
+        password_required: true, allow_other_devices: false, active_allow_other_devices: false,
+        host: "127.0.0.1", active_host: "127.0.0.1", requires_restart: false, can_change: true,
+      },
+    };
+    mockFetchRoutes({ "/api/settings": initialSettings });
+    requestMutationSpy.mockResolvedValue({
+      ...initialSettings,
+      requires_restart: true,
+      restart_required_sections: ["runtime"],
+      webui_access: { ...initialSettings.webui_access, password_required: false, allow_other_devices: true, host: "0.0.0.0", requires_restart: true },
+    });
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    const { unmount } = render(<App />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Allow access from other devices" }));
+    const secret = "新的访问密码🔐2026";
+    fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: secret } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: secret } });
+    fireEvent.click(screen.getByRole("button", { name: "Set password and allow access" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(localStorage.getItem("nanobot-webui.bootstrap-secret")).toBe(secret);
+    expect(reauthenticate).toBeDefined();
+    await act(async () => { await reauthenticate?.(); });
+    expect(fetchBootstrap).toHaveBeenLastCalledWith("", secret);
+    unmount();
+
+    vi.mocked(loadSavedSecret).mockImplementationOnce(actualBootstrap.loadSavedSecret);
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalledTimes(2));
+    expect(fetchBootstrap).toHaveBeenLastCalledWith("", secret);
+    expect(window.location.href).not.toContain(secret);
+  });
+
+  it.each([true, false])("keeps proxy credentials intact when remote access needs a password: %s", async (passwordRequired) => {
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "proxy-ws-token", api_token: "proxy-api-token", expires_in: 300,
+      ws_path: "/remote-session/proxy-id", ws_url: "ws://127.0.0.1:28000/remote-session/proxy-id",
+      terminal: { webui: { capabilities: ["webui.core.v1", "webui.access.v1"] } },
+      host_compatibility: { status: "compatible" },
+    });
+    const initialSettings = {
+      ...baseSettingsPayload(),
+      webui_access: {
+        password_required: passwordRequired, allow_other_devices: false, active_allow_other_devices: false,
+        host: "127.0.0.1", active_host: "127.0.0.1", requires_restart: false, can_change: true,
+      },
+    };
+    mockFetchRoutes({ "/api/settings": initialSettings });
+    requestMutationSpy.mockResolvedValue({
+      ...initialSettings,
+      webui_access: { ...initialSettings.webui_access, allow_other_devices: true, requires_restart: true },
+    });
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    render(<App />);
+    const toggle = await screen.findByRole("switch", { name: "Allow access from other devices" });
+    if (passwordRequired) {
+      expect(toggle).toBeDisabled();
+      expect(screen.getByText("Set the password on the computer running nanobot.")).toBeVisible();
+      fireEvent.click(toggle);
+      expect(requestMutationSpy).not.toHaveBeenCalled();
+    } else {
+      fireEvent.click(toggle);
+      await waitFor(() => expect(toggle).toBeChecked());
+      expect(requestMutationSpy).toHaveBeenCalledWith("settings.webui_access.update", { allow_other_devices: true }, expect.any(Number));
+    }
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(saveSecret).not.toHaveBeenCalled();
   });
 
   it("reuses an in-flight pairing poll when the page becomes visible again", async () => {

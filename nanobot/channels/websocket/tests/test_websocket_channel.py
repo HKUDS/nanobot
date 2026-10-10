@@ -140,7 +140,6 @@ def _ch(bus: Any, **kw: Any) -> WebSocketChannel:
         "port": _PORT,
         "path": "/ws",
         "websocketRequiresToken": False,
-        "tokenIssueSecret": "synthetic-access-secret",
     }
     cfg.update(kw)
     parsed = WebSocketConfig.model_validate(cfg)
@@ -163,7 +162,7 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
         "enabled": True, "allowFrom": ["*"],
         "host": "127.0.0.1", "port": _PORT,
         "path": "/ws", "websocketRequiresToken": False,
-        "tokenIssueSecret": kw.get("token_issue_secret", "synthetic-access-secret"),
+        "tokenIssueSecret": kw.get("token_issue_secret", ""),
     })
     return build_gateway_services(
         config=cfg,
@@ -878,7 +877,6 @@ async def test_token_issue_route_requires_secret_when_static_token_configured(bu
         bus,
         port=port,
         token="static-token",
-        tokenIssueSecret="",
         tokenIssuePath="/custom-token",
         websocketRequiresToken=True,
     )
@@ -5325,7 +5323,7 @@ async def test_allow_from_empty_list_denies_all(bus: MagicMock) -> None:
 
 @pytest.mark.asyncio
 async def test_websocket_requires_token_without_issue_path(bus: MagicMock) -> None:
-    """An initialized instance still requires an issued token when no issue route is exposed."""
+    """When websocket_requires_token is True but no token or issue path configured, all connections are rejected."""
     port = 29887
     channel = _ch(bus, port=port, websocketRequiresToken=True)
 

@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
 from weakref import WeakSet
 
-from aiohttp import web
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import Server, ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
@@ -204,6 +203,7 @@ class WebSocketConfig(Base):
     token: str = ""
     token_issue_path: str = ""
     token_issue_secret: str = ""
+    token_issue_secret_generated: bool = False
     trusted_proxy_auth: TrustedProxyAuthConfig | None = None
     token_ttl_s: int = Field(default=300, ge=30, le=86_400)
     websocket_requires_token: bool = True
@@ -703,12 +703,7 @@ class WebSocketChannel(BaseChannel):
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
-        async def handle_body_request(request: web.BaseRequest) -> web.StreamResponse:
-            if request.path == "/webui/setup":
-                return await self.gateway.http.access.handle_setup(request)
-            return await self._uploads.handle(request)
-
-        bridge = BinaryHTTPBridge(handle_body_request)
+        bridge = BinaryHTTPBridge(self._uploads.handle)
 
         async def prune_uploads() -> None:
             while not stop_event.is_set():

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  BootstrapSetupRequiredError,
   consumeUrlBootstrapSecret,
   deriveWsUrl,
   fetchBootstrap,
@@ -88,13 +87,6 @@ describe("bootstrap helpers", () => {
       ws_path: "/",
       ws_url: "wss://proxy.example/",
     });
-  });
-
-  it("reports setup separately from a password login", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ error: "setup_required" }), { status: 428 },
-    )));
-    await expect(fetchBootstrap()).rejects.toBeInstanceOf(BootstrapSetupRequiredError);
   });
 
   it.each([

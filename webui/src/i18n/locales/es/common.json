@@ -314,19 +314,6 @@
       "required": "Introduce la contraseña",
       "invalid": "Contraseña incorrecta"
     },
-    "setup": {
-      "title": "Establece tu contraseña de acceso",
-      "description": "Establece una contraseña en este equipo para empezar a usar nanobot.",
-      "confirmPassword": "Confirmar contraseña",
-      "submit": "Establecer y continuar",
-      "submitting": "Guardando…",
-      "required": "Introduce una contraseña de acceso.",
-      "mismatch": "Las contraseñas no coinciden. Introdúcelas de nuevo.",
-      "invalidPassword": "Usa entre 1 y 1024 caracteres, sin contar los espacios al principio y al final. La contraseña no puede contener ${.",
-      "localOnly": "Abre la dirección localhost en el equipo que ejecuta nanobot para terminar la configuración.",
-      "saveFailed": "No se pudo guardar la contraseña. Inténtalo de nuevo.",
-      "alreadyInitialized": "Otra página ya ha establecido la contraseña. Introdúcela para conectarte."
-    },
     "account": {
       "section": "Cuenta",
       "logoutHint": "Desconecta este navegador de la puerta de enlace.",
@@ -1079,7 +1066,15 @@
       "pendingEnable": "Guardado. Reinicia para permitir que otros dispositivos se conecten.",
       "pendingDisable": "Guardado. Al reiniciar, los otros dispositivos se desconectarán. Abre la dirección localhost en este equipo para volver a conectarte.",
       "networkScope": "Esto solo cambia dónde escucha la WebUI. No configura cortafuegos, routers ni túneles públicos.",
-      "saveFailed": "No se pudo guardar la configuración de acceso. Inténtalo de nuevo."
+      "saveFailed": "No se pudo guardar la configuración de acceso. Inténtalo de nuevo.",
+      "passwordTitle": "Establecer una contraseña de acceso",
+      "passwordDescription": "Establece una contraseña antes de permitir que otros dispositivos se conecten.",
+      "passwordConfirm": "Confirmar contraseña",
+      "passwordSubmit": "Establecer contraseña y permitir acceso",
+      "passwordInvalid": "Usa entre 8 y 1024 caracteres, sin contar los espacios al principio y al final. La contraseña no puede contener ${.",
+      "passwordMismatch": "Las contraseñas no coinciden. Introdúcelas de nuevo.",
+      "passwordAlreadySet": "Otra página ya ha establecido la contraseña. Actualiza esta página antes de cambiar el acceso.",
+      "passwordLocalOnly": "Establece la contraseña en el equipo que ejecuta nanobot."
     },
     "api": {
       "title": "Servidor API", "openaiCompatible": "API compatible con OpenAI",

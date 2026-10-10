@@ -314,19 +314,6 @@
       "required": "請輸入密碼",
       "invalid": "密碼不正確，請重試"
     },
-    "setup": {
-      "title": "設定存取密碼",
-      "description": "在本機設定存取密碼後開始使用。",
-      "confirmPassword": "確認密碼",
-      "submit": "設定並進入",
-      "submitting": "正在儲存…",
-      "required": "請輸入存取密碼。",
-      "mismatch": "兩次密碼不一致，請重新輸入。",
-      "invalidPassword": "密碼去除前後空白後須為 1–1024 個字元，且不能包含 ${。",
-      "localOnly": "請在執行 nanobot 的電腦上開啟 localhost 網址，完成首次設定。",
-      "saveFailed": "密碼儲存失敗，請重試。",
-      "alreadyInitialized": "其他頁面已完成密碼設定，請輸入該密碼連線。"
-    },
     "account": {
       "section": "帳戶",
       "logoutHint": "斷開此瀏覽器與閘道器的連線",
@@ -1079,7 +1066,15 @@
       "pendingEnable": "已儲存，重新啟動後允許其他裝置連線。",
       "pendingDisable": "已儲存，重新啟動後其他裝置將中斷連線，請在本機開啟 localhost 網址重新連線。",
       "networkScope": "此設定只變更 WebUI 的監聽範圍，不會設定防火牆、路由器或公網通道。",
-      "saveFailed": "存取設定儲存失敗，請重試。"
+      "saveFailed": "存取設定儲存失敗，請重試。",
+      "passwordTitle": "設定存取密碼",
+      "passwordDescription": "開啟前先設定存取密碼。",
+      "passwordConfirm": "確認密碼",
+      "passwordSubmit": "設定密碼並開啟",
+      "passwordInvalid": "密碼去除前後空白後須為 8–1024 個字元，且不能包含 ${。",
+      "passwordMismatch": "兩次密碼不一致，請重新輸入。",
+      "passwordAlreadySet": "其他頁面已設定密碼，請重新整理後再變更存取設定。",
+      "passwordLocalOnly": "請在執行 nanobot 的本機設定存取密碼。"
     },
     "api": {
       "title": "API 伺服器", "openaiCompatible": "OpenAI 相容 API", "description": "透過相容 OpenAI 的 API 連線",

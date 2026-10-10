@@ -236,8 +236,7 @@ async def test_real_gateway_move_run_reload_and_previous_result(tmp_path, target
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     cfg = WebSocketConfig.model_validate({"enabled": True, "host": "127.0.0.1", "port": port,
-        "path": "/ws", "allowFrom": ["*"], "websocketRequiresToken": True,
-        "tokenIssueSecret": "synthetic-access-secret"})
+        "path": "/ws", "allowFrom": ["*"], "websocketRequiresToken": True})
     gateway = build_gateway_services(config=cfg, bus=bus, session_manager=sessions,
         static_dist_path=None, workspace_path=tmp_path / "workspace", default_restrict_to_workspace=False,
         runtime_model_name=None, runtime_surface="browser", runtime_capabilities_overrides=None,

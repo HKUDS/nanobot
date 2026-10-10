@@ -79,7 +79,7 @@ export function useSettingsController({
   onNativeEngineRestart,
 }: SettingsControllerOptions) {
   const { t } = useTranslation();
-  const { client, getToken, token, webuiCapabilities } = useClient();
+  const { client, getToken, token, webuiCapabilities, onAccessPasswordChange } = useClient();
   const pageVisible = usePageVisibility();
   const remoteBrowserAccess =
     typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
@@ -90,6 +90,7 @@ export function useSettingsController({
   const [webuiAccessSaving, setWebuiAccessSaving] = useState(false);
   const [webuiAccessError, setWebuiAccessError] = useState<string | null>(null);
   const webuiAccessAvailable = webuiCapabilities.includes("webui.access.v1") && !!settings?.webui_access;
+  const webuiAccessCanSetPassword = Boolean(onAccessPasswordChange);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
   const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
     EMPTY_PENDING_RESTART_SECTIONS,
@@ -182,15 +183,26 @@ export function useSettingsController({
 
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
 
-  const saveWebuiAccess = async (allowOtherDevices: boolean) => {
-    if (!webuiAccessAvailable || !settings?.webui_access?.can_change || webuiAccessSaving) return;
+  const saveWebuiAccess = async (allowOtherDevices: boolean, password?: string): Promise<boolean> => {
+    if (!webuiAccessAvailable || !settings?.webui_access?.can_change || webuiAccessSaving) return false;
+    if (allowOtherDevices && settings.webui_access.password_required && !webuiAccessCanSetPassword) return false;
     setWebuiAccessSaving(true);
     setWebuiAccessError(null);
     try {
-      const payload = await updateWebuiAccessSettings(client, allowOtherDevices);
+      const payload = await updateWebuiAccessSettings(client, allowOtherDevices, password);
+      if (password !== undefined) onAccessPasswordChange?.(password);
       applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
-    } catch {
-      setWebuiAccessError(t("settings.webuiAccess.saveFailed"));
+      return true;
+    } catch (err) {
+      const errorKeys: Record<string, string> = {
+        invalid_password: "passwordInvalid",
+        password_required: "passwordDescription",
+        password_already_set: "passwordAlreadySet",
+        access_local_only: "passwordLocalOnly",
+      };
+      const key = err instanceof Error ? errorKeys[err.message] : undefined;
+      setWebuiAccessError(t(`settings.webuiAccess.${key ?? "saveFailed"}`));
+      return false;
     } finally {
       setWebuiAccessSaving(false);
     }
@@ -660,6 +672,7 @@ export function useSettingsController({
     transcriptionSaving,
     visibleProviderKeys,
     webuiAccessAvailable,
+    webuiAccessCanSetPassword,
     webuiAccessError,
     webuiAccessSaving,
     webSearchForm,

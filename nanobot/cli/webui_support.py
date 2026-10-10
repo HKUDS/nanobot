@@ -1,6 +1,8 @@
 """Shared WebUI setup, URL, health, and browser helpers."""
 
 import os
+import re
+import secrets
 import shutil
 import sys
 import time
@@ -48,11 +50,12 @@ __all__ = [
     "_open_webui_browser",
     "_prepare_webui_bundle_for_gateway",
     "_print_foreground_port_conflict",
-    "_print_webui_manual_access",
-    "_print_webui_foreground_lifecycle",
+    "_print_webui_ready",
     "_resolve_webui_config_path",
+    "_start_gateway_log_cursor",
     "_tcp_endpoint_reachable",
     "_validate_gateway_startup",
+    "_wait_for_webui",
     "_warn_webui_bind_scope",
     "_webui_browser_url",
     "webui_bootstrap_secret",
@@ -351,21 +354,10 @@ def _ensure_local_webui_channel(
 
     needs_enable = not model.enabled
     needs_port = port is not None and model.port != port
-    if current and not needs_enable and not needs_port:
+    needs_secret = not model.has_access_auth
+    if current and not needs_enable and not needs_port and not needs_secret:
         return False
 
-    target_port = port if port is not None else model.port
-    console.print()
-    console.print("[bold]Local WebUI setup[/bold]")
-    console.print(f"  URL: [cyan]http://127.0.0.1:{target_port}[/cyan]")
-    console.print(f"  Bind: [cyan]{model.host}[/cyan]")
-    if not model.has_access_auth:
-        console.print("  Set your WebUI access password on the first page.")
-    else:
-        console.print("  WebUI authentication: already configured")
-    console.print(
-        "  To allow other devices, use WebUI Settings after signing in."
-    )
     _confirm_webui_action("Enable the WebUI channel?", yes=yes)
 
     if not model.enabled:
@@ -374,9 +366,14 @@ def _ensure_local_webui_channel(
     if port is not None and model.port != port:
         saved["port"] = port
         changed = True
-    if not model.has_access_auth and not model.websocket_requires_token:
-        saved.pop("websocket_requires_token", None)
-        saved["websocketRequiresToken"] = True
+    if needs_secret:
+        saved.pop("token_issue_secret", None)
+        saved.pop("token_issue_secret_generated", None)
+        saved["tokenIssueSecret"] = secrets.token_urlsafe(32)
+        saved["tokenIssueSecretGenerated"] = True
+        if not model.websocket_requires_token:
+            saved.pop("websocket_requires_token", None)
+            saved["websocketRequiresToken"] = True
         changed = True
 
     setattr(config.channels, "websocket", saved)
@@ -394,8 +391,8 @@ def _warn_webui_bind_scope(config: Config) -> None:
     )
 
 
-def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> None:
-    """Best-effort wait for the WebUI listener before opening a browser."""
+def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> bool:
+    """Return whether the WebUI listener becomes available within the timeout."""
     import time
     from urllib.parse import urlparse
 
@@ -405,8 +402,9 @@ def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> None:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if _tcp_endpoint_reachable(host, port, timeout_s=0.2):
-            return
+            return True
         time.sleep(0.1)
+    return False
 
 
 def _tcp_endpoint_reachable(host: str, port: int, *, timeout_s: float = 0.25) -> bool:
@@ -490,10 +488,9 @@ def _print_foreground_port_conflict(
 
 
 def _open_webui_browser(url: str, *, wait: bool = True) -> bool:
-    """Open the WebUI in the user's default browser, with a copyable fallback."""
+    """Request a browser launch; the printed login link remains the fallback."""
     if wait:
         _wait_for_webui(url)
-    display_url = _webui_display_url(url)
     text_browser = _text_only_browser_name()
     if text_browser:
         console.print(
@@ -503,62 +500,57 @@ def _open_webui_browser(url: str, *, wait: bool = True) -> bool:
         return False
     try:
         if _launch_browser(url):
-            console.print(f"[green]✓[/green] Opened WebUI: [cyan]{display_url}[/cyan]")
             return True
-        else:
-            console.print("[yellow]Could not open a browser automatically.[/yellow]")
-    except Exception as exc:
-        console.print(f"[yellow]Could not open a browser automatically ({escape(str(exc))}).[/yellow]")
+    except Exception:
+        pass
+    console.print(
+        "[yellow]Could not open a browser automatically. Open the link above.[/yellow]"
+    )
     return False
 
 
-def _print_webui_manual_access(config: Config, config_path: Path, url: str) -> None:
-    """Print a complete local or SSH-tunnel browser handoff without exposing credentials."""
-    from urllib.parse import urlparse
-
-    browser_url = url.split("/#/", 1)[0]
-    parsed = urlparse(browser_url)
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    tunnel_host = _host_for_local_browser(parsed.hostname or "127.0.0.1")
-    tunnel_url = f"{parsed.scheme}://127.0.0.1:{port}"
+def _print_webui_ready(
+    config: Config,
+    config_path: Path,
+    url: str,
+    *,
+    workspace: str | None,
+    dev: bool,
+    managed: bool,
+) -> None:
+    """Show one ready state and a complete browser handoff in the local terminal."""
     ws_cfg = _webui_config_dict(config)
-    password_key = (
-        "tokenIssueSecret" if str(ws_cfg.get("tokenIssueSecret") or "").strip() else "token"
-    )
-
+    host = str(ws_cfg.get("host") or "127.0.0.1")
     console.print()
-    console.print("[bold]Open the WebUI manually[/bold]")
-    console.print(f"  WebUI: [cyan]{browser_url}[/cyan]")
+    console.print("[bold green]WebUI ready[/bold green]" + (" [dim](development)[/dim]" if dev else ""))
     if webui_bootstrap_secret(config):
-        console.print(
-            "  WebUI password: "
-            f"[cyan]channels.websocket.{password_key}[/cyan] in [cyan]{config_path}[/cyan]"
+        # Terminal wrapping keeps this one copyable line, including in narrow panes.
+        console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
+        console.print("[dim]Login link: contains your password; do not share.[/dim]")
+        console.print(Text(f"Page: {_webui_display_url(url)}", style="dim"), soft_wrap=True)
+    else:
+        console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
+        if ws_cfg.get("trustedProxyAuth"):
+            console.print("Sign in through your configured trusted proxy.")
+    console.print()
+    scope = "This device only" if is_loopback_host(host) else f"Other devices allowed ({host})"
+    console.print(Text(f"Access: {scope}"))
+    if dev and not is_loopback_host(host):
+        console.print("[dim]The development page is available only on this device.[/dim]")
+    console.print(Text(f"Config: {config_path}", style="dim"), soft_wrap=True)
+    log_command = _gateway_instance_command("logs", config_path=config_path, workspace=workspace)
+    console.print(Text(f"Logs: {log_command}", style="dim"), soft_wrap=True)
+    if managed:
+        lifecycle = (
+            "Ctrl+C detaches; on-demand gateways stop when their last local client exits."
         )
-    elif ws_cfg.get("trustedProxyAuth"):
-        console.print("  Sign in through your configured trusted proxy.")
+        if dev:
+            lifecycle = "Ctrl+C stops Vite; on-demand gateways stop when their last local client exits."
+    elif dev:
+        lifecycle = "Ctrl+C stops Vite; the existing gateway keeps running."
     else:
-        console.print("  Set your access password on this page, then enter the WebUI.")
-    console.print()
-    console.print("If nanobot is running on another machine, create an SSH tunnel from yours:")
-    console.print(
-        f"  [cyan]ssh -N -L {port}:{tunnel_host}:{port} <user>@<server>[/cyan]"
-    )
-    console.print("Replace [cyan]<user>[/cyan] and [cyan]<server>[/cyan] and keep the tunnel open.")
-    console.print(f"Then open [cyan]{tunnel_url}[/cyan] on your computer.")
-
-
-def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
-    """Explain how the browser and gateway lifecycles differ."""
-    console.print()
-    if attached:
-        console.print("[green]WebUI is attached to the shared gateway.[/green]")
-    else:
-        console.print("[green]WebUI is attached to the shared gateway.[/green]")
-    console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
-    console.print(
-        "[dim]Following live gateway logs. Press Ctrl+C to detach; the gateway stops "
-        "only when the last local client exits.[/dim]"
-    )
+        lifecycle = "The gateway is controlled by another foreground command; stop it from that terminal."
+    console.print(Text(lifecycle, style="dim"))
 
 
 _LOG_ANCHOR_BYTES = 64
@@ -630,30 +622,45 @@ def _read_new_gateway_logs(
 def _attach_to_background_gateway(
     runtime: "GatewayRuntime",
     *,
+    log_cursor: _GatewayLogCursor | None = None,
     poll_hook: Callable[[], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Keep the launcher attached and mirror this gateway's new log output."""
+    """Keep the launcher attached and surface new gateway warnings and errors."""
     status = runtime.status()
     log_path = status.log_path
-    cursor = _start_gateway_log_cursor(log_path)
-    _print_webui_foreground_lifecycle(attached=True)
+    cursor = log_cursor or _start_gateway_log_cursor(log_path)
+    show_detail = False
+
+    def print_logs(*, flush: bool = False) -> None:
+        nonlocal show_detail
+        for line in _read_new_gateway_logs(log_path, cursor, flush=flush):
+            # Full logs remain available through `nanobot gateway logs`.
+            match = re.match(r"^\S+ \| (TRACE|DEBUG|INFO|SUCCESS|WARNING|ERROR|CRITICAL)\s+\|", line)
+            if match:
+                show_detail = match[1] in {"WARNING", "ERROR", "CRITICAL"}
+            elif re.search(r"\b(?:\w*Warning:|WARNING:|ERROR:|CRITICAL:|Traceback \()", line):
+                show_detail = True
+            if not show_detail:
+                continue
+            style = "yellow" if match and match[1] == "WARNING" else None
+            if match and match[1] in {"ERROR", "CRITICAL"}:
+                style = "red"
+            console.print(line, style=style, markup=False, highlight=False)
+
     try:
         while status.running:
-            for line in _read_new_gateway_logs(log_path, cursor):
-                console.print(line, markup=False, highlight=False)
+            print_logs()
             if poll_hook is not None:
                 poll_hook()
             sleep(0.5)
             status = runtime.status()
     except KeyboardInterrupt:
-        for line in _read_new_gateway_logs(log_path, cursor, flush=True):
-            console.print(line, markup=False, highlight=False)
-        console.print("\n[yellow]WebUI launcher detached.[/yellow]")
+        print_logs(flush=True)
+        console.print("\n[dim]WebUI launcher detached.[/dim]")
         return
 
-    for line in _read_new_gateway_logs(log_path, cursor, flush=True):
-        console.print(line, markup=False, highlight=False)
+    print_logs(flush=True)
     console.print("[yellow]Gateway stopped.[/yellow]")
 
 

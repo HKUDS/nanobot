@@ -129,6 +129,7 @@ export function renderSettingsView(
   options: {
     client?: NanobotClient;
     webuiCapabilities?: string[];
+    onAccessPasswordChange?: (password: string) => void;
     initialSection?:
       | "overview"
       | "appearance"
@@ -159,7 +160,7 @@ export function renderSettingsView(
         handler("open");
         return () => {};
       },
-    } as never} token="tok" webuiCapabilities={options.webuiCapabilities}>
+    } as never} token="tok" webuiCapabilities={options.webuiCapabilities} onAccessPasswordChange={options.onAccessPasswordChange}>
       <SettingsView
         theme="light"
         initialSection={options.initialSection ?? "apps"}

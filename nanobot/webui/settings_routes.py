@@ -292,7 +292,11 @@ class WebUISettingsRouter:
 
             try:
                 payload = _mutation_payload(request) or {}
-                await asyncio.to_thread(self._access.update_scope, payload.get("allow_other_devices"))
+                await asyncio.to_thread(
+                    self._access.update_scope, payload.get("allow_other_devices"),
+                    payload.get("password"),
+                    local_browser=_is_local_browser_request(connection, request.headers),
+                )
                 return await asyncio.to_thread(self._handle_settings)
             except WebUIAccessError as exc:
                 return self._error_response(exc.status, exc.code)

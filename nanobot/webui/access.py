@@ -1,20 +1,14 @@
-"""First-run authentication and saved versus active WebUI listener scope."""
+"""Authenticated network access settings and saved versus active listener scope."""
 
 from __future__ import annotations
 
-import asyncio
-import json
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict
 from urllib.parse import urlsplit
-
-from aiohttp import web
 
 from nanobot.config.loader import resolve_config_env_vars
 from nanobot.config.schema import Config
 from nanobot.webui.http_utils import (
     case_insensitive_header,
-    is_local_browser_request,
     is_loopback_host,
 )
 from nanobot.webui.settings_services import WebUISettingsConfig
@@ -37,13 +31,13 @@ class WebUIAccessPayload(TypedDict):
     active_host: str
     requires_restart: bool
     can_change: bool
+    password_required: bool
 
 
 def browser_origin_allowed(headers: Any, *, public_ws_url: str = "") -> bool:
     """Allow same-origin browsers and the loopback-only development client.
 
-    Non-browser clients may omit Origin. First-run writes require it separately.
-    Forwarded headers never establish permission to initialize an instance.
+    Non-browser clients may omit Origin. Authentication is checked separately.
     """
     origin = case_insensitive_header(headers, "Origin")
     if not origin:
@@ -68,11 +62,6 @@ class WebUIAccess:
     def __init__(self, active: WebSocketConfig, config: WebUISettingsConfig) -> None:
         self.active = active
         self.config = config
-        self._setup_lock = asyncio.Lock()
-
-    @property
-    def setup_required(self) -> bool:
-        return not self.active.has_access_auth
 
     def _websocket(self, config: Config) -> WebSocketConfig:
         from nanobot.channels.websocket.runtime import WebSocketConfig
@@ -93,79 +82,55 @@ class WebUIAccess:
                 self.active.host, self.active.unix_socket_path,
             ),
             "can_change": not (saved.unix_socket_path or self.active.unix_socket_path),
+            "password_required": self._password_required(saved),
         }
 
-    def update_scope(self, allow_other_devices: object) -> None:
+    @staticmethod
+    def _password_required(websocket: WebSocketConfig) -> bool:
+        return not (websocket.token.strip() or websocket.trusted_proxy_auth) and (
+            websocket.token_issue_secret_generated or not websocket.token_issue_secret.strip()
+        )
+
+    def update_scope(
+        self, allow_other_devices: object, password: object = None, *, local_browser: bool,
+    ) -> None:
         if type(allow_other_devices) is not bool:
             raise WebUIAccessError("invalid_access_scope")
-        if self.setup_required:
-            raise WebUIAccessError("setup_required", 428)
-
-        def update(config: Config) -> None:
-            websocket = self._websocket(config)
-            if not websocket.has_access_auth:
-                raise WebUIAccessError("setup_required", 428)
-            if websocket.unix_socket_path or self.active.unix_socket_path:
-                raise WebUIAccessError("unix_socket_access_scope", 409)
-            if allow_other_devices != (not is_loopback_host(websocket.host)):
-                saved: dict[str, Any] = dict(getattr(config.channels, "websocket", {}) or {})
-                saved["host"] = "0.0.0.0" if allow_other_devices else "127.0.0.1"
-                setattr(config.channels, "websocket", saved)
-
-        self.config.update(update)
-
-    async def handle_setup(self, request: web.BaseRequest) -> web.Response:
-        """Accept one bounded local JSON write before normal credentials exist."""
-        try:
-            if request.method != "POST":
-                raise WebUIAccessError("method_not_allowed", 405)
-            peer = request.transport.get_extra_info("peername") if request.transport else None
-            connection = SimpleNamespace(remote_address=peer)
-            origin = request.headers.get("Origin", "")
-            if (self.active.unix_socket_path or not is_loopback_host(self.active.host)
-                    or not is_local_browser_request(connection, request.headers)
-                    or not origin or not browser_origin_allowed(request.headers)):
-                raise WebUIAccessError("setup_local_only", 403)
-            if not self.setup_required:
-                raise WebUIAccessError("already_initialized", 409)
-            if (request.content_type != "application/json"
-                    or request.headers.get("Content-Encoding")
-                    or request.headers.get("Transfer-Encoding")
-                    or not 0 < (request.content_length or 0) <= 16_384):
-                raise WebUIAccessError("invalid_request")
-            try:
-                body: object = json.loads(await asyncio.wait_for(request.read(), timeout=10))
-            except (ValueError, TimeoutError):
-                raise WebUIAccessError("invalid_request") from None
-            password = cast(dict[str, object], body).get("password") if isinstance(body, dict) else None
-            if (not isinstance(password, str) or not 1 <= len(password.strip()) <= 1024
-                    or "${" in password):
+        if password is not None:
+            if (not allow_other_devices or not isinstance(password, str)
+                    or not 8 <= len(password.strip()) <= 1024 or "${" in password):
                 raise WebUIAccessError("invalid_password")
             password = password.strip()
+            if not local_browser:
+                raise WebUIAccessError("access_local_only", 403)
 
-            def initialize(config: Config) -> None:
-                saved = self._websocket(config)
-                # The file lock covers this check and the atomic config replacement.
-                if saved.has_access_auth:
-                    raise WebUIAccessError("already_initialized", 409)
-                values: dict[str, Any] = dict(getattr(config.channels, "websocket", {}) or {})
-                values.pop("token_issue_secret", None)
-                values.pop("websocket_requires_token", None)
-                values.update(tokenIssueSecret=password, websocketRequiresToken=True)
-                setattr(config.channels, "websocket", values)
+        def update(config: Config) -> str | None:
+            websocket = self._websocket(config)
+            if websocket.unix_socket_path or self.active.unix_socket_path:
+                raise WebUIAccessError("unix_socket_access_scope", 409)
+            needs_password = self._password_required(websocket)
+            # Recheck under the config-file lock: another tab may have set the password.
+            if password is not None and not needs_password:
+                raise WebUIAccessError("password_already_set", 409)
+            if allow_other_devices and needs_password and password is None:
+                raise WebUIAccessError("password_required")
+            saved: dict[str, Any] = dict(getattr(config.channels, "websocket", {}) or {})
+            if isinstance(password, str):
+                for key in ("token_issue_secret", "token_issue_secret_generated", "websocket_requires_token"):
+                    saved.pop(key, None)
+                saved.update(
+                    tokenIssueSecret=password, tokenIssueSecretGenerated=False,
+                    websocketRequiresToken=True,
+                )
+            if allow_other_devices != (not is_loopback_host(websocket.host)):
+                saved["host"] = "0.0.0.0" if allow_other_devices else "127.0.0.1"
+            setattr(config.channels, "websocket", saved)
+            return password if isinstance(password, str) else None
 
-            async with self._setup_lock:
-                if not self.setup_required:
-                    raise WebUIAccessError("already_initialized", 409)
-                await asyncio.to_thread(self.config.update, initialize)
-                # A failed save must leave the running gateway uninitialized.
-                self.active.token_issue_secret = password
-                self.active.websocket_requires_token = True
-            response = web.json_response({"ok": True})
-        except WebUIAccessError as exc:
-            response = web.json_response({"error": exc.code}, status=exc.status)
-        except (OSError, ValueError):
-            response = web.json_response({"error": "save_failed"}, status=500)
-        response.headers["Cache-Control"] = "no-store"
-        response.force_close()
-        return response
+        saved_password = self.config.update(update)
+        if saved_password is not None:
+            # Existing local sessions finish normally; restart clears them before
+            # opening the external listener. New logins already use the new password.
+            self.active.token_issue_secret = saved_password
+            self.active.token_issue_secret_generated = False
+            self.active.websocket_requires_token = True

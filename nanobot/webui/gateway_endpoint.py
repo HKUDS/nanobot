@@ -82,8 +82,6 @@ class WebUIGatewayEndpoint:
         headers: Any = None,
     ) -> Any:
         """Authorize a WebSocket upgrade and remember trusted WebUI connections."""
-        if self._http.access.setup_required:
-            return connection.respond(428, "setup_required")
         if not browser_origin_allowed(headers or {}, public_ws_url=self._config.public_ws_url):
             return connection.respond(403, "Forbidden origin")
         if is_trusted_proxy_authenticated_request(connection, headers or {}, self._config):

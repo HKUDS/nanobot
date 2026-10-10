@@ -314,19 +314,6 @@
       "required": "Enter password",
       "invalid": "Incorrect password"
     },
-    "setup": {
-      "title": "Set your access password",
-      "description": "Set a password on this computer to start using nanobot.",
-      "confirmPassword": "Confirm password",
-      "submit": "Set password and continue",
-      "submitting": "Saving…",
-      "required": "Enter an access password.",
-      "mismatch": "The passwords do not match. Enter them again.",
-      "invalidPassword": "Use a password of 1–1024 characters, excluding surrounding spaces. It must not contain ${.",
-      "localOnly": "Open the localhost address on the computer running nanobot to finish setup.",
-      "saveFailed": "Could not save the password. Try again.",
-      "alreadyInitialized": "Another page has already set the password. Enter that password to connect."
-    },
     "account": {
       "section": "Account",
       "logoutHint": "Disconnect this browser from the gateway.",
@@ -1268,7 +1255,15 @@
       "pendingEnable": "Saved. Restart to allow other devices to connect.",
       "pendingDisable": "Saved. After restarting, other devices will disconnect. Open this computer’s localhost address to reconnect.",
       "networkScope": "This only changes where WebUI listens. It does not configure firewalls, routers or public tunnels.",
-      "saveFailed": "Could not save access settings. Try again."
+      "saveFailed": "Could not save access settings. Try again.",
+      "passwordTitle": "Set an access password",
+      "passwordDescription": "Set a password before allowing other devices to connect.",
+      "passwordConfirm": "Confirm password",
+      "passwordSubmit": "Set password and allow access",
+      "passwordInvalid": "Use a password of 8–1024 characters, excluding surrounding spaces. It must not contain ${.",
+      "passwordMismatch": "The passwords do not match. Enter them again.",
+      "passwordAlreadySet": "Another page has already set the password. Refresh this page before changing access.",
+      "passwordLocalOnly": "Set the password on the computer running nanobot."
     },
     "api": {
       "title": "API server",

@@ -1,4 +1,4 @@
-"""Exercise first-run access over the real HTTP and WebSocket listener."""
+"""Exercise authenticated network access settings over real gateway listeners."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ from nanobot.config.schema import Config
 from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 
+LOCAL_SECRET = "generated-local-secret"
+
 
 @pytest.fixture
 def config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -33,7 +35,10 @@ def config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "config.json"
     save_config(Config(
         agents={"defaults": {"workspace": str(tmp_path / "workspace")}},
-        channels={"websocket": {"port": port, "tokenIssuePath": "/auth/token"}},
+        channels={"websocket": {
+            "host": "127.0.0.1", "port": port, "tokenIssuePath": "/auth/token",
+            "tokenIssueSecret": LOCAL_SECRET, "tokenIssueSecretGenerated": True,
+        }},
     ), path)
     return path
 
@@ -47,7 +52,7 @@ async def running(config_path: Path):
     workspace.mkdir(exist_ok=True)
     static = config_path.parent / "dist"
     static.mkdir(exist_ok=True)
-    (static / "index.html").write_text("<!doctype html><title>Access setup</title>")
+    (static / "index.html").write_text("<!doctype html><title>WebUI</title>")
     gateway = build_gateway_services(
         config=active, bus=bus, session_manager=SessionManager(workspace),
         static_dist_path=static, workspace_path=workspace, config_path=config_path,
@@ -71,13 +76,7 @@ async def running(config_path: Path):
         await task
 
 
-async def setup(client: httpx.AsyncClient, password: str, **headers: str) -> httpx.Response:
-    return await client.post("/webui/setup", json={"password": password}, headers={
-        "Origin": str(client.base_url).rstrip("/"), **headers,
-    })
-
-
-async def bootstrap(client: httpx.AsyncClient, password: str) -> dict:
+async def bootstrap(client: httpx.AsyncClient, password: str = LOCAL_SECRET) -> dict:
     result = await client.get("/webui/bootstrap", headers={
         "X-Nanobot-Auth-Encoded": base64.b64encode(password.encode()).decode("ascii"),
     })
@@ -85,156 +84,192 @@ async def bootstrap(client: httpx.AsyncClient, password: str) -> dict:
     return result.json()
 
 
-async def mutation(client: httpx.AsyncClient, password: str, allow: bool) -> dict:
+@asynccontextmanager
+async def signed_in(client: httpx.AsyncClient, password: str = LOCAL_SECRET, **kwargs):
     boot = await bootstrap(client, password)
-    async with websockets.connect(boot["ws_url"] + "?token=" + boot["token"]) as ws:
-        await ws.send(json.dumps({
-            "type": "webui_request", "request_id": uuid4().hex,
-            "action": "settings.webui_access.update", "payload": {"allow_other_devices": allow},
-        }))
-        async with asyncio.timeout(5):
-            while True:
-                event = json.loads(await ws.recv())
-                if event.get("event") == "webui_response":
-                    assert event["ok"], event
-                    return event["result"]
+    async with websockets.connect(
+        boot["ws_url"] + "?token=" + boot["token"],
+        origin=str(client.base_url).rstrip("/"), **kwargs,
+    ) as ws:
+        yield ws
 
 
-async def test_first_run_blocks_capabilities_then_persists_password(config_path: Path) -> None:
-    password = "本机密码-😀"
-    async with running(config_path) as (channel, client):
-        assert (await client.get("/")).status_code == 200
-        for path in ("/webui/bootstrap", "/webui/terminal", "/auth/token", "/api/settings", "/api/sessions"):
-            result = await client.get(path)
-            assert result.status_code == 428
-            assert result.json() == {"error": "setup_required"}
-        with pytest.raises(InvalidStatus) as rejected:
-            async with websockets.connect(f"ws://127.0.0.1:{channel.config.port}/"):
-                pass
-        assert rejected.value.response.status_code == 428
-        assert (await client.post("/api/attachments", content=b"uninitialized")).status_code == 401
-        assert not channel.gateway.tokens.issued_tokens
-        assert (await setup(client, password)).status_code == 200
+async def mutation(ws, allow: bool, password: str | None = None) -> dict:
+    request_id = uuid4().hex
+    payload = {"allow_other_devices": allow}
+    if password is not None:
+        payload["password"] = password
+    await ws.send(json.dumps({
+        "type": "webui_request", "request_id": request_id,
+        "action": "settings.webui_access.update", "payload": payload,
+    }))
+    async with asyncio.timeout(5):
+        while True:
+            event = json.loads(await ws.recv())
+            if event.get("event") == "webui_response" and event.get("request_id") == request_id:
+                return event
+
+
+async def settings(client: httpx.AsyncClient, password: str = LOCAL_SECRET) -> dict:
+    boot = await bootstrap(client, password)
+    response = await client.get("/api/settings", headers={"Authorization": "Bearer " + boot["api_token"]})
+    assert response.status_code == 200
+    return response.json()
+
+
+async def test_generated_credential_authenticates_locally_but_cannot_enable_network_without_password(
+    config_path: Path,
+) -> None:
+    async with running(config_path) as (_, client):
         assert (await client.get("/webui/bootstrap")).status_code == 401
-        boot = await bootstrap(client, password)
-        assert "webui.access.v1" in boot["terminal"]["webui"]["capabilities"]
-        async with websockets.connect(boot["ws_url"] + "?token=" + boot["token"]) as ws:
-            assert json.loads(await ws.recv())["event"] == "ready"
-        assert (await setup(client, "overwrite")).status_code == 409
-    assert load_config(config_path).channels.websocket["tokenIssueSecret"] == password
-    async with running(config_path) as (_, client):
-        await bootstrap(client, password)
-        assert (await setup(client, "overwrite-after-restart")).status_code == 409
+        assert (await client.get("/api/settings")).status_code == 401
+        payload = await settings(client)
+        assert payload["webui_access"]["password_required"]
+        assert not payload["webui_access"]["allow_other_devices"]
+        assert (await client.get("/api/settings/webui-access/update")).status_code == 405
+        async with signed_in(client) as ws:
+            result = await mutation(ws, True)
+            assert result["error"] == {"status": 400, "message": "password_required"}
+        assert load_config(config_path).channels.websocket["host"] == "127.0.0.1"
 
 
-async def test_setup_rejects_cross_site_forwarded_and_nonlocal_requests(config_path: Path) -> None:
+async def test_password_and_scope_save_together_and_restart_with_new_credentials(config_path: Path) -> None:
+    password = "网络访问密码-😀42"
+    async with running(config_path) as (channel, client):
+        old_boot = await bootstrap(client)
+        async with signed_in(client) as ws:
+            changed = await mutation(ws, True, password)
+            assert changed["ok"], changed
+        assert changed["result"]["webui_access"] == {
+            "allow_other_devices": True, "active_allow_other_devices": False,
+            "host": "0.0.0.0", "active_host": "127.0.0.1", "requires_restart": True,
+            "can_change": True, "password_required": False,
+        }
+        assert "runtime" in changed["result"]["restart_required_sections"]
+        assert channel._server.sockets[0].getsockname()[0] == "127.0.0.1"
+        assert (await client.get("/webui/bootstrap", headers={"X-Nanobot-Auth": LOCAL_SECRET})).status_code == 401
+        await settings(client, password)
+    saved = load_config(config_path).channels.websocket
+    assert saved["tokenIssueSecret"] == password
+    assert saved["tokenIssueSecretGenerated"] is False
+    async with running(config_path) as (channel, client):
+        assert channel._server.sockets[0].getsockname()[0] == "0.0.0.0"
+        assert (await client.get("/api/settings", headers={"Authorization": "Bearer " + old_boot["api_token"]})).status_code == 401
+        with pytest.raises(InvalidStatus) as rejected:
+            async with websockets.connect(old_boot["ws_url"] + "?token=" + old_boot["token"]):
+                pass
+        assert rejected.value.response.status_code == 401
+        access = (await settings(client, password))["webui_access"]
+        assert access["active_allow_other_devices"] and not access["requires_restart"]
+        async with signed_in(client, password) as ws:
+            disabled = await mutation(ws, False)
+            assert disabled["ok"]
+    async with running(config_path) as (channel, client):
+        assert channel._server.sockets[0].getsockname()[0] == "127.0.0.1"
+        assert not (await settings(client, password))["webui_access"]["password_required"]
+        async with signed_in(client, password) as ws:
+            enabled = await mutation(ws, True)
+            assert enabled["ok"]
+            reverted = await mutation(ws, False)
+            assert not reverted["result"]["requires_restart"]
+        assert load_config(config_path).channels.websocket["tokenIssueSecret"] == password
+
+
+async def test_cross_site_and_forwarded_requests_cannot_set_network_password(config_path: Path) -> None:
     async with running(config_path) as (_, client):
-        for headers in (
-            {"Origin": "https://attacker.example"}, {"Origin": "null"}, {"Origin": ""},
-            {"Host": "attacker.example", "Origin": "http://attacker.example"},
-            {"X-Forwarded-For": "203.0.113.20"}, {"X-Forwarded-Host": "remote.example"},
-        ):
-            assert (await setup(client, "secret", **headers)).status_code == 403
-        # A direct TCP peer outside the accepted local addresses cannot initialize.
-        async with httpx.AsyncClient(
-            base_url=client.base_url, trust_env=False,
-            transport=httpx.AsyncHTTPTransport(local_address="127.0.0.2"),
-        ) as other_peer:
-            assert (await setup(other_peer, "remote")).status_code == 403
-        assert (await setup(client, "secret", Origin="http://127.0.0.1:5173")).status_code == 200
-        boot = await bootstrap(client, "secret")
+        boot = await bootstrap(client)
         with pytest.raises(InvalidStatus) as rejected:
             async with websockets.connect(
                 boot["ws_url"] + "?token=" + boot["token"], origin="https://attacker.example",
             ):
                 pass
         assert rejected.value.response.status_code == 403
+        for kwargs in (
+            {"additional_headers": {"X-Forwarded-For": "203.0.113.20"}},
+            {"local_addr": ("127.0.0.2", 0)},
+        ):
+            async with signed_in(client, **kwargs) as ws:
+                result = await mutation(ws, True, "network-password")
+                assert result["error"] == {"status": 403, "message": "access_local_only"}
+        assert load_config(config_path).channels.websocket["tokenIssueSecret"] == LOCAL_SECRET
 
 
-async def test_two_tabs_only_one_password_wins(config_path: Path) -> None:
+async def test_two_authenticated_tabs_cannot_overwrite_password(config_path: Path) -> None:
     async with running(config_path) as (_, client):
-        results = await asyncio.gather(setup(client, "tab-one"), setup(client, "tab-two"))
-        assert sorted(result.status_code for result in results) == [200, 409]
-        winner = "tab-one" if results[0].status_code == 200 else "tab-two"
+        async with signed_in(client) as first, signed_in(client) as second:
+            results = await asyncio.gather(
+                mutation(first, True, "tab-one-password"), mutation(second, True, "tab-two-password"),
+            )
+        assert sum(result["ok"] for result in results) == 1
+        winner = "tab-one-password" if results[0]["ok"] else "tab-two-password"
+        loser = results[1] if results[0]["ok"] else results[0]
+        assert loser["error"] == {"status": 409, "message": "password_already_set"}
         assert load_config(config_path).channels.websocket["tokenIssueSecret"] == winner
         await bootstrap(client, winner)
 
 
-async def test_failed_save_can_retry_without_unlocking_gateway(
+async def test_failed_save_keeps_local_credentials_and_can_retry(
     config_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async with running(config_path) as (_, client):
+    async with running(config_path) as (channel, client), signed_in(client) as ws:
         with monkeypatch.context() as patch:
             def fail_save(*_args) -> None:
                 raise PermissionError("read-only configuration")
             patch.setattr("nanobot.webui.settings_services.save_config", fail_save)
-            result = await setup(client, "retry-secret")
-            assert result.status_code == 500
-            assert result.json() == {"error": "save_failed"}
-        assert (await client.get("/webui/bootstrap")).status_code == 428
-        assert not load_config(config_path).channels.websocket.get("tokenIssueSecret")
-        assert (await setup(client, "retry-secret")).status_code == 200
-        await bootstrap(client, "retry-secret")
+            result = await mutation(ws, True, "retry-password")
+            assert result["error"] == {"status": 500, "message": "save_failed"}
+        await bootstrap(client)
+        saved = load_config(config_path).channels.websocket
+        assert saved["tokenIssueSecret"] == LOCAL_SECRET and saved["host"] == "127.0.0.1"
+        assert channel._server.sockets[0].getsockname()[0] == "127.0.0.1"
+        assert (await mutation(ws, True, "retry-password"))["ok"]
+        await bootstrap(client, "retry-password")
 
 
-async def test_unicode_password_limit_can_authenticate(config_path: Path) -> None:
-    async with running(config_path) as (_, client):
-        assert (await setup(client, "prefix-${PASSWORD}")).status_code == 400
-        assert (await setup(client, "😀" * 1025)).status_code == 400
+async def test_network_password_validation_and_unicode_transport(config_path: Path) -> None:
+    async with running(config_path) as (_, client), signed_in(client) as ws:
+        for invalid in ("1", "prefix-${PASSWORD}", "😀" * 1025):
+            result = await mutation(ws, True, invalid)
+            assert result["error"] == {"status": 400, "message": "invalid_password"}
         password = "😀" * 1024
-        assert (await setup(client, password)).status_code == 200
+        assert (await mutation(ws, True, password))["ok"]
         await bootstrap(client, password)
 
 
-async def test_scope_resolves_env_without_rewriting_credentials(
-    config_path: Path, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("authentication", [
+    {"token": "existing-static"}, {"tokenIssueSecret": "legacy-random-secret"},
+    {"tokenIssueSecret": "${NAN238_SECRET}"},
+    {"trustedProxyAuth": {"trustedPeerCidrs": ["127.0.0.1/32"], "assertionHeader": "X-Identity"}},
+])
+async def test_existing_authentication_can_enable_network_without_replacing_credentials(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch, authentication: dict,
 ) -> None:
     monkeypatch.setenv("NAN238_HOST", "127.0.0.1")
     monkeypatch.setenv("NAN238_SECRET", "from-environment")
     config = load_config(config_path)
-    config.channels.websocket.update(host="${NAN238_HOST}", tokenIssueSecret="${NAN238_SECRET}")
+    config.channels.websocket.pop("tokenIssueSecret")
+    config.channels.websocket.pop("tokenIssueSecretGenerated")
+    config.channels.websocket.update(host="${NAN238_HOST}", **authentication)
     save_config(config, config_path)
     async with running(config_path) as (_, client):
-        boot = await bootstrap(client, "from-environment")
-        response = await client.get("/api/settings", headers={"Authorization": "Bearer " + boot["api_token"]})
-        access = response.json()["webui_access"]
-        assert not access["allow_other_devices"]
-        assert not access["requires_restart"]
-        assert access["host"] == "127.0.0.1"
-        changed = await mutation(client, "from-environment", True)
-        assert changed["webui_access"]["requires_restart"]
+        if "trustedProxyAuth" in authentication:
+            result = await client.get("/webui/bootstrap", headers={"X-Identity": "signed-in-user"})
+            boot = result.json()
+            connection = websockets.connect(boot["ws_url"], additional_headers={"X-Identity": "signed-in-user"})
+        else:
+            password = authentication.get("token") or authentication["tokenIssueSecret"]
+            connection = signed_in(client, "from-environment" if password.startswith("${") else password)
+        async with connection as ws:
+            result = await mutation(ws, True)
+            assert result["ok"], result
+            assert not result["result"]["webui_access"]["password_required"]
         saved = load_config(config_path).channels.websocket
         assert saved["host"] == "0.0.0.0"
-        assert saved["tokenIssueSecret"] == "${NAN238_SECRET}"
-
-
-async def test_scope_saves_restarts_and_can_be_reverted(config_path: Path) -> None:
-    async with running(config_path) as (channel, client):
-        assert (await setup(client, "scope-secret")).status_code == 200
-        response = await mutation(client, "scope-secret", True)
-        assert response["webui_access"] == {
-            "allow_other_devices": True, "active_allow_other_devices": False,
-            "host": "0.0.0.0", "active_host": "127.0.0.1", "requires_restart": True,
-            "can_change": True,
-        }
-        assert "runtime" in response["restart_required_sections"]
-        assert channel._server.sockets[0].getsockname()[0] == "127.0.0.1"
-        reverted = await mutation(client, "scope-secret", False)
-        assert not reverted["requires_restart"]
-        await mutation(client, "scope-secret", True)
-    async with running(config_path) as (channel, client):
-        assert channel._server.sockets[0].getsockname()[0] == "0.0.0.0"
-        boot = await bootstrap(client, "scope-secret")
-        response = await client.get("/api/settings", headers={"Authorization": "Bearer " + boot["api_token"]})
-        assert response.json()["webui_access"]["active_allow_other_devices"]
-        assert not response.json()["requires_restart"]
-        await mutation(client, "scope-secret", False)
-    async with running(config_path) as (channel, client):
-        assert channel._server.sockets[0].getsockname()[0] == "127.0.0.1"
-        await bootstrap(client, "scope-secret")
+        for key, value in authentication.items():
+            assert saved[key] == value
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.42", "nanobot.example"])
-def test_uninitialized_external_bind_rejected(host: str) -> None:
+def test_external_bind_requires_authentication(host: str) -> None:
     with pytest.raises(ValidationError, match="outside localhost"):
         WebSocketConfig(host=host)

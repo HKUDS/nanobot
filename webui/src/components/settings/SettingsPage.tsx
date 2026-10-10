@@ -651,9 +651,10 @@ export function SettingsPage({
             {controller.webuiAccessAvailable && settings.webui_access ? (
               <WebuiAccessSettings
                 access={settings.webui_access}
+                canSetPassword={controller.webuiAccessCanSetPassword}
                 saving={controller.webuiAccessSaving}
                 error={controller.webuiAccessError}
-                onChange={(allow) => void controller.saveWebuiAccess(allow)}
+                onChange={controller.saveWebuiAccess}
               />
             ) : null}
             {runtimeConfiguration("runtime")}

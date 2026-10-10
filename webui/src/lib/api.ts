@@ -1396,9 +1396,11 @@ export async function updateRuntimeConfigSettings(
 export async function updateWebuiAccessSettings(
   transport: WebUIMutationTransport,
   allowOtherDevices: boolean,
+  password?: string,
 ): Promise<SettingsPayload> {
   return mutation<SettingsPayload>(transport, "settings.webui_access.update", {
     allow_other_devices: allowOtherDevices,
+    ...(password !== undefined ? { password } : {}),
   });
 }
 
