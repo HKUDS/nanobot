@@ -452,6 +452,11 @@ class ReadFileTool(_FsTool):
             return f"(PDF has no extractable text: {fp})"
 
         result = extraction.text
+        if extraction.truncated:
+            result += (
+                f"\n\n(Page {extraction.end_page + 1} was truncated; "
+                "the remaining text on this page is not shown.)"
+            )
         if extraction.end_page < extraction.total_pages - 1:
             next_start = extraction.end_page + 2
             next_end = min(extraction.end_page + 1 + self._MAX_PDF_PAGES, extraction.total_pages)
