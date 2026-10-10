@@ -879,7 +879,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # Groq: mainly used for Whisper voice transcription, also usable for LLM
     ProviderSpec(
         name="groq",
-        keywords=("groq",),
+        keywords=("groq", "llama3", "mixtral", "gemma"),
         env_key="GROQ_API_KEY",
         request_apis=("chat_completions", "responses"),
         display_name="Groq",
