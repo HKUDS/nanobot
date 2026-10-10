@@ -243,6 +243,17 @@ def _is_editable() -> bool:
         return False
 
 
+def _installed_version() -> Version:
+    # Another gateway or CLI process may have changed this shared environment
+    # since __version__ was imported. Read the interpreter's current metadata.
+    probe = (
+        "from importlib.metadata import version, PackageNotFoundError\n"
+        "try: print(version('nanobot-ai'))\n"
+        "except PackageNotFoundError: print('')\n"
+    )
+    return Version(_checked([sys.executable, "-I", "-c", probe]) or __version__)
+
+
 def update_installation(
     *, dev: bool = False, allow_downgrade: bool = False, output: Callable[[str], None] = print,
 ) -> UpdateResult:
@@ -275,23 +286,29 @@ def update_installation(
                 source = str(root)
             else:
                 expected = latest_release()
-                if Version(expected) < Version(__version__) and not allow_downgrade:
+                installed = _installed_version()
+                current = max(installed, Version(__version__))
+                if Version(expected) < current and not allow_downgrade:
                     raise UpdateError(
-                        f"Installed {__version__} is newer than stable {expected}. "
+                        f"Current version {current} is newer than stable {expected}. "
                         "No files changed. Back up your data before an intentional downgrade, "
                         "then run `nanobot update --allow-downgrade`."
                     )
                 target = f"nanobot-ai=={expected}"
                 editable = _is_editable()
-                if Version(expected) == Version(__version__) and not editable and not incomplete_update():
+                repairing = incomplete_update()
+                if Version(expected) == installed and not editable and not repairing:
                     _verify_installation(expected, "pypi")
-                    return {"version": expected, "source": "pypi", "requires_restart": False}
+                    return {
+                        "version": expected, "source": "pypi",
+                        "requires_restart": installed != Version(__version__),
+                    }
                 output(f"Installing nanobot {expected} from PyPI…")
                 _mark_installing()
                 _install([target], upgrade=True)
-                if editable and _is_editable():
-                    # Pip can keep a same-version editable distribution. Dependencies were
-                    # resolved above; replace only the application in this case.
+                if repairing or (editable and _is_editable()):
+                    # Same-version metadata does not prove files survived an interrupted
+                    # install. Resolve dependencies above, then replace application files.
                     _install(["--force-reinstall", "--no-deps", target])
                 source = "pypi"
             output("Verifying the installed version…")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -10,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 import typer
 from filelock import FileLock
+from packaging.version import Version
 from typer.testing import CliRunner
 
 from nanobot import update
@@ -88,6 +90,7 @@ def isolated_update(tmp_path, monkeypatch):
         pytest.skip("Self-update intentionally refuses containers")
     monkeypatch.setattr(update, "latest_release", lambda: "0.3.5")
     monkeypatch.setattr(update, "__version__", "0.3.4")
+    monkeypatch.setattr(update, "_installed_version", lambda: Version(update.__version__))
     monkeypatch.setattr(update, "update_blocked_reason", lambda **kwargs: "")
     monkeypatch.setattr(update, "_checked", lambda *args, **kwargs: json.dumps(["0.3.5", "/env/nanobot/__init__.py"]))
     install = Mock()
@@ -351,3 +354,87 @@ def test_real_python_restart_resolution_detects_cwd_shadowing(tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("PYTHONPATH", raising=False)
     update._verify_installation("0.3.5", "pypi")
+
+
+@pytest.fixture
+def installed_release(tmp_path, monkeypatch):
+    """Install a tiny local wheel with real pip, without touching the user's env."""
+    import venv
+    import zipfile
+
+    env = tmp_path / "env"
+    venv.EnvBuilder(with_pip=True).create(env)
+    executable = env / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    files = {
+        "nanobot/__init__.py": "__version__ = '0.3.5'\n",
+        "nanobot/web/dist/index.html": "<html>bundled UI</html>",
+        "nanobot_ai-0.3.5.dist-info/METADATA": "Metadata-Version: 2.1\nName: nanobot-ai\nVersion: 0.3.5\n",
+        "nanobot_ai-0.3.5.dist-info/WHEEL": "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+    }
+    record = "nanobot_ai-0.3.5.dist-info/RECORD"
+    files[record] = "".join(f"{name},,\n" for name in [*files, record])
+    with zipfile.ZipFile(wheels / "nanobot_ai-0.3.5-py3-none-any.whl", "w") as wheel:
+        for name, content in files.items():
+            wheel.writestr(name, content)
+    monkeypatch.setenv("PIP_NO_INDEX", "1")
+    monkeypatch.setenv("PIP_FIND_LINKS", str(wheels))
+    monkeypatch.setenv("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    monkeypatch.setenv("PIP_CONFIG_FILE", os.devnull)
+    monkeypatch.setenv("PIP_NO_CACHE_DIR", "1")
+    for name in ("PIP_TARGET", "PIP_PREFIX", "PIP_USER"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(sys, "executable", str(executable))
+    monkeypatch.setattr(sys, "prefix", str(env))
+    get_path = update.sysconfig.get_path
+    monkeypatch.setattr(update.sysconfig, "get_path", lambda name, *args, **kwargs: (
+        str(env / "Scripts") if name == "scripts" else get_path(name, *args, **kwargs)
+    ))
+    monkeypatch.setattr(update, "latest_release", lambda: "0.3.5")
+    monkeypatch.setattr(update, "__version__", "0.3.5")
+    monkeypatch.setattr(update, "update_blocked_reason", lambda **kwargs: "")
+    monkeypatch.setattr(update, "_is_editable", lambda: False)
+    update._install(["nanobot-ai==0.3.5"])
+    site = Path(subprocess.check_output([
+        str(executable), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
+    ], text=True).strip())
+    return site / "nanobot/web/dist/index.html"
+
+
+def test_retry_restores_missing_same_version_package_files(installed_release):
+    """A terminated install can leave valid metadata but incomplete application files."""
+    asset = installed_release
+    asset.unlink()
+    update._mark_installing()
+
+    result = update.update_installation(output=lambda _: None)
+
+    assert asset.read_text() == "<html>bundled UI</html>"
+    assert result["requires_restart"]
+    assert not update.incomplete_update()
+
+
+def test_old_gateway_cannot_downgrade_a_newer_shared_installation(installed_release, monkeypatch):
+    # Another process has upgraded the shared environment since this gateway started.
+    monkeypatch.setattr(update, "__version__", "0.3.3")
+    monkeypatch.setattr(update, "latest_release", lambda: "0.3.4")
+    install = Mock(wraps=update._install)
+    monkeypatch.setattr(update, "_install", install)
+    with pytest.raises(update.UpdateError, match="allow-downgrade"):
+        update.update_installation(output=lambda _: None)
+    install.assert_not_called()
+    assert installed_release.is_file()
+    assert not update.incomplete_update()
+
+
+def test_old_gateway_requires_restart_after_external_update(installed_release, monkeypatch):
+    monkeypatch.setattr(update, "__version__", "0.3.4")
+    install = Mock()
+    monkeypatch.setattr(update, "_install", install)
+    result = update.update_installation(output=lambda _: None)
+    assert result["version"] == "0.3.5" and result["requires_restart"]
+    install.assert_not_called()

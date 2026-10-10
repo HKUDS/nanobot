@@ -17,6 +17,7 @@ export function NanobotUpdate({ onInstalled }: { onInstalled?: () => void }) {
   const [revision, setRevision] = useState(0);
   const [prepared, setPrepared] = useState(false);
   const running = submitting || status?.state === "running";
+  const restartRequired = status?.state === "succeeded" && status.requires_restart;
   const blockedReason = dev ? status?.source_blocked_reason : status?.release_blocked_reason;
 
   useEffect(() => {
@@ -48,6 +49,7 @@ export function NanobotUpdate({ onInstalled }: { onInstalled?: () => void }) {
 
   const install = async () => {
     setSubmitting(true);
+    setPrepared(false);
     setError("");
     try {
       setStatus(await updateNanobot(client, dev));
@@ -69,7 +71,7 @@ export function NanobotUpdate({ onInstalled }: { onInstalled?: () => void }) {
         summary={t("settings.about.updateAdvanced", { defaultValue: "Advanced options" })}
         summaryClassName="rounded-control text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <label className="mt-3 flex cursor-pointer items-start gap-2">
-          <input type="checkbox" className="mt-1 accent-primary" checked={dev} disabled={running}
+          <input type="checkbox" className="mt-1 accent-primary" checked={dev} disabled={running || restartRequired}
             onChange={(event) => { setDev(event.target.checked); setPrepared(false); }} aria-describedby="nanobot-update-dev-help" />
           <span>{t("settings.about.updateDev", { defaultValue: "Install from source" })}</span>
         </label>
@@ -77,7 +79,7 @@ export function NanobotUpdate({ onInstalled }: { onInstalled?: () => void }) {
           {t("settings.about.updateDevDescription", { defaultValue: "Use the development version. Requires Git; Bun is downloaded automatically when needed. Existing source checkouts keep their current branch." })}
         </p>
       </Disclosure>
-      {!blockedReason && status?.can_update && status.state !== "succeeded" && (
+      {!blockedReason && status?.can_update && !restartRequired && (
         <label className="mt-4 flex items-start gap-2 text-[12px] leading-5 text-muted-foreground">
           <input type="checkbox" className="mt-1 accent-primary" checked={prepared} disabled={running}
             onChange={(event) => setPrepared(event.target.checked)} />
@@ -87,7 +89,7 @@ export function NanobotUpdate({ onInstalled }: { onInstalled?: () => void }) {
         </label>
       )}
       <Button className="mt-4" size="sm" onClick={() => void install()}
-        disabled={!status?.can_update || !prepared || !!blockedReason || running || status.state === "succeeded"}>
+        disabled={!status?.can_update || !prepared || !!blockedReason || running || restartRequired}>
         {running ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <ArrowUpCircle className="mr-1.5 h-4 w-4" aria-hidden />}
         {t(dev ? "settings.about.updateDevAction" : "settings.about.updateAction", {
           defaultValue: dev ? "Install development version" : "Install latest release",

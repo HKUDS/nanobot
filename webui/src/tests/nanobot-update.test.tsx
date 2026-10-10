@@ -89,4 +89,18 @@ describe("nanobot updates", () => {
     expect(await screen.findByText("Already up to date. No files changed.")).toBeVisible();
     expect(installed).not.toHaveBeenCalled();
   });
+
+  it("allows source installation after a successful release no-op", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...idle, state: "succeeded", version: "0.3.5" })));
+    requestMutationMock.mockResolvedValue({ ...idle, state: "running", mode: "dev" });
+    mount();
+    await screen.findByText("Already up to date. No files changed.");
+    fireEvent.click(screen.getByText("Advanced options"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Install from source" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I have backed up/ }));
+    const button = screen.getByRole("button", { name: "Install development version" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.nanobot.update", { dev: true }, 20000));
+  });
 });
