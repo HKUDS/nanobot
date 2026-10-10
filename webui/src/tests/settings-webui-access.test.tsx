@@ -217,7 +217,9 @@ describe("WebUI access settings", () => {
     const credentialsChanged = vi.fn();
     requestMutationMock.mockResolvedValueOnce({
       ...settingsPayload(),
-      webui_access: { ...localAccess, allow_other_devices: true, password_required: false },
+      requires_restart: true,
+      restart_required_sections: ["runtime"],
+      webui_access: { ...localAccess, allow_other_devices: true, host: "0.0.0.0", requires_restart: true },
     });
     renderSettingsView({
       initialSection: "runtime",
