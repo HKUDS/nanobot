@@ -1577,10 +1577,28 @@ def test_deepseek_thinking_enabled() -> None:
     assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
 
 
-def test_deepseek_thinking_disabled_for_minimal() -> None:
-    """reasoning_effort='minimal' must send thinking.type=disabled to DeepSeek."""
-    kw = _build_kwargs_for("deepseek", "deepseek-v4-pro", reasoning_effort="minimal")
-    assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
+@pytest.mark.parametrize(
+    "effort, wire_effort, thinking_type",
+    [
+        ("minimal", "low", "enabled"),
+        ("low", "low", "enabled"),
+        ("none", None, "disabled"),
+        (None, None, None),
+    ],
+)
+def test_deepseek_reasoning_effort_controls(
+    effort: str | None, wire_effort: str | None, thinking_type: str | None,
+) -> None:
+    """DeepSeek's minimal alias enables low-effort thinking; none disables it."""
+    kw = _build_kwargs_for("deepseek", "deepseek-flash", reasoning_effort=effort)
+    if wire_effort is None:
+        assert "reasoning_effort" not in kw
+    else:
+        assert kw["reasoning_effort"] == wire_effort
+    if thinking_type is None:
+        assert "extra_body" not in kw
+    else:
+        assert kw["extra_body"] == {"thinking": {"type": thinking_type}}
 
 
 def test_deepseek_backfills_reasoning_content_on_legacy_tool_call_messages() -> None:
@@ -1623,15 +1641,14 @@ def test_backfill_does_not_touch_messages_when_thinking_explicitly_off() -> None
         {"role": "tool", "tool_call_id": "tc1", "content": "result"},
         {"role": "user", "content": "thanks"},
     ]
-    for effort in ("minimal", "none"):
-        kw = p._build_kwargs(
-            messages=list(messages), tools=None, model="deepseek-v4-pro",
-            max_tokens=1024, temperature=0.7,
-            reasoning_effort=effort, tool_choice=None,
-        )
-        for msg in kw["messages"]:
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                assert "reasoning_content" not in msg
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-v4-pro",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort="none", tool_choice=None,
+    )
+    for msg in kw["messages"]:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            assert "reasoning_content" not in msg
 
 
 def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit() -> None:
@@ -1704,7 +1721,7 @@ def test_deepseek_flash_backfills_missing_tool_history_reasoning(
     sent_assistant = kwargs["messages"][1]
     if history_reasoning is not None:
         assert sent_assistant["reasoning_content"] == history_reasoning
-    elif effort in ("none", "minimal"):
+    elif effort == "none":
         assert "reasoning_content" not in sent_assistant
     else:
         assert sent_assistant["reasoning_content"] == ""

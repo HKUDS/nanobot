@@ -967,6 +967,9 @@ class OpenAICompatProvider(LLMProvider):
         if spec and spec.name == "dashscope" and semantic_effort == "minimal":
             # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"
+        elif spec and spec.name == "deepseek" and semantic_effort == "minimal":
+            # DeepSeek's minimal alias enables low-effort thinking.
+            semantic_effort = wire_effort = "low"
 
         # Magistral and other providers where reasoning is implicit reject the
         # reasoning_effort kwarg entirely. Strip it before the remap so we don't
