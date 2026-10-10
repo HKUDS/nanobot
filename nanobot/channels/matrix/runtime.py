@@ -266,6 +266,9 @@ def _build_matrix_text_content(
             "body": text,
             "msgtype": "m.text",
         }
+        if html:
+            new_content["format"] = MATRIX_HTML_FORMAT
+            new_content["formatted_body"] = html
         content["m.new_content"] = new_content
         content["m.relates_to"] = {
             "rel_type": "m.replace",
