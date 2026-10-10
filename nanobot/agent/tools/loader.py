@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import pkgutil
+from contextvars import ContextVar
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any
 
@@ -131,12 +133,23 @@ class ToolLoader:
 
 
 class _LegacyErrorPrefixTool(Tool):
-    """Compatibility wrapper for external tools using the old error-string contract."""
+    """Adapt legacy errors and serialize plugins with mutable request context.
+
+    Legacy context setters run only inside execute(). Parameter casting and
+    validation must use current_request_context() if they need request data.
+    """
 
     _plugin_discoverable = False
 
     def __init__(self, wrapped: Tool) -> None:
         self._wrapped = wrapped
+        self._legacy_set_context = getattr(wrapped, "set_context", None)
+        # Preparation and execution may be separated by an await. Never copy
+        # another request's context onto an executing shared plugin instance.
+        self._request_context: ContextVar[RequestContext | None] = ContextVar(
+            f"nanobot_legacy_tool_context_{wrapped.name}", default=None,
+        )
+        self._context_lock = asyncio.Lock() if callable(self._legacy_set_context) else None
 
     @property
     def name(self) -> str:
@@ -170,9 +183,8 @@ class _LegacyErrorPrefixTool(Tool):
         return getattr(self._wrapped, "config_key", "")
 
     def set_context(self, ctx: RequestContext) -> None:
-        set_context = getattr(self._wrapped, "set_context", None)
-        if callable(set_context):
-            set_context(ctx)
+        if self._context_lock is not None:
+            self._request_context.set(ctx)
 
     def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._wrapped.cast_params(params)
@@ -184,6 +196,17 @@ class _LegacyErrorPrefixTool(Tool):
         return self._wrapped.to_schema()
 
     async def execute(self, **kwargs: Any) -> Any:
+        if self._context_lock is not None:
+            ctx = self._request_context.get()
+            self._request_context.set(None)
+            async with self._context_lock:
+                set_context = self._legacy_set_context
+                if callable(set_context) and ctx is not None:
+                    set_context(ctx)
+                return await self._execute_wrapped(**kwargs)
+        return await self._execute_wrapped(**kwargs)
+
+    async def _execute_wrapped(self, **kwargs: Any) -> Any:
         result = await self._wrapped.execute(**kwargs)
         if (
             isinstance(result, str)

@@ -1,9 +1,15 @@
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.context import (
+    RequestContext,
+    ToolContext,
+    current_request_context,
+    request_context,
+)
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 
@@ -142,3 +148,96 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
     result = await tool.execute(value="1")
     assert is_tool_error_result(result) is True
     assert str(result) == "Error: plugin failed"
+
+
+def _load_plugin(tool_cls: type[Tool]) -> ToolRegistry:
+    mock_ep = MagicMock(name=tool_cls.__name__)
+    mock_ep.load.return_value = tool_cls
+    registry = ToolRegistry()
+    with patch("nanobot.agent.tools.loader.entry_points", return_value=[mock_ep]):
+        ToolLoader(test_classes=[]).load(ToolContext(config=None, workspace="."), registry)
+    return registry
+
+
+class _ContextPlugin(Tool):
+    name = "context_plugin"
+    description = "A plugin that reads the request context across an await."
+    parameters = {"type": "object", "properties": {}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_first", [False, True], ids=["completion", "cancellation"])
+async def test_legacy_entry_point_context_is_isolated_between_requests(cancel_first):
+    first_started = asyncio.Event()
+    second_prepared = asyncio.Event()
+    release_first = asyncio.Event()
+
+    class LegacyPlugin(_ContextPlugin):
+        def set_context(self, ctx: RequestContext) -> None:
+            self.context = ctx
+
+        async def execute(self, **kwargs):
+            if self.context.chat_id == "a":
+                first_started.set()
+                await release_first.wait()
+            return self.context.channel, self.context.chat_id, self.context.session_key
+
+    registry = _load_plugin(LegacyPlugin)
+
+    async def request_a():
+        with request_context(RequestContext(channel="slack", chat_id="a", session_key="slack:a")):
+            return await registry.execute("context_plugin", {})
+
+    async def request_b():
+        with request_context(RequestContext(channel="email", chat_id="b", session_key="email:b")):
+            # The runner prepares separately from execution and can suspend in a hook.
+            tool, params, error = registry.prepare_call("context_plugin", {})
+            assert tool is not None and error is None
+            second_prepared.set()
+            return await tool.execute(**params)
+
+    async with asyncio.timeout(5):
+        async with asyncio.TaskGroup() as tasks:
+            task_a = tasks.create_task(request_a())
+            await first_started.wait()
+            task_b = tasks.create_task(request_b())
+            await second_prepared.wait()
+            if cancel_first:
+                task_a.cancel()
+            else:
+                release_first.set()
+
+    if cancel_first:
+        assert task_a.cancelled()
+    else:
+        assert task_a.result() == ("slack", "a", "slack:a")
+    assert task_b.result() == ("email", "b", "email:b")
+
+
+@pytest.mark.asyncio
+async def test_entry_point_without_legacy_setter_remains_concurrent():
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+
+    class ContextVarPlugin(_ContextPlugin):
+        async def execute(self, **kwargs):
+            ctx = current_request_context()
+            assert ctx is not None
+            if ctx.chat_id == "a":
+                first_started.set()
+                await second_started.wait()
+            else:
+                await first_started.wait()
+                second_started.set()
+            return current_request_context()
+
+    registry = _load_plugin(ContextVarPlugin)
+    contexts = [RequestContext(channel="test", chat_id=chat_id) for chat_id in ("a", "b")]
+
+    async def invoke(ctx):
+        with request_context(ctx):
+            return await registry.execute("context_plugin", {})
+
+    async with asyncio.timeout(5):
+        results = await asyncio.gather(*(invoke(ctx) for ctx in contexts))
+    assert results == contexts
