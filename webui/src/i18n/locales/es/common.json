@@ -1043,6 +1043,7 @@
         "firecrawl": "Busca, rastrea y extrae contenido web.",
         "parallel-search": "Busca en la web y lee páginas relevantes.",
         "exa": "Busca en la web y extrae el texto de páginas.",
+        "keenable": "Busca en la web y lee cualquier página como markdown limpio.",
         "microsoft-learn": "Busca y lee documentación de Microsoft.",
         "aws-docs": "Busca documentación y guías de servicios de AWS.",
         "brave-search": "Busca web, noticias, imágenes, vídeos y resultados locales.",

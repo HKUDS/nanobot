@@ -1043,6 +1043,7 @@
         "firecrawl": "搜尋、抓取網站並提取網頁內容",
         "parallel-search": "搜尋網頁並讀取相關頁面",
         "exa": "搜尋網頁並提取正文",
+        "keenable": "搜尋網頁，並將任何頁面讀取為整潔的 Markdown。",
         "microsoft-learn": "搜尋和讀取微軟技術文件",
         "aws-docs": "搜尋 AWS 文件和服務指南",
         "brave-search": "搜尋網頁、新聞、影象、影片和本地資訊",

@@ -1043,6 +1043,7 @@
         "firecrawl": "Cari, telusuri, dan ekstrak konten web.",
         "parallel-search": "Cari di web dan baca halaman terkait.",
         "exa": "Cari di web dan ekstrak teks halaman.",
+        "keenable": "Cari di web dan baca halaman apa pun sebagai markdown yang bersih.",
         "microsoft-learn": "Cari dan baca dokumentasi Microsoft.",
         "aws-docs": "Cari dokumentasi dan panduan layanan AWS.",
         "brave-search": "Cari web, berita, gambar, video, dan hasil lokal.",
