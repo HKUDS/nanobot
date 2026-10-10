@@ -263,20 +263,7 @@ Some settings take effect immediately. Runtime settings that affect the gateway 
 
 Browser-only display preferences, such as file edit display mode, take effect immediately for the current browser and do not change gateway configuration.
 
-### Model and Provider Settings
-
-Open **Settings → Models** to set up your models:
-
-1. Choose **New preset** and give it a name. If **Convert to presets** appears, choose it first.
-2. Open **Provider** and select your provider. To add one, choose **Add provider** from the same menu, then enter and save its connection details or complete sign-in.
-3. Choose a model from the list or enter a model ID available to your account.
-4. Choose **Save**.
-
-Use **Configure** to edit a preset and **Manage providers** to manage existing provider connections. **Reasoning effort** offers suggested values when available; you can also enter a value supported by your model. Leave it on **Default** if you are unsure.
-
-**Advanced options** opens a separate dialog for the context window, output token limit, temperature, and API connection. Selecting a model for a new preset can fill in its context window automatically. Both token fields accept short values such as `32k` or `1m`. Keep the defaults unless you need to change them.
-
-Drag an enabled preset to the top to make it the primary model. The remaining enabled presets are tried in order if the primary fails. Turn off a preset to exclude it from this order. To delete the primary preset, make another preset primary first.
+To add a model, follow [Configure Your Model](./quick-start.md#2-configure-your-model).
 
 ## LAN Access
 

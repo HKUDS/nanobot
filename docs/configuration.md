@@ -1306,7 +1306,7 @@ Contributor notes for adding new providers live in [`development.md`](./developm
 
 Model presets let you name a complete model configuration and select one per session with `/model <preset>`. They are the recommended way to configure models because the same names can be reused for new-session defaults, chat-command switching, and fallback chains.
 
-For browser setup, follow [Model and Provider Settings](./webui.md#model-and-provider-settings). The WebUI accepts token values such as `32k` or `1m`; JSON configuration uses integer token counts.
+For browser setup, follow [Configure Your Model](./quick-start.md#2-configure-your-model). The WebUI accepts token values such as `32k` or `1m`; JSON configuration uses integer token counts.
 
 Existing configs do not need to change. Direct `agents.defaults.model`, `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and `reasoningEffort` fields still define the implicit `default` preset. For new configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
 
