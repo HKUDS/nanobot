@@ -11,6 +11,7 @@ from urllib.request import getproxies_environment
 
 import httpx
 import pytest
+from mcp import types as mcp_types
 
 import nanobot.agent.tools.mcp as mcp_mod
 from nanobot.agent.tools.mcp import (
@@ -82,6 +83,9 @@ def _fake_mcp_module(
         TextResourceContents=_FakeTextResourceContents,
         BlobResourceContents=_FakeBlobResourceContents,
         ImageContent=_FakeImageContent,
+        AudioContent=mcp_types.AudioContent,
+        ResourceLink=mcp_types.ResourceLink,
+        EmbeddedResource=mcp_types.EmbeddedResource,
         PaginatedRequestParams=SimpleNamespace,
     )
 
@@ -709,6 +713,60 @@ async def test_execute_notes_unstorable_image_block(tmp_path: Path) -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool returned an image that could not be stored)"
+
+
+@pytest.mark.asyncio
+async def test_execute_renders_resource_blocks_as_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys.modules["mcp"], "types", mcp_types)
+    body = "# Demo\n\nIt's a readme."
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return mcp_types.CallToolResult(
+            content=[
+                mcp_types.EmbeddedResource(
+                    type="resource",
+                    resource=mcp_types.TextResourceContents(
+                        uri="repo://octo/demo/README.md", mimeType="text/markdown", text=body
+                    ),
+                ),
+                mcp_types.ResourceLink(
+                    type="resource_link", name="big.bin", uri="repo://octo/demo/big.bin"
+                ),
+            ]
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == f"{body}\n[MCP Resource] big.bin\nURI: repo://octo/demo/big.bin"
+
+
+@pytest.mark.asyncio
+async def test_execute_keeps_binary_payloads_out_of_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.modules["mcp"], "types", mcp_types)
+    payload = "JVBERi0xLjcK"
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return mcp_types.CallToolResult(
+            content=[
+                mcp_types.EmbeddedResource(
+                    type="resource",
+                    resource=mcp_types.BlobResourceContents(
+                        uri="repo://octo/demo/report.pdf", mimeType="application/pdf", blob=payload
+                    ),
+                ),
+                mcp_types.AudioContent(type="audio", data=payload, mimeType="audio/wav"),
+            ]
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "[Binary resource: 12 bytes]\n[Audio content: 12 bytes]"
 
 
 @pytest.mark.asyncio
