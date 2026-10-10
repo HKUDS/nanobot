@@ -357,6 +357,8 @@ Providers that use the Responses API can keep reasoning context across a convers
 
 nanobot preserves Responses conversation state automatically for OpenAI Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4, and compatible GitHub Copilot models. Native compaction is also automatic when the provider supports it. The threshold is derived from the active model's context window and reserved output headroom; no provider configuration is required.
 
+An explicit rejection of a native compaction field or input type disables that capability for the current provider instance. Invalid threshold values and other request errors do not disable it. For OpenAI and Azure Responses requests, an unsupported compaction field permits one retry without that field; a validation error is returned for correction. Codex compaction required to fit the input budget must succeed before the conversation can continue.
+
 <details>
 <summary><b>Azure OpenAI</b></summary>
 
@@ -1428,7 +1430,7 @@ To configure presets in `config.json`:
 
 `supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Omit `api` or set it to `null` for Auto. An explicit preset declaration overrides the OpenAI connection default; for custom connections, it must stay within the connection's supported APIs.
 
-A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Other errors do not trigger this API fallback. Provider-hosted search uses Responses when the preset allows it.
+A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Fallback requires an explicit rejection of the Responses API, a Responses-specific parameter, or the `input_image` input type. Invalid parameter values, missing conversation state, authentication failures, rate limits, and server errors do not trigger this API fallback or count toward temporarily bypassing Responses. Provider-hosted search uses Responses when the preset allows it.
 
 Declare `anthropic_messages` alone in a preset. Requests use the same provider connection settings and go to `/v1/messages`; `apiBase` may include a trailing `/v1`. Automatic API fallback between Anthropic Messages and OpenAI formats is not supported; use separate [fallback presets](#model-fallbacks) when needed.
 

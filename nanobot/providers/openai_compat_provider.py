@@ -9,7 +9,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import re
 import secrets
 import string
 import time
@@ -42,6 +41,11 @@ from nanobot.providers.model_api import (
     is_hosted_web_search_tool,
 )
 from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
+from nanobot.providers.openai_responses.errors import (
+    RESPONSES_FEATURES,
+    is_unsupported_feature_error,
+    response_error_details,
+)
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
@@ -102,7 +106,6 @@ _DEEPSEEK_MULTIMODAL_MODELS: frozenset[str] = frozenset({
     "deepseek-flash",
     "deepseek-v4-flash-vision-exp",
 })
-_TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
 # because it does not support thinking.
@@ -209,69 +212,6 @@ def _float_env(name: str, default: float) -> float:
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
-
-
-def _strip_json_fence(text: str) -> str:
-    stripped = text.strip()
-    if not stripped.startswith("```") or not stripped.endswith("```"):
-        return stripped
-    lines = stripped.splitlines()
-    if len(lines) < 2:
-        return stripped
-    return "\n".join(lines[1:-1]).strip()
-
-
-def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
-    """Normalize common text-format tool call blocks into structured calls."""
-    if not content or "<tool_call>" not in content:
-        return content, []
-
-    tool_calls: list[ToolCallRequest] = []
-    spans: list[tuple[int, int]] = []
-    for match in _TEXT_TOOL_CALL_RE.finditer(content):
-        try:
-            raw_payload: object = json.loads(
-                _strip_json_fence(match.group(1))
-            )
-        except Exception:
-            continue
-        if not isinstance(raw_payload, dict):
-            continue
-        payload = cast(dict[str, Any], raw_payload)
-
-        nested = cast(object, payload.get("tool_call"))
-        if isinstance(nested, dict):
-            payload = cast(dict[str, Any], nested)
-        function = cast(object, payload.get("function"))
-        if not isinstance(function, dict):
-            function = payload
-        function_data = cast(dict[str, Any], function)
-        name = cast(object, function_data.get("name"))
-        if not isinstance(name, str) or not name:
-            continue
-
-        arguments = function_data.get(
-            "arguments",
-            payload.get("arguments", {}),
-        )
-        tool_calls.append(ToolCallRequest(
-            id=str(payload.get("id") or _short_tool_id()),
-            name=name,
-            arguments=parse_tool_arguments(arguments),
-        ))
-        spans.append(match.span())
-
-    if not tool_calls:
-        return content, []
-
-    visible_parts: list[str] = []
-    last = 0
-    for start, end in spans:
-        visible_parts.append(content[last:start])
-        last = end
-    visible_parts.append(content[last:])
-    visible_content = "".join(visible_parts).strip() or None
-    return visible_content, tool_calls
 
 
 def _get(obj: object, key: str) -> Any:
@@ -1187,32 +1127,9 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _should_fallback_from_responses_error(e: Exception) -> bool:
-        """Fallback only for likely Responses API compatibility errors."""
-        response = getattr(e, "response", None)
-        status_code = getattr(e, "status_code", None)
-        if status_code is None and response is not None:
-            status_code = getattr(response, "status_code", None)
-        if status_code not in {400, 404, 422}:
-            return False
-
-        body = (
-            getattr(e, "body", None)
-            or getattr(e, "doc", None)
-            or getattr(response, "text", None)
-        )
-        body_text = str(body).lower() if body is not None else ""
-        compatibility_markers = (
-            "responses",
-            "response api",
-            "max_output_tokens",
-            "instructions",
-            "previous_response",
-            "unsupported",
-            "not supported",
-            "unknown parameter",
-            "unrecognized request argument",
-        )
-        return any(marker in body_text for marker in compatibility_markers)
+        """Fallback only when the endpoint rejects a Responses API feature."""
+        status, body = response_error_details(e)
+        return is_unsupported_feature_error(status, body, RESPONSES_FEATURES)
 
     def _build_responses_body(
         self,
@@ -1538,8 +1455,6 @@ class OpenAICompatProvider(LLMProvider):
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
                 ))
-            if not parsed_tool_calls:
-                content, parsed_tool_calls = _extract_text_tool_calls(content)
 
             return LLMResponse(
                 content=content,
@@ -1585,8 +1500,6 @@ class OpenAICompatProvider(LLMProvider):
                 provider_specific_fields=prov,
                 function_provider_specific_fields=fn_prov,
             ))
-        if not tool_calls:
-            content, tool_calls = _extract_text_tool_calls(content)
 
         reasoning_content = getattr(msg, "reasoning_content", None)
         if reasoning_content is None and getattr(msg, "reasoning", None):
@@ -1749,8 +1662,6 @@ class OpenAICompatProvider(LLMProvider):
             )
             for b in tc_bufs.values()
         ]
-        if not tool_calls:
-            content, tool_calls = _extract_text_tool_calls(content)
 
         return LLMResponse(
             content=content,

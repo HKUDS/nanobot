@@ -279,13 +279,18 @@ class ResponsesBackend:
         idle_timeout = resolve_stream_idle_timeout_s()
         if body.get("stream"):
             options["timeout"] = idle_timeout
+        # Older supported SDKs accept server compaction through extra_body.
+        sdk_body = dict(body)
+        if "context_management" in sdk_body:
+            options["extra_body"] = {"context_management": sdk_body.pop("context_management")}
         try:
-            response = await client.responses.create(**body, **options)
+            response = await client.responses.create(**sdk_body, **options)
         except Exception as exc:
             if "context_management" not in body or not is_compaction_compatibility_error(exc):
                 raise
             self.native_compaction_available = False
             body.pop("context_management")
+            options.pop("extra_body")
             logger.warning(
                 "Responses server compaction unsupported; disabled for {} (status={})",
                 provider, getattr(exc, "status_code", None),

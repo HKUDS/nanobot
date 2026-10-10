@@ -71,6 +71,8 @@ You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Ant
 
 Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. Supported providers include `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, Anthropic Messages, `openai_codex`, and `xai_grok`. For OAuth providers, this also covers exchanging and refreshing tokens. `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
+Tool execution requires the API's structured tool-call fields. OpenAI-compatible services that put `<tool_call>` markup in assistant text must expose structured tool calls to use nanobot's tools; nanobot preserves that markup as text.
+
 ## Inline Image Requests
 
 Before sending a large inline image batch, providers prepare smaller copies while keeping the attachment files intact. This applies to Responses, Chat Completions, Anthropic Messages, and Bedrock Converse requests, including images returned by tools and images in Responses history replay. Preparation first re-encodes at the original dimensions, then reduces each dimension by at most 25% if needed, with JPEG quality at least 65. PNG transparency is preserved. The shared 1 MB image data URL budget is a best-effort transport target; small image blocks, animated images, and remote references keep their original payloads. Gateway logs report image sizes and byte counts.

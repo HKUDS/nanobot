@@ -38,6 +38,10 @@ from nanobot.providers.openai_responses import (
     ResponsesWebSocketOptions,
     responses_state_matches,
 )
+from nanobot.providers.openai_responses.errors import (
+    COMPACTION_FEATURES,
+    is_unsupported_feature_error,
+)
 from nanobot.providers.openai_responses.state import without_response_item_ids
 from nanobot.providers.openai_responses.websocket import ResponsesWebSocketError
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
@@ -468,10 +472,7 @@ def _build_codex_http_error(status_code: int, headers: httpx.Headers, raw: str) 
     retry_after = LLMProvider._extract_retry_after_from_headers(headers)
     error_type, error_code = LLMProvider._extract_error_type_code(raw)
     error_param, error_message = _codex_error_details(raw)
-    compaction_unsupported = status_code in {400, 404, 422} and any(
-        marker in raw.lower()
-        for marker in ("context_management", "compact_threshold", "compaction_trigger")
-    )
+    compaction_unsupported = is_unsupported_feature_error(status_code, raw, COMPACTION_FEATURES)
     return _CodexHTTPError(
         _friendly_error(status_code, raw), status_code=status_code,
         retry_after=retry_after, error_type=error_type, error_code=error_code,

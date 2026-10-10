@@ -20,6 +20,10 @@ from websockets.protocol import State
 
 from nanobot.providers.base import LLMProvider, LLMResponse, resolve_stream_idle_timeout_s
 from nanobot.providers.openai_responses.backend import ResponsesBackend
+from nanobot.providers.openai_responses.errors import (
+    COMPACTION_FEATURES,
+    is_unsupported_feature_error,
+)
 from nanobot.providers.openai_responses.parsing import ResponsesStreamCapture
 
 _TRANSPORT_FAILURE_LIMIT = 3
@@ -90,9 +94,8 @@ class ResponsesWebSocketError(RuntimeError):
             _error_token(cast(dict[str, Any], raw_headers).get("x-request-id"))
             if isinstance(raw_headers, dict) else None
         )
-        self.compaction_unsupported = self.status_code in {400, 404, 422} and any(
-            marker in str(message).lower()
-            for marker in ("context_management", "compact_threshold", "compaction_trigger")
+        self.compaction_unsupported = is_unsupported_feature_error(
+            self.status_code, fields, COMPACTION_FEATURES,
         )
         super().__init__(
             f"HTTP {self.status_code}: Responses WebSocket request failed"

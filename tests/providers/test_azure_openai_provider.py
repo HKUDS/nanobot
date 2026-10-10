@@ -411,7 +411,7 @@ async def test_chat_retries_without_unsupported_server_compaction():
     assert result.content == "compaction fallback"
     assert result.provider_state is not None
     assert create.await_count == 2
-    assert "context_management" in create.call_args_list[0].kwargs
+    assert "context_management" in create.call_args_list[0].kwargs["extra_body"]
     assert "context_management" not in create.call_args_list[1].kwargs
     assert provider.supports_native_compaction() is False
 
