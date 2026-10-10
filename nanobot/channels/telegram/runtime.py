@@ -869,7 +869,14 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _get_media_type(path: str) -> str:
-        """Guess media type from file extension."""
+        """Guess media type from file extension.
+
+        Remote URLs are classified by the extension of their URL path, so
+        query strings and fragments do not leak into the extension (e.g.
+        "card.jpg?width=672" is a photo, not a document).
+        """
+        if path.startswith(("http://", "https://")):
+            path = urlparse(path).path
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         if ext in ("jpg", "jpeg", "png", "gif", "webp"):
             return "photo"

@@ -3441,3 +3441,21 @@ async def test_compaction_notices_are_tracked_per_compaction_id() -> None:
         chat_id=999, message_id=101, text="Context compacted.",
     )
     assert channel._compaction_notices == {("999", "c2"): 202}
+
+
+def test_get_media_type_classifies_remote_urls_by_path_extension() -> None:
+    """Query strings and fragments must not leak into the extension (#6123)."""
+    assert (
+        TelegramChannel._get_media_type("https://cards.scryfall.io/x/card.jpg?width=672")
+        == "photo"
+    )
+    assert (
+        TelegramChannel._get_media_type("https://example.com/a/b.png?v=1#frag") == "photo"
+    )
+    assert TelegramChannel._get_media_type("https://example.com/clip.mp4?t=10") == "video"
+    # Remote URLs without a usable path extension still fall back to document.
+    assert TelegramChannel._get_media_type("https://example.com/download?id=1") == "document"
+    assert TelegramChannel._get_media_type("https://example.com/file.bin?x=.jpg") == "document"
+    # Local paths are unaffected.
+    assert TelegramChannel._get_media_type("/tmp/pic.jpeg") == "photo"
+    assert TelegramChannel._get_media_type("notes.txt") == "document"
