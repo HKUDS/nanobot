@@ -160,6 +160,10 @@ class APIError:
     message: str
     details: str
     fbtrace_id: str
+    # Media endpoints share 400/100 between an invalid token, an unknown or
+    # expired media id, and a length cap, so a 400 there is not treated as an
+    # authentication failure.
+    media_endpoint: bool = False
 
     @property
     def invalid_token(self) -> bool:
@@ -167,9 +171,14 @@ class APIError:
 
         A malformed or missing ``Authorization`` header yields 401/190. A token
         that is present but not valid yields 400/100 — the API deliberately does
-        not use 401 for that case.
+        not use 401 for that case. That heuristic is scoped to endpoints without
+        media, where 400/100 has no other common cause.
         """
-        return self.status_code == 401 or (
+        if self.status_code == 401:
+            return True
+        if self.media_endpoint:
+            return False
+        return (
             self.status_code == 400
             and self.code == CODE_INVALID_TOKEN
             and not self._is_length_rejection
@@ -232,7 +241,12 @@ class WhatsAppAgentAPIError(WhatsAppAgentError):
         self.error = error
 
 
-def classify_error(status_code: int, payload: Any) -> APIError:
+def classify_error(
+    status_code: int,
+    payload: Any,
+    *,
+    media_endpoint: bool = False,
+) -> APIError:
     """Extract the structured error from a non-2xx response body."""
     body = _as_dict(payload) or {}
     error = _as_dict(body.get("error")) or {}
@@ -251,6 +265,7 @@ def classify_error(status_code: int, payload: Any) -> APIError:
         message=_text(error.get("message")),
         details=details,
         fbtrace_id=_text(error.get("fbtrace_id")),
+        media_endpoint=media_endpoint,
     )
 
 

@@ -280,7 +280,9 @@ class WhatsAppAgentChannel(BaseChannel):
         )
         if 200 <= status_code < 300:
             return payload
-        error = classify_error(status_code, payload)
+        error = classify_error(
+            status_code, payload, media_endpoint=method_key == "media"
+        )
         if error.invalid_token:
             raise WhatsAppAgentAuthError(str(error))
         raise WhatsAppAgentAPIError(error)

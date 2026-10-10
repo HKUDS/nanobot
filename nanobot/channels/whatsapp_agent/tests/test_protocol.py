@@ -251,6 +251,24 @@ def test_only_confirmed_non_delivery_is_retryable():
     assert fatal.ambiguous is False
 
 
+def test_media_endpoint_400_is_not_treated_as_an_invalid_token():
+    # Media methods share 400/100 between a bad token, an unknown or expired
+    # media id, and a length cap, so an expired id must not stop the channel.
+    expired = classify_error(
+        400, {"error": {"code": 100, "message": "unknown media id"}}, media_endpoint=True
+    )
+    assert expired.invalid_token is False
+
+    # The same response on a non-media endpoint is the documented bad-token case.
+    bad_token = classify_error(
+        400, {"error": {"code": 100, "message": "(#100) invalid"}}, media_endpoint=False
+    )
+    assert bad_token.invalid_token is True
+
+    # A malformed header is 401 everywhere, including media.
+    assert classify_error(401, {"error": {"code": 190}}, media_endpoint=True).invalid_token is True
+
+
 def test_duplicate_poller_is_reported_as_poll_replaced():
     error = classify_error(409, {"error": {"code": 1752041}})
 

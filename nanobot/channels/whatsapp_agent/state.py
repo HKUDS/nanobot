@@ -10,8 +10,10 @@ explicit, crash-safe store on the channel side:
 * Marking a message read may delete it server-side, so a message must be
   recorded before its receipt is acknowledged.
 
-The store keeps the cursor, the recently handled wamids, and accumulated
-contact display names in one atomically replaced JSON file.
+The store keeps the cursor, the recently handled wamids, the most recent
+creator identifier, and outbound delivery receipts in one atomically
+replaced JSON file. The API token is represented only by a SHA-256
+fingerprint, so the file carries no credential material.
 """
 
 from __future__ import annotations
