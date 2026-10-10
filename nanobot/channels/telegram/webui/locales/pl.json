@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji Telegrama",
+    "officialLabel": "Otwórz BotFather",
+    "fields": {
+      "token": {
+        "label": "Token bota",
+        "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "Serwer proxy",
+        "placeholder": "http://127.0.0.1:7890"
+      },
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy",
+        "placeholder": "* lub identyfikatory użytkowników Telegrama"
+      },
+      "groupPolicy": {
+        "label": "Zachowanie w grupach",
+        "choices": {
+          "mention": "Tylko wzmianki",
+          "open": "Wszystkie wiadomości",
+          "allowlist": "Lista dozwolonych"
+        }
+      },
+      "mode": {
+        "label": "Tryb połączenia",
+        "choices": {
+          "polling": "Długie odpytywanie",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "Odpowiadaj na wiadomość",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "reactEmoji": {
+        "label": "Emoji odczytania"
+      },
+      "connectionPoolSize": {
+        "label": "Rozmiar puli połączeń"
+      },
+      "poolTimeout": {
+        "label": "Limit czasu puli połączeń"
+      },
+      "streaming": {
+        "label": "Przesyłanie strumieniowe",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "Klawiatury w wiadomościach",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "richMessages": {
+        "label": "Rozbudowane wiadomości",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Odstęp aktualizacji strumienia"
+      },
+      "webhookUrl": {
+        "label": "Adres URL webhooka"
+      },
+      "webhookListenHost": {
+        "label": "Host nasłuchiwania webhooka"
+      },
+      "webhookListenPort": {
+        "label": "Port nasłuchiwania webhooka"
+      },
+      "webhookPath": {
+        "label": "Ścieżka webhooka"
+      },
+      "webhookSecretToken": {
+        "label": "Sekretny token webhooka"
+      },
+      "webhookMaxConnections": {
+        "label": "Maksymalna liczba połączeń webhooka"
+      }
+    }
+  }
+}
