@@ -714,6 +714,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         local artifacts (mirroring the built-in image generation tool) so the
         model can deliver them via the message tool instead of trying to forward
         base64 — which would be truncated and bloat the context window.
+        Other binary payloads become size placeholders for the same reason.
         """
         from mcp import types
 
@@ -730,6 +731,20 @@ class MCPToolWrapper(_MCPWrapperBase):
                     artifacts.append(stored)
                 else:
                     text_parts.append("(MCP tool returned an image that could not be stored)")
+                continue
+            if isinstance(block, types.EmbeddedResource):
+                resource = block.resource
+                if isinstance(resource, types.TextResourceContents):
+                    text_parts.append(resource.text)
+                else:
+                    text_parts.append(f"[Binary resource: {len(resource.blob)} bytes]")
+                continue
+            if isinstance(block, types.AudioContent):
+                text_parts.append(f"[Audio content: {len(block.data)} bytes]")
+                continue
+            if isinstance(block, types.ResourceLink):
+                desc = block.description or block.name
+                text_parts.append(f"[MCP Resource] {desc}\nURI: {block.uri}")
                 continue
             text_parts.append(str(block))
 
