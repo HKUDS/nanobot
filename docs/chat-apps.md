@@ -172,6 +172,37 @@ HTTP, HTTPS, SOCKS5, and SOCKS5H proxy URLs are accepted. Treat a proxy URL cont
 >
 > `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
+`groupPolicyOverrides` lets one bot serve several chats or forum topics with
+different reply behavior. Keys are either `"<chat_id>"` (whole chat) or
+`"<chat_id>:<thread_id>"` (one forum topic); an unlisted scope falls back to
+`groupPolicy`. A topic key is `chat_id`-qualified because Telegram forum topics
+do not have their own chat id — they share the parent supergroup's `chat_id` and
+are distinguished only by `message_thread_id`.
+
+For example, keep the channel-wide policy `open` but silence one announcement
+topic so the bot only replies there when it is @mentioned:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "allowFrom": ["YOUR_USER_ID"],
+      "groupPolicy": "open",
+      "groupPolicyOverrides": {
+        "-1001668715626": "open",
+        "-1001668715626:7819": "mention"
+      }
+    }
+  }
+}
+```
+
+In this example `-1001668715626:7819` (a single topic) is mention-only while the
+rest of that chat stays open. Use the plain chat key to set a whole chat, then
+add topic keys for the exceptions.
+
 
 **3. Run**
 
