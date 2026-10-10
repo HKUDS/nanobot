@@ -126,9 +126,10 @@ async function refreshAssetManifest(cache) {
 // Drop cached entries that the current index.html no longer references.
 // CACHE_NAME is stable across deployments, so without this, hashed assets from
 // previous builds would pile up in the same cache forever. The cached
-// index.html is the latest one this client saw (navigation is network-first
-// and overwrites it on every successful visit), so pruning against it keeps
-// the offline shell consistent with the last loaded build.
+// index.html is the latest one this client saw (the shell is served
+// stale-while-revalidate and the background refresh overwrites it on every
+// successful visit), so pruning against it keeps the offline shell
+// consistent with the last loaded build.
 async function pruneStaleEntries() {
   const cache = await caches.open(CACHE_NAME);
   const cachedIndex = await cache.match("/");
@@ -148,6 +149,37 @@ async function pruneStaleEntries() {
       await cache.delete(request);
     })
   );
+}
+
+// App shell navigations are stale-while-revalidate: the cached shell paints
+// immediately on cold start instead of blocking first paint on a network
+// round trip, while the background refresh overwrites it and prunes the
+// build graph so a deployed update is picked up on the next launch.
+// Deep-link navigations resolve client-side, so every navigation is served
+// from the "/" cache entry.
+async function serveShellStaleWhileRevalidate(event, request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cachedShell = await cache.match("/");
+  const networkResponse = fetch(request);
+  const refresh = networkResponse.then(async (response) => {
+    if (!responseMayBeCached(response)) return;
+    // Clone before the first await. The original response is also handed
+    // back to the browser on a cache miss, which may lock its body as soon
+    // as this callback yields to the event loop.
+    const cachedResponse = response.clone();
+    await cache.put("/", cachedResponse);
+    // Refresh the complete build graph before pruning. A deployment can
+    // change index.html without changing sw.js, so this cannot rely only
+    // on the manifest cached when the worker was installed.
+    if (await refreshAssetManifest(cache)) await pruneStaleEntries();
+  });
+  if (cachedShell) {
+    event.waitUntil(refresh.catch(() => undefined));
+    return cachedShell;
+  }
+  // First launch with an empty cache: network-first, with the offline
+  // fallback to the (still missing) cached shell preserved on rejection.
+  return networkResponse.catch(() => cachedShell);
 }
 
 self.addEventListener("activate", (event) => {
@@ -213,7 +245,13 @@ self.addEventListener("fetch", (event) => {
   const isNavigation = request.mode === "navigate";
   if (!isNavigation && !NETWORK_FIRST_STATIC_PATHS.has(path)) return;
 
-  // App shell and public files: network-first with an offline fallback.
+  // App shell: stale-while-revalidate (see serveShellStaleWhileRevalidate).
+  if (isNavigation || path === "/") {
+    event.respondWith(serveShellStaleWhileRevalidate(event, request));
+    return;
+  }
+
+  // Public files: network-first with an offline fallback.
   const networkResponse = fetch(request);
   event.waitUntil(
     networkResponse
@@ -224,23 +262,11 @@ self.addEventListener("fetch", (event) => {
         // yields to the event loop.
         const cachedResponse = response.clone();
         const cache = await caches.open(CACHE_NAME);
-        await cache.put(isNavigation ? "/" : request, cachedResponse);
-        // Refresh the complete build graph before pruning. A deployment can
-        // change index.html without changing sw.js, so this cannot rely only
-        // on the manifest cached when the worker was installed.
-        if (isNavigation || path === "/") {
-          if (await refreshAssetManifest(cache)) await pruneStaleEntries();
-        }
+        await cache.put(request, cachedResponse);
       })
       .catch(() => undefined)
   );
   event.respondWith(
-    networkResponse
-      .catch(() => {
-        // Offline: serve the app shell for navigations (deep links resolve
-        // client-side), the last cached copy for everything else.
-        if (request.mode === "navigate") return caches.match("/");
-        return caches.match(request);
-      })
+    networkResponse.catch(() => caches.match(request))
   );
 });

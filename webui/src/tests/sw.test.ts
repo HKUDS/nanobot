@@ -13,7 +13,10 @@ const ICON_CACHE_LIMIT = 128;
 
 /** Minimal Cache-compatible in-memory store with SW-style URL normalization. */
 class FakeCacheStore {
-  entries = new Map<string, Response>();
+  // Real CacheStorage snapshots the body on put() and hands out a fresh,
+  // re-readable Response from every match(); store the body text so a cached
+  // entry survives being read (e.g. by pruneStaleEntries) before it is served.
+  entries = new Map<string, string>();
 
   private key(input: Request | string): string {
     return new URL(typeof input === "string" ? input : input.url, ORIGIN).href;
@@ -21,16 +24,17 @@ class FakeCacheStore {
 
   async addAll(urls: string[]): Promise<void> {
     for (const url of urls) {
-      this.entries.set(this.key(url), new Response("ok"));
+      this.entries.set(this.key(url), "ok");
     }
   }
 
   async match(input: Request | string): Promise<Response | undefined> {
-    return this.entries.get(this.key(input));
+    const body = this.entries.get(this.key(input));
+    return body === undefined ? undefined : new Response(body);
   }
 
   async put(input: Request | string, response: Response): Promise<void> {
-    this.entries.set(this.key(input), response);
+    this.entries.set(this.key(input), await response.text());
   }
 
   async delete(input: Request | string): Promise<boolean> {
@@ -399,24 +403,15 @@ describe("service worker", () => {
     expect(response.clone).toHaveBeenCalledTimes(1);
   });
 
-  it("serves navigation network-first, prunes on shell refresh, and falls back when offline", async () => {
+  it("serves the cached shell immediately and refreshes it in the background", async () => {
     const sw = loadSw();
     await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js"]));
     // Assets from an older build, still referenced by the cached v2 shell.
     await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v1.js`, new Response("v1"));
 
-    // Offline: network rejects, cached shell is returned.
-    sw.fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
-    const offlineEvent = {
-      request: new Request(`${ORIGIN}/`),
-      respondWith: vi.fn(),
-    };
-    await sw.fire("fetch", offlineEvent);
-    const offlineResponse = (await offlineEvent.respondWith.mock.calls[0][0]) as Response;
-    expect(await offlineResponse.text()).toContain("assets/index-v2.js");
-
-    // Online: network response wins, refreshes the cached shell, and prunes
+    // Online: the stale cached shell is returned without waiting for the
+    // network, which refreshes the cached shell in the background and prunes
     // entries the new index.html no longer references.
     const freshShell = indexHtml(["/assets/index-v3.js"]);
     sw.fetchMock.mockImplementation((input: Request | string) => {
@@ -434,12 +429,37 @@ describe("service worker", () => {
     };
     await sw.fire("fetch", onlineEvent);
     const onlineResponse = (await onlineEvent.respondWith.mock.calls[0][0]) as Response;
-    expect(await onlineResponse.text()).toContain("assets/index-v3.js");
-    // The prune is fire-and-forget; give its microtasks a chance to settle.
+    expect(await onlineResponse.text()).toContain("assets/index-v2.js");
+    // The refresh is fire-and-forget; give its microtasks a chance to settle.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.js`)).toBe(false);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.js`)).toBe(false);
+
+    // Offline: the cached shell is served without waiting for the network.
+    sw.fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    const offlineEvent = {
+      request: new Request(`${ORIGIN}/`),
+      respondWith: vi.fn(),
+    };
+    await sw.fire("fetch", offlineEvent);
+    const offlineResponse = (await offlineEvent.respondWith.mock.calls[0][0]) as Response;
+    expect(await offlineResponse.text()).toContain("assets/index-v3.js");
+  });
+
+  it("fetches the shell from the network when no cached copy exists yet", async () => {
+    const sw = loadSw();
+    sw.fetchMock.mockResolvedValue(new Response("<!doctype html>first launch"));
+
+    const event = {
+      request: new Request(`${ORIGIN}/`),
+      respondWith: vi.fn(),
+    };
+    await sw.fire("fetch", event);
+
+    const response = (await event.respondWith.mock.calls[0][0]) as Response;
+    expect(await response.text()).toBe("<!doctype html>first launch");
+    expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
   });
 
   it("serves the cached app shell for offline deep-link navigations", async () => {
