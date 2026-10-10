@@ -1679,6 +1679,8 @@ class LLMProvider(ABC):
             r"retry[_-]?after[\"'\s:=]+(\d+(?:\.\d+)?)",
         )
         for idx, pattern in enumerate(patterns):
+            if idx == 1 and (compound := cls._extract_compound_try_again_in(text)) is not None:
+                return compound
             match = re.search(pattern, text)
             if not match:
                 continue
@@ -1686,6 +1688,16 @@ class LLMProvider(ABC):
             unit = match.group(2) if idx < 3 else "s"
             return cls._to_retry_seconds(value, unit)
         return None
+
+    @classmethod
+    def _extract_compound_try_again_in(cls, text: str) -> float | None:
+        """Sum Go-style durations such as OpenAI's ``try again in 1m30s``."""
+        match = re.search(r"try again in\s+((?:\d+(?:\.\d+)?(?:ms|h|m|s))+)(?![a-z])", text)
+        if not match:
+            return None
+        unit_seconds = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+        parts = re.findall(r"(\d+(?:\.\d+)?)(ms|h|m|s)", match.group(1))
+        return max(0.1, sum(float(value) * unit_seconds[unit] for value, unit in parts))
 
     @classmethod
     def _to_retry_seconds(cls, value: float, unit: str | None = None) -> float:
@@ -1975,6 +1987,9 @@ class LLMProvider(ABC):
             )
 
         return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]
+
+    async def aclose(self) -> None:
+        """Close provider-owned transports after their active requests have stopped."""
 
     @abstractmethod
     def get_default_model(self) -> str:

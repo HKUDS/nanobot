@@ -12,29 +12,29 @@
         "placeholder": "アクセストークン（任意）"
       },
       "groupPolicy": {
-        "label": "グループでの動作",
+        "label": "グループのルール",
         "choices": {
           "mention": "メンションのみ",
-          "open": "すべてのメッセージ",
+          "open": "全メッセージ",
           "allowlist": "許可リスト"
         }
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "QQ ID（カンマ区切り）"
       },
       "groupPolicyOverrides": {
-        "label": "グループ動作のオーバーライド (JSON)"
+        "label": "グループの例外（JSON）"
       },
       "welcomeNewMembers": {
-        "label": "新しいメンバーを歓迎します",
+        "label": "新メンバーに挨拶",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "maxImageBytes": {
-        "label": "最大画像サイズ"
+        "label": "画像の上限（バイト）"
       }
     }
   }

@@ -321,7 +321,7 @@ export class Transcript {
   notice(content: string, error = false): void {
     this.noteOutput()
     this.finishActivity()
-    this.writeRole(error ? "×" : "·", content, error ? "error" : "muted")
+    this.writeRole(error ? "×" : "", content, error ? "error" : "muted")
   }
 
   compaction(compaction: ContextCompaction, index?: number): boolean {
@@ -348,7 +348,7 @@ export class Transcript {
       : compaction.phase === "succeeded"
         ? "  ✓ Conversation compacted"
         : compaction.phase === "cancelled"
-          ? "  · Conversation compaction cancelled"
+          ? "  Conversation compaction cancelled"
           : "  × Could not compact conversation"
     entry.text.fg = compaction.phase === "failed" ? this.theme.error : this.theme.muted
     return added
@@ -572,7 +572,7 @@ export class Transcript {
     const hidden = activity.lines.length - visibleSteps
     const disclosure = hidden > 0 ? `${hidden} earlier steps` : `${activity.lines.length} steps`
     activity.text.content = [
-      `  … ${disclosure} · Ctrl+O expand`,
+      `  … ${disclosure}  Ctrl+O expand`,
       ...visible.map((item) => item.text),
     ].join("\n")
   }
@@ -757,7 +757,7 @@ export class Transcript {
 
 function cleanProgress(value: string): string {
   const text = value.trim().replace(/^\*\*(.*?)\*\*$/u, "$1").replace(/\s+/gu, " ")
-  return text ? `  · ${text}` : ""
+  return text ? `  ${text}` : ""
 }
 
 function activityPreview(lines: readonly string[]): ActivityPreviewItem[] {

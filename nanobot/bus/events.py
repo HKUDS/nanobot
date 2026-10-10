@@ -30,7 +30,7 @@ class InboundMessage:
     chat_id: str  # Chat/channel identifier
     content: str  # Message text
     timestamp: datetime = field(default_factory=datetime.now)
-    media: list[str] = field(default_factory=list)  # Media URLs
+    media: list[str] = field(default_factory=list)  # Media paths or URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
     require_existing_session: bool = False

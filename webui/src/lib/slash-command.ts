@@ -14,6 +14,13 @@ function slashCommandArgs(content: string, commandName: string): string {
   return content.slice(commandName.length).trim();
 }
 
+export function isRegisteredSlashCommand(content: string, slashCommands: SlashCommand[]): boolean {
+  // Argument validation belongs to the gateway. Even invalid commands must not
+  // wait behind the active response; paths and unknown names are ordinary text.
+  const name = slashCommandName(content.trim()).replace(/@[A-Za-z0-9_]+$/, "").toLowerCase();
+  return slashCommands.some((item) => item.command === name);
+}
+
 export function matchingSlashCommand(
   content: string,
   slashCommands: SlashCommand[],

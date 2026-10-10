@@ -1,4 +1,4 @@
-"""Native path pickers used by a locally hosted WebUI; never read file contents."""
+"""Select local SSH files for the WebUI without reading their contents."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 _PICKER_TIMEOUT_SECONDS = 300
 _COMMON_ENV_KEYS = (
@@ -56,8 +55,8 @@ _WINDOWS_GUI_ENV_KEYS = (
 )
 
 
-class NativeFolderPickerError(RuntimeError):
-    """Raised when an available native folder picker cannot complete."""
+class NativeFilePickerError(RuntimeError):
+    """Raised when a native file picker cannot complete."""
 
 
 @dataclass(frozen=True)
@@ -67,8 +66,8 @@ class _PickerCommand:
     cancel_markers: tuple[str, ...] = ()
 
 
-def _picker_command(kind: Literal["folder", "file"] = "folder") -> _PickerCommand | None:
-    title = "Select Workspace Directory" if kind == "folder" else "Select SSH key or configuration file"
+def _picker_command() -> _PickerCommand | None:
+    title = "Select SSH key or configuration file"
     if sys.platform == "darwin":
         executable = shutil.which("osascript")
         if executable is None:
@@ -77,7 +76,7 @@ def _picker_command(kind: Literal["folder", "file"] = "folder") -> _PickerComman
             argv=(
                 executable,
                 "-e",
-                f'set selectedPath to choose {kind} with prompt "{title}"',
+                f'set selectedPath to choose file with prompt "{title}"',
                 "-e",
                 "POSIX path of selectedPath",
             ),
@@ -89,22 +88,14 @@ def _picker_command(kind: Literal["folder", "file"] = "folder") -> _PickerComman
         executable = shutil.which("powershell.exe") or shutil.which("powershell")
         if executable is None:
             return None
-        dialog = (
-            "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
-            f"$dialog.Description='{title}';"
-            "$dialog.ShowNewFolderButton=$true;"
-        ) if kind == "folder" else (
+        script = (
+            "Add-Type -AssemblyName System.Windows.Forms;"
             "$dialog=New-Object System.Windows.Forms.OpenFileDialog;"
             f"$dialog.Title='{title}';"
             "$dialog.CheckFileExists=$true;$dialog.Multiselect=$false;"
-        )
-        selected = "SelectedPath" if kind == "folder" else "FileName"
-        script = (
-            "Add-Type -AssemblyName System.Windows.Forms;"
-            + dialog +
             "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){"
             "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"
-            f"[Console]::Out.Write($dialog.{selected})}}"
+            "[Console]::Out.Write($dialog.FileName)}"
         )
         return _PickerCommand(
             argv=(
@@ -127,7 +118,6 @@ def _picker_command(kind: Literal["folder", "file"] = "folder") -> _PickerComman
                 argv=(
                     zenity,
                     "--file-selection",
-                    *(("--directory",) if kind == "folder" else ()),
                     f"--title={title}",
                 ),
                 cancel_codes=frozenset({1}),
@@ -135,15 +125,10 @@ def _picker_command(kind: Literal["folder", "file"] = "folder") -> _PickerComman
         kdialog = shutil.which("kdialog")
         if kdialog is not None:
             return _PickerCommand(
-                argv=(kdialog, "--getexistingdirectory" if kind == "folder" else "--getopenfilename", str(Path.home())),
+                argv=(kdialog, "--getopenfilename", str(Path.home())),
                 cancel_codes=frozenset({1}),
             )
     return None
-
-
-def native_folder_picker_available() -> bool:
-    """Return whether this host can display a native directory picker."""
-    return _picker_command() is not None
 
 
 def _picker_environment() -> dict[str, str]:
@@ -175,19 +160,11 @@ async def _stop_process(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
-async def pick_native_folder() -> str | None:
-    """Open the platform directory picker and return an existing absolute path."""
-    return await _pick_native_path(_picker_command(), "directory")
-
-
 async def pick_native_file() -> str | None:
     """Choose an existing local file without opening, uploading or copying it."""
-    return await _pick_native_path(_picker_command("file"), "file")
-
-
-async def _pick_native_path(command: _PickerCommand | None, kind: str) -> str | None:
+    command = _picker_command()
     if command is None:
-        raise NativeFolderPickerError("native folder picker is unavailable on this host")
+        raise NativeFilePickerError("native file picker is unavailable on this host")
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -197,7 +174,7 @@ async def _pick_native_path(command: _PickerCommand | None, kind: str) -> str | 
             stderr=asyncio.subprocess.PIPE,
         )
     except OSError as exc:
-        raise NativeFolderPickerError("native folder picker failed to start") from exc
+        raise NativeFilePickerError("native file picker failed to start") from exc
     try:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(),
@@ -208,7 +185,7 @@ async def _pick_native_path(command: _PickerCommand | None, kind: str) -> str | 
         raise
     except TimeoutError as exc:
         await _stop_process(process)
-        raise NativeFolderPickerError("native folder picker timed out") from exc
+        raise NativeFilePickerError("native file picker timed out") from exc
 
     error_text = stderr.decode("utf-8", errors="replace").strip()
     normalized_error = error_text.lower()
@@ -218,12 +195,12 @@ async def _pick_native_path(command: _PickerCommand | None, kind: str) -> str | 
             or any(marker in normalized_error for marker in command.cancel_markers)
         ):
             return None
-        raise NativeFolderPickerError("native folder picker failed")
+        raise NativeFilePickerError("native file picker failed")
 
     selected = stdout.decode("utf-8", errors="replace").strip()
     if not selected:
         return None
     path = Path(selected).expanduser()
-    if not path.is_absolute() or not (path.is_dir() if kind == "directory" else path.is_file()):
-        raise NativeFolderPickerError(f"native path picker returned an invalid {kind}")
+    if not path.is_absolute() or not path.is_file():
+        raise NativeFilePickerError("native file picker returned an invalid file")
     return str(path)

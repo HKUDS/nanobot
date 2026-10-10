@@ -20,18 +20,13 @@ from nanobot.providers.base import (
     LLMResponse,
     LLMUsage,
     ToolCallRequest,
-    resolve_stream_idle_timeout_s,
 )
 from nanobot.providers.oauth_model_catalog import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
 )
-from nanobot.providers.openai_responses import (
-    consume_sse_with_reasoning,
-    convert_messages,
-    convert_tools,
-)
+from nanobot.providers.openai_responses import ResponsesBackend
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
 from nanobot.providers.xai_oauth import (
     XAI_CLIENT_VERSION,
@@ -87,6 +82,10 @@ class XAIGrokProvider(LLMProvider):
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
+        self._responses = ResponsesBackend()
+
+    async def aclose(self) -> None:
+        await self._responses.aclose()
 
     async def _supports_backend_search(self, model: str) -> bool:
         catalog = await asyncio.to_thread(
@@ -116,7 +115,11 @@ class XAIGrokProvider(LLMProvider):
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         wire_model = _strip_model_prefix(model or self.default_model)
-        system_prompt, input_items = convert_messages(messages)
+        prepared = self._responses.prepare(
+            messages, provider=f"xai_grok:{DEFAULT_XAI_GROK_URL.rstrip('/')}",
+            model=wire_model, tools=tools, tool_choice=tool_choice,
+        )
+        body = prepared.body
 
         stage = "oauth_token"
         try:
@@ -130,7 +133,7 @@ class XAIGrokProvider(LLMProvider):
             if not tools_are_explicit:
                 stage = "model_capabilities"
                 supports_backend_search = await self._supports_backend_search(wire_model)
-            converted_tools = convert_tools(tools or [])
+            converted_tools = cast(list[dict[str, Any]], body.get("tools", []))
             if isinstance(configured_tools, list):
                 converted_tools.extend(cast(list[dict[str, Any]], configured_tools))
             if supports_backend_search or configured_hosted_search:
@@ -142,12 +145,9 @@ class XAIGrokProvider(LLMProvider):
 
             hosted_search_enabled = supports_backend_search or configured_hosted_search
 
-            body: dict[str, Any] = {
-                "model": wire_model,
-                "store": False,
+            body.update({
                 "stream": True,
-                "instructions": system_prompt,
-                "input": input_items,
+                "instructions": body["instructions"] or "",
                 "include": ["reasoning.encrypted_content"],
                 "tools": converted_tools,
                 "tool_choice": tool_choice or "auto",
@@ -156,7 +156,7 @@ class XAIGrokProvider(LLMProvider):
                 "max_output_tokens": max_tokens,
                 "temperature": temperature,
                 "reasoning": _build_reasoning_options(reasoning_effort),
-            }
+            })
             if hosted_search_enabled:
                 # xAI's global default is intentionally unspecified. Five turns is
                 # their documented balanced setting and prevents a search from
@@ -411,43 +411,34 @@ async def _request_xai(
         if hosted_event is not None:
             await _track_and_forward_tool_event(hosted_event)
 
-    client_kwargs: dict[str, Any] = {"timeout": resolve_stream_idle_timeout_s()}
-    if proxy:
-        client_kwargs.update(proxy=proxy, trust_env=False)
-    async with httpx.AsyncClient(**client_kwargs) as client:
-        async with client.stream("POST", url, headers=headers, json=body) as response:
-            if response.status_code != 200:
-                content = await response.aread()
-                raw = content.decode("utf-8", "ignore")
-                raise _build_xai_http_error(response.status_code, response.headers, raw)
-            result = await consume_sse_with_reasoning(
-                response,
-                on_content_delta=(_forward_content_delta if on_content_delta is not None else None),
-                # Always observe tool events so protocol validation also works for
-                # non-streaming callers that did not request UI progress callbacks.
-                on_tool_call_delta=_track_and_forward_tool_event,
-                on_reasoning_delta=(
-                    _forward_thinking_delta if on_thinking_delta is not None else None
-                ),
-                on_response_event=_on_response_event,
+    result = await ResponsesBackend.sse_request(
+        url, headers, body, proxy=proxy, error_factory=_build_xai_http_error,
+        on_content_delta=(_forward_content_delta if on_content_delta is not None else None),
+        # Observe hosted-tool completion even without a UI progress callback.
+        on_tool_call_delta=_track_and_forward_tool_event,
+        on_thinking_delta=(_forward_thinking_delta if on_thinking_delta is not None else None),
+        on_response_event=_on_response_event,
+    )
+    if result.finish_reason != "error" and active_hosted_tools:
+        active = list(active_hosted_tools.values())
+        for event in active:
+            await _track_and_forward_tool_event(
+                {
+                    **event,
+                    "phase": "error",
+                    "result": None,
+                    "error": "xAI ended the response before this hosted tool completed.",
+                }
             )
-            if result[2] != "error" and active_hosted_tools:
-                active = list(active_hosted_tools.values())
-                for event in active:
-                    await _track_and_forward_tool_event(
-                        {
-                            **event,
-                            "phase": "error",
-                            "result": None,
-                            "error": "xAI ended the response before this hosted tool completed.",
-                        }
-                    )
-                raise _XAIIncompleteHostedToolError(
-                    active,
-                    usage=result[3],
-                    stream_output_emitted=stream_output_emitted,
-                )
-            return result
+        raise _XAIIncompleteHostedToolError(
+            active,
+            usage=result.usage,
+            stream_output_emitted=stream_output_emitted,
+        )
+    return (
+        result.content or "", result.tool_calls, result.finish_reason,
+        result.usage, result.reasoning_content,
+    )
 
 
 def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:

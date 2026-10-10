@@ -233,7 +233,10 @@ class LinearConnectStore:
             if not any(member["id"] == user_id for member in members):
                 raise ChannelConnectError("Member is not active in an accessible Linear team", status=404)
             try:
-                state.set_member_access(config.client_id, organization_id, user_id, allowed=allowed)
+                state.set_member_access(
+                    config.client_id, organization_id, user_id, allowed=allowed,
+                    expected_authorized_at=installation.authorized_at,
+                )
             except ValueError as exc:
                 raise ChannelConnectError(str(exc), status=409) from exc
         return {

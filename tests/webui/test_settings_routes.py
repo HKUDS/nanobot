@@ -157,6 +157,43 @@ async def test_full_settings_query_runs_off_the_event_loop(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("provider", "model", "effort", "expected"), [
+    ("openai", "gpt-4o", "", "chat_completions"),
+    ("openai", "gpt-4o", "high", "responses"),
+    ("tenant", "gpt-6-luna", "high", "chat_completions"),
+    ("openai_codex", "gpt-6-astra", "", "responses"),
+])
+async def test_automatic_model_api_read_resolves_drafts_without_saving_or_probing(
+    tmp_path, monkeypatch, provider, model, effort, expected,
+) -> None:
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {
+        "openai": {"apiKey": "fixture"},
+        "tenant": {"apiBase": "https://tenant.test/v1"},
+    }}), config_path)
+    before = config_path.read_bytes()
+
+    def unexpected_client(*_args, **_kwargs):
+        pytest.fail("API resolution must not construct an HTTP client")
+
+    monkeypatch.setattr("httpx.Client", unexpected_client)
+    monkeypatch.setattr("httpx.AsyncClient", unexpected_client)
+    path = f"/api/settings/model-api?provider={provider}&model={model}&reasoning_effort={effort}"
+    request = SimpleNamespace(path=path, headers=Headers())
+    route = "/api/settings/model-api"
+    denied = await _router(authorized=False, config_path=config_path).dispatch(None, request, route)
+    assert denied is not None and denied.status_code == 401
+    response = await _router(config_path=config_path).dispatch(None, request, route)
+    assert response is not None and response.status_code == 200
+    assert json.loads(response.body) == {"provider": provider, "api": expected}
+    assert config_path.read_bytes() == before
+    assert WebUISettingsRouter.is_mutation_path(route) is False
+
+
+@pytest.mark.asyncio
 async def test_mcp_reload_callback_is_bounded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

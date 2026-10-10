@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
 import { StreamingLabelSheen } from "@/components/MessageBubble";
@@ -12,6 +12,8 @@ export interface ActivityStepProps {
   marker?: ReactNode;
   showMarker?: boolean;
   label: ReactNode;
+  detail?: string;
+  detailClassName?: string;
   tooltipContent?: ReactNode;
   ariaLabel?: string;
   active?: boolean;
@@ -29,6 +31,8 @@ export function ActivityStep({
   marker,
   showMarker = true,
   label,
+  detail,
+  detailClassName,
   tooltipContent,
   ariaLabel,
   active = false,
@@ -40,21 +44,31 @@ export function ActivityStep({
   markerClassName,
   style,
 }: ActivityStepProps) {
+  const lineRef = useRef<HTMLDivElement>(null);
+  const [hintOpen, setHintOpen] = useState(false);
+  const textLabel = typeof label === "string" ? [label, detail].filter(Boolean).join("\n") : undefined;
   const line = (
     <div
+      ref={lineRef}
       data-testid="activity-line"
       tabIndex={typeof label === "string" ? 0 : undefined}
+      aria-label={detail && typeof label === "string" ? `${label}, ${detail}` : undefined}
       className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap"
     >
       <StreamingLabelSheen
         active={active && animateLabel}
         className={cn(
           "min-w-0 flex-1 truncate font-medium",
-          tone === "error" ? "text-destructive/78" : "text-muted-foreground/85",
+          tone === "error" ? "text-destructive/[0.78]" : "text-muted-foreground",
           labelClassName,
         )}
       >
-        {label}
+        {detail ? (
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="max-w-[70%] shrink-0 truncate">{label}</span>{" "}
+            <span className={cn("min-w-0 flex-1 truncate font-normal text-muted-foreground", detailClassName)}>{detail}</span>
+          </span>
+        ) : label}
       </StreamingLabelSheen>
     </div>
   );
@@ -80,15 +94,12 @@ export function ActivityStep({
           {marker ?? (
             <span
               className={cn(
-                "grid h-3.5 w-3.5 place-items-center rounded-full border bg-background transition-colors",
-                tone === "active" && "border-muted-foreground/28 text-muted-foreground/72",
-                tone === "success" && "border-emerald-500/28 text-emerald-500/78",
-                tone === "error" && "border-destructive/30 text-destructive/78",
-                tone === "neutral" && "border-muted-foreground/18 text-muted-foreground/50",
+                "grid h-3.5 w-3.5 place-items-center transition-colors",
+                tone === "error" ? "text-destructive/[0.78]" : "text-muted-foreground",
                 markerClassName,
               )}
             >
-              {Icon ? <Icon className="h-2.5 w-2.5" strokeWidth={2.15} /> : null}
+              {Icon ? <Icon className="h-3.5 w-3.5" strokeWidth={1.75} /> : null}
             </span>
           )}
         </span>
@@ -96,10 +107,14 @@ export function ActivityStep({
       <div className={cn("min-w-0", contentClassName)}>
         {typeof label === "string" ? (
           <TooltipProvider>
-            <Tooltip>
+            <Tooltip open={hintOpen} onOpenChange={(open) => {
+              const truncated = Array.from(lineRef.current?.querySelectorAll<HTMLElement>(".truncate") ?? [])
+                .some((element) => element.scrollWidth > element.clientWidth);
+              setHintOpen(open && (truncated || tooltipContent !== undefined && tooltipContent !== textLabel));
+            }}>
               <TooltipTrigger asChild>{line}</TooltipTrigger>
               <TooltipContent side="top" className="max-w-[min(32rem,calc(100vw-2rem))] whitespace-pre-wrap break-words">
-                {tooltipContent ?? label}
+                {tooltipContent ?? textLabel}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

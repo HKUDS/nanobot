@@ -20,7 +20,7 @@
         }
       },
       "groupPolicy": {
-        "label": "Comportement en groupe",
+        "label": "Règles des groupes",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
@@ -32,10 +32,10 @@
         "placeholder": "ID utilisateur séparés par des virgules"
       },
       "topicIsolation": {
-        "label": "Isolation par sujet",
+        "label": "Sessions par sujet",
         "choices": {
-          "true": "Une session séparée par sujet",
-          "false": "Une session partagée pour le groupe"
+          "true": "Sessions séparées",
+          "false": "Session partagée"
         }
       },
       "name": {
@@ -54,19 +54,19 @@
         "label": "Terminé emoji"
       },
       "toolHintPrefix": {
-        "label": "Préfixe d'indice d'outil"
+        "label": "Préfixe d’indication"
       },
       "replyToMessage": {
         "label": "Répondre au message",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "streaming": {
         "label": "Diffusion en continu",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       }

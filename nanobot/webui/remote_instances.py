@@ -212,7 +212,7 @@ class RemoteInstances:
 
     async def action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "pick_file":
-            from nanobot.webui.native_folder_picker import NativeFolderPickerError, pick_native_file
+            from nanobot.webui.native_file_picker import NativeFilePickerError, pick_native_file
 
             if self._closed or self._picker_lock.locked():
                 raise RemoteError("file_picker_unavailable")
@@ -221,7 +221,7 @@ class RemoteInstances:
             async with self._picker_lock:
                 try:
                     return {"path": await pick_native_file()}
-                except NativeFolderPickerError:
+                except NativeFilePickerError:
                     raise RemoteError("file_picker_unavailable") from None
         if action == "discover":
             from nanobot.webui.ssh_config import discover_hosts

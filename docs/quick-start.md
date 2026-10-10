@@ -112,11 +112,7 @@ Then start an interactive terminal chat with:
 nanobot
 ```
 
-In interactive mode, `Enter` sends and `Shift+Enter` inserts a newline (`Ctrl+J` is the
-universal fallback). While nanobot is working, `Enter` sends immediately, `Tab` waits until the
-current response is finished, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) edits the
-latest waiting message. Exit
-with `exit`, `/exit`, `:q`, or `Ctrl+D`.
+In interactive mode, `Enter` sends and `Shift+Enter` inserts a newline (`Ctrl+J` is the universal fallback). While nanobot is working, `Enter` sends immediately, `Tab` waits until the current response is finished, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) edits the latest waiting message. Exit with `exit`, `/exit`, `:q`, or `Ctrl+D`.
 
 ## Choose One Next Step
 
@@ -155,8 +151,7 @@ If pip reports `externally-managed-environment`, use the recommended installer, 
 
 **Current source**
 
-Clone the repository and install it in editable mode. Bun is required so the checkout can run
-its matching native TUI instead of mixing current Python with an older release binary.
+Clone the repository and install it in editable mode. Bun is required so the checkout can run its matching native TUI instead of mixing current Python with an older release binary.
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -164,19 +159,14 @@ cd nanobot
 python -m venv .venv
 ```
 
-Activate it with `source .venv/bin/activate` on macOS/Linux or
-`.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
+Activate it with `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
 
 ```bash
 python -m pip install -e .
 nanobot webui
 ```
 
-The source path follows current `main` and can be newer than the published package. The editable
-install keeps Python pointed at the checkout; `nanobot` runs `tui/` with Bun, and
-`nanobot webui` automatically rebuilds `webui/` when its bundled assets are stale. All normal
-commands remain the same as a stable install. For development details, follow
-[`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+The source path follows current `main` and can be newer than the published package. The editable install keeps Python pointed at the checkout; `nanobot` runs `tui/` with Bun, and `nanobot webui` automatically rebuilds `webui/` when its bundled assets are stale. All normal commands remain the same as a stable install. For development details, follow [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 If the package is installed but the shell cannot find `nanobot`, use the runner that owns the installation. The recommended installer prints the exact command to reuse. Common forms are:
 
@@ -239,11 +229,7 @@ git pull --ff-only
 python -m pip install -e .
 ```
 
-Because the install is editable, normal source changes are visible immediately. Re-running the
-install synchronizes any changed Python dependencies; the TUI and WebUI refresh their own
-dependencies/assets when launched. Then check `nanobot --version`. Run
-`nanobot onboard --refresh` when you want to add newly introduced default fields while preserving
-existing settings.
+Because the install is editable, normal source changes are visible immediately. Re-running the install synchronizes any changed Python dependencies; the TUI and WebUI refresh their own dependencies/assets when launched. Then check `nanobot --version`. Run `nanobot onboard --refresh` when you want to add newly introduced default fields while preserving existing settings.
 
 ## If the First Reply Fails
 

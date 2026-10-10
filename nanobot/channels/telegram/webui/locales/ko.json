@@ -12,11 +12,11 @@
         "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "* 또는 Telegram 사용자 ID"
       },
       "groupPolicy": {
-        "label": "그룹 동작",
+        "label": "그룹 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
@@ -54,7 +54,7 @@
         }
       },
       "inlineKeyboards": {
-        "label": "인라인 키보드",
+        "label": "메시지 버튼",
         "choices": {
           "true": "켜기",
           "false": "끄기"
@@ -68,7 +68,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "스트림 업데이트 간격"
+        "label": "갱신 간격(초)"
       },
       "webhookUrl": {
         "label": "웹훅 URL"
@@ -86,7 +86,7 @@
         "label": "웹훅 비밀 토큰"
       },
       "webhookMaxConnections": {
-        "label": "최대 웹훅 연결"
+        "label": "Webhook 연결 상한"
       }
     }
   }

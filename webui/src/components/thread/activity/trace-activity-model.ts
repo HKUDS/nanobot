@@ -9,6 +9,7 @@ export interface TraceDescription {
   kind: "search" | "tool" | "done" | "trace";
   label: string;
   detail: string;
+  aside?: string;
   icon?: "clock";
   url?: string;
   host?: string;
@@ -33,8 +34,7 @@ export function describeTraceLine(
     const query = traceFieldFromArgs(args, ["query", "q", "text"]) || args;
     return {
       kind: "search",
-      label: presentWebSearchAction(query, status, name === "x_search" ? "x" : "web", t),
-      detail: "",
+      ...presentWebSearchAction(query, status, name === "x_search" ? "x" : "web", t),
     };
   }
   if (/fetch|read|open/i.test(name) || plainWebReadTrace) {
@@ -108,7 +108,7 @@ function describeShellTrace(
   return {
     kind: "tool",
     label: activityStatus(t, status, "runningCommand", "ranCommand", "commandFailed"),
-    detail: summarizeShellCommand(command, t),
+    ...summarizeShellCommand(command, t),
   };
 }
 

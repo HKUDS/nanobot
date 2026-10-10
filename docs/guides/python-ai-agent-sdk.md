@@ -1,9 +1,6 @@
 # Nanobot Python SDK: Run an AI Agent from Python
 
-This guide shows when to use the Nanobot Python SDK instead of calling a model
-directly. The SDK runs the same agent runtime used by the CLI: model routing,
-tools, workspace access, session history, memory, streaming events, and runtime
-helpers.
+This guide shows when to use the Nanobot Python SDK instead of calling a model directly. The SDK runs the same agent runtime used by the CLI: model routing, tools, workspace access, session history, memory, streaming events, and runtime helpers.
 
 ## What you will build
 
@@ -13,12 +10,9 @@ helpers.
 
 ## When to use this
 
-Use the Python SDK for notebooks, evals, product backends, local scripts,
-workflow runners, and integrations that need direct access to agent sessions,
-memory, hooks, runtime state, or structured run results.
+Use the Python SDK for notebooks, evals, product backends, local scripts, workflow runners, and integrations that need direct access to agent sessions, memory, hooks, runtime state, or structured run results.
 
-Use the OpenAI-compatible API instead when another language or process should
-call nanobot over HTTP.
+Use the OpenAI-compatible API instead when another language or process should call nanobot over HTTP.
 
 ## Install
 
@@ -49,8 +43,7 @@ asyncio.run(main())
 
 - Reuse one `Nanobot` instance for related work.
 - Pass `session_key` when a user, job, or eval case needs persistent history.
-- Use `bot.stream(...)` when the caller needs live text, tool, or failure
-  events.
+- Use `bot.stream(...)` when the caller needs live text, tool, or failure events.
 - Use hooks for audit logs or custom observability.
 
 ## Security notes
@@ -61,10 +54,8 @@ asyncio.run(main())
 
 ## Troubleshooting
 
-- If SDK code fails, first run `nanobot agent -m "Hello!"` in the same
-  environment.
-- Print `bot.runtime.workspace` and `bot.runtime.model` to confirm the expected
-  config loaded.
+- If SDK code fails, first run `nanobot agent -m "Hello!"` in the same environment.
+- Print `bot.runtime.workspace` and `bot.runtime.model` to confirm the expected config loaded.
 - Use explicit `config_path` and `workspace` when scripts run from services.
 
 ## Related nanobot docs

@@ -2,7 +2,7 @@
 
 Validates that:
 - OpenRouter (no strip) keeps model names intact.
-- AiHubMix (strip_model_prefix=True) strips provider prefixes.
+- AiHubMix strips provider prefixes declared by its spec.
 - Standard providers pass model names through as-is.
 """
 
@@ -16,7 +16,7 @@ import pytest
 
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 
 
 def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
@@ -320,8 +320,8 @@ async def test_openai_compat_chat_stream_forwards_reasoning_deltas_deepseek_styl
             api_key="sk-test",
             default_model="deepseek-v4-pro",
             spec=spec,
+            model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
         )
-        provider._api_type = "chat_completions"
         result = await provider.chat_stream(
             messages=[{"role": "user", "content": "hi"}],
             model="deepseek-v4-pro",
@@ -364,7 +364,7 @@ async def test_deepseek_v4_pro_uses_responses_api() -> None:
     call_kwargs = mock_responses.call_args.kwargs
     assert call_kwargs["model"] == "deepseek-v4-pro"
     assert call_kwargs["reasoning"] == {"effort": "none"}
-    assert call_kwargs["tools"] == [{"type": "web_search"}]
+    assert "tools" not in call_kwargs
     assert "include" not in call_kwargs
 
 
@@ -614,7 +614,7 @@ async def test_openrouter_keeps_model_name_intact() -> None:
 
 @pytest.mark.asyncio
 async def test_aihubmix_strips_model_prefix() -> None:
-    """AiHubMix strips the provider prefix (strip_model_prefix=True)."""
+    """AiHubMix strips provider prefixes declared by its spec."""
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("aihubmix")
 
@@ -1012,7 +1012,88 @@ def test_openai_compat_supports_temperature_matches_reasoning_model_rules() -> N
     assert OpenAICompatProvider._supports_temperature("gpt-4o") is True
     assert OpenAICompatProvider._supports_temperature("gpt-5-chat") is False
     assert OpenAICompatProvider._supports_temperature("o3-mini") is False
-    assert OpenAICompatProvider._supports_temperature("gpt-4o", reasoning_effort="medium") is False
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "model", "responses"),
+    [
+        ("deepseek", "deepseek-v4-flash", False),
+        ("deepseek", "deepseek-v4-flash", True),
+        ("mistral", "mistral-medium-3-5", False),
+    ],
+)
+def test_compatible_provider_keeps_temperature_when_reasoning_effort_is_set(
+    provider_name: str, model: str, responses: bool,
+) -> None:
+    spec = find_by_name(provider_name)
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model=model,
+            spec=spec,
+        )
+
+    build_request = provider._build_responses_body if responses else provider._build_kwargs
+    request = build_request(
+        messages=[{"role": "user", "content": "hello"}],
+        tools=None,
+        model=model,
+        max_tokens=4096,
+        temperature=0.2,
+        reasoning_effort="high",
+        tool_choice=None,
+    )
+
+    assert request["temperature"] == 0.2
+    if responses:
+        assert request["reasoning"] == {"effort": "high"}
+    else:
+        assert request["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize("api_type", ["chat_completions", "responses"])
+@pytest.mark.parametrize(
+    ("model", "effort", "supports_temperature"),
+    [
+        ("gpt-6.1-sol", "high", False),
+        ("gpt-6-sol", "high", False),
+        ("gpt-6-sol", None, False),
+        ("gpt-6-sol", "none", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_gpt6_temperature_requires_explicit_none_effort(
+    api_type: str, model: str, effort: str | None, supports_temperature: bool,
+) -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response())
+    mock_responses = AsyncMock(return_value=_fake_responses_response())
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client:
+        mock_client.return_value.chat.completions.create = mock_chat
+        mock_client.return_value.responses.create = mock_responses
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model=model,
+            spec=find_by_name("openai"),
+            model_api=ModelAPICapabilities((api_type,), api_type),
+        )
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=0.2,
+            reasoning_effort=effort,
+        )
+
+    assert result.content == "ok"
+    request_mock = mock_responses if api_type == "responses" else mock_chat
+    other_mock = mock_chat if api_type == "responses" else mock_responses
+    request_mock.assert_awaited_once()
+    other_mock.assert_not_awaited()
+    request = request_mock.call_args.kwargs
+    if supports_temperature:
+        assert request["temperature"] == 0.2
+    else:
+        assert "temperature" not in request
+        if api_type == "responses":
+            assert request["include"] == ["reasoning.encrypted_content"]
 
 
 def test_openai_compat_build_kwargs_uses_gpt5_safe_parameters() -> None:
@@ -1496,10 +1577,28 @@ def test_deepseek_thinking_enabled() -> None:
     assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
 
 
-def test_deepseek_thinking_disabled_for_minimal() -> None:
-    """reasoning_effort='minimal' must send thinking.type=disabled to DeepSeek."""
-    kw = _build_kwargs_for("deepseek", "deepseek-v4-pro", reasoning_effort="minimal")
-    assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
+@pytest.mark.parametrize(
+    "effort, wire_effort, thinking_type",
+    [
+        ("minimal", "low", "enabled"),
+        ("low", "low", "enabled"),
+        ("none", None, "disabled"),
+        (None, None, None),
+    ],
+)
+def test_deepseek_reasoning_effort_controls(
+    effort: str | None, wire_effort: str | None, thinking_type: str | None,
+) -> None:
+    """DeepSeek's minimal alias enables low-effort thinking; none disables it."""
+    kw = _build_kwargs_for("deepseek", "deepseek-flash", reasoning_effort=effort)
+    if wire_effort is None:
+        assert "reasoning_effort" not in kw
+    else:
+        assert kw["reasoning_effort"] == wire_effort
+    if thinking_type is None:
+        assert "extra_body" not in kw
+    else:
+        assert kw["extra_body"] == {"thinking": {"type": thinking_type}}
 
 
 def test_deepseek_backfills_reasoning_content_on_legacy_tool_call_messages() -> None:
@@ -1542,15 +1641,14 @@ def test_backfill_does_not_touch_messages_when_thinking_explicitly_off() -> None
         {"role": "tool", "tool_call_id": "tc1", "content": "result"},
         {"role": "user", "content": "thanks"},
     ]
-    for effort in ("minimal", "none"):
-        kw = p._build_kwargs(
-            messages=list(messages), tools=None, model="deepseek-v4-pro",
-            max_tokens=1024, temperature=0.7,
-            reasoning_effort=effort, tool_choice=None,
-        )
-        for msg in kw["messages"]:
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                assert "reasoning_content" not in msg
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-v4-pro",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort="none", tool_choice=None,
+    )
+    for msg in kw["messages"]:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            assert "reasoning_content" not in msg
 
 
 def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit() -> None:
@@ -1623,7 +1721,7 @@ def test_deepseek_flash_backfills_missing_tool_history_reasoning(
     sent_assistant = kwargs["messages"][1]
     if history_reasoning is not None:
         assert sent_assistant["reasoning_content"] == history_reasoning
-    elif effort in ("none", "minimal"):
+    elif effort == "none":
         assert "reasoning_content" not in sent_assistant
     else:
         assert sent_assistant["reasoning_content"] == ""

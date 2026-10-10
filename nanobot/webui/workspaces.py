@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import platform
+import socket
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -16,6 +18,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScope,
     WorkspaceScopeError,
+    WorkspaceScopeResolver,
     build_workspace_scope,
     default_workspace_scope,
     validate_workspace_scope_payload,
@@ -50,6 +53,8 @@ def default_webui_workspace_state() -> dict[str, Any]:
         "schema_version": WEBUI_WORKSPACE_STATE_SCHEMA_VERSION,
         "default_access_mode": "default",
         "updated_at": None,
+        "recent_projects": [],
+        "favorite_projects": [],
     }
 
 
@@ -63,7 +68,25 @@ def normalize_webui_workspace_state(raw: Any) -> dict[str, Any]:
     default_access_mode = raw.get("default_access_mode")
     if default_access_mode in _DEFAULT_ACCESS_MODES:
         state["default_access_mode"] = default_access_mode
+    for key, limit in (("recent_projects", 20), ("favorite_projects", 40)):
+        paths = raw.get(key)
+        if isinstance(paths, list):
+            state[key] = list(dict.fromkeys(
+                path for path in cast(list[object], paths)
+                if isinstance(path, str) and "\0" not in path and Path(path).is_absolute()
+            ))[:limit]
     return state
+
+
+def remember_webui_project(path: Path) -> None:
+    state = read_webui_workspace_state()
+    recent = [str(path), *(item for item in state["recent_projects"] if item != str(path))][:20]
+    if recent != state["recent_projects"]:
+        state["recent_projects"] = recent
+        try:
+            write_webui_workspace_state(state)
+        except OSError:
+            logger.exception("failed to save recent WebUI projects")
 
 
 def read_webui_workspace_state() -> dict[str, Any]:
@@ -153,9 +176,9 @@ def workspaces_payload(
     default_restrict_to_workspace: bool,
     can_change_project: bool,
     can_use_full_access: bool,
-    folder_picker_available: bool = False,
 ) -> dict[str, Any]:
-    default_access_mode = read_webui_default_access_mode()
+    state = read_webui_workspace_state()
+    default_access_mode = state["default_access_mode"]
     default_scope = (
         default_workspace_scope(
             default_workspace,
@@ -169,10 +192,21 @@ def workspaces_payload(
         "schema_version": WEBUI_WORKSPACE_STATE_SCHEMA_VERSION,
         "default_access_mode": default_access_mode,
         "default_scope": default_scope.payload(),
+        "host": {"name": socket.gethostname(), "platform": platform.system()},
+        "favorite_projects": [
+            {"name": Path(path).name or path, "path": path}
+            for path in state["favorite_projects"]
+        ],
+        "recent_projects": [
+            {"name": Path(path).name or path, "path": path}
+            for path in state["recent_projects"]
+        ],
         "controls": {
             "can_change_project": can_change_project,
             "can_use_full_access": can_use_full_access,
-            "can_pick_folder": folder_picker_available,
+            "can_browse_directories": can_change_project,
+            "can_resolve_project": can_change_project,
+            "can_manage_favorites": can_change_project,
         },
     }
 
@@ -196,6 +230,18 @@ class WebUIWorkspaceController:
         return default_scope_for_webui(
             self._default_workspace,
             self._default_restrict_to_workspace,
+        )
+
+    def automation_scope(
+        self, session_key: str, channel: str, message_metadata: dict[str, Any],
+    ) -> WorkspaceScope:
+        """Use the runtime's policy, not the browser's draft project selection."""
+        data = self._sessions.read_session_metadata(session_key) if self._sessions else None
+        return WorkspaceScopeResolver(
+            self._default_workspace, self._default_restrict_to_workspace,
+        ).for_turn(
+            channel=channel, message_metadata=message_metadata,
+            session_metadata=data.get("metadata", {}) if data else {},
         )
 
     def restricted_default_scope(self) -> WorkspaceScope:
@@ -257,15 +303,54 @@ class WebUIWorkspaceController:
         *,
         can_change_project: bool,
         can_use_full_access: bool,
-        folder_picker_available: bool = False,
     ) -> dict[str, Any]:
         return workspaces_payload(
             default_workspace=self._default_workspace,
             default_restrict_to_workspace=self._default_restrict_to_workspace,
             can_change_project=can_change_project,
             can_use_full_access=can_use_full_access,
-            folder_picker_available=folder_picker_available,
         )
+
+    def resolve_project(self, path: object) -> dict[str, str]:
+        """Validate and remember a selection without changing any chat's scope."""
+        if not isinstance(path, str) or not path.strip():
+            raise WorkspaceScopeError("project_path must be a nonempty string")
+        scope = validate_workspace_scope_payload(
+            {"project_path": path.strip(), "access_mode": "restricted"},
+            default_workspace=self._default_workspace,
+            default_restrict_to_workspace=self._default_restrict_to_workspace,
+            source_channel=_WEBUI_SCOPE_CHANNEL,
+        )
+        remember_webui_project(scope.project_path)
+        return {"path": str(scope.project_path), "name": scope.project_name}
+
+    def set_favorite_project(self, path: object, pinned: object) -> list[dict[str, str]]:
+        """Pin validated folders; allow removing a favorite after it is deleted."""
+        if not isinstance(path, str) or not path.strip() or "\0" in path:
+            raise WorkspaceScopeError("path must be a nonempty directory path")
+        if not isinstance(pinned, bool):
+            raise WorkspaceScopeError("pinned must be a boolean")
+        path = path.strip()
+        if pinned:
+            scope = validate_workspace_scope_payload(
+                {"project_path": path, "access_mode": "restricted"},
+                default_workspace=self._default_workspace,
+                default_restrict_to_workspace=self._default_restrict_to_workspace,
+                source_channel=_WEBUI_SCOPE_CHANNEL,
+            )
+            path = str(scope.project_path)
+        state = read_webui_workspace_state()
+        favorites: list[str] = state["favorite_projects"]
+        existing = next((item for item in favorites if os.path.normcase(item) == os.path.normcase(path)), None)
+        if pinned and existing is None:
+            if len(favorites) >= 40:
+                raise WorkspaceScopeError("at most 40 favorite folders can be pinned")
+            favorites.append(path)
+            write_webui_workspace_state(state)
+        elif not pinned and existing is not None:
+            favorites.remove(existing)
+            write_webui_workspace_state(state)
+        return [{"name": Path(item).name or item, "path": item} for item in favorites]
 
     def scope_from_envelope(
         self,
@@ -368,6 +453,7 @@ class WebUIWorkspaceController:
             session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._sessions.save(session)
         self._draft_scopes.pop(session_key, None)
+        remember_webui_project(scope.project_path)
 
     def stage_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
         """Keep a new chat's scope transient until its first accepted message."""
@@ -378,6 +464,7 @@ class WebUIWorkspaceController:
         ):
             self.persist_scope(chat_id, scope)
             return
+        remember_webui_project(scope.project_path)
         self._draft_scopes[session_key] = scope
         self._draft_scopes.move_to_end(session_key)
         while len(self._draft_scopes) > _MAX_DRAFT_SCOPES:

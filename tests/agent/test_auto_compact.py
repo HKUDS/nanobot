@@ -24,7 +24,7 @@ def _make_loop(
 ) -> AgentLoop:
     """Create a minimal AgentLoop for testing."""
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.estimate_prompt_tokens.return_value = (10_000, "test")
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
@@ -250,8 +250,8 @@ class TestAgentLoopTTLParam:
         loop = _make_loop(tmp_path, session_ttl_minutes=25)
         assert loop.auto_compact._ttl == 25
 
-    def test_loop_default_ttl_zero(self, tmp_path):
-        """AutoCompact default TTL should be 0 (disabled)."""
+    def test_explicit_zero_ttl_disables_loop_compaction(self, tmp_path):
+        """An explicit zero TTL disables idle compaction in the loop."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
 
@@ -1155,7 +1155,7 @@ class TestSummaryPersistence:
         loop.sessions.invalidate("cli:test")
         reloaded = loop.sessions.get_or_create("cli:test")
 
-        # Every call returns the summary from metadata (no _consumed_keys gate)
+        # Every call returns the persisted summary.
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary is not None
         _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
@@ -1166,8 +1166,8 @@ class TestSummaryPersistence:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_metadata_cleanup_on_inmemory_path(self, tmp_path):
-        """In-memory _summaries path should also clean up _last_summary from metadata."""
+    async def test_inmemory_summary_preserves_metadata_for_restart(self, tmp_path):
+        """The in-memory summary path preserves _last_summary for restart recovery."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="hello")

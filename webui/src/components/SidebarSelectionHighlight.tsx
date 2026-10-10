@@ -15,11 +15,11 @@ interface SidebarSelectionHighlightProps extends HTMLAttributes<HTMLDivElement> 
 }
 
 export const SIDEBAR_SELECTION_ITEM_CLASS =
-  "relative z-[1] transition-[color] duration-150 ease-out motion-reduce:transition-none";
+  "relative z-[1] transition-[color,background-color] duration-150 ease-out motion-reduce:transition-none";
 
 // During a drag, animate only the shared highlight, not its measured target as well.
 export const SIDEBAR_SELECTION_ACTION_ITEM_CLASS =
-  "relative z-[1] transition-[width,padding,color] [transition-duration:300ms,300ms,150ms] ease-out group-data-[resizing=true]/sidebar:transition-none motion-reduce:transition-none";
+  "relative z-[1] transition-[width,padding,color,background-color] [transition-duration:300ms,300ms,150ms,150ms] ease-out group-data-[resizing=true]/sidebar:transition-none motion-reduce:transition-none";
 
 export function SidebarSelectionHighlight({
   targetRef,
@@ -62,6 +62,10 @@ export function SidebarSelectionHighlight({
       const firstPosition = !positionedRef.current;
       if (firstPosition) highlight.style.transitionProperty = "none";
 
+      // Preserve fractional layout coordinates so the highlight shares the
+      // target's edges, including where it meets an adjacent hover background.
+      highlight.style.left = "0px";
+      highlight.style.top = "0px";
       highlight.style.width = `${targetRect.width}px`;
       highlight.style.height = `${targetRect.height}px`;
       highlight.style.transform = `translate3d(${targetRect.left - containerRect.left}px, ${

@@ -15,6 +15,7 @@ _STEPFUN_SPEC = ProviderSpec(
     name="stepfun",
     keywords=("stepfun", "step"),
     env_key="STEPFUN_API_KEY",
+    request_apis=("chat_completions", "responses"),
     display_name="Step Fun",
     backend="openai_compat",
     default_api_base="https://api.stepfun.com/v1",

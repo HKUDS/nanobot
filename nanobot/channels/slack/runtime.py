@@ -87,6 +87,7 @@ class SlackConfig(Base):
 
 
 SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
+SLACK_SECTION_TEXT_MAX_LEN = 3_000  # Block Kit section text limit
 SLACK_DOWNLOAD_TIMEOUT = 30.0
 # Abort Socket Mode WSS handshake after this many seconds. REST auth_test can still
 # succeed while WSS blocks (firewall / region). slack-sdk does not apply HTTP(S)_PROXY
@@ -739,8 +740,12 @@ class SlackChannel(BaseChannel):
     @staticmethod
     def _build_button_blocks(text: str, buttons: list[list[str]]) -> list[dict[str, Any]]:
         """Build Slack Block Kit blocks with action buttons."""
+        # Slack renders ``blocks`` instead of ``text`` and caps each section's
+        # text at 3000 chars, so split the chunk across sections rather than
+        # dropping everything past the first 3000 chars.
         blocks: list[dict[str, Any]] = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": text[:3000]}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": part}}
+            for part in split_message(text, SLACK_SECTION_TEXT_MAX_LEN)
         ]
         elements: list[dict[str, Any]] = []
         for row in buttons:
@@ -845,11 +850,20 @@ class SlackChannel(BaseChannel):
             code_blocks.append(m.group(0))
             return f"\x00CB{len(code_blocks) - 1}\x00"
 
+        tables: list[str] = []
+
+        def _save_table(m: re.Match[str]) -> str:
+            tables.append(cls._convert_table(m))
+            return f"\ue000TB{len(tables) - 1}\ue000"
+
         text = cls._CODE_FENCE_RE.sub(_save_fence, text)
-        text = cls._TABLE_RE.sub(cls._convert_table, text)
+        text = cls._TABLE_RE.sub(_save_table, text)
         for i, block in enumerate(code_blocks):
             text = text.replace(f"\x00CB{i}\x00", block)
-        return cls._fixup_mrkdwn(slackify_markdown(text)).rstrip("\n")
+        text = slackify_markdown(text)
+        for i, table in enumerate(tables):
+            text = text.replace(f"\ue000TB{i}\ue000", table)
+        return cls._fixup_mrkdwn(text).rstrip("\n")
 
     @classmethod
     def _fixup_mrkdwn(cls, text: str) -> str:
@@ -887,5 +901,5 @@ class SlackChannel(BaseChannel):
             cells = (cells + [""] * len(headers))[: len(headers)]
             parts = [f"**{headers[i]}**: {cells[i]}" for i in range(len(headers)) if cells[i]]
             if parts:
-                rows.append(" · ".join(parts))
-        return "\n".join(rows)
+                rows.append(slackify_markdown("\n".join(parts)).rstrip("\n"))
+        return "\n\n".join(rows)

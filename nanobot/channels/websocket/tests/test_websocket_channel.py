@@ -47,7 +47,7 @@ from nanobot.channels.websocket.runtime import (
     _parse_inbound_payload,
 )
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig
 from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
@@ -418,9 +418,8 @@ async def test_temporary_chat_is_transient_and_discarded(bus, tmp_path) -> None:
     chat_id = await _new_temporary_chat(channel, connection)
     upload = tmp_path / "temporary-upload.txt"
     upload.write_text("private attachment", encoding="utf-8")
-    channel.gateway.media.store_inbound_attachments = MagicMock(
-        return_value=([str(upload)], None),
-    )
+    channel.gateway.uploads.store.resolve = MagicMock(return_value=[str(upload)])
+    channel.gateway.uploads.store.commit = MagicMock(return_value=[str(upload)])
 
     await channel._dispatch_envelope(
         connection,
@@ -429,7 +428,7 @@ async def test_temporary_chat_is_transient_and_discarded(bus, tmp_path) -> None:
             "type": "message",
             "chat_id": chat_id,
             "content": "read this",
-            "media": [{"data_url": "data:text/plain;base64,cHJpdmF0ZQ=="}],
+            "media": [{"reference": "temporary-upload"}],
             "cli_apps": [{"name": "drawio"}],
             "workspace_scope": {
                 "project_path": str(selected_project),
@@ -478,7 +477,9 @@ async def test_temporary_chat_is_transient_and_discarded(bus, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", ["/goal private", "/trigger later", "/dream"])
+@pytest.mark.parametrize("content", [
+    "/goal private", "/trigger later", "/dream", "/NEW@nanobot", "/__shell pwd",
+])
 async def test_temporary_chat_rejects_persistent_commands(bus, tmp_path, content) -> None:
     sessions = SessionManager(tmp_path)
     channel = WebSocketChannel(
@@ -502,6 +503,29 @@ async def test_temporary_chat_rejects_persistent_commands(bus, tmp_path, content
     assert json.loads(connection.send.await_args.args[0])["detail"] == (
         "temporary_chat_command_rejected"
     )
+
+
+@pytest.mark.parametrize("content", ["/tmp", "/new/file.txt", "/model@nanobot fast"])
+async def test_temporary_chat_accepts_paths_and_allowed_commands(bus, tmp_path, content) -> None:
+    sessions = SessionManager(tmp_path)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    connection = AsyncMock()
+    connection.remote_address = ("127.0.0.1", 5000)
+    chat_id = await _new_temporary_chat(channel, connection)
+
+    await channel._dispatch_envelope(connection, "webui-client", {
+        "type": "message", "chat_id": chat_id, "content": content, "webui": True,
+    })
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.content == content
+    assert inbound.require_existing_session is True
+    assert read_transcript_lines(inbound.session_key) == []
+    session = sessions.get_cached(inbound.session_key)
+    assert session is not None and not session.policy.persist
 
 
 @pytest.mark.asyncio
@@ -4779,7 +4803,6 @@ async def test_bootstrap_exposes_native_surface(bus: MagicMock) -> None:
             bus,
             token_issue_secret="native-secret",
             runtime_surface="native",
-            runtime_capabilities_overrides={"can_pick_folder": True},
         ),
     )
 
@@ -4794,7 +4817,6 @@ async def test_bootstrap_exposes_native_surface(bus: MagicMock) -> None:
         assert response.status_code == 200
         body = response.json()
         assert body["runtime_surface"] == "native"
-        assert body["runtime_capabilities"]["can_pick_folder"] is True
         assert body["runtime_capabilities"]["can_restart_engine"] is True
         assert body["token"].startswith("nbwt_")
         assert body["api_token"].startswith("nbwt_")
@@ -4820,18 +4842,19 @@ def test_settings_payload_normalizes_camel_case_provider(
     assert body["agent"]["provider"] == "minimax_anthropic"
 
 
-def test_settings_payload_exposes_api_type_only_for_openai(monkeypatch, tmp_path) -> None:
+def test_settings_payload_exposes_openai_api_defaults(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.providers.openai.api_type = "responses"
+    config.providers.openai.api = ModelAPIConfig(supported_apis=("responses",), preferred_api="responses")
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     body = settings_payload()
     providers = {provider["name"]: provider for provider in body["providers"]}
 
-    assert providers["openai"]["api_type"] == "responses"
-    assert "api_type" not in providers["custom"]
+    assert providers["openai"]["api"] == {"supported_apis": ["responses"], "preferred_api": "responses"}
+    assert providers["openai"]["request_apis"] == ["chat_completions", "responses"]
+    assert providers["custom"]["api"] is None
 
 
 def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> None:
@@ -4886,7 +4909,7 @@ def test_update_provider_settings_ignores_api_type_for_non_openai(monkeypatch, t
     assert body["providers"]
     config = load_config(config_path)
     assert config.providers.custom.api_base == "https://example.test/v1"
-    assert config.providers.custom.api_type == "auto"
+    assert config.providers.custom.api is None
 
 
 @pytest.mark.asyncio

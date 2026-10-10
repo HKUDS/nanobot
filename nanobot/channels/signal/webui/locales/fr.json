@@ -16,7 +16,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Expéditeurs de messages privés autorisés",
+        "label": "Utilisateurs de DM autorisés",
         "placeholder": "Numéros ou UUID"
       },
       "group_allowFrom": {
@@ -24,7 +24,7 @@
         "placeholder": "ID de groupe"
       },
       "groupMessageBufferSize": {
-        "label": "Messages contextuels de groupe"
+        "label": "Messages de contexte"
       },
       "attachmentsDir": {
         "label": "Répertoire des pièces jointes"
@@ -32,7 +32,7 @@
       "dm_enabled": {
         "label": "Activer les messages directs",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
@@ -46,7 +46,7 @@
       "group_enabled": {
         "label": "Activer les groupes",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
@@ -58,9 +58,9 @@
         }
       },
       "group_requireMention": {
-        "label": "Exiger une mention dans les groupes",
+        "label": "Exiger une mention en groupe",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       }

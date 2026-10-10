@@ -20,9 +20,9 @@
         }
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Group rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }
@@ -32,10 +32,10 @@
         "placeholder": "User IDs, comma separated"
       },
       "topicIsolation": {
-        "label": "Topic isolation",
+        "label": "Topic sessions",
         "choices": {
-          "true": "Separate session for each topic",
-          "false": "One shared session for the group"
+          "true": "Separate sessions",
+          "false": "Shared session"
         }
       },
       "name": {
@@ -54,7 +54,7 @@
         "label": "Done emoji"
       },
       "toolHintPrefix": {
-        "label": "Tool hint prefix"
+        "label": "Hint prefix"
       },
       "replyToMessage": {
         "label": "Reply to message",

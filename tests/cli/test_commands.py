@@ -14,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -44,6 +45,13 @@ from nanobot.webui.metadata import (
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def mock_webui_bundle(monkeypatch) -> MagicMock:
+    prepare_bundle = MagicMock()
+    monkeypatch.setattr(cli_webui, "_prepare_webui_bundle_for_gateway", prepare_bundle)
+    return prepare_bundle
+
+
 def _without_rendered_line_breaks(output: str) -> str:
     return "".join(output.splitlines())
 
@@ -71,7 +79,7 @@ def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
 
 def _fake_provider():
     """Return a minimal fake provider that satisfies AgentLoop.__init__."""
-    p = MagicMock()
+    p = MagicMock(aclose=AsyncMock())
     p.generation.max_tokens = 4096
     return p
 
@@ -84,6 +92,10 @@ class _GatewayAgentContractStub:
     """Minimal stable AgentLoop surface required by gateway assembly tests."""
 
     tools = ToolRegistry()
+    subagents = MagicMock(spec=SubagentManager)
+
+    async def discard_session(self, _session_key: str) -> None:
+        pass
 
     @staticmethod
     def mcp_runtime_status() -> dict[str, str]:
@@ -1275,20 +1287,21 @@ def test_provider_proxy_rejects_unsupported_backend():
         {
             "agents": {
                 "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/claude-opus-4-5",
+                    "provider": "azure_openai",
+                    "model": "gpt-4.1",
                 }
             },
             "providers": {
-                "anthropic": {
+                "azureOpenai": {
                     "apiKey": "sk-test",
+                    "apiBase": "https://azure.example/openai/v1",
                     "proxy": "http://127.0.0.1:23458",
                 }
             },
         }
     )
 
-    with pytest.raises(ValueError, match=r"providers\.anthropic\.proxy"):
+    with pytest.raises(ValueError, match=r"providers\.azure_openai\.proxy"):
         make_provider(config)
 
 
@@ -2856,7 +2869,9 @@ def test_attach_to_background_gateway_checks_owned_sidecar(tmp_path: Path) -> No
         )
 
 
-def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path: Path) -> None:
+def test_webui_foreground_does_not_claim_unmanaged_gateway(
+    monkeypatch, tmp_path: Path, mock_webui_bundle: MagicMock,
+) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
     _patch_webui_provider_ready(monkeypatch)
@@ -2882,6 +2897,8 @@ def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path
 
     assert result.exit_code == 0
     assert "controlled by another foreground command" in result.stdout
+    mock_webui_bundle.assert_called_once()
+    assert mock_webui_bundle.call_args.kwargs == {"mode": "auto"}
 
 
 def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Path) -> None:
@@ -3500,7 +3517,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         enabled_channels: list[str] = []
 
         def __init__(self, *_args, **_kwargs) -> None:
-            return None
+            seen["webui_subagent_manager"] = _kwargs["webui_subagent_manager"]
+            seen["webui_discard_session"] = _kwargs["webui_discard_session"]
 
         def get_channel(self, name: str) -> object | None:
             return object() if name == "websocket" else None
@@ -3531,6 +3549,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     agent = seen["agent"]
     agent_kwargs = seen["agent_from_config_kwargs"]
     kwargs = seen["local_trigger_queue_kwargs"]
+    assert seen["webui_subagent_manager"] is agent.subagents
+    assert seen["webui_discard_session"] == agent.discard_session
     assert isinstance(agent_kwargs["provider"], UnconfiguredProvider) is bool(setup_error)
     refreshed_snapshot = agent_kwargs["provider_snapshot_loader"]()
     assert not isinstance(refreshed_snapshot.provider, UnconfiguredProvider)

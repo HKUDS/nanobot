@@ -38,7 +38,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def mock_provider():
-    p = MagicMock()
+    p = MagicMock(aclose=AsyncMock())
     p.chat_stream_with_retry = AsyncMock()
     p.generation = GenerationSettings(max_tokens=100)
     return p
@@ -365,7 +365,7 @@ class TestConsolidatorSummarize:
     async def test_summarize_raw_dumps_on_llm_failure(
         self, consolidator, mock_provider, store, runtime
     ):
-        """On LLM failure, raw-dump messages to HISTORY.md."""
+        """On LLM failure, append raw messages to memory/history.jsonl."""
         mock_provider.chat_stream_with_retry.side_effect = Exception("API error")
         messages = [{"role": "user", "content": "hello"}]
         result = await _archive(consolidator, messages, runtime)
@@ -1583,7 +1583,7 @@ class TestCompactIdleSession:
         assert not lock.locked()
 
 
-class TestRawArchiveTruncation:
+class TestRawArchiveChunks:
     """raw_archive() keeps complete journal content with bounded individual entries."""
 
     @pytest.mark.parametrize("boundary", ["A ", "\n\n", "<think>PRIVATE</think>"])
@@ -1604,8 +1604,8 @@ class TestRawArchiveTruncation:
         assert "PRIVATE" not in joined
         assert "PUBLIC_TAIL" in joined
 
-    def test_raw_archive_truncates_large_content(self, store):
-        """Large messages should be truncated to _RAW_ARCHIVE_MAX_CHARS."""
+    def test_raw_archive_splits_large_content_into_bounded_entries(self, store):
+        """Large messages are split across bounded journal entries."""
         big = "x" * 50_000
         messages = [{"role": "user", "content": big}]
         store.raw_archive(messages)

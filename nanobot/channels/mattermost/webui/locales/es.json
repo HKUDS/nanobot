@@ -16,7 +16,7 @@
         "placeholder": "ID de equipo opcional"
       },
       "groupPolicy": {
-        "label": "Comportamiento en canales",
+        "label": "Reglas de canal",
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
@@ -24,7 +24,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "Comportamiento en hilos",
+        "label": "Reglas del hilo",
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes (sin mención)",
@@ -47,21 +47,21 @@
         "label": "Canales permitidos"
       },
       "replyInThread": {
-        "label": "Responder en el hilo",
+        "label": "Respuestas en hilo",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
         }
       },
       "includeThreadContext": {
-        "label": "Incluir contexto de hilo",
+        "label": "Contexto del hilo",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
         }
       },
       "threadContextLimit": {
-        "label": "Límite de contexto del hilo"
+        "label": "Límite de contexto"
       },
       "streaming": {
         "label": "Transmisión",
@@ -84,7 +84,7 @@
         }
       },
       "sendToolHints": {
-        "label": "Enviar sugerencias de herramientas",
+        "label": "Indicaciones de herramientas",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
@@ -105,7 +105,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Usuarios permitidos de mensajes directos"
+        "label": "Usuarios de DM permitidos"
       }
     }
   }

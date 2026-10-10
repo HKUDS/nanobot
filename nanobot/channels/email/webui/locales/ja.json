@@ -15,7 +15,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "nanobot にメールの読み取りと送信を許可",
+        "label": "メールの読み書き",
         "choices": {
           "true": "同意済み",
           "false": "未同意"
@@ -58,7 +58,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "メールの確認間隔（秒）",
+        "label": "受信の確認間隔（秒）",
         "placeholder": "30"
       },
       "allowFrom": {
@@ -118,48 +118,48 @@
         }
       },
       "postAction": {
-        "label": "加工後",
+        "label": "処理後",
         "choices": {
           "delete": "削除",
           "move": "移動"
         }
       },
       "postActionMoveMailbox": {
-        "label": "メールボックスに移動"
+        "label": "移動先メールボックス"
       },
       "postActionExpunge": {
-        "label": "アクションを永続的に適用する",
+        "label": "完全に削除",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "スキップされたメッセージを無視する",
+        "label": "未処理メールを保持",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "maxBodyChars": {
-        "label": "最大体長"
+        "label": "本文の文字数上限（文字）"
       },
       "subjectPrefix": {
-        "label": "返信件名の接頭辞"
+        "label": "件名の接頭辞"
       },
       "allowedAttachmentTypes": {
-        "label": "許可される添付ファイルの種類"
+        "label": "添付ファイルの種類"
       },
       "maxAttachmentSize": {
-        "label": "添付ファイルの最大サイズ"
+        "label": "添付ごとの上限（バイト）"
       },
       "maxAttachmentsPerEmail": {
-        "label": "最大添付ファイル数"
+        "label": "添付数の上限"
       },
       "trustedAuthservIds": {
         "label": "信頼する認証サービス",
         "placeholder": "mx.google.com（カンマ区切り）",
-        "help": "受信メールサービスが追加する正確な authserv-id。SPF または DKIM 検証時は必須です。"
+        "help": "信頼する authserv-id を入力します。\n\n受信メールサービスが追加する正確な authserv-id。SPF または DKIM 検証時は必須です。"
       }
     }
   }

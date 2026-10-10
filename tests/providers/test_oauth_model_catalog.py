@@ -259,9 +259,14 @@ def test_xai_inference_classifies_typed_reauth() -> None:
     assert "synthetic-secret" not in str(response)
 
 
-def test_github_copilot_catalog_only_lists_compatible_chat_models(
+@pytest.mark.parametrize(
+    "responses_model",
+    ["gpt-5.4-mini", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"],
+)
+def test_github_copilot_catalog_routes_advertised_model_apis(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    responses_model: str,
 ) -> None:
     original_client = httpx.Client
     captured: list[httpx.Request] = []
@@ -293,8 +298,7 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
                         },
                     },
                     {
-                        "id": "gpt-5.4-mini",
-                        "name": "GPT-5.4 Mini",
+                        "id": responses_model,
                         "model_picker_enabled": True,
                         "supported_endpoints": ["/responses"],
                     },
@@ -340,10 +344,28 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
     assert catalog.source == "remote"
     assert [model.id for model in catalog.models] == [
         "github-copilot/claude-sonnet",
-        "github-copilot/gpt-5.4-mini",
+        f"github-copilot/{responses_model}",
+        "github-copilot/unknown-responses-only",
     ]
     assert catalog.models[0].context_window == 200_000
     assert catalog.models[0].reasoning_efforts == ("low", "high")
+    assert catalog.models[0].api.supported_apis == ("chat_completions",)
+    assert catalog.models[2].api.supported_apis == ("responses",)
+    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
+    provider = GitHubCopilotProvider(default_model="github-copilot/unknown-responses-only")
+    assert provider._should_use_responses_api(None, None)
+    assert not provider._should_use_responses_api("github-copilot/claude-sonnet", "high")
+    from nanobot.config.schema import Config, ModelPresetConfig
+    from nanobot.providers.factory import resolve_automatic_model_api
+
+    for model, effort, expected in (
+        ("github-copilot/unknown-responses-only", None, "responses"),
+        ("github-copilot/claude-sonnet", "high", "chat_completions"),
+    ):
+        assert resolve_automatic_model_api(Config(), preset=ModelPresetConfig(
+            provider="github_copilot", model=model, reasoning_effort=effort,
+        )) == ("github_copilot", expected)
     assert len(captured) == 2
     assert captured[0].headers["Authorization"] == "token github-secret"
     assert captured[1].headers["Authorization"] == "Bearer copilot-secret"

@@ -12,29 +12,29 @@
         "placeholder": "Token opsional"
       },
       "groupPolicy": {
-        "label": "Perilaku grup",
+        "label": "Aturan grup",
         "choices": {
-          "mention": "Hanya saat disebut",
+          "mention": "Hanya mention",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "ID QQ, dipisahkan koma"
       },
       "groupPolicyOverrides": {
-        "label": "Penggantian perilaku grup (JSON)"
+        "label": "Pengecualian grup (JSON)"
       },
       "welcomeNewMembers": {
-        "label": "Selamat datang anggota baru",
+        "label": "Sambut anggota baru",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "maxImageBytes": {
-        "label": "Ukuran gambar maksimum"
+        "label": "Batas ukuran gambar (byte)"
       }
     }
   }

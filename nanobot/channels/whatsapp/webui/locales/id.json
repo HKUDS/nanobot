@@ -5,13 +5,13 @@
     "officialLabel": "Buka bantuan WhatsApp",
     "fields": {
       "allowFrom": {
-        "label": "Kontak yang diizinkan",
+        "label": "Kontak diizinkan",
         "placeholder": "Nomor telepon atau ID WhatsApp"
       },
       "groupPolicy": {
-        "label": "Perilaku grup",
+        "label": "Aturan grup",
         "choices": {
-          "mention": "Hanya saat disebut",
+          "mention": "Hanya mention",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }

@@ -222,12 +222,14 @@ function wrap(
   children: ReactNode,
   modelName?: string | null,
   token = "tok",
+  webuiCapabilities: string[] = [],
 ) {
   return (
     <ClientProvider
       client={client as unknown as import("@/lib/nanobot-client").NanobotClient}
       token={token}
       modelName={modelName ?? null}
+      webuiCapabilities={webuiCapabilities}
     >
       {children}
     </ClientProvider>
@@ -491,6 +493,39 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("renders one persisted task entry at the initiating prompt through the full shell", async () => {
+    const client = makeClient();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [{
+        task_id: "completed-task", label: "Inspect settings", task_description: "Inspect settings",
+        origin_turn_id: "delegation-turn", origin_message_id: null, created_at: 100, completed_at: 102,
+        state: "done", phase: "done", elapsed_seconds: 2, iteration: 1, tool_events: [],
+        usage: null, receipts: {}, result: "Verified", partial: false, stop_reason: "completed", error: null,
+      }] });
+      if (String(input).includes("/webui-thread")) return httpJson(transcriptFromSimpleMessages([
+        { role: "user", content: "Delegate inspection", turnId: "delegation-turn" },
+        { role: "assistant", content: "Parent conclusion", turnId: "delegation-turn" },
+      ]));
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    const shell = () => wrap(client, <ThreadShell session={session("persisted-tasks")} title="Task history"
+      onToggleSidebar={() => {}} />, null, "tok", ["webui.core.v1", "webui.subagents.v1"]);
+    const view = render(shell());
+    await screen.findByText("Delegate inspection");
+    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Finished: 1/ }));
+    const task = await screen.findByRole("button", { name: /Inspect settings Completed/ });
+    await screen.findByText("Delegate inspection");
+    expect(screen.getAllByRole("button", { name: /Inspect settings/ })).toHaveLength(1);
+    expect(screen.getByTestId("thread-message-region")).toContainElement(task);
+    expect(within(screen.getByTestId("thread-composer-motion")).queryByText("Inspect settings")).not.toBeInTheDocument();
+    view.unmount();
+    render(shell());
+    await screen.findByText("Delegate inspection");
+    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Finished: 1/ }));
+    await screen.findByRole("button", { name: /Inspect settings Completed/ });
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("clears the welcome draft after a delayed new-chat send and an unchanged round-trip", async () => {
     const client = makeClient();
     const store = new ComposerDraftStore();
@@ -576,7 +611,7 @@ describe("ThreadShell", () => {
     const view = render(shell("draft-a"));
     expect(screen.getByRole("textbox")).toHaveValue("draft A");
     expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quote A");
-    fireEvent.click(screen.getByRole("button", { name: "Remove quoted context" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove quote" }));
     view.rerender(shell("draft-b"));
     expect(screen.getByRole("textbox")).toHaveValue("draft B");
     expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quote B");
@@ -1137,7 +1172,7 @@ describe("ThreadShell", () => {
     );
 
     fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByLabelText("Default")).not.toBeInTheDocument();
   });
@@ -1164,9 +1199,9 @@ describe("ThreadShell", () => {
     );
 
     fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
-    expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
   it("switches through every named preset while preserving call-order priority", async () => {
@@ -1202,7 +1237,7 @@ describe("ThreadShell", () => {
       "preset-order",
       "/model fast",
     );
-    expect(await screen.findByText("fast")).toBeInTheDocument();
+    expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "fast" }));
     fireEvent.click(await screen.findByRole("option", { name: /^extra\b/i }));
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
@@ -1212,7 +1247,7 @@ describe("ThreadShell", () => {
     expect(await screen.findByText("extra")).toBeInTheDocument();
 
     rerender(view("fast"));
-    expect(await screen.findByText("fast")).toBeInTheDocument();
+    expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
   });
 
   it("uses the backend-resolved provider for an auto session preset", async () => {
@@ -1248,9 +1283,9 @@ describe("ThreadShell", () => {
     );
 
     fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-4 · Company Proxy");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-4 Company Proxy");
     fireEvent.blur(screen.getByLabelText("fast"));
-    expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
   it("keeps the selected composer preset and attributes only the reply to its actual source", async () => {
@@ -1300,7 +1335,7 @@ describe("ThreadShell", () => {
     expect(configuredBadge).not.toHaveAttribute("data-fallback");
     fireEvent.focus(screen.getByLabelText("Default"));
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "Default · gpt-5.5 · OpenAI Codex",
+      "Default gpt-5.5 OpenAI Codex",
     );
     fireEvent.blur(screen.getByLabelText("Default"));
 
@@ -1415,7 +1450,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByText(/This response used a fallback model/)).not.toBeInTheDocument();
   });
 
-  it.each([false, true])("hides unconfigured model details in setup tooltips (existing history: %s)", async (hasHistory) => {
+  it.each([false, true])("keeps model setup actionable without a repeated tooltip (existing history: %s)", async (hasHistory) => {
     const client = makeClient();
     const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
     settings.agent.has_api_key = false;
@@ -1442,9 +1477,9 @@ describe("ThreadShell", () => {
     ));
 
     await screen.findByText(hasHistory ? "Previous message" : HERO_GREETING_PATTERN);
-    const badge = screen.getByRole("button", { name: "Choose your AI" });
+    const badge = screen.getByRole("button", { name: "Choose model" });
     fireEvent.focus(badge);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Choose your AI$/);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     fireEvent.click(badge);
     expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
     expect(client.sendMessage).not.toHaveBeenCalled();
@@ -1489,12 +1524,12 @@ describe("ThreadShell", () => {
       ),
     );
 
-    const badge = await screen.findByRole("button", { name: "Choose your AI" });
+    const badge = await screen.findByRole("button", { name: "Choose model" });
     expect(screen.queryByTestId("composer-model-setup-icon")).not.toBeInTheDocument();
     expect(badge.querySelector('[data-needs-setup="true"]')).toHaveClass(
       "composer-model-pill-setup",
     );
-    expect(screen.getByTestId("composer-model-setup-label")).toHaveTextContent("Choose your AI");
+    expect(screen.getByTestId("composer-model-setup-label")).toHaveTextContent("Choose model");
     expect(badge).not.toHaveClass("border-amber-500/35");
     expect(screen.queryByTestId("composer-model-logo-openai_codex")).not.toBeInTheDocument();
 
@@ -1504,7 +1539,7 @@ describe("ThreadShell", () => {
     });
     fireEvent.click(badge);
 
-    expect(screen.queryByRole("dialog", { name: "Choose your AI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
     expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
     expect(input).toHaveValue("hello");
     expect(client.sendMessage).not.toHaveBeenCalled();
@@ -1550,7 +1585,7 @@ describe("ThreadShell", () => {
     );
 
     await screen.findByLabelText("Message input");
-    expect(screen.queryByRole("button", { name: "Toggle image generation mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Image mode" })).not.toBeInTheDocument();
 
     await act(async () => {
       rerender(
@@ -1567,7 +1602,7 @@ describe("ThreadShell", () => {
       );
     });
 
-    expect(screen.queryByRole("button", { name: "Toggle image generation mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Image mode" })).not.toBeInTheDocument();
   });
 
   it("restores in-memory messages when switching away and back to a session", async () => {
@@ -1740,7 +1775,7 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expect(screen.queryByText("delete me cleanly")).not.toBeInTheDocument();
     });
-    expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
 
   it("creates a chat only when the blank landing sends a first message", async () => {
@@ -1797,7 +1832,7 @@ describe("ThreadShell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Default" }));
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
-    expect(await screen.findByText("fast")).toBeInTheDocument();
+    expect(await within(screen.getByTestId("thread-welcome-layout")).findByText("fast")).toBeInTheDocument();
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Message input"), {
@@ -1815,7 +1850,7 @@ describe("ThreadShell", () => {
       rerender(view(session("chat-new", "fast")));
     });
     fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
@@ -2096,9 +2131,9 @@ describe("ThreadShell", () => {
     const greeting = screen.getByRole("heading", { level: 1, name: HERO_GREETING_PATTERN });
     expect(greeting).toHaveAttribute("data-testid", "hero-greeting");
     expect(greeting).toHaveClass("select-none", "whitespace-nowrap");
-    expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write code" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create a project plan" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Make a plan" })).not.toBeInTheDocument();
   });
 
   it("does not leak the previous thread when opening a brand-new chat", async () => {
@@ -2156,9 +2191,10 @@ describe("ThreadShell", () => {
 
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument(),
+      expect(screen.getByRole("textbox")).toBeInTheDocument(),
     );
-    const input = screen.getByPlaceholderText("Ask anything...");
+    const input = screen.getByRole("textbox");
+    expect(input).toHaveAttribute("placeholder", "Describe what you’d like to do");
     expect(input.className).toContain("min-h-[78px]");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });
@@ -2206,7 +2242,7 @@ describe("ThreadShell", () => {
     );
 
     const menu = await openMessageActions("answer 100");
-    fireEvent.click(within(menu).getByRole("button", { name: "Fork" }));
+    fireEvent.click(within(menu).getByRole("button", { name: "New chat from here" }));
 
     await waitFor(() =>
       expect(onForkChat).toHaveBeenCalledWith("long-chat", 101),
@@ -4361,10 +4397,10 @@ describe("ThreadShell", () => {
     );
     await act(async () => {});
 
-    expect(screen.queryByText("Design an app icon")).not.toBeInTheDocument();
+    expect(screen.queryByText("Design an icon")).not.toBeInTheDocument();
     expect(screen.queryByText("Write code")).not.toBeInTheDocument();
 
-    expect(screen.queryByText("Design an app icon")).not.toBeInTheDocument();
+    expect(screen.queryByText("Design an icon")).not.toBeInTheDocument();
     expect(screen.queryByText("Write code")).not.toBeInTheDocument();
   });
 

@@ -19,6 +19,7 @@ from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot.providers.base import LLMResponse, ProviderCallContext
+from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 from nanobot.providers.oauth_model_catalog import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
@@ -212,6 +213,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         default_model: str = "github-copilot/gpt-4.1",
         *,
         provider_name: str = "github_copilot",
+        model_api: ModelAPICapabilities | None = None,
     ):
         self._copilot_access_token: str | None = None
         self._copilot_expires_at: float = 0.0
@@ -227,7 +229,18 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             },
             spec=find_by_name("github_copilot"),
             provider_name=provider_name,
+            model_api=model_api,
         )
+
+    def _model_api_capabilities(
+        self, model: str | None = None, reasoning_effort: str | None = None,
+    ) -> ModelAPICapabilities:
+        if self._preset_model_api is not None:
+            return self._preset_model_api
+        api = cached_github_copilot_model_api(model or self.default_model, self._proxy)
+        if api is not None:
+            return api
+        return super()._model_api_capabilities(model, reasoning_effort)
 
     async def _get_copilot_access_token(self) -> str:
         now = time.time()
@@ -331,17 +344,31 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         )
 
 
+def cached_github_copilot_model_api(
+    model: str, proxy: str | None = None,
+) -> ModelAPICapabilities | None:
+    """Read the account's known model APIs without refreshing the catalog."""
+    catalog = _GITHUB_COPILOT_MODEL_CATALOG.peek(cache_key=_copilot_catalog_cache_key(proxy))
+    row = catalog.find(model) if catalog is not None else None
+    return row.api if row is not None else None
+
+
 def get_github_copilot_model_catalog(
     proxy: str | None = None,
 ) -> OAuthModelCatalogSnapshot:
+    return _GITHUB_COPILOT_MODEL_CATALOG.get(
+        cache_key=_copilot_catalog_cache_key(proxy), proxy=proxy,
+    )
+
+
+def _copilot_catalog_cache_key(proxy: str | None = None) -> str:
     storage = get_storage()
     token = storage.load()
     account_key = _catalog_account_key(getattr(token, "account_id", None))
-    cache_key = (
+    return (
         f"{storage.get_token_path()}\0{account_key}\0"
         f"{_resolve('NANOBOT_COPILOT_BASE_URL', DEFAULT_COPILOT_BASE_URL)}\0{proxy or ''}"
     )
-    return _GITHUB_COPILOT_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy)
 
 
 def invalidate_github_copilot_model_catalog() -> None:
@@ -409,12 +436,13 @@ def _parse_github_copilot_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
         wire_id = _catalog_first_text(row, "id")
         policy = _catalog_mapping(row.get("policy"))
         endpoints = row.get("supported_endpoints")
+        api = _copilot_model_api(wire_id, endpoints)
         if (
             not wire_id
             or wire_id in seen
             or row.get("model_picker_enabled") is not True
             or policy.get("state") == "disabled"
-            or not _copilot_transport_supported(wire_id, endpoints)
+            or (isinstance(endpoints, list) and api is None)
         ):
             continue
         seen.add(wire_id)
@@ -436,20 +464,27 @@ def _parse_github_copilot_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
                     or (fallback.context_window if fallback is not None else None)
                 ),
                 reasoning_efforts=_catalog_reasoning_efforts(supports.get("reasoning_effort")),
+                api=api,
             )
         )
     return tuple(models)
 
 
-def _copilot_transport_supported(wire_id: str, endpoints: object) -> bool:
+def _copilot_model_api(wire_id: str, endpoints: object) -> ModelAPICapabilities | None:
     if not isinstance(endpoints, list):
-        return True
-    supported = cast(list[object], endpoints)
-    if "/chat/completions" in supported:
-        return True
-    model = wire_id.lower()
-    return "/responses" in supported and any(
-        token in model for token in ("gpt-5", "o1", "o3", "o4")
+        return None
+    supported: list[RequestAPI] = []
+    if "/responses" in endpoints:
+        supported.append("responses")
+    if "/chat/completions" in endpoints:
+        supported.append("chat_completions")
+    if not supported:
+        return None
+    spec = find_by_name("github_copilot")
+    assert spec is not None and spec.responses is not None
+    preferred = spec.responses.model_api(wire_id).preferred_api
+    return ModelAPICapabilities(
+        tuple(supported), preferred if preferred in supported else supported[0],
     )
 
 

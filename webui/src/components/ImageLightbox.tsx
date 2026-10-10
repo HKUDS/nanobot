@@ -142,8 +142,8 @@ export function ImageLightbox({
           <DialogPrimitive.Close
             aria-label={t("lightbox.close")}
             className={cn(
-              "absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full",
-              "bg-black/55 text-white/90 hover:bg-black/70 hover:text-white",
+              "touch-target absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full",
+              "bg-black/55 text-white/90 hover:text-white",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70",
               "transition-colors motion-reduce:transition-none",
             )}
@@ -178,7 +178,7 @@ function NavButton({ side, label, onClick }: NavButtonProps) {
       aria-label={label}
       className={cn(
         "absolute top-1/2 -translate-y-1/2 grid h-11 w-11 place-items-center rounded-full",
-        "bg-black/55 text-white/90 hover:bg-black/70 hover:text-white",
+        "bg-black/55 text-white/90 hover:text-white",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70",
         "transition-colors motion-reduce:transition-none",
         side === "left" ? "left-4" : "right-4",

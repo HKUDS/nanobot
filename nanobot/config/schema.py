@@ -7,9 +7,12 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nanobot.config.home import get_default_workspace
+from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
+from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.cli_apps import CliAppsToolConfig
@@ -81,6 +84,37 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class ProviderAPIConfig(Base):
+    """Connection API defaults and custom endpoints' accepted request APIs."""
+
+    supported_apis: tuple[RequestAPI, ...] = Field(min_length=1)
+    preferred_api: RequestAPI | None = None
+
+    @model_validator(mode="after")
+    def _validate_preference(self) -> "ProviderAPIConfig":
+        if self.preferred_api is not None and self.preferred_api not in self.supported_apis:
+            raise ValueError("preferred_api must be one of supported_apis")
+        return self
+
+    def to_capabilities(self) -> ModelAPICapabilities:
+        return ModelAPICapabilities(
+            supported_apis=self.supported_apis,
+            preferred_api=self.preferred_api or self.supported_apis[0],
+        )
+
+
+class ModelAPIConfig(ProviderAPIConfig):
+    """Allowed request APIs and preference for a model preset's endpoint."""
+
+    @model_validator(mode="after")
+    def _validate_api_family(self) -> "ModelAPIConfig":
+        if "anthropic_messages" in self.supported_apis and set(self.supported_apis) != {
+            "anthropic_messages",
+        }:
+            raise ValueError("anthropic_messages cannot be combined with OpenAI request APIs")
+        return self
+
+
 class InlineFallbackConfig(Base):
     """One inline fallback model configuration."""
 
@@ -90,6 +124,7 @@ class InlineFallbackConfig(Base):
     context_window_tokens: int | None = None
     temperature: float | None = None
     reasoning_effort: str | None = None
+    api: ModelAPIConfig | None = None
 
 
 FallbackCandidate = str | InlineFallbackConfig
@@ -104,6 +139,7 @@ class ModelPresetConfig(Base):
     context_window_tokens: int = 200_000
     temperature: float = 0.1
     reasoning_effort: str | None = None
+    api: ModelAPIConfig | None = None
 
     def to_generation_settings(self) -> Any:
         from nanobot.providers.base import GenerationSettings
@@ -117,7 +153,7 @@ class ModelPresetConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.nanobot/workspace"
+    workspace: str = Field(default_factory=get_default_workspace)
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
@@ -139,6 +175,7 @@ class AgentDefaults(Base):
         serialization_alias="toolHintMaxLength",
     )  # Max characters for tool hint display (e.g. "$ cd …/project && npm test")
     reasoning_effort: str | None = None  # low / medium / high / xhigh / max / adaptive / none — LLM thinking effort; None preserves the provider default
+    api: ModelAPIConfig | None = None
     timezone: str = "UTC"  # Effective IANA timezone, e.g. "Asia/Shanghai"
     timezone_mode: Literal["auto", "manual"] = "auto"
     bot_name: str = "nanobot"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
@@ -201,7 +238,7 @@ class ProviderConfig(Base):
     )
     api_key: str | None = Field(default=None, repr=False)
     api_base: str | None = None
-    api_type: Literal["auto", "chat_completions", "responses"] = "auto"  # Request API surface
+    api: ProviderAPIConfig | None = Field(default=None, exclude_if=lambda value: value is None)
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
@@ -310,18 +347,18 @@ class ProvidersConfig(Base):
                     self.model_extra[key] = ProviderConfig.model_validate(value)
         return self
 
-    @model_validator(mode="after")
-    def _validate_api_type_scope(self) -> "ProvidersConfig":
-        for name in self.__class__.model_fields:
-            if name == "openai":
-                continue
-            provider = getattr(self, name, None)
-            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
-                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
-        for provider in (self.model_extra or {}).values():
-            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
-                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_api_type(cls, value: Any) -> Any:
+        # Temporary for two releases; remove with provider_api_migration.py.
+        if not isinstance(value, dict):
+            return value
+        providers = cast(dict[str, Any], value)
+        return {
+            name: migrate_legacy_provider_api(cast(dict[str, Any], provider), provider_name=name)
+            if isinstance(provider, dict) else provider
+            for name, provider in providers.items()
+        }
 
 
 class HeartbeatConfig(Base):
@@ -476,7 +513,7 @@ class Config(BaseSettings):
         return ModelPresetConfig(
             model=d.model, provider=d.provider, max_tokens=d.max_tokens,
             context_window_tokens=d.context_window_tokens,
-            temperature=d.temperature, reasoning_effort=d.reasoning_effort,
+            temperature=d.temperature, reasoning_effort=d.reasoning_effort, api=d.api,
         )
 
     def resolve_preset(self, name: str | None = None) -> ModelPresetConfig:

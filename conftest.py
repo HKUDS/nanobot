@@ -8,6 +8,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 from threading import Thread
+from uuid import uuid4
 
 import certifi
 import pytest
@@ -38,8 +39,9 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
     Session storage lives under the active runtime data root (outside the workspace,
     per ADR-0001), so without redirection tests would write into the real home.
     """
-    runtime_root = tmp_path.parent / f"{tmp_path.name}-runtime-root"
-    legacy_root = tmp_path.parent / f"{tmp_path.name}-legacy-sessions-root"
+    data_root = tmp_path.parent / "session-data" / uuid4().hex
+    runtime_root = data_root / "runtime"
+    legacy_root = data_root / "legacy-sessions"
 
     def runtime_subdir(name: str) -> Path:
         path = runtime_root / name
@@ -55,6 +57,35 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
         lambda: legacy_root,
     )
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_llm_usage_stores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
+    from nanobot import llm_usage
+
+    stores: dict[Path, llm_usage.LLMUsageStore] = {}
+    monkeypatch.setattr(llm_usage, "_STORES", stores)
+    try:
+        yield
+    finally:
+        for store in stores.values():
+            store.close()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_star_prompt_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep WebUI completion events out of the user's invitation state and lock."""
+    webui_dir = tmp_path.parent / "star-prompt-webui" / uuid4().hex
+
+    def get_webui_dir() -> Path:
+        webui_dir.mkdir(parents=True, exist_ok=True)
+        return webui_dir
+
+    monkeypatch.setattr("nanobot.webui.star_prompt.get_webui_dir", get_webui_dir)
 
 
 @pytest.fixture(autouse=True)

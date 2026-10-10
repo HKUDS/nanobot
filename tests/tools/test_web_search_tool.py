@@ -707,7 +707,7 @@ async def test_unknown_provider():
 
 
 @pytest.mark.asyncio
-async def test_default_provider_is_brave(monkeypatch):
+async def test_empty_provider_with_api_key_uses_brave(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "brave" in url
         return _response(json={"web": {"results": []}})

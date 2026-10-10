@@ -486,7 +486,12 @@ async def test_runner_preserves_structured_plugin_success_that_starts_with_error
 
 
 @pytest.mark.asyncio
-async def test_runner_blocks_repeated_external_fetches():
+@pytest.mark.parametrize(("urls", "expected_fetches"), [
+    (["https://example.com"] * 3, 2),
+    ([f"https://example.com/{path}" for path in ("API", "Api", "api")], 3),
+    ([f"https://example.com/?id={value}" for value in ("ABC", "Abc", "abc")], 3),
+])
+async def test_runner_blocks_repeated_external_fetches(urls, expected_fetches):
     provider = MagicMock()
     captured_final_call: list[dict] = []
     call_count = {"n": 0}
@@ -496,7 +501,7 @@ async def test_runner_blocks_repeated_external_fetches():
         if call_count["n"] <= 3:
             return LLMResponse(
                 content="working",
-                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="web_fetch", arguments={"url": "https://example.com"})],
+                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="web_fetch", arguments={"url": urls[call_count['n'] - 1]})],
                 usage=None,
             )
         captured_final_call[:] = messages
@@ -517,9 +522,12 @@ async def test_runner_blocks_repeated_external_fetches():
     ))
 
     assert result.final_content == "done"
-    assert tools.execute.await_count == 2
+    assert tools.execute.await_count == expected_fetches
     blocked_tool_message = [
         msg for msg in captured_final_call
         if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_3"
     ][0]
-    assert "repeated external lookup blocked" in blocked_tool_message["content"]
+    if expected_fetches == 2:
+        assert "repeated external lookup blocked" in blocked_tool_message["content"]
+    else:
+        assert blocked_tool_message["content"] == "page content"

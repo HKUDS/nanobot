@@ -5,6 +5,8 @@ import { NanobotTui } from "./app"
 import type { MessageOptions, SkillCandidate, SlashCommand } from "../client"
 import type { ClipboardImageReader } from "../composer/clipboard-image"
 import { options, client, mount, waitUntil, occurrences } from "./test-support"
+import { LOCAL_COMMANDS } from "./commands"
+import type { CommandMenu } from "../menus/command-menu"
 
 describe("NanobotTui composer", () => {
   let setup: TestRendererSetup | undefined
@@ -123,6 +125,38 @@ describe("NanobotTui composer", () => {
     await waitUntil(() => sent.length === 1)
     expect(sent).toEqual([pasted])
     expect(ui.composer.plainText).toBe("")
+  })
+
+  test("retains the image and text until acceptance and after upload failure", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const transport = client()
+    let rejectSend: (error: Error) => void = () => {}
+    let resolveSend: (turnId: string) => void = () => {}
+    let attempts = 0
+    transport.sendAttachments = () => {
+      attempts++
+      return new Promise<string>((resolve, reject) => { resolveSend = resolve; rejectSend = reject })
+    }
+    const app = NanobotTui.mount(setup.renderer, options, transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }), undefined,
+      { read: async () => ({ mimeType: "image/png", dataUrl: "data:image/png;base64,eA==" }), dispose: async () => {} })
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; draft: { imageCount: number }; status: { plainText: string } }
+    await waitUntil(() => ui.ready)
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.draft.imageCount === 1)
+    ui.composer.submit()
+    await waitUntil(() => attempts === 1)
+    expect(ui.composer.plainText).toContain("[Image #1]")
+    rejectSend(new Error("Upload failed (401)"))
+    await waitUntil(() => ui.status.plainText.includes("401"))
+    expect(ui.draft.imageCount).toBe(1)
+    expect(ui.composer.plainText).toContain("[Image #1]")
+    ui.composer.submit()
+    await waitUntil(() => attempts === 2)
+    resolveSend("accepted-image")
+    await waitUntil(() => ui.composer.plainText === "")
+    expect(ui.draft.imageCount).toBe(0)
   })
 
   test("pastes clipboard images into removable placeholders and sends their data", async () => {
@@ -371,7 +405,7 @@ describe("NanobotTui composer", () => {
     setup.mockInput.pressKey("v", { ctrl: true })
     await waitUntil(() => ui.composer.plainText === "/model [Image #1] ")
     ui.composer.submit()
-    await waitUntil(() => ui.status.plainText.includes("Images cannot be used with commands"))
+    await waitUntil(() => ui.status.plainText.includes("Remove the image before running a command."))
 
     expect(sent).toEqual([])
     expect(ui.composer.plainText).toBe("/model [Image #1] ")
@@ -485,7 +519,7 @@ describe("NanobotTui composer", () => {
     ui.composer.setText("first")
     ui.composer.submit()
     await waitUntil(() => sent.length === 1)
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
 
     ui.composer.setText("one more detail")
     await setup.flush()
@@ -495,7 +529,7 @@ describe("NanobotTui composer", () => {
     ui.composer.submit()
     await waitUntil(() => sent.length === 2)
     expect(ui.status.plainText).not.toContain("Steering")
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
     expect(sentOptions[1]).toEqual({
       cliApps: [{ name: "github" }],
       mcpPresets: [],
@@ -677,6 +711,37 @@ describe("NanobotTui composer", () => {
 
     expect(ui.composer.plainText).toBe("/history ")
     expect(ui.commandMenu.visible).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  test.each(["enter", "tab"])("completes /se to /sessions with %s", async (key) => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as {
+      ready: boolean
+      composer: TextareaRenderable
+      commandMenu: CommandMenu
+    }
+    await waitUntil(() => ui.ready)
+    ui.commandMenu.setCommands([{
+      command: "/model",
+      title: "Switch model preset",
+      description: "Show or switch the active model preset.",
+      argHint: "[preset]",
+      lifecycle: "side_channel",
+      acceptsArgs: true,
+    }], LOCAL_COMMANDS)
+
+    await setup.mockInput.typeText("/se")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("› /sessions")
+    if (key === "enter") setup.mockInput.pressEnter()
+    else setup.mockInput.pressTab()
+    await waitUntil(() => ui.composer.plainText !== "/se")
+
+    expect(ui.composer.plainText).toBe("/sessions")
     expect(sent).toEqual([])
   })
 

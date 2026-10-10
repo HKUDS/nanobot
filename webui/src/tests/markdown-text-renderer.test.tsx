@@ -586,6 +586,63 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByRole("link", { name: "links" })).not.toHaveAttribute("node");
   });
 
+  it("keeps CJK prose outside a bold bare URL through stream completion", () => {
+    const url = "https://github.com/HKUDS/nanobot";
+    const source = `实际跳转到 **${url}**，不是推文页面。`;
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    const assertLink = () => {
+      const link = screen.getByRole("link", { name: url });
+      expect(link).toHaveAttribute("href", url);
+      expect(link.closest("strong")).not.toBeNull();
+      expect(container.textContent).toBe(`实际跳转到 ${url}，不是推文页面。`);
+    };
+    assertLink();
+
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    assertLink();
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    assertLink();
+  });
+
+  it.each([
+    ["https://example.com/中文?q=测试", "，后续说明。"],
+    ["https://example.com/a_(b)?x=1&y=2#section", "。后续说明"],
+    ["www.example.com/path", "；后续说明"],
+    ["https://例子.测试/路径", "，后续说明"],
+    ["http://localhost:7891/path", "，后续说明"],
+    ["https://example.com/foo*bar*baz", "，后续说明"],
+    ["https://example.com/escaped%EF%BC%8Cpath", "，后续说明"],
+  ])("bounds bare URL %s before CJK punctuation", (url, following) => {
+    const { container } = render(<MarkdownTextRenderer>{url + following}</MarkdownTextRenderer>);
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute(
+      "href", encodeURI(url.startsWith("www.") ? `http://${url}` : url).replace(/%25/g, "%"),
+    );
+    expect(container.textContent).toBe(url + following);
+  });
+
+  it("preserves explicit URL punctuation and literal URLs in code and escapes", () => {
+    const url = "https://example.com/中文，测试";
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {`[Explicit](${url}) <${url}>\n\n\`**${url}**\`\n\n\`\`\`text\n**${url}**\n\`\`\`\n\n\\*\\*${url}\\*\\*`}
+      </MarkdownTextRenderer>,
+    );
+    expect(screen.getByRole("link", { name: "Explicit" })).toHaveAttribute("href", encodeURI(url));
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", encodeURI(url));
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container.querySelector("code")?.textContent).toBe(`**${url}**`);
+  });
+
+  it("keeps GFM link boundaries before a partial Markdown resource containing CJK text", () => {
+    const url = "https://example.com/path";
+    const source = `${url}](中文，后续说明。`;
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(container.textContent).toBe(source);
+  });
+
   it("renders bold CJK text when more CJK text follows immediately", () => {
     render(
       <MarkdownTextRenderer streaming>
@@ -599,6 +656,53 @@ describe("MarkdownTextRenderer", () => {
       screen.getByText("结论：目前看风险可控，没有发现常驻或可疑安装。").tagName,
     ).toBe("STRONG");
     expect(screen.getByText(/如果你之后不想再用/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["**边界说明：**issue 只有截图，没有原始消息。", "issue 只有截图，没有原始消息。"],
+    ["**边界说明： **issue 只有截图，没有原始消息。", " issue 只有截图，没有原始消息。"],
+  ])("renders CJK bold labels before Latin text through stream completion: %s", (source, following) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    expect(container.textContent).toBe(`边界说明：${following}`);
+
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    expect(container.textContent).toBe(`边界说明：${following}`);
+  });
+
+  it("keeps literal bold markers in code and escaped text", () => {
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {"`**边界说明：**issue`\n\n```text\n**边界说明： **issue\n```\n\n\\*\\*边界说明：\\*\\*issue"}
+      </MarkdownTextRenderer>,
+    );
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container).toHaveTextContent("**边界说明：**issue");
+    expect(container).toHaveTextContent("**边界说明： **issue");
+    expect(container.querySelector("p:last-child")?.textContent).toBe("**边界说明：**issue");
+  });
+
+  it.each([
+    ["**结论：**继续 &amp; 其他说明。", "结论：继续 & 其他说明。"],
+    ["**边界说明：**issue &amp; details", "边界说明：issue & details"],
+    ["先写转义标点 \\#，然后 **结论：**继续说明。", "先写转义标点 #，然后 结论：继续说明。"],
+    ["\\*\\*字面符号：\\*\\*issue 和 **结论：**继续说明。", "**字面符号：**issue 和 结论：继续说明。"],
+    ["&#42;&#42;字面符号：&#42;&#42;issue 和 **结论：**继续说明。", "**字面符号：**issue 和 结论：继续说明。"],
+    ["- 第一行\n  **结论：**继续 &amp; 其他说明。", "第一行\n结论：继续 & 其他说明。"],
+  ])("recovers CJK bold labels without reinterpreting decoded text: %s", (source, text) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    expect(container.textContent?.trim()).toBe(text);
+    rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    expect(container.textContent?.trim()).toBe(text);
   });
 
   it("adds line numbers to multiline fenced code without changing inline code", () => {

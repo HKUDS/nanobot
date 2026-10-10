@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from types import MappingProxyType
@@ -9,6 +10,7 @@ from typing import cast
 
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
 from nanobot.utils.llm_runtime import LLMRuntime, runtime_from_provider_snapshot
 
@@ -32,6 +34,7 @@ class ModelRuntimeResolver:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
     ) -> None:
         self._runtime = initial_runtime
+        self._providers: set[LLMProvider] = {initial_runtime.provider}
         self._model_presets = dict(model_presets or {})
         self._preset_catalog_loader = preset_catalog_loader
         self._preset_catalog_refresh_required = False
@@ -98,7 +101,16 @@ class ModelRuntimeResolver:
         snapshot: ProviderSnapshot,
     ) -> LLMRuntime:
         """Resolve a factory snapshot without changing the selected default."""
+        self._providers.add(snapshot.provider)
         return runtime_from_provider_snapshot(snapshot)
+
+    async def aclose(self) -> None:
+        """Close all admitted providers, including runtimes replaced by configuration reloads."""
+        providers, self._providers = self._providers, set()
+        results = await asyncio.gather(*(provider.aclose() for provider in providers), return_exceptions=True)
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            raise BaseExceptionGroup("failed to close model providers", errors)
 
     def adopt_snapshot(
         self,

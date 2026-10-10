@@ -1,10 +1,11 @@
 import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
+import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
+import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticModelAPI";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import {
-  ChevronDown,
   GripVertical,
   ListOrdered,
   Loader2,
@@ -32,6 +33,7 @@ import {
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
 import { Button } from "@/components/ui/button";
+import { ControlChevron } from "@/components/ui/control-chevron";
 import {
   Dialog,
   DialogContent,
@@ -42,7 +44,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { SettingsPayload } from "@/lib/types";
+import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
 
 export interface AgentSettingsDraft {
   model: string;
@@ -52,6 +54,7 @@ export interface AgentSettingsDraft {
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  api: ModelAPIConfig | null;
   timezone: string;
   toolHintMaxLength: number;
 }
@@ -92,6 +95,7 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   contextWindowTokens: 200_000,
   temperature: 0.1,
   reasoningEffort: "",
+  api: null,
   timezone: "UTC",
   toolHintMaxLength: 40,
 };
@@ -115,6 +119,7 @@ export function agentDraftFromPayload(
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
+    api: activePreset ? activePreset.api ?? null : payload.agent.api ?? null,
     timezone: payload.agent.timezone,
     toolHintMaxLength: payload.agent.tool_hint_max_length,
   };
@@ -233,11 +238,20 @@ export function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const resolvedAutomaticAPI = useAutomaticModelAPI({
+    token,
+    provider: form.provider,
+    model: form.model,
+    reasoningEffort: form.reasoningEffort,
+    providers: settings.providers,
+    supported: settings.model_api_resolution_supported === true,
+    editorOpen: editorOpen && advancedOpen,
+  });
   const editorTriggerRef = useRef<HTMLElement | null>(null);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
   const suggestedPresetNameRef = useRef<string | null>(null);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const advancedId = useId();
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
   const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
@@ -337,6 +351,7 @@ export function ModelsSettings({
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
+      api: preset.api ?? null,
     }));
     setEditorRowKey(rowKey);
     setEditorOpen(true);
@@ -446,6 +461,7 @@ export function ModelsSettings({
               ...prev,
               provider,
               model: provider === prev.provider ? prev.model : "",
+              api: provider === prev.provider ? prev.api : null,
               modelPreset: clearSuggestedName ? "" : prev.modelPreset,
             }));
           }}
@@ -495,6 +511,7 @@ export function ModelsSettings({
             setForm((prev) => ({
               ...prev,
               model,
+              api: model === prev.model ? prev.api : null,
               modelPreset: canSuggestName ? suggestion : prev.modelPreset,
             }));
           }}
@@ -505,40 +522,51 @@ export function ModelsSettings({
         aria-expanded={advancedOpen}
         aria-controls={advancedId}
         onClick={() => setAdvancedOpen((value) => !value)}
-        className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors settings-hover sm:px-5"
+        className="settings-disclosure-row w-full text-left transition-colors settings-hover"
       >
-        <span>
+        <span className="min-w-0">
           <span className="block text-[14px] font-medium text-foreground">
             {tx("settings.models.advancedOptions", "Advanced options")}
           </span>
-          <span className="mt-0.5 block text-[12px] text-muted-foreground">
-            {tx(
-              "settings.models.advancedSummary",
-              "Context {{context}} · Max {{max}} tokens",
-              {
-                context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
-                max: formatContextWindow(form.maxTokens),
-              },
-            )}
+          <span className="mt-0.5 flex flex-wrap gap-x-3 text-[12px] tabular-nums text-muted-foreground">
+            <span>{tx("settings.models.contextSummary", "Context {{context}}", {
+              context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
+            })}</span>{" "}
+            <span>{tx("settings.models.outputSummary", "Max {{max}} tokens", {
+              max: formatContextWindow(form.maxTokens),
+            })}</span>
           </span>
         </span>
-        <ChevronDown
-          className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
-            advancedOpen && "rotate-180",
-          )}
-          aria-hidden
-        />
+        <span className="settings-control">
+          <span className="control-layout justify-end border-transparent">
+            <ControlChevron
+              className={cn(
+                "transition-transform duration-200 motion-reduce:transition-none",
+                advancedOpen && "rotate-180",
+              )}
+            />
+          </span>
+        </span>
       </button>
       <DisclosureContent id={advancedId} open={advancedOpen}>
-        <div className="bg-muted/12 px-4 py-4 sm:px-5">
-          <ModelAdvancedFields
-            maxTokens={form.maxTokens}
-            contextWindowTokens={form.contextWindowTokens}
-            temperature={form.temperature}
-            reasoningEffort={form.reasoningEffort}
-            onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
+        <div className="bg-muted/12">
+          <ModelAPIControl
+            provider={selectedProvider ?? settings.providers.find(
+              (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
+            )}
+            automaticAPI={resolvedAutomaticAPI?.api}
+            value={form.api}
+            onChange={(api) => setForm((prev) => ({ ...prev, api }))}
           />
+          <div className="px-4 py-4 sm:px-5">
+            <ModelAdvancedFields
+              maxTokens={form.maxTokens}
+              contextWindowTokens={form.contextWindowTokens}
+              temperature={form.temperature}
+              reasoningEffort={form.reasoningEffort}
+              onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
+            />
+          </div>
         </div>
       </DisclosureContent>
       <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">

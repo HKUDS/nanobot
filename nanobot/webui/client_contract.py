@@ -13,6 +13,11 @@ from nanobot import __version__
 
 WEBUI_PROTOCOL = 1
 CORE_CAPABILITY = "webui.core.v1"
+SUBAGENT_CAPABILITY = "webui.subagents.v1"
+SUBAGENT_EVENTS_CAPABILITY = "webui.subagents.events.v1"
+SUBAGENT_HISTORY_CAPABILITY = "webui.subagents.history.v1"
+AUTOMATION_CHAT_CAPABILITY = "webui.automation-chat.v1"
+BINARY_ATTACHMENTS_CAPABILITY = "webui.attachments.binary.v1"
 
 
 class Compatibility(TypedDict):
@@ -26,7 +31,11 @@ def webui_contract() -> dict[str, object]:
         "version": __version__,
         "min_protocol": WEBUI_PROTOCOL,
         "max_protocol": WEBUI_PROTOCOL,
-        "capabilities": [CORE_CAPABILITY],
+        "capabilities": [
+            CORE_CAPABILITY, SUBAGENT_CAPABILITY, SUBAGENT_EVENTS_CAPABILITY,
+            SUBAGENT_HISTORY_CAPABILITY, AUTOMATION_CHAT_CAPABILITY,
+            BINARY_ATTACHMENTS_CAPABILITY,
+        ],
     }
 
 

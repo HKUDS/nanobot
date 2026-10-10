@@ -12,8 +12,14 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import ToolContext, current_request_session_key
+from nanobot.agent.tools.context import (
+    ToolContext,
+    current_request_session_key,
+    tool_log_content_allowed,
+)
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -141,8 +147,24 @@ class _ExecSession:
         self._stderr = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
         self._lock = asyncio.Lock()
         self._timed_out = False
+        self._kill_task: asyncio.Task[None] | None = None
         self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, self._stdout))
         self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, self._stderr))
+        self._timeout_task = asyncio.create_task(self._watch_timeout()) if timeout else None
+
+    async def _watch_timeout(self) -> None:
+        """Enforce the hard deadline even when nobody polls this session."""
+        try:
+            await asyncio.wait_for(
+                self.process.wait(), timeout=max(0.0, self.deadline - time.monotonic()),
+            )
+        except asyncio.TimeoutError:
+            if self.process.returncode is None:
+                if self._kill_task is None:
+                    self._timed_out = True
+                # The kill callback logs failures; leave the session available for retry.
+                with suppress(Exception):
+                    await self.kill()
 
     async def _read_stream(
         self,
@@ -203,8 +225,13 @@ class _ExecSession:
                     await asyncio.wait_for(self.process.wait(), timeout=wait_s)
 
         if self.process.returncode is None and time.monotonic() >= self.deadline:
-            self._timed_out = True
+            if self._kill_task is None:
+                self._timed_out = True
             await self.kill()
+
+        if self._kill_task is not None:
+            # Finish termination before releasing process-tree ownership or returning output.
+            await asyncio.shield(self._kill_task)
 
         if self.process.returncode is not None:
             with suppress(asyncio.TimeoutError):
@@ -243,6 +270,24 @@ class _ExecSession:
         )
 
     async def kill(self) -> None:
+        # A cancelled poll must not cancel the session's process-tree cleanup.
+        if self._kill_task is None or (
+            self._kill_task.done() and self.process.returncode is None
+        ):
+            self._kill_task = asyncio.create_task(self._kill())
+            self._kill_task.add_done_callback(self._on_kill_done)
+        await asyncio.shield(self._kill_task)
+
+    def _on_kill_done(self, task: asyncio.Task[None]) -> None:
+        error = None if task.cancelled() else task.exception()
+        if error is not None:
+            logger.opt(exception=error if tool_log_content_allowed() else False).error(
+                "Failed to terminate exec session {}", self.session_id,
+            )
+        if (task.cancelled() or error is not None) and self._kill_task is task:
+            self._kill_task = None
+
+    async def _kill(self) -> None:
         from nanobot.agent.tools.shell import ExecTool
 
         try:

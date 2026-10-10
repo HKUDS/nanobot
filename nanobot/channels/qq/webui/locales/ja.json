@@ -12,7 +12,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "Open ID（カンマ区切り）"
       },
       "msgFormat": {
@@ -23,19 +23,19 @@
         }
       },
       "ackMessage": {
-        "label": "確認メッセージ"
+        "label": "受信確認のメッセージ"
       },
       "mediaDir": {
         "label": "メディアディレクトリ"
       },
       "downloadChunkSize": {
-        "label": "ダウンロードチャンクサイズ"
+        "label": "チャンクのサイズ（バイト）"
       },
       "downloadMaxBytes": {
-        "label": "最大ダウンロードサイズ"
+        "label": "ダウンロードの上限（バイト）"
       },
       "showCompactionNotices": {
-        "label": "コンテキスト圧縮通知",
+        "label": "圧縮の通知",
         "choices": {
           "true": "オン",
           "false": "オフ"

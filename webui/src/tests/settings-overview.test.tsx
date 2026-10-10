@@ -1,5 +1,9 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { HostNavigationContext } from "@/components/remote/HostSwitcher";
+import { AboutSettings } from "@/components/settings/overview/OverviewSettings";
+import { NanobotClient } from "@/lib/nanobot-client";
+import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
@@ -10,6 +14,66 @@ describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
 
 
+  it("links the host's short commit beside its version", () => {
+    const commit = "abcdef12".repeat(5);
+    renderSettingsView({
+      initialSection: "about",
+      initialSettings: { ...settingsPayload(), version: { current: "0.3.5", commit } },
+    });
+    expect(screen.getByText("v0.3.5")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "abcdef1" });
+    expect(link).toHaveAttribute("href", `https://github.com/HKUDS/nanobot/commit/${commit}`);
+    expect(link).toHaveAttribute("title", commit);
+    const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(reportUrl.origin + reportUrl.pathname).toBe("https://github.com/HKUDS/nanobot/issues/new");
+    expect(reportUrl.searchParams.get("template")).toBe("bug_report.yml");
+    expect(reportUrl.searchParams.get("version")).toBe(`0.3.5 (commit ${commit})`);
+  });
+
+  it.each([undefined, null])("keeps About usable when the host reports no commit (%s)", (commit) => {
+    renderSettingsView({
+      initialSection: "about",
+      initialSettings: { ...settingsPayload(), version: { current: "0.3.5", commit } },
+    });
+    expect(screen.getByText("v0.3.5")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+    expect(document.querySelector('a[href*="/commit/"]')).toBeNull();
+    const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(reportUrl.searchParams.get("version")).toBe("0.3.5");
+    expect(reportUrl.searchParams.get("python_version")).toBeNull();
+    expect(reportUrl.searchParams.get("os")).toBeNull();
+    expect(reportUrl.searchParams.get("channel")).toBe("WebSocket");
+    expect(reportUrl.searchParams.get("llm_provider")).toBe("openai");
+    expect(reportUrl.searchParams.get("model")).toBe("openai/gpt-4o");
+    expect(reportUrl.searchParams.get("additional")).toBeNull();
+  });
+
+  it("prefills the remote gateway environment separately from the browser", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Browser on Windows");
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      environment: { python_version: "3.14.2", os: "Darwin", os_version: "24.4.0", architecture: "arm64" },
+    };
+    render(
+      <ClientProvider client={new NanobotClient({ url: "ws://localhost:8765" })} token="tok">
+        <HostNavigationContext.Provider value={{ kind: "embedded", name: "Remote", hostname: "private-host", open: vi.fn() }}>
+          <AboutSettings settings={payload} />
+        </HostNavigationContext.Provider>
+      </ClientProvider>,
+    );
+    const url = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(url.searchParams.get("python_version")).toBe("3.14.2");
+    expect(url.searchParams.get("os")).toBe("macOS 24.4.0 (arm64)");
+    expect(url.searchParams.get("channel")).toBe("WebSocket");
+    expect(url.searchParams.get("browser")).toBe("Browser on Windows");
+    expect(url.searchParams.get("connection")).toBe("Remote host");
+    expect(url.searchParams.get("model")).toBe("openai/gpt-4o");
+    expect(url.searchParams.get("llm_provider")).toBe("openai");
+    expect(url.searchParams.get("additional")).toBeNull();
+    expect(url.href).not.toContain(encodeURIComponent(payload.runtime.config_path));
+    expect(url.href).not.toContain("private-host");
+  });
+
   it("persists the file edit display local preference", async () => {
     renderSettingsView({
       initialSection: "appearance",
@@ -17,7 +81,7 @@ describe("Settings overview and appearance", () => {
       showSidebar: true,
     });
 
-    expect(screen.getByText("File edit display")).toBeInTheDocument();
+    expect(screen.getByText("Edit preview")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Diff" }));
 
     await waitFor(() => {
@@ -86,7 +150,7 @@ describe("Settings overview and appearance", () => {
 
     expect(await screen.findByText("No apps available.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
-    expect(await screen.findByText("Add MCP server")).toBeInTheDocument();
+    expect(await screen.findByText("Add MCP")).toBeInTheDocument();
   });
 
   it("shows token activity on the overview", async () => {

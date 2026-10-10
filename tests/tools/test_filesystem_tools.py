@@ -10,6 +10,28 @@ from nanobot.agent.tools.filesystem import (
     WriteFileTool,
 )
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("operation", ["write", "edit_new", "edit_empty"])
+async def test_file_creation_preserves_provided_newlines(tmp_path, newline, operation):
+    target = tmp_path / "nested" / "script.py"
+    content = f"first = 1{newline}second = 2{newline}"
+    if operation == "write":
+        result = await WriteFileTool(workspace=tmp_path).execute(
+            path=str(target), content=content,
+        )
+    else:
+        if operation == "edit_empty":
+            target.parent.mkdir()
+            target.touch()
+        result = await EditFileTool(workspace=tmp_path).execute(
+            path=str(target), old_text="", new_text=content,
+        )
+
+    assert "Error" not in result
+    assert target.read_bytes() == content.encode("utf-8")
+
 # ---------------------------------------------------------------------------
 # ReadFileTool
 # ---------------------------------------------------------------------------
@@ -304,6 +326,24 @@ class TestListDirTool:
         # Ignored dirs should not appear
         assert ".git" not in result
         assert "node_modules" not in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("relative_root", ["build", "build/project"])
+    async def test_recursive_ignores_only_descendants(self, tool, tmp_path, relative_root):
+        root = tmp_path / relative_root
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "main.py").write_text("pass")
+        (root / "README.md").write_text("hi")
+        (root / ".git").mkdir()
+        (root / ".git" / "config").write_text("ignored")
+        (root / "src" / "node_modules").mkdir()
+        (root / "src" / "node_modules" / "package.json").write_text("{}")
+
+        result = await tool.execute(path=str(root), recursive=True)
+
+        assert set(result.replace("\\", "/").splitlines()) == {
+            "README.md", "src/", "src/main.py",
+        }
 
     @pytest.mark.asyncio
     async def test_max_entries_truncation(self, tool, tmp_path):

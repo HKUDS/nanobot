@@ -579,7 +579,7 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown content")
             fp = self._resolve_write(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8")
+            fp.write_text(content, encoding="utf-8", newline="")
             self._file_states.record_write(fp)
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
@@ -651,8 +651,9 @@ def _leading_ws(line: str) -> str:
 
 def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
     """Preserve the outer indentation from the actual matched block."""
-    old_lines = old_text.split("\n")
-    actual_lines = actual_text.split("\n")
+    # A terminal newline does not add a logical line, even at an unterminated EOF.
+    old_lines = old_text.removesuffix("\n").split("\n")
+    actual_lines = actual_text.removesuffix("\n").split("\n")
     if len(old_lines) != len(actual_lines):
         return new_text
 
@@ -756,7 +757,11 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
 
         start = offsets[i]
         end = offsets[i + window_size]
-        if content_lines_keepends[i + window_size - 1].endswith("\n"):
+        # Include the line terminator only when the requested match includes it.
+        if (
+            not old_text.endswith("\n")
+            and content_lines_keepends[i + window_size - 1].endswith("\n")
+        ):
             end -= 1
         matches.append(
             _MatchSpan(
@@ -894,9 +899,13 @@ class EditFileTool(_FsTool):
         )
 
     @staticmethod
-    def _strip_trailing_ws(text: str) -> str:
-        """Strip trailing whitespace from each line."""
-        return "\n".join(line.rstrip() for line in text.split("\n"))
+    def _strip_trailing_ws(text: str, *, preserve_last_line: bool = False) -> str:
+        """Strip line-ending whitespace, except a final fragment that continues inline."""
+        lines = text.split("\n")
+        return "\n".join(
+            line if preserve_last_line and i == len(lines) - 1 else line.rstrip()
+            for i, line in enumerate(lines)
+        )
 
     def _format_summary(
         self, resolved_path: Path, before: str, after: str, *,
@@ -939,7 +948,7 @@ class EditFileTool(_FsTool):
             if not file_exists:
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
-                    fp.write_text(new_text, encoding="utf-8")
+                    fp.write_text(new_text, encoding="utf-8", newline="")
                     self._file_states.record_write(fp)
                     return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
                 return self._file_not_found_msg(path, fp)
@@ -958,7 +967,7 @@ class EditFileTool(_FsTool):
                 content = raw.decode("utf-8")
                 if content.strip():
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
-                fp.write_text(new_text, encoding="utf-8")
+                fp.write_text(new_text, encoding="utf-8", newline="")
                 self._file_states.record_write(fp)
                 return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
 
@@ -996,10 +1005,6 @@ class EditFileTool(_FsTool):
 
             norm_new = new_text.replace("\r\n", "\n")
 
-            # Trailing whitespace stripping (skip markdown to preserve double-space line breaks)
-            if fp.suffix.lower() not in self._MARKDOWN_EXTS:
-                norm_new = self._strip_trailing_ws(norm_new)
-
             if replace_all:
                 selected = matches
             elif occurrence is not None:
@@ -1030,7 +1035,18 @@ class EditFileTool(_FsTool):
                 )
             new_content = content
             for match in reversed(selected):
-                replacement = _preserve_quote_style(norm_old, match.text, norm_new)
+                replacement = norm_new
+                # Preserve separator whitespace when the remaining line has content.
+                # Markdown keeps all trailing whitespace for hard line breaks.
+                if fp.suffix.lower() not in self._MARKDOWN_EXTS:
+                    line_end = content.find("\n", match.end)
+                    if line_end == -1:
+                        line_end = len(content)
+                    replacement = self._strip_trailing_ws(
+                        replacement,
+                        preserve_last_line=bool(content[match.end:line_end].strip()),
+                    )
+                replacement = _preserve_quote_style(norm_old, match.text, replacement)
                 replacement = _reindent_like_match(norm_old, match.text, replacement)
 
                 # Only consume the trailing newline when deleting complete lines;
@@ -1158,11 +1174,11 @@ class ListDirTool(_FsTool):
 
             if recursive:
                 for item in sorted(dp.rglob("*")):
-                    if any(p in self._IGNORE_DIRS for p in item.parts):
+                    rel = item.relative_to(dp)
+                    if any(p in self._IGNORE_DIRS for p in rel.parts):
                         continue
                     total += 1
                     if len(items) < cap:
-                        rel = item.relative_to(dp)
                         items.append(f"{rel}/" if item.is_dir() else str(rel))
             else:
                 for item in sorted(dp.iterdir()):

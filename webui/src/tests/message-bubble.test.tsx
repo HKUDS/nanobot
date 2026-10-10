@@ -540,7 +540,7 @@ describe("MessageBubble", () => {
     );
 
     menuActions(container);
-    fireEvent.click(screen.getByRole("button", { name: "Fork" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat from here" }));
     expect(onForkFromHere).toHaveBeenCalledTimes(1);
   });
 
@@ -575,7 +575,7 @@ describe("MessageBubble", () => {
     />);
     const actions = menuActions(container);
     const copy = screen.getByRole("button", { name: "Copy" });
-    const fork = screen.getByRole("button", { name: "Fork" });
+    const fork = screen.getByRole("button", { name: "New chat from here" });
     const metadata = actions.querySelector("[data-message-block-metadata]")!;
     expect(actions.querySelector("[data-message-block-toolbar]")).toContainElement(copy);
     expect(actions.querySelector("[data-message-block-toolbar]")).toContainElement(fork);
@@ -690,7 +690,7 @@ describe("MessageBubble", () => {
     const timestamp = document.querySelector("[data-message-timestamp]")!;
     const automation = document.querySelector("[data-automation-trigger]")!;
     expect(timestamp).toHaveTextContent(formatMessageEndTime(completedAt));
-    expect(automation).toHaveTextContent("Triggered automatically · drink water");
+    expect(automation).toHaveTextContent("Triggered automatically drink water");
     expect(timestamp.compareDocumentPosition(automation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

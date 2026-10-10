@@ -44,7 +44,7 @@
         "label": "Độ trễ kết nối lại"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "Độ trễ kết nối lại tối đa"
+        "label": "Giới hạn độ trễ kết nối lại (ms)"
       },
       "socketConnectTimeoutMs": {
         "label": "Hết thời gian kết nối"
@@ -56,16 +56,16 @@
         "label": "Hết thời gian xem"
       },
       "watchLimit": {
-        "label": "Kích thước lô đồng hồ"
+        "label": "Số lượng mỗi đợt"
       },
       "retryDelayMs": {
         "label": "Trì hoãn thử lại"
       },
       "maxRetryAttempts": {
-        "label": "Số lần thử lại tối đa"
+        "label": "Giới hạn thử lại"
       },
       "mention_requireInGroups": {
-        "label": "Yêu cầu đề cập trong nhóm",
+        "label": "Yêu cầu nhắc trong nhóm",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
@@ -75,7 +75,7 @@
         "label": "Quy tắc nhóm (JSON)"
       },
       "replyDelayMode": {
-        "label": "Chế độ trì hoãn trả lời"
+        "label": "Cách trì hoãn trả lời"
       },
       "replyDelayMs": {
         "label": "Trả lời chậm trễ"

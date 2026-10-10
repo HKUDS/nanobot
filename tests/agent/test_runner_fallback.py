@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
@@ -321,7 +321,7 @@ def test_factory_injects_configured_identity_into_primary_and_fallback_leaves() 
 
 
 def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
-    from nanobot.config.schema import Config
+    from nanobot.config.schema import Config, InlineFallbackConfig
     from nanobot.providers.factory import provider_signature
 
     config = Config.model_validate({
@@ -349,7 +349,13 @@ def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
     signature = provider_signature(config)
     fallback_signatures = signature[-1]
 
-    assert fallback_signatures[0][13] is None
+    config.model_presets["fast"].reasoning_effort = "low"
+    assert provider_signature(config)[-1] == fallback_signatures
+
+    config.agents.defaults.fallback_models = [
+        InlineFallbackConfig(provider="openai", model="gpt-4.1", reasoning_effort="low")
+    ]
+    assert provider_signature(config)[-1] != fallback_signatures
 
 
 # -- FallbackProvider tests --
@@ -464,11 +470,13 @@ class TestFallbackWhenPrimaryRaises:
         )
 
         retry = fb.chat_stream_with_retry if stream else fb.chat_with_retry
-        result = await retry(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await retry(messages=[{"role": "user", "content": "hi"}], model="primary-model")
 
         assert result.content == "fallback ok"
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
+        assert sleep.await_args_list == [call(1), call(2), call(4)]
 
     @pytest.mark.asyncio
     async def test_authentication_exception_message_is_classified(self) -> None:
@@ -911,13 +919,15 @@ class TestFallbackOnPrimaryError:
             fallback_model_observer=_observe,
         )
 
-        result = await fb.chat_with_retry(
-            messages=[{"role": "user", "content": "hi"}],
-            model="primary-model",
-        )
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await fb.chat_with_retry(
+                messages=[{"role": "user", "content": "hi"}],
+                model="primary-model",
+            )
 
         assert result.content == "fallback ok"
         assert fallback_models == ["fallback-b"]
+        assert sleep.await_args_list == [call(1), call(2), call(4)]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("provider_name", "status", "code", "kind", "expected"), [
@@ -1607,7 +1617,7 @@ class TestFailoverOnAuthenticationError:
         factory.assert_called_once_with(fallback_preset)
 
 
-class TestNoFallbackOnNonRetryableError:
+class TestFallbackErrorClassification:
     @pytest.mark.asyncio
     async def test_bad_request(self) -> None:
         primary = _FakeProvider(
@@ -1656,7 +1666,7 @@ class TestNoFallbackOnNonRetryableError:
         factory.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_timeout(self) -> None:
+    async def test_timeout_triggers_fallback(self) -> None:
         primary = _FakeProvider(
             "primary",
             _make_response("timed out", finish_reason="error", error_kind="timeout"),
@@ -1848,6 +1858,22 @@ class TestGetDefaultModel:
             provider_factory=MagicMock(),
         )
         assert fb.get_default_model() == "primary/model"
+
+
+async def test_fallback_closes_temporary_provider_and_owns_primary_shutdown() -> None:
+    primary = _FakeProvider("primary", _error_response())
+    fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+    primary.aclose = AsyncMock()
+    fallback.aclose = AsyncMock()
+    wrapper = FallbackProvider(primary, [_fallback("backup")], MagicMock(return_value=fallback))
+
+    result = await wrapper.chat(messages=[{"role": "user", "content": "hi"}])
+
+    assert result.content == "fallback ok"
+    fallback.aclose.assert_awaited_once()
+    primary.aclose.assert_not_awaited()
+    await wrapper.aclose()
+    primary.aclose.assert_awaited_once()
 
 
 class TestCircuitBreaker:

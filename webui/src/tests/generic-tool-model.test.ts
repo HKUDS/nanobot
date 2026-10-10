@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { redactActivityText } from "@/components/thread/activity/activity-text";
 import {
   describeGenericToolRun,
+  canGroupGenericToolRuns,
   parseGenericToolTrace,
   type GenericToolStatus,
 } from "@/components/thread/activity/generic-tool-model";
@@ -39,7 +40,12 @@ describe("generic tool activity semantics", () => {
     ['read_file({"path":"docs/guide.md"})', "Read file", "docs/guide.md"],
     ['memory_search({"query":"launch date"})', "Searched memory", "“launch date”"],
     ['generate_image({"prompt":"private launch art"})', "Generated image", ""],
-    ['spawn({"label":"Research competitors","task":"private task"})', "Delegated task", "Research competitors"],
+    ['spawn({"label":"Research competitors","task":"private task"})', "Subtask created", "Research competitors"],
+    ['subagent("create")', "Subtask created", ""],
+    ['subagent({"action":"create","label":"Research competitors","task":"private task"})', "Subtask created", "Research competitors"],
+    ['subagent("check")', "Subtask status retrieved", ""],
+    ['subagent("send")', "Message queued for subtask", ""],
+    ['subagent("cancel")', "Stop request processed", ""],
     ['message({"channel":"telegram","content":"private message"})', "Sent message", "telegram"],
     ['my({"action":"check","key":"context_window_tokens"})', "Checked agent settings", "context_window_tokens"],
     ['my({"action":"set","key":"model","value":"private-model"})', "Updated agent settings", "model"],
@@ -123,6 +129,13 @@ describe("generic tool activity semantics", () => {
         detail: "session…ecret",
       });
     }
+  });
+
+  it("keeps different subtask actions separate while grouping repeated status checks", () => {
+    const item = (action: string) => ({ trace: parseGenericToolTrace(`subagent("${action}")`)!, status: "done" as const });
+    expect(canGroupGenericToolRuns(item("create"), item("check"))).toBe(false);
+    expect(canGroupGenericToolRuns(item("send"), item("cancel"))).toBe(false);
+    expect(canGroupGenericToolRuns(item("check"), item("check"))).toBe(true);
   });
 
   it.each([

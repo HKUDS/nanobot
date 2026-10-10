@@ -3,7 +3,6 @@ import {
   Bot,
   Brain,
   Check,
-  ChevronDown,
   CircleAlert,
   Cloud,
   Cpu,
@@ -26,6 +25,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { ControlChevron } from "@/components/ui/control-chevron";
 import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -126,7 +126,7 @@ export function ProviderPicker({
           type="button"
           disabled={disabled}
           className={cn(
-            "h-9 w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
+            "w-full justify-between rounded-full border-input bg-background text-[13px] font-normal shadow-none",
             "settings-hover focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "text-muted-foreground",
           )}
@@ -344,10 +344,9 @@ export function ModelIdPicker({
             {model.label ?? model.id}
           </span>
           {model.description || (model.label && model.label !== model.id) ? (
-            <span className="mt-0.5 block truncate text-[10.5px] text-muted-foreground">
-              {[model.label && model.label !== model.id ? model.id : null, model.description]
-                .filter(Boolean)
-                .join(" · ")}
+            <span className="mt-0.5 flex min-w-0 flex-wrap gap-x-2 text-[10.5px] text-muted-foreground">
+              {model.label && model.label !== model.id ? <span className="truncate font-mono">{model.id}</span> : null}{" "}
+              {model.description ? <span className="truncate">{model.description}</span> : null}
             </span>
           ) : null}
         </span>
@@ -365,8 +364,9 @@ export function ModelIdPicker({
         <Button
           type="button"
           variant="outline"
+          size="control"
           className={cn(
-            "h-9 w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
+            "w-full justify-between rounded-full border-input bg-background text-[13px] font-normal shadow-none",
             "settings-hover focus-visible:ring-2 focus-visible:ring-ring",
           )}
         >
@@ -385,7 +385,7 @@ export function ModelIdPicker({
               {value || emptyLabel || tx("settings.models.selectModel", "Select model")}
             </span>
           </span>
-          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <ControlChevron />
         </Button>
       </PopoverTrigger>
       <PopoverContent

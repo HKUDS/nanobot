@@ -1,8 +1,6 @@
 # How AI Agent Memory Works in nanobot
 
-This guide explains how to use nanobot's long-term AI agent memory: session
-history, compressed archives, durable memory files, Dream consolidation, and
-Git-backed memory changes.
+This guide explains how to use nanobot's long-term AI agent memory: session history, compressed archives, durable memory files, Dream consolidation, and Git-backed memory changes.
 
 ## What you will build
 
@@ -13,10 +11,7 @@ Git-backed memory changes.
 
 ## When to use this
 
-Use memory when an agent should remember stable preferences, project facts,
-decisions, and recurring context across sessions. Do not use memory as a dumping
-ground for every raw transcript; nanobot separates short-term messages from
-curated durable knowledge.
+Use memory when an agent should remember stable preferences, project facts, decisions, and recurring context across sessions. Do not use memory as a dumping ground for every raw transcript; nanobot separates short-term messages from curated durable knowledge.
 
 ## Install
 
@@ -40,8 +35,7 @@ Inspect recent memory changes:
 /dream-log
 ```
 
-The exact files live in the active workspace, usually under
-`~/.nanobot/workspace/`.
+The exact files live in the active workspace, usually under `~/.nanobot/workspace/`.
 
 ## Production notes
 
@@ -53,15 +47,13 @@ The exact files live in the active workspace, usually under
 ## Security notes
 
 - Memory files may contain sensitive user or project facts.
-- Avoid sharing workspaces without reviewing `SOUL.md`, `USER.md`, and
-  `memory/MEMORY.md`.
+- Avoid sharing workspaces without reviewing `SOUL.md`, `USER.md`, and `memory/MEMORY.md`.
 - Use separate workspaces for personal and team contexts.
 
 ## Troubleshooting
 
 - If memory feels stale, run `/dream` and inspect `/dream-log`.
-- If memory changed incorrectly, use `/dream-restore` to inspect and restore
-  previous versions.
+- If memory changed incorrectly, use `/dream-restore` to inspect and restore previous versions.
 - If a new session lacks context, confirm it uses the same workspace.
 
 ## Related nanobot docs

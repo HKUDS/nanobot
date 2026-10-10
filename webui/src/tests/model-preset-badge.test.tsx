@@ -10,7 +10,7 @@ const presets = [
 ];
 
 describe("ModelPresetBadge setup tooltip", () => {
-  it.each([true, false])("hides model details on hover and focus (hero: %s)", async (isHero) => {
+  it.each([true, false])("keeps setup actionable without repeating its prompt in a tooltip (hero: %s)", async (isHero) => {
     const user = userEvent.setup();
     const onClick = vi.fn();
     render(
@@ -27,12 +27,12 @@ describe("ModelPresetBadge setup tooltip", () => {
 
     const trigger = screen.getByRole("button", { name: "Choose your AI" });
     await user.hover(trigger);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Choose your AI$/);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     await user.unhover(trigger);
     fireEvent.keyDown(trigger, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
     fireEvent.focus(trigger);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Choose your AI$/);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     await user.click(trigger);
     expect(onClick).toHaveBeenCalledTimes(1);
   });
@@ -56,7 +56,7 @@ describe("ModelPresetBadge setup tooltip", () => {
       expect(trigger).toHaveTextContent("选择你的 AI");
       expect(trigger.querySelector("[data-fallback]")).toBeNull();
       fireEvent.focus(trigger);
-      expect(await screen.findByRole("tooltip")).toHaveTextContent(/^选择你的 AI$/);
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     },
   );
 });
@@ -90,7 +90,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(onPresetChange).not.toHaveBeenCalled();
     await user.click(trigger);
     await user.tab();
-    expect(screen.getByRole("button", { name: "Manage models" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Manage presets" })).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onManageModels).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -106,7 +106,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
       expect(screen.queryByTestId("composer-model-pill-viewport")).not.toBeInTheDocument();
       fireEvent.pointerUp(trigger, { pointerId: 1, pointerType: "touch", clientY: 100 });
       fireEvent.click(trigger);
-      expect(screen.getByRole("button", { name: "Manage models" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Manage presets" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -122,7 +122,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     fireEvent.click(current);
     expect(onPresetChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "deepseek-chat" }));
-    fireEvent.click(screen.getByRole("button", { name: "Manage models" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage presets" }));
     expect(onManageModels).toHaveBeenCalledTimes(1);
   });
 
@@ -157,7 +157,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(container.querySelector("[title]")).toBeNull();
     await user.hover(trigger);
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("zhipu · glm-5");
+    expect(tooltip).toHaveTextContent("zhipu glm-5");
     expect(tooltip).not.toHaveTextContent("codex");
     await user.click(trigger);
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
@@ -179,7 +179,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(trigger).toHaveAttribute("tabindex", "0");
     fireEvent.focus(trigger);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "zhipu · glm-5",
+      "zhipu glm-5",
     );
     fireEvent.keyDown(trigger, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());

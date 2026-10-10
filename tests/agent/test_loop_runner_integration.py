@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -506,9 +506,8 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_streamed_flag_not_set_on_llm_error(tmp_path):
-    """When LLM errors during a streaming-capable channel interaction,
-    _streamed must NOT be set so ChannelManager delivers the error."""
+async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_path):
+    """LLM errors must not produce StreamedResponseEvent, so channels deliver the error."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -640,8 +639,8 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, monkeypatch):
-    from nanobot.agent.subagent import SubagentManager, SubagentStatus
+async def test_subagent_max_iterations_announces_partial_incomplete_result(tmp_path, monkeypatch):
+    from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -658,24 +657,28 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
         consolidator=MagicMock(),
         max_iterations=2,
     )
-    mgr._announce_result = AsyncMock()
 
     async def fake_execute(self, **kwargs):
         return "tool result"
 
     monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
-    status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
-    await mgr._run_subagent(
-        "sub-1",
-        "do task",
-        "label",
-        {"channel": "test", "chat_id": "c1"},
-        status,
-        LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
+    await mgr.spawn(
+        task="do task",
+        label="label",
+        origin_channel="test",
+        origin_chat_id="c1",
+        runtime=LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
     )
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
-    mgr._announce_result.assert_awaited_once()
-    args = mgr._announce_result.await_args.args
-    assert args[3] == "Task completed but no final response was generated."
-    assert args[5] == "ok"
+    status = next(iter(mgr.statuses_for_session("test:c1").values()))
+    assert status.state == "incomplete"
+    assert status.stop_reason == "max_iterations"
+    assert status.partial is True
+    assert status.result == "working"
+    notice = await asyncio.wait_for(bus.consume_inbound(), timeout=1)
+    assert notice.metadata["subagent_state"] == "incomplete"
+    assert notice.metadata["subagent_partial"] is True
+    assert "working" in notice.content
+    await mgr.close()

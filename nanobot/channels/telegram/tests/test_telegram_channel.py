@@ -2431,6 +2431,33 @@ async def test_forward_command_pairs_unauthorized_private_user(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("separator", [" ", "\t", "\n", "\r\n", "  \n"])
+@pytest.mark.parametrize("suffix", ["", "@nanobot_test"])
+async def test_forward_command_preserves_whitespace_and_argument_mentions(separator, suffix) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    arguments = "contact@example.org\nkeep the second line"
+    text = f"/dream_prompt{suffix}{separator}{arguments}"
+    await channel._forward_command(_make_telegram_update(text=text), None)
+
+    assert handled[0]["content"] == f"/dream-prompt{separator}{arguments}"
+
+
+@pytest.mark.parametrize("text", ["/goal@nanobot_test\nfirst\nsecond", "/dream_prompt first\nsecond"])
+def test_bus_command_regex_accepts_multiline_arguments(text) -> None:
+    assert TelegramChannel.TELEGRAM_BUS_SLASH_COMMAND_RE.fullmatch(text)
+
+
+@pytest.mark.asyncio
 async def test_forward_command_preserves_dream_log_args_and_strips_bot_suffix() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
@@ -2958,6 +2985,40 @@ def test_markdown_to_html_mixed_formatting() -> None:
     assert "\u2022 bullet one" in result
     assert "1. step one" in result
     assert "<b>bold text</b>" in result
+
+
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        (
+            "[init](https://github.com/o/r/blob/main/pkg/__init__.py)",
+            '<a href="https://github.com/o/r/blob/main/pkg/__init__.py">init</a>',
+        ),
+        (
+            "see [css](https://example.com/_static_/a.css) ok",
+            'see <a href="https://example.com/_static_/a.css">css</a> ok',
+        ),
+        (
+            "[x](https://example.com/a**b**c~~d~~)",
+            '<a href="https://example.com/a**b**c~~d~~">x</a>',
+        ),
+    ],
+)
+def test_markdown_to_html_link_urls_are_not_formatted(markdown: str, expected: str) -> None:
+    """Inline-formatting passes must not inject tags into href attributes."""
+    assert _markdown_to_telegram_html(markdown) == expected
+
+
+def test_markdown_to_html_link_url_quotes_are_escaped() -> None:
+    result = _markdown_to_telegram_html('[q](https://example.com/?q="x"&y=1)')
+
+    assert result == '<a href="https://example.com/?q=&quot;x&quot;&amp;y=1">q</a>'
+
+
+def test_markdown_to_html_link_text_keeps_formatting() -> None:
+    result = _markdown_to_telegram_html("[**bold** _it_](https://example.com/a_b_c)")
+
+    assert result == '<a href="https://example.com/a_b_c"><b>bold</b> <i>it</i></a>'
 
 
 # ---------------------------------------------------------------------------

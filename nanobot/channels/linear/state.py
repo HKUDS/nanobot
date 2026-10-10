@@ -263,15 +263,24 @@ class LinearStateStore:
 
     def set_member_access(
         self, client_id: str, organization_id: str, user_id: str, *, allowed: bool,
+        expected_authorized_at: float | None = None,
     ) -> None:
+        """Save a choice, rejecting network results from an older authorization."""
         with self._guard, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             installed = connection.execute(
-                "SELECT 1 FROM installations WHERE oauth_client_id = ? AND organization_id = ?",
+                "SELECT authorized_at FROM installations "
+                "WHERE oauth_client_id = ? AND organization_id = ?",
                 (client_id, organization_id),
             ).fetchone()
             if installed is None:
                 raise ValueError("Linear workspace is not connected")
+            if (expected_authorized_at is not None
+                    and float(installed["authorized_at"]) != expected_authorized_at):
+                raise ValueError(
+                    "Linear workspace authorization changed while updating member access. "
+                    "Refresh and try again."
+                )
             connection.execute(
                 "INSERT INTO member_access (oauth_client_id, organization_id, user_id, allowed) "
                 "VALUES (?, ?, ?, ?) ON CONFLICT(oauth_client_id, organization_id, user_id) "
