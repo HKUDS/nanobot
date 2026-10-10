@@ -2736,12 +2736,12 @@ function Shell({
     : activeKey;
 
   const sidebarProps = {
-    sessions: sidebarTopicSessions,
-    temporarySessions: temporarySessionList,
+    sessions: sidebarStateLoading ? [] : sidebarTopicSessions,
+    temporarySessions: sidebarStateLoading ? [] : temporarySessionList,
     activeKey: !managingConnections && view === "chat"
       ? (temporaryChatActive ? activeKey : activeSidebarKey)
       : null,
-    loading,
+    loading: loading || sidebarStateLoading,
     newChatActive: !managingConnections && view === "chat" && activeKey === null,
     onNewChat,
     onSelect: onSelectSidebarItem,

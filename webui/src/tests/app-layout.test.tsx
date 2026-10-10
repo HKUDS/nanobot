@@ -59,6 +59,7 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const route = routes[String(input)]
+        ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
         ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(String(input)) ? { tasks: [] } : undefined);
       const body =
         typeof route === "function"
@@ -2540,7 +2541,7 @@ describe("App layout", () => {
     );
   }, 15_000);
 
-  it("applies persisted sidebar workspace state from the gateway", async () => {
+  it("retries a failed sidebar read before enabling edits without losing saved state", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -2575,11 +2576,13 @@ describe("App layout", () => {
       },
       updated_at: null,
     };
+    let sidebarReads = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url: string | URL | Request) => {
         const href = String(url);
         if (href === "/api/webui/sidebar-state") {
+          if (++sidebarReads === 1) throw new Error("Gateway restarting");
           return { ok: true, json: async () => initialState };
         }
         return { ok: false, status: 404 };
@@ -2593,8 +2596,11 @@ describe("App layout", () => {
       statusHandlers.forEach((handler) => handler("open"));
     });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByText("Loading…")).toBeInTheDocument();
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(within(sidebar).getByText("Pinned")).toBeInTheDocument(),
+      { timeout: 5_000 },
     );
     expect(within(sidebar).getByRole("button", { name: /^Roadmap$/ })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
@@ -2606,12 +2612,15 @@ describe("App layout", () => {
     expect(within(sidebar).getByRole("button", { name: /^First chat$/ })).toBeInTheDocument();
     expect(setSidebarStateSpy).toHaveBeenCalledWith(
       expect.objectContaining({
+        pinned_keys: initialState.pinned_keys,
+        archived_keys: initialState.archived_keys,
+        title_overrides: initialState.title_overrides,
         view: expect.objectContaining({ show_archived: true }),
       }),
     );
 
     expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("sorts chats by displayed title when A-Z is persisted", async () => {
     mockSessions = [

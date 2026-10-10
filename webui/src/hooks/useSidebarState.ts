@@ -147,6 +147,7 @@ export function useSidebarState(
   const { client, token } = useClient();
   const tokenRef = useRef(token);
   const stateRef = useRef(DEFAULT_SIDEBAR_STATE);
+  const loadedRef = useRef(false);
   const connectionOpenRef = useRef(client.status === "open");
   const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
   const persistenceInFlightRef = useRef(false);
@@ -158,29 +159,34 @@ export function useSidebarState(
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
-    (async () => {
+    const load = async () => {
       try {
         const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current));
         if (cancelled) return;
         stateRef.current = loaded;
+        loadedRef.current = true;
         setState(loaded);
+        setLoading(false);
       } catch {
         if (cancelled) return;
-        stateRef.current = DEFAULT_SIDEBAR_STATE;
-        setState(DEFAULT_SIDEBAR_STATE);
-      } finally {
-        if (!cancelled) setLoading(false);
+        // A failed read is not an empty store. Keep writes blocked until a
+        // retry can load the saved state, including after gateway restarts.
+        retryTimer = setTimeout(() => void load(), 3_000);
       }
-    })();
+    };
+    void load();
     return () => {
       cancelled = true;
+      clearTimeout(retryTimer);
     };
   }, []);
 
   const flushPersistence = useCallback(() => {
     if (
-      persistenceInFlightRef.current
+      !loadedRef.current
+      || persistenceInFlightRef.current
       || !connectionOpenRef.current
       || pendingPersistenceRef.current === null
     ) return;
@@ -229,6 +235,7 @@ export function useSidebarState(
 
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
+      if (!loadedRef.current) return;
       const next = normalizeSidebarState(updater(stateRef.current));
       if (sameState(next, stateRef.current)) return;
       stateRef.current = next;
