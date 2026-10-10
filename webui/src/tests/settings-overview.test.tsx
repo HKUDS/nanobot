@@ -13,6 +13,31 @@ import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewT
 describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
 
+  it.each([{ capabilities: [] }, { capabilities: ["webui.core.v1", "webui.self-update.v1"] }])(
+    "requests update status only when the host declares support (%j)",
+    async ({ capabilities }) => {
+      const fetcher = vi.fn(async () => jsonResponse({
+        state: "idle", mode: "release", can_update: false, message: "",
+        version: null, requires_restart: false, needs_repair: false,
+        release_blocked_reason: "", source_blocked_reason: "",
+      }));
+      vi.stubGlobal("fetch", fetcher);
+      render(
+        <ClientProvider client={new NanobotClient({ url: "ws://localhost:8765" })} token="tok"
+          webuiCapabilities={capabilities}>
+          <AboutSettings settings={settingsPayload()} />
+        </ClientProvider>,
+      );
+      if (capabilities.includes("webui.self-update.v1")) {
+        expect(await screen.findByText(/Open WebUI on the server's localhost/)).toBeVisible();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      } else {
+        expect(screen.queryByRole("heading", { name: "Update nanobot" })).not.toBeInTheDocument();
+        expect(fetcher).not.toHaveBeenCalled();
+      }
+      expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+    },
+  );
 
   it("links the host's short commit beside its version", () => {
     const commit = "abcdef12".repeat(5);

@@ -18,6 +18,7 @@ SUBAGENT_EVENTS_CAPABILITY = "webui.subagents.events.v1"
 SUBAGENT_HISTORY_CAPABILITY = "webui.subagents.history.v1"
 AUTOMATION_CHAT_CAPABILITY = "webui.automation-chat.v1"
 BINARY_ATTACHMENTS_CAPABILITY = "webui.attachments.binary.v1"
+SELF_UPDATE_CAPABILITY = "webui.self-update.v1"
 
 
 class Compatibility(TypedDict):
@@ -34,7 +35,7 @@ def webui_contract() -> dict[str, object]:
         "capabilities": [
             CORE_CAPABILITY, SUBAGENT_CAPABILITY, SUBAGENT_EVENTS_CAPABILITY,
             SUBAGENT_HISTORY_CAPABILITY, AUTOMATION_CHAT_CAPABILITY,
-            BINARY_ATTACHMENTS_CAPABILITY,
+            BINARY_ATTACHMENTS_CAPABILITY, SELF_UPDATE_CAPABILITY,
         ],
     }
 

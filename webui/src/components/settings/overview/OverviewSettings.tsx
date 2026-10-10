@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { HostNavigationContext } from "@/components/remote/HostSwitcher";
 import { StarLink } from "@/components/StarPrompt";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { NanobotUpdate } from "@/components/settings/overview/NanobotUpdate";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
 import { settingsProviderConfigured } from "@/components/settings/shared/ModelControls";
@@ -140,11 +141,16 @@ export function OverviewSettings({
 
 type VersionInfoProps = { currentVersion?: string; currentCommit?: string | null };
 
-export function AboutSettings({ settings }: { settings: SettingsPayload }) {
+export function AboutSettings({ settings, onUpdateInstalled }: {
+  settings: SettingsPayload;
+  onUpdateInstalled?: () => void;
+}) {
   const { t } = useTranslation();
   const hostPicker = useContext(HostNavigationContext);
+  const { webuiCapabilities } = useClient();
   const currentVersion = settings.version?.current;
   const currentCommit = settings.version?.commit;
+  const nativeHost = (settings.surface ?? settings.runtime_surface) === "native";
   const environment = settings.environment;
   const reportIssueUrl = new URL("https://github.com/HKUDS/nanobot/issues/new");
   reportIssueUrl.searchParams.set("template", "bug_report.yml");
@@ -177,6 +183,7 @@ export function AboutSettings({ settings }: { settings: SettingsPayload }) {
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
         <VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit} />
       </div>
+      {!nativeHost && webuiCapabilities.includes("webui.self-update.v1") && <NanobotUpdate onInstalled={onUpdateInstalled} />}
       <SettingsGroup>
         {links.map(({ key, icon: Icon, href }) => (
           <a key={key} href={href} target="_blank" rel="noopener noreferrer"
