@@ -384,7 +384,8 @@ class ReadFileTool(_FsTool):
             # is consistent regardless of where the file was written.
             text_content = text_content.replace("\r\n", "\n")
 
-            all_lines = text_content.splitlines()
+            # Count LF only, like edit_file and rg; splitlines() also breaks on \f and U+2028.
+            all_lines = text_content.removesuffix("\n").split("\n")
             total = len(all_lines)
 
             if offset < 1:
@@ -768,7 +769,7 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
                 start=start,
                 end=end,
                 text=content[start:end],
-                line=i + 1,
+                line=content.count("\n", 0, start) + 1,
             )
         )
     return matches
@@ -830,7 +831,7 @@ def _diagnose_near_match(old_text: str, actual_text: str) -> list[str]:
 
 
 def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], list[str]]:
-    """Find the closest line-window match and return ratio/start/snippet/hints."""
+    """Find the closest line-window match and return ratio/line/snippet/hints."""
     lines = content.splitlines(keepends=True)
     old_lines = old_text.splitlines(keepends=True)
     window = max(1, len(old_lines))
@@ -847,7 +848,8 @@ def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], li
 
     actual_text = "".join(best_window_lines).replace("\r\n", "\n").rstrip("\n")
     hints = _diagnose_near_match(old_text.replace("\r\n", "\n").rstrip("\n"), actual_text)
-    return best_ratio, best_start, best_window_lines, hints
+    best_line = content.count("\n", 0, sum(len(line) for line in lines[:best_start])) + 1
+    return best_ratio, best_line, best_window_lines, hints
 
 
 @tool_parameters(
@@ -1087,13 +1089,13 @@ class EditFileTool(_FsTool):
 
     @staticmethod
     def _not_found_msg(old_text: str, content: str, path: str) -> str:
-        best_ratio, best_start, best_window_lines, hints = _best_window(old_text, content)
+        best_ratio, best_line, best_window_lines, hints = _best_window(old_text, content)
         if best_ratio > 0.5:
             diff = "\n".join(difflib.unified_diff(
                 old_text.splitlines(keepends=True),
                 best_window_lines,
                 fromfile="old_text (provided)",
-                tofile=f"{path} (actual, line {best_start + 1})",
+                tofile=f"{path} (actual, line {best_line})",
                 lineterm="",
             ))
             hint_text = ""
@@ -1101,7 +1103,7 @@ class EditFileTool(_FsTool):
                 hint_text = "\nPossible cause: " + ", ".join(hints) + "."
             return ToolResult.error(
                 f"Error: old_text not found in {path}."
-                f"{hint_text}\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
+                f"{hint_text}\nBest match ({best_ratio:.0%} similar) at line {best_line}:\n{diff}"
             )
 
         if hints:
