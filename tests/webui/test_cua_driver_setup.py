@@ -27,6 +27,9 @@ def settings(tmp_path, monkeypatch, request):
 
     release = Release("darwin-native", "", native=True) if request.param == "native" else _RELEASES["darwin-universal"]
     monkeypatch.setattr("nanobot.apps.cua_driver.host_release", lambda: release)
+    # These settings-contract tests simulate a Mac on Linux/Windows too; the
+    # real per-user Unix endpoint is covered by the native transport tests.
+    monkeypatch.setattr("nanobot.apps.cua_driver_stdio.endpoint", lambda _path: tmp_path / "native.sock")
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     path = tmp_path / "config.json"
