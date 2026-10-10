@@ -28,7 +28,7 @@ from nanobot.config.schema import Config
 from nanobot.llm_usage import llm_usage_payload
 from nanobot.optional_features import OptionalFeatureError, with_channel_runtime_status
 from nanobot.security.workspace_access import workspace_sandbox_status
-from nanobot.update import UpdateError
+from nanobot.update import UpdateError, update_blocked_reason
 from nanobot.webui.settings_capabilities import network_safety_payload
 from nanobot.webui.settings_contracts import (
     QueryParams,
@@ -517,6 +517,8 @@ class SystemSettingsHandler:
             return SettingsRouteResult.success({
                 **self._updates.status(),
                 "can_update": self.allow_feature_package_install(request),
+                "release_blocked_reason": update_blocked_reason(),
+                "source_blocked_reason": update_blocked_reason(dev=True),
             }, decorate_restart=True, restart_section="runtime")
         if action == "update-start":
             if not self.allow_feature_package_install(request):

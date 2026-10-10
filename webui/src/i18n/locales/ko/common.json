@@ -929,6 +929,8 @@
       "upToDate": "최신 버전입니다",
       "updateAvailable": "업데이트 사용 가능 v{{version}}",
       "updateTitle": "nanobot 업데이트",
+      "updatePrepared": "이 게이트웨이의 설정과 데이터를 백업하고 작업을 중지했습니다. 다른 호스트는 업데이트되지 않습니다.",
+      "updateUnchanged": "이미 최신 버전입니다. 파일은 변경되지 않았습니다.",
       "updateDescription": "최신 안정 버전을 설치합니다. 설치 후 nanobot을 다시 시작하세요.",
       "updateAdvanced": "고급 옵션",
       "updateDev": "소스에서 설치",

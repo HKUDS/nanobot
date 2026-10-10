@@ -903,6 +903,8 @@
       "upToDate": "已是最新版本",
       "updateAvailable": "发现新版本 v{{version}}",
       "updateTitle": "更新 nanobot",
+      "updatePrepared": "我已备份此网关的配置和数据，并停止任务。此次只更新该网关，不会更新其他主机。",
+      "updateUnchanged": "已是最新版本，未更改文件。",
       "updateDescription": "安装最新稳定版，安装完成后重启 nanobot 生效。",
       "updateAdvanced": "高级选项",
       "updateDev": "从源码安装",

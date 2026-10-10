@@ -61,23 +61,45 @@ nanobot update               # Install the latest stable PyPI release
 nanobot update --dev         # Update source, prepare TUI dependencies, and build WebUI
 ```
 
-`--update-dev` is an alias for `--dev`. Updates target the current Python environment
-and leave already-satisfying dependencies installed. Missing pip is handled through
-the existing uv/ensurepip fallback; no separate package manager is required.
-Configuration, workspace files, and chat history are not replaced.
+`--update-dev` is an alias for `--dev`. In-place updates support virtual environments
+not owned by a tool manager. They leave already-satisfying dependencies installed.
+Missing pip is handled through the existing uv/ensurepip fallback.
+For uv tool or pipx installations, use `uv tool upgrade nanobot-ai` or
+`pipx upgrade nanobot-ai` in the gateway's account. These managers preserve the
+installation's constraints and extra packages. A pinned uv tool version requires an
+explicit `uv tool install` with the new version constraint; do not overwrite its
+environment with pip. System Python installations use their original installer.
+
+Back up configuration, workspace files, and chat history before updating. The updater
+does not replace this data, but a new runtime may migrate it. Stop active tasks and
+other processes that share this Python environment.
 
 Source updates require Git. Existing editable checkouts keep their current branch
 and fast-forward to its upstream; local changes, detached HEADs, and divergent branches
 must be resolved manually. A package install switches to an editable checkout under
 `~/.nanobot/src/` on the official `main` branch. Bun is downloaded into
 `~/.nanobot/tools/bun/` when the pinned version is unavailable, with SHA-256 verification.
-Node is not required. `nanobot update` switches a source install back to the PyPI release.
+Node is not required. Source is not a versioned preview channel. To switch from source
+to a release, stop nanobot, install the release in a separate environment, and launch
+outside the checkout. In-place source-to-release switching is refused because a restart
+can otherwise load the old source with the new package's version metadata.
 
 WebUI exposes the same actions under **Settings → About → Update nanobot**. Source
 installation is opt-in under **Advanced options**. The existing remote package-install
 permission also governs updates. Browser refreshes do not cancel an in-progress update.
-Restart nanobot after completion. Stop active tasks before updating; this is an in-place
-update, not a transactional deployment, and a failed installation may need to be retried.
+The control is only available when the host advertises `webui.self-update.v1`.
+Restart nanobot after a successful installation, then verify the running gateway's
+version and behavior. Installation verification checks normal and isolated interpreter
+imports; it does not restart or verify the live process. An already-current install
+does not request a restart. An older stable release is never installed over a newer
+version unless the CLI receives `--allow-downgrade`; restore compatible data when needed.
+
+This is an in-place update, not a transactional deployment. Once installation begins,
+a marker under `~/.nanobot/run/` records an unverified update for that Python environment.
+It is removed only after installation verification succeeds. After a failure or process
+termination, stop nanobot and retry the same update from that environment. There is no
+automatic rollback. Browser progress survives reconnection while the gateway runs;
+after a gateway crash, the marker reports an incomplete update, not the previous logs.
 On Windows, if another nanobot process locks installation files, stop that process
 and retry with `python -m nanobot update` (add `--dev` for source).
 Containers must be rebuilt and redeployed; Desktop is updated through its host application.

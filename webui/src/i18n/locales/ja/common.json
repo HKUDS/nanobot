@@ -929,6 +929,8 @@
       "upToDate": "最新の状態です",
       "updateAvailable": "アップデートがあります v{{version}}",
       "updateTitle": "nanobot を更新",
+      "updatePrepared": "このゲートウェイの設定とデータをバックアップし、タスクを停止しました。他のホストは更新されません。",
+      "updateUnchanged": "すでに最新です。ファイルは変更されていません。",
       "updateDescription": "最新の安定版をインストールします。インストール後に nanobot を再起動してください。",
       "updateAdvanced": "詳細オプション",
       "updateDev": "ソースからインストール",

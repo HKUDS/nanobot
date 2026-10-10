@@ -212,7 +212,8 @@ Replace the provider, endpoint, and model together. Do not pair a credential fro
 
 ## Updating
 
-Update the active Python installation:
+Back up your configuration and data and stop active tasks first. For a regular Python
+virtual environment, update the active installation:
 
 ```bash
 nanobot update --check
@@ -222,11 +223,12 @@ nanobot update --dev
 ```
 
 You can also use **Settings → About → Update nanobot** in WebUI. Source installation
-is an advanced option. Restart nanobot after installation. Existing source checkouts
+is an advanced option, not a versioned preview release. Restart nanobot after installation. Existing source checkouts
 must be clean and able to fast-forward to their upstream; updates never discard local edits.
 See [Updating](./cli-reference.md#updating) for dependency handling and deployment limits.
 
-For older versions without this command, use the same method you used to install:
+For uv tool, pipx, system-managed installations, or older versions without this command,
+use the same method you used to install:
 
 ```bash
 # Recommended installer

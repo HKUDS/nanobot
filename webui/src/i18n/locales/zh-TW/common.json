@@ -929,6 +929,8 @@
       "upToDate": "已是最新版本",
       "updateAvailable": "已有 v{{version}} 版更新",
       "updateTitle": "更新 nanobot",
+      "updatePrepared": "我已備份此閘道的設定和資料，並停止任務。此次只更新該閘道，不會更新其他主機。",
+      "updateUnchanged": "已是最新版本，未變更檔案。",
       "updateDescription": "安裝最新穩定版，安裝完成後重新啟動 nanobot 即可套用。",
       "updateAdvanced": "進階選項",
       "updateDev": "從原始碼安裝",

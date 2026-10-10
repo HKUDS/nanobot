@@ -147,6 +147,7 @@ export function AboutSettings({ settings, onUpdateInstalled }: {
 }) {
   const { t } = useTranslation();
   const hostPicker = useContext(HostNavigationContext);
+  const { webuiCapabilities } = useClient();
   const currentVersion = settings.version?.current;
   const currentCommit = settings.version?.commit;
   const nativeHost = (settings.surface ?? settings.runtime_surface) === "native";
@@ -182,7 +183,7 @@ export function AboutSettings({ settings, onUpdateInstalled }: {
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
         <VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit} />
       </div>
-      {!nativeHost && <NanobotUpdate onInstalled={onUpdateInstalled} />}
+      {!nativeHost && webuiCapabilities.includes("webui.self-update.v1") && <NanobotUpdate onInstalled={onUpdateInstalled} />}
       <SettingsGroup>
         {links.map(({ key, icon: Icon, href }) => (
           <a key={key} href={href} target="_blank" rel="noopener noreferrer"

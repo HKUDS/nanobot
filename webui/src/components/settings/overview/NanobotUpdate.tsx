@@ -3,6 +3,7 @@ import { ArrowUpCircle, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
 import { fetchNanobotUpdate, updateNanobot, type NanobotUpdateStatus } from "@/lib/api";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -14,11 +15,13 @@ export function NanobotUpdate({ onInstalled }: { onInstalled?: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const [prepared, setPrepared] = useState(false);
   const running = submitting || status?.state === "running";
+  const blockedReason = dev ? status?.source_blocked_reason : status?.release_blocked_reason;
 
   useEffect(() => {
-    if (status?.state === "succeeded") onInstalled?.();
-  }, [status?.state, onInstalled]);
+    if (status?.state === "succeeded" && status.requires_restart) onInstalled?.();
+  }, [status?.state, status?.requires_restart, onInstalled]);
 
   useEffect(() => {
     let active = true;
@@ -62,21 +65,29 @@ export function NanobotUpdate({ onInstalled }: { onInstalled?: () => void }) {
       <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
         {t("settings.about.updateDescription", { defaultValue: "Install the latest stable release. Restart nanobot after installation." })}
       </p>
-      <details className="mt-4 text-[13px]">
-        <summary className="cursor-pointer rounded-sm text-muted-foreground focus-visible:outline focus-visible:outline-2">
-          {t("settings.about.updateAdvanced", { defaultValue: "Advanced options" })}
-        </summary>
+      <Disclosure className="mt-4 text-[13px]"
+        summary={t("settings.about.updateAdvanced", { defaultValue: "Advanced options" })}
+        summaryClassName="rounded-control text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <label className="mt-3 flex cursor-pointer items-start gap-2">
           <input type="checkbox" className="mt-1 accent-primary" checked={dev} disabled={running}
-            onChange={(event) => setDev(event.target.checked)} aria-describedby="nanobot-update-dev-help" />
+            onChange={(event) => { setDev(event.target.checked); setPrepared(false); }} aria-describedby="nanobot-update-dev-help" />
           <span>{t("settings.about.updateDev", { defaultValue: "Install from source" })}</span>
         </label>
         <p id="nanobot-update-dev-help" className="mt-1 pl-5 text-[12px] leading-5 text-muted-foreground">
           {t("settings.about.updateDevDescription", { defaultValue: "Use the development version. Requires Git; Bun is downloaded automatically when needed. Existing source checkouts keep their current branch." })}
         </p>
-      </details>
+      </Disclosure>
+      {!blockedReason && status?.can_update && status.state !== "succeeded" && (
+        <label className="mt-4 flex items-start gap-2 text-[12px] leading-5 text-muted-foreground">
+          <input type="checkbox" className="mt-1 accent-primary" checked={prepared} disabled={running}
+            onChange={(event) => setPrepared(event.target.checked)} />
+          <span>{t("settings.about.updatePrepared", {
+            defaultValue: "I have backed up this gateway's configuration and data, and stopped its tasks. This updates the gateway, not other hosts.",
+          })}</span>
+        </label>
+      )}
       <Button className="mt-4" size="sm" onClick={() => void install()}
-        disabled={!status?.can_update || running || status.state === "succeeded"}>
+        disabled={!status?.can_update || !prepared || !!blockedReason || running || status.state === "succeeded"}>
         {running ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <ArrowUpCircle className="mr-1.5 h-4 w-4" aria-hidden />}
         {t(dev ? "settings.about.updateDevAction" : "settings.about.updateAction", {
           defaultValue: dev ? "Install development version" : "Install latest release",
@@ -84,12 +95,15 @@ export function NanobotUpdate({ onInstalled }: { onInstalled?: () => void }) {
       </Button>
       <div role="status" className="mt-3 text-[12px] leading-5 text-muted-foreground">
         {status?.state === "succeeded"
-          ? t("settings.about.updateSuccess", { defaultValue: "Installed v{{version}}. Restart nanobot to apply the update.", version: status.version })
+          ? status.requires_restart
+            ? t("settings.about.updateSuccess", { defaultValue: "Installed v{{version}}. Restart nanobot to apply the update.", version: status.version })
+            : t("settings.about.updateUnchanged", { defaultValue: "Already up to date. No files changed." })
           : status?.state === "running" ? status.message : null}
         {status && !status.can_update ? t("settings.about.updateLocalOnly", {
           defaultValue: "Open WebUI on the server's localhost, or enable remote package installation to update here.",
         }) : null}
       </div>
+      {blockedReason && <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{blockedReason}</p>}
       {error || status?.state === "failed" ? (
         <p role="alert" className="mt-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-destructive">
           {error || status?.message}

@@ -8,6 +8,7 @@ import { installSettingsViewTestHooks, jsonResponse, requestMutationMock } from 
 const idle = {
   state: "idle", mode: "release", message: "", version: null,
   requires_restart: false, can_update: true,
+  needs_repair: false, release_blocked_reason: "", source_blocked_reason: "",
 };
 
 function mount(onInstalled?: () => void) {
@@ -24,6 +25,8 @@ describe("nanobot updates", () => {
     requestMutationMock.mockResolvedValue({ ...idle, state: "running" });
     mount();
     const release = await screen.findByRole("button", { name: "Install latest release" });
+    expect(release).toBeDisabled();
+    fireEvent.click(await screen.findByRole("checkbox", { name: /I have backed up/ }));
     await waitFor(() => expect(release).toBeEnabled());
     fireEvent.click(release);
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.nanobot.update", { dev: false }, 20000));
@@ -36,6 +39,7 @@ describe("nanobot updates", () => {
     fireEvent.click(screen.getByText("Advanced options"));
     fireEvent.click(screen.getByRole("checkbox", { name: "Install from source" }));
     const button = screen.getByRole("button", { name: "Install development version" });
+    fireEvent.click(await screen.findByRole("checkbox", { name: /I have backed up/ }));
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.nanobot.update", { dev: true }, 20000));
@@ -64,6 +68,25 @@ describe("nanobot updates", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...idle, state: "failed", message: "Offline" })));
     mount();
     expect(await screen.findByRole("alert")).toHaveTextContent("Offline");
+    fireEvent.click(screen.getByRole("checkbox", { name: /I have backed up/ }));
     expect(screen.getByRole("button", { name: "Install latest release" })).toBeEnabled();
+  });
+
+  it("shows the owning installer's instructions instead of permitting pip replacement", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      ...idle, release_blocked_reason: "Use uv tool upgrade nanobot-ai.",
+    })));
+    mount();
+    expect(await screen.findByText("Use uv tool upgrade nanobot-ai.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Install latest release" })).toBeDisabled();
+    expect(screen.queryByRole("checkbox", { name: /I have backed up/ })).not.toBeInTheDocument();
+  });
+
+  it("does not request a restart for an already-current installation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...idle, state: "succeeded", version: "0.3.5" })));
+    const installed = vi.fn();
+    mount(installed);
+    expect(await screen.findByText("Already up to date. No files changed.")).toBeVisible();
+    expect(installed).not.toHaveBeenCalled();
   });
 });

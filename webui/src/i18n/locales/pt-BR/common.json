@@ -717,6 +717,8 @@
       "upToDate": "O nanobot está atualizado",
       "updateAvailable": "Atualização disponível v{{version}}",
       "updateTitle": "Atualizar o nanobot",
+      "updatePrepared": "Fiz backup da configuração e dos dados deste gateway e parei suas tarefas. Outros hosts não serão atualizados.",
+      "updateUnchanged": "A versão já está atualizada. Nenhum arquivo foi alterado.",
       "updateDescription": "Instala a versão estável mais recente. Reinicie o nanobot após a instalação.",
       "updateAdvanced": "Opções avançadas",
       "updateDev": "Instalar do código-fonte",

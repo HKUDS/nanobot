@@ -929,6 +929,8 @@
       "upToDate": "Vous êtes à jour",
       "updateAvailable": "Mise à jour disponible v{{version}}",
       "updateTitle": "Mettre nanobot à jour",
+      "updatePrepared": "J’ai sauvegardé la configuration et les données de cette passerelle et arrêté ses tâches. Les autres hôtes ne seront pas mis à jour.",
+      "updateUnchanged": "La version est à jour. Aucun fichier n’a été modifié.",
       "updateDescription": "Installe la dernière version stable. Redémarrez nanobot après l’installation.",
       "updateAdvanced": "Options avancées",
       "updateDev": "Installer depuis les sources",

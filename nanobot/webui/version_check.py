@@ -38,19 +38,20 @@ def check_for_update() -> dict[str, Any] | None:
             resp = httpx.get(_PYPI_URL, timeout=5.0, follow_redirects=True)
             resp.raise_for_status()
             latest = resp.json().get("info", {}).get("version")
-        except Exception:
-            logger.debug("PyPI version check failed", exc_info=True)
-            return None
-        _cache = (now, latest)
+        except Exception as exc:
+            raise RuntimeError("Could not check PyPI. Check your connection and retry.") from exc
 
     if not isinstance(latest, str) or not latest:
-        return None
+        raise ValueError("PyPI returned no release version.")
     try:
+        parsed = Version(latest)
+        if parsed.is_prerelease or parsed.is_devrelease:
+            raise ValueError("PyPI returned a prerelease instead of a stable release.")
+        _cache = (now, latest)
         if Version(latest) <= Version(__version__):
             return None
-    except InvalidVersion:
-        logger.debug("PyPI returned an invalid nanobot version: %r", latest)
-        return None
+    except InvalidVersion as exc:
+        raise ValueError("Could not compare release versions.") from exc
     return {
         "currentVersion": __version__,
         "latestVersion": latest,

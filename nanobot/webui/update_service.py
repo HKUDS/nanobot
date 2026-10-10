@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Literal, TypedDict
 
-from nanobot.update import UpdateError, update_installation
+from nanobot.update import UpdateError, incomplete_update, update_installation
 
 
 class UpdateStatus(TypedDict):
@@ -14,6 +14,7 @@ class UpdateStatus(TypedDict):
     message: str
     version: str | None
     requires_restart: bool
+    needs_repair: bool
 
 
 class UpdateService:
@@ -21,8 +22,13 @@ class UpdateService:
         self._task: asyncio.Task[None] | None = None
         self._status: UpdateStatus = {
             "state": "idle", "mode": "release", "message": "",
-            "version": None, "requires_restart": False,
+            "version": None, "requires_restart": False, "needs_repair": False,
         }
+        if incomplete_update():
+            self._status.update(
+                state="failed", needs_repair=True,
+                message="A previous update did not finish verification. Stop nanobot and retry the same update from its Python environment.",
+            )
 
     def status(self) -> UpdateStatus:
         return self._status.copy()
@@ -32,7 +38,7 @@ class UpdateService:
             raise UpdateError("A nanobot update is already running.")
         self._status = {
             "state": "running", "mode": "dev" if dev else "release",
-            "message": "Preparing update…", "version": None, "requires_restart": False,
+            "message": "Preparing update…", "version": None, "requires_restart": False, "needs_repair": False,
         }
         self._task = asyncio.create_task(self._execute(dev), name="nanobot-update")
         return self.status()
@@ -46,11 +52,14 @@ class UpdateService:
         try:
             result = await asyncio.to_thread(update_installation, dev=dev, output=progress)
         except Exception as exc:
-            self._status.update(state="failed", message=str(exc))
+            self._status.update(
+                state="failed", message=str(exc),
+                needs_repair=isinstance(exc, UpdateError) and exc.needs_repair,
+            )
         else:
             self._status.update(
-                state="succeeded", version=result["version"], requires_restart=True,
-                message="Update installed. Restart nanobot to apply it.",
+                state="succeeded", version=result["version"], requires_restart=result["requires_restart"],
+                message="Update installed. Restart nanobot to apply it." if result["requires_restart"] else "Already up to date. No files changed.",
             )
 
     def _progress(self, message: str) -> None:

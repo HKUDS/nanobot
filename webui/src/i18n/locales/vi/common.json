@@ -929,6 +929,8 @@
       "upToDate": "Bạn đang dùng phiên bản mới nhất",
       "updateAvailable": "Có bản cập nhật v{{version}}",
       "updateTitle": "Cập nhật nanobot",
+      "updatePrepared": "Tôi đã sao lưu cấu hình và dữ liệu của gateway này và dừng các tác vụ. Các máy chủ khác sẽ không được cập nhật.",
+      "updateUnchanged": "Đã là phiên bản mới nhất. Không có tệp nào thay đổi.",
       "updateDescription": "Cài đặt bản ổn định mới nhất. Hãy khởi động lại nanobot sau khi cài đặt.",
       "updateAdvanced": "Tùy chọn nâng cao",
       "updateDev": "Cài đặt từ mã nguồn",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import threading
@@ -86,7 +87,9 @@ def isolated_update(tmp_path, monkeypatch):
     if Path("/.dockerenv").exists():
         pytest.skip("Self-update intentionally refuses containers")
     monkeypatch.setattr(update, "latest_release", lambda: "0.3.5")
-    monkeypatch.setattr(update, "_checked", lambda *args, **kwargs: "0.3.5")
+    monkeypatch.setattr(update, "__version__", "0.3.4")
+    monkeypatch.setattr(update, "update_blocked_reason", lambda **kwargs: "")
+    monkeypatch.setattr(update, "_checked", lambda *args, **kwargs: json.dumps(["0.3.5", "/env/nanobot/__init__.py"]))
     install = Mock()
     monkeypatch.setattr(update, "_install", install)
     return install
@@ -110,11 +113,12 @@ def test_release_update_does_not_force_reinstall_wheel(isolated_update, monkeypa
 
 def test_update_verifies_in_fresh_interpreter(isolated_update, monkeypatch):
     monkeypatch.setattr(update, "_is_editable", lambda: False)
-    checked = Mock(return_value="old")
+    checked = Mock(return_value=json.dumps(["0.3.4", "/env/nanobot/__init__.py"]))
     monkeypatch.setattr(update, "_checked", checked)
     with pytest.raises(update.UpdateError, match="expected 0.3.5"):
         update.update_installation(output=lambda _: None)
-    assert checked.call_args.args[0][:3] == [sys.executable, "-I", "-c"]
+    assert checked.call_args_list[0].args[0][:3] == [sys.executable, "-I", "-c"]
+    assert checked.call_args_list[1].args[0][:2] == [sys.executable, "-c"]
 
 
 def test_update_lock_excludes_other_processes(isolated_update, tmp_path):
@@ -243,9 +247,107 @@ def test_windows_recovers_launcher_left_by_interrupted_update(monkeypatch, tmp_p
 
 @pytest.mark.parametrize("flag", ["--dev", "--update-dev"])
 def test_cli_dev_is_explicit(monkeypatch, flag):
-    install = Mock(return_value={"version": "0.3.5"})
+    install = Mock(return_value={"version": "0.3.5", "requires_restart": True})
     monkeypatch.setattr(update, "update_installation", install)
     app = typer.Typer()
     app.command()(update_command)
     assert CliRunner().invoke(app, [flag]).exit_code == 0
     assert install.call_args.kwargs["dev"] is True
+
+
+def test_update_rejects_shadowed_restart_even_with_matching_metadata(isolated_update, monkeypatch):
+    monkeypatch.setattr(update, "_is_editable", lambda: False)
+    monkeypatch.setattr(update, "_checked", Mock(side_effect=[
+        json.dumps(["0.3.5", "/env/nanobot/__init__.py"]),
+        json.dumps(["0.3.5", "/checkout/nanobot/__init__.py"]),
+    ]))
+    with pytest.raises(update.UpdateError, match="restart would load a different") as error:
+        update.update_installation(output=lambda _: None)
+    assert error.value.needs_repair
+    assert update.incomplete_update()
+
+
+def test_source_release_switch_is_blocked_before_any_install(checkout, monkeypatch):
+    monkeypatch.setattr(sys, "prefix", "/test/venv")
+    monkeypatch.setattr(sys, "base_prefix", "/test/python")
+    assert "outside the checkout" in update.update_blocked_reason()
+    assert update.update_blocked_reason(dev=True) == ""
+
+
+@pytest.mark.parametrize("receipt,command", [
+    ("uv-receipt.toml", "uv tool upgrade"),
+    ("pipx_metadata.json", "pipx upgrade"),
+])
+def test_tool_manager_environment_is_not_overwritten(tmp_path, monkeypatch, receipt, command):
+    (tmp_path / receipt).write_text("owned by installer", encoding="utf-8")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    assert command in update.update_blocked_reason()
+    assert command in update.update_blocked_reason(dev=True)
+
+
+def test_update_noop_does_not_install_or_require_restart(isolated_update, monkeypatch):
+    monkeypatch.setattr(update, "__version__", "0.3.5")
+    monkeypatch.setattr(update, "_is_editable", lambda: False)
+    assert not update.update_installation()["requires_restart"]
+    isolated_update.assert_not_called()
+    assert not update.incomplete_update()
+
+
+def test_preview_does_not_silently_downgrade_to_stable(isolated_update, monkeypatch):
+    monkeypatch.setattr(update, "__version__", "0.3.6.dev2026101001")
+    with pytest.raises(update.UpdateError, match="allow-downgrade"):
+        update.update_installation()
+    isolated_update.assert_not_called()
+    assert not update.incomplete_update()
+    monkeypatch.setattr(update, "_is_editable", lambda: False)
+    assert update.update_installation(allow_downgrade=True)["requires_restart"]
+    assert not update.incomplete_update()
+
+
+def test_failed_install_survives_gateway_restart_and_success_clears_marker(isolated_update, monkeypatch):
+    monkeypatch.setattr(update, "_is_editable", lambda: False)
+    isolated_update.side_effect = update.UpdateError("package install failed")
+    with pytest.raises(update.UpdateError, match="No automatic rollback") as error:
+        update.update_installation()
+    assert error.value.needs_repair
+    recovered = UpdateService().status()
+    assert recovered["state"] == "failed" and recovered["needs_repair"]
+    isolated_update.side_effect = None
+    update.update_installation()
+    assert not update.incomplete_update()
+
+
+def test_source_preflight_failure_does_not_mark_installation_modified(checkout, isolated_update, monkeypatch):
+    root, _ = checkout
+    (root / "file").write_text("my edits", encoding="utf-8")
+    monkeypatch.setattr(update, "ensure_bun", lambda **kwargs: "bun")
+    with pytest.raises(update.UpdateError, match="local changes") as error:
+        update.update_installation(dev=True)
+    assert not error.value.needs_repair
+    assert not update.incomplete_update()
+
+
+def test_real_python_restart_resolution_detects_cwd_shadowing(tmp_path, monkeypatch):
+    """Exercise real import lookup without installing or changing the user's env."""
+    import venv
+
+    env = tmp_path / "env"
+    venv.EnvBuilder(with_pip=False).create(env)
+    executable = env / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    site = Path(subprocess.check_output([
+        str(executable), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
+    ], text=True).strip())
+    package = site / "nanobot"
+    package.mkdir()
+    (package / "__init__.py").write_text("__version__ = '0.3.5'\n", encoding="utf-8")
+    checkout = tmp_path / "source"
+    (checkout / "nanobot").mkdir(parents=True)
+    # Matching metadata is the original bug: the old code can report a new version.
+    (checkout / "nanobot/__init__.py").write_text("__version__ = '0.3.5'\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(executable))
+    monkeypatch.chdir(checkout)
+    with pytest.raises(update.UpdateError, match="different nanobot package"):
+        update._verify_installation("0.3.5", "pypi")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    update._verify_installation("0.3.5", "pypi")

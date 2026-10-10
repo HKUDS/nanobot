@@ -929,6 +929,8 @@
       "upToDate": "Anda sudah menggunakan versi terbaru",
       "updateAvailable": "Pembaruan tersedia v{{version}}",
       "updateTitle": "Perbarui nanobot",
+      "updatePrepared": "Saya telah mencadangkan konfigurasi dan data gateway ini serta menghentikan tugasnya. Host lain tidak akan diperbarui.",
+      "updateUnchanged": "Sudah versi terbaru. Tidak ada file yang diubah.",
       "updateDescription": "Pasang rilis stabil terbaru. Mulai ulang nanobot setelah pemasangan selesai.",
       "updateAdvanced": "Opsi lanjutan",
       "updateDev": "Pasang dari kode sumber",

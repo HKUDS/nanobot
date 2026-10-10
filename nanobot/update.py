@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import TypedDict
 
 from filelock import FileLock, Timeout
+from packaging.version import Version
 
+from nanobot import __version__
 from nanobot.bun import bun_environment, ensure_bun
 
 _SOURCE_URL = "https://github.com/HKUDS/nanobot.git"
@@ -28,6 +30,10 @@ _SOURCE_URL = "https://github.com/HKUDS/nanobot.git"
 
 class UpdateError(RuntimeError):
     """An update cannot proceed or did not finish successfully."""
+
+    def __init__(self, message: str, *, needs_repair: bool = False) -> None:
+        super().__init__(message)
+        self.needs_repair = needs_repair
 
 
 class UpdateResult(TypedDict):
@@ -71,8 +77,6 @@ def latest_release() -> str:
         version = payload["info"]["version"]
         if not isinstance(version, str) or not version:
             raise ValueError("missing release version")
-        from packaging.version import Version
-
         parsed = Version(version)
         if parsed.is_prerelease or parsed.is_devrelease:
             raise ValueError("PyPI returned a prerelease")
@@ -85,7 +89,68 @@ def _installation_key() -> str:
     return hashlib.sha256(os.fsencode(Path(sys.prefix).resolve())).hexdigest()[:16]
 
 
-def _prepare_source(output: Callable[[str], None]) -> Path:
+def update_blocked_reason(*, dev: bool = False) -> str:
+    """Do not replace files owned by another deployment or package manager."""
+    if Path("/.dockerenv").exists() or os.environ.get("RENDER") == "true":
+        return "This installation is deployed in a container. Rebuild and redeploy its image."
+    prefix = Path(sys.prefix)
+    if (prefix / "uv-receipt.toml").exists():
+        return "Use `uv tool upgrade nanobot-ai` in the gateway's account to preserve its uv tool settings."
+    if (prefix / "pipx_metadata.json").exists():
+        return "Use `pipx upgrade nanobot-ai` in the gateway's account to preserve its pipx settings."
+    if sys.prefix == sys.base_prefix:
+        return "Use the installer or package manager that owns this Python installation. In-app updates require a virtual environment."
+    if not dev and source_checkout() is not None:
+        return (
+            "This gateway runs from source. Use the source update option to keep its checkout. "
+            "To switch to a release, stop nanobot, install it in a separate environment, "
+            "and launch it outside the checkout."
+        )
+    return ""
+
+
+def _journal_path() -> Path:
+    return Path.home() / ".nanobot" / "run" / f"update-{_installation_key()}.pending"
+
+
+def incomplete_update() -> bool:
+    """A marker survives failure or process termination after mutation begins."""
+    return _journal_path().exists()
+
+
+def _mark_installing() -> None:
+    path = _journal_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as marker:
+        marker.write("Installation may be incomplete. Stop nanobot and retry the update.\n")
+        marker.flush()
+        os.fsync(marker.fileno())
+
+
+def _verify_installation(expected: str, source: str) -> None:
+    # Match normal `python -m nanobot` restart resolution as well as isolated
+    # installed-package resolution. A version from dist-info alone can hide a
+    # checkout shadowing the installed wheel through cwd or PYTHONPATH.
+    probe = (
+        "import json, nanobot; from pathlib import Path; "
+        "print(json.dumps([nanobot.__version__, str(Path(nanobot.__file__).resolve())]))"
+    )
+    installed = json.loads(_checked([sys.executable, "-I", "-c", probe]))
+    restarted = json.loads(_checked([sys.executable, "-c", probe]))
+    if installed[0] != expected:
+        raise UpdateError(f"Installed version is {installed[0]}, expected {expected}. Check the installation environment.")
+    if installed != restarted:
+        raise UpdateError(
+            "The restart would load a different nanobot package. Stop nanobot and restart "
+            "outside the source checkout, without a source directory in PYTHONPATH."
+        )
+    if source != "pypi" and Path(installed[1]).parent != Path(source) / "nanobot":
+        raise UpdateError("The interpreter does not load the updated source checkout. Check the editable installation.")
+
+
+def _prepare_source(
+    output: Callable[[str], None], *, before_change: Callable[[], None] = lambda: None,
+) -> Path:
     git = shutil.which("git")
     if not git:
         raise UpdateError("Source updates require Git. Install Git and retry, or use a release update.")
@@ -114,6 +179,7 @@ def _prepare_source(output: Callable[[str], None]) -> Path:
     _checked([git, "fetch", "--", remote], cwd=root)
     if _run([git, "merge-base", "--is-ancestor", "HEAD", "@{upstream}"], cwd=root).returncode:
         raise UpdateError("The source branch cannot fast-forward to its upstream. Reconcile it manually.")
+    before_change()
     _checked([git, "merge", "--ff-only", "@{upstream}"], cwd=root)
     return root
 
@@ -178,18 +244,19 @@ def _is_editable() -> bool:
 
 
 def update_installation(
-    *, dev: bool = False, output: Callable[[str], None] = print,
+    *, dev: bool = False, allow_downgrade: bool = False, output: Callable[[str], None] = print,
 ) -> UpdateResult:
     """Update application files and verify their version in a fresh interpreter."""
-    if Path("/.dockerenv").exists() or os.environ.get("RENDER") == "true":
-        raise UpdateError("This installation is deployed in a container. Rebuild and redeploy its image.")
+    reason = update_blocked_reason(dev=dev)
+    if reason:
+        raise UpdateError(reason)
     lock_dir = Path.home() / ".nanobot" / "run"
     lock_dir.mkdir(parents=True, exist_ok=True)
     try:
         with FileLock(str(lock_dir / f"update-{_installation_key()}.lock"), timeout=0):
             if dev:
-                root = _prepare_source(output)
                 bun = ensure_bun(output=output)
+                root = _prepare_source(output, before_change=_mark_installing)
                 output("Preparing TUI dependencies…")
                 with bun_environment(bun) as env:
                     result = _run([bun, "install", "--frozen-lockfile"], cwd=root / "tui", env=env)
@@ -208,9 +275,19 @@ def update_installation(
                 source = str(root)
             else:
                 expected = latest_release()
+                if Version(expected) < Version(__version__) and not allow_downgrade:
+                    raise UpdateError(
+                        f"Installed {__version__} is newer than stable {expected}. "
+                        "No files changed. Back up your data before an intentional downgrade, "
+                        "then run `nanobot update --allow-downgrade`."
+                    )
                 target = f"nanobot-ai=={expected}"
                 editable = _is_editable()
+                if Version(expected) == Version(__version__) and not editable and not incomplete_update():
+                    _verify_installation(expected, "pypi")
+                    return {"version": expected, "source": "pypi", "requires_restart": False}
                 output(f"Installing nanobot {expected} from PyPI…")
+                _mark_installing()
                 _install([target], upgrade=True)
                 if editable and _is_editable():
                     # Pip can keep a same-version editable distribution. Dependencies were
@@ -218,12 +295,16 @@ def update_installation(
                     _install(["--force-reinstall", "--no-deps", target])
                 source = "pypi"
             output("Verifying the installed version…")
-            actual = _checked([
-                sys.executable, "-I", "-c",
-                "import nanobot; print(nanobot.__version__)",
-            ])
-            if actual != expected:
-                raise UpdateError(f"Installed version is {actual}, expected {expected}. Check the installation environment.")
-            return {"version": actual, "source": source, "requires_restart": True}
+            _verify_installation(expected, source)
+            _journal_path().unlink()
+            return {"version": expected, "source": source, "requires_restart": True}
     except Timeout as exc:
         raise UpdateError("Another nanobot update is already running in this environment.") from exc
+    except Exception as exc:
+        if incomplete_update():
+            raise UpdateError(
+                f"{exc}\nInstallation may be incomplete. Stop nanobot and retry the same update "
+                "from its Python environment before restarting. No automatic rollback was performed.",
+                needs_repair=True,
+            ) from exc
+        raise

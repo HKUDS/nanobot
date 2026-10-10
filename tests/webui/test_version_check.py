@@ -40,7 +40,7 @@ def test_version_check_reports_only_a_newer_release_and_caches_it(
     )
 
 
-@pytest.mark.parametrize("latest", ["1.2.0", "1.1.9", "not-a-version", 42, None])
+@pytest.mark.parametrize("latest", ["1.2.0", "1.1.9"])
 def test_version_check_ignores_non_newer_or_invalid_releases(
     monkeypatch: pytest.MonkeyPatch,
     latest: object,
@@ -51,14 +51,24 @@ def test_version_check_ignores_non_newer_or_invalid_releases(
     assert version_check.check_for_update() is None
 
 
-def test_version_check_treats_network_failure_as_best_effort(
+def test_version_check_does_not_report_network_failure_as_up_to_date(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     get = MagicMock(side_effect=TimeoutError("offline"))
     monkeypatch.setattr(version_check.httpx, "get", get)
 
-    assert version_check.check_for_update() is None
+    with pytest.raises(RuntimeError, match="Could not check PyPI"):
+        version_check.check_for_update()
 
     # Failures are not cached, so a later explicit check can recover.
-    assert version_check.check_for_update() is None
+    with pytest.raises(RuntimeError, match="Could not check PyPI"):
+        version_check.check_for_update()
     assert get.call_count == 2
+
+
+@pytest.mark.parametrize("latest", ["not-a-version", 42, None, "1.3.0.dev1"])
+def test_version_check_rejects_invalid_stable_metadata(monkeypatch, latest):
+    monkeypatch.setattr(version_check.httpx, "get", lambda *_args, **_kwargs: _pypi_response(latest))
+    with pytest.raises(ValueError):
+        version_check.check_for_update()
+    assert version_check._cache == (0.0, None)

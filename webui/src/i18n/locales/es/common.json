@@ -929,6 +929,8 @@
       "upToDate": "Estás al día",
       "updateAvailable": "Actualización disponible v{{version}}",
       "updateTitle": "Actualizar nanobot",
+      "updatePrepared": "He guardado una copia de la configuración y los datos de esta puerta de enlace y he detenido sus tareas. No se actualizarán otros hosts.",
+      "updateUnchanged": "Ya está actualizado. No se ha cambiado ningún archivo.",
       "updateDescription": "Instala la última versión estable. Reinicia nanobot después de la instalación.",
       "updateAdvanced": "Opciones avanzadas",
       "updateDev": "Instalar desde el código fuente",

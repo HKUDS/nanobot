@@ -771,6 +771,9 @@ export interface NanobotUpdateStatus {
   version: string | null;
   requires_restart: boolean;
   can_update: boolean;
+  needs_repair: boolean;
+  release_blocked_reason: string;
+  source_blocked_reason: string;
 }
 
 export function fetchNanobotUpdate(token: string): Promise<NanobotUpdateStatus> {
