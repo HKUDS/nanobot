@@ -89,18 +89,6 @@ describe("bootstrap helpers", () => {
     });
   });
 
-  it.each([
-    ["existing-password", { "X-Nanobot-Auth": "existing-password" }],
-    ["访问密码🔐", { "X-Nanobot-Auth-Encoded": Buffer.from("访问密码🔐").toString("base64") }],
-  ])("sends %s using a compatible HTTP authentication header", async (secret, headers) => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ws_path: "/" })));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await fetchBootstrap("", secret);
-
-    expect(fetchMock).toHaveBeenCalledWith("/webui/bootstrap", expect.objectContaining({ headers }));
-  });
-
   it("consumes bootstrap secrets from the URL fragment", () => {
     window.history.replaceState(
       null,

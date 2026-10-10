@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import socket
+import string
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -78,7 +78,7 @@ async def running(config_path: Path):
 
 async def bootstrap(client: httpx.AsyncClient, password: str = LOCAL_SECRET) -> dict:
     result = await client.get("/webui/bootstrap", headers={
-        "X-Nanobot-Auth-Encoded": base64.b64encode(password.encode()).decode("ascii"),
+        "X-Nanobot-Auth": password,
     })
     assert result.status_code == 200, result.text
     return result.json()
@@ -94,7 +94,7 @@ async def signed_in(client: httpx.AsyncClient, password: str = LOCAL_SECRET, **k
         yield ws
 
 
-async def mutation(ws, allow: bool, password: str | None = None) -> dict:
+async def mutation(ws, allow: bool, password: object = None) -> dict:
     request_id = uuid4().hex
     payload = {"allow_other_devices": allow}
     if password is not None:
@@ -133,8 +133,20 @@ async def test_generated_credential_authenticates_locally_but_cannot_enable_netw
         assert load_config(config_path).channels.websocket["host"] == "127.0.0.1"
 
 
+async def test_bootstrap_rejects_non_ascii_auth_headers(config_path: Path) -> None:
+    async with running(config_path) as (_, client):
+        for headers in (
+            [(b"X-Nanobot-Auth", b"bad-\xff")],
+            [(b"Authorization", b"Bearer bad-\xff")],
+        ):
+            for path in ("/webui/bootstrap", "/auth/token"):
+                response = await client.get(path, headers=headers)
+                assert response.status_code == 401
+        await bootstrap(client)
+
+
 async def test_password_and_scope_save_together_and_restart_with_new_credentials(config_path: Path) -> None:
-    password = "网络访问密码-😀42"
+    password = "Network-Access42!@#"
     async with running(config_path) as (channel, client):
         old_boot = await bootstrap(client)
         async with signed_in(client) as ws:
@@ -189,7 +201,7 @@ async def test_cross_site_and_forwarded_requests_cannot_set_network_password(con
             {"local_addr": ("127.0.0.2", 0)},
         ):
             async with signed_in(client, **kwargs) as ws:
-                result = await mutation(ws, True, "network-password")
+                result = await mutation(ws, True, "Network-Password42!")
                 assert result["error"] == {"status": 403, "message": "access_local_only"}
         assert load_config(config_path).channels.websocket["tokenIssueSecret"] == LOCAL_SECRET
 
@@ -198,10 +210,10 @@ async def test_two_authenticated_tabs_cannot_overwrite_password(config_path: Pat
     async with running(config_path) as (_, client):
         async with signed_in(client) as first, signed_in(client) as second:
             results = await asyncio.gather(
-                mutation(first, True, "tab-one-password"), mutation(second, True, "tab-two-password"),
+                mutation(first, True, "Tab-One-Password42!"), mutation(second, True, "Tab-Two-Password42!"),
             )
         assert sum(result["ok"] for result in results) == 1
-        winner = "tab-one-password" if results[0]["ok"] else "tab-two-password"
+        winner = "Tab-One-Password42!" if results[0]["ok"] else "Tab-Two-Password42!"
         loser = results[1] if results[0]["ok"] else results[0]
         assert loser["error"] == {"status": 409, "message": "password_already_set"}
         assert load_config(config_path).channels.websocket["tokenIssueSecret"] == winner
@@ -216,23 +228,38 @@ async def test_failed_save_keeps_local_credentials_and_can_retry(
             def fail_save(*_args) -> None:
                 raise PermissionError("read-only configuration")
             patch.setattr("nanobot.webui.settings_services.save_config", fail_save)
-            result = await mutation(ws, True, "retry-password")
+            result = await mutation(ws, True, "Retry-Password42!")
             assert result["error"] == {"status": 500, "message": "save_failed"}
         await bootstrap(client)
         saved = load_config(config_path).channels.websocket
         assert saved["tokenIssueSecret"] == LOCAL_SECRET and saved["host"] == "127.0.0.1"
         assert channel._server.sockets[0].getsockname()[0] == "127.0.0.1"
-        assert (await mutation(ws, True, "retry-password"))["ok"]
-        await bootstrap(client, "retry-password")
+        assert (await mutation(ws, True, "Retry-Password42!"))["ok"]
+        await bootstrap(client, "Retry-Password42!")
 
 
-async def test_network_password_validation_and_unicode_transport(config_path: Path) -> None:
+@pytest.mark.parametrize("password", [
+    "Aa1!bcde", "Aa1" + string.punctuation, "Aa1!" * 256,
+    "Aa1!'OR'1'='1';--", 'Aa1!"},"token":"injected"',
+])
+async def test_network_password_rules_and_symbol_round_trip(config_path: Path, password: str) -> None:
     async with running(config_path) as (_, client), signed_in(client) as ws:
-        for invalid in ("1", "prefix-${PASSWORD}", "😀" * 1025):
+        for invalid in (
+            "Aa1!bcd", "Aa1!" * 256 + "x", "lowercase42!", "UPPERCASE42!",
+            "MissingDigits!", "MissingSymbol42", "Valid42!中文", "Valid42!😀",
+            " Valid42!", "Valid42! ", "Valid 42!", "Valid42!\n", "Valid42!\r\nX-Test: injected",
+            "Valid42!\x00", "Valid42!${PASSWORD}", {"password": "Valid42!"}, 42,
+        ):
             result = await mutation(ws, True, invalid)
             assert result["error"] == {"status": 400, "message": "invalid_password"}
-        password = "😀" * 1024
+        saved = load_config(config_path).channels.websocket
+        assert saved["tokenIssueSecret"] == LOCAL_SECRET and saved["host"] == "127.0.0.1"
+        await bootstrap(client)
         assert (await mutation(ws, True, password))["ok"]
+        assert load_config(config_path).channels.websocket["tokenIssueSecret"] == password
+        assert not load_config(config_path).channels.websocket.get("token")
+        await bootstrap(client, password)
+    async with running(config_path) as (_, client):
         await bootstrap(client, password)
 
 

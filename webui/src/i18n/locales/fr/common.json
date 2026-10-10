@@ -1068,10 +1068,10 @@
       "networkScope": "Ce réglage modifie uniquement l’écoute de la WebUI. Il ne configure pas les pare-feu, les routeurs ni les tunnels publics.",
       "saveFailed": "Impossible d’enregistrer les paramètres d’accès. Réessayez.",
       "passwordTitle": "Définir un mot de passe d’accès",
-      "passwordDescription": "Définissez un mot de passe avant d’autoriser les autres appareils à se connecter.",
+      "passwordDescription": "Combinez des lettres anglaises majuscules et minuscules, des chiffres et des symboles.",
       "passwordConfirm": "Confirmer le mot de passe",
       "passwordSubmit": "Définir le mot de passe et autoriser l’accès",
-      "passwordInvalid": "Utilisez de 8 à 1024 caractères, sans compter les espaces au début et à la fin. Le mot de passe ne doit pas contenir ${.",
+      "passwordInvalid": "Utilisez de 8 à 1024 caractères avec des lettres anglaises majuscules et minuscules, des chiffres et des symboles ASCII comme !@#. Les espaces, les autres caractères et ${ sont interdits.",
       "passwordMismatch": "Les mots de passe ne correspondent pas. Saisissez-les à nouveau.",
       "passwordAlreadySet": "Une autre page a déjà défini le mot de passe. Actualisez cette page avant de modifier l’accès.",
       "passwordLocalOnly": "Définissez le mot de passe sur l’ordinateur qui exécute nanobot."

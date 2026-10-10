@@ -1071,10 +1071,10 @@
       "networkScope": "Isso altera apenas onde a WebUI escuta. Não configura firewalls, roteadores ou túneis públicos.",
       "saveFailed": "Não foi possível salvar as configurações de acesso. Tente novamente.",
       "passwordTitle": "Definir senha de acesso",
-      "passwordDescription": "Defina uma senha antes de permitir que outros dispositivos se conectem.",
+      "passwordDescription": "Combine letras inglesas maiúsculas e minúsculas, números e símbolos.",
       "passwordConfirm": "Confirmar senha",
       "passwordSubmit": "Definir senha e permitir acesso",
-      "passwordInvalid": "Use de 8 a 1024 caracteres, sem contar os espaços no início e no fim. A senha não pode conter ${.",
+      "passwordInvalid": "Use de 8 a 1024 caracteres com letras inglesas maiúsculas e minúsculas, números e símbolos ASCII como !@#. Não são permitidos espaços, outros caracteres nem ${.",
       "passwordMismatch": "As senhas não coincidem. Digite-as novamente.",
       "passwordAlreadySet": "Outra página já definiu a senha. Atualize esta página antes de alterar o acesso.",
       "passwordLocalOnly": "Defina a senha no computador que executa o nanobot."

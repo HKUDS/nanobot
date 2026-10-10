@@ -4068,7 +4068,7 @@ describe("App layout", () => {
     window.history.replaceState(null, "", "/#/settings?section=runtime");
     const { unmount } = render(<App />);
     fireEvent.click(await screen.findByRole("switch", { name: "Allow access from other devices" }));
-    const secret = "新的访问密码🔐2026";
+    const secret = "New-Access-Password42!";
     fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: secret } });
     fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: secret } });
     fireEvent.click(screen.getByRole("button", { name: "Set password and allow access" }));

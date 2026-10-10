@@ -501,13 +501,11 @@ def _webui_credentials_match(url: str, secret: str) -> bool:
 
     import httpx
 
-    from nanobot.webui.http_utils import webui_auth_headers
-
     parsed = urlsplit(url)
     bootstrap_url = urlunsplit((parsed.scheme, parsed.netloc, "/webui/bootstrap", "", ""))
     try:
         response = httpx.get(
-            bootstrap_url, headers=webui_auth_headers(secret), timeout=2,
+            bootstrap_url, headers={"X-Nanobot-Auth": secret}, timeout=2,
             trust_env=False, follow_redirects=False,
         )
         if response.status_code != 200:

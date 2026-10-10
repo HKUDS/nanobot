@@ -1068,10 +1068,10 @@
       "networkScope": "Chỉ thay đổi phạm vi lắng nghe của WebUI. Không cấu hình tường lửa, bộ định tuyến hay đường hầm công khai.",
       "saveFailed": "Không thể lưu cài đặt truy cập. Vui lòng thử lại.",
       "passwordTitle": "Đặt mật khẩu truy cập",
-      "passwordDescription": "Đặt mật khẩu trước khi cho phép các thiết bị khác kết nối.",
+      "passwordDescription": "Kết hợp chữ cái tiếng Anh viết hoa, viết thường, số và ký hiệu.",
       "passwordConfirm": "Xác nhận mật khẩu",
       "passwordSubmit": "Đặt mật khẩu và cho phép truy cập",
-      "passwordInvalid": "Dùng mật khẩu dài 8–1024 ký tự, không tính khoảng trắng ở đầu và cuối. Mật khẩu không được chứa ${.",
+      "passwordInvalid": "Dùng 8–1024 ký tự gồm chữ cái tiếng Anh viết hoa, viết thường, số và ký hiệu ASCII như !@#. Không dùng khoảng trắng, ký tự khác hoặc ${.",
       "passwordMismatch": "Mật khẩu không khớp. Vui lòng nhập lại.",
       "passwordAlreadySet": "Một trang khác đã đặt mật khẩu. Hãy tải lại trang này trước khi thay đổi quyền truy cập.",
       "passwordLocalOnly": "Đặt mật khẩu trên máy tính chạy nanobot."

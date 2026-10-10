@@ -19,7 +19,6 @@ from pydantic import Field
 from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPrivateUsage]
 from nanobot.webui import remote_ssh
 from nanobot.webui.client_contract import Compatibility, assess_webui_contract, compatibility_error
-from nanobot.webui.http_utils import webui_auth_headers
 from nanobot.webui.remote_proxy import RemoteProxy
 from nanobot.webui.remote_ssh import RemoteError, RemoteProfile, Tunnel
 
@@ -181,7 +180,7 @@ class RemoteInstances:
             async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
                 response = await client.get(
                     f"http://127.0.0.1:{connection.tunnel.port}/webui/terminal",
-                    headers=webui_auth_headers(connection.secret),
+                    headers={"X-Nanobot-Auth": connection.secret},
                 )
             if response.status_code in {401, 403}:
                 connection.error = "remote_auth_failed"
@@ -482,7 +481,7 @@ class RemoteInstances:
         try:
             async with httpx.AsyncClient(timeout=20, trust_env=False, follow_redirects=False) as client:
                 response = await client.get(
-                    f"{base}/webui/terminal", headers=webui_auth_headers(data["secret"]),
+                    f"{base}/webui/terminal", headers={"X-Nanobot-Auth": data["secret"]},
                 )
                 if response.status_code in {401, 403}:
                     raise RemoteError("remote_auth_failed")

@@ -49,14 +49,15 @@ export function WebuiAccessSettings({ access, canSetPassword, saving, error, onC
   const submitPassword = async (event: React.FormEvent) => {
     event.preventDefault();
     if (saving) return;
-    const secret = password.trim();
-    const length = Array.from(secret).length;
-    if (length < 8 || length > 1024 || secret.includes("${")) {
+    const secret = password;
+    if (secret.length < 8 || secret.length > 1024 || /[^\x21-\x7e]/.test(secret)
+      || !/[a-z]/.test(secret) || !/[A-Z]/.test(secret) || !/[0-9]/.test(secret)
+      || !/[^A-Za-z0-9]/.test(secret) || secret.includes("${")) {
       setValidationError(t("settings.webuiAccess.passwordInvalid"));
       passwordRef.current?.focus();
       return;
     }
-    if (secret !== confirmation.trim()) {
+    if (secret !== confirmation) {
       setValidationError(t("settings.webuiAccess.passwordMismatch"));
       confirmationRef.current?.focus();
       return;

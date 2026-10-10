@@ -73,13 +73,7 @@ export async function fetchBootstrap(
 ): Promise<BootstrapResponse> {
   const headers: Record<string, string> = {};
   if (secret) {
-    if (/^[\x20-\x7e]*$/.test(secret)) {
-      headers["X-Nanobot-Auth"] = secret;
-    } else {
-      headers["X-Nanobot-Auth-Encoded"] = btoa(
-        Array.from(new TextEncoder().encode(secret), (byte) => String.fromCharCode(byte)).join(""),
-      );
-    }
+    headers["X-Nanobot-Auth"] = secret;
   }
   const res = await fetchWithTimeout(`${baseUrl}/webui/bootstrap`, {
     method: "GET",

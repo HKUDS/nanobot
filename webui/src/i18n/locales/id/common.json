@@ -1068,10 +1068,10 @@
       "networkScope": "Ini hanya mengubah cakupan alamat dengar WebUI. Tidak mengonfigurasi firewall, router, atau tunnel publik.",
       "saveFailed": "Pengaturan akses tidak dapat disimpan. Coba lagi.",
       "passwordTitle": "Atur kata sandi akses",
-      "passwordDescription": "Atur kata sandi sebelum mengizinkan perangkat lain terhubung.",
+      "passwordDescription": "Gabungkan huruf besar dan kecil bahasa Inggris, angka, dan simbol.",
       "passwordConfirm": "Konfirmasi kata sandi",
       "passwordSubmit": "Atur kata sandi dan izinkan akses",
-      "passwordInvalid": "Gunakan 8–1024 karakter, tidak termasuk spasi di awal dan akhir. Kata sandi tidak boleh berisi ${.",
+      "passwordInvalid": "Gunakan 8–1024 karakter dengan huruf besar dan kecil bahasa Inggris, angka, serta simbol ASCII seperti !@#. Spasi, karakter lain, dan ${ tidak diizinkan.",
       "passwordMismatch": "Kata sandi tidak cocok. Masukkan kembali.",
       "passwordAlreadySet": "Halaman lain sudah mengatur kata sandi. Muat ulang halaman ini sebelum mengubah akses.",
       "passwordLocalOnly": "Atur kata sandi di komputer yang menjalankan nanobot."

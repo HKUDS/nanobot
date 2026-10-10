@@ -152,16 +152,18 @@ describe("WebUI access settings", () => {
     const password = screen.getByLabelText("WebUI password");
     const confirmation = screen.getByLabelText("Confirm password");
     const submit = screen.getByRole("button", { name: "Set password and allow access" });
-    fireEvent.change(password, { target: { value: "🔐".repeat(7) } });
-    fireEvent.click(submit);
-    expect(screen.getByRole("alert")).toHaveTextContent("8–1024 characters");
-    fireEvent.change(password, { target: { value: "🔐".repeat(1025) } });
-    fireEvent.click(submit);
-    expect(screen.getByRole("alert")).toHaveTextContent("8–1024 characters");
-    fireEvent.change(password, { target: { value: "prefix-${PASSWORD}" } });
-    fireEvent.click(submit);
-    expect(screen.getByRole("alert")).toHaveTextContent("It must not contain ${.");
-    fireEvent.change(password, { target: { value: "🔐".repeat(8) } });
+    for (const invalid of [
+      "Aa1!bcd", "Aa1!".repeat(256) + "x", "lowercase42!", "UPPERCASE42!",
+      "MissingDigits!", "MissingSymbol42", "Valid42!中文", "Valid42!😀",
+      " Valid42!", "Valid42! ", "Valid 42!", "Valid42!${PASSWORD}",
+    ]) {
+      fireEvent.change(password, { target: { value: invalid } });
+      fireEvent.click(submit);
+      expect(screen.getByRole("alert")).toHaveTextContent("uppercase and lowercase English letters");
+      expect(password).toHaveFocus();
+      expect(requestMutationMock).not.toHaveBeenCalled();
+    }
+    fireEvent.change(password, { target: { value: "Aa1!bcde" } });
     fireEvent.change(confirmation, { target: { value: "different" } });
     fireEvent.click(submit);
     expect(screen.getByRole("alert")).toHaveTextContent("The passwords do not match");
@@ -191,14 +193,14 @@ describe("WebUI access settings", () => {
     });
     const toggle = screen.getByRole("switch", { name: "Allow access from other devices" });
     fireEvent.click(toggle);
-    const secret = "🔐".repeat(1024);
-    fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: `  ${secret}  ` } });
+    const secret = "Aa1!".repeat(256);
+    fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: secret } });
     fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: secret } });
     fireEvent.click(screen.getByRole("button", { name: "Set password and allow access" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not save access settings. Try again.");
     expect(toggle).not.toBeChecked();
     expect(credentialsChanged).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("WebUI password")).toHaveValue(`  ${secret}  `);
+    expect(screen.getByLabelText("WebUI password")).toHaveValue(secret);
     fireEvent.click(screen.getByRole("button", { name: "Set password and allow access" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(toggle).toBeChecked();
@@ -226,8 +228,8 @@ describe("WebUI access settings", () => {
     });
     const toggle = screen.getByRole("switch", { name: "Allow access from other devices" });
     fireEvent.click(toggle);
-    fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: "second-tab-password" } });
-    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "second-tab-password" } });
+    fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: "Second-Tab42!" } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "Second-Tab42!" } });
     fireEvent.click(screen.getByRole("button", { name: "Set password and allow access" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
     expect(toggle).not.toBeChecked();

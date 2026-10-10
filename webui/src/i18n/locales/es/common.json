@@ -1068,10 +1068,10 @@
       "networkScope": "Esto solo cambia dónde escucha la WebUI. No configura cortafuegos, routers ni túneles públicos.",
       "saveFailed": "No se pudo guardar la configuración de acceso. Inténtalo de nuevo.",
       "passwordTitle": "Establecer una contraseña de acceso",
-      "passwordDescription": "Establece una contraseña antes de permitir que otros dispositivos se conecten.",
+      "passwordDescription": "Combina letras inglesas mayúsculas y minúsculas, números y símbolos.",
       "passwordConfirm": "Confirmar contraseña",
       "passwordSubmit": "Establecer contraseña y permitir acceso",
-      "passwordInvalid": "Usa entre 8 y 1024 caracteres, sin contar los espacios al principio y al final. La contraseña no puede contener ${.",
+      "passwordInvalid": "Usa entre 8 y 1024 caracteres con letras inglesas mayúsculas y minúsculas, números y símbolos ASCII como !@#. No se permiten espacios, otros caracteres ni ${.",
       "passwordMismatch": "Las contraseñas no coinciden. Introdúcelas de nuevo.",
       "passwordAlreadySet": "Otra página ya ha establecido la contraseña. Actualiza esta página antes de cambiar el acceso.",
       "passwordLocalOnly": "Establece la contraseña en el equipo que ejecuta nanobot."

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import email.utils
 import gzip
 import hmac
@@ -313,28 +311,13 @@ def bearer_token(headers: Any) -> str | None:
     return None
 
 
-def webui_auth_headers(secret: str) -> dict[str, str]:
-    """Encode WebUI credentials, retaining the legacy header for ASCII credentials."""
-    if all(" " <= char <= "~" for char in secret):
-        return {"X-Nanobot-Auth": secret}
-    return {"X-Nanobot-Auth-Encoded": base64.b64encode(secret.encode("utf-8")).decode("ascii")}
-
-
 def issue_route_secret_matches(headers: Any, configured_secret: str) -> bool:
     if not configured_secret:
         return True
-    encoded = case_insensitive_header(headers, "X-Nanobot-Auth-Encoded")
-    if encoded:
-        try:
-            supplied = base64.b64decode(encoded, validate=True).decode("utf-8")
-        except (ValueError, binascii.Error):
-            return False
-        return hmac.compare_digest(supplied.encode("utf-8"), configured_secret.encode("utf-8"))
     authorization = headers.get("Authorization") or headers.get("authorization")
     if authorization and authorization.lower().startswith("bearer "):
         supplied = authorization[7:].strip()
-        return hmac.compare_digest(supplied.encode("utf-8"), configured_secret.encode("utf-8"))
-    header_token = headers.get("X-Nanobot-Auth") or headers.get("x-nanobot-auth")
-    if not header_token:
-        return False
-    return hmac.compare_digest(header_token.strip().encode("utf-8"), configured_secret.encode("utf-8"))
+    else:
+        supplied = (headers.get("X-Nanobot-Auth") or headers.get("x-nanobot-auth") or "").strip()
+    return (supplied.isascii() and configured_secret.isascii()
+            and hmac.compare_digest(supplied, configured_secret))
