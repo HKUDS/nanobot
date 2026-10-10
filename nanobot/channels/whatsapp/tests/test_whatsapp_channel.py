@@ -589,6 +589,40 @@ async def test_group_allow_from_does_not_allow_same_participant_in_other_group()
 
 
 @pytest.mark.asyncio
+async def test_message_before_startup_is_dropped_with_millisecond_timestamp() -> None:
+    bus = MessageBus()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    ch._started_at = 1_700_000_000.250
+    ch._send_read_receipt = AsyncMock()
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(message=_Proto(conversation="old message"), timestamp=1_700_000_000_249),
+    )
+
+    assert bus.inbound_size == 0
+    ch._send_read_receipt.assert_not_awaited()
+
+
+@pytest.mark.parametrize("timestamp", [1_700_000_000_251, 1_700_000_001_987])
+@pytest.mark.asyncio
+async def test_message_after_startup_has_timestamp_in_seconds(timestamp: int) -> None:
+    bus = MessageBus()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    ch._started_at = 1_700_000_000.250
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(message=_Proto(conversation="new message"), timestamp=timestamp),
+    )
+
+    assert bus.inbound_size == 1
+    msg = await bus.consume_inbound()
+    assert msg.content == "new message"
+    assert msg.metadata["timestamp"] == timestamp // 1000
+
+
+@pytest.mark.asyncio
 async def test_read_receipt_is_requested_once_after_dedup() -> None:
     ch = _make_channel()
     ch._send_read_receipt = AsyncMock()
