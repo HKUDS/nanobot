@@ -603,11 +603,15 @@ class MemoryStore:
     def dream_run_completed(
         resp: object | None,
     ) -> bool:
-        """Return True when the Dream agent reached a normal terminal response."""
+        """Return True when Dream completed without a provider policy block."""
         metadata = getattr(resp, "metadata", None)
         if not isinstance(metadata, dict):
             return False
-        return cast(dict[str, Any], metadata).get("_stop_reason") == "completed"
+        data = cast(dict[str, Any], metadata)
+        return (
+            data.get("_stop_reason") == "completed"
+            and data.get("_provider_finish_reason") not in {"refusal", "content_filter"}
+        )
 
     @staticmethod
     def dream_incompletion_reason(
@@ -616,7 +620,11 @@ class MemoryStore:
         """Human-readable explanation of why a Dream run cannot advance."""
         metadata = getattr(resp, "metadata", None)
         if isinstance(metadata, dict):
-            stop_reason = cast(dict[str, Any], metadata).get("_stop_reason", "unknown")
+            data = cast(dict[str, Any], metadata)
+            stop_reason = data.get("_stop_reason", "unknown")
+            provider_finish_reason = data.get("_provider_finish_reason")
+            if provider_finish_reason in {"refusal", "content_filter"}:
+                return f"provider finish_reason: {provider_finish_reason}"
         else:
             stop_reason = "missing response metadata"
         return f"stop_reason: {stop_reason}"

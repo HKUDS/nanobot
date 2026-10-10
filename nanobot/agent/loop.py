@@ -147,6 +147,7 @@ class TurnContext:
     final_content: str | None = None
     all_messages: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str = ""
+    provider_finish_reason: str | None = None
     failure_error_kind: str | None = None
     streamed_content: bool = False
 
@@ -2199,6 +2200,7 @@ class AgentLoop:
         ctx.summary_checkpoint = result.summary_checkpoint
         ctx.provider_compaction_applied = result.provider_compaction_applied
         ctx.stop_reason = result.stop_reason
+        ctx.provider_finish_reason = result.provider_finish_reason
         ctx.failure_error_kind = result.failure_error_kind
         if (
             ctx.kind is TurnKind.USER
@@ -2285,6 +2287,7 @@ class AgentLoop:
         )
         if ctx.ephemeral and ctx.outbound is not None:
             ctx.outbound.metadata["_stop_reason"] = ctx.stop_reason
+            ctx.outbound.metadata["_provider_finish_reason"] = ctx.provider_finish_reason
 
     def _sanitize_persisted_blocks(
         self,
