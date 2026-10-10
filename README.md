@@ -70,8 +70,7 @@ nanobot is a self-hosted personal AI agent runtime. It can:
 
 ## 📦 Install
 
-> [!IMPORTANT]
-> If you want the newest features and experiments, install from source.
+> [!IMPORTANT] If you want the newest features and experiments, install from source.
 >
 > If you want the most stable day-to-day experience, install from PyPI or with `uv`.
 
@@ -128,16 +127,11 @@ python -m pip install nanobot-ai
 
 If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or install inside a virtual environment.
 
-Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon
-and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2.
-Pip selects the matching wheel; opening the TUI does not need a separate GitHub download or Bun
-installation. A source-distribution install on a supported target can use the matching checksummed
-GitHub release archive. On other platforms, use `nanobot --classic` or the WebUI.
+Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2. Pip selects the matching wheel; opening the TUI does not need a separate GitHub download or Bun installation. A source-distribution install on a supported target can use the matching checksummed GitHub release archive. On other platforms, use `nanobot --classic` or the WebUI.
 
 **Install from source**
 
-Clone the repository and install it in editable mode. Bun is required because the source
-checkout runs the matching TUI directly instead of downloading an older release binary.
+Clone the repository and install it in editable mode. Bun is required because the source checkout runs the matching TUI directly instead of downloading an older release binary.
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -145,18 +139,13 @@ cd nanobot
 python -m venv .venv
 ```
 
-Activate it with `source .venv/bin/activate` on macOS/Linux or
-`.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
+Activate it with `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
 
 ```bash
 python -m pip install -e .
 ```
 
-After that, the normal commands are identical to a stable install. `nanobot` runs the TUI
-from this checkout, and `nanobot webui` rebuilds stale frontend assets automatically. A later
-`git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun
-`python -m pip install -e .` when Python dependencies change. Contributors should also read
-[`CONTRIBUTING.md`](./CONTRIBUTING.md).
+After that, the normal commands are identical to a stable install. `nanobot` runs the TUI from this checkout, and `nanobot webui` rebuilds stale frontend assets automatically. A later `git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun `python -m pip install -e .` when Python dependencies change. Contributors should also read [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 Verify the install:
 

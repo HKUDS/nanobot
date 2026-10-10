@@ -4,22 +4,7 @@ Use this page when the first reply fails because of provider/model mismatch, or 
 
 For normal local setup, open **Settings → Models** in the WebUI to add provider credentials, create a model preset, and select the active model. Use the JSON below for manual deployments, local endpoints, provider-specific fields, or diagnosis.
 
-The model picker fetches online catalogs for OpenAI Codex, xAI Grok, and GitHub
-Copilot. An explicit authorization failure hides the picker’s search and model
-list and offers **Sign in again** using the existing provider login flow.
-Successful WebUI sign-in clears the catalog cache and restores model selection.
-Existing presets, selected models, and unsaved preset details are preserved.
-Network, rate-limit, and service failures instead keep cached or built-in lists
-available, label them as potentially out of date, and ask you to try again later
-(failed refreshes are cached briefly). Manual model IDs remain available for
-these temporary failures. A successful chat may have used a fallback preset and
-does not prove that the selected provider's authorization is still valid.
-When a live chat uses a fallback model, a dismissible notice above the composer
-names that model and links to model settings. If the provider explicitly rejected
-OAuth credentials, the notice instead names the provider that needs a new login,
-with fallback completion as secondary information. Network errors, ordinary
-permission denials, and rate limits do not request reauthentication. The notice
-does not change your selected preset.
+The model picker fetches online catalogs for OpenAI Codex, xAI Grok, and GitHub Copilot. An explicit authorization failure hides the picker’s search and model list and offers **Sign in again** using the existing provider login flow. Successful WebUI sign-in clears the catalog cache and restores model selection. Existing presets, selected models, and unsaved preset details are preserved. Network, rate-limit, and service failures instead keep cached or built-in lists available, label them as potentially out of date, and ask you to try again later (failed refreshes are cached briefly). Manual model IDs remain available for these temporary failures. A successful chat may have used a fallback preset and does not prove that the selected provider's authorization is still valid. When a live chat uses a fallback model, a dismissible notice above the composer names that model and links to model settings. If the provider explicitly rejected OAuth credentials, the notice instead names the provider that needs a new login, with fallback completion as secondary information. Network errors, ordinary permission denials, and rate limits do not request reauthentication. The notice does not change your selected preset.
 
 For every setup, answer three questions:
 
@@ -88,20 +73,9 @@ Use `proxy` when one provider must send HTTP traffic through a proxy without cha
 
 ## Inline Image Requests
 
-Before sending a large inline image batch, providers prepare smaller copies while
-keeping the attachment files intact. This applies to Responses, Chat Completions,
-Anthropic Messages, and Bedrock Converse requests, including images returned by tools
-and images in Responses history replay. Preparation first re-encodes at the original
-dimensions, then reduces each dimension by at most 25% if needed, with JPEG quality
-at least 65. PNG transparency is preserved. The shared 1 MB image data URL budget is
-a best-effort transport target; small image blocks, animated images, and remote
-references keep their original payloads. Gateway logs report image sizes and byte counts.
+Before sending a large inline image batch, providers prepare smaller copies while keeping the attachment files intact. This applies to Responses, Chat Completions, Anthropic Messages, and Bedrock Converse requests, including images returned by tools and images in Responses history replay. Preparation first re-encodes at the original dimensions, then reduces each dimension by at most 25% if needed, with JPEG quality at least 65. PNG transparency is preserved. The shared 1 MB image data URL budget is a best-effort transport target; small image blocks, animated images, and remote references keep their original payloads. Gateway logs report image sizes and byte counts.
 
-Preparation preserves each adapter's model and API capability rules. When automatic
-Responses compatibility fallback is allowed, switching to Chat Completions retains
-the images. The shared retry policy can retry a non-transient image request error once
-without images, using text placeholders that explicitly say the images were not delivered.
-Responses state containing images is discarded before that text-only retry.
+Preparation preserves each adapter's model and API capability rules. When automatic Responses compatibility fallback is allowed, switching to Chat Completions retains the images. The shared retry policy can retry a non-transient image request error once without images, using text placeholders that explicitly say the images were not delivered. Responses state containing images is discarded before that text-only retry.
 
 ## Common Provider Patterns
 
@@ -151,16 +125,11 @@ To opt into OpenRouter server-managed search and fetch, add:
 }
 ```
 
-Chat Completions-compatible OpenRouter
-[server tools](https://openrouter.ai/docs/guides/features/server-tools), such as those above, are
-appended to nanobot's generated functions. This keeps unrelated local tools such as `write_file`
-available in the same request. Responses-only server tools require an API surface that the
-OpenRouter provider does not currently enable.
+Chat Completions-compatible OpenRouter [server tools](https://openrouter.ai/docs/guides/features/server-tools), such as those above, are appended to nanobot's generated functions. This keeps unrelated local tools such as `write_file` available in the same request. Responses-only server tools require an API surface that the OpenRouter provider does not currently enable.
 
 ### OrcaRouter Gateway
 
-[OrcaRouter](https://www.orcarouter.ai) is an OpenAI-compatible model routing gateway. Configure
-the built-in `orcarouter` provider and use a model ID from OrcaRouter's catalog:
+[OrcaRouter](https://www.orcarouter.ai) is an OpenAI-compatible model routing gateway. Configure the built-in `orcarouter` provider and use a model ID from OrcaRouter's catalog:
 
 ```json
 {
@@ -185,17 +154,11 @@ the built-in `orcarouter` provider and use a model ID from OrcaRouter's catalog:
 }
 ```
 
-Use the model ID exactly as OrcaRouter lists it. `orcarouter/auto` routes to a
-suitable upstream automatically; explicit IDs such as
-`anthropic/claude-sonnet-4.6` or `openai/gpt-5` are also accepted. OrcaRouter API keys start with
-`sk-orca-`. The WebUI can load the account's model catalog after the API key is saved under
-**Settings → Models**.
+Use the model ID exactly as OrcaRouter lists it. `orcarouter/auto` routes to a suitable upstream automatically; explicit IDs such as `anthropic/claude-sonnet-4.6` or `openai/gpt-5` are also accepted. OrcaRouter API keys start with `sk-orca-`. The WebUI can load the account's model catalog after the API key is saved under **Settings → Models**.
 
 ### Eden AI Gateway
 
-Eden AI exposes an OpenAI-compatible chat-completions endpoint at
-`https://api.edenai.run/v3`. Configure the built-in `edenai` provider and use
-the full `provider/model` identifier listed by Eden AI:
+Eden AI exposes an OpenAI-compatible chat-completions endpoint at `https://api.edenai.run/v3`. Configure the built-in `edenai` provider and use the full `provider/model` identifier listed by Eden AI:
 
 ```json
 {
@@ -219,16 +182,11 @@ the full `provider/model` identifier listed by Eden AI:
 }
 ```
 
-Nanobot sends the model ID unchanged, including its provider prefix. Use
-Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models)
-to choose a currently available model. The WebUI can also load that catalog
-after the Eden AI API key is saved under **Settings → Models**.
+Nanobot sends the model ID unchanged, including its provider prefix. Use Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models) to choose a currently available model. The WebUI can also load that catalog after the Eden AI API key is saved under **Settings → Models**.
 
 ### OpenCode Zen and Go
 
-OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
-They share `OPENCODE_API_KEY`, but use separate provider config keys and default base
-URLs in nanobot.
+OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models. They share `OPENCODE_API_KEY`, but use separate provider config keys and default base URLs in nanobot.
 
 ```json
 {
@@ -273,12 +231,7 @@ For OpenCode Go, switch the provider block and preset:
 }
 ```
 
-OpenCode documents model IDs with `opencode/<model-id>` for Zen and
-`opencode-go/<model-id>` for Go. nanobot accepts those prefixes and strips them
-before sending the request to OpenCode. Use model IDs that OpenCode lists under
-the `chat/completions` endpoint; models listed only under `responses`,
-`messages`, or provider-specific endpoints are not handled by this
-OpenAI-compatible provider path.
+OpenCode documents model IDs with `opencode/<model-id>` for Zen and `opencode-go/<model-id>` for Go. nanobot accepts those prefixes and strips them before sending the request to OpenCode. Use model IDs that OpenCode lists under the `chat/completions` endpoint; models listed only under `responses`, `messages`, or provider-specific endpoints are not handled by this OpenAI-compatible provider path.
 
 ### Anthropic Direct
 
@@ -506,12 +459,7 @@ Start Ollama separately, then point nanobot at the OpenAI-compatible endpoint.
 
 Most Ollama setups do not require an API key.
 
-Ollama renders the OpenAI-compatible messages and tools through each model's chat
-template. If ordinary model responses are fast but tool-using turns show low prompt
-cache reuse, diagnose the rendered template before changing nanobot's context or
-memory settings. The
-[Ollama prompt-cache guide](./guides/configure-ollama-prompt-cache.md) explains the
-log pattern and a tested `llama3.1:8b` workaround.
+Ollama renders the OpenAI-compatible messages and tools through each model's chat template. If ordinary model responses are fast but tool-using turns show low prompt cache reuse, diagnose the rendered template before changing nanobot's context or memory settings. The [Ollama prompt-cache guide](./guides/configure-ollama-prompt-cache.md) explains the log pattern and a tested `llama3.1:8b` workaround.
 
 ### vLLM or Other Local OpenAI-Compatible Server
 
@@ -608,14 +556,9 @@ For OpenAI Codex:
 nanobot provider login openai-codex --set-main
 ```
 
-The WebUI reads the account's Codex model catalog online, including current
-context-window and reasoning-effort metadata. A small compatible catalog remains
-available when the service cannot be reached.
+The WebUI reads the account's Codex model catalog online, including current context-window and reasoning-effort metadata. A small compatible catalog remains available when the service cannot be reached.
 
-After three WebSocket transport failures without a completed reply, the same
-authenticated session uses HTTP for subsequent attempts. The existing retry policy
-controls replay and cancellation. WebSocket logs include request bytes, first-event timing,
-and close codes; unrecognized close reasons are redacted.
+After three WebSocket transport failures without a completed reply, the same authenticated session uses HTTP for subsequent attempts. The existing retry policy controls replay and cancellation. WebSocket logs include request bytes, first-event timing, and close codes; unrecognized close reasons are redacted.
 
 For an eligible X Premium / Grok subscription:
 
@@ -623,33 +566,13 @@ For an eligible X Premium / Grok subscription:
 nanobot provider login xai-grok --set-main
 ```
 
-This selects `xai-grok/grok-4.6`. The WebUI model selector reads xAI's online
-model catalog, so newly available subscription models appear without a nanobot
-release. Online metadata is cached and enriched with nanobot's curated labels;
-if xAI is temporarily unavailable, nanobot uses the last successful catalog or
-a small built-in fallback instead of emptying the selector. The same catalog
-controls whether the provider exposes the hosted `x_search` tool; models that do
-not advertise support continue without hosted X Search.
-When enabled, Grok can search current X posts and return inline source links
-without invoking a local nanobot tool. Credentials are stored under the
-active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in
-`config.json` and not in Grok Build's credential file.
-Hosted X Search remains enabled by default and can be disabled with the WebUI
-switch or `providers.xaiGrok.extraBody.tools: []`.
+This selects `xai-grok/grok-4.6`. The WebUI model selector reads xAI's online model catalog, so newly available subscription models appear without a nanobot release. Online metadata is cached and enriched with nanobot's curated labels; if xAI is temporarily unavailable, nanobot uses the last successful catalog or a small built-in fallback instead of emptying the selector. The same catalog controls whether the provider exposes the hosted `x_search` tool; models that do not advertise support continue without hosted X Search. When enabled, Grok can search current X posts and return inline source links without invoking a local nanobot tool. Credentials are stored under the active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in `config.json` and not in Grok Build's credential file. Hosted X Search remains enabled by default and can be disabled with the WebUI switch or `providers.xaiGrok.extraBody.tools: []`.
 
-The login is xAI subscription OAuth, not X Developer OAuth. It follows the
-public client contract documented and implemented by
-[Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md);
-xAI may change that upstream contract independently of nanobot.
+The login is xAI subscription OAuth, not X Developer OAuth. It follows the public client contract documented and implemented by [Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md); xAI may change that upstream contract independently of nanobot.
 
 For GitHub Copilot:
 
-You can also sign in from the WebUI's model settings. The sign-in dialog shows a
-device code: copy it, select **Open GitHub**, and enter the code on GitHub. Keep
-the dialog open; nanobot detects approval and refreshes the model catalog
-automatically. Closing the dialog cancels the pending sign-in without replacing
-your saved credentials. This works from a remote browser too; no browser needs
-to open on the gateway machine.
+You can also sign in from the WebUI's model settings. The sign-in dialog shows a device code: copy it, select **Open GitHub**, and enter the code on GitHub. Keep the dialog open; nanobot detects approval and refreshes the model catalog automatically. Closing the dialog cancels the pending sign-in without replacing your saved credentials. This works from a remote browser too; no browser needs to open on the gateway machine.
 
 For terminal sign-in:
 
@@ -657,9 +580,7 @@ For terminal sign-in:
 nanobot provider login github-copilot --set-main
 ```
 
-The WebUI reads the models enabled for the signed-in Copilot account. nanobot
-lists entries that support its current Copilot chat-completions or Responses
-transport and hides models that it cannot route safely.
+The WebUI reads the models enabled for the signed-in Copilot account. nanobot lists entries that support its current Copilot chat-completions or Responses transport and hides models that it cannot route safely.
 
 Each command authenticates the selected provider and makes its current default model active. OpenAI Codex and eligible GitHub Copilot models participate in [Responses state retention](./configuration.md#responses-state-and-compaction), while native compaction remains provider-capability-specific. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 

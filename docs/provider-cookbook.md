@@ -97,9 +97,7 @@ If this fails with `401` or `unauthorized`, check that `OPENROUTER_API_KEY` is v
 
 ## Recipe: OpenCode Zen or Go
 
-This recipe applies when your credential comes from OpenCode Zen or OpenCode Go.
-Both providers use `OPENCODE_API_KEY`; pick the provider block that matches the
-subscription or balance you want to use.
+This recipe applies when your credential comes from OpenCode Zen or OpenCode Go. Both providers use `OPENCODE_API_KEY`; pick the provider block that matches the subscription or balance you want to use.
 
 OpenCode Zen:
 
@@ -160,11 +158,7 @@ nanobot status
 nanobot agent -m "Hello!"
 ```
 
-OpenCode's docs list models across multiple endpoint types. The `opencode_zen`
-and `opencode_go` providers in nanobot use the OpenAI-compatible
-`chat/completions` path. If a model fails with `model not found` or an endpoint
-shape error, choose a model that OpenCode lists under `chat/completions` for the
-matching Zen or Go endpoint.
+OpenCode's docs list models across multiple endpoint types. The `opencode_zen` and `opencode_go` providers in nanobot use the OpenAI-compatible `chat/completions` path. If a model fails with `model not found` or an endpoint shape error, choose a model that OpenCode lists under `chat/completions` for the matching Zen or Go endpoint.
 
 ## Recipe: OpenAI Direct
 
@@ -422,11 +416,7 @@ nanobot agent -m "Hello!"
 
 If you see `connection refused`, Ollama is not running or `apiBase` points to the wrong port. If every response is slow, try a smaller local model or lower `contextWindowTokens`.
 
-If direct Ollama responses are fast but tool-using nanobot turns repeatedly evaluate
-thousands of prompt tokens, the model's chat template may be moving its tool
-definitions between requests. See
-[Improve Ollama Tool-Calling Prompt Cache Reuse](./guides/configure-ollama-prompt-cache.md)
-for a diagnostic procedure and an optional model-specific workaround.
+If direct Ollama responses are fast but tool-using nanobot turns repeatedly evaluate thousands of prompt tokens, the model's chat template may be moving its tool definitions between requests. See [Improve Ollama Tool-Calling Prompt Cache Reuse](./guides/configure-ollama-prompt-cache.md) for a diagnostic procedure and an optional model-specific workaround.
 
 ## Recipe: vLLM or LM Studio
 
@@ -592,9 +582,7 @@ In chat:
 /model fast
 ```
 
-`/model` stores the selection in the current session without rewriting `config.json`.
-The selection survives restarts, does not affect other sessions, and an in-progress
-turn keeps using the model it started with.
+`/model` stores the selection in the current session without rewriting `config.json`. The selection survives restarts, does not affect other sessions, and an in-progress turn keeps using the model it started with.
 
 ## Quick Failure Map
 

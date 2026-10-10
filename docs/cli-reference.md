@@ -38,64 +38,17 @@ python -m nanobot --version
 
 ### Coexisting with Nanobot Desktop
 
-The Python package and Nanobot Desktop keep separate runtimes, configuration,
-workspaces, and state. When a running Desktop release publishes its private
-terminal-access descriptor, an interactive bare `nanobot` or `nanobot webui`
-asks which installation to use after authenticating a ready Desktop target.
-Use `Up`/`Down` to highlight an installation and `Enter` to confirm.
-`Ctrl+C` cancels with exit code 130 without attaching to Desktop or starting a Python backend.
-If Desktop is absent, busy, unavailable, or cannot be authenticated, the command
-reports the current Python executable and continues normally. A virtual
-environment's executable is shown without resolving it to its base interpreter.
+The Python package and Nanobot Desktop keep separate runtimes, configuration, workspaces, and state. When a running Desktop release publishes its private terminal-access descriptor, an interactive bare `nanobot` or `nanobot webui` asks which installation to use after authenticating a ready Desktop target. Use `Up`/`Down` to highlight an installation and `Enter` to confirm. `Ctrl+C` cancels with exit code 130 without attaching to Desktop or starting a Python backend. If Desktop is absent, busy, unavailable, or cannot be authenticated, the command reports the current Python executable and continues normally. A virtual environment's executable is shown without resolving it to its base interpreter.
 
-Choosing Desktop for `nanobot webui` opens its already-running browser workbench
-and exits; closing the browser never stops the Desktop gateway. Choosing Desktop
-for bare `nanobot` opens the terminal UI against that same running backend when
-the Desktop host, gateway and terminal client support terminal protocol 1. Older
-versions fail explicitly with update guidance. Use explicit `nanobot agent` for
-the original Python terminal UI.
-After Desktop is selected, a disconnect or incompatible reply ends that invocation
-with an error; it never silently switches to Python or launches a replacement.
-On macOS, browser URLs are delivered through native Launch Services rather than
-command-line arguments. A failed native handoff does not fall back to `open` or
-a `BROWSER` command, keeping bootstrap credentials out of launcher arguments.
+Choosing Desktop for `nanobot webui` opens its already-running browser workbench and exits; closing the browser never stops the Desktop gateway. Choosing Desktop for bare `nanobot` opens the terminal UI against that same running backend when the Desktop host, gateway and terminal client support terminal protocol 1. Older versions fail explicitly with update guidance. Use explicit `nanobot agent` for the original Python terminal UI. After Desktop is selected, a disconnect or incompatible reply ends that invocation with an error; it never silently switches to Python or launches a replacement. On macOS, browser URLs are delivered through native Launch Services rather than command-line arguments. A failed native handoff does not fall back to `open` or a `BROWSER` command, keeping bootstrap credentials out of launcher arguments.
 
-On Windows, the shared browser launcher uses a private HTML redirect rather than
-passing a credential-bearing URL to a browser command. A short-lived, windowless
-Python helper receives the URL over an anonymous pipe, opens the redirect through
-the system's HTTP association, and attempts file cleanup after two minutes. The calling
-CLI can exit immediately after the launch acknowledgement; this helper does not
-start, stop, or keep a gateway alive. It does not honor `BROWSER` overrides.
-Redirects are stored in the current user's Windows Local AppData known folder,
-under `NanobotBrowserHandoff-v1`, with an explicit current-user-only protected ACL.
-An ACL-enforcing local filesystem and a non-reparse storage path are required;
-unsafe existing storage or failed browser handoff fails without raw-URL fallback.
-Abnormal termination can leave a private redirect behind. Later invocations retry
-cleanup of verified redirect files older than ten minutes, excluding active files;
-cleanup is not a guarantee of physical erasure or secrecy from same-user programs
-or administrators. No Python/Desktop settings, credentials, or history are imported
-between installations.
+On Windows, the shared browser launcher uses a private HTML redirect rather than passing a credential-bearing URL to a browser command. A short-lived, windowless Python helper receives the URL over an anonymous pipe, opens the redirect through the system's HTTP association, and attempts file cleanup after two minutes. The calling CLI can exit immediately after the launch acknowledgement; this helper does not start, stop, or keep a gateway alive. It does not honor `BROWSER` overrides. Redirects are stored in the current user's Windows Local AppData known folder, under `NanobotBrowserHandoff-v1`, with an explicit current-user-only protected ACL. An ACL-enforcing local filesystem and a non-reparse storage path are required; unsafe existing storage or failed browser handoff fails without raw-URL fallback. Abnormal termination can leave a private redirect behind. Later invocations retry cleanup of verified redirect files older than ten minutes, excluding active files; cleanup is not a guarantee of physical erasure or secrecy from same-user programs or administrators. No Python/Desktop settings, credentials, or history are imported between installations.
 
-Any explicit subcommand or option—including `nanobot agent`,
-`nanobot webui --no-open`, config/workspace selectors, help, version, completion,
-and gateway lifecycle commands—keeps its existing Python meaning and never opens
-the Desktop picker. Target choices are not remembered, and Desktop settings are
-not copied into the Python installation.
+Any explicit subcommand or option—including `nanobot agent`, `nanobot webui --no-open`, config/workspace selectors, help, version, completion, and gateway lifecycle commands—keeps its existing Python meaning and never opens the Desktop picker. Target choices are not remembered, and Desktop settings are not copied into the Python installation.
 
-Desktop terminal credentials are short-lived WebSocket/API tokens obtained through
-the authenticated current-user rendezvous. The TUI receives them through a bounded
-anonymous pipe, not command arguments, environment variables or temporary files.
-Its environment contains only a trusted resolver command and public instance IDs.
-The resolver verifies the selected Desktop and gateway again for every credential
-refresh. The gateway identity is also checked before any WebSocket mutation. This
-mode does not acquire a gateway lifecycle lease: client exit leaves Desktop running,
-and disconnect never automatically reconnects or replays an uncertain task.
+Desktop terminal credentials are short-lived WebSocket/API tokens obtained through the authenticated current-user rendezvous. The TUI receives them through a bounded anonymous pipe, not command arguments, environment variables or temporary files. Its environment contains only a trusted resolver command and public instance IDs. The resolver verifies the selected Desktop and gateway again for every credential refresh. The gateway identity is also checked before any WebSocket mutation. This mode does not acquire a gateway lifecycle lease: client exit leaves Desktop running, and disconnect never automatically reconnects or replays an uncertain task.
 
-Desktop-only distributions use the narrow `nanobot-desktop-tui` entrypoint inside
-their existing private runtime; it is not a replacement for the full Python CLI.
-They must ship this engine entrypoint and a matching terminal client together.
-The client cache can be kept inside Desktop's data root without reading or writing
-the separate Python installation's config. No additional system Python is needed.
+Desktop-only distributions use the narrow `nanobot-desktop-tui` entrypoint inside their existing private runtime; it is not a replacement for the full Python CLI. They must ship this engine entrypoint and a matching terminal client together. The client cache can be kept inside Desktop's data root without reading or writing the separate Python installation's config. No additional system Python is needed.
 
 ## Common Patterns
 
@@ -114,9 +67,7 @@ nanobot gateway --verbose
 nanobot serve --verbose
 ```
 
-Long-running commands keep working until you stop them. Press `Ctrl+C` in that terminal
-to stop foreground `nanobot gateway` or `nanobot serve`. If you started the gateway
-with `--background`, use `nanobot gateway stop`.
+Long-running commands keep working until you stop them. Press `Ctrl+C` in that terminal to stop foreground `nanobot gateway` or `nanobot serve`. If you started the gateway with `--background`, use `nanobot gateway stop`.
 
 ## Setup
 
@@ -142,9 +93,7 @@ Default paths:
 | `nanobot status --config <path>` | Check a specific config file |
 | `nanobot status --workspace <path>` | Show status with a workspace override |
 
-Status does not send a model request. On success, run the printed
-`nanobot agent -m "Hello!"` command to verify network access and credentials. On failure,
-follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` route.
+Status does not send a model request. On success, run the printed `nanobot agent -m "Hello!"` command to verify network access and credentials. On failure, follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` route.
 
 ## Agent CLI
 
@@ -160,32 +109,19 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 | `nanobot --no-markdown` | Use the classic prompt and print plain text instead of Markdown |
 | `nanobot --logs` | Use the classic prompt and show runtime logs while chatting |
 
-Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved
-conversation, and `/context` explains the compacted summary and raw session suffix available to
-the next agent turn. `/branch` forks a saved conversation from a completed reply, and `/diff`
-opens the latest turn's file changes as a full-screen unified diff.
-`PageUp` loads older transcript pages when you reach the top. By default, each launch starts a
-new session using the launch directory as its workspace. `--session` selects a specific existing
-session, and `--workspace` overrides the launch directory. When the TUI exits, it prints a
-ready-to-run `nanobot agent --session ...` command for the current session.
+Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved conversation, and `/context` explains the compacted summary and raw session suffix available to the next agent turn. `/branch` forks a saved conversation from a completed reply, and `/diff` opens the latest turn's file changes as a full-screen unified diff. `PageUp` loads older transcript pages when you reach the top. By default, each launch starts a new session using the launch directory as its workspace. `--session` selects a specific existing session, and `--workspace` overrides the launch directory. When the TUI exits, it prints a ready-to-run `nanobot agent --session ...` command for the current session.
 
 ## Session Storage and Rollback
 
-Session JSONL files live under `<config-dir>/sessions/<workspace-id>/`, outside the
-agent-readable workspace. On the first upgraded start, nanobot safely migrates existing
-`<workspace>/sessions/*.jsonl` files after verifying an atomic copy. Stop every old nanobot
-process that uses the workspace before upgrading; old and new binaries must not write the
-same session concurrently.
+Session JSONL files live under `<config-dir>/sessions/<workspace-id>/`, outside the agent-readable workspace. On the first upgraded start, nanobot safely migrates existing `<workspace>/sessions/*.jsonl` files after verifying an atomic copy. Stop every old nanobot process that uses the workspace before upgrading; old and new binaries must not write the same session concurrently.
 
-To prepare a downgrade, stop nanobot and copy the current sessions back to the path understood
-by older releases:
+To prepare a downgrade, stop nanobot and copy the current sessions back to the path understood by older releases:
 
 ```bash
 nanobot sessions restore-workspace --config ./bot-a/config.json --workspace ./bot-a/workspace
 ```
 
-The command never deletes the external store and refuses to overwrite a different existing
-workspace file. Back up both the config directory and workspace before changing versions.
+The command never deletes the external store and refuses to overwrite a different existing workspace file. Back up both the config directory and workspace before changing versions.
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. `/detach` promotes the shared gateway to persistent background mode before closing the TUI, so active agent work continues without a connected client. An explicit `nanobot gateway --background` starts or promotes the gateway the same way before opening a client. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 
@@ -215,12 +151,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
-`--dev` is a foreground source-checkout workflow. Persistent gateway lifecycle is deliberately
-owned only by `nanobot gateway --background`; `nanobot webui --background` prints migration
-guidance instead of silently changing process ownership.
-It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured
-WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops
-only when no other interactive client still holds it.
+`--dev` is a foreground source-checkout workflow. Persistent gateway lifecycle is deliberately owned only by `nanobot gateway --background`; `nanobot webui --background` prints migration guidance instead of silently changing process ownership. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it.
 
 ## Gateway
 
@@ -252,10 +183,7 @@ nanobot gateway stop --config ./bot-a/config.json --workspace ./bot-a/workspace
 nanobot gateway install-service --config ./bot-a/config.json --workspace ./bot-a/workspace --name bot-a
 ```
 
-`--background` is a lightweight detached process. `install-service` is for
-login/startup integration: Linux uses a systemd user service; macOS uses a
-LaunchAgent plist. System services run the foreground gateway under the OS
-supervisor rather than nesting another background process.
+`--background` is a lightweight detached process. `install-service` is for login/startup integration: Linux uses a systemd user service; macOS uses a LaunchAgent plist. System services run the foreground gateway under the OS supervisor rather than nesting another background process.
 
 Default health endpoint:
 
@@ -267,27 +195,15 @@ The bundled WebUI is served by the WebSocket channel, usually on port `8765`, no
 
 ## Local Triggers
 
-`nanobot trigger` delivers one local message to a trigger that was created from
-a chat/session with `/trigger <name>`.
+`nanobot trigger` delivers one local message to a trigger that was created from a chat/session with `/trigger <name>`.
 
 ```bash
 nanobot trigger trg_8K4P2Q9X "Review PR #4502"
 ```
 
-Keep `nanobot gateway` running so the message can be delivered to the linked
-chat/session. The message is recorded as an automation turn in that session,
-not as a normal chat message typed by the user.
+Keep `nanobot gateway` running so the message can be delivered to the linked chat/session. The message is recorded as an automation turn in that session, not as a normal chat message typed by the user.
 
-The command writes to a workspace-local durable queue. If `nanobot gateway` is
-not running yet, the message waits in that workspace. If the target session is
-already running a turn, the trigger waits for that session to become idle. If the
-gateway exits after claiming a delivery but before the linked turn completes,
-the next gateway start requeues that delivery. The queue is at-least-once, not
-exactly-once, so the same message can be delivered again after an interrupted
-process. If the agent receives the delivery and the turn fails, the delivery is
-marked failed instead of retried indefinitely. Each delivery also writes an
-audit record under `<workspace>/triggers/runs`. Run one gateway consumer per
-workspace; this local queue is not a distributed multi-consumer queue.
+The command writes to a workspace-local durable queue. If `nanobot gateway` is not running yet, the message waits in that workspace. If the target session is already running a turn, the trigger waits for that session to become idle. If the gateway exits after claiming a delivery but before the linked turn completes, the next gateway start requeues that delivery. The queue is at-least-once, not exactly-once, so the same message can be delivered again after an interrupted process. If the agent receives the delivery and the turn fails, the delivery is marked failed instead of retried indefinitely. Each delivery also writes an audit record under `<workspace>/triggers/runs`. Run one gateway consumer per workspace; this local queue is not a distributed multi-consumer queue.
 
 Use stdin when another local process generates the message:
 
@@ -304,15 +220,11 @@ Options:
 | `nanobot trigger --config <path> <id> "message"` | Use the workspace from a specific config |
 | `nanobot trigger --workspace <path> <id> "message"` | Use a specific workspace |
 
-Triggers are managed in the WebUI Automations view instead of through separate
-`list`, `revoke`, or `delete` CLI subcommands. From there you can pause/resume,
-rename, delete, search, and copy the command for each trigger.
+Triggers are managed in the WebUI Automations view instead of through separate `list`, `revoke`, or `delete` CLI subcommands. From there you can pause/resume, rename, delete, search, and copy the command for each trigger.
 
-For webhooks or other external systems, run your own small service and have it
-call this CLI after it decides what message nanobot should receive.
+For webhooks or other external systems, run your own small service and have it call this CLI after it decides what message nanobot should receive.
 
-See [Automations](./automations.md) for the broader automation model, WebUI
-management, and delivery behavior.
+See [Automations](./automations.md) for the broader automation model, WebUI management, and delivery behavior.
 
 ## OpenAI-Compatible API
 
@@ -373,14 +285,9 @@ See [`chat-apps.md`](./chat-apps.md) for channel-specific setup.
 
 ## Optional Features
 
-Use these commands when you want nanobot to add or remove a built-in capability
-without hand-editing JSON. Enabling may install the support package first.
-Disabling is for channels such as Telegram, Matrix, or Slack; it keeps your
-saved settings and turns the channel off.
+Use these commands when you want nanobot to add or remove a built-in capability without hand-editing JSON. Enabling may install the support package first. Disabling is for channels such as Telegram, Matrix, or Slack; it keeps your saved settings and turns the channel off.
 
-The `plugins` command name is retained for compatibility, but these entries are
-nanobot runtime support packages, not the user-invokable tools shown in WebUI
-Apps. They cannot be attached to a chat turn with `@`.
+The `plugins` command name is retained for compatibility, but these entries are nanobot runtime support packages, not the user-invokable tools shown in WebUI Apps. They cannot be attached to a chat turn with `@`.
 
 | Feature name | What it enables |
 |---|---|
@@ -401,9 +308,7 @@ Apps. They cannot be attached to a chat turn with `@`.
 | `nanobot plugins enable <name> --config <path>` | Update a specific config file |
 | `nanobot plugins disable <channel> --config <path>` | Turn off a channel in a specific config file |
 
-Document and PDF reading are included in the standard installation. The old
-`nanobot plugins enable documents` and `nanobot plugins enable pdf` commands
-remain accepted as no-op compatibility aliases.
+Document and PDF reading are included in the standard installation. The old `nanobot plugins enable documents` and `nanobot plugins enable pdf` commands remain accepted as no-op compatibility aliases.
 
 ## Provider OAuth
 

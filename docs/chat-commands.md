@@ -30,23 +30,13 @@ These commands work inside chat channels and interactive agent sessions:
 
 ## Commands and file paths
 
-The gateway treats a message as a command only when its first word matches a
-registered command name. Names are case-insensitive. Arguments must follow the
-command's supported form.
+The gateway treats a message as a command only when its first word matches a registered command name. Names are case-insensitive. Arguments must follow the command's supported form.
 
-Other text goes to the agent unchanged. This includes `/tmp`,
-`/home/user/project`, and `/Users/alice/report.md`. Unknown names such as `/neaw`
-also go to the agent; the gateway no longer returns a spelling suggestion.
-Use `/help` or the command menu to find a command.
+Other text goes to the agent unchanged. This includes `/tmp`, `/home/user/project`, and `/Users/alice/report.md`. Unknown names such as `/neaw` also go to the agent; the gateway no longer returns a spelling suggestion. Use `/help` or the command menu to find a command.
 
-In the WebUI, Enter queues ordinary text while a response is running. Paths
-follow the same rule. Registered commands still go to the gateway immediately.
-If the command list is unavailable, slash-prefixed input goes to the gateway
-immediately, so commands such as `/stop` do not wait in the queue.
+In the WebUI, Enter queues ordinary text while a response is running. Paths follow the same rule. Registered commands still go to the gateway immediately. If the command list is unavailable, slash-prefixed input goes to the gateway immediately, so commands such as `/stop` do not wait in the queue.
 
-A path can have the same name as a command. For example, `/new` starts a new
-conversation. To discuss that directory, write `/new/` or `Look at /new`.
-Chat platforms can apply their own command rules before a message reaches the gateway.
+A path can have the same name as a command. For example, `/new` starts a new conversation. To discuss that directory, write `/new/` or `Look at /new`. Chat platforms can apply their own command rules before a message reaches the gateway.
 
 ## Pairing
 
@@ -82,9 +72,7 @@ Preset names come from the top-level `modelPresets` config. Switching affects on
 
 ## Local triggers
 
-Use `/trigger <name>` when a local script or another service should be able to
-send a message into the current chat/session later. A name is required; plain
-`/trigger` only shows the usage hint.
+Use `/trigger <name>` when a local script or another service should be able to send a message into the current chat/session later. A name is required; plain `/trigger` only shows the usage hint.
 
 Create the trigger from the chat where future messages should arrive:
 
@@ -98,21 +86,9 @@ nanobot replies with a trigger ID and a command shaped like:
 nanobot trigger trg_8K4P2Q9X "Review PR #4502"
 ```
 
-Replace `"Review PR #4502"` with the message you want nanobot to receive. The
-trigger is bound to the session where it was created, so the message goes back
-to that same chat. Keep `nanobot gateway` running so trigger messages can be
-delivered. The trigger message starts an automation turn recorded in that
-session with the message you passed to the CLI; it is not treated as a normal
-user message. If that session is already running a turn, the trigger waits
-until the session is idle instead of being injected into the active turn.
+Replace `"Review PR #4502"` with the message you want nanobot to receive. The trigger is bound to the session where it was created, so the message goes back to that same chat. Keep `nanobot gateway` running so trigger messages can be delivered. The trigger message starts an automation turn recorded in that session with the message you passed to the CLI; it is not treated as a normal user message. If that session is already running a turn, the trigger waits until the session is idle instead of being injected into the active turn.
 
-Trigger deliveries are stored in the workspace until their linked agent turn
-finishes successfully. If the gateway exits after claiming a delivery but before
-the turn completes, the next gateway start requeues that delivery. This is an
-at-least-once local queue: a delivery may run more than once if the process
-exits at the wrong time, so external scripts should make repeated trigger
-messages safe. If the delivery reaches the agent and the agent turn fails, the
-delivery is marked failed in Automations instead of retrying forever.
+Trigger deliveries are stored in the workspace until their linked agent turn finishes successfully. If the gateway exits after claiming a delivery but before the turn completes, the next gateway start requeues that delivery. This is an at-least-once local queue: a delivery may run more than once if the process exits at the wrong time, so external scripts should make repeated trigger messages safe. If the delivery reaches the agent and the agent turn fails, the delivery is marked failed in Automations instead of retrying forever.
 
 For longer or generated content, omit the message argument and pipe stdin:
 
@@ -120,27 +96,22 @@ For longer or generated content, omit the message argument and pipe stdin:
 printf '%s\n' "Review the latest failed CI job" | nanobot trigger trg_8K4P2Q9X
 ```
 
-If an external webhook should wake nanobot up, run your own small webhook
-service and have it call the trigger command after it builds the final message:
+If an external webhook should wake nanobot up, run your own small webhook service and have it call the trigger command after it builds the final message:
 
 ```bash
 nanobot trigger <trigger-id> "<message>"
 ```
 
-If you run multiple nanobot instances, pass the same config or workspace
-selector used by the gateway:
+If you run multiple nanobot instances, pass the same config or workspace selector used by the gateway:
 
 ```bash
 nanobot trigger --config ./bot-a/config.json trg_8K4P2Q9X "Nightly report"
 nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
 ```
 
-Manage triggers from the WebUI Automations view. You can search, pause/resume,
-rename, delete, and copy the trigger command there. A session may have multiple
-triggers, just like it may have multiple scheduled automations.
+Manage triggers from the WebUI Automations view. You can search, pause/resume, rename, delete, and copy the trigger command there. A session may have multiple triggers, just like it may have multiple scheduled automations.
 
-See [Automations](./automations.md) for how local triggers fit with scheduled
-automations, heartbeat, and gateway delivery.
+See [Automations](./automations.md) for how local triggers fit with scheduled automations, heartbeat, and gateway delivery.
 
 ## Periodic Tasks
 
