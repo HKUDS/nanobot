@@ -15,6 +15,7 @@ from nanobot.config.schema import (
     ModelAPIConfig,
     ModelPresetConfig,
     ProviderAPIConfig,
+    ProviderConfig,
 )
 from nanobot.providers.anthropic_provider import AnthropicProvider
 from nanobot.providers.factory import (
@@ -340,10 +341,10 @@ def test_messages_rejects_cross_protocol_fallback(other_api):
 @pytest.mark.parametrize("provider_name", ["tenant", "custom", "anthropic", "openai"])
 async def test_messages_declaration_validates_adapter_before_loading_client(provider_name):
     config = _config()
-    config.providers.custom.api_base = "https://tenant.test/v1"
+    config.providers.custom = ProviderConfig(api_base="https://tenant.test/v1")
     config.providers.custom.api_key = "fixture"
-    config.providers.anthropic.api_key = "fixture"
-    config.providers.openai.api_key = "fixture"
+    config.providers.anthropic = ProviderConfig(api_key="fixture")
+    config.providers.openai = ProviderConfig(api_key="fixture")
     preset = config.model_presets["messages"].model_copy(update={"provider": provider_name})
     if provider_name == "openai":
         with pytest.raises(ValueError, match="does not support anthropic_messages"):
@@ -395,6 +396,7 @@ async def test_custom_messages_keeps_connection_options_and_tool_history(bind_tr
 
 def test_fixed_provider_validates_preset_api_before_loading_client():
     config = Config()
+    config.providers.openai_codex = ProviderConfig()
     preset = ModelPresetConfig(
         provider="openai_codex", model="gpt-6-astra", api=ModelAPIConfig(supported_apis=("responses",)),
     )
@@ -414,7 +416,7 @@ async def test_preset_overrides_openai_default_and_scopes_compaction(bind_transp
     preset = config.model_presets["responses"]
     preset.provider = "openai"
     preset.api = ModelAPIConfig(supported_apis=apis, preferred_api=preferred)
-    config.providers.openai.api_key = "fixture"
+    config.providers.openai = ProviderConfig(api_key="fixture")
     config.providers.openai.api = ModelAPIConfig(supported_apis=("chat_completions",))
     requests = []
 
@@ -510,6 +512,7 @@ def test_connection_single_api_constrains_presets_and_reload_signature(preferred
 
 def test_custom_messages_requires_an_explicit_endpoint():
     config = Config()
+    config.providers.custom = ProviderConfig()
     preset = ModelPresetConfig(
         provider="custom", model="served-model",
         api=ModelAPIConfig(supported_apis=("anthropic_messages",)),

@@ -115,14 +115,16 @@ def _resolve_oauth_provider(provider: str) -> ProviderSpec:
     return spec
 
 
-def _set_oauth_provider_as_main(
+def _save_oauth_provider_config(
     provider_name: str,
     *,
+    set_main: bool,
     model: str | None = None,
     config_path: str | None = None,
 ) -> None:
-    """Persist an OAuth provider as the active agent provider."""
+    """Register an authenticated connection and optionally select its model."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.config.schema import ProviderConfig
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None and get_config_path() != resolved_config_path:
@@ -130,6 +132,11 @@ def _set_oauth_provider_as_main(
         console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
     config = load_config(resolved_config_path)
+    if getattr(config.providers, provider_name) is None:
+        setattr(config.providers, provider_name, ProviderConfig())
+    if not set_main:
+        save_config(config, resolved_config_path)
+        return
     selected_model = (model or "").strip() or _OAUTH_PROVIDER_DEFAULT_MODELS[provider_name]
     config.agents.defaults.model_preset = None
     config.agents.defaults.provider = provider_name
@@ -186,8 +193,9 @@ def provider_login(
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()
-    if set_main or model:
-        _set_oauth_provider_as_main(spec.name, model=model, config_path=config)
+    _save_oauth_provider_config(
+        spec.name, set_main=bool(set_main or model), model=model, config_path=config,
+    )
 
 
 @provider_app.command("logout")
@@ -224,7 +232,8 @@ def _login_openai_codex() -> None:
         get_token, login_oauth_interactive = _load_openai_oauth_client()
         proxy = None
         try:
-            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+            provider_config = resolve_config_env_vars(load_config()).providers.openai_codex
+            proxy = provider_config.proxy if provider_config else None
         except ValueError as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1) from e
@@ -267,7 +276,8 @@ def _login_xai_grok() -> None:
     from nanobot.providers.xai_oauth import get_xai_oauth_token, login_xai_oauth
 
     try:
-        proxy = resolve_config_env_vars(load_config()).providers.xai_grok.proxy or None
+        provider_config = resolve_config_env_vars(load_config()).providers.xai_grok
+        proxy = provider_config.proxy if provider_config else None
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc

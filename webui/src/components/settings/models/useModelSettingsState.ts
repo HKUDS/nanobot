@@ -10,7 +10,7 @@ import type { ProviderOAuthAuthorizationRequired, SettingsPayload } from "@/lib/
 
 export interface ProviderOperation {
   provider: string;
-  action: "save" | "create" | "login" | "logout";
+  action: "save" | "create" | "login" | "logout" | "remove";
 }
 
 export function useModelSettingsState(initialSettings: SettingsPayload | null) {

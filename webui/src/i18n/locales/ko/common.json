@@ -771,6 +771,7 @@
       "noMatches": "일치하는 제공업체가 없습니다.",
       "addOwnProvider": "제공업체 추가",
       "addProvider": "제공업체 추가",
+      "removeProvider": "제거",
       "backToProviders": "제공업체 목록으로 돌아가기",
       "customProvider": "사용자 지정",
       "customProviderName": "이름",

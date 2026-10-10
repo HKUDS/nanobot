@@ -1008,6 +1008,7 @@
       "noMatches": "Nenhum provedor corresponde a esta busca.",
       "addOwnProvider": "Adicionar provedor",
       "addProvider": "Adicionar provedor",
+      "removeProvider": "Remover",
       "backToProviders": "Voltar aos provedores",
       "customProvider": "Personalizado",
       "customProviderName": "Nome",
