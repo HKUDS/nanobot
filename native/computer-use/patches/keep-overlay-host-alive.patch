@@ -15,3 +15,14 @@ diff --git a/libs/cua-driver/rust/crates/platform-macos/src/cursor/overlay.rs b/
      register_display_reconfiguration_callback();
  
      std::thread::spawn(move || render_loop(rx));
+@@ -788,4 +789,10 @@ fn render_loop(rx: std::sync::mpsc::Receiver<MacOverlayMsg>) {
+         let woke_from_idle = first_msg.is_some();
++        // A first permission grant need not emit a display-change callback.
++        // Retry only when real cursor work arrives, never with an idle poll.
++        if woke_from_idle && HOST.lock().unwrap().is_none() {
++            dispatch_rebuild_appkit_host();
++        }
++
+         let now = Instant::now();
+         let dt = if woke_from_idle {
+             0.0
