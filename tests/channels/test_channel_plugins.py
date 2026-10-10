@@ -267,14 +267,17 @@ def test_channels_config_getattr_returns_extra():
 
 def test_channels_config_keeps_shared_delivery_defaults():
     cfg = ChannelsConfig()
-    assert cfg.send_progress is True
+    # Progress notes are opt-in; see the sendProgress issue.
+    assert cfg.send_progress is False
     assert cfg.send_tool_hints is True
     assert cfg.extract_document_text is True
 
     opted_out = ChannelsConfig.model_validate({
+        "sendProgress": True,
         "sendToolHints": False,
         "extractDocumentText": False,
     })
+    assert opted_out.send_progress is True
     assert opted_out.send_tool_hints is False
     assert opted_out.extract_document_text is False
 

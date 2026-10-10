@@ -51,6 +51,7 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.config_bools import channels_config_resolve_bool
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.command.router import command_text, normalize_command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
@@ -935,6 +936,33 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
+    def _progress_notes_enabled(self, channel: str | None) -> bool:
+        """Whether *channel* should be told it may write progress notes.
+
+        Progress text has exactly one source: the text on the assistant message
+        that carries tool calls. ``tool_contract.md`` tells the model to leave
+        that text empty, so without this instruction ``sendProgress`` has
+        nothing to deliver and behaves like ``false``.
+
+        Gating the instruction on the same switch that delivers the notes keeps
+        one meaning per switch: ``false`` is quiet end to end, ``true`` both
+        produces and delivers. The per-channel override mirrors the delivery
+        check in ``ChannelManager._should_send_progress``.
+        """
+        if not channel:
+            return False
+        channels_config = self.channels_config
+        if channels_config is None:
+            # No channel configuration reaches the loop (SDK, CLI, tests).
+            return False
+        section = getattr(channels_config, "model_extra", None) or {}
+        channel_section = section.get(channel) if isinstance(section, dict) else None
+        for candidate in (channel_section, channels_config):
+            value = channels_config_resolve_bool(candidate, "send_progress")
+            if value is not None:
+                return value
+        return False
+
     def _can_inject_message(self, msg: InboundMessage) -> bool:
         """Keep independent turns and controls out of user-input batches."""
         if turn_continuation.internal_continuation_inbound(msg.metadata) or any(
@@ -1189,6 +1217,7 @@ class AgentLoop:
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=session.policy.persist if session is not None else True,
+            progress_notes=self._progress_notes_enabled(request_ctx.channel),
         )
         if request_context is None:
             request_ctx = dataclasses.replace(

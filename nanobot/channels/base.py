@@ -28,7 +28,7 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
-    send_progress: bool = True
+    send_progress: bool = False
     send_tool_hints: bool = True
     show_reasoning: bool = True
     show_compaction_notices: bool = False
