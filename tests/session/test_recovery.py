@@ -16,9 +16,11 @@ from nanobot.session.recovery import (
     RUNTIME_CHECKPOINT_KEY,
     RecoveryActionError,
     RecoveryCoordinator,
+    _runtime_checkpoint_is_well_formed,
     acknowledge_pending_followups,
     pending_followups,
     record_pending_followup,
+    restore_runtime_checkpoint,
 )
 from nanobot.webui import session_list_index, transcript
 
@@ -771,3 +773,93 @@ async def test_bus_remains_quiet_after_recovered_state(tmp_path: Path) -> None:
     await asyncio.sleep(0)
     assert bus.inbound.empty()
     assert bus.outbound.empty()
+
+def _partial_checkpoint(phase: str = "awaiting_tools", *, completed=None, pending=None) -> dict:
+    return {
+        "phase": phase,
+        "assistant_message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "A", "type": "function", "function": {"name": "list_dir", "arguments": "{}"}},
+                {"id": "B", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {"id": "C", "type": "function", "function": {"name": "grep", "arguments": "{}"}},
+            ],
+        },
+        "completed_tool_results": completed or [],
+        "pending_tool_calls": pending or [],
+    }
+
+
+def _tool_result(call_id: str) -> dict:
+    return {"role": "tool", "tool_call_id": call_id, "name": "x", "content": "ok"}
+
+_PENDING_ALL = [
+    {"id": "A", "type": "function", "function": {"name": "list_dir", "arguments": "{}"}},
+    {"id": "B", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+    {"id": "C", "type": "function", "function": {"name": "grep", "arguments": "{}"}},
+]
+
+_COMPLETED_ALL = [
+    _tool_result("A"), _tool_result("B"), _tool_result("C"),
+]
+
+def test_partial_checkpoint_partition_is_well_formed() -> None:
+    # 中间态：A 完成、B/C 待执行 → 应通过
+    assert _runtime_checkpoint_is_well_formed(_partial_checkpoint(
+        completed=[_tool_result("A")],
+        pending=_PENDING_ALL[1:],
+    ))
+    # legacy 全 pending → 仍通过
+    assert _runtime_checkpoint_is_well_formed(_partial_checkpoint(
+        pending=_PENDING_ALL,
+    ))
+    # legacy 全 completed（tools_completed 形状）→ 仍通过
+    assert _runtime_checkpoint_is_well_formed(_partial_checkpoint(
+        phase="tools_completed",
+        completed=_COMPLETED_ALL,
+    ))
+
+
+@pytest.mark.parametrize("completed,pending", [
+    ([_tool_result("A")], [{"id": "A", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+                            {"id": "B", "type": "function", "function": {"name": "y", "arguments": "{}"}}]),  # 重叠
+    ([_tool_result("A")], [{"id": "B", "type": "function", "function": {"name": "y", "arguments": "{}"}}]),  # C 缺失
+    ([_tool_result("A"), _tool_result("A")], []),  # completed 重复
+])
+def test_partial_checkpoint_bad_partition_rejected(completed, pending) -> None:
+    assert not _runtime_checkpoint_is_well_formed(_partial_checkpoint(
+        completed=completed, pending=pending,
+    ))
+
+def test_partial_checkpoint_restore_keeps_completed_and_marks_pending_interrupted(
+    tmp_path: Path,
+) -> None:
+    """中间态恢复：completed 保留真实结果，pending 物化为 interrupted。"""
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:chat")
+    session.messages.append({"role": "user", "content": "do A B C"})
+    session.metadata[RUNTIME_CHECKPOINT_KEY] = _partial_checkpoint(
+        completed=[_tool_result("A")],
+        pending=[
+            {"id": "B", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            {"id": "C", "type": "function", "function": {"name": "grep", "arguments": "{}"}},
+        ],
+    )
+
+    assert restore_runtime_checkpoint(session) is True
+
+    tool_rows = [m for m in session.messages if m.get("role") == "tool"]
+    assert len(tool_rows) == 3
+    # A：真实结果原样保留，不标 interrupted
+    assert tool_rows[0]["tool_call_id"] == "A"
+    assert tool_rows[0]["content"] == "ok"
+    assert "_recovery_interrupted" not in tool_rows[0]
+    # B/C：物化为 interrupted
+    assert tool_rows[1]["tool_call_id"] == "B"
+    assert tool_rows[1]["_recovery_interrupted"] is True
+    assert tool_rows[2]["tool_call_id"] == "C"
+    assert tool_rows[2]["_recovery_interrupted"] is True
+    # checkpoint 清除、provider 原生状态丢弃
+    assert RUNTIME_CHECKPOINT_KEY not in session.metadata
+    assert session.provider_state is None
