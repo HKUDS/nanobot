@@ -640,7 +640,7 @@ export function ProvidersSettings({
     const form = providerForms[provider.name] ?? providerFormFromRow(provider);
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
-    const oauthAuthenticated = provider.oauth_authenticated ?? provider.configured;
+    const oauthAuthenticated = provider.oauth_authenticated === true;
     const supportsOauthAdvancedSettings =
       isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
     const keyVisible = !!visibleProviderKeys[provider.name];
@@ -650,7 +650,7 @@ export function ProvidersSettings({
     const apiBase = form.apiBase.trim();
     const advancedFields = provider.advanced_fields ?? [];
     const oauthSettingsDirty = isOauthProvider && (
-      provider.enabled === false
+      (provider.enabled === false && oauthAuthenticated)
       || form.proxy.trim() !== (provider.proxy ?? "").trim()
       || form.extraBody.trim() !== providerJsonValue(provider.extra_body).trim()
     );
@@ -786,7 +786,7 @@ export function ProvidersSettings({
                     {t("settings.actions.cancel")}
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => onSaveProvider(provider.name)}
-                    disabled={saving || !oauthAuthenticated || !oauthSettingsDirty} className="rounded-full">
+                    disabled={saving || !oauthSettingsDirty} className="rounded-full">
                     {oauthSettingsSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                     {oauthSettingsSaving
                       ? t("settings.actions.saving")

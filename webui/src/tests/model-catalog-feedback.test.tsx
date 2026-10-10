@@ -16,6 +16,7 @@ function settings() {
     ...settingsPayload(),
     providers: [{
       name: "openai_codex", label: "OpenAI Codex", configured: true,
+      oauth_authenticated: true,
       auth_type: "oauth" as const, model_catalog: "hybrid" as const,
       oauth_login_supported: true,
     }],

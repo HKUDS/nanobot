@@ -1491,7 +1491,7 @@ describe("ThreadShell", () => {
     settings.agent.has_api_key = false;
     settings.providers = settings.providers.map((provider) =>
       provider.name === "openai_codex"
-        ? { ...provider, auth_type: "oauth", configured: false }
+        ? { ...provider, auth_type: "oauth", configured: false, oauth_authenticated: false }
         : provider,
     );
     settings.providers.push(
@@ -1500,6 +1500,7 @@ describe("ThreadShell", () => {
         label: "xAI Grok",
         auth_type: "oauth",
         configured: true,
+        oauth_authenticated: true,
       },
       {
         name: "ollama",

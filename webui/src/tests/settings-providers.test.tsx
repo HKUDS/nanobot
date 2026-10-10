@@ -137,6 +137,7 @@ describe("Settings providers", () => {
         name: "openai_codex",
         label: "OpenAI Codex",
         configured: true,
+        oauth_authenticated: true,
         auth_type: "oauth",
         api_key_required: false,
         api_key_hint: null,
@@ -167,6 +168,8 @@ describe("Settings providers", () => {
       name: "xai_grok",
       label: "xAI Grok",
       configured: false,
+      enabled: false,
+      oauth_authenticated: false,
       auth_type: "oauth" as const,
       api_key_required: false,
       api_key_hint: null,
@@ -180,7 +183,7 @@ describe("Settings providers", () => {
     const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
     const signedIn: SettingsPayload = {
       ...payload,
-      providers: [{ ...xaiProvider, configured: true, oauth_account: "user@example.com" }],
+      providers: [{ ...xaiProvider, configured: true, enabled: true, oauth_authenticated: true, oauth_account: "user@example.com" }],
     };
     const authorization = {
       status: "authorization_required",
@@ -267,6 +270,7 @@ describe("Settings providers", () => {
         name: "xai_grok",
         label: "xAI Grok",
         configured: false,
+        oauth_authenticated: false,
         auth_type: "oauth" as const,
         api_key_required: false,
         api_key_hint: null,
@@ -346,6 +350,7 @@ describe("Settings providers", () => {
       name: "openai_codex",
       label: "OpenAI Codex",
       configured: false,
+      oauth_authenticated: false,
       auth_type: "oauth" as const,
       api_key_required: false,
       api_key_hint: null,
@@ -359,7 +364,7 @@ describe("Settings providers", () => {
     const payload: SettingsPayload = { ...base, providers: [codexProvider] };
     const signedIn: SettingsPayload = {
       ...payload,
-      providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
+      providers: [{ ...codexProvider, configured: true, oauth_authenticated: true, oauth_account: "acct-codex" }],
     };
     const authorization = {
       status: "authorization_required",
@@ -424,6 +429,7 @@ describe("Settings providers", () => {
         name: "openai_codex",
         label: "OpenAI Codex",
         configured: false,
+        oauth_authenticated: false,
         auth_type: "oauth" as const,
         api_key_required: false,
         api_key_hint: null,
@@ -437,7 +443,7 @@ describe("Settings providers", () => {
       const payload: SettingsPayload = { ...base, providers: [codexProvider] };
       const signedIn: SettingsPayload = {
         ...payload,
-        providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
+        providers: [{ ...codexProvider, configured: true, oauth_authenticated: true, oauth_account: "acct-codex" }],
       };
       const authorization = {
         status: "authorization_required",
@@ -543,6 +549,7 @@ describe("Settings providers", () => {
         name: "xai_grok",
         label: "xAI Grok",
         configured: false,
+        oauth_authenticated: false,
         auth_type: "oauth",
         api_key_required: false,
         api_key_hint: null,
@@ -560,6 +567,7 @@ describe("Settings providers", () => {
         name: "openai_codex",
         label: "OpenAI Codex",
         configured: false,
+        oauth_authenticated: false,
         auth_type: "oauth",
         api_key_required: false,
         api_key_hint: null,
@@ -625,6 +633,7 @@ describe("Settings providers", () => {
         "settings.provider.update",
         {
           provider: "xai_grok",
+          enabled: true,
           extraBody: "",
           proxy: "http://127.0.0.1:7890",
         },
@@ -646,6 +655,7 @@ describe("Settings providers", () => {
         "settings.provider.update",
         {
           provider: "openai_codex",
+          enabled: true,
           extraBody: "",
           proxy: "http://proxy.example:8080",
         },
@@ -661,6 +671,7 @@ describe("Settings providers", () => {
         name: "xai_grok",
         label: "xAI Grok",
         configured: true,
+        oauth_authenticated: true,
         auth_type: "oauth",
         api_key_required: false,
         oauth_account: "grok@example.com",
@@ -672,6 +683,7 @@ describe("Settings providers", () => {
         name: "openai_codex",
         label: "OpenAI Codex",
         configured: true,
+        oauth_authenticated: true,
         auth_type: "oauth",
         api_key_required: false,
         oauth_account: "codex@example.com",
@@ -939,7 +951,7 @@ describe("Settings providers", () => {
       ["Body parameters", '{"service_tier":"priority"}'],
       ["Query parameters", '{"api-version":"2026-01-01"}'],
     ]) {
-      fireEvent.click(screen.getByRole("button", { name: title }));
+      fireEvent.click(screen.getByRole("button", { name: `${title} Not configured Edit` }));
       const editor = screen.getByRole("dialog", { name: title });
       fireEvent.change(within(editor).getByRole("textbox", { name: title }), { target: { value } });
       fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
