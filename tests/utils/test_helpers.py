@@ -122,6 +122,29 @@ def test_truncate_text_to_tokens_non_positive_budget_returns_text():
     assert truncate_text_to_tokens(text, 0) == text
 
 
+@pytest.mark.parametrize(
+    ("text", "max_tokens", "expected"),
+    [
+        ("🙂" * 10, 1, ""),
+        ("汉" * 10, 1, ""),
+        ("a🙂" * 10, 3, "a"),
+        ("🙂" * 10, 4, "🙂"),
+        ("🙂" * 10, 19, "\n... (truncated)"),
+        ("汉" * 10, 20, "汉\n... (truncated)"),
+        ("a🙂" * 10, 20, "a\n... (truncated)"),
+        ("🙂" * 10, 20, "🙂\n... (truncated)"),
+    ],
+)
+def test_truncate_text_to_tokens_preserves_complete_unicode_characters(
+    text: str, max_tokens: int, expected: str, monkeypatch, byte_encoding
+) -> None:
+    monkeypatch.setattr(token_encoding, "_encoding", byte_encoding)
+    result = truncate_text_to_tokens(text, max_tokens)
+
+    assert result == expected
+    assert len(byte_encoding.encode_ordinary(result)) <= max_tokens
+
+
 def test_content_with_media_breadcrumbs_preserves_valid_paths():
     assert content_with_media_breadcrumbs(
         "user",
