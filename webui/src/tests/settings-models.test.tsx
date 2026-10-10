@@ -86,6 +86,16 @@ async function togglePresetEditor(name = "primary") {
   fireEvent.click(within(row).getAllByRole("button")[0]);
 }
 
+function mockPresetRowLayout() {
+  let top = 100;
+  return screen.getAllByTestId(/^model-call-order-row-/).map((row, index) => {
+    const rect = DOMRect.fromRect({ x: 0, y: top, width: 800, height: index === 0 ? 240 : 80 });
+    vi.spyOn(row.closest('[role="listitem"]')!, "getBoundingClientRect").mockReturnValue(rect);
+    top += rect.height + (index === 0 ? 72 : 8);
+    return rect.top + rect.height / 2;
+  });
+}
+
 async function openModelPicker() {
   const input = await screen.findByRole("combobox", { name: "Select model" });
   await openPopover(input);
@@ -558,7 +568,7 @@ describe("Settings models", () => {
 
     fireEvent.click(advanced);
 
-    expect(await screen.findByText("Context window")).toBeInTheDocument();
+    expect(within(screen.getByTestId("model-preset-editor")).getByText("Context window")).toBeInTheDocument();
     expect(screen.getByText("Temperature")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue("200k");
     const reasoningEffort = screen.getByLabelText("Reasoning effort");
@@ -602,6 +612,39 @@ describe("Settings models", () => {
     expect(input).toHaveValue(value);
   });
 
+  it("saves abbreviated output budgets as integers and keeps an incomplete input unsaved", async () => {
+    let payload = settingsPayload();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    requestMutationMock.mockImplementation(async (_action, args) => {
+      payload = {
+        ...payload,
+        model_presets: payload.model_presets.map((preset) => ({ ...preset, max_tokens: args.max_tokens })),
+      };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await openPresetAdvancedOptions();
+    const input = screen.getByRole("textbox", { name: "Max output tokens" });
+    fireEvent.change(input, { target: { value: "32K" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", expect.objectContaining({ max_tokens: 32000 }), expect.any(Number),
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    expect(input).toHaveValue("32K");
+    requestMutationMock.mockClear();
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "8.192k" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", expect.objectContaining({ max_tokens: 8192 }), expect.any(Number),
+    ));
+  });
+
   it("opens the preset editor in a dialog and protects the primary preset", async () => {
     vi.stubGlobal(
       "fetch",
@@ -638,13 +681,37 @@ describe("Settings models", () => {
     expect(deleteButton).toBeDisabled();
     expect(deleteButton).toHaveAttribute("aria-describedby", "model-preset-delete-hint");
     expect(
-      within(editor).getByText("Choose another primary preset before deleting this one."),
+      within(editor).getByText("Cannot delete the primary model"),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
   });
 
-  it("drags model presets to reorder and saves the model call order immediately", async () => {
+  it.each([true, false])("shows a saved primary summary inside the shared settings layout (sidebar: %s)", async (showSidebar) => {
+    const payload = settingsPayload();
+    payload.model_presets[0].context_window_tokens = 262_144;
+    payload.model_presets[0].max_tokens = 32_768;
+    renderSettingsView({ initialSection: "models", initialSettings: payload, showSidebar });
+
+    expect(screen.queryAllByRole("heading", { name: "Models", exact: true })).toHaveLength(showSidebar ? 0 : 1);
+    expect(screen.getByRole("heading", { name: "Model presets", exact: true })).toHaveClass("settings-section-title");
+    expect(screen.queryByRole("heading", { name: "Fallback presets" })).not.toBeInTheDocument();
+    const summary = within(screen.getByTestId("model-call-order-row-primary"));
+    expect(summary.getByText(payload.model_presets[0].model)).toBeInTheDocument();
+    expect(summary.getByText("256K")).toBeInTheDocument();
+    expect(summary.getByText("32.8K")).toBeInTheDocument();
+
+    await togglePresetEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByLabelText("Max output tokens"), { target: { value: "16384" } });
+    expect(summary.getByText("32.8K")).toBeInTheDocument();
+    expect(summary.queryByText("16.4K")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["backup", 1, 0],
+    ["primary", 0, 1],
+  ] as const)("drags %s across different row heights and saves the model call order immediately", async (name, from, to) => {
     const { payload, backupPreset } = settingsPayloadWithBackup();
     const updatedPayload: SettingsPayload = {
       ...payload,
@@ -691,11 +758,14 @@ describe("Settings models", () => {
       target: { value: "0.4" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
-    const backupRow = screen.getByTestId("model-call-order-row-backup");
-    fireEvent.pointerDown(backupRow, { button: 0, clientY: 100, pointerId: 1 });
-    fireEvent.pointerMove(backupRow, { clientY: 40, pointerId: 1, buttons: 1 });
-    fireEvent.pointerUp(backupRow, { pointerId: 1 });
-    fireEvent.click(backupRow);
+    const centers = mockPresetRowLayout();
+    const draggedRow = screen.getByTestId(`model-call-order-row-${name}`);
+    fireEvent.pointerDown(draggedRow, { button: 0, clientY: centers[from], pointerId: 1 });
+    fireEvent.pointerMove(draggedRow, { clientY: centers[to] + (to > from ? 1 : -1), pointerId: 1, buttons: 1 });
+    expect(within(screen.getByTestId("model-call-order-row-backup")).getByText("Primary")).toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.pointerUp(draggedRow, { pointerId: 1 });
+    fireEvent.click(draggedRow);
 
     await waitFor(() => {
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -705,10 +775,50 @@ describe("Settings models", () => {
       );
     });
 
+    const newPrimary = screen.getByTestId("model-call-order-row-backup");
+    expect(within(newPrimary).getByText("Primary")).toBeInTheDocument();
+    expect(within(newPrimary).getByText(backupPreset.model)).toBeInTheDocument();
+    expect(within(newPrimary).getByText("Context window")).toBeInTheDocument();
     fireEvent.click(within(screen.getByTestId("model-call-order-row-primary")).getByRole("button"));
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     expect(screen.getByLabelText("Temperature")).toHaveValue(0.4);
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("allows the next switch click when a drag ends without a click event", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    requestMutationMock
+      .mockResolvedValueOnce({ ...payload, model_call_order: ["backup", "primary"] })
+      .mockResolvedValueOnce({ ...payload, model_call_order: ["backup"] });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    const centers = mockPresetRowLayout();
+    const backupRow = screen.getByTestId("model-call-order-row-backup");
+    fireEvent.pointerDown(backupRow, { button: 0, clientY: centers[1], pointerId: 1 });
+    fireEvent.pointerMove(backupRow, { clientY: centers[0], pointerId: 1, buttons: 1 });
+    fireEvent.pointerUp(backupRow, { pointerId: 1 });
+    await waitFor(() => expect(within(backupRow).getByText("Primary")).toBeInTheDocument());
+
+    const toggle = within(screen.getByTestId("model-call-order-row-primary")).getByRole("switch");
+    await waitFor(() => expect(toggle).toBeEnabled());
+    fireEvent.pointerDown(toggle, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(toggle, { pointerId: 1 });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_call_order.update", { order: ["backup"] }, 20_000,
+    ));
+  });
+
+  it("restores the primary preview without saving when a pointer drag is cancelled", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    const centers = mockPresetRowLayout();
+    const backupRow = screen.getByTestId("model-call-order-row-backup");
+    fireEvent.pointerDown(backupRow, { button: 0, clientY: centers[1], pointerId: 1 });
+    fireEvent.pointerMove(backupRow, { clientY: centers[0] - 1, pointerId: 1, buttons: 1 });
+    expect(within(backupRow).getByText("Primary")).toBeInTheDocument();
+    fireEvent.pointerCancel(backupRow, { pointerId: 1 });
+    expect(within(screen.getByTestId("model-call-order-row-primary")).getByText("Primary")).toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
   it("keeps repeated fallback preset rows stable when changing the primary preset", async () => {
@@ -766,8 +876,9 @@ describe("Settings models", () => {
     expect(screen.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
 
-    fireEvent.pointerDown(primaryRow, { button: 0, clientY: 100, pointerId: 1 });
-    fireEvent.pointerMove(primaryRow, { clientY: 40, pointerId: 1, buttons: 1 });
+    const centers = mockPresetRowLayout();
+    fireEvent.pointerDown(primaryRow, { button: 0, clientY: centers[1], pointerId: 1 });
+    fireEvent.pointerMove(primaryRow, { clientY: centers[0], pointerId: 1, buttons: 1 });
     fireEvent.pointerUp(primaryRow, { pointerId: 1 });
 
     await waitFor(() =>
@@ -1195,7 +1306,9 @@ describe("Settings models", () => {
       }),
     });
 
-    expect(screen.getAllByText("Company Proxy").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Provider setup required")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Manage providers" }));
+    expect(screen.getByRole("button", { name: "Company Proxy" })).toBeInTheDocument();
   });
 
   it("does not treat auto dynamic provider api keys as configured without apiBase", async () => {
@@ -1347,7 +1460,9 @@ describe("Settings models", () => {
     const providerPicker = await screen.findByRole("combobox", { name: /DeepSeek/ });
     fireEvent.keyDown(providerPicker, { key: "ArrowDown" });
 
-    expect(await screen.findByRole("option", { name: /DeepSeek/ })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "DeepSeek", exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "OpenAI Codex", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "GitHub Copilot", exact: true })).not.toBeInTheDocument();
   });
 
   it("does not fetch model lists for unsigned OAuth providers", async () => {
@@ -1742,7 +1857,6 @@ describe("Settings models", () => {
 
     const createButton = await screen.findByRole("button", { name: "New preset" });
     const previousPointerEvents = document.body.style.pointerEvents;
-    expect(createButton).toHaveClass("w-full");
     fireEvent.click(createButton);
 
     expect(screen.getByRole("dialog", { name: "New preset" })).toBeInTheDocument();
@@ -1753,6 +1867,7 @@ describe("Settings models", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await waitFor(() => expect(document.body.style.pointerEvents).toBe(previousPointerEvents));
+    await waitFor(() => expect(createButton).toHaveFocus());
 
     fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     const nameInput = await screen.findByRole("textbox", { name: "Preset name" });
@@ -1771,6 +1886,68 @@ describe("Settings models", () => {
     fireEvent.change(nextModelSearch, { target: { value: "openai/gpt-4.1-mini" } });
     fireEvent.keyDown(nextModelSearch, { key: "Enter" });
     expect(nameInput).toHaveValue("Writer");
+  });
+
+  it.each([
+    { context: 1_000_000, manual: undefined, expected: "1m" },
+    { context: 1_000_000, manual: "256k", expected: "256k" },
+    { context: null, manual: undefined, expected: "200k" },
+  ])("initializes new preset context from the selected model while preserving overrides ($expected)", async ({ context, manual, expected }) => {
+    const payload = settingsPayload();
+    payload.model_presets[0].provider = "openai";
+    payload.model_presets[0].context_window_tokens = 200_000;
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return new Promise<Response>(() => {});
+      if (url.includes("/provider-models?")) return jsonResponse({
+        provider: "openai", status: "available", catalog_kind: "official",
+        models: [{ id: "catalog-model", context_window: context, reasoning_efforts: ["low", "high"] }], model_count: 1,
+      });
+      return jsonResponse(payload);
+    }));
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    if (manual) fireEvent.change(screen.getByRole("textbox", { name: "Context window" }), { target: { value: manual } });
+    await openModelPicker();
+    fireEvent.click(await screen.findByRole("option", { name: /catalog-model/ }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue(expected));
+    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.create", expect.objectContaining({ context_window_tokens: manual ? 256000 : context ?? 200000 }), expect.any(Number),
+    ));
+  });
+
+  it("offers model-specific reasoning levels and retains manual values", async () => {
+    const payload = settingsPayload();
+    payload.model_presets[0].provider = "openai";
+    payload.model_presets[0].reasoning_effort = "high";
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/provider-models?")
+      ? jsonResponse({ provider: "openai", status: "available", catalog_kind: "official", models: [
+        { id: payload.model_presets[0].model, reasoning_efforts: ["low", "high"] },
+        { id: "another-model", reasoning_efforts: ["ultra"] },
+      ], model_count: 2 }) : jsonResponse(payload)));
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await openPresetAdvancedOptions();
+    const input = screen.getByRole("combobox", { name: "Reasoning effort" });
+    fireEvent.click(input);
+    fireEvent.click(await screen.findByRole("option", { name: "low", exact: true }));
+    await waitFor(() => expect(input).toHaveValue("low"));
+    fireEvent.click(input);
+    expect(screen.queryByRole("option", { name: "ultra", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "Default", exact: true }));
+    await waitFor(() => expect(input).toHaveValue(""));
+    fireEvent.click(input);
+    fireEvent.change(input, { target: { value: "provider-native-mode" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", expect.objectContaining({ reasoning_effort: "provider-native-mode" }), expect.any(Number),
+    ));
   });
 
   it("loads provider models and lets users choose one without typing the id manually", async () => {

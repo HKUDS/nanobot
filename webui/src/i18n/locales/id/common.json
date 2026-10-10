@@ -762,6 +762,9 @@
       }
     },
     "providers": {
+      "manageProviders": "Kelola penyedia",
+      "configureProvider": "Konfigurasi {{provider}}…",
+      "sharedProviderHelp": "Perubahan berlaku untuk semua prasetel yang menggunakan penyedia ini.",
       "parameterCount": "{{count}} entri",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
@@ -816,6 +819,7 @@
       "installing": "Memasang paket yang diperlukan…"
     },
     "models": {
+      "otherPresets": "Preset cadangan",
       "catalogAuthRequired": "Otorisasi kedaluwarsa. Silakan masuk lagi.",
       "catalogUnavailable": "Pembaruan gagal. Klik untuk mencoba lagi",
       "catalogStale": "Daftar dalam cache mungkin sudah usang.",
@@ -829,7 +833,6 @@
       "configurationNamePlaceholder": "Menulis cepat",
       "callOrder": "Urutan model",
       "primary": "Utama",
-      "fallbackNumber": "Cadangan {{number}}",
       "addToOrder": "Aktifkan prasetel",
       "newPreset": "Preset baru",
       "newPresetHelp": "Simpan model dan pengaturan untuk digunakan kembali.",
@@ -866,7 +869,7 @@
       "disabled": "Nonaktif",
       "noPresets": "Belum ada prasetel model",
       "noPresetsHelp": "Buat prasetel, lalu tambahkan ke urutan pemanggilan.",
-      "removeBeforeDelete": "Pilih prasetel utama lain sebelum menghapus prasetel ini.",
+      "removeBeforeDelete": "Model utama tidak dapat dihapus",
       "providerSetupRequired": "Penyedia perlu dikonfigurasi",
       "configureProviderBeforeSaving": "Konfigurasikan penyedia ini sebelum menyimpan prasetel.",
       "deletePresetTitle": "Hapus prasetel model?",

@@ -762,6 +762,9 @@
       }
     },
     "providers": {
+      "manageProviders": "Gérer les fournisseurs",
+      "configureProvider": "Configurer {{provider}}…",
+      "sharedProviderHelp": "Les modifications s’appliquent à tous les préréglages qui utilisent ce fournisseur.",
       "parameterCount": "{{count}} entrées",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
@@ -816,6 +819,7 @@
       "installing": "Installation des dépendances…"
     },
     "models": {
+      "otherPresets": "Préréglages de secours",
       "catalogAuthRequired": "L’autorisation a expiré. Veuillez vous reconnecter.",
       "catalogUnavailable": "Actualisation impossible. Cliquez pour réessayer",
       "catalogStale": "La liste en cache peut être obsolète.",
@@ -829,7 +833,6 @@
       "configurationNamePlaceholder": "Rédaction rapide",
       "callOrder": "Ordre des modèles",
       "primary": "Principal",
-      "fallbackNumber": "Secours {{number}}",
       "addToOrder": "Activer le préréglage",
       "newPreset": "Nouveau préréglage",
       "newPresetHelp": "Enregistrez un modèle et ses réglages pour les réutiliser.",
@@ -866,7 +869,7 @@
       "disabled": "Désactivé",
       "noPresets": "Aucun préréglage de modèle",
       "noPresetsHelp": "Créez un préréglage, puis ajoutez-le à l’ordre d’appel.",
-      "removeBeforeDelete": "Choisissez un autre préréglage principal avant de supprimer celui-ci.",
+      "removeBeforeDelete": "Impossible de supprimer le modèle principal",
       "providerSetupRequired": "Configuration du fournisseur requise",
       "configureProviderBeforeSaving": "Configurez ce fournisseur avant d’enregistrer le préréglage.",
       "deletePresetTitle": "Supprimer le préréglage de modèle ?",

@@ -693,6 +693,7 @@
       "voiceInput": "Transcription"
     },
     "models": {
+      "otherPresets": "Fallback presets",
       "catalogAuthRequired": "Authorization expired. Please sign in again.",
       "catalogUnavailable": "Refresh failed. Click to retry",
       "catalogStale": "Cached list may be out of date.",
@@ -706,7 +707,6 @@
       "configurationNamePlaceholder": "Fast writing",
       "callOrder": "Model order",
       "primary": "Primary",
-      "fallbackNumber": "Fallback {{number}}",
       "addToOrder": "Enable preset",
       "newPreset": "New preset",
       "newPresetHelp": "Save a model and settings for reuse.",
@@ -743,7 +743,7 @@
       "disabled": "Disabled",
       "noPresets": "No model presets yet",
       "noPresetsHelp": "Create a preset, then add it to the call order.",
-      "removeBeforeDelete": "Choose another primary preset before deleting this one.",
+      "removeBeforeDelete": "Cannot delete the primary model",
       "providerSetupRequired": "Provider setup required",
       "configureProviderBeforeSaving": "Configure this provider before saving the preset.",
       "deletePresetTitle": "Delete model preset?",
@@ -1185,6 +1185,9 @@
       "systemHelp": "Includes internal tasks and calls without a recorded source."
     },
     "providers": {
+      "manageProviders": "Manage providers",
+      "configureProvider": "Configure {{provider}}…",
+      "sharedProviderHelp": "Changes affect all presets that use this provider.",
       "parameterCount": "{{count}} entries",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",

@@ -762,6 +762,9 @@
       }
     },
     "providers": {
+      "manageProviders": "Gestionar proveedores",
+      "configureProvider": "Configurar {{provider}}…",
+      "sharedProviderHelp": "Los cambios afectan a todos los preajustes que usan este proveedor.",
       "parameterCount": "{{count}} entradas",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
@@ -816,6 +819,7 @@
       "installing": "Instalando dependencias…"
     },
     "models": {
+      "otherPresets": "Preajustes alternativos",
       "catalogAuthRequired": "La autorización ha caducado. Inicia sesión de nuevo.",
       "catalogUnavailable": "No se pudo actualizar. Haz clic para reintentar",
       "catalogStale": "La lista en caché puede estar desactualizada.",
@@ -829,7 +833,6 @@
       "configurationNamePlaceholder": "Escritura rápida",
       "callOrder": "Orden de modelos",
       "primary": "Principal",
-      "fallbackNumber": "Alternativa {{number}}",
       "addToOrder": "Activar preajuste",
       "newPreset": "Nuevo preajuste",
       "newPresetHelp": "Guarda un modelo y sus ajustes para reutilizarlos.",
@@ -866,7 +869,7 @@
       "disabled": "Desactivado",
       "noPresets": "Aún no hay preajustes de modelo",
       "noPresetsHelp": "Crea un preajuste y añádelo al orden de llamada.",
-      "removeBeforeDelete": "Elige otro preajuste principal antes de eliminar este.",
+      "removeBeforeDelete": "No se puede eliminar el modelo principal",
       "providerSetupRequired": "El proveedor requiere configuración",
       "configureProviderBeforeSaving": "Configura este proveedor antes de guardar el preajuste.",
       "deletePresetTitle": "¿Eliminar el preajuste de modelo?",

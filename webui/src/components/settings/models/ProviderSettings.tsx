@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   ChevronDown,
@@ -10,20 +10,16 @@ import {
   Globe2,
   Loader2,
   Pencil,
+  Plus,
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { SettingsAddButton } from "@/components/settings/shared/SettingsAddButton";
 import type { ProviderOperation } from "@/components/settings/models/useModelSettingsState";
 import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { ProviderSearchList } from "@/components/settings/models/ProviderSearchList";
 export { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
-import {
-  CapabilityInstallNotice,
-  SettingsGroup,
-  SettingsSectionTitle,
-} from "@/components/settings/shared/SettingsControls";
+import { CapabilityInstallNotice } from "@/components/settings/shared/SettingsControls";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
@@ -35,7 +31,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -525,7 +520,19 @@ function ProviderAdvancedOptions({
   );
 }
 
+export type ProviderSettingsEntry =
+  | { kind: "manage" | "add" }
+  | { kind: "edit"; provider: string };
+
+type ProviderSettingsView =
+  | { kind: "list" | "picker" | "custom" }
+  | { kind: "provider"; name: string; adding: boolean };
+
 export function ProvidersSettings({
+  entry,
+  onClose,
+  onCloseAutoFocus,
+  onProviderAdded,
   settings,
   nanobotFeatures,
   featureAction,
@@ -547,6 +554,10 @@ export function ProvidersSettings({
   onProviderOAuthLogin,
   onProviderOAuthLogout,
 }: {
+  entry: ProviderSettingsEntry;
+  onClose: () => void;
+  onCloseAutoFocus: (event: Event) => void;
+  onProviderAdded?: (provider: string) => void;
   settings: SettingsPayload;
   nanobotFeatures: NanobotFeaturesPayload | null;
   featureAction: string | null;
@@ -562,17 +573,18 @@ export function ProvidersSettings({
   onToggleProviderKey: (provider: string) => void;
   onToggleProviderKeyEditing: (provider: string) => void;
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
-  onSaveProvider: (provider: string) => void;
-  onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
+  onSaveProvider: (provider: string) => Promise<boolean>;
+  onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<SettingsPayload | null>;
   providerOperation?: ProviderOperation | null;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const [creatingCustomProvider, setCreatingCustomProvider] = useState(false);
-  const [addingProvider, setAddingProvider] = useState(false);
-  const [providerToAdd, setProviderToAdd] = useState<string | null>(null);
+  const [view, setView] = useState<ProviderSettingsView>(() => entry.kind === "edit"
+    ? { kind: "provider", name: entry.provider, adding: false }
+    : { kind: entry.kind === "manage" ? "list" : "picker" });
+  const lastProvider = useRef<string | null>(null);
   const [providerSearch, setProviderSearch] = useState("");
   const [customProviderKeyVisible, setCustomProviderKeyVisible] = useState(false);
   const [customProviderDraft, setCustomProviderDraft] = useState<CustomProviderDraft>(
@@ -586,54 +598,62 @@ export function ProvidersSettings({
       ),
     [settings.providers],
   );
-  const selectedUnconfiguredProvider =
-    unconfiguredProviders.find((provider) => provider.name === expandedProvider) ?? null;
   const customProviderSaving = providerSaving === CUSTOM_PROVIDER_CREATION_KEY;
-  const selectedProviderToAdd = settings.providers.find((provider) => provider.name === providerToAdd);
+  const selectedProvider = view.kind === "provider"
+    ? settings.providers.find((provider) => provider.name === view.name)
+    : null;
   useEffect(() => {
-    // Existing save/cancel actions own expandedProvider; close the add flow when they finish.
-    if (addingProvider && providerToAdd && expandedProvider !== providerToAdd) {
-      setAddingProvider(false);
-      setProviderToAdd(null);
+    if (view.kind === "provider" && view.adding && selectedProvider?.auth_type === "oauth"
+      && selectedProvider.configured && !providerSaving && onProviderAdded) {
+      onProviderAdded(view.name);
+      if (expandedProvider) onToggleProvider(expandedProvider);
+      onClose();
     }
-  }, [addingProvider, providerToAdd, expandedProvider]);
-  const closeAddProvider = () => {
-    setAddingProvider(false);
-    setProviderToAdd(null);
-    setCreatingCustomProvider(false);
-    setCustomProviderDraft(emptyCustomProviderDraft());
-    setCustomProviderKeyVisible(false);
-    if (providerToAdd && expandedProvider === providerToAdd) onToggleProvider(providerToAdd);
+  }, [view, selectedProvider?.auth_type, selectedProvider?.configured, providerSaving, onProviderAdded, expandedProvider, onToggleProvider, onClose]);
+  const closePanel = () => {
+    if (expandedProvider) onToggleProvider(expandedProvider);
+    onClose();
   };
-  const backToProviderPicker = () => {
-    setProviderToAdd(null);
-    setCreatingCustomProvider(false);
-    if (providerToAdd && expandedProvider === providerToAdd) onToggleProvider(providerToAdd);
+  const returnToOrigin = () => {
+    if (entry.kind === "manage") setView({ kind: "list" });
+    else onClose();
   };
-  const toggleProvider = (providerName: string) => {
-    setCreatingCustomProvider(false);
-    onToggleProvider(providerName);
+  const returnFromEditor = () => {
+    if (expandedProvider) onToggleProvider(expandedProvider);
+    returnToOrigin();
+  };
+  const goBack = () => {
+    if (expandedProvider) onToggleProvider(expandedProvider);
+    setView({ kind: view.kind === "custom" || (view.kind === "provider" && view.adding)
+      ? "picker" : "list" });
+  };
+  const editProvider = (provider: string, adding: boolean) => {
+    lastProvider.current = provider;
+    onToggleProvider(provider);
+    setView({ kind: "provider", name: provider, adding });
+  };
+  const saveProvider = async (provider: string) => {
+    if (await onSaveProvider(provider)) {
+      if (selectedProvider?.auth_type === "oauth" && !selectedProvider.configured) return;
+      if (view.kind === "provider" && view.adding) onProviderAdded?.(provider);
+      returnToOrigin();
+    }
   };
   const beginCustomProviderCreation = () => {
-    if (expandedProvider) onToggleProvider(expandedProvider);
     setCustomProviderDraft(emptyCustomProviderDraft());
     setCustomProviderKeyVisible(false);
-    setCreatingCustomProvider(true);
-  };
-  const cancelCustomProviderCreation = () => {
-    setCreatingCustomProvider(false);
-    setCustomProviderDraft(emptyCustomProviderDraft());
-    setCustomProviderKeyVisible(false);
-    setAddingProvider(false);
+    setView({ kind: "custom" });
   };
   const saveCustomProvider = async () => {
     if (customProviderSaving) return;
-    if (await onCreateCustomProvider(customProviderDraft)) {
-      cancelCustomProviderCreation();
+    const payload = await onCreateCustomProvider(customProviderDraft);
+    if (payload) {
+      if (payload.created_provider) onProviderAdded?.(payload.created_provider);
+      lastProvider.current = payload.created_provider ?? null;
+      returnToOrigin();
     }
   };
-  const renderProviderRow = (provider: SettingsPayload["providers"][number], contentOnly = false) => {
-    const expanded = expandedProvider === provider.name && !addingProvider;
+  const renderProviderForm = (provider: SettingsPayload["providers"][number]) => {
     const form = providerForms[provider.name] ?? providerFormFromRow(provider);
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
@@ -677,7 +697,7 @@ export function ProvidersSettings({
     const supportFeature = supportName
       ? (nanobotFeatures?.features ?? []).find((feature) => feature.name === supportName)
       : null;
-    const content = (
+    return (
       <>
             {supportFeature && !supportFeature.installed ? (
               <CapabilityInstallNotice
@@ -770,12 +790,12 @@ export function ProvidersSettings({
                   />
                 ) : null}
                 <div className="flex flex-wrap items-center justify-end gap-2 py-3">
-                  <Button size="sm" variant="ghost" onClick={() => toggleProvider(provider.name)}
+                  <Button size="sm" variant="ghost" onClick={returnFromEditor}
                     disabled={saving} className="rounded-full">
                     {t("settings.actions.cancel")}
                   </Button>
                   {supportsOauthAdvancedSettings ? (
-                    <Button size="sm" variant="outline" onClick={() => onSaveProvider(provider.name)}
+                    <Button size="sm" variant="outline" onClick={() => saveProvider(provider.name)}
                       disabled={saving || !oauthSettingsDirty} className="rounded-full">
                       {oauthSettingsSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                       {oauthSettingsSaving
@@ -902,7 +922,8 @@ export function ProvidersSettings({
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => toggleProvider(provider.name)}
+                    onClick={returnFromEditor}
+                    disabled={saving}
                     className="rounded-full"
                   >
                     {t("settings.actions.cancel")}
@@ -910,7 +931,7 @@ export function ProvidersSettings({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => onSaveProvider(provider.name)}
+                    onClick={() => saveProvider(provider.name)}
                     disabled={
                       saving
                       || missingRequiredApiKey
@@ -930,29 +951,8 @@ export function ProvidersSettings({
             )}
       </>
     );
-    if (contentOnly) return content;
-    return (
-      <Dialog key={provider.name} open={expanded} onOpenChange={(open) => {
-        if (open !== expanded) toggleProvider(provider.name);
-      }}>
-        <DialogTrigger asChild>
-          <button type="button" aria-label={provider.label}
-            className="settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover">
-            <span className="flex min-w-0 items-center gap-3">
-              <ProviderIcon provider={provider.name} showBrandLogos={showBrandLogos} />
-              <span className="truncate text-[14px] font-medium leading-5 text-foreground">{provider.label}</span>
-            </span>
-            <span className="shrink-0 px-2 py-1 text-[13px] font-normal leading-5 text-muted-foreground">{t("settings.configure")}</span>
-          </button>
-        </DialogTrigger>
-        {expanded ? <DialogContent aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto">
-          <DialogHeader><DialogTitle>{provider.label}</DialogTitle></DialogHeader>
-          {content}
-        </DialogContent> : null}
-      </Dialog>
-    );
   };
-  const customProviderForm = creatingCustomProvider ? (
+  const customProviderForm = view.kind === "custom" ? (
       <div className="space-y-3">
         <label className="block space-y-1.5">
           <span className="block px-3 text-[12px] font-medium text-muted-foreground">
@@ -1053,7 +1053,7 @@ export function ProvidersSettings({
           <Button
             size="sm"
             variant="ghost"
-            onClick={cancelCustomProviderCreation}
+            onClick={returnFromEditor}
             disabled={customProviderSaving}
             className="rounded-full"
           >
@@ -1077,75 +1077,93 @@ export function ProvidersSettings({
         </div>
       </div>
   ) : null;
+  const title = view.kind === "list"
+    ? t("settings.providers.manageProviders")
+    : view.kind === "custom"
+      ? t("settings.providers.customProvider")
+      : selectedProvider?.label ?? t("settings.providers.addProvider");
+  const canGoBack = view.kind === "custom"
+    || (view.kind === "provider" && (view.adding || entry.kind === "manage"))
+    || (view.kind === "picker" && entry.kind === "manage");
   return (
-    <div className="space-y-6">
-      <section>
-        <SettingsSectionTitle>
-          {tx("settings.providers.title", "Model providers")}
-        </SettingsSectionTitle>
-        <SettingsGroup>
-          {configuredProviders.map((provider) => renderProviderRow(provider))}
-          {selectedUnconfiguredProvider && !addingProvider
-            ? renderProviderRow(selectedUnconfiguredProvider)
-            : null}
-          <ProviderSetupPanel
-            open={addingProvider}
-            onOpenChange={(open) => {
-              if (open) {
-                setProviderToAdd(null);
+    <ProviderSetupPanel
+      view={view.kind}
+      title={title}
+      busy={Boolean(providerSaving)}
+      onClose={closePanel}
+      onCloseAutoFocus={onCloseAutoFocus}
+      onBack={canGoBack ? goBack : undefined}
+    >
+      {view.kind === "list" ? (
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-5 pb-5">
+          <div className="space-y-1">
+            {configuredProviders.map((provider) => (
+              <button key={provider.name} type="button" aria-label={provider.label}
+                data-provider-return-focus={lastProvider.current === provider.name ? "" : undefined}
+                onClick={() => editProvider(provider.name, false)}
+                className="flex min-h-14 w-full rounded-xl px-3 items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover">
+                <span className="flex min-w-0 items-center gap-3">
+                  <ProviderIcon provider={provider.name} showBrandLogos={showBrandLogos} />
+                  <span className="truncate text-[14px] font-medium leading-5 text-foreground">{provider.label}</span>
+                </span>
+                <span className="shrink-0 px-2 py-1 text-[13px] text-muted-foreground">{t("settings.configure")}</span>
+              </button>
+            ))}
+            {configuredProviders.length === 0 ? (
+              <p className="px-4 py-5 text-sm text-muted-foreground">{t("settings.byok.noConfiguredProviders")}</p>
+            ) : null}
+          </div>
+          <div className="flex justify-end pt-4">
+            <Button type="button" variant="outline" size="sm"
+              className="h-11 gap-2 text-[13px] font-normal sm:h-9"
+              data-provider-add onClick={() => {
                 setProviderSearch("");
-                setAddingProvider(true);
-              } else closeAddProvider();
-            }}
-            title={creatingCustomProvider
-              ? tx("settings.providers.customProvider", "Custom provider")
-              : selectedProviderToAdd?.label ?? tx("settings.providers.addProvider", "Add provider")}
-            onBack={creatingCustomProvider || selectedProviderToAdd ? backToProviderPicker : undefined}
-            trigger={
-              <SettingsAddButton>
-                {tx("settings.providers.addProvider", "Add provider")}
-              </SettingsAddButton>
-            }
-          >
-            {creatingCustomProvider || selectedProviderToAdd ? (
-              <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 pb-5">
-                {creatingCustomProvider ? customProviderForm : renderProviderRow(selectedProviderToAdd!, true)}
-              </div>
-            ) : (
-              <ProviderSearchList providers={unconfiguredProviders} showBrandLogos={showBrandLogos}
-                query={providerSearch} onQueryChange={setProviderSearch}
-                onSelect={(name) => {
-                  setProviderToAdd(name);
-                  onToggleProvider(name);
-                }}
-                onCustom={beginCustomProviderCreation} onClose={closeAddProvider} />
-            )}
-          </ProviderSetupPanel>
-        </SettingsGroup>
-      </section>
-    </div>
+                setView({ kind: "picker" });
+              }}>
+              <Plus className="h-4 w-4 text-muted-foreground" aria-hidden />
+              {t("settings.providers.addProvider")}
+            </Button>
+          </div>
+        </div>
+      ) : view.kind === "picker" ? (
+        <ProviderSearchList providers={unconfiguredProviders} showBrandLogos={showBrandLogos}
+          query={providerSearch} onQueryChange={setProviderSearch}
+          onSelect={(name) => editProvider(name, true)}
+          onCustom={beginCustomProviderCreation} onClose={entry.kind === "manage" ? goBack : closePanel} />
+      ) : (
+        <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 pb-5">
+          {view.kind === "custom" ? customProviderForm : selectedProvider ? renderProviderForm(selectedProvider) : null}
+        </div>
+      )}
+    </ProviderSetupPanel>
   );
 }
 
-function ProviderSetupPanel({ open, onOpenChange, title, trigger, onBack, children }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+function ProviderSetupPanel({ view, onClose, onCloseAutoFocus, title, busy, onBack, children }: {
+  view: ProviderSettingsView["kind"];
+  onClose: () => void;
+  onCloseAutoFocus: (event: Event) => void;
   title: string;
-  trigger: ReactNode;
+  busy: boolean;
   onBack?: () => void;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
   const mobile = useMediaQuery("(max-width: 639px)");
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
-  const configuring = Boolean(onBack);
   useEffect(() => {
-    if (configuring) container?.focus({ preventScroll: true });
-  }, [configuring, container]);
+    const target = view === "list"
+      ? container?.querySelector<HTMLElement>("[data-provider-return-focus]")
+        ?? container?.querySelector<HTMLElement>("[data-provider-add]")
+      : (view === "picker" && !mobile) || view === "custom"
+        ? container?.querySelector<HTMLInputElement>("input")
+        : null;
+    (target ?? container)?.focus({ preventScroll: true });
+  }, [view, title, container, mobile]);
   const content = <>
     <div className="flex h-16 shrink-0 items-center gap-2 px-5 pr-12">
-      {onBack ? <Button type="button" variant="ghost" size="icon" onClick={onBack}
-        aria-label={t("settings.providers.backToProviders", { defaultValue: "Back to providers" })}
+      {onBack ? <Button type="button" variant="ghost" size="icon" onClick={onBack} disabled={busy}
+        aria-label={t("settings.providers.backToProviders")}
         className="-ml-2 h-9 w-9 shrink-0 rounded-full">
         <ChevronLeft className="h-4 w-4" aria-hidden />
       </Button> : null}
@@ -1153,23 +1171,26 @@ function ProviderSetupPanel({ open, onOpenChange, title, trigger, onBack, childr
     </div>
     {children}
   </>;
-  const focusOnOpen = (event: Event) => {
-    event.preventDefault();
-    const target = !mobile ? container?.querySelector<HTMLInputElement>("input") : null;
-    (target ?? container)?.focus({ preventScroll: true });
+  const onEscapeKeyDown = (event: KeyboardEvent) => {
+    if (onBack) {
+      event.preventDefault();
+      if (!busy) onBack();
+    }
   };
-  return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogTrigger asChild>{trigger}</DialogTrigger>
+  return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
     {mobile ? <SheetContent side="bottom" ref={setContainer} aria-describedby={undefined}
-      onOpenAutoFocus={focusOnOpen}
-      className={cn("mx-auto max-h-[85dvh] max-w-md gap-0 overflow-hidden rounded-t-3xl pb-[env(safe-area-inset-bottom)] outline-none", !configuring && "h-[min(36rem,85dvh)]")}
+      onOpenAutoFocus={(event) => event.preventDefault()}
+      onCloseAutoFocus={onCloseAutoFocus}
+      onEscapeKeyDown={onEscapeKeyDown}
+      className={cn("mx-auto max-h-[85dvh] max-w-md gap-0 overflow-hidden rounded-t-3xl pb-[env(safe-area-inset-bottom)] outline-none", view === "picker" && "h-[min(36rem,85dvh)]")}
       closeButtonClassName="grid h-9 w-9 place-items-center right-3 top-3 rounded-full">
       <FloatingPortalContext.Provider value={container}>{content}</FloatingPortalContext.Provider>
     </SheetContent> : <DialogContent ref={setContainer} aria-describedby={undefined}
-      onOpenAutoFocus={focusOnOpen}
-      className={cn("flex max-h-[85dvh] w-[min(28rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 outline-none", !configuring && "h-[min(32rem,85dvh)]")}>
+      onOpenAutoFocus={(event) => event.preventDefault()}
+      onCloseAutoFocus={onCloseAutoFocus}
+      onEscapeKeyDown={onEscapeKeyDown}
+      className={cn("flex max-h-[85dvh] w-[min(28rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 outline-none", view === "picker" && "h-[min(32rem,85dvh)]", view === "list" && "w-[min(26rem,calc(100vw-2rem))]")}>
       {content}
     </DialogContent>}
   </Dialog>;
 }
-

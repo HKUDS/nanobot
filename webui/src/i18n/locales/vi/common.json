@@ -762,6 +762,9 @@
       }
     },
     "providers": {
+      "manageProviders": "Quản lý nhà cung cấp",
+      "configureProvider": "Cấu hình {{provider}}…",
+      "sharedProviderHelp": "Thay đổi sẽ ảnh hưởng đến tất cả cấu hình đặt trước sử dụng nhà cung cấp này.",
       "parameterCount": "{{count}} mục",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
@@ -816,6 +819,7 @@
       "installing": "Đang cài các gói cần thiết…"
     },
     "models": {
+      "otherPresets": "Cấu hình dự phòng",
       "catalogAuthRequired": "Quyền truy cập đã hết hạn. Vui lòng đăng nhập lại.",
       "catalogUnavailable": "Cập nhật thất bại. Nhấp để thử lại",
       "catalogStale": "Danh sách đã lưu đệm có thể đã cũ.",
@@ -829,7 +833,6 @@
       "configurationNamePlaceholder": "Viết nhanh",
       "callOrder": "Thứ tự mô hình",
       "primary": "Chính",
-      "fallbackNumber": "Dự phòng {{number}}",
       "addToOrder": "Bật cấu hình đặt trước",
       "newPreset": "Tạo bộ thiết lập",
       "newPresetHelp": "Lưu mô hình và thiết lập để dùng lại.",
@@ -866,7 +869,7 @@
       "disabled": "Đã tắt",
       "noPresets": "Chưa có cấu hình mô hình đặt trước",
       "noPresetsHelp": "Tạo cấu hình đặt trước rồi thêm vào thứ tự gọi.",
-      "removeBeforeDelete": "Chọn cấu hình chính khác trước khi xóa cấu hình này.",
+      "removeBeforeDelete": "Không thể xóa mô hình chính",
       "providerSetupRequired": "Cần cấu hình nhà cung cấp",
       "configureProviderBeforeSaving": "Hãy cấu hình nhà cung cấp này trước khi lưu cấu hình đặt trước.",
       "deletePresetTitle": "Xóa cấu hình mô hình đặt trước?",

@@ -4,6 +4,7 @@ import {
   CircleAlert,
   Hexagon,
   Pencil,
+  Plus,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -11,7 +12,7 @@ import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { Button } from "@/components/ui/button";
 import { ControlChevron } from "@/components/ui/control-chevron";
 import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchInput } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -87,6 +88,8 @@ export function ProviderPicker({
   emptyLabel,
   showProviderLogos = false,
   onChange,
+  onAddProvider,
+  onConfigureProvider,
 }: {
   providers: Array<{ name: string; label: string }>;
   value: string;
@@ -94,13 +97,27 @@ export function ProviderPicker({
   emptyLabel: string;
   showProviderLogos?: boolean;
   onChange: (provider: string) => void;
+  onAddProvider?: (trigger: HTMLButtonElement | null) => void;
+  onConfigureProvider?: (provider: string, trigger: HTMLButtonElement | null) => void;
 }) {
+  const { t } = useTranslation();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const openingProviderSetup = useRef(false);
   const selectedProvider = providers.find((provider) => provider.name === value) ?? null;
-  const disabled = !!triggerProps?.disabled || providers.length === 0;
+  const disabled = !!triggerProps?.disabled || (providers.length === 0 && !onAddProvider);
 
   return (
-    <Select value={value} onValueChange={onChange} disabled={disabled}>
+    <Select value={value} onValueChange={(provider) => {
+      if (provider === ":add-provider") {
+        openingProviderSetup.current = true;
+        onAddProvider?.(triggerRef.current);
+      } else if (provider === ":configure-provider") {
+        openingProviderSetup.current = true;
+        onConfigureProvider?.(value, triggerRef.current);
+      } else onChange(provider);
+    }} disabled={disabled}>
         <SelectTrigger
+          ref={triggerRef}
           {...triggerProps}
           aria-label={triggerProps?.["aria-label"] ?? selectedProvider?.label ?? emptyLabel}
           type="button"
@@ -121,7 +138,12 @@ export function ProviderPicker({
             <span className="truncate">{selectedProvider?.label ?? emptyLabel}</span>
           </span></SelectValue>
         </SelectTrigger>
-      <SelectContent>
+      <SelectContent onCloseAutoFocus={(event) => {
+        if (openingProviderSetup.current) {
+          event.preventDefault();
+          openingProviderSetup.current = false;
+        }
+      }}>
         {providers.map((provider) => {
           return (
             <SelectItem
@@ -140,6 +162,21 @@ export function ProviderPicker({
             </SelectItem>
           );
         })}
+        {onAddProvider || onConfigureProvider ? <>
+          {providers.length > 0 ? <SelectSeparator className="my-1 h-px bg-border" /> : null}
+          {onConfigureProvider && selectedProvider ? <SelectItem value=":configure-provider">
+            <span className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-muted-foreground" aria-hidden />
+              {t("settings.providers.configureProvider", { provider: selectedProvider.label })}
+            </span>
+          </SelectItem> : null}
+          {onAddProvider ? <SelectItem value=":add-provider">
+            <span className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-muted-foreground" aria-hidden />
+              {t("settings.providers.addProvider", { defaultValue: "Add provider" })}
+            </span>
+          </SelectItem> : null}
+        </> : null}
       </SelectContent>
     </Select>
   );
@@ -170,7 +207,7 @@ export function ModelIdPicker({
   emptyMessage?: string;
   onProviderOAuthLogin?: (provider: string) => void;
   providerSigningIn?: boolean;
-  onChange: (model: string) => void;
+  onChange: (model: string, info?: ProviderModelsPayload["models"][number]) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -271,7 +308,7 @@ export function ModelIdPicker({
     setOpen(false);
   };
   const selectModel = (model: string) => {
-    onChange(model);
+    onChange(model, providerModels.find((entry) => entry.id === model));
     closePicker(true);
   };
   const navigationValues = useMemo(
@@ -339,6 +376,12 @@ export function ModelIdPicker({
           </span>
           <SearchInput
             ref={searchInputRef}
+            type="search"
+            name="model-search"
+            autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={open && !catalogNeedsSignIn ? query : value}
             readOnly={catalogNeedsSignIn}
             onClick={() => openPicker()}
@@ -359,7 +402,7 @@ export function ModelIdPicker({
             aria-label={emptyLabel || tx("settings.models.selectModel", "Select model")}
             aria-expanded={open}
             aria-describedby={showCatalogNotice ? catalogNoticeId : undefined}
-            className="h-9 pl-9 pr-9 text-[13px] font-medium"
+            className="h-9 appearance-none pl-9 pr-9 text-[13px] font-medium [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
           />
           <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
             <ControlChevron />

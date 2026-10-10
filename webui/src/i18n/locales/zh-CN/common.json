@@ -693,6 +693,7 @@
       "voiceInput": "语音转写"
     },
     "models": {
+      "otherPresets": "备用预设",
       "catalogAuthRequired": "授权已失效，请重新登录。",
       "catalogUnavailable": "刷新失败，点击重试",
       "catalogStale": "缓存列表可能已过时。",
@@ -706,7 +707,6 @@
       "configurationNamePlaceholder": "快速写作",
       "callOrder": "使用顺序",
       "primary": "主模型",
-      "fallbackNumber": "备用模型 {{number}}",
       "addToOrder": "启用预设",
       "newPreset": "新建预设",
       "newPresetHelp": "保存模型和参数，方便下次选用",
@@ -743,7 +743,7 @@
       "disabled": "未启用",
       "noPresets": "还没有模型预设",
       "noPresetsHelp": "先创建预设，再将它加入调用顺序。",
-      "removeBeforeDelete": "请先将其他预设设为主模型，再删除此预设。",
+      "removeBeforeDelete": "无法删除主模型",
       "providerSetupRequired": "请先配置提供商",
       "configureProviderBeforeSaving": "请先配置此提供商，再保存预设。",
       "deletePresetTitle": "删除模型预设？",
@@ -1185,6 +1185,9 @@
       "systemHelp": "包括内部任务和未标注来源的调用"
     },
     "providers": {
+      "manageProviders": "管理提供商",
+      "configureProvider": "配置 {{provider}}…",
+      "sharedProviderHelp": "修改会影响使用此提供商的所有预设。",
       "parameterCount": "{{count}} 项",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",

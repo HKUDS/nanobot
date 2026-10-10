@@ -507,6 +507,7 @@
       "voiceInput": "Transcrição"
     },
     "models": {
+      "otherPresets": "Presets alternativos",
       "catalogAuthRequired": "A autorização expirou. Entre novamente.",
       "catalogUnavailable": "Falha ao atualizar. Clique para tentar novamente",
       "catalogStale": "A lista em cache pode estar desatualizada.",
@@ -520,7 +521,6 @@
       "configurationNamePlaceholder": "Escrita rápida",
       "callOrder": "Ordem dos modelos",
       "primary": "Principal",
-      "fallbackNumber": "Alternativo {{number}}",
       "addToOrder": "Ativar predefinição",
       "newPreset": "Novo preset",
       "newPresetHelp": "Salve um modelo e seus ajustes para reutilizar.",
@@ -557,7 +557,7 @@
       "disabled": "Desabilitado",
       "noPresets": "Ainda não há predefinições de modelo",
       "noPresetsHelp": "Crie uma predefinição e adicione-a à ordem de chamada.",
-      "removeBeforeDelete": "Escolha outra predefinição principal antes de excluir esta.",
+      "removeBeforeDelete": "Não é possível excluir o modelo principal",
       "providerSetupRequired": "Configuração do provedor necessária",
       "configureProviderBeforeSaving": "Configure este provedor antes de salvar a predefinição.",
       "deletePresetTitle": "Excluir predefinição de modelo?",
@@ -999,6 +999,9 @@
       }
     },
     "providers": {
+      "manageProviders": "Gerenciar provedores",
+      "configureProvider": "Configurar {{provider}}…",
+      "sharedProviderHelp": "As alterações afetam todas as predefinições que usam este provedor.",
       "parameterCount": "{{count}} entradas",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",

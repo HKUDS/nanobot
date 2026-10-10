@@ -1,5 +1,5 @@
 import { ChevronLeft, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { SettingsExitGuard } from "@/components/settings/contracts";
@@ -18,6 +18,7 @@ import {
 import {
   ProviderOAuthLoginDialog,
   ProvidersSettings,
+  type ProviderSettingsEntry,
 } from "@/components/settings/models/ProviderSettings";
 import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
@@ -88,6 +89,11 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
+  const [providerPanel, setProviderPanel] = useState<ProviderSettingsEntry | null>(null);
+  const providerSetupOrigin = useRef<{
+    trigger: HTMLButtonElement | null;
+    onAdded?: (provider: string) => void;
+  } | null>(null);
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
   const [automationDetailReturn, setAutomationDetailReturn] =
     useState<SessionAutomationJob | null>(null);
@@ -365,6 +371,19 @@ export function SettingsPage({
               providerSaving={providerOperation?.action === "login" ? providerSaving : null}
               onChangeCallOrder={changeModelCallOrder}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
+              onAddProvider={(trigger, onAdded) => {
+                providerSetupOrigin.current = { trigger, onAdded };
+                setProviderPanel({ kind: "add" });
+              }}
+              onConfigureProvider={(provider, trigger) => {
+                providerSetupOrigin.current = { trigger };
+                handleToggleProvider(provider);
+                setProviderPanel({ kind: "edit", provider });
+              }}
+              onManageProviders={(trigger) => {
+                providerSetupOrigin.current = { trigger };
+                setProviderPanel({ kind: "manage" });
+              }}
               onSave={saveModelSettings}
               onMigrate={handleMigrateModelConfigurations}
               onBeginCreate={beginModelPresetCreation}
@@ -378,7 +397,19 @@ export function SettingsPage({
               }}
               onDeleteConfiguration={setModelPresetPendingDelete}
             />
-            <ProvidersSettings
+            {providerPanel ? <ProvidersSettings
+              entry={providerPanel}
+              onClose={() => setProviderPanel(null)}
+              onProviderAdded={providerSetupOrigin.current?.onAdded
+                ? (provider) => providerSetupOrigin.current?.onAdded?.(provider)
+                : undefined}
+              onCloseAutoFocus={(event) => {
+                if (providerSetupOrigin.current) {
+                  event.preventDefault();
+                  providerSetupOrigin.current.trigger?.focus({ preventScroll: true });
+                  providerSetupOrigin.current = null;
+                }
+              }}
               settings={settings}
               nanobotFeatures={nanobotFeatures}
               featureAction={nanobotFeatureAction}
@@ -409,7 +440,7 @@ export function SettingsPage({
               providerOperation={providerOperation}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
-            />
+            /> : null}
           </div>
         );
       case "image":

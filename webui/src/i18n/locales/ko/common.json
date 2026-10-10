@@ -762,6 +762,9 @@
       }
     },
     "providers": {
+      "manageProviders": "제공업체 관리",
+      "configureProvider": "{{provider}} 설정…",
+      "sharedProviderHelp": "변경 사항은 이 제공업체를 사용하는 모든 프리셋에 적용됩니다.",
       "parameterCount": "{{count}}개 항목",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
@@ -816,6 +819,7 @@
       "installing": "필수 패키지 설치 중…"
     },
     "models": {
+      "otherPresets": "대체 프리셋",
       "catalogAuthRequired": "인증이 만료되었습니다. 다시 로그인해 주세요.",
       "catalogUnavailable": "갱신 실패. 클릭하여 다시 시도",
       "catalogStale": "캐시된 목록이 최신이 아닐 수 있습니다.",
@@ -829,7 +833,6 @@
       "configurationNamePlaceholder": "빠른 작성",
       "callOrder": "모델 순서",
       "primary": "기본",
-      "fallbackNumber": "대체 {{number}}",
       "addToOrder": "프리셋 활성화",
       "newPreset": "프리셋 만들기",
       "newPresetHelp": "모델과 설정을 저장해 다시 사용하세요.",
@@ -866,7 +869,7 @@
       "disabled": "비활성화됨",
       "noPresets": "아직 모델 프리셋이 없습니다",
       "noPresetsHelp": "프리셋을 만든 다음 호출 순서에 추가하세요.",
-      "removeBeforeDelete": "삭제하기 전에 다른 프리셋을 기본으로 선택하세요.",
+      "removeBeforeDelete": "기본 모델은 삭제할 수 없습니다",
       "providerSetupRequired": "제공업체 설정 필요",
       "configureProviderBeforeSaving": "프리셋을 저장하기 전에 이 제공업체를 설정하세요.",
       "deletePresetTitle": "모델 프리셋을 삭제할까요?",

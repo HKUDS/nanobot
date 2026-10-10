@@ -762,6 +762,9 @@
       }
     },
     "providers": {
+      "manageProviders": "管理提供商",
+      "configureProvider": "設定 {{provider}}…",
+      "sharedProviderHelp": "變更會影響使用此提供商的所有預設。",
       "parameterCount": "{{count}} 項",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
@@ -816,6 +819,7 @@
       "installing": "正在安裝所需套件…"
     },
     "models": {
+      "otherPresets": "備用預設",
       "catalogAuthRequired": "授權已失效，請重新登入。",
       "catalogUnavailable": "更新失敗，點擊重試",
       "catalogStale": "快取清單可能已過時。",
@@ -829,7 +833,6 @@
       "configurationNamePlaceholder": "快速寫作",
       "callOrder": "使用順序",
       "primary": "主要模型",
-      "fallbackNumber": "備用模型 {{number}}",
       "addToOrder": "啟用預設",
       "newPreset": "新建預設",
       "newPresetHelp": "儲存模型和引數，方便下次選用",
@@ -866,7 +869,7 @@
       "disabled": "未啟用",
       "noPresets": "尚無模型預設",
       "noPresetsHelp": "先建立預設，再將它加入呼叫順序。",
-      "removeBeforeDelete": "請先將其他預設設為主要模型，再刪除此預設。",
+      "removeBeforeDelete": "無法刪除主要模型",
       "providerSetupRequired": "供應商需要設定",
       "configureProviderBeforeSaving": "請先設定此供應商，再儲存預設。",
       "deletePresetTitle": "刪除模型預設？",

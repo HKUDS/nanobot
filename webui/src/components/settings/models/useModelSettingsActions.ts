@@ -161,6 +161,8 @@ export function useModelSettingsActions({
       saving ||
       modelCallOrderSaving ||
       modelConfigurationSaving ||
+      !Number.isSafeInteger(form.maxTokens) ||
+      form.maxTokens <= 0 ||
       !Number.isSafeInteger(form.contextWindowTokens) ||
       form.contextWindowTokens <= 0
     ) {
@@ -382,16 +384,16 @@ export function useModelSettingsActions({
     }
   };
 
-  const saveProvider = async (providerName: string) => {
-    if (providerSaving) return;
+  const saveProvider = async (providerName: string): Promise<boolean> => {
+    if (providerSaving) return false;
     const provider = settings?.providers.find((item) => item.name === providerName);
-    if (!provider) return;
+    if (!provider) return false;
     const isOauthProvider = provider.auth_type === "oauth";
     const providerForm = providerForms[providerName] ?? providerFormFromRow(provider);
     const apiKey = providerForm.apiKey.trim();
     if (!isOauthProvider && !provider.configured && (provider.api_key_required ?? true) && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
-      return;
+      return false;
     }
     setProviderOperation({ provider: providerName, action: "save" });
     try {
@@ -400,7 +402,7 @@ export function useModelSettingsActions({
         : providerName === "azure_openai"
           ? "azure"
           : null;
-      if (supportName && !(await installCapabilities([supportName]))) return;
+      if (supportName && !(await installCapabilities([supportName]))) return false;
       const update: ProviderSettingsUpdate = { provider: providerName };
       if (!isOauthProvider) {
         update.apiKey = apiKey || undefined;
@@ -422,7 +424,7 @@ export function useModelSettingsActions({
         if (field === "profile") update.profile = providerForm.profile.trim();
       }
       const payload = await updateProviderSettings(client, update);
-      applyPayload(payload);
+      applyPayload(payload, { preserveAgentForm: true });
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
@@ -434,17 +436,19 @@ export function useModelSettingsActions({
       });
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
       setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-      if (!isOauthProvider) setExpandedProvider(null);
+      if (!isOauthProvider || provider.configured) setExpandedProvider(null);
       setError(null);
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setProviderOperation(null);
     }
   };
 
-  const createCustomProvider = async (draft: CustomProviderDraft): Promise<boolean> => {
-    if (providerSaving) return false;
+  const createCustomProvider = async (draft: CustomProviderDraft): Promise<SettingsPayload | null> => {
+    if (providerSaving) return null;
     setProviderOperation({ provider: CUSTOM_PROVIDER_CREATION_KEY, action: "create" });
     try {
       const payload = await createProviderSettings(client, {
@@ -458,13 +462,13 @@ export function useModelSettingsActions({
         extraQuery: draft.extraQuery.trim(),
         thinkingStyle: draft.thinkingStyle.trim(),
       });
-      applyPayload(payload);
+      applyPayload(payload, { preserveAgentForm: true });
       setExpandedProvider(null);
       setError(null);
-      return true;
+      return payload;
     } catch (err) {
       setError((err as Error).message);
-      return false;
+      return null;
     } finally {
       setProviderOperation(null);
     }
@@ -514,7 +518,7 @@ export function useModelSettingsActions({
       }
       popup?.close();
       closeProviderOAuthFlow(false);
-      applyPayload(payload, { preserveAgentForm: action === "login" });
+      applyPayload(payload, { preserveAgentForm: true });
       setError(null);
     } catch (err) {
       popup?.close();
