@@ -350,9 +350,9 @@
   },
   "temporaryChat": {
     "title": "临时聊天",
-    "retention": "不保存到历史记录或记忆",
-    "expiration": "刷新、关页或连接中断后结束",
-    "externalEffects": "仍请求提供商，工具操作可能留下更改",
+    "retention": "不保存聊天记录或记忆",
+    "expiration": "刷新、关闭页面或连接中断后结束",
+    "externalEffects": "请求仍发给模型提供商，工具更改可能保留",
     "clear": "清空聊天",
     "sectionTitle": "临时聊天",
     "closeAction": "关闭临时聊天：{{title}}"
