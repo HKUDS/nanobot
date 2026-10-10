@@ -75,7 +75,23 @@ the same complete package, source, license, and platform checks, not a reduced p
    archives. Verify public downloads before uploading the same five wheels and one
    sdist to PyPI.
 8. Test a clean public installation. Only then mark the candidate available in the
-   channel feed. A partial upload is not an available update.
+   channel feed. The gateway must not offer a partial upload as an available update.
+
+PyPI publication is not atomic: [its upload API creates a release with the first
+file](https://docs.pypi.org/api/upload/). Holding back the channel feed does not hide
+those files from direct pip/uv/pipx users. Upload the already verified platform wheels
+before the sdist to reduce premature source-build fallback; this order does not
+eliminate the partial-publication window. Recommended preview commands must pin a
+candidate whose complete manifest has passed public verification, not select the
+newest prerelease blindly.
+
+If an upload stops, keep the candidate out of the feed and compare every public file
+against its recorded hash. Resume only missing files from that exact verified build;
+never overwrite or rebuild under the same version. For an abandoned or broken public
+candidate, obtain maintainer approval to [yank the release](https://docs.pypi.org/project-management/yanking/)
+with a reason and publish a new version. Yanking is not deletion or rollback, and
+exact version pins can still install a yanked release. The gateway must independently
+reject yanked candidates, including a previously selected candidate before installation.
 
 A scheduled build must not bypass an approval required for publication. Start with a
 manually triggered candidate workflow and no publish credentials in build jobs. Enable
@@ -182,6 +198,7 @@ covering that window. This proposal does not silently change the existing policy
 - [ ] Implement manual candidate preparation and complete, non-publishing artifact CI.
 - [ ] Verify source-offer commitments and retained corresponding-source materials.
 - [ ] Configure protected publication and PyPI trust, then publish one approved preview.
+- [ ] Exercise partial-upload recovery and yanked-candidate rejection before enabling scheduled publication.
 - [ ] Verify fresh install and upgrade for pip/uv/pipx/installer on macOS, Windows and Linux.
 - [ ] Verify failure recovery, no-op, downgrade rejection, task coordination and supervisor restart.
 - [ ] Add gateway channel selection, exact-target plans and installer-specific adapters to the executor.
