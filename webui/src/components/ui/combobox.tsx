@@ -28,7 +28,13 @@ export function useComboboxNavigation({
 }: ComboboxNavigationOptions) {
   const listboxId = React.useId();
   const [activeOption, setActiveOption] = React.useState<ActiveOption>({ value: null, source: "initial" });
-  const activeValue = activeOption.value;
+  const activeValue = !open || (activeOption.source === "pointer" && activeOption.value === null)
+    ? null
+    : activeOption.value && values.includes(activeOption.value)
+      ? activeOption.value
+      : selectedValue && values.includes(selectedValue)
+        ? selectedValue
+        : values[0] ?? null;
 
   React.useEffect(() => {
     setActiveOption((current) => {
