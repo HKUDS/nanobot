@@ -1194,7 +1194,6 @@
       "noMatches": "没有匹配的提供商。",
       "addOwnProvider": "添加提供商",
       "addProvider": "添加提供商",
-      "removeProvider": "移除",
       "backToProviders": "返回提供商列表",
       "customProvider": "自定义",
       "customProviderName": "名称",

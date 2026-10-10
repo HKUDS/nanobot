@@ -1269,13 +1269,6 @@ export async function createProviderSettings(
   return mutation<SettingsPayload>(transport, "settings.provider.create", { ...update });
 }
 
-export async function removeProviderSettings(
-  transport: WebUIMutationTransport,
-  provider: string,
-): Promise<SettingsPayload> {
-  return mutation<SettingsPayload>(transport, "settings.provider.remove", { provider });
-}
-
 export async function loginProviderOAuth(
   transport: WebUIMutationTransport,
   provider: string,

@@ -144,28 +144,6 @@ def _apply_ssrf_whitelist(config: Config) -> None:
     configure_ssrf_whitelist(config.tools.ssrf_whitelist)
 
 
-def config_to_dict(config: Config) -> dict[str, Any]:
-    """Serialize configured connections without embedding OAuth credentials."""
-    data = config.model_dump(mode="json", by_alias=True)
-    # OAuth credentials live in dedicated token stores. Persist only the
-    # non-credential request settings consumed by these provider backends.
-    for alias, provider in (
-        ("openaiCodex", config.providers.openai_codex),
-        ("xaiGrok", config.providers.xai_grok),
-        ("githubCopilot", config.providers.github_copilot),
-    ):
-        if provider is None:
-            continue
-        settings = provider.model_dump(
-            mode="json",
-            by_alias=True,
-            include={"proxy", "extra_body"},
-            exclude_none=True,
-        )
-        data["providers"][alias] = settings
-    return data
-
-
 def save_config(config: Config, config_path: Path | None = None) -> None:
     """
     Save configuration to file.
@@ -177,8 +155,24 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    data = config.model_dump(mode="json", by_alias=True)
+    # OAuth credentials live in dedicated token stores. Persist only the
+    # non-credential request settings consumed by these provider backends.
+    for alias, provider in (
+        ("openaiCodex", config.providers.openai_codex),
+        ("xaiGrok", config.providers.xai_grok),
+    ):
+        settings = provider.model_dump(
+            mode="json",
+            by_alias=True,
+            include={"proxy", "extra_body"},
+            exclude_none=True,
+        )
+        if settings:
+            data.setdefault("providers", {})[alias] = settings
+
     # Temp + replace so a crash mid-write cannot leave a truncated config.json.
-    _write_text_atomic(path, json.dumps(config_to_dict(config), indent=2, ensure_ascii=False))
+    _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def merge_missing_defaults(existing: object, defaults: object) -> object:

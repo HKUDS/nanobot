@@ -406,8 +406,8 @@ function modelSettings(model: string, provider: string): SettingsPayload {
     model_call_order: [],
     model_call_order_editable: false,
     providers: [
-      { name: "deepseek", label: "DeepSeek", api_key_required: true, has_config: true, configured: true },
-      { name: "openai_codex", label: "OpenAI Codex", api_key_required: false, has_config: true, configured: true },
+      { name: "deepseek", label: "DeepSeek", configured: true },
+      { name: "openai_codex", label: "OpenAI Codex", configured: true },
     ],
     web_search: {
       provider: "duckduckgo",
@@ -1256,8 +1256,6 @@ describe("ThreadShell", () => {
     settings.providers.push({
       name: "companyproxy",
       label: "Company Proxy",
-      api_key_required: false,
-      has_config: true,
       configured: true,
     });
     settings.model_presets.push({
@@ -1456,7 +1454,7 @@ describe("ThreadShell", () => {
     const client = makeClient();
     const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
     settings.agent.has_api_key = false;
-    settings.providers = [{ name: "anthropic", label: "Anthropic", api_key_required: true, has_config: true, configured: false }];
+    settings.providers = [{ name: "anthropic", label: "Anthropic", configured: false }];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("websocket%3Asetup-tooltip/webui-thread")) {
         return Promise.resolve(httpJson(transcriptFromSimpleMessages(
@@ -1493,7 +1491,7 @@ describe("ThreadShell", () => {
     settings.agent.has_api_key = false;
     settings.providers = settings.providers.map((provider) =>
       provider.name === "openai_codex"
-        ? { ...provider, auth_type: "oauth", has_config: true, configured: false, oauth_authenticated: false }
+        ? { ...provider, auth_type: "oauth", configured: false }
         : provider,
     );
     settings.providers.push(
@@ -1501,16 +1499,11 @@ describe("ThreadShell", () => {
         name: "xai_grok",
         label: "xAI Grok",
         auth_type: "oauth",
-        api_key_required: false,
-        has_config: true,
         configured: true,
-        oauth_authenticated: true,
       },
       {
         name: "ollama",
         label: "Ollama",
-        api_key_required: false,
-        has_config: true,
         configured: true,
         api_base: "http://127.0.0.1:11434",
       },

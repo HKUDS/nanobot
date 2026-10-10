@@ -723,21 +723,6 @@ def test_provider_login_openai_codex_handles_missing_oauth_symbol(monkeypatch):
     assert result.exception is not None
 
 
-def test_provider_login_registers_connection_without_changing_main_model(tmp_path, monkeypatch):
-    config_path = tmp_path / "config.json"
-    before = Config().agents.defaults.model_dump()
-    monkeypatch.setitem(provider_commands._LOGIN_HANDLERS, "openai_codex", lambda: None)
-
-    result = runner.invoke(app, [
-        "provider", "login", "openai-codex", "--config", str(config_path),
-    ])
-
-    assert result.exit_code == 0
-    saved = json.loads(config_path.read_text(encoding="utf-8"))
-    assert saved["providers"] == {"openaiCodex": {}}
-    assert Config.model_validate(saved).agents.defaults.model_dump() == before
-
-
 def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
     config_path = tmp_path / "config.json"
     called = False
@@ -862,12 +847,11 @@ def test_provider_login_model_implies_set_main_provider(tmp_path):
     assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
 
 
-def test_provider_login_openai_codex_passes_configured_proxy(tmp_path, monkeypatch):
+def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
     proxy = "http://127.0.0.1:23458"
-    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: tmp_path / "config.json")
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
-        lambda _path=None: Config.model_validate({"providers": {"openaiCodex": {"proxy": proxy}}}),
+        lambda: Config.model_validate({"providers": {"openaiCodex": {"proxy": proxy}}}),
     )
 
     import oauth_cli_kit
@@ -937,13 +921,12 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
     assert captured["proxy"] == proxy
 
 
-def test_provider_login_openai_codex_resolves_proxy_env_ref(tmp_path, monkeypatch):
+def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
     proxy = "http://127.0.0.1:23458"
-    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: tmp_path / "config.json")
     monkeypatch.setenv("CODEX_PROXY_FOR_TEST", proxy)
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
-        lambda _path=None: Config.model_validate(
+        lambda: Config.model_validate(
             {"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_FOR_TEST}"}}}
         ),
     )
@@ -964,12 +947,11 @@ def test_provider_login_openai_codex_resolves_proxy_env_ref(tmp_path, monkeypatc
     assert captured["proxy"] == proxy
 
 
-def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(tmp_path, monkeypatch):
+def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(monkeypatch):
     proxy = "http://127.0.0.1:23458"
-    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: tmp_path / "config.json")
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
-        lambda _path=None: Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}),
+        lambda: Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}),
     )
     monkeypatch.setattr(
         "nanobot.providers.xai_oauth.get_xai_oauth_token",
@@ -2065,7 +2047,7 @@ def _patch_cli_command_runtime(
         set_config_path or (lambda _path: None),
     )
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.config.loader.resolve_config_env_vars", lambda c, **_kwargs: c)
+    monkeypatch.setattr("nanobot.config.loader.resolve_config_env_vars", lambda c: c)
     monkeypatch.setattr(
         "nanobot.cli.commands.sync_workspace_templates",
         sync_templates or (lambda _path: None),
@@ -2084,7 +2066,7 @@ def _patch_cli_command_runtime(
     )
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
-        lambda _config, **_kwargs: _test_provider_snapshot(provider_factory(_config), _config),
+        lambda _config: _test_provider_snapshot(provider_factory(_config), _config),
     )
     monkeypatch.setattr(
         "nanobot.providers.factory.load_provider_snapshot",
@@ -3123,7 +3105,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
-        lambda _config, **_kwargs: _test_provider_snapshot(provider, _config),
+        lambda _config: _test_provider_snapshot(provider, _config),
     )
     monkeypatch.setattr(
         "nanobot.providers.factory.load_provider_snapshot",
@@ -3251,7 +3233,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
-        lambda _config, **_kwargs: _test_provider_snapshot(provider, _config),
+        lambda _config: _test_provider_snapshot(provider, _config),
     )
     monkeypatch.setattr(
         "nanobot.providers.factory.load_provider_snapshot",

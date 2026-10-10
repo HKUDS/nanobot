@@ -18,9 +18,6 @@ def test_save_config_round_trips(tmp_path: Path) -> None:
     save_config(Config(), path)
     loaded = load_config(path)
     assert loaded.agents.defaults.model
-    assert json.loads(path.read_text(encoding="utf-8"))["providers"] == {}
-    assert loaded.providers.openai is None
-    assert loaded.providers.openai_codex is None
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX file modes")

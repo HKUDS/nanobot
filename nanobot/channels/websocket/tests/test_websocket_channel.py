@@ -47,7 +47,7 @@ from nanobot.channels.websocket.runtime import (
     _parse_inbound_payload,
 )
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig
 from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
@@ -4241,7 +4241,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     config_path = tmp_path / "config.json"
     config = Config()
     config.agents.defaults.model = "openai/gpt-4o"
-    config.providers.openai = ProviderConfig(api_key="secret-key")
+    config.providers.openai.api_key = "secret-key"
     config.model_presets["deep"] = ModelPresetConfig(
         model="anthropic/claude-opus-4-5",
         provider="anthropic",
@@ -4658,7 +4658,7 @@ async def test_image_settings_hot_reload_without_restart(
     port = 29935
     config_path = tmp_path / "config.json"
     config = Config()
-    config.providers.openrouter = ProviderConfig(api_key="image-key")
+    config.providers.openrouter.api_key = "image-key"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     image_reload = AsyncMock(
@@ -4710,7 +4710,7 @@ async def test_image_settings_fall_back_to_restart_when_hot_reload_fails(
     port = 29936
     config_path = tmp_path / "config.json"
     config = Config()
-    config.providers.openrouter = ProviderConfig(api_key="image-key")
+    config.providers.openrouter.api_key = "image-key"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
@@ -4845,9 +4845,7 @@ def test_settings_payload_normalizes_camel_case_provider(
 def test_settings_payload_exposes_openai_api_defaults(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.providers.openai = ProviderConfig(
-        api=ModelAPIConfig(supported_apis=("responses",), preferred_api="responses"),
-    )
+    config.providers.openai.api = ModelAPIConfig(supported_apis=("responses",), preferred_api="responses")
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 

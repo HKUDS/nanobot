@@ -88,9 +88,7 @@ def _resolve_transcription_api_key(
     provider: str,
     provider_cfg: ProviderConfig | None,
 ) -> str:
-    if provider_cfg is None:
-        return ""
-    api_key = resolve_env_refs(provider_cfg.api_key or "")
+    api_key = resolve_env_refs(getattr(provider_cfg, "api_key", None) or "") if provider_cfg else ""
     if api_key:
         return api_key
 

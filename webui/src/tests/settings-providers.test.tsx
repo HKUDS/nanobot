@@ -19,9 +19,9 @@ describe("Settings providers", () => {
     const user = userEvent.setup();
     const payload = settingsPayload();
     payload.providers = [
-      { name: "deepseek", label: "DeepSeek", api_key_required: true, has_config: true, configured: true },
-      { name: "volcengine", label: "VolcEngine", api_key_required: true, has_config: false, configured: false },
-      { name: "volcengine_coding_plan", label: "VolcEngine Coding Plan", api_key_required: true, has_config: false, configured: false },
+      { name: "deepseek", label: "DeepSeek", configured: true },
+      { name: "volcengine", label: "VolcEngine", configured: false },
+      { name: "volcengine_coding_plan", label: "VolcEngine Coding Plan", configured: false },
     ];
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     const trigger = screen.getByRole("button", { name: "Add provider" });
@@ -80,9 +80,9 @@ describe("Settings providers", () => {
   it("adds a built-in provider only after saving and returns focus to Add", async () => {
     const user = userEvent.setup();
     const payload = settingsPayload();
-    payload.providers = [{ name: "moonshot", label: "Moonshot", api_key_required: true, has_config: false, configured: false }];
+    payload.providers = [{ name: "moonshot", label: "Moonshot", configured: false }];
     requestMutationMock.mockResolvedValueOnce({
-      ...payload, providers: [{ ...payload.providers[0], has_config: true, configured: true, api_key_hint: "configured" }],
+      ...payload, providers: [{ ...payload.providers[0], configured: true, api_key_hint: "configured" }],
     });
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     const trigger = screen.getByRole("button", { name: "Add provider" });
@@ -97,49 +97,10 @@ describe("Settings providers", () => {
     expect(screen.queryByRole("option", { name: "Moonshot" })).not.toBeInTheDocument();
   });
 
-  it("removes OAuth configuration while preserving sign-in and resets fields before adding it again", async () => {
-    const user = userEvent.setup();
-    const provider: SettingsPayload["providers"][number] = {
-      name: "openai_codex", label: "OpenAI Codex", has_config: true, configured: true,
-      api_key_required: false, auth_type: "oauth",
-      oauth_authenticated: true, oauth_account: "codex@example.com", oauth_login_supported: true,
-      advanced_fields: ["extra_body", "proxy"],
-      proxy: "http://127.0.0.1:7890", extra_body: { service_tier: "priority" },
-    };
-    const payload = { ...settingsPayload(), providers: [provider] };
-    const removed = {
-      ...provider, has_config: false, configured: false, proxy: null, extra_body: null,
-    };
-    requestMutationMock
-      .mockResolvedValueOnce({ ...payload, providers: [removed] })
-      .mockResolvedValueOnce({ ...payload, providers: [{ ...removed, has_config: true, configured: true }] });
-    renderSettingsView({ initialSection: "models", initialSettings: payload });
-    await user.click(screen.getByRole("button", { name: "OpenAI Codex", exact: true }));
-    await user.click(screen.getByRole("button", { name: "Advanced options" }));
-    await user.clear(screen.getByPlaceholderText("http://127.0.0.1:7890"));
-    await user.type(screen.getByPlaceholderText("http://127.0.0.1:7890"), "127.0.0.1:9999");
-    await user.click(screen.getByRole("button", { name: "Remove" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "OpenAI Codex", exact: true })).not.toBeInTheDocument();
-    await chooseProviderToConfigure("OpenAI Codex");
-    expect(screen.getByText("Signed in as codex@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign in again" })).toBeEnabled();
-    expect(screen.getByRole("switch", { name: "Fast mode" })).toHaveAttribute("aria-checked", "false");
-    await user.click(screen.getByRole("button", { name: "Advanced options" }));
-    expect(screen.getByPlaceholderText("http://127.0.0.1:7890")).toHaveValue("");
-    await user.click(screen.getByRole("button", { name: "Add provider" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "OpenAI Codex", exact: true })).toBeInTheDocument();
-    expect(requestMutationMock.mock.calls).toEqual([
-      ["settings.provider.remove", { provider: "openai_codex" }, 20_000],
-      ["settings.provider.update", { provider: "openai_codex", extraBody: "", proxy: "" }, 20_000],
-    ]);
-  });
-
   it.each([false, true])("retains the add-provider draft after a failed save (custom: %s)", async (custom) => {
     const user = userEvent.setup();
     const payload = settingsPayload();
-    payload.providers = [{ name: "moonshot", label: "Moonshot", api_key_required: true, has_config: false, configured: false }];
+    payload.providers = [{ name: "moonshot", label: "Moonshot", configured: false }];
     requestMutationMock.mockRejectedValueOnce(new Error("Provider could not be saved"));
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await user.click(screen.getByRole("button", { name: "Add provider" }));
@@ -175,9 +136,7 @@ describe("Settings providers", () => {
       providers: [{
         name: "openai_codex",
         label: "OpenAI Codex",
-        has_config: true,
         configured: true,
-        oauth_authenticated: true,
         auth_type: "oauth",
         api_key_required: false,
         api_key_hint: null,
@@ -207,9 +166,7 @@ describe("Settings providers", () => {
     const xaiProvider = {
       name: "xai_grok",
       label: "xAI Grok",
-      has_config: false,
       configured: false,
-      oauth_authenticated: false,
       auth_type: "oauth" as const,
       api_key_required: false,
       api_key_hint: null,
@@ -223,7 +180,7 @@ describe("Settings providers", () => {
     const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
     const signedIn: SettingsPayload = {
       ...payload,
-      providers: [{ ...xaiProvider, has_config: true, configured: true, oauth_authenticated: true, oauth_account: "user@example.com" }],
+      providers: [{ ...xaiProvider, configured: true, oauth_account: "user@example.com" }],
     };
     const authorization = {
       status: "authorization_required",
@@ -309,9 +266,7 @@ describe("Settings providers", () => {
       const xaiProvider = {
         name: "xai_grok",
         label: "xAI Grok",
-        has_config: false,
         configured: false,
-        oauth_authenticated: false,
         auth_type: "oauth" as const,
         api_key_required: false,
         api_key_hint: null,
@@ -390,9 +345,7 @@ describe("Settings providers", () => {
     const codexProvider = {
       name: "openai_codex",
       label: "OpenAI Codex",
-      has_config: false,
       configured: false,
-      oauth_authenticated: false,
       auth_type: "oauth" as const,
       api_key_required: false,
       api_key_hint: null,
@@ -406,7 +359,7 @@ describe("Settings providers", () => {
     const payload: SettingsPayload = { ...base, providers: [codexProvider] };
     const signedIn: SettingsPayload = {
       ...payload,
-      providers: [{ ...codexProvider, has_config: true, configured: true, oauth_authenticated: true, oauth_account: "acct-codex" }],
+      providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
     };
     const authorization = {
       status: "authorization_required",
@@ -470,9 +423,7 @@ describe("Settings providers", () => {
       const codexProvider = {
         name: "openai_codex",
         label: "OpenAI Codex",
-        has_config: false,
         configured: false,
-        oauth_authenticated: false,
         auth_type: "oauth" as const,
         api_key_required: false,
         api_key_hint: null,
@@ -486,7 +437,7 @@ describe("Settings providers", () => {
       const payload: SettingsPayload = { ...base, providers: [codexProvider] };
       const signedIn: SettingsPayload = {
         ...payload,
-        providers: [{ ...codexProvider, has_config: true, configured: true, oauth_authenticated: true, oauth_account: "acct-codex" }],
+        providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
       };
       const authorization = {
         status: "authorization_required",
@@ -591,9 +542,7 @@ describe("Settings providers", () => {
       {
         name: "xai_grok",
         label: "xAI Grok",
-        has_config: true,
         configured: false,
-        oauth_authenticated: false,
         auth_type: "oauth",
         api_key_required: false,
         api_key_hint: null,
@@ -610,9 +559,7 @@ describe("Settings providers", () => {
       {
         name: "openai_codex",
         label: "OpenAI Codex",
-        has_config: false,
         configured: false,
-        oauth_authenticated: false,
         auth_type: "oauth",
         api_key_required: false,
         api_key_hint: null,
@@ -650,7 +597,6 @@ describe("Settings providers", () => {
           provider.name === values.provider
             ? {
                 ...provider,
-                has_config: true,
                 proxy: values.proxy || null,
                 extra_body: values.extraBody ? JSON.parse(values.extraBody) : null,
               }
@@ -662,7 +608,7 @@ describe("Settings providers", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click(screen.getByRole("button", { name: "xAI Grok", exact: true }));
+    await chooseProviderToConfigure("xAI Grok");
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     const xaiProxy = screen.getByLabelText("Network proxy");
     expect(xaiProxy).toHaveValue("http://127.0.0.1:7000");
@@ -693,7 +639,7 @@ describe("Settings providers", () => {
     const codexProxy = screen.getByLabelText("Network proxy");
     expect(codexProxy).toHaveValue("");
     fireEvent.change(codexProxy, { target: { value: "http://proxy.example:8080" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -714,9 +660,7 @@ describe("Settings providers", () => {
       {
         name: "xai_grok",
         label: "xAI Grok",
-        has_config: true,
         configured: true,
-        oauth_authenticated: true,
         auth_type: "oauth",
         api_key_required: false,
         oauth_account: "grok@example.com",
@@ -727,9 +671,7 @@ describe("Settings providers", () => {
       {
         name: "openai_codex",
         label: "OpenAI Codex",
-        has_config: true,
         configured: true,
-        oauth_authenticated: true,
         auth_type: "oauth",
         api_key_required: false,
         oauth_account: "codex@example.com",
@@ -740,7 +682,6 @@ describe("Settings providers", () => {
       {
         name: "deepseek",
         label: "DeepSeek",
-        has_config: true,
         configured: true,
         api_key_required: true,
         api_key_hint: "deep••••test",
@@ -751,7 +692,6 @@ describe("Settings providers", () => {
       {
         name: "openai",
         label: "OpenAI",
-        has_config: true,
         configured: true,
         api_key_required: true,
         api_key_hint: "sk-••••test",
@@ -857,7 +797,6 @@ describe("Settings providers", () => {
       providers: [{
         name: "openai",
         label: "OpenAI",
-        has_config: true,
         configured: true,
         api_key_required: true,
         api_key_hint: "sk-••••test",
@@ -917,7 +856,6 @@ describe("Settings providers", () => {
         {
           name: "deepseek",
           label: "DeepSeek",
-          has_config: true,
           configured: true,
           api_key_required: true,
           api_key_hint: "deep••••test",
@@ -926,7 +864,6 @@ describe("Settings providers", () => {
         {
           name: "openrouter",
           label: "OpenRouter",
-          has_config: false,
           configured: false,
           api_key_required: true,
           api_key_hint: null,
@@ -960,7 +897,6 @@ describe("Settings providers", () => {
               name: "custom-company-gateway",
               label: values.name,
               is_custom: true,
-              has_config: true,
               configured: true,
               api_key_required: false,
               api_key_hint: "sk-c••••pany",
@@ -1057,8 +993,7 @@ describe("Settings providers", () => {
         payload = {
           ...payload,
           providers: [...payload.providers, {
-            name: "tenant", label: "Tenant", is_custom: true, has_config: true, configured: true,
-            api_key_required: false,
+            name: "tenant", label: "Tenant", is_custom: true, configured: true,
             api_base: args.apiBase, api: args.api,
             provider_api_configurable: true,
             request_apis: args.api.supported_apis,
@@ -1115,7 +1050,7 @@ describe("Settings providers", () => {
     const user = userEvent.setup();
     let payload = settingsPayload();
     payload.providers = [{
-      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
+      name: "openai", label: "OpenAI", configured: true,
       api_key_hint: "sk-...",
       provider_api_configurable: true, request_apis: ["chat_completions", "responses"],
       api: { supported_apis: ["responses"], preferred_api: "responses" },
@@ -1154,7 +1089,7 @@ describe("Settings providers", () => {
   it("keeps ordinary OpenAI edits available on hosts without API declarations", async () => {
     const payload = settingsPayload();
     payload.providers = [{
-      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
+      name: "openai", label: "OpenAI", configured: true,
       api_key_hint: "sk-...",
       api_base: "https://api.openai.com/v1", advanced_fields: ["extra_body"],
       extra_body: { tools: [{ type: "web_search" }] },

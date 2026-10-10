@@ -25,7 +25,6 @@ import {
   loginProviderOAuth,
   logoutProviderOAuth,
   migrateModelConfigurations,
-  removeProviderSettings,
   updateModelCallOrder,
   updateModelConfiguration,
   updateProviderSettings,
@@ -390,7 +389,7 @@ export function useModelSettingsActions({
     const isOauthProvider = provider.auth_type === "oauth";
     const providerForm = providerForms[providerName] ?? providerFormFromRow(provider);
     const apiKey = providerForm.apiKey.trim();
-    if (!isOauthProvider && !provider.configured && provider.api_key_required && !apiKey) {
+    if (!isOauthProvider && !provider.configured && (provider.api_key_required ?? true) && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
       return;
     }
@@ -435,33 +434,7 @@ export function useModelSettingsActions({
       });
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
       setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-      if (!isOauthProvider || !provider.has_config) setExpandedProvider(null);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setProviderOperation(null);
-    }
-  };
-
-  const removeProvider = async (providerName: string) => {
-    if (providerSaving) return;
-    setProviderOperation({ provider: providerName, action: "remove" });
-    try {
-      const payload = await removeProviderSettings(client, providerName);
-      applyPayload(payload, { preserveAgentForm: true });
-      if (payload.requires_restart) {
-        setPendingRestartSections((prev) => ({ ...prev, image: true }));
-      }
-      await maybeRestartHostEngine(payload);
-      setProviderForms((prev) => {
-        const next = { ...prev };
-        delete next[providerName];
-        return next;
-      });
-      setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-      setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-      setExpandedProvider(null);
+      if (!isOauthProvider) setExpandedProvider(null);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -628,7 +601,6 @@ export function useModelSettingsActions({
     handleMigrateModelConfigurations,
     handleToggleProvider,
     resetProviderDraft,
-    removeProvider,
     runProviderOAuth,
     saveModelSettings,
     saveProvider,

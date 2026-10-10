@@ -23,7 +23,7 @@ from nanobot.cli.onboard import (
     run_onboard,
 )
 from nanobot.config.loader import merge_missing_defaults
-from nanobot.config.schema import Config, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.utils.helpers import sync_workspace_templates
 
 
@@ -528,57 +528,6 @@ class TestRunOnboardExitBehavior:
 
         assert result.should_save is False
         assert result.config.model_dump(by_alias=True) == initial_config.model_dump(by_alias=True)
-
-
-    @pytest.mark.parametrize("change,dirty", [
-        ("add", True),
-        ("remove", True),
-        ("proxy", True),
-        ("request", True),
-        ("credential", False),
-    ])
-    def test_oauth_provider_edits_offer_save_only_for_persisted_changes(self, monkeypatch, change, dirty):
-        initial_config = Config()
-        if change != "add":
-            initial_config.providers.openai_codex = ProviderConfig()
-        responses = iter(["[A] Advanced Settings", "[P] LLM Provider", "<- Back", None])
-        exit_prompts = []
-
-        def configure_provider(config):
-            if change == "add":
-                config.providers.openai_codex = ProviderConfig()
-            elif change == "remove":
-                config.providers.openai_codex = None
-            elif change == "proxy":
-                config.providers.openai_codex.proxy = "http://127.0.0.1:8080"
-            elif change == "request":
-                config.providers.openai_codex.extra_body = {"service_tier": "priority"}
-            else:
-                config.providers.openai_codex.api_key = "runtime-only-token"
-
-        def exit_menu(has_unsaved_changes):
-            exit_prompts.append(has_unsaved_changes)
-            return "save" if has_unsaved_changes else "discard"
-
-        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *_args, **_kwargs: next(responses))
-        monkeypatch.setattr(onboard_wizard, "_configure_providers", configure_provider)
-        monkeypatch.setattr(onboard_wizard, "_prompt_main_menu_exit", exit_menu)
-
-        result = run_onboard(initial_config=initial_config)
-
-        assert exit_prompts == [dirty]
-        assert result.should_save is dirty
-        if change == "add":
-            assert result.config.providers.openai_codex == ProviderConfig()
-        elif change == "remove":
-            assert result.config.providers.openai_codex is None
-        elif change == "proxy":
-            assert result.config.providers.openai_codex.proxy == "http://127.0.0.1:8080"
-        elif change == "request":
-            assert result.config.providers.openai_codex.extra_body == {"service_tier": "priority"}
-        else:
-            assert result.config.providers.openai_codex == initial_config.providers.openai_codex
 
 
 class TestValidateFieldConstraint:
@@ -1098,8 +1047,8 @@ class TestMainMenuInteraction:
         import oauth_cli_kit
 
         config = Config()
-        config.providers.openai = ProviderConfig(api_key="${UNRELATED_MISSING_KEY}")
-        config.providers.openai_codex = ProviderConfig(proxy="${CODEX_PROXY}")
+        config.providers.openai.api_key = "${UNRELATED_MISSING_KEY}"
+        config.providers.openai_codex.proxy = "${CODEX_PROXY}"
         token = SimpleNamespace(access="existing-token", account_id="account-123")
         token_proxies: list[str | None] = []
         login_calls: list[object] = []
@@ -1148,7 +1097,7 @@ class TestMainMenuInteraction:
         import oauth_cli_kit
 
         config = Config()
-        config.providers.openai_codex = ProviderConfig(proxy="http://127.0.0.1:8080")
+        config.providers.openai_codex.proxy = "http://127.0.0.1:8080"
         prompts: list[str] = []
         printed: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
@@ -1195,7 +1144,7 @@ class TestMainMenuInteraction:
         import oauth_cli_kit
 
         config = Config()
-        config.providers.anthropic = ProviderConfig(api_key="${UNRELATED_MISSING_KEY}")
+        config.providers.anthropic.api_key = "${UNRELATED_MISSING_KEY}"
         monkeypatch.delenv("UNRELATED_MISSING_KEY", raising=False)
         monkeypatch.setattr(
             oauth_cli_kit,
@@ -1465,7 +1414,7 @@ class TestMainMenuInteraction:
         assert onboard_wizard._configure_quick_start_provider(config) is True
 
         assert selected_providers == ["DeepSeek", "OpenAI"]
-        assert config.providers.deepseek is None
+        assert config.providers.deepseek.api_key is None
         assert config.providers.openai.api_key == "sk-openai-test"
         assert config.model_presets["primary"].provider == "openai"
 
@@ -1688,8 +1637,10 @@ class TestMainMenuInteraction:
 
         assert onboard_wizard._configure_quick_start_provider(config) is False
 
-        assert config.providers.deepseek is None
-        assert config.providers.custom is None
+        assert config.providers.deepseek.api_key is None
+        assert config.providers.deepseek.api_base is None
+        assert config.providers.custom.api_key is None
+        assert config.providers.custom.api_base is None
         assert "primary" not in config.model_presets
 
     def test_quick_start_requires_model_id_before_setting_defaults(self, monkeypatch):
@@ -1703,7 +1654,8 @@ class TestMainMenuInteraction:
 
         assert onboard_wizard._configure_quick_start_provider(config) is False
 
-        assert config.providers.deepseek is None
+        assert config.providers.deepseek.api_key is None
+        assert config.providers.deepseek.api_base is None
         assert "primary" not in config.model_presets
 
     def test_quick_start_summary_calls_out_missing_api_key(self, monkeypatch):

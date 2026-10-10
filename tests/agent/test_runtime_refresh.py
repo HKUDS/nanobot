@@ -10,13 +10,11 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeModelChanged
-from nanobot.cli.gateway_runtime import _load_gateway_provider_snapshot
 from nanobot.config.errors import ConfigLoadError
 from nanobot.config.loader import save_config
-from nanobot.config.schema import Config, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.base import GenerationSettings
 from nanobot.providers.factory import ProviderSnapshot, load_provider_snapshot
-from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
@@ -323,7 +321,7 @@ def test_settings_context_window_refreshes_runtime_state(
     config.agents.defaults.model = "openai/gpt-4o"
     config.agents.defaults.provider = "openai"
     config.agents.defaults.context_window_tokens = 65_536
-    config.providers.openai = ProviderConfig(api_key="sk-test")
+    config.providers.openai.api_key = "sk-test"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -343,82 +341,3 @@ def test_settings_context_window_refreshes_runtime_state(
     assert payload["requires_restart"] is False
     assert loop.context_window_tokens == 262_144
     assert loop.llm_runtime().context_window_tokens == 262_144
-
-
-@pytest.mark.asyncio
-async def test_runtime_refresh_removes_and_restores_empty_oauth_connection(tmp_path: Path, monkeypatch) -> None:
-    config_path = tmp_path / "config.json"
-    config = Config()
-    config.agents.defaults.model = "openai-codex/gpt-6-astra"
-    config.agents.defaults.provider = "openai_codex"
-    config.providers.openai_codex = ProviderConfig()
-    save_config(config, config_path)
-    configured_providers = []
-
-    def make_provider(*, default_model, **_kwargs):
-        provider = _provider(default_model)
-        configured_providers.append(provider)
-        return provider
-
-    monkeypatch.setattr("nanobot.providers.openai_codex_provider.OpenAICodexProvider", make_provider)
-
-    def load_snapshot():
-        return _load_gateway_provider_snapshot(config_path)
-
-    initial = load_snapshot()
-    loop = AgentLoop(
-        bus=MessageBus(), provider=initial.provider, workspace=tmp_path,
-        model=initial.model, context_window_tokens=initial.context_window_tokens,
-        provider_signature=initial.signature, provider_snapshot_loader=load_snapshot,
-    )
-    assert loop.llm_runtime().provider is configured_providers[0]
-
-    config.providers.openai_codex = None
-    save_config(config, config_path)
-    loop.runtime_resolver.invalidate()
-    removed = loop.llm_runtime()
-
-    assert isinstance(removed.provider, UnconfiguredProvider)
-    response = await removed.provider.chat([{"role": "user", "content": "hello"}])
-    assert response.error_kind == "configuration"
-    assert response.error_should_retry is False
-
-    config.providers.openai_codex = ProviderConfig()
-    save_config(config, config_path)
-    loop.runtime_resolver.invalidate()
-    restored = loop.llm_runtime()
-
-    assert restored.provider is configured_providers[-1]
-    assert restored.provider is not initial.provider
-    assert restored.model == initial.model
-
-
-def test_gateway_runtime_refresh_surfaces_missing_api_key_on_existing_connection(tmp_path: Path, monkeypatch) -> None:
-    config_path = tmp_path / "config.json"
-    config = Config()
-    config.agents.defaults.model = "openai/gpt-4o"
-    config.agents.defaults.provider = "openai"
-    config.providers.openai = ProviderConfig(api_key="configured-key")
-    save_config(config, config_path)
-    monkeypatch.setattr(
-        "nanobot.providers.openai_compat_provider.OpenAICompatProvider",
-        lambda **kwargs: _provider(kwargs["default_model"]),
-    )
-
-    def load_snapshot():
-        return _load_gateway_provider_snapshot(config_path)
-
-    initial = load_snapshot()
-    loop = AgentLoop(
-        bus=MessageBus(), provider=initial.provider, workspace=tmp_path,
-        model=initial.model, context_window_tokens=initial.context_window_tokens,
-        provider_signature=initial.signature, provider_snapshot_loader=load_snapshot,
-    )
-    assert loop.llm_runtime().provider is initial.provider
-
-    config.providers.openai.api_key = None
-    save_config(config, config_path)
-    loop.runtime_resolver.invalidate()
-
-    with pytest.raises(ValueError, match="No API key configured for provider 'openai'"):
-        loop.llm_runtime()

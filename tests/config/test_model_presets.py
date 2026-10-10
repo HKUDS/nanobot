@@ -9,24 +9,7 @@ import pytest
 
 from nanobot.agent.model_presets import load_model_preset_catalog
 from nanobot.config.errors import ConfigLoadError
-from nanobot.config.schema import Config, ModelPresetConfig
-from nanobot.providers.routing import validate_provider_setup
-
-
-@pytest.mark.parametrize("provider,model", [
-    ("openai_codex", "openai-codex/gpt-6-astra"),
-    ("ollama", "ollama/llama3.2"),
-])
-@pytest.mark.parametrize("selection", ["auto", "explicit"])
-def test_missing_connection_does_not_route_through_another_provider(provider, model, selection):
-    config = Config.model_validate({"providers": {"openrouter": {"apiKey": "gateway-key"}}})
-    preset = ModelPresetConfig(provider=provider if selection == "explicit" else "auto", model=model)
-
-    with pytest.raises(ValueError, match="No provider is configured"):
-        validate_provider_setup(config, preset=preset)
-
-    assert config.get_provider_name(model, preset=preset) == provider
-    assert config.get_provider(model, preset=preset) is None
+from nanobot.config.schema import Config
 
 
 def test_resolve_preset_returns_defaults_when_no_preset() -> None:

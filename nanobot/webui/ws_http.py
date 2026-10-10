@@ -205,7 +205,6 @@ _WEBUI_MUTATION_PATHS = {
     "settings.model_call_order.update": "/api/settings/model-call-order/update",
     "settings.provider.update": "/api/settings/provider/update",
     "settings.provider.create": "/api/settings/provider/create",
-    "settings.provider.remove": "/api/settings/provider/remove",
     "settings.provider.oauth_login": "/api/settings/provider/oauth-login",
     "settings.provider.oauth_complete": "/api/settings/provider/oauth-login/complete",
     "settings.provider.oauth_logout": "/api/settings/provider/oauth-logout",

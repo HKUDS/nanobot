@@ -721,11 +721,9 @@ export interface SettingsPayload {
     name: string;
     label: string;
     is_custom?: boolean;
-    has_config: boolean;
-    oauth_authenticated?: boolean;
     configured: boolean;
     auth_type?: "api_key" | "oauth";
-    api_key_required: boolean;
+    api_key_required?: boolean;
     api_key_hint?: string | null;
     api_base?: string | null;
     default_api_base?: string | null;

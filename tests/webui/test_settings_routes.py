@@ -13,7 +13,6 @@ import pytest
 from websockets.datastructures import Headers
 
 from nanobot.config.loader import get_config_path
-from nanobot.config.schema import ProviderConfig
 from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.mcp_presets_api import custom_mcp_action
 from nanobot.webui.settings_routes import WebUISettingsRouter
@@ -174,7 +173,6 @@ async def test_automatic_model_api_read_resolves_drafts_without_saving_or_probin
     save_config(Config.model_validate({"providers": {
         "openai": {"apiKey": "fixture"},
         "tenant": {"apiBase": "https://tenant.test/v1"},
-        "openaiCodex": {},
     }}), config_path)
     before = config_path.read_bytes()
 
@@ -664,7 +662,7 @@ async def test_image_switch_round_trip_clears_restart(tmp_path, monkeypatch, ena
     from nanobot.config.schema import Config
 
     config = Config()
-    config.providers.openrouter = ProviderConfig(api_key="sk-test")
+    config.providers.openrouter.api_key = "sk-test"
     config.tools.image_generation.enabled = enabled
     config_path = tmp_path / "config.json"
     save_config(config, config_path)

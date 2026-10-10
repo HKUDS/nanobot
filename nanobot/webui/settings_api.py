@@ -22,7 +22,6 @@ from nanobot.webui import settings_models as models
 from nanobot.webui import settings_runtime as runtime
 from nanobot.webui import settings_system as system
 from nanobot.webui.settings_contracts import QueryParams, WebUISettingsError
-from nanobot.webui.settings_services import WebUISettingsConfig
 from nanobot.webui.workspaces import write_webui_default_access_mode
 
 if TYPE_CHECKING:
@@ -339,18 +338,6 @@ def model_api_resolution_payload(
     return models.model_api_resolution_payload(_load_settings_config(config_path), query)
 
 
-def remove_provider_settings(
-    query: QueryParams,
-    *,
-    config_path: Path | None = None,
-    oauth_flows: WebUIOAuthFlowRegistry | None = None,
-) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
-    restart_required = models.remove_provider_settings(config, query, oauth_flows=oauth_flows)
-    _save_settings_config(config, config_path)
-    return settings_payload(requires_restart=restart_required, config_path=config_path)
-
-
 def provider_models_payload(
     query: QueryParams,
     *,
@@ -385,18 +372,12 @@ def complete_oauth_provider(
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
-    def add_provider(provider_name: str) -> None:
-        WebUISettingsConfig(_settings_config_path(config_path)).update(
-            lambda config: models.add_provider_settings(config, provider_name),
-        )
-
     return models.complete_oauth_provider(
         query,
         authorization_response,
         oauth_flows=oauth_flows,
         config_path=config_path,
         settings_payload=settings_payload,
-        on_authorized=add_provider,
     )
 
 

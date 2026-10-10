@@ -16,7 +16,7 @@ from nanobot.agent.tools.image_generation import (
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import ProviderConfig, ToolsConfig
+from nanobot.config.schema import ToolsConfig
 
 
 def _runtime_state(tmp_path):
@@ -35,7 +35,7 @@ async def test_image_generation_reload_replaces_and_removes_live_tool(
     config_path = tmp_path / "config.json"
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     config = load_config()
-    config.providers.openrouter = ProviderConfig(api_key="first-key")
+    config.providers.openrouter.api_key = "first-key"
     config.tools.image_generation.enabled = True
     config.tools.image_generation.provider = "openrouter"
     config.tools.image_generation.model = "openai/first-image-model"
@@ -82,7 +82,7 @@ async def test_image_generation_reload_reaches_agent_runtime_control(
     config_path = tmp_path / "config.json"
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     config = load_config()
-    config.providers.openrouter = ProviderConfig(api_key="image-key")
+    config.providers.openrouter.api_key = "image-key"
     config.tools.image_generation.enabled = True
     save_config(config)
 
