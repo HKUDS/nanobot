@@ -8,6 +8,7 @@ from typing import Any
 UNIFIED_SESSION_KEY = "unified:default"
 HEARTBEAT_SESSION_KEY = "heartbeat"
 LAST_CHANNEL_METADATA_KEY = "last_channel"
+WEBUI_SESSION_METADATA_KEY = "webui"
 
 
 def is_dream_session(key: str) -> bool:
