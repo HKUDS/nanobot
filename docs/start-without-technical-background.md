@@ -78,9 +78,9 @@ If your organization blocks downloaded install scripts, use the [alternative ins
 
 In the browser, open **Settings → Models**. Then:
 
-1. Open **Manage providers → Add provider**, choose your provider, then enter and save its API key and base URL as required, or complete sign-in.
-2. Return to **Models** and choose **New preset**, or **Configure** an existing preset. If **Convert to presets** appears, choose it first.
-3. Name the preset, select its provider, and choose a model from the list or enter a model ID available to your account.
+1. Choose **New preset** and give it a name. If **Convert to presets** appears, choose it first.
+2. Open **Provider** and select your provider. To add one, choose **Add provider** from the same menu, then enter and save its connection details or complete sign-in.
+3. Choose a model from the list or enter a model ID available to your account.
 4. Choose **Save**.
 
 Treat every API key like a password. Do not include it in screenshots or support requests.

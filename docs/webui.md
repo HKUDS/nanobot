@@ -267,11 +267,12 @@ Browser-only display preferences, such as file edit display mode, take effect im
 
 Open **Settings → Models** to set up your models:
 
-1. Choose **Manage providers → Add provider**. Select your provider, enter its connection details and save, or complete sign-in for a subscription provider.
-2. Choose **New preset**, give it a name, and select its provider. If **Convert to presets** appears, choose it first.
-3. Choose a model from the list or type a model ID available to your account, then choose **Save**.
+1. Choose **New preset** and give it a name. If **Convert to presets** appears, choose it first.
+2. Open **Provider** and select your provider. To add one, choose **Add provider** from the same menu, then enter and save its connection details or complete sign-in.
+3. Choose a model from the list or enter a model ID available to your account.
+4. Choose **Save**.
 
-Use **Configure** to edit a preset. **Reasoning effort** offers suggested values when available; you can also enter a value supported by your model. Leave it on **Default** if you are unsure.
+Use **Configure** to edit a preset and **Manage providers** to manage existing provider connections. **Reasoning effort** offers suggested values when available; you can also enter a value supported by your model. Leave it on **Default** if you are unsure.
 
 **Advanced options** opens a separate dialog for the context window, output token limit, temperature, and API connection. Selecting a model for a new preset can fill in its context window automatically. Both token fields accept short values such as `32k` or `1m`. Keep the defaults unless you need to change them.
 
