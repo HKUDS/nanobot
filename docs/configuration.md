@@ -189,7 +189,6 @@ These variables are process-level switches. Set them in the same terminal, servi
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NANOBOT_HOME` | `~/.nanobot` | Instance root for the default config, workspace, and CLI history. Global `--home` overrides it; explicit config and workspace settings take precedence over the corresponding defaults. |
 | `NANOBOT_MAX_CONCURRENT_REQUESTS` | Unlimited | Maximum concurrently running inbound agent requests. Set a positive integer to apply a cap; unset, `0`, or a negative value means unlimited. |
 | `NANOBOT_LLM_TIMEOUT_S` | Unused | Model calls use streaming idle timeouts instead of a fixed total duration. Use `NANOBOT_STREAM_IDLE_TIMEOUT_S` to control stalled requests. |
 | `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Maximum idle wait, in seconds, for model streams, including internal tasks such as Dream, memory archiving, title generation, and Heartbeat evaluation. Each stream event renews the wait, including reasoning and tool-call deltas. Invalid or non-positive values are ignored; values above `3600` are clamped. |

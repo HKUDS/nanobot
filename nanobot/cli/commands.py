@@ -121,16 +121,11 @@ def main(
 ):
     """nanobot - Personal AI Assistant."""
     if home is not None:
-        previous_home = os.environ.get("NANOBOT_HOME")
-        os.environ["NANOBOT_HOME"] = str(home.expanduser().resolve())
+        from nanobot.config.home import get_selected_home_path, set_home_path
 
-        def restore_home() -> None:
-            if previous_home is None:
-                os.environ.pop("NANOBOT_HOME", None)
-            else:
-                os.environ["NANOBOT_HOME"] = previous_home
-
-        ctx.call_on_close(restore_home)
+        previous_home = get_selected_home_path()
+        set_home_path(home)
+        ctx.call_on_close(lambda: set_home_path(previous_home))
     # Editable/source installs can retain an older generated console script that
     # imports this Typer app directly instead of ``nanobot.cli.entry``. Keep the
     # role identity correct until that launcher is regenerated.

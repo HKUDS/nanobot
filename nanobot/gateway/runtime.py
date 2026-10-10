@@ -22,6 +22,7 @@ from typing import Any, Generator, Literal, cast
 
 from filelock import FileLock
 
+from nanobot.config.home import get_selected_home_path
 from nanobot.config.paths import get_data_dir
 from nanobot.process_runtime import (
     ManagedProcessRuntime,
@@ -33,7 +34,12 @@ from nanobot.process_runtime import (
     process_is_running,
 )
 
-GatewayStartOptions = ProcessStartOptions
+
+@dataclass(frozen=True)
+class GatewayStartOptions(ProcessStartOptions):
+    """Gateway launch options, including the explicit instance root."""
+
+    home: str | None = None
 
 GatewayLaunchMode = Literal["foreground", "background", "unknown"]
 GatewayLifetime = Literal["explicit", "on_demand"]
@@ -110,11 +116,15 @@ def build_gateway_command(python_executable: str, options: GatewayStartOptions) 
         python_executable,
         "-m",
         "nanobot",
+    ]
+    if options.home is not None:
+        command.extend(["--home", options.home])
+    command.extend([
         "gateway",
         "--foreground",
         "--port",
         str(options.port),
-    ]
+    ])
     if options.verbose:
         command.append("--verbose")
     if options.workspace:
@@ -156,6 +166,7 @@ class GatewayInstance:
     config_path: Path
     workspace: str | None
     paths: GatewayRuntimePaths
+    home: Path | None = None
 
     @classmethod
     def resolve(
@@ -174,6 +185,7 @@ class GatewayInstance:
             None if resolved_config == _default_config_path() else str(resolved_config)
         )
         return cls(
+            home=get_selected_home_path(),
             config_path=resolved_config,
             workspace=resolved_workspace,
             paths=GatewayRuntimePaths.for_instance(
@@ -190,6 +202,7 @@ class GatewayInstance:
         verbose: bool = False,
     ) -> GatewayStartOptions:
         return GatewayStartOptions(
+            home=str(self.home) if self.home is not None else None,
             port=port,
             verbose=verbose,
             workspace=self.workspace,
@@ -199,7 +212,7 @@ class GatewayInstance:
         )
 
 
-class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
+class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
     """Manage a background ``nanobot gateway`` process."""
 
     service_name = "gateway"
@@ -223,14 +236,14 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             sleep=sleep,
         )
 
-    def _build_child_command(self, options: ProcessStartOptions) -> list[str]:
+    def _build_child_command(self, options: GatewayStartOptions) -> list[str]:
         return build_gateway_command(self.python_executable, options)
 
     def _transition_lock(self) -> FileLock:
         """Serialize long lifecycle transitions without blocking child cleanup."""
         return FileLock(f"{self.paths.state_path}.transition.lock")
 
-    def start_background(self, options: ProcessStartOptions) -> RuntimeResult:
+    def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
         """Start the gateway detached from the current terminal."""
         lease = GatewayClientLease(self, kind="gateway-background")
         while True:
@@ -242,7 +255,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
                 result = self._start_background(options)
                 return RuntimeResult(result.ok, result.message, result.status, promoted)
 
-    def start_on_demand(self, options: ProcessStartOptions) -> RuntimeResult:
+    def start_on_demand(self, options: GatewayStartOptions) -> RuntimeResult:
         """Atomically reuse a gateway or start one owned by local client leases."""
         lease = GatewayClientLease(self, kind="gateway-start")
         while True:
@@ -256,7 +269,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
                 lease._mark_ephemeral_locked()
                 return self._start_background(options)
 
-    def _start_background(self, options: ProcessStartOptions) -> RuntimeResult:
+    def _start_background(self, options: GatewayStartOptions) -> RuntimeResult:
         result = super()._start_background(options)
         if not result.ok:
             return self._result(result)
@@ -325,7 +338,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             self._write_state(state)
 
     @contextmanager
-    def foreground_instance(self, options: ProcessStartOptions) -> Generator[None]:
+    def foreground_instance(self, options: GatewayStartOptions) -> Generator[None]:
         """Publish this foreground gateway while it is available to local clients."""
         self._claim_current_process(options)
         try:
@@ -333,7 +346,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
         finally:
             self._release_current_process()
 
-    def _claim_current_process(self, options: ProcessStartOptions) -> GatewayLaunchMode:
+    def _claim_current_process(self, options: GatewayStartOptions) -> GatewayLaunchMode:
         lease = GatewayClientLease(self, kind="gateway-foreground")
         pid = os.getpid()
         while True:
@@ -391,7 +404,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
                 kind="gateway-exit",
             )._finish_shutdown_locked()
 
-    def restart(self, options: ProcessStartOptions, *, timeout_s: int = 20) -> RuntimeResult:
+    def restart(self, options: GatewayStartOptions, *, timeout_s: int = 20) -> RuntimeResult:
         """Restart an existing gateway without creating a new persistent instance."""
         with self._transition_lock():
             with self._lifecycle_lock():

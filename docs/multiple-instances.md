@@ -18,10 +18,9 @@ runtime data such as sessions, media, and logs under the
 config directory. CLI input history is stored under `<home>/history/`.
 `onboard` saves the workspace path into the new config.
 
-You can also set the `NANOBOT_HOME` environment variable. `--home` takes precedence
-over that variable, and background gateway processes inherit the selected home.
-Without either selector, the home remains `~/.nanobot`. `-h` remains an alias for
-`--help`.
+Background gateway processes receive the selected home through their command-line
+arguments. Without `--home`, the home remains `~/.nanobot`. `-h` remains an alias
+for `--help`.
 
 An explicit `--config` overrides the config location and its runtime data directory.
 A workspace saved in the config overrides the home-based default; `--workspace`
