@@ -527,7 +527,12 @@ class Config(BaseSettings):
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
-        return Path(self.agents.defaults.workspace).expanduser()
+        from nanobot.config.paths import DEFAULT_WORKSPACE_SETTING, default_workspace_path
+
+        raw = self.agents.defaults.workspace
+        if raw == DEFAULT_WORKSPACE_SETTING:
+            return default_workspace_path()
+        return Path(raw).expanduser()
 
     def _match_provider(
         self, model: str | None = None,

@@ -2,9 +2,31 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from nanobot.utils.helpers import ensure_dir
+
+# Stock config default; resolved via :func:`get_nanobot_home` so ``NANOBOT_HOME`` works.
+DEFAULT_WORKSPACE_SETTING = "~/.nanobot/workspace"
+
+
+def get_nanobot_home() -> Path:
+    """Return the nanobot home directory used for default config and workspace.
+
+    When ``NANOBOT_HOME`` is set, that path is used (after ``expanduser``).
+    Otherwise defaults to ``~/.nanobot``. This lets multiple instances on
+    Windows isolate config/data without rewriting ``USERPROFILE``.
+    """
+    raw = os.environ.get("NANOBOT_HOME", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve(strict=False)
+    return (Path.home() / ".nanobot").resolve(strict=False)
+
+
+def default_workspace_path() -> Path:
+    """Return the default agent workspace under :func:`get_nanobot_home`."""
+    return get_nanobot_home() / "workspace"
 
 
 def get_config_path() -> Path:
@@ -50,14 +72,22 @@ def get_webui_dir() -> Path:
 
 def get_workspace_path(workspace: str | Path | None = None) -> Path:
     """Resolve and ensure the agent workspace path."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    if workspace is None:
+        path = default_workspace_path()
+    elif str(workspace) == DEFAULT_WORKSPACE_SETTING:
+        path = default_workspace_path()
+    else:
+        path = Path(workspace).expanduser()
     return ensure_dir(path)
 
 
 def is_default_workspace(workspace: str | Path | None) -> bool:
     """Return whether a workspace resolves to nanobot's default workspace path."""
-    current = Path(workspace).expanduser() if workspace is not None else Path.home() / ".nanobot" / "workspace"
-    default = Path.home() / ".nanobot" / "workspace"
+    if workspace is None or str(workspace) == DEFAULT_WORKSPACE_SETTING:
+        current = default_workspace_path()
+    else:
+        current = Path(workspace).expanduser()
+    default = default_workspace_path()
     return current.resolve(strict=False) == default.resolve(strict=False)
 
 

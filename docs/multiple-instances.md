@@ -39,6 +39,43 @@ nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 
 When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
 
+### `NANOBOT_HOME` (optional)
+
+If you prefer an environment variable instead of passing `--config` on every command, set `NANOBOT_HOME` to an instance directory. Nanobot then uses:
+
+| Path | Resolved From |
+|------|---------------|
+| Config | `$NANOBOT_HOME/config.json` |
+| Default workspace | `$NANOBOT_HOME/workspace` |
+| Runtime data (sessions, media, …) | `$NANOBOT_HOME/` (config parent) |
+
+`--config` still wins when you pass it explicitly. Shared CLI history and legacy session migration paths remain under the user profile (`~/.nanobot/...`) and are not redirected by `NANOBOT_HOME`.
+
+**Windows (CMD):**
+
+```bat
+set "NANOBOT_HOME=C:\nanobot\telegram"
+nanobot onboard
+nanobot gateway
+```
+
+**Windows (PowerShell):**
+
+```powershell
+$env:NANOBOT_HOME = "C:\nanobot\telegram"
+nanobot onboard
+nanobot gateway
+```
+
+**Unix:**
+
+```bash
+NANOBOT_HOME=~/nanobot-telegram nanobot onboard
+NANOBOT_HOME=~/nanobot-telegram nanobot gateway
+```
+
+Use a different `NANOBOT_HOME` (or `--config`) per instance so Telegram/Discord tokens and sessions do not collide.
+
 To open a CLI session against one of these instances locally:
 
 ```bash
@@ -143,3 +180,4 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 - Session data follows the active config directory; use a different workspace per instance to isolate memory, skills, and the stable session namespace ID
 - `--workspace` overrides the workspace defined in the config file
 - Cron jobs are stored in the active workspace; runtime media/state is derived from the config directory
+- On Windows, prefer `NANOBOT_HOME` or `--config` over rewriting `USERPROFILE` when running multiple instances

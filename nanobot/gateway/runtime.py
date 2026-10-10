@@ -67,7 +67,9 @@ def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bo
 
 
 def _default_config_path() -> Path:
-    return (Path.home() / ".nanobot" / "config.json").resolve(strict=False)
+    from nanobot.config.paths import get_nanobot_home
+
+    return (get_nanobot_home() / "config.json").resolve(strict=False)
 
 
 @dataclass(frozen=True)

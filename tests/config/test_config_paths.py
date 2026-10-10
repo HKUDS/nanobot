@@ -1,12 +1,15 @@
 from pathlib import Path
 
+from nanobot.config.loader import get_config_path
 from nanobot.config.paths import (
+    default_workspace_path,
     get_cli_history_path,
     get_cron_dir,
     get_data_dir,
     get_legacy_sessions_dir,
     get_logs_dir,
     get_media_dir,
+    get_nanobot_home,
     get_runtime_subdir,
     get_workspace_path,
     is_default_workspace,
@@ -37,11 +40,26 @@ def test_shared_and_legacy_paths_remain_global() -> None:
 
 
 def test_workspace_path_is_explicitly_resolved() -> None:
-    assert get_workspace_path() == Path.home() / ".nanobot" / "workspace"
+    assert get_workspace_path() == default_workspace_path()
     assert get_workspace_path("~/custom-workspace") == Path.home() / "custom-workspace"
 
 
 def test_is_default_workspace_distinguishes_default_and_custom_paths() -> None:
     assert is_default_workspace(None) is True
-    assert is_default_workspace(Path.home() / ".nanobot" / "workspace") is True
+    assert is_default_workspace(default_workspace_path()) is True
+    assert is_default_workspace("~/.nanobot/workspace") is True
     assert is_default_workspace("~/custom-workspace") is False
+
+
+def test_nanobot_home_env_overrides_default_config_and_workspace(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "instance-home"
+    monkeypatch.setenv("NANOBOT_HOME", str(home))
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", None)
+
+    assert get_nanobot_home() == home.resolve(strict=False)
+    assert get_config_path() == home.resolve(strict=False) / "config.json"
+    assert default_workspace_path() == home.resolve(strict=False) / "workspace"
+    assert get_workspace_path() == home.resolve(strict=False) / "workspace"
+    assert is_default_workspace("~/.nanobot/workspace") is True
