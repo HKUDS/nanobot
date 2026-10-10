@@ -321,7 +321,9 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     archive_snapshot = None
     runtime = None
     if session.last_archived < len(snapshot):
-        runtime = ctx.runtime or loop.runtime_for_session(session)
+        runtime = loop.compact_runtime_for_session(
+            session, fallback=ctx.runtime
+        )
         archive_snapshot = replace(
             session,
             messages=snapshot,
@@ -350,7 +352,7 @@ async def cmd_compact(ctx: CommandContext) -> None:
     """Compact the current session without resetting the conversation."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    runtime = ctx.runtime or loop.runtime_for_session(session)
+    runtime = loop.compact_runtime_for_session(session)
     delivery = loop.turn_delivery_factory.create(ctx.msg, ctx.key)
 
     try:

@@ -252,6 +252,33 @@ class AgentLoop:
             return None
         return self.runtime_resolver.resolve_preset(self.dream_model_preset)
 
+    def compact_runtime_for_session(
+        self,
+        session: Session,
+        *,
+        fallback: LLMRuntime | None = None,
+        recover_removed: bool = True,
+    ) -> LLMRuntime:
+        """Resolve the runtime used to compact one session's context.
+
+        Prefers the configured compaction preset (e.g. a cheap summarizer on a
+        separate provider); otherwise falls back to ``fallback`` when given, or
+        to the session's own runtime when no preset is configured or the preset
+        has been removed.
+        """
+        if self.compact_model_preset:
+            try:
+                return self.runtime_resolver.resolve_preset(self.compact_model_preset)
+            except KeyError:
+                logger.warning(
+                    "Configured compact model preset '{}' is unavailable; "
+                    "falling back to the session runtime",
+                    self.compact_model_preset,
+                )
+        if fallback is not None:
+            return fallback
+        return self.runtime_for_session(session, recover_removed=recover_removed)
+
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
     _PROVIDER_STATE_CHECKPOINT_VERSION_KEY = "provider_state_checkpoint_version"
@@ -289,6 +316,7 @@ class AgentLoop:
         preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
         model_preset: str | None = None,
         dream_model_preset: str | None = None,
+        compact_model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         turn_delivery_factory: TurnDeliveryFactory | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
@@ -338,6 +366,7 @@ class AgentLoop:
             preset_snapshot_loader=preset_snapshot_loader,
         )
         self.dream_model_preset = dream_model_preset
+        self.compact_model_preset = compact_model_preset
         self.max_tool_result_chars = (
             max_tool_result_chars
             if max_tool_result_chars is not None
@@ -509,6 +538,7 @@ class AgentLoop:
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
             dream_model_preset=defaults.dream.model_override,
+            compact_model_preset=defaults.compact_model_preset,
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
@@ -1333,7 +1363,7 @@ class AgentLoop:
         self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
         self.auto_compact.check_expired(
             self.schedule_background,
-            self.runtime_for_session,
+            self.compact_runtime_for_session,
             active_session_keys=self._pending_queues.keys(),
         )
 

@@ -192,6 +192,10 @@ class AgentDefaults(Base):
         default=60,
         ge=0,
     )  # Minimum interval in seconds between scans for idle sessions
+    compact_model_preset: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("compactModelPreset", "compact_model_preset"),
+    )  # Optional model preset for context compaction (auto-compact, /compact, /new archive); None = use the session's own runtime
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
     @model_validator(mode="before")
