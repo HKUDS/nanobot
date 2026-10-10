@@ -543,7 +543,8 @@ def _print_webui_ready(
         console.print("[bold]Next step[/bold]")
         if config.get_provider_name():
             console.print(Text(f"Model setup is incomplete:\n{provider_error}", style="yellow"))
-        console.print("Configure a provider and model in WebUI Settings → Models.")
+        console.print("Configure a provider and model:")
+        console.print("WebUI Settings → Models.", style="bold")
     console.print()
     console.print(Text(f"Config: {config_path}", style="dim"), soft_wrap=True)
     console.print()

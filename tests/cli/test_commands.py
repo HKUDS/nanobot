@@ -2481,7 +2481,7 @@ def test_webui_resumes_first_run_without_provider_setup(
     assert result.exit_code == 0
     assert config_file.exists()
     assert seen["start_options"].config_path == str(config_file.resolve(strict=False))
-    assert "Configure a provider and model in WebUI Settings → Models." in result.stdout
+    assert "Configure a provider and model:\nWebUI Settings → Models." in result.stdout
     assert "anthropic" not in result.stdout.lower()
     assert "Model setup is incomplete" not in result.stdout
     assert result.stdout.index("WebUI ready") < result.stdout.index("Next step")
@@ -2492,7 +2492,7 @@ def test_webui_resumes_first_run_without_provider_setup(
 
     assert resumed.exit_code == 0, resumed.stdout
     assert seen["start_options"].config_path == str(config_file.resolve(strict=False))
-    assert "Configure a provider and model in WebUI Settings → Models." in resumed.stdout
+    assert "Configure a provider and model:\nWebUI Settings → Models." in resumed.stdout
     assert "anthropic" not in resumed.stdout.lower()
     assert "Model setup is incomplete" not in resumed.stdout
     assert "Quick Start" not in resumed.stdout
