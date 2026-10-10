@@ -239,14 +239,13 @@ async def test_failed_save_keeps_local_credentials_and_can_retry(
 
 
 @pytest.mark.parametrize("password", [
-    "Aa1!bcde", "Aa1" + string.punctuation, "Aa1!" * 256,
+    "abcdefgh", "ABCDEFGH", "12345678", string.punctuation.replace("$", ""), "a" * 1024,
     "Aa1!'OR'1'='1';--", 'Aa1!"},"token":"injected"',
 ])
 async def test_network_password_rules_and_symbol_round_trip(config_path: Path, password: str) -> None:
     async with running(config_path) as (_, client), signed_in(client) as ws:
         for invalid in (
-            "Aa1!bcd", "Aa1!" * 256 + "x", "lowercase42!", "UPPERCASE42!",
-            "MissingDigits!", "MissingSymbol42", "Valid42!中文", "Valid42!😀",
+            "Aa1!bcd", "Aa1!" * 256 + "x", "Valid42!中文", "Valid42!😀", "Valid42!$",
             " Valid42!", "Valid42! ", "Valid 42!", "Valid42!\n", "Valid42!\r\nX-Test: injected",
             "Valid42!\x00", "Valid42!${PASSWORD}", {"password": "Valid42!"}, 42,
         ):

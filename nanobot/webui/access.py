@@ -100,11 +100,7 @@ class WebUIAccess:
         if password is not None:
             if (not allow_other_devices or not isinstance(password, str)
                     or not re.fullmatch(r"[\x21-\x7e]{8,1024}", password)
-                    or not re.search(r"[a-z]", password)
-                    or not re.search(r"[A-Z]", password)
-                    or not re.search(r"[0-9]", password)
-                    or not re.search(r"[^A-Za-z0-9]", password)
-                    or "${" in password):
+                    or "$" in password):
                 raise WebUIAccessError("invalid_password")
             if not local_browser:
                 raise WebUIAccessError("access_local_only", 403)

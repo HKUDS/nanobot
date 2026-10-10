@@ -141,7 +141,7 @@ describe("WebUI access settings", () => {
     expect(screen.getByLabelText("WebUI password")).toHaveValue("");
   });
 
-  it("validates password length, confirmation and config references before sending", () => {
+  it("validates password length, allowed characters and confirmation before sending", () => {
     renderSettingsView({
       initialSection: "runtime",
       initialSettings: { ...settingsPayload(), webui_access: { ...localAccess, password_required: true } },
@@ -153,13 +153,12 @@ describe("WebUI access settings", () => {
     const confirmation = screen.getByLabelText("Confirm password");
     const submit = screen.getByRole("button", { name: "Set password and allow access" });
     for (const invalid of [
-      "Aa1!bcd", "Aa1!".repeat(256) + "x", "lowercase42!", "UPPERCASE42!",
-      "MissingDigits!", "MissingSymbol42", "Valid42!中文", "Valid42!😀",
+      "Aa1!bcd", "Aa1!".repeat(256) + "x", "Valid42!中文", "Valid42!😀", "Valid42!$",
       " Valid42!", "Valid42! ", "Valid 42!", "Valid42!${PASSWORD}",
     ]) {
       fireEvent.change(password, { target: { value: invalid } });
       fireEvent.click(submit);
-      expect(screen.getByRole("alert")).toHaveTextContent("uppercase and lowercase English letters");
+      expect(screen.getByRole("alert")).toHaveTextContent("8–1024 visible ASCII characters");
       expect(password).toHaveFocus();
       expect(requestMutationMock).not.toHaveBeenCalled();
     }
@@ -193,7 +192,7 @@ describe("WebUI access settings", () => {
     });
     const toggle = screen.getByRole("switch", { name: "Allow access from other devices" });
     fireEvent.click(toggle);
-    const secret = "Aa1!".repeat(256);
+    const secret = "a".repeat(1024);
     fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: secret } });
     fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: secret } });
     fireEvent.click(screen.getByRole("button", { name: "Set password and allow access" }));
@@ -212,6 +211,30 @@ describe("WebUI access settings", () => {
     const access = screen.getByRole("region", { name: "WebUI access" });
     expect(within(access).getByText("127.0.0.1")).toBeVisible();
     expect(within(access).getByRole("status")).toHaveTextContent("Saved. Restart to allow other devices to connect.");
+  });
+
+  it.each(["ABCDEFGH", "12345678", "!@#%^&*?"])("accepts %s without requiring character combinations", async (secret) => {
+    const credentialsChanged = vi.fn();
+    requestMutationMock.mockResolvedValueOnce({
+      ...settingsPayload(),
+      webui_access: { ...localAccess, allow_other_devices: true, password_required: false },
+    });
+    renderSettingsView({
+      initialSection: "runtime",
+      initialSettings: { ...settingsPayload(), webui_access: { ...localAccess, password_required: true } },
+      webuiCapabilities: ["webui.access.v1"],
+      onAccessPasswordChange: credentialsChanged,
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Allow access from other devices" }));
+    fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: secret } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: secret } });
+    fireEvent.click(screen.getByRole("button", { name: "Set password and allow access" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.webui_access.update", {
+      allow_other_devices: true, password: secret,
+    }, expect.any(Number));
+    expect(credentialsChanged).toHaveBeenCalledWith(secret);
+    expect(screen.getByRole("switch", { name: "Allow access from other devices" })).toBeChecked();
   });
 
   it.each([

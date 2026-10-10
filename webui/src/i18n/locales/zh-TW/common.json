@@ -1068,10 +1068,10 @@
       "networkScope": "此設定只變更 WebUI 的監聽範圍，不會設定防火牆、路由器或公網通道。",
       "saveFailed": "存取設定儲存失敗，請重試。",
       "passwordTitle": "設定存取密碼",
-      "passwordDescription": "組合大小寫英文字母、數字和符號。",
+      "passwordDescription": "使用英文字母、數字或半形符號。",
       "passwordConfirm": "確認密碼",
       "passwordSubmit": "設定密碼並開啟",
-      "passwordInvalid": "請輸入 8–1024 位密碼，包含大小寫英文字母、數字和半形符號（如 !@#）；不能含其他字元、空白或 ${。",
+      "passwordInvalid": "請輸入 8–1024 位密碼，僅限英文字母、數字或半形符號，不含空白或 $。",
       "passwordMismatch": "兩次密碼不一致，請重新輸入。",
       "passwordAlreadySet": "其他頁面已設定密碼，請重新整理後再變更存取設定。",
       "passwordLocalOnly": "請在執行 nanobot 的本機設定存取密碼。"

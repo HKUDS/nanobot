@@ -1257,10 +1257,10 @@
       "networkScope": "This only changes where WebUI listens. It does not configure firewalls, routers or public tunnels.",
       "saveFailed": "Could not save access settings. Try again.",
       "passwordTitle": "Set an access password",
-      "passwordDescription": "Combine uppercase and lowercase English letters, numbers, and symbols.",
+      "passwordDescription": "Use English letters, numbers, or ASCII symbols.",
       "passwordConfirm": "Confirm password",
       "passwordSubmit": "Set password and allow access",
-      "passwordInvalid": "Use 8–1024 characters with uppercase and lowercase English letters, numbers, and ASCII symbols such as !@#. No spaces, other characters, or ${.",
+      "passwordInvalid": "Use 8–1024 visible ASCII characters, without spaces or $.",
       "passwordMismatch": "The passwords do not match. Enter them again.",
       "passwordAlreadySet": "Another page has already set the password. Refresh this page before changing access.",
       "passwordLocalOnly": "Set the password on the computer running nanobot."

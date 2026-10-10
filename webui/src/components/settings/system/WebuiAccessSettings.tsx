@@ -51,8 +51,7 @@ export function WebuiAccessSettings({ access, canSetPassword, saving, error, onC
     if (saving) return;
     const secret = password;
     if (secret.length < 8 || secret.length > 1024 || /[^\x21-\x7e]/.test(secret)
-      || !/[a-z]/.test(secret) || !/[A-Z]/.test(secret) || !/[0-9]/.test(secret)
-      || !/[^A-Za-z0-9]/.test(secret) || secret.includes("${")) {
+      || secret.includes("$")) {
       setValidationError(t("settings.webuiAccess.passwordInvalid"));
       passwordRef.current?.focus();
       return;
