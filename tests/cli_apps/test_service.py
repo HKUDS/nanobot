@@ -11,7 +11,12 @@ import pytest
 
 from nanobot.agent import plugins as agent_plugins
 from nanobot.agent.skills import SkillsLoader
-from nanobot.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from nanobot.apps.cli.service import (
+    CLI_ANYTHING_REGISTRY_URL,
+    CliAppError,
+    CliAppManager,
+    CliAppsRuntimeConfig,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -1100,3 +1105,172 @@ def test_uninstall_uses_uv_pip_when_pip_unavailable(
         sys.executable,
         "suno-cli",
     ]
+
+
+def _fake_registry_get(data_for_url: dict[str, dict]) -> object:
+    class Response:
+        def __init__(self, data: dict) -> None:
+            self._data = data
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._data
+
+    def fake_get(url: str, **kwargs: object) -> Response:
+        return Response(data_for_url.get(url, {"meta": {}, "clis": []}))
+
+    return fake_get
+
+
+def _install_gimp(manager: CliAppManager, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        manager,
+        "_run_argv",
+        lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
+    )
+    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        manager,
+        "_fetch_skill_content",
+        lambda app: "---\nname: cli-anything-gimp\ndescription: GIMP\n---\n# GIMP\n",
+    )
+    manager.install("gimp")
+
+
+def test_install_records_registry_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    monkeypatch.setattr(
+        manager,
+        "_run_argv",
+        lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
+    )
+    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        manager,
+        "_fetch_skill_content",
+        lambda app: "---\nname: cli-anything-gimp\ndescription: GIMP\n---\n# GIMP\n",
+    )
+
+    payload = manager.install("gimp")
+
+    installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
+    entry = installed["gimp"]
+    assert entry["registry_url"] == CLI_ANYTHING_REGISTRY_URL
+    assert entry["catalog_updated_at"] == "2026-04-16"
+    assert entry["install_cmd"] == "pip install cli-anything-gimp"
+    assert payload["last_action"]["command"] == subprocess.list2cmdline(
+        [sys.executable, "-m", "pip", "install", "cli-anything-gimp"]
+    )
+
+
+def test_update_blocks_changed_install_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    _install_gimp(manager, monkeypatch)
+
+    drifted = {
+        "meta": {"updated": "2026-04-20"},
+        "clis": [
+            {
+                "name": "gimp",
+                "display_name": "GIMP",
+                "version": "1.0.0",
+                "install_cmd": "pip install cli-anything-gimp-evil",
+                "entry_point": "cli-anything-gimp",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.httpx.get",
+        _fake_registry_get({CLI_ANYTHING_REGISTRY_URL: drifted}),
+    )
+
+    def fail_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("update must not run a changed install command")
+
+    monkeypatch.setattr(manager, "_run_argv", fail_run)
+
+    with pytest.raises(CliAppError, match="changed since install"):
+        manager.update("gimp")
+
+
+def test_update_reports_version_drift_without_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    _install_gimp(manager, monkeypatch)
+
+    bumped = {
+        "meta": {"updated": "2026-04-20"},
+        "clis": [
+            {
+                "name": "gimp",
+                "display_name": "GIMP",
+                "version": "2.0.0",
+                "install_cmd": "pip install cli-anything-gimp",
+                "entry_point": "cli-anything-gimp",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.httpx.get",
+        _fake_registry_get({CLI_ANYTHING_REGISTRY_URL: bumped}),
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(manager, "_run_argv", fake_run)
+    monkeypatch.setattr(manager, "_fetch_skill_content", lambda app: None)
+
+    payload = manager.update("gimp")
+
+    assert calls  # a version bump alone does not block the update
+    assert payload["last_action"]["registry_drift"] == {
+        "version": {"from": "1.0.0", "to": "2.0.0"}
+    }
+    assert payload["last_action"]["command"] == subprocess.list2cmdline(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", "cli-anything-gimp"]
+    )
+
+
+def test_update_allows_legacy_entries_without_recorded_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({
+        "gimp": {
+            "entry_point": "cli-anything-gimp",
+            "source": "harness",
+            "strategy": "pip",
+        }
+    })
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(manager, "_run_argv", fake_run)
+    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
+    monkeypatch.setattr(manager, "_fetch_skill_content", lambda app: None)
+
+    payload = manager.update("gimp")
+
+    assert calls  # no recorded provenance -> no drift gate, update proceeds
+    assert "registry_drift" not in payload["last_action"]
