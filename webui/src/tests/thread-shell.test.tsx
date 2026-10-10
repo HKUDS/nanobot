@@ -406,8 +406,8 @@ function modelSettings(model: string, provider: string): SettingsPayload {
     model_call_order: [],
     model_call_order_editable: false,
     providers: [
-      { name: "deepseek", label: "DeepSeek", api_key_required: true, api_base_required: false, has_config: true, configured: true },
-      { name: "openai_codex", label: "OpenAI Codex", api_key_required: false, api_base_required: false, has_config: true, configured: true },
+      { name: "deepseek", label: "DeepSeek", api_key_required: true, has_config: true, configured: true },
+      { name: "openai_codex", label: "OpenAI Codex", api_key_required: false, has_config: true, configured: true },
     ],
     web_search: {
       provider: "duckduckgo",
@@ -1257,7 +1257,6 @@ describe("ThreadShell", () => {
       name: "companyproxy",
       label: "Company Proxy",
       api_key_required: false,
-      api_base_required: true,
       has_config: true,
       configured: true,
     });
@@ -1457,7 +1456,7 @@ describe("ThreadShell", () => {
     const client = makeClient();
     const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
     settings.agent.has_api_key = false;
-    settings.providers = [{ name: "anthropic", label: "Anthropic", api_key_required: true, api_base_required: false, has_config: true, configured: false }];
+    settings.providers = [{ name: "anthropic", label: "Anthropic", api_key_required: true, has_config: true, configured: false }];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("websocket%3Asetup-tooltip/webui-thread")) {
         return Promise.resolve(httpJson(transcriptFromSimpleMessages(
@@ -1503,7 +1502,6 @@ describe("ThreadShell", () => {
         label: "xAI Grok",
         auth_type: "oauth",
         api_key_required: false,
-        api_base_required: false,
         has_config: true,
         configured: true,
         oauth_authenticated: true,
@@ -1512,7 +1510,6 @@ describe("ThreadShell", () => {
         name: "ollama",
         label: "Ollama",
         api_key_required: false,
-        api_base_required: false,
         has_config: true,
         configured: true,
         api_base: "http://127.0.0.1:11434",

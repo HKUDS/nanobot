@@ -38,6 +38,7 @@ _query_first_alias = contracts.query_first_alias
 _query_has_alias = contracts.query_has_alias
 _model_catalog_kind = models.model_catalog_kind
 _oauth_provider_status = models.oauth_provider_status
+_provider_requires_api_key = models.provider_requires_api_key
 _reasoning_effort_values_for = models.reasoning_effort_values_for
 
 

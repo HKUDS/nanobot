@@ -19,9 +19,9 @@ describe("Settings providers", () => {
     const user = userEvent.setup();
     const payload = settingsPayload();
     payload.providers = [
-      { name: "deepseek", label: "DeepSeek", api_key_required: true, api_base_required: false, has_config: true, configured: true },
-      { name: "volcengine", label: "VolcEngine", api_key_required: true, api_base_required: false, has_config: false, configured: false },
-      { name: "volcengine_coding_plan", label: "VolcEngine Coding Plan", api_key_required: true, api_base_required: false, has_config: false, configured: false },
+      { name: "deepseek", label: "DeepSeek", api_key_required: true, has_config: true, configured: true },
+      { name: "volcengine", label: "VolcEngine", api_key_required: true, has_config: false, configured: false },
+      { name: "volcengine_coding_plan", label: "VolcEngine Coding Plan", api_key_required: true, has_config: false, configured: false },
     ];
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     const trigger = screen.getByRole("button", { name: "Add provider" });
@@ -80,7 +80,7 @@ describe("Settings providers", () => {
   it("adds a built-in provider only after saving and returns focus to Add", async () => {
     const user = userEvent.setup();
     const payload = settingsPayload();
-    payload.providers = [{ name: "moonshot", label: "Moonshot", api_key_required: true, api_base_required: false, has_config: false, configured: false }];
+    payload.providers = [{ name: "moonshot", label: "Moonshot", api_key_required: true, has_config: false, configured: false }];
     requestMutationMock.mockResolvedValueOnce({
       ...payload, providers: [{ ...payload.providers[0], has_config: true, configured: true, api_key_hint: "configured" }],
     });
@@ -97,35 +97,11 @@ describe("Settings providers", () => {
     expect(screen.queryByRole("option", { name: "Moonshot" })).not.toBeInTheDocument();
   });
 
-  it("adds Ollama with an empty configuration and its default connection settings", async () => {
-    const user = userEvent.setup();
-    const payload = settingsPayload();
-    payload.providers = [{
-      name: "ollama", label: "Ollama", has_config: false, configured: false,
-      api_key_required: false, api_base_required: false,
-      default_api_base: "http://localhost:11434/v1",
-    }];
-    requestMutationMock.mockResolvedValueOnce({
-      ...payload, providers: [{ ...payload.providers[0], has_config: true, configured: true }],
-    });
-    renderSettingsView({ initialSection: "models", initialSettings: payload });
-    await chooseProviderToConfigure("Ollama");
-    await user.clear(screen.getByPlaceholderText("http://localhost:11434/v1"));
-    const add = screen.getByRole("button", { name: "Add provider" });
-    expect(add).toBeEnabled();
-    await user.click(add);
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(requestMutationMock.mock.calls).toEqual([
-      ["settings.provider.update", { provider: "ollama", apiKey: undefined, apiBase: "" }, 20_000],
-    ]);
-    expect(screen.getByRole("button", { name: "Ollama", exact: true })).toBeInTheDocument();
-  });
-
   it("removes OAuth configuration while preserving sign-in and resets fields before adding it again", async () => {
     const user = userEvent.setup();
     const provider: SettingsPayload["providers"][number] = {
       name: "openai_codex", label: "OpenAI Codex", has_config: true, configured: true,
-      api_key_required: false, api_base_required: false, auth_type: "oauth",
+      api_key_required: false, auth_type: "oauth",
       oauth_authenticated: true, oauth_account: "codex@example.com", oauth_login_supported: true,
       advanced_fields: ["extra_body", "proxy"],
       proxy: "http://127.0.0.1:7890", extra_body: { service_tier: "priority" },
@@ -163,7 +139,7 @@ describe("Settings providers", () => {
   it.each([false, true])("retains the add-provider draft after a failed save (custom: %s)", async (custom) => {
     const user = userEvent.setup();
     const payload = settingsPayload();
-    payload.providers = [{ name: "moonshot", label: "Moonshot", api_key_required: true, api_base_required: false, has_config: false, configured: false }];
+    payload.providers = [{ name: "moonshot", label: "Moonshot", api_key_required: true, has_config: false, configured: false }];
     requestMutationMock.mockRejectedValueOnce(new Error("Provider could not be saved"));
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await user.click(screen.getByRole("button", { name: "Add provider" }));
@@ -199,7 +175,6 @@ describe("Settings providers", () => {
       providers: [{
         name: "openai_codex",
         label: "OpenAI Codex",
-        api_base_required: false,
         has_config: true,
         configured: true,
         oauth_authenticated: true,
@@ -232,7 +207,6 @@ describe("Settings providers", () => {
     const xaiProvider = {
       name: "xai_grok",
       label: "xAI Grok",
-      api_base_required: false,
       has_config: false,
       configured: false,
       oauth_authenticated: false,
@@ -335,7 +309,6 @@ describe("Settings providers", () => {
       const xaiProvider = {
         name: "xai_grok",
         label: "xAI Grok",
-        api_base_required: false,
         has_config: false,
         configured: false,
         oauth_authenticated: false,
@@ -417,7 +390,6 @@ describe("Settings providers", () => {
     const codexProvider = {
       name: "openai_codex",
       label: "OpenAI Codex",
-      api_base_required: false,
       has_config: false,
       configured: false,
       oauth_authenticated: false,
@@ -498,7 +470,6 @@ describe("Settings providers", () => {
       const codexProvider = {
         name: "openai_codex",
         label: "OpenAI Codex",
-        api_base_required: false,
         has_config: false,
         configured: false,
         oauth_authenticated: false,
@@ -620,7 +591,6 @@ describe("Settings providers", () => {
       {
         name: "xai_grok",
         label: "xAI Grok",
-        api_base_required: false,
         has_config: true,
         configured: false,
         oauth_authenticated: false,
@@ -640,7 +610,6 @@ describe("Settings providers", () => {
       {
         name: "openai_codex",
         label: "OpenAI Codex",
-        api_base_required: false,
         has_config: false,
         configured: false,
         oauth_authenticated: false,
@@ -745,7 +714,6 @@ describe("Settings providers", () => {
       {
         name: "xai_grok",
         label: "xAI Grok",
-        api_base_required: false,
         has_config: true,
         configured: true,
         oauth_authenticated: true,
@@ -759,7 +727,6 @@ describe("Settings providers", () => {
       {
         name: "openai_codex",
         label: "OpenAI Codex",
-        api_base_required: false,
         has_config: true,
         configured: true,
         oauth_authenticated: true,
@@ -773,7 +740,6 @@ describe("Settings providers", () => {
       {
         name: "deepseek",
         label: "DeepSeek",
-        api_base_required: false,
         has_config: true,
         configured: true,
         api_key_required: true,
@@ -785,7 +751,6 @@ describe("Settings providers", () => {
       {
         name: "openai",
         label: "OpenAI",
-        api_base_required: false,
         has_config: true,
         configured: true,
         api_key_required: true,
@@ -892,7 +857,6 @@ describe("Settings providers", () => {
       providers: [{
         name: "openai",
         label: "OpenAI",
-        api_base_required: false,
         has_config: true,
         configured: true,
         api_key_required: true,
@@ -953,7 +917,6 @@ describe("Settings providers", () => {
         {
           name: "deepseek",
           label: "DeepSeek",
-          api_base_required: false,
           has_config: true,
           configured: true,
           api_key_required: true,
@@ -963,7 +926,6 @@ describe("Settings providers", () => {
         {
           name: "openrouter",
           label: "OpenRouter",
-          api_base_required: false,
           has_config: false,
           configured: false,
           api_key_required: true,
@@ -998,7 +960,6 @@ describe("Settings providers", () => {
               name: "custom-company-gateway",
               label: values.name,
               is_custom: true,
-              api_base_required: true,
               has_config: true,
               configured: true,
               api_key_required: false,
@@ -1096,7 +1057,7 @@ describe("Settings providers", () => {
         payload = {
           ...payload,
           providers: [...payload.providers, {
-            name: "tenant", label: "Tenant", is_custom: true, api_base_required: true, has_config: true, configured: true,
+            name: "tenant", label: "Tenant", is_custom: true, has_config: true, configured: true,
             api_key_required: false,
             api_base: args.apiBase, api: args.api,
             provider_api_configurable: true,
@@ -1154,7 +1115,7 @@ describe("Settings providers", () => {
     const user = userEvent.setup();
     let payload = settingsPayload();
     payload.providers = [{
-      name: "openai", label: "OpenAI", api_key_required: true, api_base_required: false, has_config: true, configured: true,
+      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
       api_key_hint: "sk-...",
       provider_api_configurable: true, request_apis: ["chat_completions", "responses"],
       api: { supported_apis: ["responses"], preferred_api: "responses" },
@@ -1193,7 +1154,7 @@ describe("Settings providers", () => {
   it("keeps ordinary OpenAI edits available on hosts without API declarations", async () => {
     const payload = settingsPayload();
     payload.providers = [{
-      name: "openai", label: "OpenAI", api_key_required: true, api_base_required: false, has_config: true, configured: true,
+      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
       api_key_hint: "sk-...",
       api_base: "https://api.openai.com/v1", advanced_fields: ["extra_body"],
       extra_body: { tools: [{ type: "web_search" }] },

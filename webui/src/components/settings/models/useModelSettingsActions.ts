@@ -390,11 +390,10 @@ export function useModelSettingsActions({
     const isOauthProvider = provider.auth_type === "oauth";
     const providerForm = providerForms[providerName] ?? providerFormFromRow(provider);
     const apiKey = providerForm.apiKey.trim();
-    if (provider.api_key_required && !provider.api_key_hint && !apiKey) {
+    if (!isOauthProvider && !provider.configured && provider.api_key_required && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
       return;
     }
-    if (provider.api_base_required && !providerForm.apiBase.trim()) return;
     setProviderOperation({ provider: providerName, action: "save" });
     try {
       const supportName = providerName === "bedrock"

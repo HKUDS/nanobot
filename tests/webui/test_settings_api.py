@@ -2192,8 +2192,10 @@ def test_provider_models_payload_fetches_openai_compatible_models(
 
 
 def test_provider_models_payload_returns_online_openai_codex_models(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {'openai_codex': {}}}), config_path)
     monkeypatch.setattr(
         "nanobot.webui.settings_models.get_oauth_model_catalog",
         lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
@@ -2212,7 +2214,7 @@ def test_provider_models_payload_returns_online_openai_codex_models(
         ),
     )
 
-    payload = provider_models_payload({"provider": ["openai_codex"]})
+    payload = provider_models_payload({"provider": ["openai_codex"]}, config_path=config_path)
 
     assert payload["status"] == "available"
     assert payload["catalog_kind"] == "hybrid"
@@ -2232,8 +2234,10 @@ def test_provider_models_payload_returns_online_openai_codex_models(
 @pytest.mark.parametrize("source", ["stale", "fallback"])
 @pytest.mark.parametrize("error_kind", ["auth_required", "unavailable"])
 def test_provider_models_payload_exposes_catalog_failure_with_usable_models(
-    monkeypatch, source, error_kind,
+    tmp_path, monkeypatch, source, error_kind,
 ):
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {'openai_codex': {}}}), config_path)
     monkeypatch.setattr(
         "nanobot.webui.settings_models.get_oauth_model_catalog",
         lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
@@ -2241,18 +2245,20 @@ def test_provider_models_payload_exposes_catalog_failure_with_usable_models(
             source=source, fetched_at=123, error_kind=error_kind,
         ),
     )
-    payload = provider_models_payload({"provider": ["openai_codex"]})
+    payload = provider_models_payload({"provider": ["openai_codex"]}, config_path=config_path)
     assert payload["status"] == "available"
     assert payload["source"] == source
     assert payload["error_kind"] == error_kind
     assert payload["models"][0]["id"] == "openai-codex/offline-model"
 
 
-def test_copilot_explicit_login_does_not_reuse_revoked_credentials(monkeypatch, oauth_flows):
+def test_copilot_explicit_login_does_not_reuse_revoked_credentials(tmp_path, monkeypatch, oauth_flows):
     from unittest.mock import Mock
 
     from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
 
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
     start = Mock()
     invalidate = Mock()
     monkeypatch.setattr(
@@ -2263,20 +2269,24 @@ def test_copilot_explicit_login_does_not_reuse_revoked_credentials(monkeypatch, 
     monkeypatch.setattr(GitHubCopilotOAuthFlow, "complete", lambda _: SimpleNamespace(access="new-token"))
     monkeypatch.setattr("nanobot.webui.settings_models.invalidate_oauth_model_catalog", invalidate)
     monkeypatch.setattr("nanobot.webui.settings_api.settings_payload", lambda **_: {"ready": True})
-    payload = login_oauth_provider({"provider": ["github-copilot"]}, oauth_flows=oauth_flows)
+    payload = login_oauth_provider(
+        {"provider": ["github-copilot"]}, oauth_flows=oauth_flows, config_path=config_path,
+    )
     assert payload["status"] == "authorization_required"
     assert payload["completion_input"] == "device_code"
     start.assert_called_once()
     invalidate.assert_not_called()
     assert complete_oauth_provider(
         {"provider": ["github-copilot"], "flow_id": [payload["flow_id"]]},
-        oauth_flows=oauth_flows,
+        oauth_flows=oauth_flows, config_path=config_path,
     ) == {"ready": True}
     invalidate.assert_called_once_with("github_copilot")
 
 
 @pytest.mark.parametrize("provider", ["openai_codex", "xai_grok"])
-def test_oauth_completion_clears_same_account_catalog_failure(monkeypatch, oauth_flows, provider):
+def test_oauth_completion_clears_same_account_catalog_failure(tmp_path, monkeypatch, oauth_flows, provider):
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {provider: {}}}), config_path)
     from nanobot.providers.oauth_model_catalog import OAuthModelCatalog
 
     signed_in = [False]
@@ -2310,21 +2320,23 @@ def test_oauth_completion_clears_same_account_catalog_failure(monkeypatch, oauth
     completion = "complete_openai_codex_oauth_login" if provider == "openai_codex" else "complete_xai_oauth_login"
     monkeypatch.setattr(f"nanobot.providers.{owner}.{completion}", complete)
     oauth_flows.register(provider, "flow-test", Flow())
-    before = provider_models_payload({"provider": [provider]})
+    before = provider_models_payload({"provider": [provider]}, config_path=config_path)
     assert before["error_kind"] == "auth_required"
     assert complete_oauth_provider(
         {"provider": [provider], "flow_id": ["flow-test"]},
-        "synthetic-callback", oauth_flows=oauth_flows,
+        "synthetic-callback", oauth_flows=oauth_flows, config_path=config_path,
     ) == {"ready": True}
-    after = provider_models_payload({"provider": [provider]})
+    after = provider_models_payload({"provider": [provider]}, config_path=config_path)
     assert after["source"] == "remote"
     assert after["error_kind"] is None
     assert after["models"][0]["id"] == "provider/new-model"
 
 
 def test_provider_models_payload_returns_online_github_copilot_models(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {'github_copilot': {}}}), config_path)
     monkeypatch.setattr(
         "nanobot.webui.settings_models.get_oauth_model_catalog",
         lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
@@ -2341,7 +2353,7 @@ def test_provider_models_payload_returns_online_github_copilot_models(
         ),
     )
 
-    payload = provider_models_payload({"provider": ["github_copilot"]})
+    payload = provider_models_payload({"provider": ["github_copilot"]}, config_path=config_path)
 
     assert payload["status"] == "available"
     assert payload["catalog_kind"] == "hybrid"
@@ -2350,8 +2362,10 @@ def test_provider_models_payload_returns_online_github_copilot_models(
 
 
 def test_provider_models_payload_returns_online_xai_grok_models(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {'xai_grok': {}}}), config_path)
     monkeypatch.setattr(
         "nanobot.webui.settings_models.get_oauth_model_catalog",
         lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
@@ -2379,7 +2393,7 @@ def test_provider_models_payload_returns_online_xai_grok_models(
         ),
     )
 
-    payload = provider_models_payload({"provider": ["xai_grok"]})
+    payload = provider_models_payload({"provider": ["xai_grok"]}, config_path=config_path)
 
     assert payload["status"] == "available"
     assert payload["catalog_kind"] == "hybrid"
@@ -2633,7 +2647,6 @@ def test_settings_payload_azure_openai_missing_base_not_configured(
     azure = next(row for row in payload["providers"] if row["name"] == "azure_openai")
 
     assert azure["configured"] is False
-    assert azure["api_base_required"] is True
 
 
 def test_create_model_configuration_accepts_azure_openai_aad_mode(
@@ -2664,9 +2677,11 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
 
 def test_azure_openai_spec_no_longer_requires_api_key() -> None:
     """Contract guard: api_key is optional for azure_openai (AAD fallback)."""
+    from nanobot.webui.settings_api import _provider_requires_api_key
+
     spec = find_by_name("azure_openai")
     assert spec is not None
-    assert spec.api_key_required is False
+    assert _provider_requires_api_key(spec) is False
 
 
 @pytest.mark.parametrize("protocol", ["chat_completions", "responses", "anthropic_messages"])

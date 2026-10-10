@@ -79,28 +79,6 @@ def test_provider_removal_persists_without_removing_oauth_credentials(tmp_path, 
         assert row["configured"] is True
 
 
-@pytest.mark.parametrize("provider_name", ["bedrock", "ollama"])
-def test_present_keyless_provider_is_configured(provider_name):
-    config = Config.model_validate({"providers": {provider_name: {}}})
-    row = next(row for row in model_settings_payload(config, oauth_status=_oauth_status)["providers"]
-               if row["name"] == provider_name)
-    assert row["has_config"] is True
-    assert row["configured"] is True
-    assert row["api_key_required"] is False
-    assert row["api_base_required"] is False
-
-
-@pytest.mark.parametrize("api_base", [None, "http://localhost:8000/v1"])
-def test_local_provider_without_default_endpoint_requires_base(api_base):
-    config = Config.model_validate({"providers": {"vllm": {"apiBase": api_base}}})
-    row = next(row for row in model_settings_payload(config, oauth_status=_oauth_status)["providers"]
-               if row["name"] == "vllm")
-    assert row["has_config"] is True
-    assert row["api_key_required"] is False
-    assert row["api_base_required"] is True
-    assert row["configured"] is (api_base is not None)
-
-
 def _oauth_status(_spec: Any) -> dict[str, Any]:
     return {
         "configured": False,

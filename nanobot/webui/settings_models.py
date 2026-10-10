@@ -300,6 +300,22 @@ def _resolve_env_placeholders(value: str | None) -> str | None:
     return resolved or None
 
 
+def provider_requires_api_key(spec: ProviderSpec) -> bool:
+    if spec.name == "azure_openai":
+        return False
+    if spec.is_oauth:
+        return False
+    if spec.is_local or spec.is_direct:
+        return False
+    return True
+
+
+def provider_requires_api_base(spec: ProviderSpec) -> bool:
+    if spec.name == "azure_openai":
+        return True
+    return bool(spec.backend == "openai_compat" and spec.is_direct and not spec.default_api_base)
+
+
 def oauth_provider_status(spec: Any) -> dict[str, Any]:
     if not getattr(spec, "is_oauth", False):
         return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
@@ -389,11 +405,16 @@ def provider_configured_for_settings(
         return False
     if spec.is_oauth:
         return bool(oauth_status(spec)["configured"])
-    if spec.api_base_required:
+    if provider_requires_api_base(spec):
         return bool(provider_config.api_base)
-    if spec.api_key_required:
+    if provider_requires_api_key(spec):
         return bool(provider_config.api_key)
-    return True
+    return bool(
+        provider_config.api_key
+        or provider_config.api_base
+        or getattr(provider_config, "region", None)
+        or getattr(provider_config, "profile", None)
+    )
 
 
 def _dynamic_provider_items(config: Config) -> list[tuple[str, ProviderConfig]]:
@@ -485,8 +506,7 @@ def _provider_settings_row(
         "has_config": has_config,
         "configured": configured,
         "auth_type": "oauth" if spec.is_oauth else "api_key",
-        "api_key_required": spec.api_key_required,
-        "api_base_required": spec.api_base_required,
+        "api_key_required": provider_requires_api_key(spec),
         "api_key_hint": mask_secret_hint(provider_config.api_key),
         "api_base": provider_config.api_base,
         "default_api_base": spec.default_api_base or None,
@@ -741,7 +761,7 @@ def provider_models_payload(
         }
 
     api_key = _resolve_env_placeholders(provider_config.api_key)
-    if spec.api_key_required and not api_key:
+    if provider_requires_api_key(spec) and not api_key:
         return {
             **base_payload,
             "status": "not_configured",

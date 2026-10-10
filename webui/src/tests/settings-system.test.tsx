@@ -286,7 +286,6 @@ describe("Settings system domains", () => {
       name: "openai",
       label: "OpenAI",
       api_key_required: true,
-      api_base_required: false,
       has_config: true,
       configured: true,
     }];

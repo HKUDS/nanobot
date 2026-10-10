@@ -15,7 +15,7 @@ function settings() {
   return {
     ...settingsPayload(),
     providers: [{
-      name: "openai_codex", label: "OpenAI Codex", api_key_required: false, api_base_required: false, has_config: true, configured: true,
+      name: "openai_codex", label: "OpenAI Codex", api_key_required: false, has_config: true, configured: true,
       oauth_authenticated: true,
       auth_type: "oauth" as const, model_catalog: "hybrid" as const,
       oauth_login_supported: true,

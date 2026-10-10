@@ -33,7 +33,7 @@ const modelSettings = {
     { name: "deep", model: "openai/gpt-5", provider: "openai", active: false, is_default: false },
   ],
   model_call_order: ["fast", "deep"],
-  providers: [{ name: "openai", label: "OpenAI", api_key_required: true, api_base_required: false, has_config: true, configured: true }],
+  providers: [{ name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true }],
 } as SettingsPayload;
 type Props = Partial<React.ComponentProps<typeof AutomationsSettings>>;
 const SYSTEM_TASKS_OPEN_STORAGE_KEY = "nanobot-webui.automation-show-system-tasks";

@@ -654,8 +654,23 @@ export function ProvidersSettings({
     );
     const oauthSettingsSaving = saving && providerOperation?.action === "save";
     const oauthActionBusy = saving && (providerOperation?.action === "login" || providerOperation?.action === "logout");
-    const missingRequiredApiKey = provider.api_key_required && !provider.api_key_hint && !apiKey;
-    const missingRequiredApiBase = provider.api_base_required && !apiBase;
+    const missingRequiredApiKey = !isOauthProvider && provider.api_key_required && !provider.configured && !apiKey;
+    const hasOptionalProviderSetting = Boolean(
+      apiKey
+      || apiBase
+      || form.proxy.trim()
+      || form.extraHeaders.trim()
+      || form.extraBody.trim()
+      || form.extraQuery.trim()
+      || form.thinkingStyle.trim()
+      || form.region.trim()
+      || form.profile.trim(),
+    );
+    const missingOptionalCredential =
+      !isOauthProvider
+      && !provider.api_key_required
+      && !provider.configured
+      && !hasOptionalProviderSetting;
     const removeAction = provider.has_config ? (
       <RemoveActionButton className="mr-auto" disabled={saving}
         onClick={() => onRemoveProvider(provider.name)}>
@@ -909,7 +924,7 @@ export function ProvidersSettings({
                     disabled={
                       saving
                       || missingRequiredApiKey
-                      || missingRequiredApiBase
+                      || missingOptionalCredential
                       || (provider.is_custom && !form.displayName.trim())
                     }
                     className="rounded-full"

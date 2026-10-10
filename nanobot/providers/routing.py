@@ -118,14 +118,20 @@ def resolve_provider_route(
             "OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI Grok."
         )
 
-    if spec.api_base_required and not provider_config.api_base:
-        if backend == "azure_openai":
+    if backend == "azure_openai":
+        if not provider_config.api_base:
             raise ValueError("Azure OpenAI requires api_base in config.")
+    elif (
+        backend in {"openai_compat", "anthropic"}
+        and spec.is_direct
+        and not spec.default_api_base
+        and not provider_config.api_base
+    ):
         raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-    if backend in {"anthropic", "openai_compat"} and not (
+    elif backend in {"anthropic", "openai_compat"} and not (
         backend == "openai_compat" and model.startswith("bedrock/")
     ):
-        if spec.api_key_required and not provider_config.api_key:
+        if not provider_config.api_key and not (spec.is_oauth or spec.is_local or spec.is_direct):
             raise ValueError(f"No API key configured for provider '{provider_name}'.")
 
     return ProviderRoute(
