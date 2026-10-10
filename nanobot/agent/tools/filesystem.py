@@ -339,8 +339,8 @@ class ReadFileTool(_FsTool):
             if not raw:
                 return f"(Empty file: {path})"
 
-            mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-            if mime and mime.startswith("image/"):
+            mime = detect_image_mime(raw)
+            if mime:
                 return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
             content_hash = hashlib.sha256(raw).hexdigest()
@@ -362,14 +362,7 @@ class ReadFileTool(_FsTool):
                     if _is_text_extension(fp.suffix.lower()):
                         text_content = raw.decode("latin-1")
                     else:
-                        mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-                        if mime and mime.startswith("image/"):
-                            return build_image_content_blocks(
-                                raw,
-                                mime,
-                                str(fp),
-                                f"(Image file: {path})",
-                            )
+                        mime = mimetypes.guess_type(path)[0]
                         return ToolResult.error(
                             f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
                             "Only supported text files and images can be read."
