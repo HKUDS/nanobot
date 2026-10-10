@@ -230,7 +230,8 @@ class SkillsLoader:
         sections: list[str] = []
         groups = (
             ("Workspace skills", "workspace", self.workspace_skills),
-            ("Agent Plugin skills", "plugin", self.workspace / "plugins"),
+            # The plugin loader returns resolved skill paths.
+            ("Agent Plugin skills", "plugin", (self.workspace / "plugins").expanduser().resolve()),
             ("Built-in skills", "builtin", self.builtin_skills),
         )
         for label, source, root in groups:
