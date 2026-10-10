@@ -27,11 +27,18 @@ Use this page when you know what you want to run and need the command shape. For
 ```bash
 nanobot --help
 nanobot --version
+nanobot --home ~/.nanobot-work onboard
 python -m nanobot --help
 python -m nanobot --version
 ```
 
 `python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
+
+`--home <directory>` is a global option; place it before the subcommand. It selects
+`<directory>/config.json` and the default `<directory>/workspace/`. Alternatively,
+set `NANOBOT_HOME`; the command-line option takes precedence. Explicit `--config`
+and workspace settings still apply. See [Multiple Instances](./multiple-instances.md)
+for runtime data locations and port selection. `-h` and `--help` display help.
 
 ### Coexisting with Nanobot Desktop
 

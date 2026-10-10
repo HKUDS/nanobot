@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nanobot.config.home import get_default_workspace
 from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
@@ -152,7 +153,7 @@ class ModelPresetConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.nanobot/workspace"
+    workspace: str = Field(default_factory=get_default_workspace)
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (

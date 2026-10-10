@@ -23,6 +23,8 @@ def test_root_metadata_and_subcommands_keep_the_root_cli() -> None:
     for args in (
         ["--help"],
         ["--version"],
+        ["--home", "./instance", "onboard"],
+        ["--home=./instance", "webui"],
         ["--install-completion"],
         ["gateway"],
         ["webui"],

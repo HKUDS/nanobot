@@ -1,6 +1,32 @@
 # Multiple Instances
 
-Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint. Optionally pass `--workspace` during `onboard` when you want to initialize or update the saved workspace for a specific instance.
+Run multiple nanobot instances simultaneously with separate configs and runtime data. Use the global `--home` option to select an instance directory, or `--config` to select a configuration file directly.
+
+## Instance Home
+
+Place `--home` before the subcommand:
+
+```bash
+nanobot --home ~/.nanobot-work onboard
+nanobot --home ~/.nanobot-work webui --port 8766 --gateway-port 18791
+nanobot --home ~/.nanobot-work agent
+nanobot --home ~/.nanobot-work status
+```
+
+The instance uses `<home>/config.json`, defaults to `<home>/workspace/`, and stores
+runtime data such as sessions, media, and logs under the
+config directory. CLI input history is stored under `<home>/history/`.
+`onboard` saves the workspace path into the new config.
+
+You can also set the `NANOBOT_HOME` environment variable. `--home` takes precedence
+over that variable, and background gateway processes inherit the selected home.
+Without either selector, the home remains `~/.nanobot`. `-h` remains an alias for
+`--help`.
+
+An explicit `--config` overrides the config location and its runtime data directory.
+A workspace saved in the config overrides the home-based default; `--workspace`
+overrides both. Selecting a new home does not relocate paths saved in an existing
+config. Use different WebUI and gateway health ports when instances run together.
 
 ## Quick Start
 

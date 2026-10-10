@@ -93,6 +93,7 @@ def dispatch_bare_desktop_target(args: list[str]) -> int | None:
     """
     if (
         args not in ([], ["webui"])
+        or os.environ.get("NANOBOT_HOME")
         or os.environ.get("_NANOBOT_COMPLETE")
         or not _interactive_shell()
     ):
