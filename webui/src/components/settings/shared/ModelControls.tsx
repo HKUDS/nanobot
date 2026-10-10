@@ -308,7 +308,9 @@ export function ModelIdPicker({
     setOpen(false);
   };
   const selectModel = (model: string) => {
-    onChange(model, providerModels.find((entry) => entry.id === model));
+    const info = providerModels.find((entry) => entry.id === model);
+    if (info) onChange(model, info);
+    else onChange(model);
     closePicker(true);
   };
   const navigationValues = useMemo(
@@ -535,7 +537,7 @@ export function ModelIdPicker({
           <div
             {...navigation.listProps}
             aria-label={searchPlaceholder || tx("settings.models.selectModel", "Select model")}
-            className="max-h-[16rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent"
+            className="max-h-[16rem] overflow-y-auto scrollbar-thin"
           >
             {showModels
               ? visibleModels.map((model) =>

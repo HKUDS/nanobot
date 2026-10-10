@@ -741,47 +741,51 @@ export function ModelsSettings({
                             }
                           }}
                           className={cn(
-                            "settings-list-inset group relative select-none outline-none transition-[padding,background-color] [transition-duration:240ms] motion-reduce:transition-none",
-                            primary ? "py-5 sm:py-6" : "py-4",
+                            "settings-list-inset group relative grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] gap-x-3 select-none outline-none transition-[padding,background-color] [transition-duration:240ms] motion-reduce:transition-none",
+                            primary ? "py-5 [--preset-title-size:1.375rem] sm:py-6 sm:[--preset-title-size:1.625rem]" : "py-4",
                             ordered && (callOrderBusy ? "cursor-wait" : "cursor-grab active:cursor-grabbing"),
                             !isDragging && "settings-hover",
                             isSelected && "bg-muted/45",
                             !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                           )}
                         >
-                          <div className="flex items-center gap-3">
+                          <div className="col-span-full grid grid-cols-subgrid items-center">
                             <button
                               type="button"
                               aria-pressed={selectedPreset?.name === name}
                               aria-haspopup="dialog"
                               disabled={!preset}
                               onClick={() => preset && selectPreset(preset, key)}
-                              className={cn("flex min-w-0 flex-1 items-center gap-3 rounded-control text-left outline-none",
+                              className={cn("col-span-3 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none",
                                 !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-ring")}
                             >
                               {presetConfigured ? (
-                                <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} />
+                                <span className={cn("relative aspect-square min-w-8", primary ? "w-[calc(var(--preset-title-size)*1.375+1.5rem)]" : "h-8")}>
+                                  <span className="absolute inset-0">
+                                    <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} fill />
+                                  </span>
+                                </span>
                               ) : (
                                 <span className="grid h-8 w-8 shrink-0 place-items-center">
                                   <ProviderPickerIcon provider={provider} showBrandLogos={showBrandLogos} unconfigured />
                                 </span>
                               )}
                               <span className="min-w-0 flex-1">
-                                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="flex min-w-0 items-center gap-x-2">
                                   <span title={name} className={cn("truncate font-medium text-foreground transition-[font-size,line-height,letter-spacing] [transition-duration:240ms] motion-reduce:transition-none",
-                                    primary ? "text-[22px] leading-snug tracking-tight sm:text-[26px]" : "text-[14px]")}>
+                                    primary ? "text-[length:var(--preset-title-size)] leading-snug tracking-tight" : "text-[14px]")}>
                                     {name}
                                   </span>
                                   {primary ? (
-                                    <StatusPill tone="success">{t("settings.models.primary")}</StatusPill>
+                                    <span className="shrink-0 whitespace-nowrap"><StatusPill tone="success">{t("settings.models.primary")}</StatusPill></span>
                                   ) : !ordered ? (
                                     <span className="text-[11px] leading-5 text-muted-foreground">
                                       {t("settings.models.disabled")}
                                     </span>
                                   ) : null}
                                 </span>
-                                {!primary && preset ? (
-                                  <span className="mt-1 block truncate text-[12px] text-muted-foreground" title={preset.model}>
+                                {preset ? (
+                                  <span className={cn("mt-1 block truncate text-muted-foreground", primary ? "text-[13px] leading-5" : "text-[12px]")} title={preset.model}>
                                     {preset.model}
                                   </span>
                                 ) : null}
@@ -809,39 +813,36 @@ export function ModelsSettings({
                               }}
                             />
                           </div>
-                          {primary && preset ? (
-                            <p className="ml-11 mt-1 truncate text-[13px] text-muted-foreground" title={preset.model}>
-                              {preset.model}
-                            </p>
-                          ) : null}
                           {!presetConfigured ? (
-                            <p className="ml-11 mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                            <p className="col-[2/-1] mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
                               {t("settings.models.providerSetupRequired")}
                             </p>
                           ) : null}
                           {preset ? (
-                            <DisclosureContent open={primary} className="pt-6">
-                              <dl className="grid grid-cols-3 gap-x-3 gap-y-4 border-t border-border/45 pt-5 sm:gap-x-4">
-                                <div>
-                                  <dt className="text-[12px] leading-5 text-muted-foreground">{t("settings.rows.contextWindow")}</dt>
-                                  <dd className="mt-1 text-[20px] font-medium leading-7 tabular-nums text-foreground">
-                                    {formatModelContextWindow(preset.context_window_tokens)}
-                                  </dd>
-                                </div>
-                                <div>
-                                  <dt className="text-[12px] leading-5 text-muted-foreground">{t("settings.models.maxTokens")}</dt>
-                                  <dd className="mt-1 text-[20px] font-medium leading-7 tabular-nums text-foreground">
-                                    {formatContextWindow(preset.max_tokens)}
-                                  </dd>
-                                </div>
-                                <div className="min-w-0">
-                                  <dt className="break-words text-[12px] leading-5 text-muted-foreground">{t("settings.models.reasoningEffort")}</dt>
-                                  <dd className="mt-1 break-words text-[20px] font-medium leading-7 text-foreground">
-                                    {preset.reasoning_effort || t("settings.values.default")}
-                                  </dd>
-                                </div>
-                              </dl>
-                            </DisclosureContent>
+                            <div className="col-[2/-1] min-w-0">
+                              <DisclosureContent open={primary} className="pt-6">
+                                <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-x-3 gap-y-4 border-t border-border/45 pt-5 sm:gap-x-4">
+                                  <div>
+                                    <dt className="text-[12px] leading-5 text-muted-foreground">{t("settings.rows.contextWindow")}</dt>
+                                    <dd className="mt-1 text-[20px] font-medium leading-7 tabular-nums text-foreground">
+                                      {formatModelContextWindow(preset.context_window_tokens)}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt className="text-[12px] leading-5 text-muted-foreground">{t("settings.models.maxTokens")}</dt>
+                                    <dd className="mt-1 text-[20px] font-medium leading-7 tabular-nums text-foreground">
+                                      {formatContextWindow(preset.max_tokens)}
+                                    </dd>
+                                  </div>
+                                  <div className="min-w-0">
+                                    <dt className="break-words text-[12px] leading-5 text-muted-foreground">{t("settings.models.reasoningEffort")}</dt>
+                                    <dd className="mt-1 break-words text-[20px] font-medium leading-7 text-foreground">
+                                      {preset.reasoning_effort || t("settings.values.default")}
+                                    </dd>
+                                  </div>
+                                </dl>
+                              </DisclosureContent>
+                            </div>
                           ) : null}
                         </div>
                       </SettingsGroup>

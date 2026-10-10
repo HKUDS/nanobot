@@ -8,10 +8,12 @@ export function ProviderIcon({
   provider,
   showBrandLogos,
   compact = false,
+  fill = false,
 }: {
   provider: string;
   showBrandLogos: boolean;
   compact?: boolean;
+  fill?: boolean;
 }) {
   const brand = providerBrand(provider);
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
@@ -25,7 +27,7 @@ export function ProviderIcon({
       data-testid={`provider-logo-${provider}`}
       className={cn(
         "relative grid shrink-0 place-items-center overflow-hidden font-semibold text-muted-foreground",
-        compact ? "h-6 w-6 rounded-[7px] text-[9px]" : "h-8 w-8 rounded-[9px] text-[11px]",
+        fill ? "h-full w-full rounded-[9px] text-[11px]" : compact ? "h-6 w-6 rounded-[7px] text-[9px]" : "h-8 w-8 rounded-[9px] text-[11px]",
         showLoadedLogo ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
       )}
       aria-hidden
@@ -33,12 +35,13 @@ export function ProviderIcon({
       <span
         className={cn(
           "transition-opacity duration-150 motion-reduce:transition-none",
+          fill && "grid h-3/4 w-3/4 place-items-center",
           showLoadedLogo ? "opacity-0" : "opacity-100",
         )}
       >
         {showBrandLogos && brand
           ? brand.initials
-          : <Icon className="h-5 w-5" strokeWidth={2} />}
+          : <Icon className={fill ? "h-full w-full" : "h-5 w-5"} strokeWidth={2} />}
       </span>
       {showRemoteLogo ? (
         <img
@@ -50,7 +53,7 @@ export function ProviderIcon({
           draggable={false}
           className={cn(
             "absolute object-contain transition-opacity duration-150 motion-reduce:transition-none",
-            isLogoTile ? (compact ? "h-6 w-6" : "h-8 w-8") : compact ? "h-[18px] w-[18px]" : "h-6 w-6",
+            fill ? (isLogoTile ? "h-full w-full" : "h-3/4 w-3/4") : isLogoTile ? (compact ? "h-6 w-6" : "h-8 w-8") : compact ? "h-[18px] w-[18px]" : "h-6 w-6",
             logoLoaded ? "opacity-100" : "opacity-0",
           )}
           onLoad={onLogoLoad}

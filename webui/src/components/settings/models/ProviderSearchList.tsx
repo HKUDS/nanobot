@@ -86,7 +86,7 @@ export function ProviderSearchList({ providers, showBrandLogos, query, onQueryCh
             <div id={`${groupId}-${group.id}`} className="px-2 pb-1 text-[11px] font-medium text-muted-foreground sm:px-3">
               {t(group.labelKey, { defaultValue: group.label })}
             </div>
-            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-x-2 gap-y-0.5">
               {group.providers.map((provider) => <ComboboxOption key={provider.name} {...getOptionProps(provider.name)}
                 aria-label={provider.label}
                 className="min-h-11 min-w-0 gap-2 rounded-xl px-2 py-2 text-[13px] font-normal sm:gap-3 sm:px-3 sm:text-sm">
