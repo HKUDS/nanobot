@@ -17,6 +17,7 @@ import { RemoteInstances, useRemoteConnections } from "@/components/remote/Remot
 import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
+import { ExtensionView } from "@/components/ExtensionView";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
@@ -81,6 +82,7 @@ import type {
   PairingRequestInfo,
   SessionAutomationJob,
   SettingsPayload,
+  WebUIExtensionSummary,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
@@ -117,6 +119,7 @@ type BootState =
       ingressLimits: BootstrapResponse["limits"] | null;
       runtimeSurface: RuntimeSurface;
       webuiCapabilities: string[];
+      extensions: WebUIExtensionSummary[];
     };
 
 function bootstrapCapabilities(boot: BootstrapResponse): string[] {
@@ -139,12 +142,13 @@ const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const PAIRING_POLL_INTERVAL_MS = 5_000;
 const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote" | "extensions";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
   temporary?: boolean;
+  extensionId?: string | null;
 };
 const loadThreadShell = () => import("@/components/thread/ThreadShell");
 const ThreadShell = lazy(() => loadThreadShell().then(
@@ -198,6 +202,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "automations",
   "memory",
   "skills",
+  "extensions",
   "runtime",
   "advanced",
 ];
@@ -211,7 +216,7 @@ function defaultShellRoute(): ShellRoute {
 }
 
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "automations" || section === "skills" || section === "channels") return section;
+  if (section === "apps" || section === "automations" || section === "skills" || section === "channels" || section === "extensions") return section;
   return "settings";
 }
 
@@ -295,6 +300,20 @@ function readShellRoute(): ShellRoute {
   if (path === "/skills") {
     return { view: "skills", activeKey, temporary, settingsSection: "skills" };
   }
+  if (path.startsWith("/extensions/")) {
+    const encoded = path.slice("/extensions/".length).split("/", 1)[0];
+    try {
+      const extensionId = decodeURIComponent(encoded).trim();
+      return extensionId
+        ? { view: "extensions", activeKey, temporary, settingsSection: "extensions", extensionId }
+        : defaultShellRoute();
+    } catch {
+      return defaultShellRoute();
+    }
+  }
+  if (path === "/extensions") {
+    return { view: "extensions", activeKey, temporary, settingsSection: "extensions", extensionId: null };
+  }
   if (path.startsWith("/temporary/")) {
     const encoded = path.slice("/temporary/".length);
     try {
@@ -334,6 +353,11 @@ function shellRouteHash(route: ShellRoute): string {
     return route.activeKey
       ? `#/chat/${encodeURIComponent(route.activeKey)}`
       : "#/new";
+  }
+  if (route.view === "extensions") {
+    return route.extensionId
+      ? `#/extensions/${encodeURIComponent(route.extensionId)}`
+      : "#/extensions";
   }
   const params = new URLSearchParams();
   if (route.view === "settings" && route.settingsSection !== "overview") {
@@ -931,6 +955,7 @@ export default function App() {
               ingressLimits: boot.limits ?? current.ingressLimits,
               runtimeSurface,
               webuiCapabilities: bootstrapCapabilities(boot),
+              extensions: boot.extensions ?? current.extensions ?? [],
             }
           : current,
       );
@@ -979,6 +1004,7 @@ export default function App() {
             ingressLimits: boot.limits ?? null,
             runtimeSurface,
             webuiCapabilities: bootstrapCapabilities(boot),
+            extensions: boot.extensions ?? [],
           });
         } catch (e) {
           if (cancelled) return;
@@ -1102,6 +1128,7 @@ export default function App() {
     >
       <RemoteInstances><Shell
         runtimeSurface={state.runtimeSurface}
+        extensions={state.extensions}
         onModelNameChange={handleModelNameChange}
         onLogout={handleLogout}
         onNativeEngineRestart={handleNativeEngineRestart}
@@ -1112,11 +1139,13 @@ export default function App() {
 
 function Shell({
   runtimeSurface,
+  extensions,
   onModelNameChange,
   onLogout,
   onNativeEngineRestart,
 }: {
   runtimeSurface: RuntimeSurface;
+  extensions: WebUIExtensionSummary[];
   onModelNameChange: (modelName: string | null) => void;
   onLogout: () => void;
   onNativeEngineRestart: () => Promise<string>;
@@ -1144,6 +1173,37 @@ function Shell({
   const remoteConnectionsRef = useRef(remoteConnections);
   remoteConnectionsRef.current = remoteConnections;
   const { client, getToken } = useClient();
+  const [extensionCatalog, setExtensionCatalog] = useState<WebUIExtensionSummary[]>(extensions);
+  useEffect(() => {
+    setExtensionCatalog(extensions);
+  }, [extensions]);
+  const handleToggleExtension = useCallback(async (extensionId: string, enabled: boolean) => {
+    const response = await client.requestMutation<{ extensions?: WebUIExtensionSummary[] }>(
+      "extension.toggle",
+      { id: extensionId, enabled },
+    );
+    if (Array.isArray(response.extensions)) {
+      setExtensionCatalog(response.extensions);
+    }
+  }, [client]);
+  const handleEditExtension = useCallback(async (extensionId: string, config: Record<string, unknown>) => {
+    const response = await client.requestMutation<{ extensions?: WebUIExtensionSummary[] }>(
+      "extension.config",
+      { id: extensionId, config },
+    );
+    if (Array.isArray(response.extensions)) {
+      setExtensionCatalog(response.extensions);
+    }
+  }, [client]);
+  const handleDeleteExtension = useCallback(async (extensionId: string) => {
+    const response = await client.requestMutation<{ extensions?: WebUIExtensionSummary[] }>(
+      "extension.delete",
+      { id: extensionId },
+    );
+    if (Array.isArray(response.extensions)) {
+      setExtensionCatalog(response.extensions);
+    }
+  }, [client]);
   const {
     sessions,
     loading,
@@ -1165,6 +1225,9 @@ function Shell({
     initialRouteRef.current.activeKey,
   );
   const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
+  const [extensionId, setExtensionId] = useState<string | null>(
+    initialRouteRef.current.extensionId ?? null,
+  );
   const [chatVisited, setChatVisited] = useState(initialRouteRef.current.view === "chat");
   useEffect(() => {
     if (view === "chat") setChatVisited(true);
@@ -1248,6 +1311,7 @@ function Shell({
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
   currentShellRouteRef.current = {
     view, activeKey, settingsSection: settingsInitialSection,
+    extensionId: view === "extensions" ? extensionId : null,
     temporary: Boolean(activeKey && temporarySessions[activeKey]),
   };
   const registerSettingsExitGuard = useCallback((guard: SettingsExitGuard | null) => {
@@ -1308,6 +1372,7 @@ function Shell({
         if (remoteConnectionsRef.current?.managing) remoteConnectionsRef.current.closeManagement();
         setActiveKey(route.activeKey);
         setView(route.view);
+        setExtensionId(route.view === "extensions" ? (route.extensionId ?? null) : null);
         setSettingsInitialSection(route.settingsSection);
         writeShellRoute({
           ...route,
@@ -1330,6 +1395,7 @@ function Shell({
         settingsExitGuardRef.current(() => {
           setActiveKey(route.activeKey);
           setView(route.view);
+          setExtensionId(route.view === "extensions" ? (route.extensionId ?? null) : null);
           setSettingsInitialSection(route.settingsSection);
           writeShellRoute(route, true);
           setWorkspaceError(null);
@@ -1339,6 +1405,7 @@ function Shell({
       }
       setActiveKey(route.activeKey);
       setView(route.view);
+      setExtensionId(route.view === "extensions" ? (route.extensionId ?? null) : null);
       setSettingsInitialSection(route.settingsSection);
       setWorkspaceError(null);
       if (route.view === "chat" && !route.activeKey) {
@@ -2175,6 +2242,18 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenExtension = useCallback((extensionId: string) => {
+    setSessionSearchOpen(false);
+    navigate({ view: "extensions", activeKey, settingsSection: "extensions", extensionId });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
+  const onOpenExtensions = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "extensions", activeKey, settingsSection: "extensions", extensionId: null });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   useEffect(() => {
     const actions = { newChat: onNewChat, search: onOpenSessionSearch, apps: onOpenApps,
       skills: onOpenSkills, automations: onOpenAutomations, channels: onOpenChannels, settings: () => onOpenSettings() };
@@ -2710,6 +2789,12 @@ function Shell({
       });
       return;
     }
+    if (view === "extensions") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("extensions.documentTitle", { defaultValue: "Extensions" }),
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -2766,9 +2851,10 @@ function Shell({
     onOpenAutomations,
     onOpenChannels,
     onOpenSkills,
+    onOpenExtensions: extensionCatalog.length > 0 ? onOpenExtensions : undefined,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: !managingConnections && (view === "apps" || view === "automations" || view === "skills" || view === "channels") ? view : null,
+    activeUtility: !managingConnections && (view === "apps" || view === "automations" || view === "skills" || view === "channels" || view === "extensions") ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
@@ -3079,7 +3165,7 @@ function Shell({
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}
-                /> : <Suspense fallback={<SurfaceLoadingFallback />}>
+                /> : view === "extensions" && extensionId ? <ExtensionView extensionId={extensionId} /> : <Suspense fallback={<SurfaceLoadingFallback />}>
                   <SettingsView
                     registerExitGuard={registerSettingsExitGuard}
                     theme={theme}
@@ -3094,6 +3180,11 @@ function Shell({
                     skills={skills}
                     skillsLoading={skillsLoading}
                     skillsError={skillsError}
+                    extensions={extensionCatalog}
+                    onOpenExtension={onOpenExtension}
+                    onToggleExtension={handleToggleExtension}
+                    onEditExtension={handleEditExtension}
+                    onDeleteExtension={handleDeleteExtension}
                     onStartAutomationChat={onStartAutomationChat}
                     titleOverrides={sidebarState.title_overrides}
                     sessions={topicSessions}

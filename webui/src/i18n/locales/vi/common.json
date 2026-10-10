@@ -374,9 +374,20 @@
     },
     "apps": "Ứng dụng",
     "automations": "Tự động hóa",
-    "skills": {
+        "skills": {
       "title": "Kỹ năng"
-    }
+    },
+    "extensions": "Tiện ích"
+  },
+  "extensions": {
+    "documentTitle": "Tiện ích",
+    "notFound": "Không tìm thấy tiện ích.",
+    "empty": "Chưa cài đặt tiện ích WebUI nào.",
+    "installed": "{{count}} tiện ích đã cài",
+    "open": "Mở",
+    "version": "v{{version}}",
+    "description": "Tiện ích WebUI là các ứng dụng trình duyệt độc lập được phục vụ từ thư mục tiện ích.",
+    "settingsTitle": "Tiện ích"
   },
   "settings": {
     "timezoneNoMatches": "Không tìm thấy múi giờ phù hợp.",

@@ -374,9 +374,20 @@
     },
     "apps": "Aplicaciones",
     "automations": "Automatizaciones",
-    "skills": {
+        "skills": {
       "title": "Habilidades"
-    }
+    },
+    "extensions": "Extensiones"
+  },
+  "extensions": {
+    "documentTitle": "Extensiones",
+    "notFound": "No se encontró la extensión.",
+    "empty": "No hay extensiones de WebUI instaladas.",
+    "installed": "{{count}} instaladas",
+    "open": "Abrir",
+    "version": "v{{version}}",
+    "description": "Las extensiones de WebUI son aplicaciones de navegador autocontenidas servidas desde el directorio de extensiones.",
+    "settingsTitle": "Extensiones"
   },
   "settings": {
     "timezoneNoMatches": "No hay zonas horarias que coincidan.",

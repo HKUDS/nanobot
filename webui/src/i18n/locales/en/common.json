@@ -376,7 +376,18 @@
     "automations": "Automations",
     "skills": {
       "title": "Skills"
-    }
+    },
+    "extensions": "Extensions"
+  },
+  "extensions": {
+    "documentTitle": "Extensions",
+    "notFound": "Extension not found.",
+    "empty": "No WebUI extensions are installed.",
+    "installed": "{{count}} installed",
+    "open": "Open",
+    "version": "v{{version}}",
+    "description": "WebUI extensions are self-contained browser apps served from the extensions directory.",
+    "settingsTitle": "Extensions"
   },
   "settings": {
     "timezoneNoMatches": "No matching timezones.",

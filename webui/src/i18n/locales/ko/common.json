@@ -374,9 +374,20 @@
     },
     "apps": "앱",
     "automations": "자동화",
-    "skills": {
+        "skills": {
       "title": "스킬"
-    }
+    },
+    "extensions": "확장 기능"
+  },
+  "extensions": {
+    "documentTitle": "확장 기능",
+    "notFound": "확장 기능을 찾을 수 없습니다.",
+    "empty": "설치된 WebUI 확장 기능이 없습니다.",
+    "installed": "{{count}}개 설치됨",
+    "open": "열기",
+    "version": "v{{version}}",
+    "description": "WebUI 확장 기능은 확장 기능 디렉터리에서 제공되는 독립형 브라우저 앱입니다.",
+    "settingsTitle": "확장 기능"
   },
   "settings": {
     "timezoneNoMatches": "일치하는 시간대가 없습니다.",
