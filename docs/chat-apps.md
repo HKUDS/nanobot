@@ -43,7 +43,8 @@ Optional package installation is available to a same-machine WebUI by default. R
 
 The sections below explain what each chat platform requires and provide manual config for deployments that manage `config.json` directly.
 
-> [!NOTE] If you are upgrading from a version where chat app SDKs were installed by default, enable the channel in the same Python environment so nanobot installs its manifest-declared dependencies:
+> [!NOTE]
+> If you are upgrading from a version where chat app SDKs were installed by default, enable the channel in the same Python environment so nanobot installs its manifest-declared dependencies:
 >
 > ```bash
 > nanobot plugins enable <channel>
@@ -334,7 +335,8 @@ Enable Matrix support first:
 nanobot plugins enable matrix
 ```
 
-> [!NOTE] Matrix encryption is disabled by default on Windows because `matrix-nio[e2e]` depends on `python-olm`, which has no pre-built Windows wheel. Use macOS, Linux, or WSL2 if you need Matrix E2EE.
+> [!NOTE]
+> Matrix encryption is disabled by default on Windows because `matrix-nio[e2e]` depends on `python-olm`, which has no pre-built Windows wheel. Use macOS, Linux, or WSL2 if you need Matrix E2EE.
 
 **1. Create/choose a Matrix account**
 
@@ -529,7 +531,8 @@ If QR login is unavailable for your account, use manual setup below.
 nanobot gateway
 ```
 
-> [!TIP] Feishu uses WebSocket to receive messages — no webhook or public IP needed!
+> [!TIP]
+> Feishu uses WebSocket to receive messages — no webhook or public IP needed!
 
 </details>
 
@@ -1006,6 +1009,7 @@ signal-cli -a +1234567890 daemon --http localhost:8080
 nanobot gateway
 ```
 
-> [!TIP] The channel automatically reconnects to the signal-cli daemon with exponential backoff if the connection drops. Markdown in bot replies is automatically converted to Signal text styles (bold, italic, code, etc.).
+> [!TIP]
+> The channel automatically reconnects to the signal-cli daemon with exponential backoff if the connection drops. Markdown in bot replies is automatically converted to Signal text styles (bold, italic, code, etc.).
 
 </details>

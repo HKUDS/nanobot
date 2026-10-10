@@ -12,7 +12,8 @@ The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`
 
 For setup and runtime failures, follow the diagnosis order in [`troubleshooting.md`](./troubleshooting.md) before changing multiple config areas at once.
 
-> [!NOTE] If your config file is older than the current schema, run `nanobot onboard --refresh`. nanobot adds missing default fields while preserving your existing values.
+> [!NOTE]
+> If your config file is older than the current schema, run `nanobot onboard --refresh`. nanobot adds missing default fields while preserving your existing values.
 
 ## Configuration Guides
 
@@ -478,7 +479,8 @@ Install Bedrock support first:
 nanobot plugins enable bedrock
 ```
 
-> [!NOTE] If you configured Bedrock before `boto3` became an optional dependency, run `nanobot plugins enable bedrock` after upgrading. Otherwise the provider will fail when it first tries to create a Bedrock client.
+> [!NOTE]
+> If you configured Bedrock before `boto3` became an optional dependency, run `nanobot plugins enable bedrock` after upgrading. Otherwise the provider will fail when it first tries to create a Bedrock client.
 
 **1. Configure credentials**
 
@@ -1654,7 +1656,8 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 - **Transient failures**: Network hiccups and temporary API limits often recover on the next attempt
 - **Permanent failures**: Invalid tokens, revoked access, or banned channels will exhaust the retry budget and fail cleanly
 
-> [!NOTE] This design is deliberate: channel implementations should raise on delivery failure, and the channel manager owns the shared retry policy.
+> [!NOTE]
+> This design is deliberate: channel implementations should raise on delivery failure, and the channel manager owns the shared retry policy.
 >
 > Some channels may still apply small API-specific retries internally. For example, Telegram separately retries timeout and flood-control errors before surfacing a final failure to the manager.
 >
@@ -1694,7 +1697,8 @@ Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.1
 
 HTTP/SSE MCP connections use the same process-wide proxy environment behavior as `web_fetch`: proxied targets use the configured proxy, and URLs excluded by `NO_PROXY` remain DNS-pinned direct connections.
 
-> [!TIP] Use `proxy` in `tools.web` to route web requests through a proxy:
+> [!TIP]
+> Use `proxy` in `tools.web` to route web requests through a proxy:
 > ```json
 > { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
 > ```
@@ -1915,14 +1919,16 @@ AnySearch works out of the box with no key, via its anonymous quota (lower rate 
 
 ### Web Fetch
 
-> [!TIP] If you are having issues with JS proof-of-work or Cloudflare captchas, set a random user agent and disable Jina Reader:
+> [!TIP]
+> If you are having issues with JS proof-of-work or Cloudflare captchas, set a random user agent and disable Jina Reader:
 > ```json
 > { "tools": { "web": { "userAgent": "Not-A-Browser", "fetch": { "useJinaReader": false } } } }
 > ```
 
 nanobot by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
 
-> [!NOTE] Using the remote reader means the fetched URL itself is disclosed to the third-party service. URLs that visibly carry credentials (userinfo, signed-URL or token-style query parameters) are detected and fetched locally instead, but secrets embedded in a URL's *path* (for example bot-token or webhook-style URLs) cannot be reliably detected. Set `useJinaReader: false` if fetched URLs must never leave the machine.
+> [!NOTE]
+> Using the remote reader means the fetched URL itself is disclosed to the third-party service. URLs that visibly carry credentials (userinfo, signed-URL or token-style query parameters) are detected and fetched locally instead, but secrets embedded in a URL's *path* (for example bot-token or webhook-style URLs) cannot be reliably detected. Set `useJinaReader: false` if fetched URLs must never leave the machine.
 
 If you want to always use the local conversion, you can force it using:
 
@@ -1952,7 +1958,8 @@ See [Image Generation](./image-generation.md) for WebUI usage, provider examples
 
 ## MCP (Model Context Protocol)
 
-> [!TIP] The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
+> [!TIP]
+> The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
 
 nanobot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
 
@@ -2004,7 +2011,8 @@ nanobot opens the server's authorization page and handles the callback through t
 
 For a remotely accessed WebUI, HTTPS is recommended. Configure `channels.websocket.publicWsUrl` with the browser-facing `wss://` endpoint so nanobot can register the matching HTTPS callback and finish automatically. A loopback WebUI may use HTTP. When a remote WebUI is served over plain HTTP, nanobot instead registers a localhost callback and asks you to paste the complete callback URL from the browser address bar after authorization.
 
-> [!IMPORTANT] HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request—including OAuth metadata, client registration, token exchange, and redirects—is validated again. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
+> [!IMPORTANT]
+> HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request—including OAuth metadata, client registration, token exchange, and redirects—is validated again. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
 
 Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 
@@ -2050,11 +2058,13 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 ## Security
 
-> [!TIP] For production deployments, set both `"restrictToWorkspace": true` and `"tools.exec.sandbox"` (`"bwrap"` on Linux, `"seatbelt"` on macOS) in your config. `restrictToWorkspace` enables nanobot's application-level workspace guards; `tools.exec.sandbox` provides process-level isolation for shell commands.
+> [!TIP]
+> For production deployments, set both `"restrictToWorkspace": true` and `"tools.exec.sandbox"` (`"bwrap"` on Linux, `"seatbelt"` on macOS) in your config. `restrictToWorkspace` enables nanobot's application-level workspace guards; `tools.exec.sandbox` provides process-level isolation for shell commands.
 
 For API keys, tokens, and other secrets, see [Environment Variables for Secrets](#environment-variables-for-secrets) — avoid storing them directly in `config.json`.
 
-> [!NOTE] When a restricted WebUI chat selects a project outside the configured agent workspace, that project becomes the normal file and shell boundary. Nanobot adds capability-specific, read-only access for built-in skills, the agent workspace's `skills/` directory, and the exact agent `memory/history.jsonl` file. Neighboring memory/profile files and all cross-workspace writes remain denied. Agent-owned `SOUL.md` and `USER.md` are assembled into model context directly; this does not grant file tools broader access to the agent workspace.
+> [!NOTE]
+> When a restricted WebUI chat selects a project outside the configured agent workspace, that project becomes the normal file and shell boundary. Nanobot adds capability-specific, read-only access for built-in skills, the agent workspace's `skills/` directory, and the exact agent `memory/history.jsonl` file. Neighboring memory/profile files and all cross-workspace writes remain denied. Agent-owned `SOUL.md` and `USER.md` are assembled into model context directly; this does not grant file tools broader access to the agent workspace.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -2235,7 +2245,8 @@ How it works:
 3. **Session preservation**: The complete session history remains stored for later inspection and reuse.
 4. **Restart-safe resume**: The compacted context remains available after a process restart.
 
-> [!NOTE] Auto compact shortens the context sent to the model without deleting the session's structured message history.
+> [!NOTE]
+> Auto compact shortens the context sent to the model without deleting the session's structured message history.
 
 Use `/compact` in chat to compact the current session without waiting for the idle threshold.
 

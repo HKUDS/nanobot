@@ -2,7 +2,8 @@
 
 This guide takes you from an empty Linear channel configuration to a working @mention or delegated issue. The recommended path uses the nanobot WebUI and a pre-filled Linear app manifest. Review the generated URLs and subscriptions, and confirm that webhook delivery is enabled before testing a task.
 
-> [!NOTE] Linear's Agent APIs are currently a Developer Preview. Their schema may change. Keep nanobot current when you use this channel.
+> [!NOTE]
+> Linear's Agent APIs are currently a Developer Preview. Their schema may change. Keep nanobot current when you use this channel.
 
 ## What this channel does
 
@@ -125,7 +126,8 @@ Saving a partial configuration at this point is expected. You will create the cr
 4. Create the app.
 5. In the app's **Webhooks** section, check **Delivery status**. If it is **Disabled**, use the adjacent **…** menu to enable delivery. Confirm the URL points to the current public origin and that **Events** includes **Agent session events** (`AgentSessionEvent`).
 
-> [!IMPORTANT] OAuth authorization and webhook delivery are separate. Authorization can succeed while webhook delivery is disabled. In that state, Linear can create an Agent Session, but nanobot receives no task and Linear may report **Agent didn't start** or **nanobot failed to start**.
+> [!IMPORTANT]
+> OAuth authorization and webhook delivery are separate. Authorization can succeed while webhook delivery is disabled. In that state, Linear can create an Agent Session, but nanobot receives no task and Linear may report **Agent didn't start** or **nanobot failed to start**.
 
 Do not add a `Comment` webhook subscription. Linear delivers new @mentions and Agent Session follow-ups through `AgentSessionEvent`; subscribing to comments would add events that this channel intentionally ignores.
 

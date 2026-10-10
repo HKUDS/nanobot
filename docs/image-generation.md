@@ -36,7 +36,8 @@ This snippet uses the current built-in image-generation default so the JSON has 
 
 See [Provider Notes](#provider-notes) for Custom, AIHubMix, MiniMax, Gemini, Ollama, StepFun, Zhipu, and ModelScope configuration examples.
 
-> [!TIP] Prefer environment variables for API keys. nanobot resolves `${VAR_NAME}` values from the environment at startup.
+> [!TIP]
+> Prefer environment variables for API keys. nanobot resolves `${VAR_NAME}` values from the environment at startup.
 
 ## WebUI Usage
 
@@ -267,7 +268,8 @@ Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`.  Sizes are specifi
 }
 ```
 
-> [!NOTE] The StepFun provider reuses the existing `providers.stepfun` config block (the same one used for StepFun's LLM API).  Set `providers.stepfun.apiKey` once and it is shared between text and image generation.
+> [!NOTE]
+> The StepFun provider reuses the existing `providers.stepfun` config block (the same one used for StepFun's LLM API).  Set `providers.stepfun.apiKey` once and it is shared between text and image generation.
 >
 > When `step-image-edit-2` is used, `reference_images` are ignored (the model does not support style reference).  Switch to `step-1x-medium` to use reference-image-guided generation.
 

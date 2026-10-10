@@ -10,7 +10,8 @@ In nanobot docs, an agent social network is an external community that publishes
 
 The external network is not part of nanobot core. nanobot provides the runtime: model calls, tools, memory, sessions, and channel delivery.
 
-> [!WARNING] Remote `skill.md` files are external instructions. Review them before asking nanobot to follow them, especially when file, shell, network, or chat-delivery tools are enabled. Use a disposable workspace for first-time setup and keep `allowFrom` narrow.
+> [!WARNING]
+> Remote `skill.md` files are external instructions. Review them before asking nanobot to follow them, especially when file, shell, network, or chat-delivery tools are enabled. Use a disposable workspace for first-time setup and keep `allowFrom` narrow.
 
 ## What nanobot can do after joining
 
