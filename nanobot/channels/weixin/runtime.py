@@ -216,11 +216,9 @@ class WeixinConfig(Base):
     reply_progress_messages: bool = False
     reply_progress_max_messages: int = Field(default=2, ge=0, le=4)
     context_message_budget: int = Field(default=8, ge=1, le=10)
-    # Default on: WeChat iLink has no native incremental delivery (send_delta is
-    # buffered and the final answer is still sent in one shot), so streaming has
-    # zero user-facing effect here — it only switches the LLM call to the
-    # streaming API. That avoids upstream Anthropic relays that drop tool_use
-    # id/name/input on the non-streaming Messages path (a common third-party
+    # Default on: use the LLM streaming API even when block_streaming is off
+    # and visible delivery waits for stream end. This avoids upstream Anthropic
+    # relays that drop tool_use id/name/input on the non-streaming Messages path (a common third-party
     # relay bug). Set to false only if a relay's streaming/SSE path is broken.
     streaming: bool = True
     # Optional user-visible block streaming. Disabled by default because every
@@ -330,8 +328,8 @@ class WeixinChannel(BaseChannel):
         self._context_token_at: dict[str, float] = {}
         self._pending_tool_hints: dict[str, list[str]] = {}
         # Buffers streamed content deltas per chat. WeChat iLink has no native
-        # incremental delivery, so when streaming is enabled we accumulate the
-        # deltas and flush the full reply in one shot at _stream_end.
+        # incremental delivery. Optional block streaming sends bounded messages
+        # while deltas arrive; stream end flushes the remaining buffered reply.
         self._stream_buffers: dict[str, list[str]] = {}
         self._stream_sent_counts: dict[str, int] = {}
         self._stream_live_disabled: set[str] = set()
@@ -2126,10 +2124,10 @@ class WeixinChannel(BaseChannel):
     ) -> None:
         """Deliver a streamed reply to WeChat.
 
-        WeChat iLink has no native incremental delivery, and the manager
-        bypasses :meth:`send` for the ``_streamed`` final answer. So we
-        accumulate content deltas and flush the full reply as a single message
-        at stream end. Reasoning deltas are invisible in WeChat and are dropped.
+        WeChat iLink has no native incremental delivery. Optional block streaming
+        sends bounded messages while deltas arrive; stream end flushes the
+        remaining reply. The manager skips the final ``StreamedResponseEvent``
+        to avoid duplicate delivery. Reasoning deltas are dropped.
         """
         meta = metadata or {}
         if meta.get("_reasoning_delta") or meta.get("_reasoning"):

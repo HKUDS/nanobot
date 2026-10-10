@@ -1605,7 +1605,7 @@ class TestRawArchiveTruncation:
         assert "PUBLIC_TAIL" in joined
 
     def test_raw_archive_truncates_large_content(self, store):
-        """Large messages should be truncated to _RAW_ARCHIVE_MAX_CHARS."""
+        """Large messages are split across bounded journal entries."""
         big = "x" * 50_000
         messages = [{"role": "user", "content": big}]
         store.raw_archive(messages)

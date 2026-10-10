@@ -1,4 +1,4 @@
-"""Tests for structured tool-event progress metadata emitted by AgentLoop."""
+"""Tests for structured tool activity emitted through AgentLoop progress events."""
 
 import asyncio
 from pathlib import Path

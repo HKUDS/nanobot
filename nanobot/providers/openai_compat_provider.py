@@ -1,4 +1,4 @@
-"""OpenAI-compatible provider for all non-Anthropic LLM APIs."""
+"""Shared provider for OpenAI-compatible Chat Completions and Responses APIs."""
 
 # pyright: reportPrivateImportUsage=false
 
@@ -478,7 +478,7 @@ def _merge_responses_extra_body(
 
 
 class OpenAICompatProvider(LLMProvider):
-    """Unified provider for all OpenAI-compatible APIs.
+    """Provider for OpenAI-compatible Chat Completions and Responses endpoints.
 
     Receives a resolved ``ProviderSpec`` from the caller — no internal
     registry lookups needed.
@@ -552,9 +552,8 @@ class OpenAICompatProvider(LLMProvider):
         elif self._is_local:
             # Local model servers (Ollama, llama.cpp, vLLM) often close idle
             # HTTP connections before the client-side keepalive expires. When
-            # two LLM calls happen seconds apart (e.g. heartbeat _decide then
-            # process_direct), the second call may grab a now-dead pooled
-            # connection, causing a transient APIConnectionError on every first
+            # two LLM calls happen seconds apart, the second may grab a dead
+            # pooled connection, causing a transient APIConnectionError on every first
             # attempt. Disabling keepalive for local endpoints avoids this by
             # opening a fresh connection for each request, which is cheap on a
             # LAN. Cloud providers benefit from keepalive, so we leave the
