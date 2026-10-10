@@ -1166,7 +1166,7 @@ class TestSummaryPersistence:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_metadata_cleanup_on_inmemory_path(self, tmp_path):
+    async def test_inmemory_summary_preserves_metadata_for_restart(self, tmp_path):
         """The in-memory summary path preserves _last_summary for restart recovery."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")

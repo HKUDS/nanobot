@@ -1604,7 +1604,7 @@ class TestRawArchiveTruncation:
         assert "PRIVATE" not in joined
         assert "PUBLIC_TAIL" in joined
 
-    def test_raw_archive_truncates_large_content(self, store):
+    def test_raw_archive_splits_large_content_into_bounded_entries(self, store):
         """Large messages are split across bounded journal entries."""
         big = "x" * 50_000
         messages = [{"role": "user", "content": big}]

@@ -276,7 +276,7 @@ class TestToolEventProgress:
         assert file_events == []
 
     @pytest.mark.asyncio
-    async def test_bus_progress_forwards_tool_events_to_outbound_metadata(self, tmp_path: Path) -> None:
+    async def test_bus_progress_delivers_tool_activity_in_progress_events(self, tmp_path: Path) -> None:
         """Bus-dispatched turns deliver tool activity through ProgressEvent.tool_events."""
         bus = MessageBus()
         provider = MagicMock()

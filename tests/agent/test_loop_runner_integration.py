@@ -506,7 +506,7 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_streamed_flag_not_set_on_llm_error(tmp_path):
+async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_path):
     """LLM errors must not produce StreamedResponseEvent, so channels deliver the error."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
