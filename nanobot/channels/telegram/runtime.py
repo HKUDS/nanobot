@@ -1197,7 +1197,11 @@ class TelegramChannel(BaseChannel):
                 if rich_ok:
                     return
 
-            chunks = _split_telegram_markdown(text, TELEGRAM_MAX_MESSAGE_LEN)
+            if render_as_blockquote:
+                chunks = _split_telegram_markdown(text, TELEGRAM_MAX_MESSAGE_LEN)
+            else:
+                html_chunks = _split_telegram_markdown_html_chunks(text, TELEGRAM_HTML_MAX_LEN)
+                chunks = [markdown for markdown, _ in html_chunks]
             for i, chunk in enumerate(chunks):
                 is_last = (i == len(chunks) - 1)
                 await self._send_text(
@@ -1373,9 +1377,11 @@ class TelegramChannel(BaseChannel):
                         buf.text = "\n".join(rich_chunks[index + 1:])
                         continue
                     legacy_chunks = [
-                        chunk
+                        markdown
                         for remaining in rich_chunks[index:]
-                        for chunk in _split_telegram_markdown(remaining, TELEGRAM_MAX_MESSAGE_LEN)
+                        for markdown, _ in _split_telegram_markdown_html_chunks(
+                            remaining, TELEGRAM_HTML_MAX_LEN,
+                        )
                     ]
                     for legacy_index, legacy_chunk in enumerate(legacy_chunks):
                         await self._send_text(
