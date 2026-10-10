@@ -105,6 +105,7 @@ class ContextBuilder:
         session_summary: SessionSummary | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
+        current_message: str = "",
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -141,6 +142,11 @@ class ContextBuilder:
         )
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
+
+        if include_memory and current_message:
+            learned_skills = self.memory.get_skills_context(current_message)
+            if learned_skills:
+                parts.append(f"# Learned Skills\n\n{learned_skills}")
 
         if session_summary and session_summary["text"] != "(nothing)":
             parts.append(
@@ -291,6 +297,10 @@ class ContextBuilder:
                     session_summary=transcript.session_summary,
                     workspace=root,
                     include_memory=include_memory,
+                    current_message=(
+                        transcript.current_message or ""
+                        if transcript.current_role == "user" else ""
+                    ),
                 ),
             },
             *transcript.history,
