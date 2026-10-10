@@ -1012,6 +1012,21 @@ class AgentLoop:
             if session is None or ephemeral:
                 return
             public_payload = dict(payload)
+            # Use the same history projection as normal completion, without
+            # committing the live turn or acknowledging its follow-ups yet.
+            turn_messages = public_payload.pop("turn_messages", None)
+            if isinstance(turn_messages, list):
+                draft = Session(key=session.key)
+                followup_ids = self._save_turn(
+                    draft, cast(list[dict[str, Any]], turn_messages), skip=0,
+                )
+                public_payload["turn_messages"] = draft.messages
+                public_payload["acknowledged_followup_ids"] = sorted(followup_ids)
+                # Keep the phase tail consistent with the sanitized replay rows.
+                completed_count = len(payload["completed_tool_results"])
+                assistant_index = len(draft.messages) - completed_count - 1
+                public_payload["assistant_message"] = draft.messages[assistant_index]
+                public_payload["completed_tool_results"] = draft.messages[assistant_index + 1:]
             private_state = public_payload.pop("provider_state", None)
             public_payload.pop(self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY, None)
             if "provider_state" in payload and (
@@ -2345,8 +2360,8 @@ class AgentLoop:
         turn_latency_ms: int | None = None,
         summary_checkpoint: SessionSummaryCheckpoint | None = None,
         input_persisted_early: bool = False,
-    ) -> None:
-        """Commit new-turn messages and an optional summary boundary."""
+    ) -> set[str]:
+        """Commit new-turn messages and return acknowledged follow-up IDs."""
         declared_tool_call_ids = {
             str(tc["id"])
             for m in session.messages
@@ -2469,6 +2484,7 @@ class AgentLoop:
         if saved_followup_ids:
             acknowledge_pending_followups(session, saved_followup_ids)
         session.updated_at = datetime.now()
+        return saved_followup_ids
 
     def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:
         """Persist subagent follow-ups before prompt assembly so history stays durable.
