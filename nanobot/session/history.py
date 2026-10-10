@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from typing import Any, TypedDict, cast
 
 from nanobot.runtime_context import public_history_message
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
+from nanobot.session.search_index import SessionSearchIndex
 
 
 class SessionMessage(TypedDict):
@@ -80,6 +82,7 @@ class SessionHistoryReader:
 
     def __init__(self, sessions: SessionManager) -> None:
         self._sessions = sessions
+        self._search_index = SessionSearchIndex(sessions)
 
     def search(
         self,
@@ -88,12 +91,34 @@ class SessionHistoryReader:
         *,
         exclude_session_key: str | None = None,
     ) -> list[SessionMatch]:
+        with self._sessions.locked_session_files():
+            ranked, remaining, public_rows = self._candidates(query, exclude_session_key)
+        ranked.sort(key=lambda item: item[0])
+        if len(ranked) < limit and remaining:
+            keys = self._search_index.matching_session_keys(query, public_rows, self._index_content)
+            if keys is not None:
+                remaining = [row for row in remaining if row["key"] in keys]
+        for row in remaining:
+            if len(ranked) >= limit:
+                break
+            match = self.read(cast(str, row["key"]), query=query, limit=2)
+            if match is not None and match["messages"]:
+                match["title"] = _text(row.get("title")) or _text(match["messages"][0]["content"])
+                ranked.append((3, match))
+        return [item[1] for item in ranked[:limit]]
+
+    def _candidates(
+        self,
+        query: str,
+        exclude_session_key: str | None,
+    ) -> tuple[list[tuple[int, SessionMatch]], list[dict[str, Any]], list[dict[str, Any]]]:
         needle = query.casefold()
         ranked: list[tuple[int, SessionMatch]] = []
         remaining: list[dict[str, Any]] = []
+        public_rows: list[dict[str, Any]] = []
         for row in self._sessions.list_sessions():
             key = row.get("key")
-            if not isinstance(key, str) or key == exclude_session_key:
+            if not isinstance(key, str):
                 continue
             payload = self._sessions.read_session_metadata(key)
             if payload is None:
@@ -101,6 +126,9 @@ class SessionHistoryReader:
             raw_metadata = cast(object, payload.get("metadata"))
             metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
             if not self._sessions.types.public_history(metadata):
+                continue
+            public_rows.append(row)
+            if key == exclude_session_key:
                 continue
             title = _text(row.get("title"))
             folded = title.casefold()
@@ -121,15 +149,11 @@ class SessionHistoryReader:
                 "messages": [],
             }))
 
-        ranked.sort(key=lambda item: item[0])
-        for row in remaining:
-            if len(ranked) >= limit:
-                break
-            match = self.read(cast(str, row["key"]), query=query, limit=2)
-            if match is not None and match["messages"]:
-                match["title"] = _text(row.get("title")) or _text(match["messages"][0]["content"])
-                ranked.append((3, match))
-        return [item[1] for item in ranked[:limit]]
+        return ranked, remaining, public_rows
+
+    def _index_content(self, key: str) -> str:
+        match = self.read(key, query="", limit=sys.maxsize)
+        return "\n".join(message["content"] for message in match["messages"]) if match else ""
 
     def read(
         self,
