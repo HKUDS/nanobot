@@ -1306,6 +1306,8 @@ Contributor notes for adding new providers live in [`development.md`](./developm
 
 Model presets let you name a complete model configuration and select one per session with `/model <preset>`. They are the recommended way to configure models because the same names can be reused for new-session defaults, chat-command switching, and fallback chains.
 
+For browser setup, follow [Model and Provider Settings](./webui.md#model-and-provider-settings). The WebUI accepts token values such as `32k` or `1m`; JSON configuration uses integer token counts.
+
 Existing configs do not need to change. Direct `agents.defaults.model`, `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and `reasoningEffort` fields still define the implicit `default` preset. For new configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
 
 ```json
@@ -1434,7 +1436,7 @@ Declare `anthropic_messages` alone in a preset. Requests use the same provider c
 
 OpenAI Codex, xAI Grok subscriptions, and Azure OpenAI use Responses; Anthropic uses Messages, and Bedrock uses Converse. These connections show their protocol name instead of an editable selector. Selecting Responses for a custom service does not enable OpenAI-native [context compaction](#responses-state-and-compaction).
 
-Advanced options is collapsed by default; opening or closing it preserves API settings. Changing a preset's model or provider resets its API selection to Auto unless the same update supplies a new declaration. Each fallback preset keeps its own API settings. Existing `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
+**Advanced options** opens in a separate dialog; closing it returns to the preset editor. Changing a preset's model or provider resets its API selection to Auto unless the same update supplies a new declaration. Each fallback preset keeps its own API settings. Existing `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
 
 ### Model Fallbacks
 

@@ -8,7 +8,7 @@ The feature is disabled by default. Open **Settings → Image**, choose a config
 
 **WebUI**
 
-1. Add the image provider credential under **Settings → Models** if it is not already configured.
+1. Add the image provider credential under **Settings → Models → Manage providers** if it is not already configured.
 2. Open **Settings → Image**.
 3. Select the provider and image model, then enable image generation.
 4. Save and ask for a simple test image. If the gateway cannot apply the change live, WebUI will prompt you to restart it.
