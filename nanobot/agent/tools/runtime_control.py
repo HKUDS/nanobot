@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
+from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
+from nanobot.security.workspace_access import (
+    WorkspaceSandboxStatus,
+    WorkspaceScope,
+    current_tool_workspace,
+    workspace_sandbox_status,
+)
+
 if TYPE_CHECKING:
+    from nanobot.agent.tools.context import RequestContext
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.agent.tools.web import WebToolsConfig
     from nanobot.config.schema import ModelPresetConfig
@@ -25,6 +35,7 @@ RUNTIME_SNAPSHOT_KEYS = frozenset({
     "max_iterations",
     "context_window_tokens",
     "workspace",
+    "workspace_sandbox",
     "provider_retry_mode",
     "max_tool_result_chars",
     "tool_names",
@@ -59,6 +70,7 @@ class RuntimeSnapshot:
     web_config: dict[str, object]
     exec_config: dict[str, object]
     scratchpad: dict[str, JsonValue]
+    workspace_sandbox: dict[str, object]
 
     def as_mapping(self) -> Mapping[str, object]:
         """Return the fixed public names understood by ``MyTool``."""
@@ -69,6 +81,7 @@ class RuntimeSnapshot:
             "max_iterations": self.max_iterations,
             "context_window_tokens": self.context_window_tokens,
             "workspace": self.workspace,
+            "workspace_sandbox": self.workspace_sandbox,
             "provider_retry_mode": self.provider_retry_mode,
             "max_tool_result_chars": self.max_tool_result_chars,
             "tool_names": self.tool_names,
@@ -115,6 +128,7 @@ class _RuntimeControlTarget(Protocol):
     max_tool_result_chars: int
     web_config: WebToolsConfig
     exec_config: ExecToolConfig
+    restrict_to_workspace: bool
 
     @property
     def model(self) -> str: ...
@@ -153,6 +167,41 @@ class AgentRuntimeControl:
         self.__scratchpad: dict[str, JsonValue] = {}
         self.__workspace_display: str | None = None
 
+    def _workspace_sandbox(self, scope: WorkspaceScope | None = None) -> WorkspaceSandboxStatus:
+        target = self.__target
+        workspace = current_tool_workspace(
+            target.workspace,
+            restrict_to_workspace=target.restrict_to_workspace,
+            sandbox_restricts_workspace=bool(target.exec_config.sandbox),
+            scope=scope,
+        )
+        assert workspace.project_path is not None
+        return workspace_sandbox_status(
+            workspace=workspace.project_path,
+            restrict_to_workspace=workspace.restrict_to_workspace,
+        )
+
+    async def workspace_context(self, request: RequestContext) -> RuntimeContextBlock:
+        """Append current access facts without changing the reusable prompt prefix."""
+        status = self._workspace_sandbox(request.workspace_scope)
+        # A valid directory can contain newlines or prompt delimiters. Keep it data.
+        root = json.dumps(status.workspace_root, ensure_ascii=False)
+        root = root.replace("[", "\\u005b").replace("]", "\\u005d")
+        lines = [
+            f"Current project (JSON path): {root}",
+            (
+                "File access: project and tool-specific allowed paths only."
+                if status.restrict_to_workspace
+                else "File access: no workspace restriction."
+            ),
+            "OS permissions and tool rules still apply.",
+        ]
+        if self.__target.exec_config.sandbox:
+            lines.append(
+                "Shell sandbox configured; extra binds do not grant file-tool access."
+            )
+        return RuntimeContextBlock(source="workspace_access", content=wrap_runtime_context_lines(lines))
+
     def snapshot(self) -> RuntimeSnapshot:
         target = self.__target
         return RuntimeSnapshot(
@@ -172,6 +221,7 @@ class AgentRuntimeControl:
             web_config=_snapshot_web_config(target.web_config),
             exec_config=_snapshot_exec_config(target.exec_config),
             scratchpad=_snapshot_json_mapping(self.__scratchpad),
+            workspace_sandbox=self._workspace_sandbox().as_dict(),
         )
 
     def set_model(self, model: str) -> LLMRuntime:

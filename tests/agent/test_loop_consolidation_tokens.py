@@ -76,7 +76,8 @@ async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> No
     model_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
     assert "Current checkpoint." in model_request[0]["content"]
     assert [message["role"] for message in model_request] == ["system", "user"]
-    assert model_request[1]["content"] == "continue the task"
+    assert model_request[1]["content"].startswith("continue the task\n\n")
+    assert "File access: no workspace restriction." in model_request[1]["content"]
 
     reloaded = loop.sessions.get_or_create("cli:test")
     assert reloaded.messages[0]["content"] == "old-user-0"
@@ -84,7 +85,7 @@ async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> No
     assert reloaded.messages[reloaded.last_archived]["content"] == (
         SUMMARY_CONTINUATION_TEXT
     )
-    assert [message["content"] for message in reloaded.get_history()] == [
+    assert [message["content"] for message in reloaded.get_history(include_runtime_context=False)] == [
         "continue the task",
         "done",
     ]
@@ -131,7 +132,8 @@ async def test_ephemeral_runner_pressure_summarizes_without_persisting(tmp_path)
     assert loop.provider.chat_stream_with_retry.await_count == 2
     model_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
     assert "Transient checkpoint." in model_request[0]["content"]
-    assert model_request[1]["content"] == "continue the task"
+    assert model_request[1]["content"].startswith("continue the task\n\n")
+    assert "File access: no workspace restriction." in model_request[1]["content"]
 
     reloaded = loop.sessions.get_or_create("cli:ephemeral")
     assert reloaded.messages[: len(original_messages)] == original_messages
@@ -238,7 +240,7 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
     accepted_contents = [message.get("content") for message in accepted]
     assert "accepted history" in accepted_contents
     assert "accepted answer" in accepted_contents
-    assert "continue" in accepted_contents
+    assert any(content.startswith("continue\n\n") for content in accepted_contents)
     assert "done" not in accepted_contents
     reloaded = loop.sessions.get_or_create("cli:native")
     assert reloaded.provider_state is None
