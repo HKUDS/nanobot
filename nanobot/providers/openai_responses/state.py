@@ -9,6 +9,11 @@ from loguru import logger
 
 from nanobot.providers.base import LLMResponse, LLMUsage, ProviderConversationState
 from nanobot.providers.openai_responses.converters import convert_messages
+from nanobot.providers.openai_responses.errors import (
+    COMPACTION_FEATURES,
+    is_unsupported_feature_error,
+    response_error_details,
+)
 
 RESPONSES_STATE_KIND = "openai_responses"
 RESPONSES_STATE_VERSION = 1
@@ -187,24 +192,8 @@ def is_compaction_compatibility_error(exc: Exception) -> bool:
     """Recognize endpoints that reject native Responses compaction fields."""
     if getattr(exc, "compaction_unsupported", False) is True:
         return True
-    response = getattr(exc, "response", None)
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None and response is not None:
-        status_code = getattr(response, "status_code", None)
-    body = (
-        getattr(exc, "body", None)
-        or getattr(exc, "doc", None)
-        or getattr(response, "text", None)
-        or str(exc)
-    )
-    text = str(body).lower()
-    has_compaction_marker = any(
-        marker in text
-        for marker in ("context_management", "compact_threshold", "compaction_trigger")
-    )
-    if not has_compaction_marker:
-        return False
-    return isinstance(exc, TypeError) or status_code in {400, 404, 422}
+    status, body = response_error_details(exc)
+    return is_unsupported_feature_error(status, body, COMPACTION_FEATURES)
 
 
 def _prune_before_latest_output_compaction(

@@ -665,6 +665,31 @@ async def test_codex_compaction_restarts_continuation_from_rewritten_history(cod
     assert any(item.get("type") == "compaction" for item in server.requests[2][1]["input"])
 
 
+@pytest.mark.parametrize("unsupported", [False, True])
+async def test_required_compaction_error_preserves_capability_unless_unsupported(codex_peer, unsupported):
+    provider, server, _ = codex_peer
+    first = await provider.chat(_messages(), provider_context=_context())
+
+    async def respond(peer, _body):
+        await peer.socket.send_json({"type": "error", "status": 400, "error": {
+            "message": (
+                "Unknown input type compaction_trigger" if unsupported
+                else "Invalid compaction_trigger: input exceeds context window"
+            ),
+        }})
+
+    server.respond = respond
+    result = await provider.chat(
+        _messages("next"), max_tokens=10,
+        provider_context=_context(first, context_window_tokens=4_000, compaction_input_budget=10_000),
+    )
+    assert result.finish_reason == "error"
+    assert provider.supports_native_compaction() is (not unsupported)
+    assert len(server.requests) == 2
+    assert server.requests[-1][1]["input"] == [{"type": "compaction_trigger"}]
+    assert not server.http_requests
+
+
 async def test_codex_inline_compaction_starts_next_request_with_compacted_state(codex_peer):
     provider, server, _ = codex_peer
     compaction = {"type": "compaction", "id": "cmp_1", "encrypted_content": "compacted"}
