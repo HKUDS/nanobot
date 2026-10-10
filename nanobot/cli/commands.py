@@ -112,7 +112,7 @@ def version_callback(value: bool):
 def main(
     ctx: typer.Context,
     home: Path | None = typer.Option(
-        None, "--home", help="Instance root directory (place before the subcommand).",
+        None, "--home", help="Instance root directory",
         file_okay=False,
     ),
     version: bool = typer.Option(
