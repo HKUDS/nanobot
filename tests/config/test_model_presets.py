@@ -72,26 +72,38 @@ def test_agent_timezones_use_packaged_data_without_system_database() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_provider_api_type_accepts_exact_values_only() -> None:
-    config = Config.model_validate({
-        "providers": {
-            "openai": {
-                "apiKey": "sk-test",
-                "apiType": "responses",
-            }
-        }
-    })
-    assert config.providers.openai.api_type == "responses"
+@pytest.mark.parametrize("field", ["apiType", "api_type"])
+@pytest.mark.parametrize("legacy", ["auto", "chat_completions", "responses"])
+def test_legacy_provider_api_migrates_and_saves_current_format(tmp_path, field, legacy):
+    from nanobot.config.loader import load_config, save_config
 
-    with pytest.raises(ValueError):
-        Config.model_validate({
-            "providers": {
-                "openai": {
-                    "apiKey": "sk-test",
-                    "apiType": "response",
-                }
-            }
-        })
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"providers": {"openai": {"apiKey": "sk-test", field: legacy}}}), encoding="utf-8")
+    config = load_config(path)
+    expected = None if legacy == "auto" else {
+        "supportedApis": [legacy], "preferredApi": legacy,
+    }
+    save_config(config, path)
+    saved = json.loads(path.read_text(encoding="utf-8"))["providers"]["openai"]
+    assert saved.get("api") == expected
+    assert field not in saved  # The seeded legacy field must not survive a save.
+    assert load_config(path).providers.openai.api == config.providers.openai.api
+
+
+@pytest.mark.parametrize("api", [None, {"supportedApis": ["chat_completions"]}])
+def test_current_provider_api_takes_precedence_over_legacy_input(api):
+    config = Config.model_validate({"providers": {"openai": {
+        "apiType": "responses", "api": api,
+    }}})
+    if api is None:
+        assert config.providers.openai.api is None
+    else:
+        assert config.providers.openai.api.to_capabilities().preferred_api == "chat_completions"
+
+
+def test_legacy_provider_api_rejects_invalid_selector():
+    with pytest.raises(ValueError, match="apiType must be"):
+        Config.model_validate({"providers": {"openai": {"apiType": "response"}}})
 
 
 def test_provider_api_type_is_openai_only() -> None:

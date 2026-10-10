@@ -170,6 +170,12 @@ class OAuthModelCatalog:
             self._failures.clear()
             self._condition.notify_all()
 
+    def peek(self, *, cache_key: str) -> OAuthModelCatalogSnapshot | None:
+        """Read the last successful metadata for this identity without discovery."""
+        with self._condition:
+            entry = self._entries.get(cache_key)
+            return entry.snapshot if entry is not None else None
+
     def _cached_result(self, cache_key: str) -> OAuthModelCatalogSnapshot | None:
         now = self._monotonic()
         entry = self._entries.get(cache_key)

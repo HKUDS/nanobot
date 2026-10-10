@@ -1,7 +1,6 @@
 # How to Configure an OpenAI-Compatible Provider in nanobot
 
-nanobot can call OpenAI-compatible model providers by configuring an `apiBase`,
-optional `apiKey`, and a model preset that references that provider name.
+nanobot can call OpenAI-compatible model providers by configuring an `apiBase`, optional `apiKey`, and a model preset that references that provider name.
 
 ## What you will build
 
@@ -11,9 +10,7 @@ optional `apiKey`, and a model preset that references that provider name.
 
 ## When to use this
 
-Use this for local or hosted services that expose OpenAI-compatible endpoints,
-including internal gateways, local model servers, and provider proxies that are
-not already named in nanobot.
+Use this for local or hosted services that expose OpenAI-compatible endpoints, including internal gateways, local model servers, and provider proxies that are not already named in nanobot.
 
 ## Install
 
@@ -67,9 +64,9 @@ nanobot agent -m "Hello!"
 
 - Include the version path in `apiBase` when the service expects `/v1`.
 - Use separate provider names for separate endpoints.
-- Use a placeholder key such as `EMPTY` only when the endpoint requires a
-  non-empty key but does not validate it.
-- Leave `apiType` unset for OpenAI-compatible custom endpoints.
+- Use a placeholder key such as `EMPTY` only when the endpoint requires a non-empty key but does not validate it.
+- Leave the preset's API selection on Auto for ordinary Chat Completions services.
+- If the service requires Responses or Anthropic Messages, set its supported APIs and default in the connection's **Advanced options**. To choose an API for an individual model, use **Settings → Models → a preset → Advanced options → API connection**. See [connection settings](../configuration.md#custom-connection-apis) and [preset settings](../configuration.md#preset-request-api) for JSON examples.
 
 ## Security notes
 
@@ -80,10 +77,8 @@ nanobot agent -m "Hello!"
 ## Troubleshooting
 
 - If `curl /models` fails, fix the provider endpoint before changing nanobot.
-- If nanobot says the model is unknown, check the model ID expected by the
-  provider.
-- If auth fails, confirm whether the provider wants Bearer auth and whether the
-  key is present in the environment that starts nanobot.
+- If nanobot says the model is unknown, check the model ID expected by the provider.
+- If auth fails, confirm whether the provider wants Bearer auth and whether the key is present in the environment that starts nanobot.
 
 ## Related nanobot docs
 

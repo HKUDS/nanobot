@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+
+import pytest
 
 from nanobot.providers.openai_compat_provider import (
     OpenAICompatProvider,
@@ -145,17 +146,11 @@ class TestBuildKwargsExtraBody:
         """Config extra_body should merge with (and override) thinking params."""
         from nanobot.providers.registry import ProviderSpec
 
-        spec = MagicMock(spec=ProviderSpec)
-        spec.thinking_style = "deepseek"
-        spec.supports_prompt_caching = False
-        spec.strip_model_prefix = False
-        spec.model_overrides = []
-        spec.name = "custom"
-        spec.supports_max_completion_tokens = False
-        spec.env_key = None
-        spec.default_api_base = None
-        spec.is_local = True
-        spec.detect_by_base_keyword = None
+        spec = ProviderSpec(
+            name="custom", keywords=(), env_key="",
+            request_apis=("chat_completions", "responses"),
+            thinking_style="thinking_type", is_local=True,
+        )
 
         provider = OpenAICompatProvider(
             api_key="test",
@@ -171,6 +166,7 @@ class TestBuildKwargsExtraBody:
         body = kwargs.get("extra_body", {})
         # Config param should be present
         assert body.get("custom_param") == "value"
+        assert body["thinking"] == {"type": "enabled"}
 
     def test_nested_extra_body_does_not_clobber_siblings(self) -> None:
         """Nested dict merge should preserve sibling keys."""
@@ -314,39 +310,13 @@ class TestBuildResponsesBodyExtraBody:
         assert body["include"] == ["web_search_call.action.sources"]
         assert provider._should_use_responses_api(None, None) is True
 
-    def test_deepseek_default_search_replaces_the_local_search_function(self) -> None:
+    @pytest.mark.parametrize("extra_body", [None, {"tools": []}, {"tools": [{"type": "web_search"}]}])
+    def test_deepseek_preserves_the_local_search_function(self, extra_body) -> None:
         provider = OpenAICompatProvider(
             api_key="test-key",
             default_model="deepseek-v4-flash",
             spec=find_by_name("deepseek"),
-        )
-
-        body = provider._build_responses_body(
-            messages=_simple_messages(),
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "description": "Search with nanobot's configured backend",
-                    "parameters": {"type": "object"},
-                },
-            }],
-            model=None,
-            max_tokens=100,
-            temperature=0.1,
-            reasoning_effort=None,
-            tool_choice=None,
-        )
-
-        assert body["tools"] == [{"type": "web_search"}]
-        assert "include" not in body
-
-    def test_explicit_empty_tools_disables_deepseek_default_search(self) -> None:
-        provider = OpenAICompatProvider(
-            api_key="test-key",
-            default_model="deepseek-v4-flash",
-            spec=find_by_name("deepseek"),
-            extra_body={"tools": []},
+            extra_body=extra_body,
         )
 
         body = provider._build_responses_body(

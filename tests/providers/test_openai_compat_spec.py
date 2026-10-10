@@ -2,7 +2,7 @@
 
 Validates that:
 - OpenRouter (no strip) keeps model names intact.
-- AiHubMix (strip_model_prefix=True) strips provider prefixes.
+- AiHubMix strips provider prefixes declared by its spec.
 - Standard providers pass model names through as-is.
 """
 
@@ -16,7 +16,7 @@ import pytest
 
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 
 
 def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
@@ -320,8 +320,8 @@ async def test_openai_compat_chat_stream_forwards_reasoning_deltas_deepseek_styl
             api_key="sk-test",
             default_model="deepseek-v4-pro",
             spec=spec,
+            model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
         )
-        provider._api_type = "chat_completions"
         result = await provider.chat_stream(
             messages=[{"role": "user", "content": "hi"}],
             model="deepseek-v4-pro",
@@ -364,7 +364,7 @@ async def test_deepseek_v4_pro_uses_responses_api() -> None:
     call_kwargs = mock_responses.call_args.kwargs
     assert call_kwargs["model"] == "deepseek-v4-pro"
     assert call_kwargs["reasoning"] == {"effort": "none"}
-    assert call_kwargs["tools"] == [{"type": "web_search"}]
+    assert "tools" not in call_kwargs
     assert "include" not in call_kwargs
 
 
@@ -614,7 +614,7 @@ async def test_openrouter_keeps_model_name_intact() -> None:
 
 @pytest.mark.asyncio
 async def test_aihubmix_strips_model_prefix() -> None:
-    """AiHubMix strips the provider prefix (strip_model_prefix=True)."""
+    """AiHubMix strips provider prefixes declared by its spec."""
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("aihubmix")
 
@@ -1074,7 +1074,7 @@ async def test_gpt6_temperature_requires_explicit_none_effort(
             api_key="sk-test-key",
             default_model=model,
             spec=find_by_name("openai"),
-            api_type=api_type,
+            model_api=ModelAPICapabilities((api_type,), api_type),
         )
         result = await provider.chat(
             messages=[{"role": "user", "content": "hello"}],

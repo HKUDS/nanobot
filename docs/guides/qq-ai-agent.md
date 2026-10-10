@@ -1,9 +1,6 @@
 # Build a QQ AI Agent with nanobot
 
-This guide connects nanobot to QQ through the official `qq` channel. The
-official channel uses the botpy SDK and currently focuses on private messages.
-For QQ group chat and OneBot v11 workflows, use the Napcat section in the full
-chat-apps reference.
+This guide connects nanobot to QQ through the official `qq` channel. The official channel uses the botpy SDK and currently focuses on private messages. For QQ group chat and OneBot v11 workflows, use the Napcat section in the full chat-apps reference.
 
 ## What this guide builds
 
@@ -38,9 +35,7 @@ Install the optional channel dependency:
 nanobot plugins enable qq
 ```
 
-In the QQ Open Platform, create a bot application and copy the AppID and
-AppSecret. Add your QQ account to the sandbox test members, then merge this
-snippet into `~/.nanobot/config.json`:
+In the QQ Open Platform, create a bot application and copy the AppID and AppSecret. Add your QQ account to the sandbox test members, then merge this snippet into `~/.nanobot/config.json`:
 
 ```json
 {
@@ -55,8 +50,7 @@ snippet into `~/.nanobot/config.json`:
 }
 ```
 
-Omitting `allowFrom` enables pairing-only mode. A new private sender should get
-a pairing code before normal agent access.
+Omitting `allowFrom` enables pairing-only mode. A new private sender should get a pairing code before normal agent access.
 
 ## Run nanobot gateway
 
@@ -67,8 +61,7 @@ nanobot gateway
 
 ## Test a message
 
-Send the QQ bot a private message from a sandbox account. It should return a
-pairing code. Approve it from a trusted local surface:
+Send the QQ bot a private message from a sandbox account. It should return a pairing code. Approve it from a trusted local surface:
 
 ```bash
 nanobot agent -m "/pairing approve ABCD-EFGH"
@@ -78,20 +71,16 @@ Send the message again after approval.
 
 ## Security notes
 
-- Prefer pairing-only mode for first setup. Add `allowFrom` only when you want a
-  static allowlist.
+- Prefer pairing-only mode for first setup. Add `allowFrom` only when you want a static allowlist.
 - Keep sandbox testing separate from production publishing.
 - Store QQ AppSecret through environment variables for deployed services.
-- Use Napcat only when you intentionally need a QQ account bridge and group chat
-  features.
+- Use Napcat only when you intentionally need a QQ account bridge and group chat features.
 
 ## Troubleshooting
 
-- If private messages do not arrive, confirm the sender is in the QQ bot sandbox
-  and the gateway is running.
+- If private messages do not arrive, confirm the sender is in the QQ bot sandbox and the gateway is running.
 - If output formatting is unreliable, keep `msgFormat` as `"plain"`.
-- If a first private message returns a pairing code, approve it before testing
-  normal replies.
+- If a first private message returns a pairing code, approve it before testing normal replies.
 - If you need QQ groups, see the Napcat section in the full chat-apps reference.
 
 ## Next: memory, automations, MCP tools

@@ -1,4 +1,4 @@
-"""OpenAI-compatible provider for all non-Anthropic LLM APIs."""
+"""Shared provider for OpenAI-compatible Chat Completions and Responses APIs."""
 
 # pyright: reportPrivateImportUsage=false
 
@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
 
 from loguru import logger
-from pydantic.alias_generators import to_snake
 
 from nanobot.providers.base import (
     LLMProvider,
@@ -35,6 +34,13 @@ from nanobot.providers.base import (
     tool_arguments_json_for_replay,
 )
 from nanobot.providers.images import prepare_inline_images
+from nanobot.providers.model_api import (
+    ModelAPICapabilities,
+    ResponsesCapabilities,
+    hosted_web_search_enabled,
+    is_direct_openai_base,
+    is_hosted_web_search_tool,
+)
 from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
 
 if TYPE_CHECKING:
@@ -48,19 +54,6 @@ if TYPE_CHECKING:
 AsyncOpenAI: Any = None
 
 _GEMINI_SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
-
-
-def _is_hosted_web_search_type(value: object) -> bool:
-    return isinstance(value, str) and (
-        value == "web_search" or value.startswith("web_search_")
-    )
-
-
-def _is_hosted_web_search_tool(tool: object) -> bool:
-    if not isinstance(tool, dict):
-        return False
-    tool_type = cast(dict[object, object], tool).get("type")
-    return _is_hosted_web_search_type(tool_type)
 
 
 def _is_named_function_tool(tool: object, name: str) -> bool:
@@ -157,10 +150,6 @@ _MODEL_THINKING_STYLES: dict[str, str] = {
 
 def _model_slug(model_name: str) -> str:
     return model_name.lower().rsplit("/", 1)[-1]
-
-
-def _provider_prefix_key(name: str) -> str:
-    return to_snake(name.replace("-", "_")).lower()
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
@@ -390,14 +379,6 @@ def _is_local_endpoint(
     return addr.is_loopback or addr.is_private
 
 
-def _is_direct_openai_base(api_base: str | None) -> bool:
-    """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
-    if not api_base:
-        return True
-    normalized = api_base.strip().lower().rstrip("/")
-    return "api.openai.com" in normalized and "openrouter" not in normalized
-
-
 def _responses_circuit_key(
     model: str | None,
     default_model: str,
@@ -497,7 +478,7 @@ def _merge_responses_extra_body(
 
 
 class OpenAICompatProvider(LLMProvider):
-    """Unified provider for all OpenAI-compatible APIs.
+    """Provider for OpenAI-compatible Chat Completions and Responses endpoints.
 
     Receives a resolved ``ProviderSpec`` from the caller — no internal
     registry lookups needed.
@@ -511,7 +492,7 @@ class OpenAICompatProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
         extra_body: dict[str, Any] | None = None,
-        api_type: str = "auto",
+        model_api: ModelAPICapabilities | None = None,
         extra_query: dict[str, str] | None = None,
         proxy: str | None = None,
         provider_name: str = "openai",
@@ -520,8 +501,11 @@ class OpenAICompatProvider(LLMProvider):
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
-        self._extra_body = dict(extra_body or {})
-        self._api_type = api_type if spec and spec.name == "openai" else "auto"
+        self._preset_model_api = model_api
+        self._extra_body = (
+            spec.responses.request_extra_body(extra_body)
+            if spec and spec.responses is not None else dict(extra_body or {})
+        )
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
         self._responses = ResponsesBackend()
@@ -568,9 +552,8 @@ class OpenAICompatProvider(LLMProvider):
         elif self._is_local:
             # Local model servers (Ollama, llama.cpp, vLLM) often close idle
             # HTTP connections before the client-side keepalive expires. When
-            # two LLM calls happen seconds apart (e.g. heartbeat _decide then
-            # process_direct), the second call may grab a now-dead pooled
-            # connection, causing a transient APIConnectionError on every first
+            # two LLM calls happen seconds apart, the second may grab a dead
+            # pooled connection, causing a transient APIConnectionError on every first
             # attempt. Disabling keepalive for local endpoints avoids this by
             # opening a fresh connection for each request, which is cheap on a
             # LAN. Cloud providers benefit from keepalive, so we leave the
@@ -870,24 +853,7 @@ class OpenAICompatProvider(LLMProvider):
     # ------------------------------------------------------------------
 
     def _request_model_name(self, model_name: str) -> str:
-        spec = self._spec
-        if not spec or "/" not in model_name:
-            return model_name
-        if spec.strip_model_prefix:
-            return model_name.split("/")[-1]
-
-        route_prefixes = getattr(spec, "strip_model_prefixes", ())
-        if not isinstance(route_prefixes, tuple) or not route_prefixes:
-            return model_name
-        typed_route_prefixes = cast(tuple[str, ...], route_prefixes)
-        model_prefix, routed_model = model_name.split("/", 1)
-        model_prefix_key = _provider_prefix_key(model_prefix)
-        if any(
-            _provider_prefix_key(prefix) == model_prefix_key
-            for prefix in typed_route_prefixes
-        ):
-            return routed_model
-        return model_name
+        return self._spec.request_model_name(model_name) if self._spec else model_name
 
     @staticmethod
     def _supports_temperature(
@@ -1106,59 +1072,44 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None,
     ) -> bool:
         """Choose Responses for providers/models that explicitly support it."""
-        if self._api_type == "chat_completions":
-            return False
-        spec_name = self._spec.name if self._spec is not None else None
-        model_name = self._request_model_name(model or self.default_model).lower()
-        supported_models = {
-            supported.lower()
-            for supported in getattr(self._spec, "responses_models", ())
-        }
-        model_responses = any(
-            model_name == supported or model_name.endswith(f"/{supported}")
-            for supported in supported_models
-        )
-        provider_responses = spec_name in ("openai", "github_copilot")
-        if not provider_responses and not model_responses:
-            return False
-        if self._responses_is_required():
-            # Explicit Responses-only request fields are mandatory; do not
-            # consult the circuit breaker or fall back to Chat Completions.
+        api = self._model_api_capabilities(model, reasoning_effort)
+        if self._hosted_web_search_enabled() and "responses" in api.supported_apis:
             return True
-        if provider_responses and (self._spec is None or self._spec.name != "github_copilot"):
-            if not _is_direct_openai_base(self._effective_base):
-                return False
-
-        wants = False
-        if model_responses:
-            wants = True
-        elif reasoning_effort and reasoning_effort.lower() != "none":
-            wants = True
-        elif any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
-            wants = True
-        if not wants:
+        if api.preferred_api != "responses":
             return False
-
+        if self._responses_is_required(model, reasoning_effort):
+            return True
         return self._responses_circuit_allows_probe(model, reasoning_effort)
 
-    def _responses_is_required(self) -> bool:
-        return self._api_type == "responses" or self._hosted_web_search_enabled()
+    def _model_api_capabilities(
+        self, model: str | None = None, reasoning_effort: str | None = None,
+    ) -> ModelAPICapabilities:
+        """Apply a preset's declaration before the provider's curated defaults."""
+        if self._preset_model_api is not None:
+            return self._preset_model_api
+        if self._spec is None:
+            return ModelAPICapabilities()
+        return self._spec.default_model_api(
+            model or self.default_model, reasoning_effort,
+            api_base=self._effective_base, extra_body=self._extra_body,
+        )
+
+    def _responses_is_required(
+        self, model: str | None = None, reasoning_effort: str | None = None,
+    ) -> bool:
+        api = self._model_api_capabilities(model, reasoning_effort)
+        return "chat_completions" not in api.supported_apis or self._hosted_web_search_enabled()
 
     def _hosted_web_search_enabled(self) -> bool:
-        extra_body = getattr(self, "_extra_body", {})
-        configured_tools = extra_body.get("tools")
-        if "tools" in extra_body:
-            return isinstance(configured_tools, list) and any(
-                _is_hosted_web_search_tool(tool)
-                for tool in cast(list[object], configured_tools)
-            )
-        return bool(
-            self._spec
-            and any(
-                _is_hosted_web_search_type(tool_type)
-                for tool_type in getattr(self._spec, "responses_default_tools", ())
-            )
-        )
+        return hosted_web_search_enabled(self._extra_body)
+
+    def _responses_capabilities(self) -> ResponsesCapabilities | None:
+        capabilities = self._spec.responses if self._spec is not None else None
+        if capabilities is not None:
+            return capabilities
+        if self._preset_model_api is not None and "responses" in self._preset_model_api.supported_apis:
+            return ResponsesCapabilities()
+        return None
 
     def _responses_state_provider(self) -> str:
         spec_name = self._spec.name if self._spec is not None else "custom"
@@ -1181,15 +1132,24 @@ class OpenAICompatProvider(LLMProvider):
 
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Enable server compaction only on direct OpenAI Responses endpoints."""
-        _ = model
+        capabilities = self._responses_capabilities()
         if (
             not self._responses.native_compaction_available
-            or self._api_type == "chat_completions"
+            or capabilities is None
+            or not capabilities.supports_native_compaction
         ):
             return False
-        if self._spec is not None and self._spec.name != "openai":
+        if self._preset_model_api is not None:
+            if "responses" not in self._preset_model_api.supported_apis:
+                return False
+            if self._preset_model_api.preferred_api != "responses" and not self._hosted_web_search_enabled():
+                return False
+        if (
+            capabilities.requires_direct_openai_base
+            and not is_direct_openai_base(self._effective_base)
+        ):
             return False
-        return _is_direct_openai_base(self._effective_base)
+        return True
 
     def _responses_circuit_allows_probe(
         self,
@@ -1282,7 +1242,10 @@ class OpenAICompatProvider(LLMProvider):
                 )
             )
         is_deepseek = bool(self._spec and self._spec.name == "deepseek")
-        preserve_reasoning = is_deepseek
+        capabilities = self._responses_capabilities()
+        preserve_reasoning = (
+            capabilities is not None and capabilities.reasoning_replay == "plaintext"
+        )
         prepared = self._responses.prepare(
             sanitized_messages, state=sanitized_state,
             provider=self._responses_state_provider(), model=model_name,
@@ -1301,7 +1264,11 @@ class OpenAICompatProvider(LLMProvider):
             body["temperature"] = temperature
 
         reasoning_enabled = bool(reasoning_effort and reasoning_effort.lower() != "none")
-        if (not supports_temperature or reasoning_enabled) and not preserve_reasoning:
+        if (
+            (not supports_temperature or reasoning_enabled)
+            and capabilities is not None
+            and capabilities.reasoning_replay == "encrypted"
+        ):
             body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and (reasoning_effort.lower() != "none" or is_deepseek):
             body["reasoning"] = {"effort": reasoning_effort}
@@ -1309,12 +1276,6 @@ class OpenAICompatProvider(LLMProvider):
             body.setdefault("reasoning", {})["context"] = "all_turns"
 
         extra_body = getattr(self, "_extra_body", {})
-        default_tools = getattr(self._spec, "responses_default_tools", ())
-        if "tools" not in extra_body and default_tools:
-            body["tools"] = [
-                *cast(list[object], body.get("tools", [])),
-                *({"type": tool_type} for tool_type in default_tools),
-            ]
         if extra_body:
             body = _merge_responses_extra_body(body, extra_body)
 
@@ -1326,7 +1287,7 @@ class OpenAICompatProvider(LLMProvider):
                 for tool in cast(list[object], configured_tools):
                     if _is_named_function_tool(tool, "web_search"):
                         continue
-                    if _is_hosted_web_search_tool(tool):
+                    if is_hosted_web_search_tool(tool):
                         if hosted_search_seen:
                             continue
                         hosted_search_seen = True
@@ -1932,12 +1893,7 @@ class OpenAICompatProvider(LLMProvider):
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
-                    if self._spec and self._spec.name == "github_copilot":
-                        # Copilot gateway exposes GPT-5/o-series only via /responses;
-                        # falling back to /chat/completions cannot succeed and would
-                        # hide the real error.
-                        raise
-                    if self._responses_is_required():
+                    if self._responses_is_required(model, reasoning_effort):
                         raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
@@ -1991,12 +1947,7 @@ class OpenAICompatProvider(LLMProvider):
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
-                    if self._spec and self._spec.name == "github_copilot":
-                        # Copilot gateway exposes GPT-5/o-series only via /responses;
-                        # falling back to /chat/completions cannot succeed and would
-                        # hide the real error.
-                        raise
-                    if self._responses_is_required():
+                    if self._responses_is_required(model, reasoning_effort):
                         raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise

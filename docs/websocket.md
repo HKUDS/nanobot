@@ -16,8 +16,7 @@ Nanobot can act as a WebSocket server, allowing external clients (web apps, CLIs
 
 ### 1. Configure
 
-The WebSocket channel is enabled by default. Add only the fields you want to
-override under `channels.websocket`:
+The WebSocket channel is enabled by default. Add only the fields you want to override under `channels.websocket`:
 
 ```json
 {
@@ -152,8 +151,7 @@ All frames are JSON text. Each message has an `event` field.
 
 Reasoning frames only flow when the channel's `showReasoning` is `true` (default) and the model returns reasoning content (DeepSeek-R1 / Kimi / MiMo / OpenAI reasoning models, Anthropic extended thinking, or inline `<think>` / `<thought>` tags). Models without reasoning produce zero `reasoning_delta` frames.
 
-**`runtime_model_updated`** — broadcast when the gateway default runtime changes or
-when a config reload requires clients to refresh their model catalog:
+**`runtime_model_updated`** — broadcast when the gateway default runtime changes or when a config reload requires clients to refresh their model catalog:
 
 ```json
 {
@@ -163,10 +161,7 @@ when a config reload requires clients to refresh their model catalog:
 }
 ```
 
-`model_preset` is omitted when no named preset is active. WebUI clients use this event
-to refresh model settings after default-runtime and config changes. `/model <preset>`
-is session-scoped; its selection is reflected through `session_updated` and the
-session row's `model_preset` field instead of this global event.
+`model_preset` is omitted when no named preset is active. WebUI clients use this event to refresh model settings after default-runtime and config changes. `/model <preset>` is session-scoped; its selection is reflected through `session_updated` and the session row's `model_preset` field instead of this global event.
 
 **`attached`** — confirmation for `new_chat` / `attach` inbound envelopes (see [Multi-chat multiplexing](#multi-chat-multiplexing)):
 
@@ -206,54 +201,28 @@ See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
 
 ### Binary attachments (WebUI and TUI)
 
-The gateway advertises `webui.attachments.binary.v1`. WebUI protocol 1 and the
-terminal protocol are unchanged. Bundled clients and their gateway use HTTP on
-the same listener for attachment uploads. After an authorized handshake, `ready`
-includes an `upload` object with `path: "/api/attachments"` and an opaque `token`.
-This token is a short-lived capability tied to that live connection, not the
-one-time handshake token, API token, or client-selected `client_id`.
+The gateway advertises `webui.attachments.binary.v1`. WebUI protocol 1 and the terminal protocol are unchanged. Bundled clients and their gateway use HTTP on the same listener for attachment uploads. After an authorized handshake, `ready` includes an `upload` object with `path: "/api/attachments"` and an opaque `token`. This token is a short-lived capability tied to that live connection, not the one-time handshake token, API token, or client-selected `client_id`.
 
-1. `POST` the raw file bytes to the advertised path with `Authorization: Bearer
-   <upload token>`, the file's `Content-Type`, and an exact `Content-Length`.
-   `X-Attachment-Name` may contain a percent-encoded display filename.
-   Compressed request bodies and chunked transfer encoding are rejected.
-2. The response is `201 {"reference": "<opaque reference>"}`. Use it in a small
-   WebSocket envelope, for example:
+1. `POST` the raw file bytes to the advertised path with `Authorization: Bearer <upload token>`, the file's `Content-Type`, and an exact `Content-Length`. `X-Attachment-Name` may contain a percent-encoded display filename. Compressed request bodies and chunked transfer encoding are rejected.
+2. The response is `201 {"reference": "<opaque reference>"}`. Use it in a small WebSocket envelope, for example:
 
    ```json
    {"type":"message","chat_id":"chat-id","content":"Inspect this","webui":true,"turn_id":"unique-turn-id","media":[{"reference":"opaque-reference","name":"report.pdf"}]}
    ```
 
-3. Retain the draft and local preview until `message_accepted` confirms the turn.
-   A connection close before confirmation means delivery is uncertain, not that
-   the draft should be discarded. Reconnect obtains a new upload capability;
-   old uncommitted references cannot be used by the new connection. A repeated
-   accepted `(chat_id, turn_id)` is acknowledged without another dispatch within
-   the gateway's bounded ten-minute in-memory retry window.
+3. Retain the draft and local preview until `message_accepted` confirms the turn. A connection close before confirmation means delivery is uncertain, not that the draft should be discarded. Reconnect obtains a new upload capability; old uncommitted references cannot be used by the new connection. A repeated accepted `(chat_id, turn_id)` is acknowledged without another dispatch within the gateway's bounded ten-minute in-memory retry window.
 
-The upload path accepts the existing image, document, and video MIME whitelist.
-Existing file/count/total limits still apply independently of `maxMessageBytes`.
-Uploads time out after five minutes, or after 30 seconds without receiving more
-data. Uploads are not resumable, so a retry sends the whole file.
+The upload path accepts the existing image, document, and video MIME whitelist. Existing file/count/total limits still apply independently of `maxMessageBytes`. Uploads time out after five minutes, or after 30 seconds without receiving more data. Uploads are not resumable, so a retry sends the whole file.
 
-Update WebUI and TUI together with the gateway. Existing messages and attachments
-remain available without a history migration. Clients must use HTTP uploads;
-`media.data_url` message uploads are no longer accepted. Local previews and the
-separate audio transcription protocol are unchanged.
+Update WebUI and TUI together with the gateway. Existing messages and attachments remain available without a history migration. Clients must use HTTP uploads; `media.data_url` message uploads are no longer accepted. Local previews and the separate audio transcription protocol are unchanged.
 
-Reverse proxies must forward `POST /api/attachments` (including its authorization
-header) to the gateway and permit the configured file sizes. Do not enable public
-CORS for this capability endpoint.
+Reverse proxies must forward `POST /api/attachments` (including its authorization header) to the gateway and permit the configured file sizes. Do not enable public CORS for this capability endpoint.
 
-For a remote host opened through the local WebUI, update the local installation
-and the remote gateway together to use binary attachments. An older host's text
-chats and HTTP reads remain available.
+For a remote host opened through the local WebUI, update the local installation and the remote gateway together to use binary attachments. An older host's text chats and HTTP reads remain available.
 
 ## Configuration Reference
 
-All fields go under `channels.websocket` in `config.json`.
-Unrecognized options retain the existing behavior: they are ignored without
-preventing startup. Active options below remain validated.
+All fields go under `channels.websocket` in `config.json`. Unrecognized options retain the existing behavior: they are ignored without preventing startup. Active options below remain validated.
 
 ### Connection
 
@@ -321,37 +290,17 @@ For production deployments where `websocketRequiresToken: true`, use short-lived
 3. Client opens WebSocket with `?token=nbwt_aBcDeFg...&client_id=...`.
 4. The token is consumed (single use) and cannot be reused.
 
-The embedded WebUI's `/webui/bootstrap` route returns a WebSocket token and
-REST `api_token` for local or secret-authenticated requests. When
-`trustedProxyAuth` authenticates the direct proxy peer, it returns connection
-metadata only: no bootstrap token, no REST API token, and no token query
-parameter is required for the WebSocket handshake or subsequent REST requests.
+The embedded WebUI's `/webui/bootstrap` route returns a WebSocket token and REST `api_token` for local or secret-authenticated requests. When `trustedProxyAuth` authenticates the direct proxy peer, it returns connection metadata only: no bootstrap token, no REST API token, and no token query parameter is required for the WebSocket handshake or subsequent REST requests.
 
 ### Trusted proxy no-token bootstrap
 
-`trustedProxyAuth` is an opt-in alternative for deployments where an
-identity-aware reverse proxy authenticates the user before connecting to nanobot.
-The proxy assertion becomes the authentication boundary for the entire WebUI
-surface: `/webui/bootstrap`, the WebSocket handshake, and REST API routes.
-Bootstrap is accepted only when **both** the direct TCP peer matches one of
-`trustedPeerCidrs` and the configured assertion header is present and non-empty.
-A trusted address by itself is never sufficient.
+`trustedProxyAuth` is an opt-in alternative for deployments where an identity-aware reverse proxy authenticates the user before connecting to nanobot. The proxy assertion becomes the authentication boundary for the entire WebUI surface: `/webui/bootstrap`, the WebSocket handshake, and REST API routes. Bootstrap is accepted only when **both** the direct TCP peer matches one of `trustedPeerCidrs` and the configured assertion header is present and non-empty. A trusted address by itself is never sufficient.
 
-Nanobot deliberately uses only `connection.remote_address` for the peer check.
-It never uses `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `CF-Connecting-IP`,
-or `X-Forwarded-Host` to decide whether the proxy is trusted. Nanobot trusts the
-assertion supplied by the explicitly trusted peer, but does not cryptographically
-validate or interpret the JWT/assertion contents. Do not enable this option if
-untrusted clients can connect directly to the nanobot listener.
+Nanobot deliberately uses only `connection.remote_address` for the peer check. It never uses `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `CF-Connecting-IP`, or `X-Forwarded-Host` to decide whether the proxy is trusted. Nanobot trusts the assertion supplied by the explicitly trusted peer, but does not cryptographically validate or interpret the JWT/assertion contents. Do not enable this option if untrusted clients can connect directly to the nanobot listener.
 
-The configured assertion header must be a proxy-generated authentication
-assertion, not a routing or client metadata header. Headers such as `Host`,
-`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `CF-Connecting-IP` are rejected
-by configuration; use the identity provider's post-authentication assertion
-header instead (for example, `Cf-Access-Jwt-Assertion`).
+The configured assertion header must be a proxy-generated authentication assertion, not a routing or client metadata header. Headers such as `Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `CF-Connecting-IP` are rejected by configuration; use the identity provider's post-authentication assertion header instead (for example, `Cf-Access-Jwt-Assertion`).
 
-For example, a local Cloudflare Tunnel with Cloudflare Access can validate the
-user at the edge and forward the resulting `Cf-Access-Jwt-Assertion`:
+For example, a local Cloudflare Tunnel with Cloudflare Access can validate the user at the edge and forward the resulting `Cf-Access-Jwt-Assertion`:
 
 ```json
 {
@@ -368,10 +317,7 @@ user at the edge and forward the resulting `Cf-Access-Jwt-Assertion`:
 }
 ```
 
-This works only when the directly connected `cloudflared` process reaches
-nanobot over the configured loopback address and supplies a non-empty assertion.
-Keep nanobot firewalled from untrusted clients; this configuration is not a
-CIDR-based bootstrap bypass.
+This works only when the directly connected `cloudflared` process reaches nanobot over the configured loopback address and supplies a non-empty assertion. Keep nanobot firewalled from untrusted clients; this configuration is not a CIDR-based bootstrap bypass.
 
 ### Example setup
 

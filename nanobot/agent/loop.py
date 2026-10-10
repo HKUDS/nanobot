@@ -2039,7 +2039,7 @@ class AgentLoop:
         if result is not None:
             ctx.outbound = result
             # Shortcut commands skip BUILD and SAVE, so we must persist the
-            # turn here so WebUI history hydration after _turn_end sees the
+            # turn here so WebUI history hydration after turn_end sees the
             # message.  Mark messages with _command so get_history can filter
             # them out of LLM context.  /new is excluded because it
             # intentionally clears the session.

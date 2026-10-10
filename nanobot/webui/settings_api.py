@@ -330,6 +330,14 @@ def update_provider_settings(
     )
 
 
+def model_api_resolution_payload(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    return models.model_api_resolution_payload(_load_settings_config(config_path), query)
+
+
 def provider_models_payload(
     query: QueryParams,
     *,

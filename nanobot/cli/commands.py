@@ -111,11 +111,21 @@ def version_callback(value: bool):
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
+    home: Path | None = typer.Option(
+        None, "--home", help="Instance root directory",
+        file_okay=False,
+    ),
     version: bool = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
     """nanobot - Personal AI Assistant."""
+    if home is not None:
+        from nanobot.config.home import get_selected_home_path, set_home_path
+
+        previous_home = get_selected_home_path()
+        set_home_path(home)
+        ctx.call_on_close(lambda: set_home_path(previous_home))
     # Editable/source installs can retain an older generated console script that
     # imports this Typer app directly instead of ``nanobot.cli.entry``. Keep the
     # role identity correct until that launcher is regenerated.

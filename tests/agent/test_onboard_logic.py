@@ -850,8 +850,8 @@ class TestApiServerRegistration:
         assert config.api.api_key == "secret"
 
 
-class TestMainMenuUpdate:
-    """Tests for main menu including new Channel Common and API Server items."""
+class TestMainMenuInteraction:
+    """Main menu navigation, save actions, and terminal input behavior."""
 
     def test_choice_viewport_keeps_long_menus_within_terminal_height(self):
         """Long provider menus should render as a bounded scrolling slice."""

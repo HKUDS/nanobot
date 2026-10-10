@@ -279,7 +279,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     if ctx_est <= 0:
         ctx_est = last_usage.input_tokens if last_usage is not None else 0
 
-    # Fetch web search provider usage (best-effort, never blocks the response)
+    # Await web search provider usage; network requests have a bounded timeout.
     search_usage_text: str | None = None
     # Never let usage fetch break /status
     with suppress(Exception):

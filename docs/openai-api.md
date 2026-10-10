@@ -14,10 +14,7 @@ For setup help, see [`quick-start.md`](./quick-start.md), [`providers.md`](./pro
 
 ## Authentication
 
-Local-only `127.0.0.1` usage does not require an API key. If you bind the API
-server to all interfaces with `api.host: "0.0.0.0"` or `"::"`, nanobot requires
-`api.apiKey`; otherwise startup fails to avoid exposing an unauthenticated agent
-endpoint on the network.
+Local-only `127.0.0.1` usage does not require an API key. If you bind the API server to all interfaces with `api.host: "0.0.0.0"` or `"::"`, nanobot requires `api.apiKey`; otherwise startup fails to avoid exposing an unauthenticated agent endpoint on the network.
 
 ```json
 {
@@ -29,9 +26,7 @@ endpoint on the network.
 }
 ```
 
-When `api.apiKey` is set, send it as a Bearer token on API routes. The health
-endpoint remains unauthenticated so local probes and load balancers can still
-check process health.
+When `api.apiKey` is set, send it as a Bearer token on API routes. The health endpoint remains unauthenticated so local probes and load balancers can still check process health.
 
 ```bash
 curl http://127.0.0.1:8900/v1/models \

@@ -359,7 +359,7 @@ def _markdown_to_telegram_html(text: str) -> str:
         escaped = _escape_telegram_html(code)
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
-    # 13. Restore header bold markers (inserted in step 3, after HTML escaping)
+    # 13. Restore header bold markers inserted in step 3 before HTML escaping.
     text = text.replace('⟪B⟫', '<b>').replace('⟪/B⟫', '</b>')
 
     return text
