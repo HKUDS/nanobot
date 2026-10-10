@@ -347,10 +347,11 @@ export function CuaDriverSetupPanel({ preset, capabilities, actionKey, check, ch
         {!setup.supported && <p role="status">{t("cuaDriver.unsupported")}</p>}
         {!setup.managed && <p role="status">{t("cuaDriver.manual")}</p>}
         {canManage && <>
+          {!mac && <p className="text-xs leading-5 text-muted-foreground">{t(setup.platform === "Linux" ? "cuaDriver.linuxPreview" : "cuaDriver.desktopSession")}</p>}
           {setup.installed ? <>
             {!enabled && accessOptions}
             {!enabled && canRequestPermissions && <p className="text-xs text-muted-foreground">{t(native ? "cuaDriver.nativeRequestHint" : "cuaDriver.requestHint", { appName })}</p>}
-            {(!mac || !guided) && <p className="text-xs text-muted-foreground">{t(mac ? "cuaDriver.permissions" : "cuaDriver.desktopSession")}</p>}
+            {mac && !guided && <p className="text-xs text-muted-foreground">{t("cuaDriver.permissions")}</p>}
             {reconnectNeeded && !editingAccess && <section aria-label={t("cuaDriver.reconnect")}>
               <h3 className="text-base font-semibold">{t("cuaDriver.reconnect")}</h3>
               <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">{t(statusKey === "sharingPaused" ? "cuaDriver.sharingPausedHint" : "cuaDriver.reconnectHint")}</p>
@@ -441,7 +442,7 @@ export function CuaDriverSetupPanel({ preset, capabilities, actionKey, check, ch
       <AlertDialogContent onCloseAutoFocus={event => { event.preventDefault(); uninstallRef.current?.focus({ preventScroll: true }); }}>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("cuaDriver.uninstallTitle")}</AlertDialogTitle>
-          <AlertDialogDescription>{t(canResetPermissions ? "cuaDriver.nativeUninstallHint" : "cuaDriver.uninstallHint", { machine: setup?.machine })}</AlertDialogDescription>
+          <AlertDialogDescription>{t(canResetPermissions ? "cuaDriver.nativeUninstallHint" : mac ? "cuaDriver.uninstallHint" : "cuaDriver.desktopUninstallHint", { machine: setup?.machine })}</AlertDialogDescription>
         </AlertDialogHeader>
         {canResetPermissions && <label className="flex cursor-pointer items-start gap-3 rounded-control border border-border/60 bg-muted/30 p-3.5 text-left transition-colors settings-hover has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring">
           <span className="relative mt-0.5 h-5 w-5 shrink-0">

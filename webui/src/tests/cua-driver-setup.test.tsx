@@ -21,6 +21,38 @@ describe("managed Cua Driver setup", () => {
   beforeEach(async () => { await i18n.changeLanguage("en"); });
   afterEach(() => vi.useRealTimers());
 
+  it.each(["Windows", "Linux"])("shows %s prerequisites before install and keeps Mac permissions out of its lifecycle", platform => {
+    const action = vi.fn();
+    const preset = { ...cuaPreset, driver_setup: { ...cuaPreset.driver_setup!, platform } };
+    const props = { capabilities: [CUA_CAPABILITY, CUA_SETUP_CAPABILITY, CUA_PERMISSIONS_CAPABILITY, CUA_UNINSTALL_CAPABILITY],
+      actionKey: null, error: null, active: false, onAction: action };
+    const view = render(<CuaDriverSetupPanel preset={preset} {...props} />);
+    expect(screen.getByText(platform === "Linux" ? /Linux preview/ : /Experimental integration/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Open .* settings/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download & install" }));
+    expect(action).toHaveBeenLastCalledWith("install", "cua-driver", { consent: `${CUA_CAPABILITY}:install` });
+
+    const installed = { ...preset, driver_setup: { ...preset.driver_setup, installed: true } };
+    view.rerender(<CuaDriverSetupPanel preset={installed} {...props} />);
+    expect(screen.getByRole("radio", { name: "View only" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Allow viewing & connect" }));
+    expect(action).toHaveBeenLastCalledWith("enable", "cua-driver", { mode: "observe", consent: `${CUA_CAPABILITY}:observe` });
+    view.rerender(<CuaDriverSetupPanel {...props}
+      preset={{ ...installed, configured: true, runtime_status: "connected", driver_setup: { ...installed.driver_setup, mode: "observe" } }}
+      check={{ connected: true, accessibility: null, screen_recording: null, capture_verified: false }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Connected");
+    expect(screen.queryByRole("heading", { name: "Finish Mac setup" })).not.toBeInTheDocument();
+
+    view.rerender(<CuaDriverSetupPanel preset={installed} {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Uninstall", exact: true }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Chats and other apps are kept");
+    expect(dialog).not.toHaveTextContent(/macOS|System Settings/);
+    expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Uninstall", exact: true }));
+    expect(action).toHaveBeenLastCalledWith("uninstall", "cua-driver", { consent: CUA_UNINSTALL_CAPABILITY });
+  });
+
   it("keeps uninstall explicit and leaves older hosts without a removal action", async () => {
     const onAction = vi.fn();
     const preset = { ...cuaPreset, driver_setup: { ...cuaPreset.driver_setup!, installed: true } };

@@ -271,11 +271,19 @@ and work without loading a remote logo. This attribution does not imply an
 official partnership or change the selected model provider. The MCP identifier
 remains `cua-driver`; existing configurations do not need renaming.
 
-New packages are selected for macOS 14.2+ (arm64 or x86_64), Windows x64/ARM64,
-and Linux x64/ARM64. Existing official macOS 14+ universal installations are
-preserved. Download/install support does not supply a desktop session, Linux
-system libraries, Windows elevated privileges, or OS permission approvals.
-Headless servers and unsupported architectures need a supported desktop host.
+### Platform differences
+
+The **gateway computer**, not the browser's operating system, selects the package and setup flow. A Windows browser connected to a Mac gateway sees Mac setup and controls that Mac.
+
+| Gateway platform | Installed engine | Setup and limits |
+| --- | --- | --- |
+| macOS 14.2+ (arm64 or x86_64) | Bundled nanobot Computer Use | Sequential Mac permissions; branded cursor and real system sharing indicator. Existing official macOS 14+ installations keep CuaDriver and their grants until explicitly uninstalled. |
+| Windows x64/ARM64 | Official Cua Driver 0.33.4 | Experimental nanobot integration. Requires a signed-in interactive desktop; elevated applications have additional restrictions. No Mac permission wizard or native Mac sharing indicator. |
+| Linux x64/ARM64 | Official Cua Driver 0.33.4 preview | Requires an active graphical desktop and system dependencies. X11/XWayland and native Wayland have different input/capture limits. No Mac permission wizard or native Mac sharing indicator. |
+
+Windows and Linux installation packages exist in the [pinned upstream release](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.33.4), but nanobot's integration has not completed real-desktop end-to-end validation on these platforms. Package-selection tests and connection checks do not prove screenshot or input execution. The nanobot-branded cursor is part of the Mac host; official drivers retain their own platform-dependent pointer behavior. See the upstream [platform guide](https://cua.ai/docs/cua-driver/concepts/platform-support) for desktop dependencies and restrictions.
+
+Before installation, setup shows the non-Mac desktop requirement and experimental/preview status. Platform support metadata checks OS and architecture, not whether a desktop session exists. Installation does not create a desktop or install system libraries, and a headless server must use a supported desktop host. Nanobot does not supply elevated privileges or grant OS permissions. Unsupported architectures cannot use the managed installer.
 
 This optional Apps flow requires `webui.cua-driver.v1` and setup schema 1;
 the core WebUI protocol remains 1. A new UI on an older compatible gateway
