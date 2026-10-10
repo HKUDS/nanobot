@@ -1,170 +1,70 @@
 # Multiple Instances
 
-Run multiple nanobot instances simultaneously with separate configs and runtime data. Use the global `--home` option to select an instance directory, or `--config` to select a configuration file directly.
+Use a separate home directory for each instance. Place `--home` before the
+subcommand; without it, nanobot uses `~/.nanobot`.
 
-## Instance Home
-
-Place `--home` before the subcommand:
+## Quick Start
 
 ```bash
 nanobot --home ~/.nanobot-work onboard
 nanobot --home ~/.nanobot-work webui --port 8766 --gateway-port 18791
-nanobot --home ~/.nanobot-work agent
+```
+
+Configure this instance's models and channels in WebUI Settings or
+`~/.nanobot-work/config.json`. Onboarding saves its default workspace as
+`~/.nanobot-work/workspace`.
+
+Use the same home for other commands:
+
+```bash
 nanobot --home ~/.nanobot-work status
+nanobot --home ~/.nanobot-work agent
+nanobot --home ~/.nanobot-work gateway --port 18791
 ```
 
-The instance uses `<home>/config.json`, defaults to `<home>/workspace/`, and stores
-runtime data such as sessions, media, and logs under the
-config directory. CLI input history is stored under `<home>/history/`.
-`onboard` saves the workspace path into the new config.
-
-Background gateway processes receive the selected home through their command-line
-arguments. Without `--home`, the home remains `~/.nanobot`. `-h` remains an alias
-for `--help`.
-
-An explicit `--config` overrides the config location and its runtime data directory.
-A workspace saved in the config overrides the home-based default; `--workspace`
-overrides both. Selecting a new home does not relocate paths saved in an existing
-config. Use different WebUI and gateway health ports when instances run together.
-
-## Quick Start
-
-If you want each instance to have its own dedicated workspace from the start, pass both `--config` and `--workspace` during onboarding.
-
-**Initialize instances:**
-
-```bash
-# Create separate instance configs and workspaces
-nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
-nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
-nanobot onboard --config ~/.nanobot-feishu/config.json --workspace ~/.nanobot-feishu/workspace
-```
-
-**Configure each instance:**
-
-Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. with different channel settings. The workspace you passed during `onboard` is saved into each config as that instance's default workspace.
-
-**Run instances:**
-
-```bash
-# Check one instance before starting it
-nanobot status --config ~/.nanobot-telegram/config.json
-
-# Instance A - Telegram bot
-nanobot gateway --config ~/.nanobot-telegram/config.json
-
-# Instance B - Discord bot
-nanobot gateway --config ~/.nanobot-discord/config.json
-
-# Instance C - Feishu bot with custom port
-nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
-```
+Concurrent instances need distinct gateway health ports and WebUI/channel ports.
+`webui --port` sets the WebUI/WebSocket port; `--gateway-port` sets the health port.
+For `gateway`, `--port` sets the health port. You can also save these ports in each
+config. Chat channels should use separate bot credentials.
 
 ## Path Resolution
 
-When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
+| Data | Location |
+|------|----------|
+| Config | `<home>/config.json`, or explicit `--config` |
+| Workspace | `<home>/workspace` by default; saved `agents.defaults.workspace` takes precedence; `--workspace` overrides both |
+| Sessions | `<config-directory>/sessions/<workspace-id>/` |
+| Media, logs, runtime state | Under the config directory |
+| Memory, skills, cron jobs | Under the workspace |
+| CLI input history | `<home>/history/cli_history` |
 
-To open a CLI session against one of these instances locally:
+An explicit `--config` also selects the runtime data directory. Keep each config
+in its own directory and use separate workspaces to isolate memory, skills, and
+sessions. Selecting a home does not relocate paths saved in an existing config.
 
-```bash
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
-nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
-
-# Open the browser workbench for a specific instance
-nanobot webui -c ~/.nanobot-telegram/config.json
-
-# Optional one-off workspace override
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
-```
-
-> Interactive `nanobot agent` and `nanobot webui` commands with the same `--config` and explicit `--workspace` selectors share one gateway instance. Different selectors produce isolated runtime state and processes. The one-shot and `--classic` agent paths remain direct local executions.
-
-| Component | Resolved From | Example |
-|-----------|---------------|---------|
-| **Config** | `--config` path | `~/.nanobot-A/config.json` |
-| **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
-| **Sessions** | config directory + workspace ID | `~/.nanobot-A/sessions/<workspace-id>/` |
-| **Cron Jobs** | workspace directory | `~/.nanobot-A/workspace/cron/` |
-| **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
-
-## How It Works
-
-- `--config` selects which config file to load
-- By default, the workspace comes from `agents.defaults.workspace` in that config
-- If you pass `--workspace`, it overrides the workspace from the config file
-
-## Minimal Setup
-
-1. Copy your base config into a new instance directory.
-2. Set a different `agents.defaults.workspace` for that instance.
-3. Start the instance with `--config`.
-
-Example config fragment:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "workspace": "~/.nanobot-telegram/workspace"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN"
-    }
-  },
-  "gateway": {
-    "host": "127.0.0.1",
-    "port": 18790
-  }
-}
-```
-
-The copied base config can keep using the same `modelPresets` and `agents.defaults.modelPreset`. If this instance needs a different model, add another preset and set `agents.defaults.modelPreset` to that preset name.
-
-Start separate instances:
+For custom config/workspace locations:
 
 ```bash
-nanobot status --config ~/.nanobot-telegram/config.json
-nanobot gateway --config ~/.nanobot-telegram/config.json
-nanobot gateway --config ~/.nanobot-discord/config.json
+nanobot onboard --config ~/bots/work/config.json --workspace ~/work-agent
+nanobot webui --config ~/bots/work/config.json --port 8766 --gateway-port 18791
 ```
 
-Each gateway instance also exposes a lightweight HTTP health endpoint on `gateway.host:gateway.port`. By default, the gateway binds to `127.0.0.1`, so the endpoint stays local unless you explicitly set `gateway.host` to a public or LAN-facing address.
+You can also copy an existing config into the new directory and change
+`agents.defaults.workspace`. Model presets can be reused; select a different
+`agents.defaults.modelPreset` when needed.
 
-`GET /health` reports process liveness and WebSocket channel readiness:
+Interactive `agent` and `webui` commands with the same config and explicit
+workspace selectors share a gateway. Different selectors produce separate runtime
+state and processes; one-shot and `--classic` agent runs execute directly.
+Background gateways receive `--home` through their command-line arguments.
 
-- Returns `200 OK` when the WebSocket channel is disabled or running.
-- Returns `503 Service Unavailable` when the WebSocket channel is enabled but not running.
+## Health Check
 
-The JSON response includes `status`, `process`, `ready`, and `websocket`.
-For example, with the WebSocket channel disabled:
+Each gateway serves `GET /health` on `gateway.host:gateway.port`, bound to
+`127.0.0.1` by default. It returns `200` when the WebSocket channel is disabled or
+running, and `503` when enabled but not running. The JSON fields are `status`,
+`process`, `ready`, and `websocket`; other paths return `404`.
 
-```json
-{"status":"ok","process":"alive","ready":true,"websocket":"disabled"}
-```
-
-Readiness currently reflects only the WebSocket channel. A successful response does not verify other chat channels, MCP servers, or model provider connectivity.
-
-Other paths return `404`.
-
-Override workspace for one-off runs when needed:
-
-```bash
-nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobot-telegram-test
-```
-
-## Common Use Cases
-
-- Run separate bots for Telegram, Discord, Feishu, and other platforms
-- Keep testing and production instances isolated
-- Use different models or providers for different teams
-- Serve multiple tenants with separate configs and runtime data
-
-## Notes
-
-- Each instance must use a different port if they run at the same time
-- Session data follows the active config directory; use a different workspace per instance to isolate memory, skills, and the stable session namespace ID
-- `--workspace` overrides the workspace defined in the config file
-- Cron jobs are stored in the active workspace; runtime media/state is derived from the config directory
+This checks process liveness and WebSocket readiness, not other chat channels,
+MCP servers, or model connectivity. See [CLI Reference](./cli-reference.md#gateway)
+for gateway management commands.
