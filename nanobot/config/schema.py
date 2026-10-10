@@ -366,6 +366,7 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    evaluator_model_preset: str | None = None
 
 
 class ApiConfig(Base):
@@ -502,6 +503,16 @@ class Config(BaseSettings):
         dream_name = self.agents.defaults.dream.model_override
         if dream_name and dream_name != "default" and dream_name not in self.model_presets:
             raise ValueError(f"Dream model preset {dream_name!r} not found in model_presets")
+        heartbeat_evaluator_name = self.gateway.heartbeat.evaluator_model_preset
+        if (
+            heartbeat_evaluator_name
+            and heartbeat_evaluator_name != "default"
+            and heartbeat_evaluator_name not in self.model_presets
+        ):
+            raise ValueError(
+                f"Heartbeat evaluator model preset {heartbeat_evaluator_name!r} "
+                "not found in model_presets"
+            )
         for fallback in self.agents.defaults.fallback_models:
             if isinstance(fallback, str) and fallback not in self.model_presets:
                 raise ValueError(f"fallback_models entry {fallback!r} not found in model_presets")
