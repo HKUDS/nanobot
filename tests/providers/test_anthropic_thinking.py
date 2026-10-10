@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -201,3 +202,49 @@ def test_reasoning_effort_string_none_does_not_enable_thinking() -> None:
     kw = _build(_make_provider(), "none")
     assert "thinking" not in kw
     assert kw["temperature"] == 0.7
+
+
+_THINKING = {"type": "thinking", "thinking": "Let me check.", "signature": "sig"}
+_REDACTED = {"type": "redacted_thinking", "data": "EmwKAhgB"}
+
+
+def test_parse_response_keeps_redacted_thinking_in_order() -> None:
+    response = SimpleNamespace(
+        content=[
+            SimpleNamespace(**_THINKING),
+            SimpleNamespace(**_REDACTED),
+            SimpleNamespace(type="tool_use", id="toolu_01", name="read_file", input={}),
+        ],
+        stop_reason="tool_use",
+        usage=None,
+    )
+
+    result = AnthropicProvider._parse_response(response)
+
+    assert result.thinking_blocks == [_THINKING, _REDACTED]
+
+
+def test_redacted_thinking_replayed_before_tool_use() -> None:
+    """Thinking blocks must be replayed in their original order before the tool call."""
+    messages = [
+        {"role": "user", "content": "read a.txt"},
+        {
+            "role": "assistant",
+            "content": "",
+            "thinking_blocks": [_THINKING, _REDACTED],
+            "tool_calls": [{
+                "id": "toolu_01",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "toolu_01", "content": "hello"},
+    ]
+
+    kw = _build(_make_provider(), "high", messages=messages)
+
+    assert kw["messages"][1]["content"] == [
+        _THINKING,
+        _REDACTED,
+        {"type": "tool_use", "id": "toolu_01", "name": "read_file", "input": {}},
+    ]
