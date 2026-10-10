@@ -1445,7 +1445,8 @@
   .settings-disclosure[open] > summary { margin-block-end: 8px; }
 
   .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
-  .settings-list-row { min-block-size: 60px; border-radius: 12px; }
+  .settings-list-row { min-block-size: 60px; border-radius: var(--radius-control); }
+  .settings-list-row:focus-visible { outline: none; }
   .sidebar-action-label:lang(zh) {
     display: inline-block;
     min-inline-size: var(--sidebar-label-width, 3em);

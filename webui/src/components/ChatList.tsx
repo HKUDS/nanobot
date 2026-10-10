@@ -969,7 +969,7 @@ export const ChatList = memo(function ChatList({
                             actionMenus.openFromContextMenu(event, actionMenuId)
                           )}
                           className={cn(
-                            "group flex min-w-0 max-w-full items-center gap-1 rounded-xl px-2 text-[13px] font-normal leading-5",
+                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px] font-normal leading-5",
                             SIDEBAR_SELECTION_ITEM_CLASS,
                             compact ? "min-h-7" : "min-h-8",
                             topicActive
@@ -1161,7 +1161,7 @@ export const ChatList = memo(function ChatList({
         {deleteSelectionMode ? (
           <div
             data-testid="delete-selection-bar"
-            className="sticky bottom-2 z-30 mx-1 mt-3 flex min-h-11 items-center gap-2 rounded-2xl border border-sidebar-border/80 bg-popover/95 p-1.5 pl-2 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur-xl"
+            className="sticky bottom-2 z-30 mx-1 mt-3 flex min-h-11 items-center gap-2 rounded-floating border border-sidebar-border/80 bg-popover/95 p-1.5 pl-2 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur-xl"
           >
             <button
               type="button"
@@ -1239,7 +1239,7 @@ function WorkbenchTabHeader({
       data-workbench-tab
       onContextMenu={(event) => actionMenus.openFromContextMenu(event, actionMenuId)}
       className={cn(
-        "group/tab flex min-h-8 min-w-0 items-center gap-0.5 rounded-xl px-2",
+        "group/tab flex min-h-8 min-w-0 items-center gap-0.5 rounded-control px-2",
         active ? "text-sidebar-foreground" : "text-sidebar-content",
       )}
     >
@@ -1441,7 +1441,7 @@ function ActivePaneRows({
                 actionMenus.openFromContextMenu(event, actionMenuId)
               )}
               className={cn(
-                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-xl px-2 text-[13px] font-normal leading-5",
+                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px] font-normal leading-5",
                 SIDEBAR_SELECTION_ITEM_CLASS,
                 compact ? "min-h-7" : "min-h-8",
                 active
@@ -1657,7 +1657,7 @@ function TemporaryChatSection({
                 data-temporary-chat-row={session.key}
                 data-chat-row={session.key}
                 className={cn(
-                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px] font-normal leading-5",
+                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-control px-2 text-[13px] font-normal leading-5",
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "text-sidebar-accent-foreground"
@@ -1730,7 +1730,7 @@ function ProjectGroupHeader({
       aria-expanded={!collapsed}
       onClick={onToggle}
       className={cn(
-        "flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left transition-colors media-hover:hover:text-sidebar-foreground",
+        "flex min-w-0 flex-1 items-center gap-2 rounded-control py-1 text-left transition-colors media-hover:hover:text-sidebar-foreground",
         active ? "font-medium text-sidebar-foreground" : "font-normal",
       )}
     >
@@ -1744,7 +1744,7 @@ function ProjectGroupHeader({
         onContextMenu={onRequestRename || onNewChat
           ? (event) => actionMenus.openFromContextMenu(event, actionMenuId)
           : undefined}
-        className="group flex min-h-8 min-w-0 items-center gap-0.5 rounded-xl px-2 text-[13px] leading-5 text-sidebar-content"
+        className="group flex min-h-8 min-w-0 items-center gap-0.5 rounded-control px-2 text-[13px] leading-5 text-sidebar-content"
       >
         <HoverHint side="top" align="start" contentClassName="max-w-80 break-words" content={disclosureLabel}>
           <button
@@ -1859,7 +1859,7 @@ function ChatsFoldFooter({
       <button
         type="button"
         onClick={onToggle}
-        className="h-7 w-full rounded-xl text-left text-[12px] font-medium text-sidebar-muted-foreground transition-colors media-hover:hover:bg-sidebar-accent/50 media-hover:hover:text-sidebar-muted-foreground"
+        className="h-7 w-full rounded-control text-left text-[12px] font-medium text-sidebar-muted-foreground transition-colors media-hover:hover:bg-sidebar-accent/50 media-hover:hover:text-sidebar-muted-foreground"
       >
         <span className="px-2">
           {folded

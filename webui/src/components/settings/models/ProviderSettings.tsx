@@ -17,7 +17,6 @@ import { useTranslation } from "react-i18next";
 import { SettingsAddButton } from "@/components/settings/shared/SettingsAddButton";
 import type { ProviderOperation } from "@/components/settings/models/useModelSettingsState";
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
-import { TruncatedTextTooltip } from "@/components/ui/tooltip";
 import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { ProviderSearchList } from "@/components/settings/models/ProviderSearchList";
 export { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
@@ -49,7 +48,19 @@ import { Input } from "@/components/ui/input";
 import { SheetContent } from "@/components/ui/sheet";
 import { FloatingPortalContext } from "@/components/ui/floating-portal";
 import { Textarea } from "@/components/ui/textarea";
-import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
+import { ProviderParameterFields } from "@/components/settings/models/ProviderParameterFields";
+import {
+  CUSTOM_PROVIDER_CREATION_KEY,
+  emptyCustomProviderDraft,
+  parseProviderObject,
+  providerFormFromRow,
+  providerJsonValue,
+  type CustomProviderDraft,
+  type ProviderAdvancedField,
+  type ProviderForm,
+} from "@/components/settings/models/providerForm";
+export { CUSTOM_PROVIDER_CREATION_KEY, providerFormFromRow } from "@/components/settings/models/providerForm";
+export type { CustomProviderDraft, ProviderForm } from "@/components/settings/models/providerForm";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -60,23 +71,6 @@ import type {
   SettingsPayload,
 } from "@/lib/types";
 
-type ProviderAdvancedField = NonNullable<
-  SettingsPayload["providers"][number]["advanced_fields"]
->[number];
-export type ProviderForm = {
-  displayName: string;
-  apiKey: string;
-  apiBase: string;
-  api: ModelAPIConfig | null;
-  proxy: string;
-  extraHeaders: string;
-  extraBody: string;
-  extraQuery: string;
-  thinkingStyle: string;
-  region: string;
-  profile: string;
-};
-export type CustomProviderDraft = ProviderForm & { name: string };
 const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
 type ProviderRequestOption = {
   kind: "priority" | "hosted_tool";
@@ -115,7 +109,6 @@ const PROVIDER_REQUEST_OPTIONS: Partial<Record<string, ProviderRequestOption[]>>
     defaultEnabled: true,
   }],
 };
-export const CUSTOM_PROVIDER_CREATION_KEY = "__custom_provider__";
 const CUSTOM_PROVIDER_ADVANCED_FIELDS: ProviderAdvancedField[] = [
   "extra_headers",
   "extra_body",
@@ -123,22 +116,6 @@ const CUSTOM_PROVIDER_ADVANCED_FIELDS: ProviderAdvancedField[] = [
   "proxy",
   "thinking_style",
 ];
-
-function providerJsonValue(value: Record<string, unknown> | null | undefined): string {
-  return value && Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "";
-}
-
-function parseProviderExtraBody(value: string): Record<string, unknown> | null {
-  if (!value.trim()) return {};
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 function isHostedSearchTool(tool: unknown, toolType: "web_search" | "x_search"): boolean {
   if (!tool || typeof tool !== "object" || Array.isArray(tool)) return false;
@@ -168,7 +145,7 @@ function updateProviderRequestOption(
   enabled: boolean,
   form: ProviderForm,
 ): Partial<ProviderForm> {
-  const extraBody = { ...(parseProviderExtraBody(form.extraBody) ?? {}) };
+  const extraBody = { ...(parseProviderObject(form.extraBody) ?? {}) };
   if (option.kind === "priority") {
     if (enabled) extraBody.service_tier = "priority";
     else if (extraBody.service_tier === "priority") delete extraBody.service_tier;
@@ -189,41 +166,6 @@ function updateProviderRequestOption(
     ...(option.forceResponses && enabled
       ? { api: { supported_apis: ["responses"], preferred_api: "responses" } satisfies ModelAPIConfig }
       : {}),
-  };
-}
-
-export function providerFormFromRow(
-  provider: SettingsPayload["providers"][number],
-): ProviderForm {
-  return {
-    displayName: provider.is_custom ? provider.label : "",
-    apiKey: "",
-    apiBase: provider.api_base ?? provider.default_api_base ?? "",
-    api: provider.api ?? null,
-    proxy: provider.proxy ?? "",
-    extraHeaders: providerJsonValue(provider.extra_headers),
-    extraBody: providerJsonValue(provider.extra_body),
-    extraQuery: providerJsonValue(provider.extra_query),
-    thinkingStyle: provider.thinking_style ?? "",
-    region: provider.region ?? "",
-    profile: provider.profile ?? "",
-  };
-}
-
-function emptyCustomProviderDraft(): CustomProviderDraft {
-  return {
-    name: "",
-    displayName: "",
-    apiKey: "",
-    apiBase: "",
-    api: { supported_apis: ["chat_completions"], preferred_api: "chat_completions" },
-    proxy: "",
-    extraHeaders: "",
-    extraBody: "",
-    extraQuery: "",
-    thinkingStyle: "",
-    region: "",
-    profile: "",
   };
 }
 
@@ -397,7 +339,7 @@ function ProviderRequestOptions({
   const options = (PROVIDER_REQUEST_OPTIONS[providerName] ?? [])
     .filter((option) => !option.forceResponses || apiConfigurable);
   if (options.length === 0) return null;
-  const extraBody = parseProviderExtraBody(form.extraBody) ?? {};
+  const extraBody = parseProviderObject(form.extraBody) ?? {};
 
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
 
@@ -410,7 +352,7 @@ function ProviderRequestOptions({
         return (
           <div
             key={option.titleKey}
-            className="flex items-center justify-between gap-4 rounded-xl px-4 py-3 transition-colors settings-hover focus-within:bg-sidebar-accent/60"
+            className="flex items-center justify-between gap-4 rounded-control px-4 py-3 transition-colors settings-hover focus-within:bg-sidebar-accent/60"
           >
             <div className="flex min-w-0 items-start gap-3">
               <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
@@ -470,7 +412,7 @@ function ProviderAdvancedOptions({
         aria-expanded={open}
         aria-controls={contentId}
         onClick={() => setOpen((value) => !value)}
-        className="flex min-h-[48px] w-full items-center justify-between gap-4 px-1 py-2.5 text-left transition-colors hover:text-foreground"
+        className="flex min-h-[48px] w-full items-center justify-between gap-4 px-3 py-2.5 text-left transition-colors hover:text-foreground"
       >
         <span className="text-[13px] font-medium text-foreground">
           {tx("settings.providers.advancedOptions", "Advanced options")}
@@ -489,7 +431,7 @@ function ProviderAdvancedOptions({
           <div className="grid gap-3 md:grid-cols-2">
             {enabled.has("thinking_style") ? (
               <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
+                <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.thinkingStyle", "Reasoning parameter format")}
                 </span>
                 <DropdownMenu>
@@ -526,7 +468,7 @@ function ProviderAdvancedOptions({
             ) : null}
             {enabled.has("proxy") ? (
               <label className="block space-y-1.5 md:col-span-2">
-                <span className="text-[12px] font-medium text-muted-foreground">
+                <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.proxy", "Network proxy")}
                 </span>
                 <Input
@@ -543,7 +485,7 @@ function ProviderAdvancedOptions({
             ) : null}
             {enabled.has("region") ? (
               <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
+                <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.region", "Region")}
                 </span>
                 <Input
@@ -560,7 +502,7 @@ function ProviderAdvancedOptions({
             ) : null}
             {enabled.has("profile") ? (
               <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
+                <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.profile", "AWS profile")}
                 </span>
                 <Input
@@ -575,39 +517,7 @@ function ProviderAdvancedOptions({
                 />
               </label>
             ) : null}
-            {enabled.has("extra_headers") ? (
-              <label className="block min-w-0 space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraHeaders", "Extra headers")}
-                </span>
-                <SettingsTextEditor title={tx("settings.providers.extraHeaders", "Extra headers")}
-                  value={form.extraHeaders} onSave={(value) => onChange({ extraHeaders: value })}
-                  placeholder={'{"X-Header":"value"}'}
-                />
-              </label>
-            ) : null}
-            {enabled.has("extra_query") ? (
-              <label className="block min-w-0 space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraQuery", "Additional query parameters")}
-                </span>
-                <SettingsTextEditor title={tx("settings.providers.extraQuery", "Additional query parameters")}
-                  value={form.extraQuery} onSave={(value) => onChange({ extraQuery: value })}
-                  placeholder={'{"api-version":"2024-02-01"}'}
-                />
-              </label>
-            ) : null}
-            {enabled.has("extra_body") ? (
-              <label className="block min-w-0 space-y-1.5 md:col-span-2">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraBody", "Additional body parameters")}
-                </span>
-                <SettingsTextEditor title={tx("settings.providers.extraBody", "Additional body parameters")}
-                  value={form.extraBody} onSave={(value) => onChange({ extraBody: value })}
-                  placeholder={'{"service_tier":"priority"}'}
-                />
-              </label>
-            ) : null}
+            <ProviderParameterFields fields={fields} form={form} onChange={onChange} />
           </div>
         </div>
       </DisclosureContent>
@@ -890,7 +800,7 @@ export function ProvidersSettings({
               <>
                 {provider.is_custom ? (
                   <label className="block space-y-1.5">
-                    <span className="text-[12px] font-medium text-muted-foreground">
+                    <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                       {tx("settings.providers.customProviderName", "Provider name")}
                     </span>
                     <Input
@@ -903,7 +813,7 @@ export function ProvidersSettings({
                   </label>
                 ) : null}
                 <label className="block space-y-1.5">
-                  <span className="text-[12px] font-medium text-muted-foreground">
+                  <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                     {t("settings.byok.apiKey")}
                   </span>
                   <div className="relative">
@@ -961,7 +871,7 @@ export function ProvidersSettings({
                   </div>
                 </label>
                 <label className="block space-y-1.5">
-                  <span className="text-[12px] font-medium text-muted-foreground">
+                  <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                     {t("settings.byok.apiBase")}
                   </span>
                   <Input
@@ -1055,7 +965,7 @@ export function ProvidersSettings({
   const customProviderForm = creatingCustomProvider ? (
       <div className="space-y-3">
         <label className="block space-y-1.5">
-          <span className="text-[12px] font-medium text-muted-foreground">
+          <span className="block px-3 text-[12px] font-medium text-muted-foreground">
             {tx("settings.providers.customProviderName", "Provider name")}
           </span>
           <Input
@@ -1075,7 +985,7 @@ export function ProvidersSettings({
           />
         </label>
         <label className="block space-y-1.5">
-          <span className="text-[12px] font-medium text-muted-foreground">
+          <span className="block px-3 text-[12px] font-medium text-muted-foreground">
             {t("settings.byok.apiBase")}
           </span>
           <Input
@@ -1095,7 +1005,7 @@ export function ProvidersSettings({
           />
         </label>
         <label className="block space-y-1.5">
-          <span className="text-[12px] font-medium text-muted-foreground">
+          <span className="block px-3 text-[12px] font-medium text-muted-foreground">
             {t("settings.byok.apiKey")}
           </span>
           <div className="relative">

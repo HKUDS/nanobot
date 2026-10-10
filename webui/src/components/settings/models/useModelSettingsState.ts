@@ -5,7 +5,7 @@ import {
   agentDraftFromPayload,
   type AgentSettingsDraft,
 } from "@/components/settings/models/ModelsSettings";
-import type { ProviderForm } from "@/components/settings/models/ProviderSettings";
+import type { ProviderForm } from "@/components/settings/models/providerForm";
 import type { ProviderOAuthAuthorizationRequired, SettingsPayload } from "@/lib/types";
 
 export interface ProviderOperation {

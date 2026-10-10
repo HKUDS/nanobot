@@ -55,7 +55,7 @@ function ResponseSourceBadge({
             )}>
               <ArrowRightLeft aria-hidden className="size-3 shrink-0 opacity-70" />
               <span aria-hidden className={cn(
-                "relative grid size-4 shrink-0 place-items-center overflow-hidden rounded-[4px]",
+                "relative grid size-4 shrink-0 place-items-center overflow-hidden rounded-mark",
                 logoLoaded && !tile ? "bg-white" : "bg-transparent",
               )}>
                 {logoUrl ? <img src={logoUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer"

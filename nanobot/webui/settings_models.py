@@ -1605,28 +1605,19 @@ def update_provider_settings(
         updates = migrate_legacy_provider_api(updates, provider_name=provider_key)
     except ValueError as exc:
         raise WebUISettingsError(str(exc)) from None
-    if spec.is_oauth:
-        allowed = {"enabled", *_provider_advanced_field_names(provider_key, spec)}
-        unsupported = set(updates) - allowed
-        if unsupported:
-            raise WebUISettingsError(
-                "Setting is not supported for this OAuth provider"
-            )
-    else:
-        allowed = {
-            "api_key",
-            "api_base",
-            "enabled",
-            *_provider_advanced_field_names(provider_key, spec),
-        }
+    allowed = {"enabled", *_provider_advanced_field_names(provider_key, spec)}
+    if not spec.is_oauth:
+        allowed.update({"api_key", "api_base"})
         if find_by_name(provider_key) is None:
             allowed.add("display_name")
         if spec.provider_api_configurable:
             allowed.add("api")
-        unsupported = set(updates) - allowed
-        if unsupported:
-            field = sorted(unsupported)[0]
-            raise WebUISettingsError(f"{field} is not supported for this provider")
+    unsupported = set(updates) - allowed
+    if unsupported:
+        if spec.is_oauth:
+            raise WebUISettingsError("Setting is not supported for this OAuth provider")
+        field = sorted(unsupported)[0]
+        raise WebUISettingsError(f"{field} is not supported for this provider")
 
     if "display_name" in updates:
         display_name = str(updates["display_name"] or "")

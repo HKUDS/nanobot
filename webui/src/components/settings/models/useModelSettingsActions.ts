@@ -12,7 +12,7 @@ import {
   CUSTOM_PROVIDER_CREATION_KEY,
   providerFormFromRow,
   type CustomProviderDraft,
-} from "@/components/settings/models/ProviderSettings";
+} from "@/components/settings/models/providerForm";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
 import {
@@ -521,7 +521,7 @@ export function useModelSettingsActions({
         popup = null;
       }
     }
-    setProviderOperation({ provider: providerName, action: action });
+    setProviderOperation({ provider: providerName, action });
     try {
       const payload =
         action === "login"

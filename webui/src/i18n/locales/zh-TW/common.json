@@ -762,6 +762,7 @@
       }
     },
     "providers": {
+      "parameterCount": "{{count}} 項",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
       "providerGroupLocal": "本地",

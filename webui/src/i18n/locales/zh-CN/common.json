@@ -1185,6 +1185,7 @@
       "systemHelp": "包括内部任务和未标注来源的调用"
     },
     "providers": {
+      "parameterCount": "{{count}} 项",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
       "providerGroupLocal": "本地",

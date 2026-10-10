@@ -3,13 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ModelIdPicker } from "@/components/settings/shared/ModelControls";
 import type { ProviderModelsPayload } from "@/lib/types";
-import { installSettingsViewTestHooks, jsonResponse, settingsPayload } from "@/tests/settings-test-utils";
+import { installSettingsViewTestHooks, jsonResponse, openPopover, settingsPayload } from "@/tests/settings-test-utils";
 import en from "@/i18n/locales/en/common.json";
 import zhCN from "@/i18n/locales/zh-CN/common.json";
 
-function openModelPicker(input = screen.getByRole("combobox", { name: "Select model" })) {
-  act(() => input.focus());
-  fireEvent.click(input);
+async function openModelPicker(input = screen.getByRole("combobox", { name: "Select model" })) {
+  await openPopover(input);
 }
 
 function settings() {
@@ -46,7 +45,7 @@ describe("OAuth catalog feedback", () => {
     const login = vi.fn();
     render(<ModelIdPicker token="tok" settings={settings()} provider="openai_codex"
       value="openai-codex/saved-model" showProviderLogos onChange={onChange} onProviderOAuthLogin={login} />);
-    openModelPicker();
+    await openModelPicker();
     const notice = await screen.findByRole("status");
     expect(notice).toHaveTextContent("Authorization expired. Please sign in again.");
     expect(notice).not.toHaveTextContent("out of date");
@@ -71,7 +70,7 @@ describe("OAuth catalog feedback", () => {
     const onChange = vi.fn();
     render(<ModelIdPicker token="tok" settings={settings()} provider="openai_codex"
       value="" showProviderLogos onChange={onChange} onProviderOAuthLogin={vi.fn()} />);
-    openModelPicker();
+    await openModelPicker();
     const notice = await screen.findByRole("status");
     expect(notice).toHaveTextContent("Refresh failed. Click to retry");
     expect(notice).toHaveTextContent(source === "stale" ? "Cached list" : "Built-in list");
@@ -91,7 +90,7 @@ describe("OAuth catalog feedback", () => {
     const onChange = vi.fn();
     render(<ModelIdPicker token="tok" settings={settings()} provider="openai_codex"
       value="" showProviderLogos onChange={onChange} onProviderOAuthLogin={vi.fn()} />);
-    openModelPicker();
+    await openModelPicker();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "openai-codex/custom-model" } });
     expect(screen.getByRole("option", { name: /Use.*custom-model/ })).toBeVisible();
     await act(async () => { finish(jsonResponse(catalog("stale", "auth_required"))); });
@@ -111,18 +110,21 @@ describe("OAuth catalog feedback", () => {
     render(<ModelIdPicker token="tok" settings={settings()} provider="openai_codex"
       value="" showProviderLogos onChange={onChange} onProviderOAuthLogin={vi.fn()} />);
     const trigger = screen.getByRole("combobox", { name: "Select model" });
-    openModelPicker(trigger);
+    await openModelPicker(trigger);
     if (errorKind) await screen.findByRole("button", { name: "Sign in again" });
     else await screen.findByRole("option", { name: /Offline model/ });
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
-    openModelPicker(trigger);
+    await waitFor(() => expect(trigger).toHaveFocus());
+    if (errorKind) fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    else fireEvent.change(trigger, { target: { value: "offline" } });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     if (errorKind) {
       expect(trigger).toHaveAttribute("readonly");
       expect(screen.queryByRole("option")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Sign in again" })).toBeVisible();
     } else {
+      expect(trigger).toHaveValue("offline");
       expect(trigger).not.toHaveAttribute("readonly");
       expect(screen.getByRole("option", { name: /Offline model/ })).toBeVisible();
       expect(screen.queryByRole("status", { name: "Loading models..." })).not.toBeInTheDocument();
@@ -143,7 +145,7 @@ describe("OAuth catalog feedback", () => {
     payload.providers.push({ ...payload.providers[0], name: "xai_grok", label: "xAI Grok" });
     const props = { token: "tok", settings: payload, value: "", showProviderLogos: true, onChange: vi.fn() };
     const view = render(<ModelIdPicker {...props} provider="openai_codex" />);
-    openModelPicker();
+    await openModelPicker();
     expect(await screen.findByRole("status")).toHaveTextContent("Authorization expired");
     view.rerender(<ModelIdPicker {...props} provider="xai_grok" />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -161,7 +163,7 @@ describe("OAuth catalog feedback", () => {
     vi.stubGlobal("fetch", fetchMock);
     const props = { token: "tok", provider: "openai_codex", value: "", showProviderLogos: true, onChange: vi.fn() };
     const view = render(<ModelIdPicker {...props} settings={settings()} />);
-    openModelPicker();
+    await openModelPicker();
     expect(await screen.findByRole("status")).toHaveTextContent("Authorization expired");
     expect(screen.getByRole("combobox")).toHaveAttribute("readonly");
     expect(screen.queryByRole("option")).not.toBeInTheDocument();
@@ -181,7 +183,7 @@ describe("OAuth catalog feedback", () => {
     vi.stubGlobal("fetch", fetchMock);
     const props = { token: "tok", provider: "openai_codex", value: "", showProviderLogos: true, onChange: vi.fn() };
     const view = render(<ModelIdPicker {...props} settings={settings()} />);
-    openModelPicker();
+    await openModelPicker();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     view.rerender(<ModelIdPicker {...props} settings={settings()} />);
     await screen.findByRole("option", { name: /Offline model/ });

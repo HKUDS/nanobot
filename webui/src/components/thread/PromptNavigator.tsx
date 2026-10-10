@@ -56,7 +56,7 @@ export function PromptNavigator({
         variant="ghost"
         size="icon"
         className={cn(
-          "host-no-drag h-8 w-8 rounded-xl text-muted-foreground/80",
+          "host-no-drag h-8 w-8 rounded-control text-muted-foreground/80",
           "hover:text-foreground",
         )}
         aria-label={t("thread.promptNavigator.open")}
@@ -131,7 +131,7 @@ function PromptNavigatorRow({
     <button
       type="button"
       className={cn(
-        "w-full rounded-xl px-3 py-3 text-left transition",
+        "w-full rounded-control px-3 py-3 text-left transition",
         "hover:bg-accent focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
       )}
       aria-label={t("thread.promptNavigator.jumpTo", { label: prompt.label })}

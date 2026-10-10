@@ -1185,6 +1185,7 @@
       "systemHelp": "Includes internal tasks and calls without a recorded source."
     },
     "providers": {
+      "parameterCount": "{{count}} entries",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
       "providerGroupLocal": "Local",

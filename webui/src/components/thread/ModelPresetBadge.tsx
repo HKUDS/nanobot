@@ -290,8 +290,8 @@ export function ModelPresetBadge({
         type={opensSetup ? "button" : undefined}
         onClick={opensSetup ? onClick : undefined}
         className={cn(
-          "thread-composer-model-badge group inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] appearance-none border-0 bg-transparent p-0 shadow-none",
-          opensSetup && "cursor-pointer focus-visible:outline-none",
+          "thread-composer-model-badge group inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
+          opensSetup && "cursor-pointer",
           isHero ? "h-8" : "h-9",
         )}
       >

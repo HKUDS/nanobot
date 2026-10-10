@@ -762,6 +762,7 @@
       }
     },
     "providers": {
+      "parameterCount": "{{count}} entradas",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
       "providerGroupLocal": "Local",

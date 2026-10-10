@@ -18,8 +18,8 @@ import {
 import {
   ProviderOAuthLoginDialog,
   ProvidersSettings,
-  providerFormFromRow,
 } from "@/components/settings/models/ProviderSettings";
+import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
 import { SettingsSidebar, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
 import {

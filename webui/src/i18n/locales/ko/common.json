@@ -762,6 +762,7 @@
       }
     },
     "providers": {
+      "parameterCount": "{{count}}개 항목",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
       "providerGroupLocal": "로컬",

@@ -1110,7 +1110,7 @@ def test_update_provider_settings_keeps_oauth_credentials_read_only(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(WebUISettingsError, match="only supports proxy and extra_body settings"):
+    with pytest.raises(WebUISettingsError, match="Setting is not supported for this OAuth provider"):
         update_provider_settings({"provider": ["openai_codex"], "apiKey": ["not-allowed"]})
 
 

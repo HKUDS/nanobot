@@ -1,7 +1,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 
 import type { ApplySettingsPayload } from "@/components/settings/contracts";
-import { providerFormFromRow } from "@/components/settings/models/ProviderSettings";
+import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { cancelProviderOAuth, completeProviderOAuth } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";

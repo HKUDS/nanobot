@@ -4,7 +4,6 @@ import {
   CircleAlert,
   Hexagon,
   Pencil,
-  Search,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -186,6 +185,7 @@ export function ModelIdPicker({
   const catalogNoticeId = useId();
   const catalogSignInRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const restoreInputOnClose = useRef(false);
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
   const hasConcreteProvider = Boolean(effectiveProvider && effectiveProvider !== "auto");
@@ -261,15 +261,24 @@ export function ModelIdPicker({
   }, [open, catalogNeedsSignIn, loading]);
 
   useEffect(() => {
-    if (!open) return;
     setQuery(providerUsesManualModelIds || !hasConcreteProvider ? value : "");
-  }, [open, effectiveProvider, hasConcreteProvider, providerUsesManualModelIds, value]);
+  }, [effectiveProvider, hasConcreteProvider, providerUsesManualModelIds, value]);
 
+  const openPicker = (nextQuery?: string) => {
+    if (nextQuery !== undefined || !open) {
+      setQuery(nextQuery ?? (providerUsesManualModelIds || !hasConcreteProvider ? value : ""));
+    }
+    restoreInputOnClose.current = false;
+    setOpen(true);
+  };
 
+  const closePicker = (restoreFocus = false) => {
+    restoreInputOnClose.current = restoreFocus;
+    setOpen(false);
+  };
   const selectModel = (model: string) => {
     onChange(model);
-    searchInputRef.current?.focus();
-    setOpen(false);
+    closePicker(true);
   };
   const navigationValues = useMemo(
     () => [
@@ -283,7 +292,7 @@ export function ModelIdPicker({
     values: navigationValues,
     selectedValue: value,
     onSelect: selectModel,
-    onClose: () => setOpen(false),
+    onClose: () => closePicker(true),
   });
 
   const renderModelRow = (
@@ -338,17 +347,14 @@ export function ModelIdPicker({
             ref={searchInputRef}
             value={open && !catalogNeedsSignIn ? query : value}
             readOnly={catalogNeedsSignIn}
-            onFocus={() => setOpen(true)}
-            onClick={() => setOpen(true)}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setOpen(true);
-            }}
+            onClick={() => openPicker()}
+            onChange={(event) => openPicker(event.target.value)}
             {...navigation.inputProps}
             onKeyDown={(event) => {
-              if (!open && (event.key === "ArrowDown" || event.key === "Enter")) {
+              if (event.nativeEvent.isComposing) return;
+              if (!open && ["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) {
                 event.preventDefault();
-                setOpen(true);
+                openPicker();
                 return;
               }
               navigation.inputProps.onKeyDown(event);
@@ -369,9 +375,17 @@ export function ModelIdPicker({
       <PopoverContent
         align="end"
         onOpenAutoFocus={(event) => event.preventDefault()}
-        onCloseAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (restoreInputOnClose.current) {
+            restoreInputOnClose.current = false;
+            searchInputRef.current?.focus({ preventScroll: true });
+          }
+        }}
+        onEscapeKeyDown={() => { restoreInputOnClose.current = true; }}
         onInteractOutside={(event) => {
           if (event.target === searchInputRef.current) event.preventDefault();
+          else restoreInputOnClose.current = false;
         }}
         className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-1.5"
       >
@@ -414,7 +428,7 @@ export function ModelIdPicker({
                   disabled={providerSigningIn}
                   aria-describedby={catalogNoticeId}
                   onClick={() => {
-                    setOpen(false);
+                    closePicker();
                     onProviderOAuthLogin(effectiveProvider);
                   }}
                 >

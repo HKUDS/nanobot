@@ -2,6 +2,7 @@ import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
 import { StreamingLabelSheen } from "@/components/MessageBubble";
+import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -53,7 +54,10 @@ export function ActivityStep({
       data-testid="activity-line"
       tabIndex={typeof label === "string" ? 0 : undefined}
       aria-label={detail && typeof label === "string" ? `${label}, ${detail}` : undefined}
-      className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap"
+      className={cn(
+        "flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap",
+        formControlFocusClassName,
+      )}
     >
       <StreamingLabelSheen
         active={active && animateLabel}

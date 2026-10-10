@@ -65,6 +65,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   floatingItemClassName,
+  floatingItemFocusClassName,
   floatingSurfaceElevationClassName,
   floatingSurfaceVisualClassName,
 } from "@/components/ui/floating-surface";
@@ -3185,6 +3186,7 @@ function CliAppMentionPalette({
                   }}
                   className={cn(
                     floatingItemClassName,
+                    floatingItemFocusClassName,
                     "touch-target flex min-h-10 w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors",
                     selected
                       ? "bg-foreground/[0.055] text-foreground"
@@ -3333,6 +3335,7 @@ function SlashCommandPalette({
               }}
               className={cn(
                 floatingItemClassName,
+                floatingItemFocusClassName,
                 "flex min-h-[44px] w-full items-center gap-3 px-3 py-2 text-left transition-colors",
                 selected
                   ? "bg-foreground/[0.065] text-foreground dark:bg-white/[0.09]"

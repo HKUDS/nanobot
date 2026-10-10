@@ -88,8 +88,7 @@ async function togglePresetEditor(name = "primary") {
 
 async function openModelPicker() {
   const input = await screen.findByRole("combobox", { name: "Select model" });
-  act(() => input.focus());
-  fireEvent.click(input);
+  await openPopover(input);
   return input;
 }
 
