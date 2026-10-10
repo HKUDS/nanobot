@@ -86,9 +86,9 @@ class WebUIAccess:
         }
 
     @staticmethod
-    def _password_required(websocket: WebSocketConfig) -> bool:
-        return not (websocket.token.strip() or websocket.trusted_proxy_auth) and (
-            websocket.token_issue_secret_generated or not websocket.token_issue_secret.strip()
+    def _password_required(config: WebSocketConfig) -> bool:
+        return not (config.token.strip() or config.trusted_proxy_auth) and (
+            config.token_issue_secret_generated or not config.token_issue_secret.strip()
         )
 
     def update_scope(
