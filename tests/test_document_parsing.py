@@ -163,6 +163,38 @@ class TestExtractText:
         assert "Widget" in result
         assert "9.99" in result
 
+    @pytest.mark.parametrize("chart_index", [0, 1, 2])
+    def test_extract_text_xlsx_with_chartsheet(self, tmp_path: Path, chart_index: int):
+        from openpyxl import Workbook
+        from openpyxl.chart import BarChart, Reference
+
+        xlsx_file = tmp_path / "report.xlsx"
+        workbook = Workbook()
+        first_sheet = workbook.active
+        first_sheet.title = "Sales"
+        first_sheet.append(["Revenue", 42])
+        second_sheet = workbook.create_sheet("Notes")
+        second_sheet.append(["Forecast", 50])
+        chart = BarChart()
+        chart.add_data(Reference(first_sheet, min_col=2, min_row=1))
+        workbook.create_chartsheet("Dashboard", index=chart_index).add_chart(chart)
+        workbook.save(xlsx_file)
+        workbook.close()
+
+        assert extract_text(xlsx_file) == (
+            "--- Sheet: Sales ---\nRevenue\t42\n\n--- Sheet: Notes ---\nForecast\t50"
+        )
+        source = open_document_line_source(xlsx_file)
+        assert source is not None
+        assert [
+            (line.text, line.extracted_line, line.locator)
+            for line in source.lines
+            if line.searchable
+        ] == [
+            ("Revenue\t42", 2, "sheet='Sales',row=1"),
+            ("Forecast\t50", 5, "sheet='Notes',row=1"),
+        ]
+
     def test_extract_text_xlsx_empty_sheet(self, tmp_path: Path):
         """Test extracting text from an .xlsx file with empty sheets."""
         from openpyxl import Workbook
