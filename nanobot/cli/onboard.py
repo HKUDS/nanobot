@@ -30,8 +30,13 @@ from nanobot.cli.models import (
     get_model_catalog,
     get_model_context_limit,
 )
-from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
-from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.config.loader import (
+    config_to_dict,
+    get_config_path,
+    load_config,
+    resolve_config_env_vars,
+)
+from nanobot.config.schema import BedrockProviderConfig, Config, ModelPresetConfig, ProviderConfig
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
 console = Console()
@@ -1239,10 +1244,13 @@ def _get_provider_names() -> dict[str, str]:
 
 def _configure_provider(config: Config, provider_name: str) -> None:
     """Configure a single LLM provider."""
-    provider_config = getattr(config.providers, provider_name, None)
-    if provider_config is None:
+    if provider_name not in _get_provider_names():
         console.print(f"[red]Unknown provider: {provider_name}[/red]")
         return
+
+    provider_config = getattr(config.providers, provider_name, None)
+    if provider_config is None:
+        provider_config = BedrockProviderConfig() if provider_name == "bedrock" else ProviderConfig()
 
     display_name = _get_provider_names().get(provider_name, provider_name)
     info = _get_provider_info()
@@ -1660,9 +1668,13 @@ def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderI
 
 def _quick_start_codex_proxy(config: Config) -> str | None:
     """Resolve only the Codex proxy without validating unrelated provider secrets."""
+    provider_config = config.providers.openai_codex
+    if provider_config is None:
+        return None
     proxy_config = Config()
-    proxy_config.providers.openai_codex.proxy = config.providers.openai_codex.proxy
-    return resolve_config_env_vars(proxy_config).providers.openai_codex.proxy or None
+    proxy_config.providers.openai_codex = ProviderConfig(proxy=provider_config.proxy)
+    resolved_provider = resolve_config_env_vars(proxy_config).providers.openai_codex
+    return resolved_provider.proxy if resolved_provider else None
 
 
 def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
@@ -1838,11 +1850,11 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
 
         provider_config = getattr(config.providers, provider_name, None)
         if provider_config is None:
-            console.print(f"[red]Unknown provider: {provider_name}[/red]")
-            return False
+            provider_config = BedrockProviderConfig() if provider_name == "bedrock" else ProviderConfig()
 
         catalog_config = config.model_copy(deep=True)
-        catalog_provider = getattr(catalog_config.providers, provider_name)
+        catalog_provider = provider_config.model_copy(deep=True)
+        setattr(catalog_config.providers, provider_name, catalog_provider)
         if api_key is not None:
             catalog_provider.api_key = api_key
         if api_base and (base_was_prompted or not catalog_provider.api_base):
@@ -1873,6 +1885,7 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
             elif not provider_config.api_base:
                 provider_config.api_base = api_base
 
+        setattr(config.providers, provider_name, provider_config)
         _set_primary_quick_start_preset(
             config,
             provider_name,
@@ -1989,7 +2002,7 @@ def _configure_quick_start(config: Config) -> bool:
 
 def _has_unsaved_changes(original: Config, current: Config) -> bool:
     """Return True when the onboarding session has committed changes."""
-    return original.model_dump(by_alias=True) != current.model_dump(by_alias=True)
+    return config_to_dict(original) != config_to_dict(current)
 
 
 def _prompt_main_menu_exit(has_unsaved_changes: bool) -> str:

@@ -74,16 +74,10 @@ export function settingsProviderConfigured(
   provider: string | null | undefined,
   resolvedProvider?: string | null,
 ): boolean {
-  const row = settingsProviderRow(payload, provider);
-  if (row) return row.configured;
-  if (provider === "auto") {
-    const resolvedRow = settingsProviderRow(
-      payload,
-      resolvedProvider ?? payload.agent.resolved_provider ?? payload.agent.provider,
-    );
-    if (resolvedRow) return resolvedRow.configured;
-  }
-  return payload.agent.has_api_key;
+  const concreteProvider = provider === "auto"
+    ? resolvedProvider ?? payload.agent.resolved_provider ?? payload.agent.provider
+    : provider;
+  return settingsProviderRow(payload, concreteProvider)?.configured ?? false;
 }
 
 export function ProviderPicker({

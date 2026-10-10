@@ -394,21 +394,17 @@ export function SettingsPage({
               onToggleProvider={handleToggleProvider}
               onToggleProviderKey={toggleProviderKeyVisibility}
               onToggleProviderKeyEditing={toggleProviderKeyEditing}
-              onChangeProviderForm={(provider, value) =>
+              onChangeProviderForm={(provider, value) => {
+                const row = settings.providers.find((item) => item.name === provider);
+                if (!row) return;
                 setProviderForms((prev) => ({
                   ...prev,
                   [provider]: {
-                    ...(prev[provider] ?? providerFormFromRow(
-                      settings.providers.find((row) => row.name === provider) ?? {
-                        name: provider,
-                        label: provider,
-                        configured: false,
-                      },
-                    )),
+                    ...(prev[provider] ?? providerFormFromRow(row)),
                     ...value,
                   },
-                }))
-              }
+                }));
+              }}
               onSaveProvider={saveProvider}
               onCreateCustomProvider={createCustomProvider}
               onRemoveProvider={removeProvider}

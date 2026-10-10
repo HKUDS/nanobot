@@ -9,6 +9,10 @@ from nanobot.providers.model_api import ModelAPICapabilities, ProviderAPI, Reque
 from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
 
 
+class ProviderNotConfiguredError(ValueError):
+    """The selected model has no provider connection in configuration."""
+
+
 @dataclass(frozen=True)
 class ProviderRoute:
     """Validated connection and adapter choice, without constructing a client.
@@ -19,21 +23,20 @@ class ProviderRoute:
 
     model: str
     provider_name: str
-    provider_config: ProviderConfig | None
-    spec: ProviderSpec | None
+    provider_config: ProviderConfig
+    spec: ProviderSpec
     backend: str
     model_api: ModelAPICapabilities | None
 
 
 def _provider_spec_for_config(
     provider_name: str,
-    provider_config: ProviderConfig | None,
-) -> ProviderSpec | None:
+    provider_config: ProviderConfig,
+) -> ProviderSpec:
     spec = find_by_name(provider_name)
     if (
         spec is not None
         and spec.name == "orcarouter"
-        and provider_config is not None
         and provider_config.api_base
         and provider_config.api_base.rstrip("/").lower()
         != spec.default_api_base.rstrip("/").lower()
@@ -42,7 +45,7 @@ def _provider_spec_for_config(
         # dynamic custom provider. Preserve that provider's model-prefix behavior
         # when an existing config points the name at a different endpoint.
         spec = None
-    if spec is None and provider_config is not None:
+    if spec is None:
         if not provider_config.api_base:
             raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
         spec = create_dynamic_spec(
@@ -97,20 +100,17 @@ def resolve_provider_route(
     model = model or preset.model
     provider_name = config.get_provider_name(model, preset=preset)
     provider_config = config.get_provider(model, preset=preset)
-    if not provider_name:
-        raise ValueError(f"No provider is configured for model '{model}'.")
-    if provider_config is not None and not provider_config.enabled:
-        raise ValueError(f"Provider '{provider_name}' is not enabled.")
+    if not provider_name or provider_config is None:
+        raise ProviderNotConfiguredError(f"No provider is configured for model '{model}'.")
     spec = _provider_spec_for_config(provider_name, provider_config)
-    if spec and spec.is_transcription_only:
+    if spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
-    backend = spec.backend if spec else "openai_compat"
-    model_api = resolve_model_api(spec, provider_config, preset.api) if spec is not None else None
+    backend = spec.backend
+    model_api = resolve_model_api(spec, provider_config, preset.api)
     if model_api is not None and model_api.preferred_api == "anthropic_messages":
         backend = "anthropic"
     if (
-        provider_config
-        and provider_config.proxy
+        provider_config.proxy
         and backend not in {"openai_compat", "openai_codex", "xai_grok", "anthropic"}
     ):
         raise ValueError(
@@ -118,23 +118,14 @@ def resolve_provider_route(
             "OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI Grok."
         )
 
-    if backend == "azure_openai":
-        if not provider_config or not provider_config.api_base:
+    if spec.api_base_required and not provider_config.api_base:
+        if backend == "azure_openai":
             raise ValueError("Azure OpenAI requires api_base in config.")
-    elif (
-        backend in {"openai_compat", "anthropic"}
-        and spec
-        and spec.is_direct
-        and not spec.default_api_base
-        and not (provider_config and provider_config.api_base)
-    ):
         raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-    elif backend in {"anthropic", "openai_compat"} and not (
+    if backend in {"anthropic", "openai_compat"} and not (
         backend == "openai_compat" and model.startswith("bedrock/")
     ):
-        needs_key = not (provider_config and provider_config.api_key)
-        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
-        if needs_key and not exempt:
+        if spec.api_key_required and not provider_config.api_key:
             raise ValueError(f"No API key configured for provider '{provider_name}'.")
 
     return ProviderRoute(
@@ -155,8 +146,6 @@ def resolve_automatic_model_api(
     if setup.model_api is not None:
         return setup.provider_name, setup.model_api.preferred_api
     spec = setup.spec
-    if spec is None:
-        return setup.provider_name, "chat_completions"
     if len(spec.request_apis) == 1:
         return setup.provider_name, spec.request_apis[0]
     provider_config = setup.provider_config
@@ -164,14 +153,14 @@ def resolve_automatic_model_api(
         from nanobot.providers.github_copilot_provider import cached_github_copilot_model_api
 
         api = cached_github_copilot_model_api(
-            setup.model, provider_config.proxy if provider_config else None,
+            setup.model, provider_config.proxy,
         )
         if api is not None:
             return setup.provider_name, api.preferred_api
     api = spec.default_model_api(
         setup.model, preset.reasoning_effort,
         api_base=config.get_api_base(setup.model, preset=preset),
-        extra_body=provider_config.extra_body if provider_config else None,
+        extra_body=provider_config.extra_body,
     )
     return setup.provider_name, api.preferred_api
 

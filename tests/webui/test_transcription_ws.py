@@ -1,3 +1,4 @@
+
 """Tests for WebUI transcription envelopes carried over the gateway socket."""
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from typing import Any
 import pytest
 
 from nanobot.config.loader import save_config
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ProviderConfig
 from nanobot.webui.transcription_ws import webui_transcription_event
 
 
@@ -50,7 +51,7 @@ async def test_webui_transcription_uses_explicit_gateway_config(
     gateway_path = tmp_path / "gateway.json"
     default = Config()
     default.transcription.provider = "groq"
-    default.providers.groq.api_key = "gsk-global"
+    default.providers.groq = ProviderConfig(api_key="gsk-global")
     gateway = Config()
     gateway.transcription.provider = "groq"
     save_config(default, default_path)
@@ -77,7 +78,7 @@ async def test_webui_transcribe_audio_rejects_unsupported_mime(
     config_path = tmp_path / "config.json"
     config = Config()
     config.transcription.provider = "groq"
-    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq = ProviderConfig(api_key="gsk-test")
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -100,7 +101,7 @@ async def test_webui_transcribe_audio_rejects_oversized_audio(
     config = Config()
     config.transcription.provider = "groq"
     config.transcription.max_upload_mb = 1
-    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq = ProviderConfig(api_key="gsk-test")
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr("nanobot.audio.transcription.get_media_dir", lambda _channel=None: tmp_path)
@@ -125,7 +126,7 @@ async def test_webui_transcribe_audio_returns_text_and_removes_temp_file(
     media_dir.mkdir()
     config = Config()
     config.transcription.provider = "groq"
-    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq = ProviderConfig(api_key="gsk-test")
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(

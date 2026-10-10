@@ -38,7 +38,6 @@ _query_first_alias = contracts.query_first_alias
 _query_has_alias = contracts.query_has_alias
 _model_catalog_kind = models.model_catalog_kind
 _oauth_provider_status = models.oauth_provider_status
-_provider_requires_api_key = models.provider_requires_api_key
 _reasoning_effort_values_for = models.reasoning_effort_values_for
 
 
@@ -385,9 +384,9 @@ def complete_oauth_provider(
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
-    def enable_provider(provider_name: str) -> None:
+    def add_provider(provider_name: str) -> None:
         WebUISettingsConfig(_settings_config_path(config_path)).update(
-            lambda config: models.enable_provider_settings(config, provider_name),
+            lambda config: models.add_provider_settings(config, provider_name),
         )
 
     return models.complete_oauth_provider(
@@ -396,7 +395,7 @@ def complete_oauth_provider(
         oauth_flows=oauth_flows,
         config_path=config_path,
         settings_payload=settings_payload,
-        on_authorized=enable_provider,
+        on_authorized=add_provider,
     )
 
 

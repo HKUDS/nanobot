@@ -267,7 +267,7 @@ def image_gen_provider_configs(config: Config) -> dict[str, ProviderConfig]:
     return {
         name: pc
         for name in _IMAGE_GEN_PROVIDERS
-        if (pc := getattr(providers_cfg, name, None)) is not None and pc.enabled
+        if (pc := getattr(providers_cfg, name, None)) is not None
     }
 
 

@@ -146,6 +146,20 @@ class ProviderSpec:
     def label(self) -> str:
         return self.display_name or self.name.title()
 
+    @property
+    def api_key_required(self) -> bool:
+        return not (
+            self.is_oauth or self.is_local or self.is_direct
+            or self.backend in {"azure_openai", "bedrock"}
+        )
+
+    @property
+    def api_base_required(self) -> bool:
+        return self.backend == "azure_openai" or (
+            self.backend == "openai_compat" and (self.is_direct or self.is_local)
+            and not self.default_api_base
+        )
+
     def request_model_name(self, model: str) -> str:
         """Remove only the provider prefixes owned by this adapter."""
         if "/" not in model:

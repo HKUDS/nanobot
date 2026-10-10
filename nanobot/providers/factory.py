@@ -72,8 +72,8 @@ def _make_provider_core(
 
         provider = OpenAICodexProvider(
             default_model=model,
-            proxy=getattr(p, "proxy", None) if p else None,
-            extra_body=p.extra_body if p else None,
+            proxy=p.proxy,
+            extra_body=p.extra_body,
             provider_name=provider_name,
         )
     elif backend == "xai_grok":
@@ -81,14 +81,14 @@ def _make_provider_core(
 
         provider = XAIGrokProvider(
             default_model=model,
-            proxy=getattr(p, "proxy", None) if p else None,
-            extra_body=p.extra_body if p else None,
+            proxy=p.proxy,
+            extra_body=p.extra_body,
             provider_name=provider_name,
         )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
-        if p is None or p.api_base is None:
+        if p.api_base is None:
             raise RuntimeError("validated Azure provider setup is missing api_base")
         provider = AzureOpenAIProvider(
             api_key=p.api_key or "",
@@ -107,7 +107,7 @@ def _make_provider_core(
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
         custom_spec = spec if spec and spec.backend == "openai_compat" else None
-        api_key = p.api_key if p else None
+        api_key = p.api_key
         if custom_spec is not None:
             api_key = api_key or "no-key"
         provider = AnthropicProvider(
@@ -115,9 +115,9 @@ def _make_provider_core(
             api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
-            extra_body=p.extra_body if p else None,
-            extra_query=p.extra_query if p else None,
-            proxy=p.proxy if p else None,
+            extra_body=p.extra_body,
+            extra_query=p.extra_query,
+            proxy=p.proxy,
             spec=custom_spec,
             provider_name=provider_name,
         )
@@ -125,27 +125,27 @@ def _make_provider_core(
         from nanobot.providers.bedrock_provider import BedrockProvider
 
         provider = BedrockProvider(
-            api_key=p.api_key if p else None,
-            api_base=p.api_base if p else None,
+            api_key=p.api_key,
+            api_base=p.api_base,
             default_model=model,
-            region=getattr(p, "region", None) if p else None,
-            profile=getattr(p, "profile", None) if p else None,
-            extra_body=p.extra_body if p else None,
+            region=getattr(p, "region", None),
+            profile=getattr(p, "profile", None),
+            extra_body=p.extra_body,
             provider_name=provider_name,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
         provider = OpenAICompatProvider(
-            api_key=p.api_key if p else None,
+            api_key=p.api_key,
             api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
             spec=spec,
-            extra_body=p.extra_body if p else None,
+            extra_body=p.extra_body,
             model_api=setup.model_api,
-            extra_query=p.extra_query if p else None,
-            proxy=p.proxy if p else None,
+            extra_query=p.extra_query,
+            proxy=p.proxy,
             provider_name=provider_name,
         )
 
@@ -215,11 +215,13 @@ def make_provider(
     return provider
 
 
-def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> ProviderSnapshot:
-    """Build a non-networking runtime so the WebUI can collect first-time setup."""
+def build_unconfigured_provider_snapshot(
+    config: Config, setup_error: str, *, preset_name: str | None = None,
+) -> ProviderSnapshot:
+    """Keep settings available when the selected model has no usable connection."""
     from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 
-    preset = config.resolve_preset()
+    preset = config.resolve_preset(preset_name)
     provider = UnconfiguredProvider(preset.model)
     provider.generation = preset.to_generation_settings()
     return ProviderSnapshot(
@@ -228,6 +230,7 @@ def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> Pr
         context_window_tokens=preset.context_window_tokens,
         signature=("unconfigured", setup_error, preset.model),
         generation=provider.generation,
+        model_preset=config.agents.defaults.model_preset if preset_name is None else preset_name,
     )
 
 
@@ -240,7 +243,7 @@ def _preset_provider_signature(
         preset.model,
         preset.provider,
         provider_name,
-        provider_config.enabled if provider_config else None,
+        provider_config is not None,
         config.get_api_key(preset.model, preset=preset),
         config.get_api_base(preset.model, preset=preset),
         _provider_extra_headers(find_by_name(provider_name) if provider_name else None, provider_config),

@@ -27,6 +27,7 @@ import httpx
 from nanobot.config.loader import resolve_config_env_vars
 from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.schema import (
+    BedrockProviderConfig,
     Config,
     FallbackCandidate,
     ModelAPIConfig,
@@ -207,8 +208,6 @@ def _restore_redacted_provider_secret_values(
 
 def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     updates: dict[str, Any] = {}
-    if (enabled := query_first(query, "enabled")) is not None:
-        updates["enabled"] = parse_bool(enabled, "enabled")
     string_fields = (
         ("api_key", "apiKey"),
         ("api_base", "apiBase"),
@@ -270,6 +269,10 @@ def _validated_provider_config(
         raise WebUISettingsError(str(exc)) from exc
 
 
+def _default_provider_config(provider_name: str) -> ProviderConfig:
+    return BedrockProviderConfig() if provider_name == "bedrock" else ProviderConfig()
+
+
 def mask_secret_hint(secret: str | None) -> str | None:
     if not secret:
         return None
@@ -295,22 +298,6 @@ def _resolve_env_placeholders(value: str | None) -> str | None:
     if missing and not resolved:
         return None
     return resolved or None
-
-
-def provider_requires_api_key(spec: Any) -> bool:
-    if spec.name == "azure_openai":
-        return False
-    if spec.is_oauth:
-        return False
-    if spec.is_local or spec.is_direct:
-        return False
-    return True
-
-
-def provider_requires_api_base(spec: Any) -> bool:
-    if spec.name == "azure_openai":
-        return True
-    return bool(spec.backend == "openai_compat" and spec.is_direct and not spec.default_api_base)
 
 
 def oauth_provider_status(spec: Any) -> dict[str, Any]:
@@ -395,23 +382,18 @@ def oauth_provider_status(spec: Any) -> dict[str, Any]:
 
 def provider_configured_for_settings(
     spec: ProviderSpec,
-    provider_config: ProviderConfig,
+    provider_config: ProviderConfig | None,
     oauth_status: OAuthStatusReader,
 ) -> bool:
-    if not provider_config.enabled:
+    if provider_config is None:
         return False
     if spec.is_oauth:
         return bool(oauth_status(spec)["configured"])
-    if provider_requires_api_base(spec):
+    if spec.api_base_required:
         return bool(provider_config.api_base)
-    if provider_requires_api_key(spec):
+    if spec.api_key_required:
         return bool(provider_config.api_key)
-    return bool(
-        provider_config.api_key
-        or provider_config.api_base
-        or getattr(provider_config, "region", None)
-        or getattr(provider_config, "profile", None)
-    )
+    return True
 
 
 def _dynamic_provider_items(config: Config) -> list[tuple[str, ProviderConfig]]:
@@ -426,13 +408,11 @@ def _dynamic_provider_items(config: Config) -> list[tuple[str, ProviderConfig]]:
 def resolve_settings_provider(
     config: Config,
     provider_name: str,
-) -> tuple[ProviderSpec, str, ProviderConfig] | None:
+) -> tuple[ProviderSpec, str, ProviderConfig | None] | None:
     spec = find_by_name(provider_name)
     if spec is not None:
         provider_config = getattr(config.providers, spec.name, None)
-        if isinstance(provider_config, ProviderConfig):
-            return spec, spec.name, provider_config
-        return None
+        return spec, spec.name, provider_config
 
     normalized = provider_name.replace("-", "_")
     for extra_name, provider_config in _dynamic_provider_items(config):
@@ -452,7 +432,7 @@ def resolve_settings_provider(
 def _require_settings_provider(
     config: Config,
     provider_name: str | None,
-) -> tuple[ProviderSpec, str, ProviderConfig]:
+) -> tuple[ProviderSpec, str, ProviderConfig | None]:
     name = (provider_name or "").strip()
     if not name:
         raise WebUISettingsError("provider is required")
@@ -482,10 +462,17 @@ def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
 def _provider_settings_row(
     name: str,
     spec: ProviderSpec,
-    provider_config: ProviderConfig,
+    provider_config: ProviderConfig | None,
     oauth_status_reader: OAuthStatusReader,
 ) -> dict[str, Any]:
     oauth_status = oauth_status_reader(spec) if spec.is_oauth else None
+    has_config = provider_config is not None
+    configured = has_config and (
+        bool(oauth_status["configured"])
+        if oauth_status is not None
+        else provider_configured_for_settings(spec, provider_config, oauth_status_reader)
+    )
+    provider_config = provider_config or _default_provider_config(name)
     is_custom = find_by_name(name) is None
     request_apis = (
         provider_config.api.supported_apis
@@ -495,14 +482,11 @@ def _provider_settings_row(
         "name": name,
         "label": spec.label,
         "is_custom": is_custom,
-        "enabled": provider_config.enabled,
-        "configured": (
-            provider_config.enabled and bool(oauth_status["configured"])
-            if oauth_status is not None
-            else provider_configured_for_settings(spec, provider_config, oauth_status_reader)
-        ),
+        "has_config": has_config,
+        "configured": configured,
         "auth_type": "oauth" if spec.is_oauth else "api_key",
-        "api_key_required": provider_requires_api_key(spec),
+        "api_key_required": spec.api_key_required,
+        "api_base_required": spec.api_base_required,
         "api_key_hint": mask_secret_hint(provider_config.api_key),
         "api_base": provider_config.api_base,
         "default_api_base": spec.default_api_base or None,
@@ -546,20 +530,22 @@ def _provider_settings_rows(
         if canonical.settings_alias_for:
             continue
         candidates = [canonical, *aliases.get(canonical.name, [])]
-        chosen = next((spec for spec in candidates if spec.name == selected_provider), None)
+        present = [
+            spec for spec in candidates
+            if getattr(config.providers, spec.name, None) is not None
+        ]
+        chosen = next((spec for spec in present if spec.name == selected_provider), None)
         if chosen is None:
             chosen = next(
                 (
                     spec
-                    for spec in candidates
+                    for spec in present
                     if (provider_config := getattr(config.providers, spec.name, None)) is not None
                     and provider_configured_for_settings(spec, provider_config, oauth_status)
                 ),
-                canonical,
+                present[0] if present else canonical,
             )
         provider_config = getattr(config.providers, chosen.name, None)
-        if provider_config is None:
-            continue
         row = _provider_settings_row(chosen.name, chosen, provider_config, oauth_status)
         row["label"] = canonical.label
         rows.append(row)
@@ -685,7 +671,7 @@ def provider_models_payload(
         "message": None,
         "fetched_at": time.time(),
     }
-    if not provider_config.enabled:
+    if provider_config is None:
         return {**base_payload, "status": "not_configured"}
     if catalog_kind == "unsupported":
         return {
@@ -755,7 +741,7 @@ def provider_models_payload(
         }
 
     api_key = _resolve_env_placeholders(provider_config.api_key)
-    if provider_requires_api_key(spec) and not api_key:
+    if spec.api_key_required and not api_key:
         return {
             **base_payload,
             "status": "not_configured",
@@ -1565,7 +1551,6 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
     allowed = {
         "api_key",
         "api_base",
-        "enabled",
         "proxy",
         "extra_headers",
         "extra_body",
@@ -1605,7 +1590,7 @@ def update_provider_settings(
         updates = migrate_legacy_provider_api(updates, provider_name=provider_key)
     except ValueError as exc:
         raise WebUISettingsError(str(exc)) from None
-    allowed = {"enabled", *_provider_advanced_field_names(provider_key, spec)}
+    allowed = set(_provider_advanced_field_names(provider_key, spec))
     if not spec.is_oauth:
         allowed.update({"api_key", "api_base"})
         if find_by_name(provider_key) is None:
@@ -1628,9 +1613,10 @@ def update_provider_settings(
         if _provider_display_name_exists(config, display_name, exclude_key=provider_key):
             raise WebUISettingsError("provider already exists", status=409)
 
-    updates.setdefault("enabled", True)
-    updated_provider_config = _validated_provider_config(provider_config, updates)
-    if updated_provider_config.api != provider_config.api:
+    updated_provider_config = _validated_provider_config(
+        provider_config or _default_provider_config(provider_key), updates,
+    )
+    if updated_provider_config.api != (provider_config.api if provider_config else None):
         candidates = [
             *config.model_presets.values(), config.agents.defaults,
             *(fallback for fallback in config.agents.defaults.fallback_models if not isinstance(fallback, str)),
@@ -1659,11 +1645,11 @@ def _provider_requires_image_reload(config: Config, provider_key: str) -> bool:
     )
 
 
-def enable_provider_settings(config: Config, provider_name: str) -> None:
-    """Enable a provider without changing its connection settings or credentials."""
+def add_provider_settings(config: Config, provider_name: str) -> None:
+    """Add a provider entry without changing its independent OAuth credentials."""
     _, provider_key, provider_config = _require_settings_provider(config, provider_name)
-    if not provider_config.enabled:
-        setattr(config.providers, provider_key, provider_config.model_copy(update={"enabled": True}))
+    if provider_config is None:
+        setattr(config.providers, provider_key, _default_provider_config(provider_key))
 
 
 def remove_provider_settings(
@@ -1672,7 +1658,7 @@ def remove_provider_settings(
     *,
     oauth_flows: WebUIOAuthFlowRegistry | None = None,
 ) -> bool:
-    spec, provider_key, provider_config = _require_settings_provider(
+    spec, provider_key, _ = _require_settings_provider(
         config, query_first(query, "provider"),
     )
     if spec.is_oauth and oauth_flows is not None:
@@ -1680,7 +1666,7 @@ def remove_provider_settings(
     if find_by_name(provider_key) is None:
         delattr(config.providers, provider_key)
     else:
-        setattr(config.providers, provider_key, type(provider_config)(enabled=False))
+        setattr(config.providers, provider_key, None)
     if spec.is_oauth:
         invalidate_oauth_model_catalog(spec.name)
     return _provider_requires_image_reload(config, provider_key)
@@ -1708,10 +1694,12 @@ def login_oauth_provider(
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
         try:
-            proxy = resolve_config_env_vars(
+            resolved_config = resolve_config_env_vars(
                 config,
                 config_path=config_path,
-            ).providers.openai_codex.proxy or None
+            )
+            provider_config = resolved_config.providers.openai_codex
+            proxy = provider_config.proxy if provider_config else None
         except ValueError as exc:
             raise WebUISettingsError(str(exc), status=400) from exc
         remote_browser_value = query_first(query, "remote_browser")
@@ -1775,10 +1763,12 @@ def login_oauth_provider(
         from nanobot.providers.xai_oauth import start_xai_oauth_login
 
         try:
-            proxy = resolve_config_env_vars(
+            resolved_config = resolve_config_env_vars(
                 config,
                 config_path=config_path,
-            ).providers.xai_grok.proxy or None
+            )
+            provider_config = resolved_config.providers.xai_grok
+            proxy = provider_config.proxy if provider_config else None
         except ValueError as exc:
             raise WebUISettingsError(str(exc), status=400) from exc
         try:

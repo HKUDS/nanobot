@@ -91,9 +91,9 @@ export function useProviderFormsSync(
   useEffect(() => {
     if (!settings) return;
     setProviderForms((prev) => {
-      const next = { ...prev };
+      const next: typeof prev = {};
       for (const provider of settings.providers) {
-        next[provider.name] = next[provider.name] ?? providerFormFromRow(provider);
+        next[provider.name] = prev[provider.name] ?? providerFormFromRow(provider);
       }
       return next;
     });

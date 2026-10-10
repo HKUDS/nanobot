@@ -390,11 +390,11 @@ export function useModelSettingsActions({
     const isOauthProvider = provider.auth_type === "oauth";
     const providerForm = providerForms[providerName] ?? providerFormFromRow(provider);
     const apiKey = providerForm.apiKey.trim();
-    const apiKeyRequired = provider.api_key_required ?? true;
-    if (!isOauthProvider && !provider.configured && apiKeyRequired && !apiKey) {
+    if (provider.api_key_required && !provider.api_key_hint && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
       return;
     }
+    if (provider.api_base_required && !providerForm.apiBase.trim()) return;
     setProviderOperation({ provider: providerName, action: "save" });
     try {
       const supportName = providerName === "bedrock"
@@ -403,7 +403,7 @@ export function useModelSettingsActions({
           ? "azure"
           : null;
       if (supportName && !(await installCapabilities([supportName]))) return;
-      const update: ProviderSettingsUpdate = { provider: providerName, enabled: true };
+      const update: ProviderSettingsUpdate = { provider: providerName };
       if (!isOauthProvider) {
         update.apiKey = apiKey || undefined;
         update.apiBase = providerForm.apiBase.trim();
@@ -429,22 +429,14 @@ export function useModelSettingsActions({
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
       await maybeRestartHostEngine(payload);
-      setProviderForms((prev) => ({
-        ...prev,
-        [providerName]: {
-          ...providerForm,
-          displayName: providerForm.displayName.trim(),
-          apiKey: "",
-          apiBase: providerForm.apiBase.trim(),
-          proxy: providerForm.proxy.trim(),
-          thinkingStyle: providerForm.thinkingStyle.trim(),
-          region: providerForm.region.trim(),
-          profile: providerForm.profile.trim(),
-        },
-      }));
+      setProviderForms((prev) => {
+        const next = { ...prev };
+        delete next[providerName];
+        return next;
+      });
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
       setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-      if (!isOauthProvider) setExpandedProvider(null);
+      if (!isOauthProvider || !provider.has_config) setExpandedProvider(null);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -609,19 +601,15 @@ export function useModelSettingsActions({
   };
 
   const toggleProviderKeyEditing = (providerName: string) => {
+    const provider = settings?.providers.find((row) => row.name === providerName);
+    if (!provider) return;
     setEditingProviderKeys((prev) => {
       const nextEditing = !prev[providerName];
       if (!nextEditing) {
         setProviderForms((forms) => ({
           ...forms,
           [providerName]: {
-            ...(forms[providerName] ?? providerFormFromRow(
-              settings?.providers.find((provider) => provider.name === providerName) ?? {
-                name: providerName,
-                label: providerName,
-                configured: false,
-              },
-            )),
+            ...(forms[providerName] ?? providerFormFromRow(provider)),
             apiKey: "",
           },
         }));

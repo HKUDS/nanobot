@@ -3146,7 +3146,7 @@ describe("App layout", () => {
                   reasoning_effort: null,
                 },
               ],
-              providers: [{ name: "openai", label: "OpenAI", configured: true }],
+              providers: [{ name: "openai", label: "OpenAI", api_key_required: true, api_base_required: false, has_config: true, configured: true }],
               web_search: {
                 provider: "duckduckgo",
                 api_key_hint: null,

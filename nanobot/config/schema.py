@@ -231,8 +231,6 @@ class AgentsConfig(Base):
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
-    enabled: bool = Field(default=True, exclude_if=lambda value: value)
-
     # User-facing name for dynamic custom providers.
     display_name: str | None = Field(
         default=None,
@@ -291,7 +289,7 @@ class BedrockProviderConfig(ProviderConfig):
 
 
 class ProvidersConfig(Base):
-    """Configuration for LLM providers.
+    """Configured provider connections; absent entries remain unconfigured.
 
     Supports custom providers via extra fields — any additional field
     becomes an OpenAI-compatible custom provider.
@@ -299,52 +297,52 @@ class ProvidersConfig(Base):
 
     model_config = ConfigDict(extra="allow")
 
-    custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
-    bedrock: BedrockProviderConfig = Field(default_factory=BedrockProviderConfig)  # AWS Bedrock Converse
-    anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
-    openai: ProviderConfig = Field(default_factory=ProviderConfig)
-    openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
-    orcarouter: ProviderConfig = Field(default_factory=ProviderConfig)  # OrcaRouter API gateway
-    assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)  # AssemblyAI voice transcription
-    huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
-    skywork: ProviderConfig = Field(default_factory=ProviderConfig)  # Skywork / APIFree API gateway
-    deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
-    groq: ProviderConfig = Field(default_factory=ProviderConfig)
-    zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
-    dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
-    modelscope: ProviderConfig = Field(default_factory=ProviderConfig)
-    vllm: ProviderConfig = Field(default_factory=ProviderConfig)
-    ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
-    lm_studio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio local models
-    atomic_chat: ProviderConfig = Field(default_factory=ProviderConfig)  # Atomic Chat local models
-    ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
-    gemini: ProviderConfig = Field(default_factory=ProviderConfig)
-    moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
-    kimi_coding: ProviderConfig = Field(default_factory=ProviderConfig)  # Kimi Coding Plan (Anthropic Messages API)
-    minimax: ProviderConfig = Field(default_factory=ProviderConfig)
-    minimax_anthropic: ProviderConfig = Field(default_factory=ProviderConfig)  # MiniMax Anthropic endpoint (thinking)
-    mistral: ProviderConfig = Field(default_factory=ProviderConfig)
-    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰) — LLM + ASR (set apiBase to Plan URL for ASR)
-    xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
-    longcat: ProviderConfig = Field(default_factory=ProviderConfig)  # LongCat
-    ant_ling: ProviderConfig = Field(default_factory=ProviderConfig)  # Ant Ling
-    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
-    edenai: ProviderConfig = Field(default_factory=ProviderConfig)  # Eden AI API gateway
-    novita: ProviderConfig = Field(default_factory=ProviderConfig)  # Novita AI
-    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
-    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
-    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
-    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
-    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
-    xai_grok: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # xAI Grok (OAuth)
-    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
-    qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
-    nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
-    opencode: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (canonical provider id)
-    opencode_zen: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (curated coding models)
-    opencode_go: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Go (low-cost coding models)
+    custom: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Any OpenAI-compatible endpoint
+    azure_openai: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Azure OpenAI (model = deployment name)
+    bedrock: BedrockProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # AWS Bedrock Converse
+    anthropic: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    openai: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    openrouter: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    orcarouter: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # OrcaRouter API gateway
+    assemblyai: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # AssemblyAI voice transcription
+    huggingface: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    skywork: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Skywork / APIFree API gateway
+    deepseek: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    groq: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    zhipu: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    dashscope: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    modelscope: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    vllm: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    ollama: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Ollama local models
+    lm_studio: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # LM Studio local models
+    atomic_chat: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Atomic Chat local models
+    ovms: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # OpenVINO Model Server (OVMS)
+    gemini: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    moonshot: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    kimi_coding: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Kimi Coding Plan (Anthropic Messages API)
+    minimax: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    minimax_anthropic: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # MiniMax Anthropic endpoint (thinking)
+    mistral: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    stepfun: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Step Fun (阶跃星辰) — LLM + ASR (set apiBase to Plan URL for ASR)
+    xiaomi_mimo: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Xiaomi MIMO (小米)
+    longcat: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # LongCat
+    ant_ling: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Ant Ling
+    aihubmix: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # AiHubMix API gateway
+    siliconflow: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # SiliconFlow (硅基流动)
+    edenai: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Eden AI API gateway
+    novita: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Novita AI
+    volcengine: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # VolcEngine (火山引擎)
+    volcengine_coding_plan: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # VolcEngine Coding Plan
+    byteplus: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # BytePlus (VolcEngine international)
+    byteplus_coding_plan: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # BytePlus Coding Plan
+    openai_codex: ProviderConfig | None = Field(default=None, exclude=True)  # OpenAI Codex (OAuth)
+    xai_grok: ProviderConfig | None = Field(default=None, exclude=True)  # xAI Grok (OAuth)
+    github_copilot: ProviderConfig | None = Field(default=None, exclude=True)  # Github Copilot (OAuth)
+    qianfan: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # Qianfan (百度千帆)
+    nvidia: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # NVIDIA NIM (nvapi- keys)
+    opencode: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # OpenCode Zen (canonical provider id)
+    opencode_zen: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # OpenCode Zen (curated coding models)
+    opencode_go: ProviderConfig | None = Field(default=None, exclude_if=lambda value: value is None)  # OpenCode Go (low-cost coding models)
 
     @model_validator(mode="after")
     def convert_extra_providers(self):
@@ -572,7 +570,7 @@ class Config(BaseSettings):
             spec = find_by_name(forced)
             if spec:
                 p = getattr(self.providers, spec.name, None)
-                return (p, spec.name) if p else (None, None)
+                return p, spec.name
             custom = _custom_provider_by_name(forced)
             if custom is not None:
                 return custom
@@ -589,13 +587,13 @@ class Config(BaseSettings):
             return kw in model_lower or kw.replace("-", "_") in model_normalized
 
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
-        for spec in PROVIDERS:
-            if spec.is_transcription_only:
-                continue
-            p = getattr(self.providers, spec.name, None)
-            if p and model_prefix and normalized_prefix == spec.name:
-                if not p.enabled or spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
-                    return p, spec.name
+        if prefixed_provider and not prefixed_provider.is_transcription_only:
+            p = getattr(self.providers, prefixed_provider.name, None)
+            if (
+                prefixed_provider.is_oauth or prefixed_provider.is_local or prefixed_provider.is_direct
+                or (p and p.api_key)
+            ):
+                return p, prefixed_provider.name
 
         # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
         # Return the matching provider even when apiBase is missing, so a
@@ -611,7 +609,7 @@ class Config(BaseSettings):
             if spec.is_transcription_only:
                 continue
             p = getattr(self.providers, spec.name, None)
-            if p and p.enabled and any(_kw_matches(kw) for kw in spec.keywords):
+            if p and any(_kw_matches(kw) for kw in spec.keywords):
                 # Local providers (Ollama, vLLM, …) keep model-family keywords
                 # like "nemotron" or "llama" to enable bare-model auto-routing,
                 # but those keywords collide with cloud-hosted variants of the
@@ -641,7 +639,7 @@ class Config(BaseSettings):
                 if not spec.is_local:
                     continue
                 p = getattr(self.providers, spec.name, None)
-                if not (p and p.enabled and p.api_base):
+                if not (p and p.api_base):
                     continue
                 if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
                     return p, spec.name
@@ -656,12 +654,12 @@ class Config(BaseSettings):
             if spec.is_oauth or spec.is_transcription_only:
                 continue
             p = getattr(self.providers, spec.name, None)
-            if p and p.enabled and p.api_key:
+            if p and p.api_key:
                 return p, spec.name
 
         # Final fallback: check for any configured custom provider
         for attr_name, p in (self.providers.model_extra or {}).items():
-            if isinstance(p, ProviderConfig) and p.enabled and p.api_base:
+            if isinstance(p, ProviderConfig) and p.api_base:
                 return p, attr_name
 
         return None, None
