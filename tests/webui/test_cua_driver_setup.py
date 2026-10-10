@@ -20,10 +20,13 @@ from nanobot.webui.mcp_presets_api import (
 from nanobot.webui.settings_services import WebUISettingsConfig
 
 
-@pytest.fixture
-def settings(tmp_path):
+@pytest.fixture(params=["official", "native"])
+def settings(tmp_path, monkeypatch, request):
+    from nanobot.apps.cua_driver import _RELEASES, Release
     from nanobot.config.loader import save_config
 
+    release = Release("darwin-native", "", native=True) if request.param == "native" else _RELEASES["darwin-universal"]
+    monkeypatch.setattr("nanobot.apps.cua_driver.host_release", lambda: release)
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     path = tmp_path / "config.json"
@@ -92,8 +95,9 @@ async def test_uninstall_has_explicit_consent_and_revokes_before_removal(setting
 
 @pytest.mark.asyncio
 async def test_reset_uninstall_needs_native_identity_and_new_consent(settings, monkeypatch):
-    from nanobot.apps.cua_driver import Release
+    from nanobot.apps.cua_driver import _RELEASES, Release
 
+    monkeypatch.setattr("nanobot.apps.cua_driver.host_release", lambda: _RELEASES["darwin-universal"])
     monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
     settings.update(lambda cfg: cfg.tools.mcp_servers.update({"cua-driver": CuaDriver(settings.path).configuration("observe")}))
     uninstall = AsyncMock()
@@ -153,7 +157,8 @@ async def test_enable_disable_reload_only_the_selected_host(settings, tmp_path, 
     result = await mcp_presets_settings_action("disable", {"name": ["cua-driver"]}, config=settings, reload_mcp=reload)
     assert "cua-driver" not in settings.load().tools.mcp_servers
     assert reload.await_count == 2
-    stop.assert_awaited_once()
+    # A native enable clears a previous sharing-stop latch before connecting.
+    assert stop.await_count == (2 if CuaDriver(settings.path).native else 1)
     row = next(row for row in result["presets"] if row["name"] == "cua-driver")
     assert row["driver_setup"]["installed"] and row["driver_setup"]["mode"] == "off"
     request.assert_not_awaited()  # An older client retains the manual setup contract.
@@ -262,7 +267,7 @@ def test_catalog_and_core_contract_are_additive(settings):
     assert CAPABILITY in result["capabilities"]
     row = next(row for row in result["presets"] if row["name"] == "cua-driver")
     assert row["driver_setup"]["schema"] == 1
-    assert row["driver_setup"]["permission_app"] == "CuaDriver"
+    assert row["driver_setup"]["permission_app"] == ("nanobot Computer Use" if CuaDriver(settings.path).native else "CuaDriver")
     assert row["manifest"]["install"]["strategy"] == "verified-driver"
     assert webui_contract()["min_protocol"] == 1
     # Frozen old host contract, independent of the current capability list.

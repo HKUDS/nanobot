@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproducible local native build. Never installs, grants access or launches it."""
+"""Build a distributable native payload. Never grant access or launch the app."""
 import argparse
 import hashlib
 import io
@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import tarfile
 from pathlib import Path
+
+from package_materials import application_source, dependency_notices, rust_notices
 
 ROOT = Path(__file__).resolve().parent
 REVISION = "d27f6a89d8aeef0f56363ee9bb60bbc565912b1e"
@@ -37,6 +39,13 @@ def main():
         (UPSTREAM / ".revision").write_text(REVISION)
     if (UPSTREAM / ".revision").read_text() != REVISION:
         raise SystemExit("Prepared source revision differs; use a separate clean build directory.")
+    for patch in sorted((ROOT / "patches").glob("*.patch")):
+        command = ["git", "apply", "--directory=native/.cua-source"]
+        applied = subprocess.run([*command, "--reverse", "--check", str(patch)],
+            cwd=ROOT.parents[1], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if applied.returncode:
+            run(*command, "--check", str(patch), cwd=ROOT.parents[1])
+            run(*command, str(patch), cwd=ROOT.parents[1])
     # Initialize downstream resolution with the upstream's exact dependency
     # versions; subsequent builds use the committed downstream lockfile.
     if not (ROOT / "Cargo.lock").exists():
@@ -45,7 +54,11 @@ def main():
         return
     destination = options.output.resolve()
     destination.mkdir(parents=True, exist_ok=False)
-    run("cargo", "build", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "-j", "4")
+    # Retain build-time proc-macro debug info to avoid Rust's broken stripped
+    # dylibs on newer macOS (rust-lang/rust#157750). The app remains a release build.
+    build_env = {**os.environ, "MACOSX_DEPLOYMENT_TARGET": "14.2",
+        "CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG": "1"}
+    run("cargo", "build", "--release", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "-j", "4", env=build_env)
     run("python3", str(ROOT / "build_theme.py"), str(destination / "theme.lottie"))
     run("cargo", "run", "--locked", "--manifest-path", str(RUST / "Cargo.toml"), "-p", "cursor-theme-cli", "--",
         "build", str(destination / "theme.lottie"), "--output", str(destination / "io.nanobot.computer-use.cua-theme"))
@@ -56,8 +69,11 @@ def main():
     resources = contents / "Resources"
     binary.parent.mkdir(parents=True)
     (resources / "cursor-themes").mkdir(parents=True)
+    sysroot = Path(run("rustc", "--print", "sysroot", stdout=subprocess.PIPE, text=True).stdout.strip())
+    rust_version = run("rustc", "--version", "--verbose", stdout=subprocess.PIPE, text=True).stdout
+    rust_notices(sysroot, resources, rust_version)
     target = Path(os.environ.get("CARGO_TARGET_DIR", str(ROOT / "target")))
-    shutil.copyfile(target / "debug/nanobot-computer-use", binary)
+    shutil.copyfile(target / "release/nanobot-computer-use", binary)
     binary.chmod(0o755)
     run("strip", "-x", str(binary))
     shutil.copyfile(destination / "io.nanobot.computer-use.cua-theme", resources / "cursor-themes/io.nanobot.computer-use.cua-theme")
@@ -73,34 +89,25 @@ def main():
         "CFBundleIconFile": "AppIcon.png", "LSUIElement": True, "LSMinimumSystemVersion": "14.2",
         "NSHighResolutionCapable": True,
     }))
-    # Resolve the complete built graph, not just the root crate's license.
-    metadata = json.loads(run("cargo", "metadata", "--locked", "--format-version", "1", "--manifest-path", str(ROOT / "Cargo.toml"), stdout=subprocess.PIPE).stdout)
-    notices = ["# Third-party notices\n", f"Cua source: https://github.com/trycua/cua/tree/{REVISION}; upstream PR #3019 preserves its contributor authorship.\n",
-        "MPL-2.0 dependency sources are supplied unchanged in Resources/MPL-SOURCES.tar.gz, under their original MPL-2.0 terms. No additional restriction applies to those sources.\n"]
-    mpl = []
-    for dep in sorted(metadata["packages"], key=lambda p: (p["name"], p["version"])):
-        dep_root = Path(dep["manifest_path"]).parent
-        notices.append(f"\n## {dep['name']} {dep['version']}\nLicense: {dep.get('license') or 'see upstream Cua MIT license'}\n")
-        if dep.get("source", "") and dep["source"].startswith("registry+"):
-            notices.append(f"Source: https://crates.io/crates/{dep['name']}/{dep['version']}\n")
-        if "MPL-2.0" in (dep.get("license") or ""):
-            mpl.append((dep_root, f"{dep['name']}-{dep['version']}"))
-        notice_files = sorted({*dep_root.glob("LICENSE*"), *dep_root.glob("COPYING*"), *dep_root.glob("NOTICE*")})
-        for notice in notice_files:
-            if notice.is_file():
-                notices.append(f"\n### {notice.name}\n\n{notice.read_text(errors='replace')}\n")
-    (package / "THIRD_PARTY_NOTICES.md").write_text("\n".join(notices))
+    triple = {"arm64": "aarch64-apple-darwin", "x86_64": "x86_64-apple-darwin"}[platform.machine().lower()]
+    metadata = json.loads(run("cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", triple,
+        "--manifest-path", str(ROOT / "Cargo.toml"), stdout=subprocess.PIPE).stdout)
+    notices = (f"Cua source: https://github.com/trycua/cua/tree/{REVISION}\n"
+        "Nanobot's MIT SDK patch is in NANOBOT-SOURCES.tar (native/computer-use/patches).\n\n"
+        "Rust runtime attribution is in RUST-NOTICES.txt and RUST-COPYRIGHT-library.html.\n\n"
+        + dependency_notices(metadata, UPSTREAM, resources))
+    (package / "THIRD_PARTY_NOTICES.md").write_text(notices)
     shutil.copyfile(package / "THIRD_PARTY_NOTICES.md", resources / "THIRD_PARTY_NOTICES.md")
-    with tarfile.open(resources / "MPL-SOURCES.tar.gz", "w:gz") as sources:
-        for directory, name in mpl:
-            sources.add(directory, arcname=name)
+    source = application_source()
+    (resources / "NANOBOT-SOURCES.tar").write_bytes(source)
     run("codesign", "--sign", "-", "--identifier", "io.nanobot.computer-use", str(app))
     run("codesign", "--verify", "--deep", "--strict", str(app))
-    archive_path = destination / (package.name + ".tar.gz")
+    archive_path = destination / "native-package.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
         archive.add(package, arcname=package.name)
     manifest = {"schema": 1, "version": "0.1.0", "revision": REVISION,
-        "directory": package.name, "archive": str(archive_path), "architecture": platform.machine().lower(),
+        "directory": package.name, "archive": archive_path.name, "architecture": platform.machine().lower(),
+        "source_sha256": hashlib.sha256(source).hexdigest(), "profile": "release", "minimum_macos": "14.2",
         "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest()}
     (destination / "native-package.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(destination / "native-package.json")

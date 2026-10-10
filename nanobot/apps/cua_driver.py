@@ -1,13 +1,15 @@
-"""Install a pinned Cua Driver release without changing other agents or PATH.
+"""Install the managed Computer Use payload without changing other agents or PATH.
 
 Installation is inert. Only an explicitly enabled MCP connection starts the
-driver; macOS retains the signed app's own permission identity.
+driver. New macOS installs use nanobot's bundled native app; existing official
+installs keep their identity until the user explicitly uninstalls them.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import platform
 import shutil
@@ -99,8 +101,8 @@ def host_release() -> Release | None:
     system, machine = platform.system().lower(), platform.machine().lower()
     arch = {"amd64": "x86_64", "x86_64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}.get(machine)
     if system == "darwin" and arch:
-        major = platform.mac_ver()[0].split(".")[0]
-        return _RELEASES["darwin-universal"] if major.isdigit() and int(major) >= 14 else None
+        version = platform.mac_ver()[0].split(".")[:2]
+        return Release("darwin-native", "", native=True) if all(p.isdigit() for p in version) and tuple(map(int, version)) >= (14, 2) else None
     return _RELEASES.get(f"{system}-{arch}")
 
 
@@ -128,16 +130,30 @@ class CuaDriver:
     def __init__(self, config_path: Path):
         self.config_path = config_path.resolve()
         self.release = host_release()
+        self.native_package: Path | None = None
         if platform.system() == "Darwin":
-            from nanobot.apps.computer_use_native import package_digest
+            from nanobot.apps.computer_use_native import BUNDLE_DIR, package_digest
 
+            # Do not hide an existing package or silently change its TCC identity.
+            legacy = _RELEASES["darwin-universal"]
+            major = platform.mac_ver()[0].split(".")[0]
+            if major.isdigit() and int(major) >= 14 and self._inside(self.root / legacy.directory).exists():
+                self.release = legacy
+                return
+            if not self.native:
+                return
+            assert self.release is not None
+            installed = self._inside(self.root / self.release.directory)
+            self.native_package = self.root if self._inside(self.root / "native-package.json").exists() else BUNDLE_DIR
+            # Pin an installed payload across distribution updates. Only uninstall
+            # followed by install selects newer bytes; consent never follows them.
+            manifest_root = installed if self._inside(installed / "native-package.json").exists() else self.native_package
             try:
-                digest = package_digest(self._inside(self.root))
+                digest = package_digest(manifest_root)
             except (ValueError, OSError) as exc:
-                raise DriverError("The local Computer Use package manifest is invalid. Restage the verified build.") from exc
+                raise DriverError("The Computer Use package manifest is invalid. Reinstall the matching nanobot distribution or restage the verified local build.") from exc
             if digest:
-                version = tuple(int(part) for part in platform.mac_ver()[0].split(".")[:2])
-                self.release = Release("darwin-native", digest, native=True) if version >= (14, 2) else None
+                self.release = Release("darwin-native", digest, native=True)
 
     @property
     def root(self) -> Path:
@@ -159,7 +175,7 @@ class CuaDriver:
 
     def _release(self) -> Release:
         if self.release is None:
-            raise DriverError("This gateway needs macOS 14+, Windows x64/ARM64, or Linux x64/ARM64 with a desktop session.")
+            raise DriverError("New installations need macOS 14.2+, Windows x64/ARM64, or Linux x64/ARM64 with a desktop session.")
         return self.release
 
     @property
@@ -171,7 +187,7 @@ class CuaDriver:
         return self._inside(self.directory / self._release().executable)
 
     def installed(self) -> bool:
-        return bool(self.release and self.executable.is_file() and
+        return bool(self.release and self.release.digest and self.executable.is_file() and
                     (self.directory / ".nanobot-verified").is_file() and
                     (self.directory / ".nanobot-verified").read_text() == self.release.digest)
 
@@ -225,17 +241,25 @@ class CuaDriver:
                 archive = staging / release.filename
                 async with asyncio.timeout(600):
                     if self.native:
-                        source = self._inside(self.root / "native-package.tar.gz")
-                        with source.open("rb") as stream:
-                            digest = hashlib.file_digest(stream, "sha256").hexdigest()
-                        if digest != release.digest:
-                            raise DriverError("The staged native package checksum failed. Nothing was installed.", 502)
+                        if not self.native_package or not release.digest:
+                            raise DriverError("This nanobot distribution is missing its native Computer Use package. Install the matching macOS platform wheel. For a source checkout, build native/computer-use into nanobot/apps/computer_use_bundle first.")
+                        source = self.native_package / "native-package.tar.gz"
+                        if self.native_package == self.root:
+                            source = self._inside(source)
+                        if not source.is_file():
+                            raise DriverError("The native Computer Use archive is missing. Reinstall the matching macOS distribution or rebuild the source checkout.")
                         copying = asyncio.create_task(asyncio.to_thread(shutil.copyfile, source, archive))
                         try:
                             await asyncio.shield(copying)
                         except asyncio.CancelledError:
                             await copying
                             raise
+                        # Verify the snapshot that will actually be unpacked,
+                        # even if pip updates the distribution during copying.
+                        with archive.open("rb") as stream:
+                            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+                        if digest != release.digest:
+                            raise DriverError("The native package checksum failed. Nothing was installed.", 502)
                     else:
                         await _download(release, archive)
                 unpack = asyncio.create_task(asyncio.to_thread(_unpack, archive, staging / "unpacked"))
@@ -272,6 +296,16 @@ class CuaDriver:
                     if returncode != 0:
                         raise DriverError("Apple's signature verification failed. The driver was not installed.", 502)
                 (package / ".nanobot-verified").write_text(release.digest)
+                if self.native:
+                    from nanobot.apps.computer_use_native import REVISION
+                    from nanobot.apps.computer_use_native import VERSION as NATIVE_VERSION
+
+                    # Pin the verified identity, not a possibly updated source
+                    # manifest. Distribution upgrades never migrate consent.
+                    (package / "native-package.json").write_text(json.dumps({
+                        "schema": 1, "version": NATIVE_VERSION, "revision": REVISION,
+                        "architecture": platform.machine().lower(), "sha256": release.digest,
+                    }))
                 package.rename(self.directory)
         except (httpx.HTTPError, TimeoutError) as exc:
             raise DriverError("Cua Driver download failed or timed out. Check this gateway's network and retry.", 502) from exc

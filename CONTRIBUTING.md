@@ -137,6 +137,15 @@ Each platform wheel contains the built WebUI and the matching native TUI. Pip ch
 
 The confirmation is an operational commitment, not a cosmetic checkbox. Before accepting it, verify that the exact Bun/WebKit revisions remain retrievable and that the project can honor the archive's corresponding-source offer for its full stated period. Preserve published archives and their source materials.
 
+Mac platform wheels also contain the verified **nanobot Computer Use** payload,
+including its licenses and corresponding source. Use `--computer-use-dir` when
+packaging them; missing payloads fail the release build. Apps installs that single
+identity without developer staging, but enabling access still requires user consent.
+The native host requires macOS 14.2+; the rest of the wheel retains its documented
+minimum OS. Follow the Computer Use signing, clean-install, source and architecture
+gates in the release checklist. Ad-hoc signing is not notarization or approval to
+publish, and existing CuaDriver installations must not be silently migrated.
+
 ## Questions?
 
 If you have questions, ideas, or half-formed insights, you are warmly welcome here.

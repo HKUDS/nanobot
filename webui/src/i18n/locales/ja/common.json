@@ -7,7 +7,7 @@
     "source": "エンジンのソース",
     "sharingPaused": "共有を停止しました",
     "sharingPausedHint": "macOS で共有が停止されました。次の操作を許可する場合のみ再接続してください。",
-    "nativeInstallHint": "検証済みの macOS 14.2 以降向けローカルテストビルドをインストールします。Cua の MIT ライセンスと第三者の権利表記を同梱します。Cua の公式バイナリではありません。",
+    "nativeInstallHint": "検証済みの nanobot Computer Use をインストールします（macOS 14.2 以降）。Cua の MIT ライセンスと第三者の権利表記を同梱します。このビルドはアドホック署名で、Apple の公証は受けていません。",
     "nativeFeedbackScoped": "タスク中は macOS が共有ウインドウを表示します。対応する操作では nanobot のポインタを表示します。バックグラウンド操作はアプリによって異なります。",
     "uninstall": "アンインストール",
     "uninstallTitle": "Computer Use をアンインストールしますか？",

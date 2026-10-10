@@ -7,7 +7,7 @@
     "source": "Mã nguồn bộ máy",
     "sharingPaused": "Đã dừng chia sẻ",
     "sharingPausedHint": "Chia sẻ đã dừng trong macOS. Chỉ kết nối lại khi bạn muốn cho phép tác vụ máy tính tiếp theo.",
-    "nativeInstallHint": "Cài bản dựng cục bộ đã xác minh cho macOS 14.2+, được ký để thử nghiệm cục bộ. Bao gồm giấy phép MIT của Cua và thông báo bên thứ ba. Đây không phải bản nhị phân chính thức của Cua.",
+    "nativeInstallHint": "Cài nanobot Computer Use đã xác minh cho macOS 14.2 trở lên. Bao gồm giấy phép MIT của Cua và thông báo bên thứ ba. Bản dựng này dùng chữ ký ad hoc, chưa được Apple công chứng.",
     "nativeFeedbackScoped": "Trong tác vụ, macOS đánh dấu cửa sổ đang chia sẻ. Các thao tác được hỗ trợ hiển thị con trỏ nanobot; điều khiển nền tùy thuộc ứng dụng.",
     "uninstall": "Gỡ cài đặt",
     "uninstallTitle": "Gỡ cài đặt Computer Use?",

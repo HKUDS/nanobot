@@ -147,7 +147,7 @@ artifacts = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["nanobot"]
-exclude = ["nanobot/channels/*/tests/**"]
+exclude = ["nanobot/channels/*/tests/**", "nanobot/apps/computer_use_bundle/**"]
 
 [tool.hatch.build.targets.wheel.sources]
 "nanobot" = "nanobot"
@@ -162,7 +162,7 @@ include = [
     "THIRD_PARTY_NOTICES.md",
     "pyproject.toml",
 ]
-exclude = ["nanobot/channels/*/tests/**"]
+exclude = ["nanobot/channels/*/tests/**", "nanobot/apps/computer_use_bundle/**"]
 
 [tool.ruff]
 line-length = 100

@@ -7,7 +7,7 @@
     "source": "Sumber mesin",
     "sharingPaused": "Berbagi dihentikan",
     "sharingPausedHint": "Berbagi dihentikan di macOS. Hubungkan kembali hanya untuk mengizinkan tugas desktop berikutnya.",
-    "nativeInstallHint": "Memasang build lokal terverifikasi untuk macOS 14.2+, ditandatangani untuk pengujian lokal. Lisensi MIT Cua dan pemberitahuan pihak ketiga disertakan. Ini bukan biner resmi Cua.",
+    "nativeInstallHint": "Memasang nanobot Computer Use terverifikasi untuk macOS 14.2 ke atas. Termasuk lisensi MIT Cua dan pemberitahuan pihak ketiga. Build ini ditandatangani ad hoc, tanpa notarisasi Apple.",
     "nativeFeedbackScoped": "Saat tugas berjalan, macOS menandai jendela yang dibagikan. Tindakan yang didukung menampilkan penunjuk nanobot; kontrol latar belakang bergantung pada aplikasi.",
     "uninstall": "Hapus instalasi",
     "uninstallTitle": "Hapus instalasi Computer Use?",

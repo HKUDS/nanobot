@@ -1,8 +1,7 @@
-"""Local macOS native-host distribution and private, bounded transport.
+"""macOS native-host distribution and private, bounded transport.
 
-This is an explicitly staged developer build, not a substitute for an upstream
-signed release. Only local installation code can register its archive. No WebUI
-or model-facing operation accepts an executable path or download URL.
+Platform wheels supply the default payload. Explicit local staging remains for
+developer builds; neither WebUI nor agent tools can select an archive or URL.
 """
 from __future__ import annotations
 
@@ -23,9 +22,10 @@ APP = "nanobot Computer Use.app"
 PERMISSION_APP = "nanobot Computer Use"
 CAPABILITY = "webui.computer-use-native.v1"
 MAX_RESPONSE = 32 * 1024 * 1024
+BUNDLE_DIR = Path(__file__).with_name("computer_use_bundle")
 
 
-def package_digest(root: Path) -> str | None:
+def package_digest(root: Path, *, architecture: str | None = None) -> str | None:
     marker = root / "native-package.json"
     if not marker.exists():
         return None
@@ -35,7 +35,7 @@ def package_digest(root: Path) -> str | None:
     value = cast(dict[str, Any], decoded)
     if (value.get("schema") != 1 or value.get("revision") != REVISION
             or value.get("version") != VERSION or not isinstance(value.get("sha256"), str)
-            or value.get("architecture") != platform.machine().lower()
+            or value.get("architecture") != (architecture or platform.machine().lower())
             or len(value["sha256"]) != 64 or any(c not in "0123456789abcdef" for c in value["sha256"])):
         raise ValueError("The local Computer Use build manifest is invalid. Rebuild and stage it locally.")
     return value["sha256"]
@@ -55,7 +55,7 @@ def register_package(config_path: Path, manifest_path: Path) -> None:
     if (source.get("revision") != REVISION or source.get("version") != VERSION
             or source.get("architecture") != platform.machine().lower()):
         raise ValueError("The native build does not match the pinned source.")
-    archive = Path(source["archive"]).resolve()
+    archive = (manifest_path.parent / source["archive"]).resolve()
     with archive.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     if digest != source.get("sha256"):

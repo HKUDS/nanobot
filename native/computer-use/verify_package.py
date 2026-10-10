@@ -1,26 +1,32 @@
 """Exercise the real installer lifecycle without requesting desktop access."""
 import asyncio
 import json
+import platform
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from nanobot.apps.computer_use_native import NativeConnection, admin, register_package
+from nanobot.apps import computer_use_native
+from nanobot.apps.computer_use_native import NativeConnection, admin
 from nanobot.apps.cua_driver import CuaDriver, DriverError
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
+from scripts.computer_use_release import verified_bundle
 
 
 async def verify(manifest: Path, runtime: bool):
+    verified_bundle(manifest.parent, platform.machine().lower())
+    # Exercise the default distribution path, without per-gateway staging.
+    computer_use_native.BUNDLE_DIR = manifest.parent.resolve()
     with tempfile.TemporaryDirectory(prefix="nb-package-", dir="/tmp") as directory:
         config_path = Path(directory) / "config.json"
         save_config(Config(), config_path)
-        register_package(config_path, manifest)
         driver = CuaDriver(config_path)
         assert driver.native and not driver.installed()
         await driver.install()
         assert driver.installed()
+        assert not (driver.root / "native-package.json").exists()
         assert not load_config(config_path).tools.mcp_servers
         subprocess.run([str(driver.executable), "--version"], check=True)
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(driver.bundle)], check=True)
@@ -77,7 +83,7 @@ async def verify(manifest: Path, runtime: bool):
         assert driver.installed()
         await driver.uninstall()
         assert not driver.directory.exists()
-        print(json.dumps({"install": True, "signature": True, "notices": True,
+        print(json.dumps({"default_bundled_install": True, "signature": True, "notices": True,
             "enabled_uninstall_refused": True, "uninstall": True, "reinstall": True,
             "other_files_preserved": True, "runtime_started": runtime, "desktop_captured": False}))
 

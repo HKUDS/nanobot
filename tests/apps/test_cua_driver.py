@@ -127,6 +127,7 @@ async def test_uninstall_cannot_reset_shared_official_grants(tmp_path, monkeypat
     from nanobot.config.loader import save_config
     from nanobot.config.schema import Config
 
+    monkeypatch.setattr(cua_driver, "host_release", lambda: cua_driver._RELEASES["darwin-universal"])
     driver = CuaDriver(tmp_path / "config.json")
     save_config(Config(), driver.config_path)
     process = AsyncMock()
@@ -275,16 +276,54 @@ async def test_install_does_not_overwrite_unverified_or_redirected_directory(tmp
 
 def test_supported_host_selects_pinned_package(monkeypatch):
     for system, arch, target in [
-        ("Darwin", "arm64", "darwin-universal"), ("Darwin", "x86_64", "darwin-universal"),
+        ("Darwin", "arm64", "darwin-native"), ("Darwin", "x86_64", "darwin-native"),
         ("Windows", "AMD64", "windows-x86_64"), ("Windows", "ARM64", "windows-arm64"),
         ("Linux", "aarch64", "linux-arm64"), ("Linux", "x86_64", "linux-x86_64"),
     ]:
         monkeypatch.setattr(cua_driver.platform, "system", lambda: system)
         monkeypatch.setattr(cua_driver.platform, "machine", lambda: arch)
-        monkeypatch.setattr(cua_driver.platform, "mac_ver", lambda: ("14.0", (), ""))
+        monkeypatch.setattr(cua_driver.platform, "mac_ver", lambda: ("14.2", (), ""))
         selected = cua_driver.host_release()
         assert selected is not None and selected.target == target
-        assert len(selected.digest) == 64
+        assert selected.native if system == "Darwin" else len(selected.digest) == 64
+
+
+def test_existing_official_mac_install_keeps_identity_until_explicit_uninstall(tmp_path, monkeypatch):
+    monkeypatch.setattr(cua_driver.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cua_driver.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(cua_driver.platform, "mac_ver", lambda: ("14.0", (), ""))
+    legacy = cua_driver._RELEASES["darwin-universal"]
+    directory = tmp_path / "apps/cua-driver" / legacy.directory
+    binary = directory / legacy.executable
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing official app")
+    (directory / ".nanobot-verified").write_text(legacy.digest)
+    driver = CuaDriver(tmp_path / "config.json")
+    assert driver.installed() and not driver.native
+    assert driver.info(None)["permission_app"] == "CuaDriver"
+    assert driver.configuration("observe").env == cua_driver.DRIVER_ENV
+    assert CuaDriver(tmp_path / "fresh/config.json").release is None
+
+
+@pytest.mark.asyncio
+async def test_fresh_mac_never_downloads_official_fallback_when_native_bundle_missing(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from nanobot.apps import computer_use_native
+
+    monkeypatch.setattr(cua_driver.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cua_driver.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(cua_driver.platform, "mac_ver", lambda: ("14.2", (), ""))
+    monkeypatch.setattr(computer_use_native, "BUNDLE_DIR", tmp_path / "absent")
+    download = AsyncMock()
+    monkeypatch.setattr(cua_driver, "_download", download)
+    driver = CuaDriver(tmp_path / "config.json")
+    assert driver.native and not driver.installed()
+    assert driver.info(None)["permission_app"] == "nanobot Computer Use"
+    with pytest.raises(DriverError, match="matching macOS platform wheel"):
+        await driver.install()
+    download.assert_not_awaited()
+    assert not driver.directory.exists()
 
 
 @pytest.mark.asyncio
@@ -503,19 +542,23 @@ async def test_stopping_waits_for_managed_launch_and_stops_only_its_socket(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_pending_permission_check_does_not_launch_or_claim_grants(tmp_path, monkeypatch):
+@pytest.mark.parametrize("native", [False, True])
+async def test_pending_permission_check_does_not_launch_or_claim_grants(tmp_path, monkeypatch, native):
     from unittest.mock import AsyncMock
 
     from nanobot.apps import cua_driver_stdio
 
     monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
     monkeypatch.setattr(cua_driver.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cua_driver, "host_release", lambda: Release("darwin-native", "", native=True)
+                        if native else cua_driver._RELEASES["darwin-universal"])
     monkeypatch.setattr(cua_driver_stdio, "endpoint", lambda path: tmp_path / "driver.sock")
     monkeypatch.setattr(cua_driver_stdio, "daemon_listening", lambda path: False)
     spawn = AsyncMock()
     monkeypatch.setattr(cua_driver.asyncio, "create_subprocess_exec", spawn)
     assert await CuaDriver(tmp_path / "config.json").check() == {
         "connected": False, "accessibility": None, "screen_recording": None, "capture_verified": False,
+        **({"sharing_paused": False} if native else {}),
     }
     spawn.assert_not_awaited()
 
@@ -546,7 +589,7 @@ async def test_setup_opens_only_fixed_panes_or_this_gateways_bundle(tmp_path, mo
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(cua_driver.platform.system() != "Darwin", reason="macOS native permission flow")
-async def test_permission_setup_and_mcp_share_one_native_startup(tmp_path, monkeypatch):
+async def test_official_permission_setup_and_mcp_share_one_startup(tmp_path, monkeypatch):
     import asyncio
     from unittest.mock import Mock
 
@@ -555,6 +598,7 @@ async def test_permission_setup_and_mcp_share_one_native_startup(tmp_path, monke
     from nanobot.config.schema import Config
 
     monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
+    monkeypatch.setattr(cua_driver, "host_release", lambda: cua_driver._RELEASES["darwin-universal"])
     temporary = tmp_path / "private socket"
     temporary.mkdir(mode=0o700)
     monkeypatch.setattr(cua_driver_stdio, "endpoint", lambda path: temporary / "driver.sock")

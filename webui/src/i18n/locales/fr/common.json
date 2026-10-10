@@ -7,7 +7,7 @@
     "source": "Code source du moteur",
     "sharingPaused": "Partage arrêté",
     "sharingPausedHint": "Le partage a été arrêté dans macOS. Reconnectez-vous uniquement pour autoriser une nouvelle tâche.",
-    "nativeInstallHint": "Installe une version locale vérifiée pour macOS 14.2+, signée pour les tests locaux. La licence MIT de Cua et les mentions tierces sont incluses. Ce n’est pas un binaire officiel de Cua.",
+    "nativeInstallHint": "Installe nanobot Computer Use vérifié pour macOS 14.2 ou ultérieur. Inclut la licence MIT de Cua et les mentions tierces. Cette version porte une signature ad hoc, sans notarisation Apple.",
     "nativeFeedbackScoped": "Pendant une tâche, macOS indique la fenêtre partagée. Les actions compatibles affichent le pointeur nanobot ; le contrôle en arrière-plan dépend de l’app.",
     "uninstall": "Désinstaller",
     "uninstallTitle": "Désinstaller Computer Use ?",

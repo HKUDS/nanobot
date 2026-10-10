@@ -7,7 +7,7 @@
     "source": "Código-fonte do motor",
     "sharingPaused": "Compartilhamento interrompido",
     "sharingPausedHint": "O compartilhamento foi interrompido no macOS. Reconecte apenas para permitir uma nova tarefa.",
-    "nativeInstallHint": "Instala uma compilação local verificada para macOS 14.2+, assinada para testes locais. Inclui a licença MIT do Cua e avisos de terceiros. Não é um binário oficial do Cua.",
+    "nativeInstallHint": "Instala o nanobot Computer Use verificado para macOS 14.2 ou posterior. Inclui a licença MIT do Cua e avisos de terceiros. Esta versão usa assinatura ad hoc, sem notarização da Apple.",
     "nativeFeedbackScoped": "Durante a tarefa, o macOS indica a janela compartilhada. Ações compatíveis mostram o cursor do nanobot; o controle em segundo plano depende do app.",
     "uninstall": "Desinstalar",
     "uninstallTitle": "Desinstalar Computer Use?",

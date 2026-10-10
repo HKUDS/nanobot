@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import plistlib
 import runpy
 import stat
 import struct
@@ -12,11 +13,61 @@ import tomllib
 import zipfile
 from email.parser import BytesParser
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from nanobot.cli import tui_launcher
 from scripts import build_tui_wheels as packager
+from scripts.computer_use_release import verified_bundle
+
+
+def make_computer_use_bundle(directory, target, *, omit=None):
+    from nanobot.apps.computer_use_native import APP, REVISION, VERSION
+
+    output = directory / target
+    output.mkdir()
+    source = runpy.run_path(str(packager.ROOT / "native/computer-use/package_materials.py"))["application_source"]()
+    prefix = f"nanobot-computer-use-{VERSION}-darwin/"
+    contents = prefix + APP + "/Contents/"
+    resources = contents + "Resources/"
+    binary = b"\xcf\xfa\xed\xfe" + struct.pack("<I", 0x0100000C if target.endswith("arm64") else 0x01000007)
+    mpl = io.BytesIO()
+    with tarfile.open(fileobj=mpl, mode="w:gz") as archive:
+        for name in ("LICENSE-MPL-2.0", "uniffi_core-0.31.0/src/lib.rs"):
+            member = tarfile.TarInfo(name)
+            member.size = 7
+            archive.addfile(member, io.BytesIO(b"fixture"))
+    notices = b"fixture: yabai; Steven Sheldon; Inter Project Authors; Mozilla Public License Version 2.0"
+    files = {
+        prefix + "LICENSE": b"fixture license",
+        prefix + "THIRD_PARTY_NOTICES.md": notices,
+        contents + "Info.plist": plistlib.dumps({"CFBundleIdentifier": "io.nanobot.computer-use",
+            "CFBundleDisplayName": "nanobot Computer Use", "LSMinimumSystemVersion": "14.2"}),
+        contents + "MacOS/nanobot-computer-use": binary,
+        contents + "_CodeSignature/CodeResources": b"fixture signature",
+        resources + "NANOBOT-SOURCES.tar": source,
+        resources + "MPL-SOURCES.tar.gz": mpl.getvalue(),
+        resources + "THIRD_PARTY_NOTICES.md": notices,
+    }
+    for name in ("Cua-MIT-LICENSE.md", "nanobot-MIT-LICENSE", "PROVENANCE.md", "AppIcon.png",
+                 "cursor-themes/io.nanobot.computer-use.cua-theme", "RUST-NOTICES.txt", "RUST-COPYRIGHT-library.html"):
+        files[resources + name] = b"fixture material"
+    if omit:
+        files.pop(resources + omit)
+    archive_path = output / "native-package.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        for name, data in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+    (output / "native-package.json").write_text(json.dumps({
+        "schema": 1, "version": VERSION, "revision": REVISION, "profile": "release", "minimum_macos": "14.2",
+        "architecture": "arm64" if target.endswith("arm64") else "x86_64",
+        "archive": archive_path.name, "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+        "source_sha256": hashlib.sha256(source).hexdigest(),
+    }))
+    return output
 
 
 @pytest.fixture
@@ -86,12 +137,16 @@ def make_bundle(directory, target, *, stale_source=False, wrong_architecture=Fal
 def test_platform_wheel_record_permissions_and_complete_bundle(tmp_path, candidate, target):
     wheel, info = candidate
     bundle = make_bundle(tmp_path, target)
-    output = packager.build_wheel(wheel, tmp_path, tmp_path / "wheels", target)
+    if target.startswith("darwin-"):
+        make_computer_use_bundle(tmp_path, target)
+    output = packager.build_wheel(wheel, tmp_path, tmp_path / "wheels", target, computer_use_dir=tmp_path)
     assert output.name.endswith(f"-py3-none-{packager.PLATFORMS[target]}.whl")
     with zipfile.ZipFile(output) as archive:
         metadata = BytesParser().parsebytes(archive.read(f"{info}/WHEEL"))
         assert metadata["Root-Is-Purelib"] == "false"
         assert metadata.get_all("Tag") == [f"py3-none-{packager.PLATFORMS[target]}"]
+        native = [name for name in archive.namelist() if name.startswith("nanobot/apps/computer_use_bundle/")]
+        assert len(native) == (2 if target.startswith("darwin-") else 0)
         for name, content in bundle.items():
             path = f"nanobot/tui/bin/{name}"
             assert archive.read(path) == content
@@ -107,7 +162,81 @@ def test_platform_wheel_record_permissions_and_complete_bundle(tmp_path, candida
                 data = archive.read(name)
                 assert (digest, size) == (packager._digest(data), str(len(data)))
     with pytest.raises(FileExistsError):
-        packager.build_wheel(wheel, tmp_path, output.parent, target)
+        packager.build_wheel(wheel, tmp_path, output.parent, target, computer_use_dir=tmp_path)
+
+
+def test_mac_wheel_refuses_missing_native_payload(tmp_path, candidate):
+    make_bundle(tmp_path, "darwin-arm64")
+    with pytest.raises(ValueError, match="--computer-use-dir"):
+        packager.build_wheel(candidate[0], tmp_path, tmp_path / "wheels", "darwin-arm64")
+    assert not list((tmp_path / "wheels").glob("*.whl"))
+
+
+@pytest.mark.parametrize("omitted", ["Cua-MIT-LICENSE.md", "MPL-SOURCES.tar.gz", "NANOBOT-SOURCES.tar", "RUST-NOTICES.txt"])
+def test_native_package_refuses_missing_compliance_material(tmp_path, omitted):
+    directory = make_computer_use_bundle(tmp_path, "darwin-arm64", omit=omitted)
+    with pytest.raises(ValueError, match="missing.*material"):
+        verified_bundle(directory, "arm64")
+
+
+def test_native_package_refuses_stale_source_and_wrong_architecture(tmp_path):
+    directory = make_computer_use_bundle(tmp_path, "darwin-arm64")
+    with pytest.raises(ValueError, match="manifest is invalid"):
+        verified_bundle(directory, "x86_64")
+    manifest = directory / "native-package.json"
+    value = json.loads(manifest.read_text())
+    value["source_sha256"] = "0" * 64
+    manifest.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="sources do not match"):
+        verified_bundle(directory, "arm64")
+
+
+@pytest.mark.asyncio
+async def test_default_native_install_is_inert_pinned_and_reinstallable(tmp_path, monkeypatch):
+    from nanobot.apps import computer_use_native, cua_driver
+    from nanobot.config.loader import load_config, save_config
+    from nanobot.config.schema import Config
+
+    directory = make_computer_use_bundle(tmp_path, "darwin-arm64")
+    monkeypatch.setattr(computer_use_native, "BUNDLE_DIR", directory)
+    monkeypatch.setattr(cua_driver.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cua_driver.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(cua_driver.platform, "mac_ver", lambda: ("14.2", (), ""))
+    spawn = AsyncMock(return_value=AsyncMock(wait=AsyncMock(return_value=0)))
+    monkeypatch.setattr(cua_driver.asyncio, "create_subprocess_exec", spawn)
+    config_path = tmp_path / "instance/config.json"
+    save_config(Config(), config_path)
+    driver = cua_driver.CuaDriver(config_path)
+    assert driver.native and not driver.installed()
+    await driver.install()  # No register_package or config-specific staging.
+    assert driver.installed() and not load_config(config_path).tools.mcp_servers
+    assert spawn.call_args.args[:4] == ("/usr/bin/codesign", "--verify", "--deep", "--strict")
+    assert spawn.call_count == 1
+    assert not (driver.root / "native-package.json").exists()
+    cfg = load_config(config_path)
+    cfg.tools.mcp_servers["cua-driver"] = driver.configuration("observe")
+    save_config(cfg, config_path)
+    with pytest.raises(cua_driver.DriverError, match="Disable Computer Use"):
+        await driver.uninstall()
+    cfg.tools.mcp_servers.clear()
+    save_config(cfg, config_path)
+    # A Python distribution update cannot silently replace the installed native identity.
+    manifest = directory / "native-package.json"
+    original = manifest.read_text()
+    value = json.loads(original)
+    value["sha256"] = "a" * 64
+    manifest.write_text(json.dumps(value))
+    existing = cua_driver.CuaDriver(config_path)
+    assert existing.installed() and existing.release == driver.release
+    monkeypatch.setattr(existing, "stop", AsyncMock())
+    await existing.uninstall()
+    with pytest.raises(cua_driver.DriverError, match="checksum failed"):
+        await cua_driver.CuaDriver(config_path).install()
+    assert not existing.directory.exists()
+    manifest.write_text(original)
+    fresh = cua_driver.CuaDriver(config_path)
+    await fresh.install()
+    assert fresh.installed() and not load_config(config_path).tools.mcp_servers
 
 
 @pytest.mark.parametrize(

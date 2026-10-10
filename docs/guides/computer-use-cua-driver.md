@@ -3,36 +3,39 @@
 The product name is **Computer Use** in every locale, with nanobot's
 orange icon. The name and short app description stay in English in the catalog
 and setup dialog; interface actions and permission instructions follow the
-selected interface language. By default, the desktop engine is the unmodified upstream **CuaDriver** app;
-macOS permission prompts and System Settings show **CuaDriver**, not nanobot.
-Connection setup explains this distinction before requesting permissions.
-The default distribution does not require a nanobot Developer ID certificate. It preserves the
-upstream bundle and signature instead of renaming or re-signing them.
-An explicitly staged **local macOS native build** is also available; see below.
+selected interface language. New macOS 14.2+ installations use **nanobot Computer Use**,
+including that name in permission prompts and System Settings. Its native payload
+comes with the macOS platform wheel; users do not need Rust or developer staging.
+Existing official **CuaDriver** installations keep their identity and grants until
+explicitly uninstalled. Linux and Windows retain the pinned official driver.
+Connection setup always names the actual installed permission owner.
 
 Install [Cua Driver](https://cua.ai/docs/cua-driver) from **Settings → Apps →
 Apps → Computer Use**, or find it by **Cua Driver** in the **MCP** filter. You can also connect a separately installed driver through stdio
 MCP. Nanobot owns the model, agent loop, and tool execution; the
 driver supplies desktop observations and input. No provider-specific computer-use
-API is required. The default official-driver path needs no extra native SDK.
+API is required. No SDK or model installation is required on the user's computer.
 
-## Local macOS build with native sharing
+## macOS native sharing
 
-The optional host in [`native/computer-use`](../../native/computer-use/README.md)
+The host in [`native/computer-use`](../../native/computer-use/README.md)
 embeds the pinned MIT Cua SDK and the branded orange/pink cursor. It is **not**
 the official 0.33.4 binary. Its permission identity is **nanobot Computer Use**;
 it never renames the upstream app or borrows its signature or macOS grants.
-Build and stage it explicitly on the gateway; neither the model nor the WebUI
-can select a source archive, executable or download URL. The manifest binds the
-source revision, architecture and archive checksum. Ordinary installations keep
-using the pinned official package until a local build is staged.
+The platform wheel supplies a verified release payload; neither the model nor the
+WebUI can select a source archive, executable or download URL. The manifest binds
+source revision, architecture, application source and archive checksum. Source
+checkouts can build into `nanobot/apps/computer_use_bundle/` using the linked guide.
+Missing native payloads produce an installation error, not a silent switch to
+CuaDriver. To switch an older installation, disable and uninstall it first.
 
 The native build uses the same Apps install/consent/disable/uninstall dialog.
 Installation does not start it. Connecting requests Accessibility first; Screen
 Recording is requested only when the user advances that step. Permission checks
 never create new prompts or capture screen content. macOS still owns both grants.
-An ad-hoc signature is for local development, not Developer ID/notarization;
-public native distribution needs its own release/signing work.
+The current builder uses ad-hoc signing, not Developer ID or Apple notarization.
+It does not bypass Gatekeeper. Public distribution requires the clean-install and
+signing decision gates in the [release checklist](../releasing.md).
 
 Each gateway agent run owns one native connection, shared across its desktop
 tools. `get_window_state(pid, window_id)` selects a real window stream before
@@ -52,7 +55,9 @@ stays local; SDK screenshots from agent tasks may reach the selected model.
 
 The package preserves Cua's original MIT notice and upstream authorship, plus
 nanobot's MIT notice and dependency licenses. UniFFI dependencies retain MPL-2.0;
-their unchanged sources are included in `Contents/Resources/MPL-SOURCES.tar.gz`.
+their unchanged sources and full license are included in `Contents/Resources/MPL-SOURCES.tar.gz`.
+Host source and build inputs are in `NANOBOT-SOURCES.tar`; notices also preserve
+the Inter font license and upstream derived-code credits.
 This does not relicense those dependencies as MIT. See the
 [Mozilla distribution guidance](https://www.mozilla.org/en-US/MPL/2.0/FAQ/#q8-i-want-to-distribute-outside-my-organization-executable-programs-or-libraries-that-i-have-compiled-from-someone-elses-unchanged-mpl-licensed-source-code-either-standalone-or-part-of-a-larger-work-what-do-i-have-to-do).
 
@@ -64,8 +69,8 @@ MCP features keep using WebUI protocol 1.
 
 The app name and catalog action open the same setup window without changing
 configuration. Before installation it shows the three core capabilities, the
-gateway computer and a fixed **Download & install** footer. This button starts
-the verified download directly; there is no second installation page. Progress
+gateway computer and a fixed **Install** footer (or **Download & install** for the
+official driver). This installs the verified payload directly; there is no second installation page. Progress
 and the subsequent access choice stay in the same dialog. Its height follows
 the content, capped by the viewport, with the action footer outside the scrolling
 body; it does not reserve blank space for another screen.
@@ -77,8 +82,9 @@ The managed app uses this flow in the shared dialog, not the generic MCP tool
 tabs. After installation, connection setup places the gateway computer and
 current access state first, followed by **View only** and **View & control** choices
 when access is off. Once enabled, the compact current-access row is itself the
-**Change access** control; **Cancel** sits beside confirmation in the footer,
-discards an unconfirmed edit and returns focus to that row. Missing or unconfirmed system
+**Change access** control. It stays visible while expanded; selecting it again
+collapses the choices and discards an unconfirmed edit. **Cancel** in the footer
+does the same and returns focus to that row. Missing or unconfirmed system
 permissions take priority over reconnecting: the setup shows one permission
 checklist, with actions for pending grants and a checkmark for confirmed grants.
 Only after both Mac grants are confirmed does a failed connection make
@@ -127,10 +133,11 @@ this navigates only, without starting a task or taking a screenshot.
    or connect to a remote host. The catalog button only opens setup; it does not
    download the driver or enable desktop access. Its tooltip and accessible name
    describe the action, and closing setup returns keyboard focus to its opener.
-2. Confirm **Download & install**. Nanobot downloads the official **0.33.4**
-   package, checks its pinned SHA-256, and extracts it into
-   `<gateway-config-directory>/apps/cua-driver/`. macOS additionally verifies
-   the signed `CuaDriver.app`. Installation alone does not enable MCP, launch
+2. Confirm **Install** on macOS or **Download & install** on other platforms.
+   Nanobot verifies the bundled native payload on macOS; Linux/Windows download
+   the pinned official **0.33.4** package. The SHA-256-checked package is extracted
+   into `<gateway-config-directory>/apps/cua-driver/`. macOS additionally verifies
+   the actual app's code signature. Installation alone does not enable MCP, launch
    the driver, change PATH, configure other agents, or grant OS permissions.
    A failed/cancelled download is discarded; an existing unverified directory
    is not overwritten. The button shows **Installing…** during the download.
@@ -148,7 +155,8 @@ this navigates only, without starting a task or taking a screenshot.
    second permission-request process alongside it. macOS still
    requires separate approval for each permission; this is not a single blanket
    authorization. Approve Accessibility and Screen Recording **yourself on the
-   gateway computer**. **CuaDriver** owns these grants, not the
+   gateway computer**. **nanobot Computer Use** (or **CuaDriver** for an existing
+   official installation) owns these grants, not the
    terminal or web browser. Connection setup shows only missing or unconfirmed
    grants. The guide highlights one permission at a time, with one **Open
    settings** action for the selected step. A confirmed first grant advances
@@ -159,7 +167,9 @@ this navigates only, without starting a task or taking a screenshot.
    call Screen Recording **Screen & System Audio Recording**. These are
    separate pages. The current step shows both names directly, rather than assuming the
    browser's operating system matches the gateway.
-   The pinned upstream 0.33.4 startup can still request both permissions and
+   The native host requests Accessibility first and Screen Recording only when
+   you advance that step. For an existing official installation, the pinned
+   upstream 0.33.4 startup can still request both permissions and
    open both settings panes, leaving the recording pane in front of a control
    permission alert. This native behavior is not fixed by the WebUI guide:
    finish the matching system prompt, then open the guide's current page.
@@ -173,7 +183,7 @@ this navigates only, without starting a task or taking a screenshot.
    **gateway**, not the device running WebUI. If the named app is missing from the
    list, expand **Can’t find the app or connect? → Show in Finder** within the current step, then drag the revealed app
    into the permission list, or use the list's **+** button to add it. Turn on the
-   added entry. Finder reveals this gateway's `CuaDriver.app`.
+   added entry. Finder reveals this gateway's actual installed app.
    Accept a relaunch if macOS
    requests it. macOS may reopen the app without nanobot's private socket arguments.
    If both grants are allowed but checks cannot reach the driver, choose
@@ -181,7 +191,7 @@ this navigates only, without starting a task or taking a screenshot.
    managed connection with its existing access scope; it does not treat a missing
    connection as proof of granted or denied permissions, and never runs automatically.
    Opening settings or Finder does not approve OS permissions.
-   CuaDriver installations share their bundle identity; OS grants are not
+   Installations of the same app share their bundle identity; OS grants are not
    isolated per nanobot gateway.
 5. The open connection panel checks automatically (serially, at most 24 times,
    five seconds apart; hidden/closed panels do not poll). Returning to the panel

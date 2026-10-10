@@ -237,6 +237,18 @@ describe("managed Cua Driver setup", () => {
     expect(screen.getByRole("button", { name: "Change access" })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Change access" }));
     expect(screen.getByRole("radio", { name: "View only" })).toBeChecked();
+    // The original disclosure stays available, and collapsing cancels the draft.
+    const accessToggle = screen.getByRole("button", { name: "Change access" });
+    expect(accessToggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "View & control" }));
+    fireEvent.click(accessToggle);
+    expect(accessToggle).toHaveAttribute("aria-expanded", "false");
+    expect(accessToggle).toHaveFocus();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow control & connect" })).not.toBeInTheDocument();
+    expect(action).toHaveBeenCalledTimes(1);
+    fireEvent.click(accessToggle);
+    expect(screen.getByRole("radio", { name: "View only" })).toBeChecked();
     fireEvent.click(screen.getByRole("radio", { name: "View & control" }));
     fireEvent.click(screen.getByRole("button", { name: "Allow control & connect" }));
     expect(action).toHaveBeenLastCalledWith("enable", "cua-driver", { mode: "control", consent: `${CUA_CAPABILITY}:control` });

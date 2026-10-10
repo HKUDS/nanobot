@@ -7,7 +7,7 @@
     "source": "엔진 소스",
     "sharingPaused": "공유 중지됨",
     "sharingPausedHint": "macOS에서 공유가 중지되었습니다. 새 데스크톱 작업을 허용할 때만 다시 연결하세요.",
-    "nativeInstallHint": "검증된 macOS 14.2 이상용 로컬 테스트 빌드를 설치합니다. Cua의 MIT 라이선스와 타사 고지를 포함하며, Cua 공식 바이너리가 아닙니다.",
+    "nativeInstallHint": "검증된 nanobot Computer Use를 설치합니다(macOS 14.2 이상). Cua의 MIT 라이선스와 타사 고지를 포함합니다. 이 빌드는 임시 서명되었으며 Apple의 공증을 받지 않았습니다.",
     "nativeFeedbackScoped": "작업 중 macOS가 공유 창을 표시합니다. 지원되는 동작에는 nanobot 포인터가 표시됩니다. 백그라운드 제어는 앱에 따라 다릅니다.",
     "uninstall": "제거",
     "uninstallTitle": "Computer Use를 제거할까요?",

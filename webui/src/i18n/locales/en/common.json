@@ -7,7 +7,7 @@
     "source": "Engine source",
     "sharingPaused": "Sharing stopped",
     "sharingPausedHint": "Sharing was stopped in macOS. Reconnect only when you want to allow another desktop task.",
-    "nativeInstallHint": "Installs a verified local macOS 14.2+ build, signed for local testing. Cua’s MIT license and third-party notices are included. This is not an official Cua binary.",
+    "nativeInstallHint": "Installs the verified nanobot Computer Use app for macOS 14.2+. Includes Cua’s MIT license and third-party notices. This build is ad-hoc signed, not notarized by Apple.",
     "nativeFeedbackScoped": "During a task, macOS marks the shared window. Supported actions show nanobot’s pointer; background control depends on the app.",
     "uninstall": "Uninstall",
     "uninstallTitle": "Uninstall Computer Use?",

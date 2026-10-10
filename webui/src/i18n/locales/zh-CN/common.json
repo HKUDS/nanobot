@@ -7,7 +7,7 @@
     "source": "引擎源代码",
     "sharingPaused": "已停止共享",
     "sharingPausedHint": "你已在 macOS 停止共享。需要再次执行电脑任务时，请主动重新连接。",
-    "nativeInstallHint": "安装经过校验的本地 macOS 14.2+ 构建，仅使用本地测试签名。保留 Cua 的 MIT 许可和第三方声明；这不是 Cua 官方二进制版本。",
+    "nativeInstallHint": "安装经过校验的 nanobot Computer Use，支持 macOS 14.2 及以上。包含 Cua 的 MIT 许可和第三方声明。此构建使用临时签名，未经 Apple 公证。",
     "nativeFeedbackScoped": "执行任务时，macOS 会标记正在共享的窗口。支持的操作会显示 nanobot 光标；后台操作能力取决于目标应用。",
     "uninstall": "卸载",
     "uninstallTitle": "卸载 Computer Use？",

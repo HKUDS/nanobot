@@ -348,7 +348,7 @@ export function CuaDriverSetupPanel({ preset, capabilities, actionKey, check, ch
         {!setup.managed && <p role="status">{t("cuaDriver.manual")}</p>}
         {canManage && <>
           {setup.installed ? <>
-            <DisclosureContent id={`${accessId}-editor`} open={!enabled || editingAccess}>{accessOptions}</DisclosureContent>
+            {!enabled && accessOptions}
             {!enabled && canRequestPermissions && <p className="text-xs text-muted-foreground">{t(native ? "cuaDriver.nativeRequestHint" : "cuaDriver.requestHint", { appName })}</p>}
             {(!mac || !guided) && <p className="text-xs text-muted-foreground">{t(mac ? "cuaDriver.permissions" : "cuaDriver.desktopSession")}</p>}
             {reconnectNeeded && !editingAccess && <section aria-label={t("cuaDriver.reconnect")}>
@@ -362,21 +362,20 @@ export function CuaDriverSetupPanel({ preset, capabilities, actionKey, check, ch
               // keep an explicit recovery path without auto-restarting the app.
               onReconnect={canReconnect && !check.connected ? () => act("reconnect") : undefined} />}
             {checkingPermissions && !editingAccess && <p className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />{t("cuaDriver.checkingPermissions")}</p>}
-            {ready && !editingAccess && onBackToChat && <p className="text-[13px] leading-5">{t("cuaDriver.connectedHint")}</p>}
-            {enabled && (editingAccess
-              ? <p className="text-xs text-muted-foreground">{t("cuaDriver.currentAccess", { mode: t(setup.mode === "control" ? "cuaDriver.control" : setup.mode === "observe" ? "cuaDriver.observe" : "cuaDriver.custom") })}</p>
-              : <div className="text-xs">
+            {ready && onBackToChat && <p className="text-[13px] leading-5">{t("cuaDriver.connectedHint")}</p>}
+            {enabled && <div>
               <Button ref={changeAccessRef} variant="ghost" size="sm" className="touch-target -mx-2 h-auto min-h-9 whitespace-normal rounded-control px-2 py-2 text-left text-xs font-normal text-muted-foreground" disabled={busy}
                 aria-label={t("cuaDriver.changeAccess")}
                 aria-expanded={editingAccess} aria-controls={`${accessId}-editor`}
                 onClick={() => {
                   setMode(setup.mode === "control" ? "control" : "observe");
-                  setEditingAccess(true);
+                  setEditingAccess(!editingAccess);
                 }}>
                   {t("cuaDriver.currentAccess", { mode: t(setup.mode === "control" ? "cuaDriver.control" : setup.mode === "observe" ? "cuaDriver.observe" : "cuaDriver.custom") })}
-                  <ChevronDown className="ml-1.5 h-3 w-3 shrink-0" aria-hidden />
+                  <ChevronDown className={cn("ml-1.5 h-3 w-3 shrink-0 transition-transform motion-reduce:transition-none", editingAccess && "rotate-180")} aria-hidden />
                 </Button>
-            </div>)}
+              <DisclosureContent id={`${accessId}-editor`} open={editingAccess} className="pt-2.5">{accessOptions}</DisclosureContent>
+            </div>}
             {enabled && !editingAccess && !pendingPermissions && <Disclosure className="text-xs text-muted-foreground"
               summaryClassName="touch-target flex items-center gap-1.5 rounded-compact focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               summary={<>{t("cuaDriver.connectionDetails")}<ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]/disclosure:rotate-180 motion-reduce:transition-none" aria-hidden /></>}>
