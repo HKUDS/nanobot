@@ -312,7 +312,8 @@ class ReadFileTool(_FsTool):
                         return self._file_too_large(len(first))
 
                     mime = detect_image_mime(first) or mimetypes.guess_type(path)[0]
-                    if mime and mime.startswith("image/"):
+                    # SVG is XML text; models cannot take it as an image block.
+                    if mime and mime.startswith("image/") and mime != "image/svg+xml":
                         chunks = [first]
                         bytes_read = len(first)
                         # Bound each read without preallocating from a size that
