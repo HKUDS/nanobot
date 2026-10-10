@@ -9,7 +9,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -26,6 +26,7 @@ from nanobot.webui import remote_ssh
 from nanobot.webui.client_contract import webui_contract
 from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.local_client_assets import LocalClientAssets
+from nanobot.webui.remote_instances import RemoteInstances
 from nanobot.webui.remote_proxy import RemoteProxy
 from nanobot.webui.remote_ssh import RemoteProfile, open_tunnel
 
@@ -34,7 +35,8 @@ MEDIA = "/api/media/AAAAAAAAAAAAAAAAAAAAAA/remoteFilePayload"
 
 
 @pytest.fixture
-async def remote(tmp_path, monkeypatch):
+async def remote(tmp_path, monkeypatch, request):
+    secret = getattr(request, "param", ROOT)
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     assets = tmp_path / "local-dist"
     assets.mkdir()
@@ -43,7 +45,7 @@ async def remote(tmp_path, monkeypatch):
     for name in ["index-AbcD1234.js", "index-AbcD1234.css", "index.js"]:
         (assets / "assets" / name).write_text("local client asset", encoding="utf-8")
     monkeypatch.setattr("nanobot.webui.remote_proxy.LocalClientAssets", lambda: LocalClientAssets(assets))
-    config = WebSocketConfig(host="127.0.0.1", token_issue_secret=ROOT, path="/custom/ws")
+    config = WebSocketConfig(host="127.0.0.1", token_issue_secret=secret, path="/custom/ws")
     services = build_gateway_services(
         config=config, bus=MagicMock(), session_manager=None, static_dist_path=None,
         workspace_path=tmp_path, config_path=tmp_path / "config.json",
@@ -138,11 +140,11 @@ while data := upstream.recv(65536):
         monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
         profile = RemoteProfile(name="Test", host="fixture.test")
         tunnel = await open_tunnel(profile, port)
-        proxy = await RemoteProxy.open(tunnel, ROOT, services.tokens.instance_id)
+        proxy = await RemoteProxy.open(tunnel, secret, services.tokens.instance_id)
         try:
             async with httpx.AsyncClient(trust_env=False) as client:
                 yield SimpleNamespace(proxy=proxy, tunnel=tunnel, client=client, services=services,
-                                      seen=seen, state=state, profile=profile, port=port)
+                                      seen=seen, state=state, profile=profile, port=port, secret=secret)
         finally:
             state.block.set()
             await proxy.close()
@@ -157,6 +159,35 @@ async def bootstrap(remote, headers=None):
     ))
     assert response.status_code == 200, response.text
     return response.json()
+
+
+@pytest.mark.parametrize("remote", [ROOT, "网络访问密码-😀42"], indirect=True)
+async def test_remote_instance_connect_health_and_browser_login(remote, tmp_path, monkeypatch):
+    monkeypatch.setattr(remote_ssh, "probe", AsyncMock(return_value={
+        "port": remote.port, "secret": remote.secret, "hostname": "remote-fixture",
+    }))
+    manager = RemoteInstances(tmp_path / "local-manager")
+    try:
+        saved = await manager.action("save", {"profile": remote.profile.model_dump()})
+        launch = await manager.action("connect", {"id": saved["id"]})
+        health = await manager.health()
+        assert health["profiles"][0]["connected"]
+        assert not health["profiles"][0]["connection_error"]
+
+        url = urlsplit(launch["url"])
+        secret = parse_qs(url.fragment.removeprefix("/?"))["bootstrapSecret"][0]
+        response = await remote.client.get(f"{url.scheme}://{url.netloc}/webui/bootstrap", headers={
+            "X-Nanobot-Auth": secret,
+        })
+        assert response.status_code == 200, response.text
+        issued = response.json()
+        assert remote.secret not in response.text
+        async with connect(issued["ws_url"] + "?token=" + issued["token"],
+                           origin=f"{url.scheme}://{url.netloc}") as ws:
+            assert json.loads(await ws.recv())["ready"]
+        assert [urlsplit(request.path).path for request in remote.seen].count("/webui/terminal") == 2
+    finally:
+        await manager.close()
 
 
 @pytest.mark.parametrize("path,cacheable", [

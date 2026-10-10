@@ -31,7 +31,9 @@ from nanobot.cli.webui_support import (
     _warn_webui_bind_scope,
     _webui_browser_url,
     _webui_build_mode_for_interactive,
+    _webui_credentials_match,
     _webui_endpoint_reachable,
+    webui_bootstrap_secret,
 )
 from nanobot.config.paths import get_workspace_path
 from nanobot.utils.helpers import sync_workspace_templates
@@ -120,7 +122,7 @@ def webui(
         raise typer.Exit(1)
     created_config = not config_path.exists()
     if created_config:
-        _confirm_webui_action("Create a nanobot config and workspace now?", yes=yes)
+        _confirm_webui_action("Set up nanobot and open WebUI on this device?", yes=yes)
 
     setup_config = _load_webui_setup_config(config_path)
     if workspace:
@@ -142,7 +144,7 @@ def webui(
         changed_webui = _ensure_local_webui_channel(
             setup_config,
             port=port,
-            yes=yes,
+            yes=yes or created_config,
         )
         resolved_webui_config = resolve_config_env_vars(
             setup_config.model_copy(deep=True), config_path=config_path,
@@ -215,6 +217,14 @@ def webui(
     gateway_ready = _gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
     webui_ready = _webui_endpoint_reachable(webui_url)
     if gateway_ready and webui_ready:
+        secret = webui_bootstrap_secret(runtime_config)
+        if not runtime.status().running and secret and not _webui_credentials_match(webui_url, secret):
+            _print_foreground_port_conflict(
+                webui_url=webui_url,
+                gateway_host=runtime_config.gateway.host,
+                gateway_port=effective_gateway_port,
+            )
+            raise typer.Exit(1)
         lease = GatewayClientLease(runtime, kind="webui")
         lease.acquire()
         try:

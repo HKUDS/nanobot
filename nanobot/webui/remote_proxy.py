@@ -33,6 +33,7 @@ from nanobot.channels.websocket.attachment_policy import (
     UPLOAD_REQUEST_TIMEOUT_SECONDS,
 )
 from nanobot.webui.client_contract import assess_webui_contract, compatibility_error
+from nanobot.webui.http_utils import webui_auth_headers
 from nanobot.webui.local_client_assets import LocalClientAssets
 from nanobot.webui.remote_ssh import (
     RemoteError,
@@ -236,7 +237,7 @@ class RemoteProxy:
                 raise web.HTTPTooManyRequests()
         async with httpx.AsyncClient(trust_env=False, timeout=20) as client:
             response = await client.get(self._upstream("/webui/bootstrap"), headers={
-                "X-Nanobot-Auth": self._remote_secret, "Host": f"127.0.0.1:{self.port}",
+                **webui_auth_headers(self._remote_secret), "Host": f"127.0.0.1:{self.port}",
             })
         if response.status_code != 200:
             raise web.HTTPBadGateway(text="Remote authentication unavailable")

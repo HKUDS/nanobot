@@ -2177,15 +2177,18 @@ def test_heartbeat_empty_response_is_not_evaluated(
     assert response is None
 
 
-def test_webui_yes_creates_config_and_enables_local_websocket(
+@pytest.mark.parametrize("yes", [True, False])
+def test_webui_creates_config_and_enables_local_websocket_with_one_confirmation(
     monkeypatch,
     tmp_path: Path,
+    yes: bool,
 ) -> None:
     config_file = tmp_path / "instance" / "config.json"
     workspace = tmp_path / "workspace"
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
     _patch_gateway_ports_free(monkeypatch)
+    monkeypatch.setattr(cli_webui_support, "_cli_can_prompt", lambda: True)
     monkeypatch.setattr(
         "nanobot.cli.webui.sync_workspace_templates",
         lambda path, **kwargs: seen.update(templates=path, templates_options=kwargs),
@@ -2205,12 +2208,14 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
             "8899",
             "--gateway-port",
             "18888",
-            "--yes",
+            *(["--yes"] if yes else []),
             "--no-open",
         ],
+        input="y\n" if not yes else None,
     )
 
     assert result.exit_code == 0, result.output
+    assert result.stdout.count("[Y/n]") == (0 if yes else 1)
     assert result.stdout.count("Config:") == 1
     data = json.loads(config_file.read_text(encoding="utf-8"))
     websocket = data["channels"]["websocket"]
@@ -2230,7 +2235,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
     assert "WebUI ready" in compact_output
     assert f"http://127.0.0.1:8899/#/?bootstrapSecret={websocket['tokenIssueSecret']}" in result.stdout.splitlines()
-    assert "Access: This device only" in compact_output
+    assert "Open in your browser:" in compact_output
     assert "Ctrl+C" in compact_output
     assert seen["lease_release_wait_for_stop"] is False
     assert "stop_timeout" not in seen
@@ -2481,7 +2486,7 @@ def test_webui_resumes_first_run_without_provider_setup(
     assert result.exit_code == 0
     assert config_file.exists()
     assert seen["start_options"].config_path == str(config_file.resolve(strict=False))
-    assert "Configure a provider and model:\nWebUI Settings → Models." in result.stdout
+    assert "Choose a provider and model:\nWebUI Settings → Models." in result.stdout
     assert "anthropic" not in result.stdout.lower()
     assert "Model setup is incomplete" not in result.stdout
     assert result.stdout.index("WebUI ready") < result.stdout.index("Next step")
@@ -2492,7 +2497,7 @@ def test_webui_resumes_first_run_without_provider_setup(
 
     assert resumed.exit_code == 0, resumed.stdout
     assert seen["start_options"].config_path == str(config_file.resolve(strict=False))
-    assert "Configure a provider and model:\nWebUI Settings → Models." in resumed.stdout
+    assert "Choose a provider and model:\nWebUI Settings → Models." in resumed.stdout
     assert "anthropic" not in resumed.stdout.lower()
     assert "Model setup is incomplete" not in resumed.stdout
     assert "Quick Start" not in resumed.stdout
@@ -2648,17 +2653,17 @@ def test_launch_browser_uses_macos_url_services(monkeypatch) -> None:
     assert seen == ["http://127.0.0.1:8765/"]
 
 
-def test_launch_browser_uses_default_browser_off_macos(monkeypatch) -> None:
-    opened: list[tuple[str, int, bool]] = []
+def test_launch_browser_uses_unix_launcher_on_linux(monkeypatch) -> None:
+    opened: list[str] = []
     monkeypatch.setattr(cli_webui_support.sys, "platform", "linux")
     monkeypatch.setattr(
-        cli_webui_support.webbrowser,
-        "open",
-        lambda url, *, new, autoraise: opened.append((url, new, autoraise)) or True,
+        cli_webui_support,
+        "_launch_unix_browser",
+        lambda url: opened.append(url) or True,
     )
 
     assert cli_webui_support._launch_browser("http://127.0.0.1:8765/") is True
-    assert opened == [("http://127.0.0.1:8765/", 2, True)]
+    assert opened == ["http://127.0.0.1:8765/"]
 
 
 def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_path: Path) -> None:
@@ -2687,15 +2692,9 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
         def __init__(self, **kwargs) -> None:
             seen["runtime_kwargs"] = kwargs
             self.paths = kwargs["paths"]
-            self.status_calls = 0
 
         def status(self):
-            self.status_calls += 1
-            # The command checks during config refresh and once more before
-            # delegating to the attach helper.
-            # If that helper is not patched as intended, make its polling loop
-            # terminate instead of hanging the Windows test worker forever.
-            return SimpleNamespace(running=self.status_calls <= 2)
+            return SimpleNamespace(running=True)
 
         def start_background(self, options):
             return SimpleNamespace(
@@ -2864,8 +2863,9 @@ def test_attach_to_background_gateway_checks_owned_sidecar(tmp_path: Path) -> No
         )
 
 
-def test_webui_foreground_does_not_claim_unmanaged_gateway(
-    monkeypatch, tmp_path: Path, mock_webui_bundle: MagicMock,
+@pytest.mark.parametrize("credentials_match", [True, False])
+def test_webui_only_reuses_an_unmanaged_gateway_with_matching_credentials(
+    monkeypatch, tmp_path: Path, mock_webui_bundle: MagicMock, credentials_match: bool,
 ) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
@@ -2873,7 +2873,14 @@ def test_webui_foreground_does_not_claim_unmanaged_gateway(
     monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path, **_kwargs: None)
     monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args: True)
     monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args: True)
-    monkeypatch.setattr("nanobot.cli.webui._open_webui_browser", lambda *_args, **_kwargs: None)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "nanobot.cli.webui._open_webui_browser",
+        lambda url, **_kwargs: opened.append(url),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.webui._webui_credentials_match", lambda *_args: credentials_match,
+    )
     monkeypatch.setattr(
         "nanobot.cli.webui._attach_to_background_gateway",
         lambda _runtime: pytest.fail("unmanaged gateway must not be attached"),
@@ -2890,8 +2897,15 @@ def test_webui_foreground_does_not_claim_unmanaged_gateway(
 
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
 
-    assert result.exit_code == 0
-    assert "controlled by another foreground command" in result.stdout
+    assert result.exit_code == (0 if credentials_match else 1)
+    if credentials_match:
+        assert "WebUI is already running" in result.stdout
+        assert len(opened) == 1
+    else:
+        assert "address is already in use" in result.stdout
+        assert "--port" in result.stdout and "--gateway-port" in result.stdout
+        assert opened == []
+        assert "bootstrapSecret=" not in result.stdout
     mock_webui_bundle.assert_called_once()
     assert mock_webui_bundle.call_args.kwargs == {"mode": "auto"}
 
@@ -2911,7 +2925,7 @@ def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Pat
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
 
     assert result.exit_code == 1
-    assert "nanobot cannot start because one of its local ports is already in use" in result.stdout
+    assert "address is already in use" in result.stdout
     assert "--port" in result.stdout
     assert "--gateway-port" in result.stdout
 
@@ -2937,7 +2951,7 @@ def test_webui_foreground_reports_an_existing_gateway_without_leaking_secret(
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
 
     assert result.exit_code == 1
-    assert "gateway is already running for this local instance" in result.stdout
+    assert "address is already in use" in result.stdout
     assert "http://127.0.0.1:8765" in result.stdout
     assert "bootstrapSecret=" not in result.stdout
     assert "do-not-leak" not in result.stdout

@@ -16,7 +16,7 @@ Use the launcher:
 nanobot webui
 ```
 
-`nanobot webui` creates the config/workspace when needed, enables the local WebSocket channel after confirmation, generates a local login credential when no authentication is configured, starts or joins the same on-demand gateway used by the native TUI, and opens the browser. With a fresh config, it can open before a model is configured so you can finish setup in **Settings → Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so it is not available from other devices on your LAN. The startup summary shows the page address, login link, listener scope, and config. While attached, the launcher displays gateway warnings and errors; use the printed logs command for full output.
+`nanobot webui` asks for one confirmation on a new installation, creates the config/workspace, enables WebUI, and generates a local login credential when no authentication is configured. It starts or joins the same on-demand gateway used by the native TUI and opens the browser. With a fresh config, it can open before a model is configured so you can finish setup in **Settings → Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so it is not available from other devices on your LAN. The startup summary shows the page address, login link, and config. While attached, the launcher displays gateway warnings and errors; use the printed logs command for full output.
 
 After model setup, explicitly promote the shared gateway when you do not want to keep a client open:
 
@@ -31,6 +31,8 @@ Each foreground WebUI or TUI launcher releases only its own client. The last int
 The browser signs in automatically using the generated credential in the launch URL. You do not need to choose a password for local use. The terminal also prints the complete login link: if automatic opening fails, copy that link into your browser, including the fragment after `#`. In WSL, use the link in your Windows browser. Opening the plain page address in a browser that has not signed in still requires authentication. Treat the login link as a credential and do not share it.
 
 `nanobot webui --no-open` prints the same login link without opening a browser. Development mode uses the Vite address, normally `http://127.0.0.1:5173`, with the same gateway authentication; the dev proxy remains loopback-only.
+
+If another instance already uses the address, the launcher checks its login before reusing it. A different password produces an address-in-use message instead of an unusable login link. Stop the existing instance from its original terminal, or choose unused ports with `--port` and `--gateway-port`.
 
 If no provider is configured, follow the **Next step** prompt to open **Settings → Models**. Errors for a configured provider appear with that prompt.
 

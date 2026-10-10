@@ -313,6 +313,13 @@ def bearer_token(headers: Any) -> str | None:
     return None
 
 
+def webui_auth_headers(secret: str) -> dict[str, str]:
+    """Encode WebUI credentials, retaining the legacy header for ASCII credentials."""
+    if all(" " <= char <= "~" for char in secret):
+        return {"X-Nanobot-Auth": secret}
+    return {"X-Nanobot-Auth-Encoded": base64.b64encode(secret.encode("utf-8")).decode("ascii")}
+
+
 def issue_route_secret_matches(headers: Any, configured_secret: str) -> bool:
     if not configured_secret:
         return True

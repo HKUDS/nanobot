@@ -10,7 +10,7 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO, cast
 
 import typer
 from pydantic import ValidationError
@@ -61,6 +61,7 @@ __all__ = [
     "webui_bootstrap_secret",
     "_webui_build_mode_for_interactive",
     "_webui_channel_enabled",
+    "_webui_credentials_match",
     "_webui_display_url",
     "_webui_endpoint_reachable",
 ]
@@ -78,7 +79,48 @@ def _launch_browser(url: str) -> bool:
         from nanobot.cli.windows_browser import launch_browser
 
         return launch_browser(url)
-    return bool(webbrowser.open(url, new=2, autoraise=True))
+    return _launch_unix_browser(url)
+
+
+def _launch_unix_browser(url: str) -> bool:
+    """Launch the selected Unix browser without exposing launcher diagnostics."""
+    choices = [choice for choice in os.environ.get("BROWSER", "").split(os.pathsep) if choice]
+    for choice in choices or [None]:
+        try:
+            browser = webbrowser.get(choice)
+        except webbrowser.Error:
+            continue
+        if isinstance(browser, webbrowser.GenericBrowser):
+            # gio, xdg-open, and BROWSER command templates inherit this class.
+            # BackgroundBrowser.open only polls once and inherits our stderr.
+            command = [browser.name, *(arg.replace("%s", url) for arg in browser.args)]
+            sys.audit("webbrowser.open", url)
+            if _launch_browser_command(command):
+                return True
+        elif browser.open(url, new=2, autoraise=True):
+            # Native Unix controllers already isolate their subprocess output.
+            return True
+    return False
+
+
+def _launch_browser_command(command: list[str]) -> bool:
+    """Report an immediate launch failure while allowing a browser to stay open."""
+    import subprocess
+    import threading
+
+    try:
+        process = subprocess.Popen(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True,
+        )
+    except OSError:
+        return False
+    try:
+        return process.wait(timeout=5) == 0
+    except subprocess.TimeoutExpired:
+        # A direct browser command can stay alive for the whole browsing session.
+        threading.Thread(target=process.wait, daemon=True).start()
+        return True
 
 
 def _text_only_browser_name() -> str | None:
@@ -358,7 +400,7 @@ def _ensure_local_webui_channel(
     if current and not needs_enable and not needs_port and not needs_secret:
         return False
 
-    _confirm_webui_action("Enable the WebUI channel?", yes=yes)
+    _confirm_webui_action("Set up WebUI?", yes=yes)
 
     if not model.enabled:
         saved["enabled"] = True
@@ -453,37 +495,47 @@ def _webui_endpoint_reachable(url: str, *, timeout_s: float = 0.25) -> bool:
     return _tcp_endpoint_reachable(host, port, timeout_s=timeout_s)
 
 
+def _webui_credentials_match(url: str, secret: str) -> bool:
+    """Verify login before reusing a listener without this instance's runtime record."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    import httpx
+
+    from nanobot.webui.http_utils import webui_auth_headers
+
+    parsed = urlsplit(url)
+    bootstrap_url = urlunsplit((parsed.scheme, parsed.netloc, "/webui/bootstrap", "", ""))
+    try:
+        response = httpx.get(
+            bootstrap_url, headers=webui_auth_headers(secret), timeout=2,
+            trust_env=False, follow_redirects=False,
+        )
+        if response.status_code != 200:
+            return False
+        payload = response.json()
+        return isinstance(payload, dict) and bool(cast(dict[str, Any], payload).get("api_token"))
+    except (httpx.HTTPError, ValueError):
+        return False
+
+
 def _print_foreground_port_conflict(
     *,
     webui_url: str,
     gateway_host: str,
     gateway_port: int,
 ) -> None:
-    gateway_running = _gateway_health_ready(gateway_host, gateway_port)
-    if gateway_running:
-        console.print(
-            "[yellow]A nanobot gateway is already running for this local instance.[/yellow]"
-        )
-    else:
-        console.print(
-            "[red]Error: nanobot cannot start because one of its local ports "
-            "is already in use.[/red]"
-        )
-    console.print(f"  WebUI: [cyan]{_webui_display_url(webui_url)}[/cyan]")
+    console.print("[red]Cannot open this WebUI: the address is already in use.[/red]")
+    console.print()
+    console.print(Text(f"Page: {_webui_display_url(webui_url)}", style="cyan"), soft_wrap=True)
     console.print(
-        f"  Gateway health: "
-        f"[cyan]http://{_host_for_local_browser(gateway_host)}:{gateway_port}/health[/cyan]"
+        Text(f"Service: {_gateway_health_url(gateway_host, gateway_port)}", style="dim"),
+        soft_wrap=True,
     )
     console.print()
-    if gateway_running:
-        console.print("Use the existing instance, or stop it first:")
-    else:
-        console.print("If this is an existing nanobot instance, use it or stop it first:")
-    console.print("  [cyan]nanobot gateway status[/cyan]")
-    console.print("  [cyan]nanobot gateway stop[/cyan]")
+    console.print("Stop the existing instance from the terminal where you started it.")
     console.print(
-        "Or choose different ports with [cyan]--port[/cyan] "
-        "and [cyan]--gateway-port[/cyan]."
+        "To run another instance, choose unused ports with "
+        "[cyan]--port[/cyan] and [cyan]--gateway-port[/cyan]."
     )
 
 
@@ -521,18 +573,14 @@ def _print_webui_ready(
 ) -> None:
     """Show one ready state and a complete browser handoff in the local terminal."""
     ws_cfg = _webui_config_dict(config)
-    host = str(ws_cfg.get("host") or "127.0.0.1")
     console.print()
     console.print("[bold green]WebUI ready[/bold green]" + (" [dim](development)[/dim]" if dev else ""))
-    scope = "This device only" if is_loopback_host(host) else f"Other devices allowed ({host})"
-    console.print(Text(f"Access: {scope}"))
-    if dev and not is_loopback_host(host):
-        console.print("[dim]The development page is available only on this device.[/dim]")
     console.print()
+    console.print("Open in your browser:")
     if webui_bootstrap_secret(config):
         # Terminal wrapping keeps this one copyable line, including in narrow panes.
         console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
-        console.print("[dim]Login link: contains your password; do not share.[/dim]")
+        console.print("[dim]This link signs you in. Do not share it.[/dim]")
         console.print(Text(f"Page: {_webui_display_url(url)}", style="dim"), soft_wrap=True)
     else:
         console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
@@ -543,7 +591,7 @@ def _print_webui_ready(
         console.print("[bold]Next step[/bold]")
         if config.get_provider_name():
             console.print(Text(f"Model setup is incomplete:\n{provider_error}", style="yellow"))
-        console.print("Configure a provider and model:")
+        console.print("Choose a provider and model:")
         console.print("WebUI Settings → Models.", style="bold")
     console.print()
     console.print(Text(f"Config: {config_path}", style="dim"), soft_wrap=True)
@@ -551,15 +599,12 @@ def _print_webui_ready(
     log_command = _gateway_instance_command("logs", config_path=config_path, workspace=workspace)
     console.print(Text(f"Logs: {log_command}", style="dim"), soft_wrap=True)
     if managed:
-        lifecycle = (
-            "Ctrl+C detaches; on-demand gateways stop when their last local client exits."
-        )
-        if dev:
-            lifecycle = "Ctrl+C stops Vite; on-demand gateways stop when their last local client exits."
-    elif dev:
-        lifecycle = "Ctrl+C stops Vite; the existing gateway keeps running."
+        lifecycle = "Keep this terminal open while using WebUI.\n"
+        lifecycle += "Ctrl+C stops development mode." if dev else "Press Ctrl+C to exit."
     else:
-        lifecycle = "The gateway is controlled by another foreground command; stop it from that terminal."
+        lifecycle = "WebUI is already running. To stop it, use the terminal where it was started."
+        if dev:
+            lifecycle += "\nCtrl+C stops development mode."
     console.print()
     console.print(Text(lifecycle, style="dim"))
     console.print()

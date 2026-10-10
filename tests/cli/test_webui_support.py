@@ -1,4 +1,7 @@
+import os
 import shlex
+import sys
+import webbrowser
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -65,11 +68,70 @@ def test_webui_ready_keeps_the_complete_login_url_copyable(monkeypatch, width: i
     assert f"http://127.0.0.1:8765/#/?bootstrapSecret={quote(password, safe='')}" in lines
     assert "Page: http://127.0.0.1:8765" in lines
     assert lines.index(url) < lines.index("Page: http://127.0.0.1:8765")
+    assert lines[lines.index(url) - 1] == "Open in your browser:"
     assert output.getvalue().count("bootstrapSecret=") == 1
-    assert "Access: This device only" in output.getvalue()
+    assert "Open in your browser:" in output.getvalue()
     assert f"Config: {config_path}" in lines
     log_command = next(line.removeprefix("Logs: ") for line in lines if line.startswith("Logs: "))
     assert shlex.split(log_command) == ["nanobot", "gateway", "logs", "--config", str(config_path)]
+
+
+def test_unix_browser_reports_delayed_launcher_failure_without_raw_output(monkeypatch, tmp_path, capfd) -> None:
+    launcher = tmp_path / "failing_browser.py"
+    launcher.write_text(
+        "import sys, time\n"
+        "time.sleep(0.1)\n"
+        "print('launcher stdout: ' + sys.argv[-1])\n"
+        "print('gio: ' + sys.argv[-1] + ': Operation not supported', file=sys.stderr)\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    browser = webbrowser.BackgroundBrowser([sys.executable, str(launcher), "%s"])
+    monkeypatch.setattr(webui_support.sys, "platform", "linux")
+    monkeypatch.delenv("BROWSER", raising=False)
+    monkeypatch.setattr(webui_support.webbrowser, "get", lambda _choice=None: browser)
+
+    assert not webui_support._open_webui_browser(
+        "http://127.0.0.1:8765/#/?bootstrapSecret=private-test-credential", wait=False,
+    )
+
+    captured = capfd.readouterr()
+    assert "Could not open a browser automatically." in captured.out
+    assert "Open the link above." in " ".join(captured.out.split())
+    assert "private-test-credential" not in captured.out + captured.err
+    assert "Operation not supported" not in captured.out + captured.err
+    assert "launcher stdout" not in captured.out + captured.err
+
+
+def test_unix_browser_preserves_custom_commands_and_candidate_order(monkeypatch, tmp_path) -> None:
+    launcher = tmp_path / "custom browser.py"
+    result = tmp_path / "received.txt"
+    launcher.write_text(
+        "import pathlib, sys\n"
+        "pathlib.Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    command = shlex.join([sys.executable, str(launcher), str(result), "%s"])
+    monkeypatch.setenv("BROWSER", f"unavailable-nanobot-test-browser{os.pathsep}{command}")
+    monkeypatch.setenv("DISPLAY", "")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "")
+    monkeypatch.setattr(webbrowser, "_tryorder", None)
+    monkeypatch.setattr(webbrowser, "_browsers", {})
+    monkeypatch.setattr(webui_support.sys, "platform", "linux")
+    url = "http://127.0.0.1:8765/#/?bootstrapSecret=custom%20password"
+
+    assert webui_support._launch_browser(url)
+    assert result.read_text(encoding="utf-8") == url
+
+
+def test_unix_browser_keeps_native_controller_new_tab_behavior(monkeypatch) -> None:
+    opened = []
+    controller = SimpleNamespace(open=lambda url, **options: opened.append((url, options)) or True)
+    monkeypatch.delenv("BROWSER", raising=False)
+    monkeypatch.setattr(webui_support.webbrowser, "get", lambda _choice=None: controller)
+
+    assert webui_support._launch_unix_browser("http://127.0.0.1:8765/")
+    assert opened == [("http://127.0.0.1:8765/", {"new": 2, "autoraise": True})]
 
 
 @pytest.mark.parametrize(
