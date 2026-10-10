@@ -188,30 +188,26 @@ describe("Settings capabilities", () => {
     fireEvent.keyDown(screen.getByRole("combobox", { name: "OpenRouter" }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "Gemini" }));
 
-    expect(await screen.findByRole("button", { name: "gemini-2.5-flash-image" })).toBeInTheDocument();
-    await openPopover(screen.getByRole("button", { name: "gemini-2.5-flash-image" }));
+    const modelInput = screen.getByRole("combobox", { name: "Select image model" });
+    await waitFor(() => expect(modelInput).toHaveValue("gemini-2.5-flash-image"));
+    await openPopover(modelInput);
     fireEvent.click(await screen.findByRole("option", { name: "imagen-4.0-generate-001" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "imagen-4.0-generate-001" })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(modelInput).toHaveValue("imagen-4.0-generate-001"));
 
-    await openPopover(screen.getByRole("button", { name: "imagen-4.0-generate-001" }));
-    const modelInput = await screen.findByRole("combobox", { name: "Search or type model ID" });
+    await openPopover(modelInput);
     fireEvent.change(modelInput, { target: { value: "imagen-5-preview" } });
     fireEvent.click(await screen.findByRole("option", { name: "Use “imagen-5-preview”" }));
-    expect(await screen.findByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
+    await waitFor(() => expect(modelInput).toHaveValue("imagen-5-preview"));
 
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Gemini" }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "Custom" }));
-    expect(screen.getByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
+    const customProviderInput = screen.getByRole("combobox", { name: "Select image model" });
+    expect(customProviderInput).toHaveValue("imagen-5-preview");
 
-    await openPopover(screen.getByRole("button", { name: "imagen-5-preview" }));
-    const customProviderInput = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
-    });
+    await openPopover(customProviderInput);
     fireEvent.change(customProviderInput, { target: { value: "private/image-v2" } });
     fireEvent.keyDown(customProviderInput, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "private/image-v2" })).toBeInTheDocument();
+    await waitFor(() => expect(customProviderInput).toHaveValue("private/image-v2"));
   });
 
   it("saves network safety without exposing technical SSRF copy", async () => {

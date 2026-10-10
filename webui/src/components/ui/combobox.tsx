@@ -31,16 +31,13 @@ export function useComboboxNavigation({
   const activeValue = activeOption.value;
 
   React.useEffect(() => {
-    if (!open) {
-      setActiveOption({ value: null, source: "initial" });
-      return;
-    }
     setActiveOption((current) => {
-      if (current.value && values.includes(current.value)) return current;
-      return {
-        value: selectedValue && values.includes(selectedValue) ? selectedValue : values[0] ?? null,
-        source: "initial",
-      };
+      if (open && current.value && values.includes(current.value)) return current;
+      const value = open
+        ? selectedValue && values.includes(selectedValue) ? selectedValue : values[0] ?? null
+        : null;
+      return current.value === value && current.source === "initial"
+        ? current : { value, source: "initial" };
     });
   }, [open, selectedValue, values]);
 

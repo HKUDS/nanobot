@@ -95,7 +95,7 @@ describe("ChatList", () => {
       .toContain(sessionHandleColor("handle_1234"));
 
     expect(conversation.closest("[data-chat-row]"))
-      .toHaveClass("rounded-xl");
+      .toHaveClass("rounded-control");
     expect(conversation.querySelector("[data-sidebar-selection-track]")).toBeNull();
   });
 
@@ -706,7 +706,7 @@ describe("ChatList", () => {
     expect(tabSurface).toContainElement(paneList);
     const activePane = within(tabGroup).getByRole("button", { name: "Research pane" });
     expect(activePane).toHaveAttribute("aria-current", "true");
-    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-xl");
+    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-control");
     expect(screen.getByTestId("chats-selection-highlight"))
       .toHaveAttribute("data-active-id", "websocket:root");
     expect(screen.getByRole("button", {
