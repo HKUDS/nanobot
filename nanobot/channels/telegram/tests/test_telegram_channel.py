@@ -64,6 +64,8 @@ class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
         self.sent_media: list[dict] = []
+        self.sent_media_groups: list[dict] = []
+        self.fail_media_groups = False
         self.get_me_calls = 0
         self.shutdown_calls = 0
 
@@ -95,6 +97,11 @@ class _FakeBot:
 
     async def send_document(self, **kwargs) -> None:
         self.sent_media.append({"kind": "document", **kwargs})
+
+    async def send_media_group(self, **kwargs) -> None:
+        if self.fail_media_groups:
+            raise RuntimeError("media group rejected")
+        self.sent_media_groups.append(kwargs)
 
     async def send_chat_action(self, **kwargs) -> None:
         pass
@@ -1919,6 +1926,84 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
             "reply_parameters": None,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_send_groups_consecutive_remote_photos_and_videos_into_album(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.validate_url_target", lambda url: (True, ""))
+    media = [
+        "https://example.com/cat.jpg",
+        "https://example.com/clip.mp4",
+        "https://example.com/dog.png",
+    ]
+
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content="", media=media))
+
+    assert channel._app.bot.sent_media == []
+    assert len(channel._app.bot.sent_media_groups) == 1
+    group = channel._app.bot.sent_media_groups[0]
+    assert [item.media for item in group["media"]] == media
+    assert group["reply_parameters"] is None
+
+
+@pytest.mark.asyncio
+async def test_send_splits_large_photo_album(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.validate_url_target", lambda url: (True, ""))
+    media = [f"https://example.com/{index}.jpg" for index in range(11)]
+
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content="", media=media))
+
+    assert [len(group["media"]) for group in channel._app.bot.sent_media_groups] == [10]
+    assert [item["photo"] for item in channel._app.bot.sent_media] == [media[-1]]
+
+
+@pytest.mark.asyncio
+async def test_send_local_photos_as_album(tmp_path: Path) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.jpg"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram", chat_id="123", content="", media=[str(first), str(second)],
+        )
+    )
+
+    group = channel._app.bot.sent_media_groups[0]
+    assert [item.media.filename for item in group["media"]] == ["first.png", "second.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_send_falls_back_to_individual_media_when_album_fails(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.fail_media_groups = True
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.validate_url_target", lambda url: (True, ""))
+    media = ["https://example.com/cat.jpg", "https://example.com/dog.jpg"]
+
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content="", media=media))
+
+    assert channel._app.bot.sent_media_groups == []
+    assert [item["photo"] for item in channel._app.bot.sent_media] == media
 
 
 @pytest.mark.asyncio
