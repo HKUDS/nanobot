@@ -143,7 +143,7 @@ class MessageTool(Tool):
                 resolved.append(p)
             elif not access.restrict_to_workspace:
                 path = Path(p).expanduser()
-                resolved.append(p if path.is_absolute() else str(workspace / path))
+                resolved.append(str(path) if path.is_absolute() else str(workspace / path))
             else:
                 resolved.append(str(resolve_workspace_path(p, workspace, access.allowed_root)))
         return resolved
