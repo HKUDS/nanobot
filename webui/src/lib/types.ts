@@ -721,6 +721,8 @@ export interface SettingsPayload {
     name: string;
     label: string;
     is_custom?: boolean;
+    enabled?: boolean;
+    oauth_authenticated?: boolean;
     configured: boolean;
     auth_type?: "api_key" | "oauth";
     api_key_required?: boolean;
@@ -1349,6 +1351,7 @@ export interface ModelConfigurationUpdate {
 
 export interface ProviderSettingsUpdate {
   provider: string;
+  enabled?: boolean;
   displayName?: string;
   apiKey?: string;
   apiBase?: string;

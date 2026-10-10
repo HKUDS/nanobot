@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -44,10 +44,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
+  HoverHint,
 } from "@/components/ui/tooltip";
 import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
 import {
@@ -117,23 +114,6 @@ function SidebarActionMenuContent({
         {children}
       </DropdownMenuContent>
     </SidebarActionMenuEscapeContext.Provider>
-  );
-}
-
-function SidebarItemTooltip({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactElement;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side="top" align="start" className="max-w-80 break-words">
-        {label}
-      </TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -665,7 +645,6 @@ export const ChatList = memo(function ChatList({
     closeDeleteSelection();
   };
   return (
-    <TooltipProvider>
     <div ref={scrollViewportRef} className="sidebar-scroll-fade sidebar-scrollbar h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pb-2">
       <SidebarSelectionHighlight
         scope="chats"
@@ -1213,7 +1192,6 @@ export const ChatList = memo(function ChatList({
         ) : null}
       </SidebarSelectionHighlight>
     </div>
-    </TooltipProvider>
   );
 });
 
@@ -1266,7 +1244,7 @@ function WorkbenchTabHeader({
       )}
     >
       {!deleteSelectionMode ? (
-          <SidebarItemTooltip label={disclosureLabel}>
+          <HoverHint side="top" align="start" contentClassName="max-w-80 break-words" content={disclosureLabel}>
             <button
               type="button"
               aria-expanded={!collapsed}
@@ -1289,9 +1267,9 @@ function WorkbenchTabHeader({
                 )}
               />
             </button>
-          </SidebarItemTooltip>
+          </HoverHint>
       ) : null}
-      <SidebarItemTooltip label={title}>
+      <HoverHint side="top" align="start" contentClassName="max-w-80 break-words" content={title}>
         <button
           type="button"
           onClick={(event) => {
@@ -1315,7 +1293,7 @@ function WorkbenchTabHeader({
           ) : null}
           <span className="min-w-0 flex-1 truncate">{title}</span>
         </button>
-      </SidebarItemTooltip>
+      </HoverHint>
       {!deleteSelectionMode ? (
         <>
           <DropdownMenu
@@ -1768,7 +1746,7 @@ function ProjectGroupHeader({
           : undefined}
         className="group flex min-h-8 min-w-0 items-center gap-0.5 rounded-xl px-2 text-[13px] leading-5 text-sidebar-content"
       >
-        <SidebarItemTooltip label={disclosureLabel}>
+        <HoverHint side="top" align="start" contentClassName="max-w-80 break-words" content={disclosureLabel}>
           <button
             type="button"
             aria-expanded={!collapsed}
@@ -1791,14 +1769,11 @@ function ProjectGroupHeader({
               )}
             />
           </button>
-        </SidebarItemTooltip>
+        </HoverHint>
         {path ? (
-          <Tooltip>
-            <TooltipTrigger asChild>{projectButton}</TooltipTrigger>
-            <TooltipContent side="top" align="start" className="max-w-72 break-words">
-              {path}
-            </TooltipContent>
-          </Tooltip>
+          <HoverHint side="top" align="start" contentClassName="max-w-72 break-words" content={path}>
+            {projectButton}
+          </HoverHint>
         ) : projectButton}
         {updatedAt ? (
           <span className="shrink-0 text-[11px] text-sidebar-muted-foreground">
@@ -1911,7 +1886,7 @@ function SessionActivityIndicator({
       defaultValue: "This conversation needs your attention",
     });
     return (
-      <SidebarItemTooltip label={label}>
+      <HoverHint side="top" align="start" contentClassName="max-w-80 break-words" content={label}>
         <span
           role="img"
           aria-label={label}
@@ -1919,14 +1894,14 @@ function SessionActivityIndicator({
         >
           <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
         </span>
-      </SidebarItemTooltip>
+      </HoverHint>
     );
   }
 
   if (state === "running") {
     const label = t("chat.activity.running");
     return (
-      <SidebarItemTooltip label={label}>
+      <HoverHint side="top" align="start" contentClassName="max-w-80 break-words" content={label}>
         <span
           role="img"
           aria-label={label}
@@ -1934,14 +1909,14 @@ function SessionActivityIndicator({
         >
           <span className="h-3 w-3 animate-spin rounded-full border border-blue-500/25 border-t-blue-500 [animation-duration:1.4s] motion-reduce:animate-none dark:border-blue-400/25 dark:border-t-blue-400" />
         </span>
-      </SidebarItemTooltip>
+      </HoverHint>
     );
   }
 
   if (state === "updated") {
     const label = t("chat.activity.updated");
     return (
-      <SidebarItemTooltip label={label}>
+      <HoverHint side="top" align="start" contentClassName="max-w-80 break-words" content={label}>
         <span
           role="img"
           aria-label={label}
@@ -1949,7 +1924,7 @@ function SessionActivityIndicator({
         >
           <span className="h-2 w-2 rounded-full bg-[#ff8a3d] shadow-[0_0_0_2px_rgba(255,138,61,0.16)]" />
         </span>
-      </SidebarItemTooltip>
+      </HoverHint>
     );
   }
 

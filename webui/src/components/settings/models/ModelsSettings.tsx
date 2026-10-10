@@ -1,6 +1,8 @@
-import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
+import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticModelAPI";
+import { SettingsAddButton } from "@/components/settings/shared/SettingsAddButton";
+import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -9,8 +11,6 @@ import {
   GripVertical,
   ListOrdered,
   Loader2,
-  Plus,
-  Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -585,19 +585,15 @@ export function ModelsSettings({
           </Button>
         ) : selectedPreset ? (
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="rounded-full text-muted-foreground hover:text-destructive"
+            <RemoveActionButton
               disabled={selectedPresetReferenced || saving || orderSaving}
               aria-describedby={
                 selectedPresetReferenced ? "model-preset-delete-hint" : undefined
               }
               onClick={() => onDeleteConfiguration(selectedPreset)}
             >
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
               {tx("settings.actions.delete", "Delete")}
-            </Button>
+            </RemoveActionButton>
             {selectedPresetReferenced ? (
               <span
                 id="model-preset-delete-hint"
@@ -853,9 +849,7 @@ export function ModelsSettings({
                 })}
               </div>
               {!creating ? (
-                <button
-                  type="button"
-                  className="flex min-h-[58px] w-full items-center justify-between gap-3 settings-list-inset py-3 text-left outline-none transition-colors settings-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                <SettingsAddButton
                   disabled={callOrderBusy}
                   onClick={(event) => {
                     editorTriggerRef.current = event.currentTarget;
@@ -863,12 +857,7 @@ export function ModelsSettings({
                     setEditorOpen(true);
                     onBeginCreate();
                   }}
-                >
-                  <span className="inline-flex items-center gap-3 text-[14px] font-medium">
-                    <span className="grid w-10 shrink-0 place-items-center"><Plus className="h-5 w-5" aria-hidden /></span>
-                    {tx("settings.models.newPreset", "New model preset")}
-                  </span>
-                  {orderSaving ? (
+                  trailing={orderSaving ? (
                     <SettingsStatusMessage>
                       <span className="inline-flex items-center gap-1.5">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -876,7 +865,9 @@ export function ModelsSettings({
                       </span>
                     </SettingsStatusMessage>
                   ) : null}
-                </button>
+                >
+                  {tx("settings.models.newPreset", "New model preset")}
+                </SettingsAddButton>
               ) : null}
             </>
           )}

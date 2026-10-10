@@ -762,11 +762,15 @@
       }
     },
     "providers": {
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "로컬",
       "title": "제공업체",
       "searchPlaceholder": "제공업체 검색",
       "noMatches": "일치하는 제공업체가 없습니다.",
       "addOwnProvider": "제공업체 추가",
       "addProvider": "제공업체 추가",
+      "removeProvider": "제거",
       "backToProviders": "제공업체 목록으로 돌아가기",
       "customProvider": "사용자 지정",
       "customProviderName": "이름",
@@ -813,9 +817,9 @@
     },
     "models": {
       "catalogAuthRequired": "인증이 만료되었습니다. 다시 로그인해 주세요.",
-      "catalogUnavailable": "모델 목록을 갱신할 수 없습니다. 나중에 다시 시도해 주세요.",
-      "catalogStale": "캐시된 모델을 표시합니다. 최신 목록이 아닐 수 있습니다.",
-      "catalogFallback": "기본 제공 모델을 표시합니다. 최신 목록이 아닐 수 있습니다.",
+      "catalogUnavailable": "갱신 실패. 클릭하여 다시 시도",
+      "catalogStale": "캐시된 목록이 최신이 아닐 수 있습니다.",
+      "catalogFallback": "기본 제공 목록이 최신이 아닐 수 있습니다.",
       "selectModel": "모델 선택",
       "addConfiguration": "설정 추가",
       "newConfiguration": "새 모델 설정",

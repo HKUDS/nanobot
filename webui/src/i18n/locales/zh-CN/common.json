@@ -694,9 +694,9 @@
     },
     "models": {
       "catalogAuthRequired": "授权已失效，请重新登录。",
-      "catalogUnavailable": "暂时无法刷新模型，请稍后重试。",
-      "catalogStale": "当前显示缓存的模型列表，可能不是最新。",
-      "catalogFallback": "当前显示内置模型列表，可能不是最新。",
+      "catalogUnavailable": "刷新失败，点击重试",
+      "catalogStale": "缓存列表可能已过时。",
+      "catalogFallback": "内置列表可能已过时。",
       "selectModel": "选择模型",
       "addConfiguration": "添加配置",
       "newConfiguration": "新建模型配置",
@@ -1185,11 +1185,15 @@
       "systemHelp": "包括内部任务和未标注来源的调用"
     },
     "providers": {
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "本地",
       "title": "提供商",
       "searchPlaceholder": "搜索提供商",
       "noMatches": "没有匹配的提供商。",
       "addOwnProvider": "添加提供商",
       "addProvider": "添加提供商",
+      "removeProvider": "移除",
       "backToProviders": "返回提供商列表",
       "customProvider": "自定义",
       "customProviderName": "名称",

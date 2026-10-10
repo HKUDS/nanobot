@@ -762,11 +762,15 @@
       }
     },
     "providers": {
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "Lokal",
       "title": "Penyedia",
       "searchPlaceholder": "Cari penyedia",
       "noMatches": "Tidak ada penyedia yang cocok.",
       "addOwnProvider": "Tambah penyedia",
       "addProvider": "Tambahkan penyedia",
+      "removeProvider": "Hapus",
       "backToProviders": "Kembali ke penyedia",
       "customProvider": "Khusus",
       "customProviderName": "Nama",
@@ -813,9 +817,9 @@
     },
     "models": {
       "catalogAuthRequired": "Otorisasi kedaluwarsa. Silakan masuk lagi.",
-      "catalogUnavailable": "Model tidak dapat diperbarui. Coba lagi nanti.",
-      "catalogStale": "Menampilkan model dari cache; daftar mungkin belum terbaru.",
-      "catalogFallback": "Menampilkan model bawaan; daftar mungkin belum terbaru.",
+      "catalogUnavailable": "Pembaruan gagal. Klik untuk mencoba lagi",
+      "catalogStale": "Daftar dalam cache mungkin sudah usang.",
+      "catalogFallback": "Daftar bawaan mungkin sudah usang.",
       "selectModel": "Pilih model",
       "addConfiguration": "Tambah konfigurasi",
       "newConfiguration": "Konfigurasi model baru",

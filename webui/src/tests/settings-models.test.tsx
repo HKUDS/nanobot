@@ -86,6 +86,13 @@ async function togglePresetEditor(name = "primary") {
   fireEvent.click(within(row).getAllByRole("button")[0]);
 }
 
+async function openModelPicker() {
+  const input = await screen.findByRole("combobox", { name: "Select model" });
+  act(() => input.focus());
+  fireEvent.click(input);
+  return input;
+}
+
 async function openPresetAdvancedOptions() {
   await togglePresetEditor();
   fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
@@ -215,8 +222,7 @@ describe("Settings models", () => {
     requestMutationMock.mockResolvedValue(payload);
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await openPresetAdvancedOptions();
-    await openPopover(screen.getByRole("button", { name: "anthropic/claude-sonnet-4", exact: true }));
-    const search = screen.getByRole("combobox", { name: "Choose model" });
+    const search = await openModelPicker();
     fireEvent.change(search, { target: { value: "gpt-4o" } });
     fireEvent.keyDown(search, { key: "Enter" });
     await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));
@@ -400,7 +406,7 @@ describe("Settings models", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "My unsaved preset" },
     });
-    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    await openModelPicker();
     fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
     if (mode === "manual") {
       fireEvent.change(await screen.findByRole("textbox", { name: "Callback URL" }), {
@@ -410,7 +416,7 @@ describe("Settings models", () => {
     }
     await waitFor(() => expect(recovered).toBe(true), { timeout: 3000 });
     expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("My unsaved preset");
-    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    await openModelPicker();
     expect(await screen.findByRole("option", { name: /openai-codex\/new-model/ })).toBeVisible();
     expect(screen.queryByText("Authorization expired. Please sign in again.")).not.toBeInTheDocument();
     expect(requestMutationMock.mock.calls.every(([action]) => action.startsWith("settings.provider.oauth_"))).toBe(true);
@@ -940,10 +946,7 @@ describe("Settings models", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "Writer" },
     });
-    await openPopover(screen.getByRole("button", { name: "Select model" }));
-    const modelSearch = await screen.findByRole("combobox", {
-      name: "Choose model",
-    });
+    const modelSearch = await openModelPicker();
     fireEvent.change(modelSearch, {
       target: { value: "openai/gpt-4o-mini" },
     });
@@ -977,10 +980,7 @@ describe("Settings models", () => {
     fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     const nameInput = screen.getByRole("textbox", { name: "Preset name" });
     fireEvent.change(nameInput, { target: { value: "PRIMARY" } });
-    await openPopover(screen.getByRole("button", { name: "Select model" }));
-    const modelSearch = await screen.findByRole("combobox", {
-      name: "Choose model",
-    });
+    const modelSearch = await openModelPicker();
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -1408,7 +1408,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models" });
 
     await togglePresetEditor();
-    await openPopover(await screen.findByRole("button", { name: /Select model/i }));
+    await openModelPicker();
     expect(
       await screen.findByText("Configure this provider before loading models."),
     ).toBeInTheDocument();
@@ -1467,10 +1467,8 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models" });
 
     await togglePresetEditor();
-    const modelButtons = await screen.findAllByRole("button", { name: /open-codex\/gpt-5\.5/i });
-    await openPopover(modelButtons[modelButtons.length - 1]);
-    const input = (await screen.findByPlaceholderText("Choose model")) as HTMLInputElement;
-    expect(input.value).toBe("open-codex/gpt-5.5");
+    const input = await openModelPicker();
+    expect(input).toHaveValue("open-codex/gpt-5.5");
 
     fireEvent.change(input, { target: { value: "openai-codex/gpt-5.5" } });
     expect(await screen.findByText("“openai-codex/gpt-5.5”")).toBeInTheDocument();
@@ -1543,8 +1541,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models" });
 
     await togglePresetEditor();
-    const modelButtons = await screen.findAllByRole("button", { name: /orcarouter\/auto/i });
-    await openPopover(modelButtons[modelButtons.length - 1]);
+    await openModelPicker();
     expect(await screen.findByText("Search this provider’s model catalog.")).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(([input]) =>
@@ -1627,10 +1624,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
     await togglePresetEditor();
-    const modelButtons = await screen.findAllByRole("button", {
-      name: /openai-codex\/gpt-5\.5/i,
-    });
-    await openPopover(modelButtons[modelButtons.length - 1]);
+    await openModelPicker();
 
     expect(await screen.findByText("GPT-5.6-Sol")).toBeInTheDocument();
     expect(screen.getByText(/Latest frontier agentic coding model\./)).toBeInTheDocument();
@@ -1709,10 +1703,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
     await togglePresetEditor();
-    const modelButtons = await screen.findAllByRole("button", {
-      name: /xai-grok\/grok-4\.5/i,
-    });
-    await openPopover(modelButtons[modelButtons.length - 1]);
+    const modelInput = await openModelPicker();
 
     expect(await screen.findByText("Grok 4.6")).toBeInTheDocument();
     expect(screen.getByText(/Latest frontier model/)).toBeInTheDocument();
@@ -1721,7 +1712,7 @@ describe("Settings models", () => {
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    await waitFor(() => expect(modelButtons[modelButtons.length - 1]).toHaveFocus());
+    await waitFor(() => expect(modelInput).toHaveFocus());
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     await waitFor(() => expect(within(screen.getByTestId("model-call-order-row-primary")).getAllByRole("button")[0]).toBeVisible());
   });
@@ -1765,10 +1756,7 @@ describe("Settings models", () => {
     expect(nameInput).toHaveValue("");
     expect(nameInput).toHaveAttribute("placeholder", "e.g. Fast writing");
 
-    await openPopover(screen.getByRole("button", { name: "Select model" }));
-    const modelSearch = await screen.findByRole("combobox", {
-      name: "Choose model",
-    });
+    const modelSearch = await openModelPicker();
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
 
@@ -1776,10 +1764,7 @@ describe("Settings models", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
     fireEvent.change(nameInput, { target: { value: "Writer" } });
-    await openPopover(screen.getByRole("button", { name: /openai\/gpt-4o-mini/ }));
-    const nextModelSearch = await screen.findByRole("combobox", {
-      name: "Choose model",
-    });
+    const nextModelSearch = await openModelPicker();
     fireEvent.change(nextModelSearch, { target: { value: "openai/gpt-4.1-mini" } });
     fireEvent.keyDown(nextModelSearch, { key: "Enter" });
     expect(nameInput).toHaveValue("Writer");
@@ -1861,8 +1846,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models" });
 
     await togglePresetEditor();
-    const modelButtons = await screen.findAllByRole("button", { name: /deepseek-chat/i });
-    await openPopover(modelButtons[modelButtons.length - 1]);
+    await openModelPicker();
     await screen.findByText("deepseek-reasoner");
     fireEvent.click(screen.getAllByText("deepseek-reasoner")[0]);
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));

@@ -762,11 +762,15 @@
       }
     },
     "providers": {
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "本地",
       "title": "提供商",
       "searchPlaceholder": "搜尋供應商",
       "noMatches": "沒有符合的供應商。",
       "addOwnProvider": "新增提供商",
       "addProvider": "新增供應商",
+      "removeProvider": "移除",
       "backToProviders": "返回供應商列表",
       "customProvider": "自定義",
       "customProviderName": "名稱",
@@ -813,9 +817,9 @@
     },
     "models": {
       "catalogAuthRequired": "授權已失效，請重新登入。",
-      "catalogUnavailable": "暫時無法更新模型，請稍後重試。",
-      "catalogStale": "目前顯示快取的模型清單，可能不是最新。",
-      "catalogFallback": "目前顯示內建模型清單，可能不是最新。",
+      "catalogUnavailable": "更新失敗，點擊重試",
+      "catalogStale": "快取清單可能已過時。",
+      "catalogFallback": "內建清單可能已過時。",
       "selectModel": "選擇模型",
       "addConfiguration": "新增設定",
       "newConfiguration": "新增模型設定",

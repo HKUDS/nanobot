@@ -8,6 +8,11 @@ import {
 import type { ProviderForm } from "@/components/settings/models/ProviderSettings";
 import type { ProviderOAuthAuthorizationRequired, SettingsPayload } from "@/lib/types";
 
+export interface ProviderOperation {
+  provider: string;
+  action: "save" | "create" | "login" | "logout" | "remove";
+}
+
 export function useModelSettingsState(initialSettings: SettingsPayload | null) {
   const initialForm = initialSettings
     ? agentDraftFromPayload(initialSettings)
@@ -21,7 +26,8 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
   const [modelPresetPendingDelete, setModelPresetPendingDelete] =
     useState<SettingsPayload["model_presets"][number] | null>(null);
   const modelPresetBeforeCreateRef = useRef<string | null>(null);
-  const [providerSaving, setProviderSaving] = useState<string | null>(null);
+  const [providerOperation, setProviderOperation] = useState<ProviderOperation | null>(null);
+  const providerSaving = providerOperation?.provider ?? null;
   const [providerOAuthFlow, setProviderOAuthFlow] =
     useState<ProviderOAuthAuthorizationRequired | null>(null);
   const providerOAuthFlowRef = useRef<ProviderOAuthAuthorizationRequired | null>(null);
@@ -60,6 +66,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     providerOAuthFlowRef,
     providerOAuthResponse,
     providerSaving,
+    providerOperation,
     saving,
     setEditingProviderKeys,
     setExpandedProvider,
@@ -77,7 +84,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     setProviderOAuthDialogError,
     setProviderOAuthFlow,
     setProviderOAuthResponse,
-    setProviderSaving,
+    setProviderOperation,
     setSaving,
     setVisibleProviderKeys,
     visibleProviderKeys,

@@ -25,6 +25,7 @@ import {
   loginProviderOAuth,
   logoutProviderOAuth,
   migrateModelConfigurations,
+  removeProviderSettings,
   updateModelCallOrder,
   updateModelConfiguration,
   updateProviderSettings,
@@ -122,7 +123,7 @@ export function useModelSettingsActions({
     setProviderOAuthDialogError,
     setProviderOAuthFlow,
     setProviderOAuthResponse,
-    setProviderSaving,
+    setProviderOperation,
     setSaving,
     setVisibleProviderKeys,
     visibleProviderKeys,
@@ -394,7 +395,7 @@ export function useModelSettingsActions({
       setError(t("settings.byok.apiKeyRequired"));
       return;
     }
-    setProviderSaving(providerName);
+    setProviderOperation({ provider: providerName, action: "save" });
     try {
       const supportName = providerName === "bedrock"
         ? "bedrock"
@@ -402,7 +403,7 @@ export function useModelSettingsActions({
           ? "azure"
           : null;
       if (supportName && !(await installCapabilities([supportName]))) return;
-      const update: ProviderSettingsUpdate = { provider: providerName };
+      const update: ProviderSettingsUpdate = { provider: providerName, enabled: true };
       if (!isOauthProvider) {
         update.apiKey = apiKey || undefined;
         update.apiBase = providerForm.apiBase.trim();
@@ -448,13 +449,39 @@ export function useModelSettingsActions({
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setProviderSaving(null);
+      setProviderOperation(null);
+    }
+  };
+
+  const removeProvider = async (providerName: string) => {
+    if (providerSaving) return;
+    setProviderOperation({ provider: providerName, action: "remove" });
+    try {
+      const payload = await removeProviderSettings(client, providerName);
+      applyPayload(payload, { preserveAgentForm: true });
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, image: true }));
+      }
+      await maybeRestartHostEngine(payload);
+      setProviderForms((prev) => {
+        const next = { ...prev };
+        delete next[providerName];
+        return next;
+      });
+      setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+      setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+      setExpandedProvider(null);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProviderOperation(null);
     }
   };
 
   const createCustomProvider = async (draft: CustomProviderDraft): Promise<boolean> => {
     if (providerSaving) return false;
-    setProviderSaving(CUSTOM_PROVIDER_CREATION_KEY);
+    setProviderOperation({ provider: CUSTOM_PROVIDER_CREATION_KEY, action: "create" });
     try {
       const payload = await createProviderSettings(client, {
         name: draft.name.trim(),
@@ -475,7 +502,7 @@ export function useModelSettingsActions({
       setError((err as Error).message);
       return false;
     } finally {
-      setProviderSaving(null);
+      setProviderOperation(null);
     }
   };
 
@@ -494,7 +521,7 @@ export function useModelSettingsActions({
         popup = null;
       }
     }
-    setProviderSaving(providerName);
+    setProviderOperation({ provider: providerName, action: action });
     try {
       const payload =
         action === "login"
@@ -529,7 +556,7 @@ export function useModelSettingsActions({
       popup?.close();
       setError((err as Error).message);
     } finally {
-      setProviderSaving(null);
+      setProviderOperation(null);
     }
   };
 
@@ -614,6 +641,7 @@ export function useModelSettingsActions({
     handleMigrateModelConfigurations,
     handleToggleProvider,
     resetProviderDraft,
+    removeProvider,
     runProviderOAuth,
     saveModelSettings,
     saveProvider,

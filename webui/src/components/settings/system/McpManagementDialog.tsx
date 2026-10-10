@@ -13,7 +13,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input, SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { McpPresetInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -432,7 +432,7 @@ function ToolsPanel({
         <label className="relative min-w-0 flex-1">
           <span className="sr-only">{tx("settings.mcp.searchTools", "Search tools")}</span>
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input
+          <SearchInput
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder={tx("settings.mcp.searchToolsPlaceholder", "Search tools")}

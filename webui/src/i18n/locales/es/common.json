@@ -762,11 +762,15 @@
       }
     },
     "providers": {
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "Local",
       "title": "Proveedores",
       "searchPlaceholder": "Buscar proveedores",
       "noMatches": "Ningún proveedor coincide con esta búsqueda.",
       "addOwnProvider": "Añadir proveedor",
       "addProvider": "Añadir proveedor",
+      "removeProvider": "Quitar",
       "backToProviders": "Volver a los proveedores",
       "customProvider": "Personalizado",
       "customProviderName": "Nombre",
@@ -813,9 +817,9 @@
     },
     "models": {
       "catalogAuthRequired": "La autorización ha caducado. Inicia sesión de nuevo.",
-      "catalogUnavailable": "No se pudieron actualizar los modelos. Inténtalo más tarde.",
-      "catalogStale": "Se muestran modelos en caché; la lista puede estar desactualizada.",
-      "catalogFallback": "Se muestran modelos integrados; la lista puede estar desactualizada.",
+      "catalogUnavailable": "No se pudo actualizar. Haz clic para reintentar",
+      "catalogStale": "La lista en caché puede estar desactualizada.",
+      "catalogFallback": "La lista integrada puede estar desactualizada.",
       "selectModel": "Seleccionar modelo",
       "addConfiguration": "Agregar configuración",
       "newConfiguration": "Nueva configuración de modelo",

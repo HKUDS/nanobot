@@ -762,11 +762,15 @@
       }
     },
     "providers": {
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "Cục bộ",
       "title": "Nhà cung cấp",
       "searchPlaceholder": "Tìm nhà cung cấp",
       "noMatches": "Không có nhà cung cấp phù hợp.",
       "addOwnProvider": "Thêm nhà cung cấp",
       "addProvider": "Thêm nhà cung cấp",
+      "removeProvider": "Xóa",
       "backToProviders": "Quay lại danh sách nhà cung cấp",
       "customProvider": "Tùy chỉnh",
       "customProviderName": "Tên",
@@ -813,9 +817,9 @@
     },
     "models": {
       "catalogAuthRequired": "Quyền truy cập đã hết hạn. Vui lòng đăng nhập lại.",
-      "catalogUnavailable": "Không thể cập nhật mô hình. Vui lòng thử lại sau.",
-      "catalogStale": "Đang hiển thị mô hình đã lưu đệm; danh sách có thể chưa được cập nhật.",
-      "catalogFallback": "Đang hiển thị mô hình tích hợp sẵn; danh sách có thể chưa được cập nhật.",
+      "catalogUnavailable": "Cập nhật thất bại. Nhấp để thử lại",
+      "catalogStale": "Danh sách đã lưu đệm có thể đã cũ.",
+      "catalogFallback": "Danh sách có sẵn có thể đã cũ.",
       "selectModel": "Chọn mô hình",
       "addConfiguration": "Thêm cấu hình",
       "newConfiguration": "Cấu hình mô hình mới",

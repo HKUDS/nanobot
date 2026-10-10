@@ -240,6 +240,7 @@ def _preset_provider_signature(
         preset.model,
         preset.provider,
         provider_name,
+        provider_config.enabled if provider_config else None,
         config.get_api_key(preset.model, preset=preset),
         config.get_api_base(preset.model, preset=preset),
         _provider_extra_headers(find_by_name(provider_name) if provider_name else None, provider_config),

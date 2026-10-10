@@ -74,6 +74,7 @@ class ModelSettingsOperations:
     update_call_order: SettingsOperation
     update_provider: SettingsOperation
     create_provider: SettingsOperation
+    remove_provider: SettingsOperation
     provider_models: SettingsOperation
     model_api: SettingsOperation
     oauth_login: SettingsOperation
@@ -206,6 +207,8 @@ def _restore_redacted_provider_secret_values(
 
 def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     updates: dict[str, Any] = {}
+    if (enabled := query_first(query, "enabled")) is not None:
+        updates["enabled"] = parse_bool(enabled, "enabled")
     string_fields = (
         ("api_key", "apiKey"),
         ("api_base", "apiBase"),
@@ -391,10 +394,12 @@ def oauth_provider_status(spec: Any) -> dict[str, Any]:
 
 
 def provider_configured_for_settings(
-    spec: Any,
-    provider_config: Any,
+    spec: ProviderSpec,
+    provider_config: ProviderConfig,
     oauth_status: OAuthStatusReader,
 ) -> bool:
+    if not provider_config.enabled:
+        return False
     if spec.is_oauth:
         return bool(oauth_status(spec)["configured"])
     if provider_requires_api_base(spec):
@@ -444,6 +449,19 @@ def resolve_settings_provider(
     return None
 
 
+def _require_settings_provider(
+    config: Config,
+    provider_name: str | None,
+) -> tuple[ProviderSpec, str, ProviderConfig]:
+    name = (provider_name or "").strip()
+    if not name:
+        raise WebUISettingsError("provider is required")
+    resolved = resolve_settings_provider(config, name)
+    if resolved is None:
+        raise WebUISettingsError("unknown provider")
+    return resolved
+
+
 def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
     fields: list[str] = []
     if spec.backend in {"openai_compat", "anthropic"}:
@@ -477,8 +495,9 @@ def _provider_settings_row(
         "name": name,
         "label": spec.label,
         "is_custom": is_custom,
+        "enabled": provider_config.enabled,
         "configured": (
-            bool(oauth_status["configured"])
+            provider_config.enabled and bool(oauth_status["configured"])
             if oauth_status is not None
             else provider_configured_for_settings(spec, provider_config, oauth_status_reader)
         ),
@@ -504,6 +523,7 @@ def _provider_settings_row(
         "proxy": provider_config.proxy,
     }
     if oauth_status is not None:
+        row["oauth_authenticated"] = bool(oauth_status["configured"])
         row["oauth_account"] = oauth_status["account"]
         row["oauth_expires_at"] = oauth_status["expires_at"]
         row["oauth_login_supported"] = oauth_status["login_supported"]
@@ -665,6 +685,8 @@ def provider_models_payload(
         "message": None,
         "fetched_at": time.time(),
     }
+    if not provider_config.enabled:
+        return {**base_payload, "status": "not_configured"}
     if catalog_kind == "unsupported":
         return {
             **base_payload,
@@ -690,7 +712,9 @@ def provider_models_payload(
         }
     if catalog_kind == "hybrid":
         proxy = _resolve_env_placeholders(provider_config.proxy)
-        catalog = get_oauth_model_catalog(spec.name, proxy=proxy)
+        catalog = get_oauth_model_catalog(
+            spec.name, proxy=proxy, refresh=query_first(query, "refresh") == "1",
+        )
         rows = [
             {
                 "id": model.id,
@@ -1541,6 +1565,7 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
     allowed = {
         "api_key",
         "api_base",
+        "enabled",
         "proxy",
         "extra_headers",
         "extra_body",
@@ -1570,14 +1595,9 @@ def update_provider_settings(
     config: Config,
     query: QueryParams,
 ) -> tuple[bool, bool]:
-    provider_name = (query_first(query, "provider") or "").strip()
-    if not provider_name:
-        raise WebUISettingsError("provider is required")
-
-    resolved_provider = resolve_settings_provider(config, provider_name)
-    if resolved_provider is None:
-        raise WebUISettingsError("unknown provider")
-    spec, provider_key, provider_config = resolved_provider
+    spec, provider_key, provider_config = _require_settings_provider(
+        config, query_first(query, "provider"),
+    )
     updates = _provider_config_updates(query)
     if not spec.is_oauth and spec.name != "openai":
         updates.pop("api_type", None)
@@ -1586,17 +1606,17 @@ def update_provider_settings(
     except ValueError as exc:
         raise WebUISettingsError(str(exc)) from None
     if spec.is_oauth:
-        if spec.name not in _OAUTH_PROXY_PROVIDERS:
-            raise WebUISettingsError("unknown provider")
-        unsupported = set(updates) - {"proxy", "extra_body"}
+        allowed = {"enabled", *_provider_advanced_field_names(provider_key, spec)}
+        unsupported = set(updates) - allowed
         if unsupported:
             raise WebUISettingsError(
-                "OAuth provider only supports proxy and extra_body settings"
+                "Setting is not supported for this OAuth provider"
             )
     else:
         allowed = {
             "api_key",
             "api_base",
+            "enabled",
             *_provider_advanced_field_names(provider_key, spec),
         }
         if find_by_name(provider_key) is None:
@@ -1617,6 +1637,7 @@ def update_provider_settings(
         if _provider_display_name_exists(config, display_name, exclude_key=provider_key):
             raise WebUISettingsError("provider already exists", status=409)
 
+    updates.setdefault("enabled", True)
     updated_provider_config = _validated_provider_config(provider_config, updates)
     if updated_provider_config.api != provider_config.api:
         candidates = [
@@ -1634,14 +1655,44 @@ def update_provider_settings(
     changed = updated_provider_config != provider_config
     if changed:
         setattr(config.providers, provider_key, updated_provider_config)
+    restart_required = changed and _provider_requires_image_reload(config, provider_key)
+    return changed, restart_required
+
+
+def _provider_requires_image_reload(config: Config, provider_key: str) -> bool:
     image_config = config.tools.image_generation
-    restart_required = (
-        changed
-        and image_config.enabled
+    return bool(
+        image_config.enabled
         and image_config.provider == provider_key
         and get_image_gen_provider(provider_key) is not None
     )
-    return changed, restart_required
+
+
+def enable_provider_settings(config: Config, provider_name: str) -> None:
+    """Enable a provider without changing its connection settings or credentials."""
+    _, provider_key, provider_config = _require_settings_provider(config, provider_name)
+    if not provider_config.enabled:
+        setattr(config.providers, provider_key, provider_config.model_copy(update={"enabled": True}))
+
+
+def remove_provider_settings(
+    config: Config,
+    query: QueryParams,
+    *,
+    oauth_flows: WebUIOAuthFlowRegistry | None = None,
+) -> bool:
+    spec, provider_key, provider_config = _require_settings_provider(
+        config, query_first(query, "provider"),
+    )
+    if spec.is_oauth and oauth_flows is not None:
+        oauth_flows.clear(spec.name)
+    if find_by_name(provider_key) is None:
+        delattr(config.providers, provider_key)
+    else:
+        setattr(config.providers, provider_key, type(provider_config)(enabled=False))
+    if spec.is_oauth:
+        invalidate_oauth_model_catalog(spec.name)
+    return _provider_requires_image_reload(config, provider_key)
 
 
 def login_oauth_provider(
@@ -1767,6 +1818,7 @@ def complete_oauth_provider(
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None,
     settings_payload: SettingsPayloadBuilder,
+    on_authorized: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     provider_name = (query_first(query, "provider") or "").strip()
     flow_id = (query_first(query, "flow_id") or "").strip()
@@ -1823,6 +1875,8 @@ def complete_oauth_provider(
     oauth_flows.remove(spec.name, flow_id, flow, cancel=False)
     if not token.access:
         raise WebUISettingsError("OAuth login failed", status=401)
+    if on_authorized is not None:
+        on_authorized(spec.name)
     invalidate_oauth_model_catalog(spec.name)
     return settings_payload(config_path=config_path)
 
@@ -1924,11 +1978,15 @@ class ModelSettingsHandler:
                 self._refresh_runtime_config()
                 return SettingsRouteResult.success(payload, decorate_restart=True)
 
-            if action == "provider-update":
-                payload = self.settings.mutate(
-                    operations.update_provider,
-                    request.query,
-                )
+            if action in {"provider-update", "provider-remove"}:
+                if action == "provider-remove":
+                    payload = self.settings.mutate(
+                        operations.remove_provider,
+                        request.query,
+                        oauth_flows=self.settings.oauth_flows,
+                    )
+                else:
+                    payload = self.settings.mutate(operations.update_provider, request.query)
                 payload, image_restart_cleared = await operations.apply_image_runtime_change(
                     payload
                 )
@@ -1999,4 +2057,5 @@ class ModelSettingsHandler:
 
         if payload.get("status") in {"authorization_required", "pending", "cancelled"}:
             return SettingsRouteResult.success(payload)
+        self._refresh_runtime_config()
         return SettingsRouteResult.success(payload, decorate_restart=True)

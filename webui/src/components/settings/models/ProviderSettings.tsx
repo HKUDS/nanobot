@@ -1,24 +1,26 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   ChevronDown,
   ChevronLeft,
-  ChevronRight,
   Clipboard,
   Eye,
   EyeOff,
   ExternalLink,
   Globe2,
-  Hexagon,
   Loader2,
   Pencil,
-  Plus,
-  Search,
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { PROVIDER_ICONS } from "@/components/settings/shared/ModelControls";
+import { SettingsAddButton } from "@/components/settings/shared/SettingsAddButton";
+import type { ProviderOperation } from "@/components/settings/models/useModelSettingsState";
+import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
+import { TruncatedTextTooltip } from "@/components/ui/tooltip";
+import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
+import { ProviderSearchList } from "@/components/settings/models/ProviderSearchList";
+export { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import {
   CapabilityInstallNotice,
   SettingsGroup,
@@ -44,14 +46,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox";
 import { SheetContent } from "@/components/ui/sheet";
 import { FloatingPortalContext } from "@/components/ui/floating-portal";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
-import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import type {
@@ -227,13 +226,6 @@ function emptyCustomProviderDraft(): CustomProviderDraft {
     profile: "",
   };
 }
-
-const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
-  ["vllm", "ollama", "lm_studio", "atomic_chat", "ovms"].map((name, index) => [
-    name,
-    index,
-  ]),
-);
 
 export function ProviderOAuthLoginDialog({
   flow,
@@ -451,13 +443,11 @@ function ProviderAdvancedOptions({
   form,
   onChange,
   children,
-  footer,
 }: {
   fields: ProviderAdvancedField[];
   form: ProviderForm;
   onChange: (value: Partial<ProviderForm>) => void;
   children?: ReactNode;
-  footer?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -621,11 +611,7 @@ function ProviderAdvancedOptions({
           </div>
         </div>
       </DisclosureContent>
-      {footer ? (
-        <div className="flex items-center justify-end gap-2 py-3">
-          {footer}
-        </div>
-      ) : null}
+
     </div>
   );
 }
@@ -648,6 +634,8 @@ export function ProvidersSettings({
   onChangeProviderForm,
   onSaveProvider,
   onCreateCustomProvider,
+  onRemoveProvider,
+  providerOperation,
   onProviderOAuthLogin,
   onProviderOAuthLogout,
 }: {
@@ -668,6 +656,8 @@ export function ProvidersSettings({
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
   onSaveProvider: (provider: string) => void;
   onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
+  onRemoveProvider: (provider: string) => void;
+  providerOperation?: ProviderOperation | null;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
 }) {
@@ -684,10 +674,8 @@ export function ProvidersSettings({
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const unconfiguredProviders = useMemo(
     () =>
-      orderUnconfiguredProviders(
-        settings.providers.filter(
-          (provider) => !provider.configured && provider.name !== "custom",
-        ),
+      settings.providers.filter(
+        (provider) => !provider.configured && provider.name !== "custom",
       ),
     [settings.providers],
   );
@@ -742,6 +730,7 @@ export function ProvidersSettings({
     const form = providerForms[provider.name] ?? providerFormFromRow(provider);
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
+    const oauthAuthenticated = provider.oauth_authenticated ?? provider.configured;
     const supportsOauthAdvancedSettings =
       isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
     const keyVisible = !!visibleProviderKeys[provider.name];
@@ -751,11 +740,12 @@ export function ProvidersSettings({
     const apiBase = form.apiBase.trim();
     const advancedFields = provider.advanced_fields ?? [];
     const oauthSettingsDirty = isOauthProvider && (
-      form.proxy.trim() !== (provider.proxy ?? "").trim()
+      provider.enabled === false
+      || form.proxy.trim() !== (provider.proxy ?? "").trim()
       || form.extraBody.trim() !== providerJsonValue(provider.extra_body).trim()
     );
-    const oauthSettingsSaving = saving && oauthSettingsDirty;
-    const oauthActionBusy = saving && !oauthSettingsSaving;
+    const oauthSettingsSaving = saving && providerOperation?.action === "save";
+    const oauthActionBusy = saving && (providerOperation?.action === "login" || providerOperation?.action === "logout");
     const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
     const hasOptionalProviderSetting = Boolean(
       apiKey
@@ -773,6 +763,12 @@ export function ProvidersSettings({
       && !apiKeyRequired
       && !provider.configured
       && !hasOptionalProviderSetting;
+    const removeAction = provider.configured ? (
+      <RemoveActionButton className="mr-auto" disabled={saving}
+        onClick={() => onRemoveProvider(provider.name)}>
+        {tx("settings.providers.removeProvider", "Remove")}
+      </RemoveActionButton>
+    ) : null;
     const supportName = provider.name === "bedrock"
       ? "bedrock"
       : provider.name === "azure_openai"
@@ -804,7 +800,7 @@ export function ProvidersSettings({
                       {tx("settings.oauth.authentication", "OAuth authentication")}
                     </p>
                     <p className="mt-1 text-[12px] text-muted-foreground">
-                      {provider.configured
+                      {oauthAuthenticated
                         ? t("settings.oauth.signedInAs", {
                             account: provider.oauth_account || provider.label,
                             defaultValue: "Signed in as {{account}}",
@@ -823,7 +819,7 @@ export function ProvidersSettings({
                     </p>
                   </div>
                   <div className="flex shrink-0 justify-end gap-2">
-                    {provider.configured ? (
+                    {oauthAuthenticated ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -854,7 +850,7 @@ export function ProvidersSettings({
                       ) : null}
                       {oauthActionBusy
                         ? tx("settings.oauth.signingIn", "Signing in...")
-                        : provider.configured
+                        : oauthAuthenticated
                           ? tx("settings.oauth.signInAgain", "Sign in again")
                           : tx("settings.oauth.signIn", "Sign in")}
                     </Button>
@@ -871,38 +867,24 @@ export function ProvidersSettings({
                     fields={advancedFields}
                     form={form}
                     onChange={(value) => onChangeProviderForm(provider.name, value)}
-                    footer={
-                      <>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => toggleProvider(provider.name)}
-                          disabled={saving}
-                          className="rounded-full"
-                        >
-                          {t("settings.actions.cancel")}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onSaveProvider(provider.name)}
-                          disabled={saving || !oauthSettingsDirty}
-                          className="rounded-full"
-                        >
-                          {oauthSettingsSaving ? (
-                            <Loader2
-                              className="mr-1.5 h-3.5 w-3.5 animate-spin"
-                              aria-hidden
-                            />
-                          ) : null}
-                          {oauthSettingsSaving
-                            ? t("settings.actions.saving")
-                            : tx("settings.providers.saveProvider", "Save provider")}
-                        </Button>
-                      </>
-                    }
                   />
                 ) : null}
+                <div className="flex flex-wrap items-center justify-end gap-2 py-3">
+                  {removeAction}
+                  <Button size="sm" variant="ghost" onClick={() => toggleProvider(provider.name)}
+                    disabled={saving} className="rounded-full">
+                    {t("settings.actions.cancel")}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => onSaveProvider(provider.name)}
+                    disabled={saving || !oauthAuthenticated || !oauthSettingsDirty} className="rounded-full">
+                    {oauthSettingsSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                    {oauthSettingsSaving
+                      ? t("settings.actions.saving")
+                      : !provider.configured && oauthAuthenticated
+                        ? tx("settings.providers.addProvider", "Add provider")
+                        : tx("settings.providers.saveProvider", "Save provider")}
+                  </Button>
+                </div>
               </>
             ) : (
               <>
@@ -1017,7 +999,8 @@ export function ProvidersSettings({
                     />
                   ))}
                 </ProviderAdvancedOptions>
-                <div className="flex items-center justify-end gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {removeAction}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1219,22 +1202,9 @@ export function ProvidersSettings({
               : selectedProviderToAdd?.label ?? tx("settings.providers.addProvider", "Add provider")}
             onBack={creatingCustomProvider || selectedProviderToAdd ? backToProviderPicker : undefined}
             trigger={
-                <button
-                  type="button"
-                  className="settings-list-row flex w-full items-center gap-3 py-2.5 text-left transition-colors settings-hover"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-muted text-muted-foreground">
-                      <Plus className="h-5 w-5" aria-hidden />
-                    </span>
-                    <span className="truncate text-[14px] font-medium text-foreground">
-                      {tx(
-                        "settings.providers.addProvider",
-                        "Add provider",
-                      )}
-                    </span>
-                  </span>
-                </button>
+              <SettingsAddButton>
+                {tx("settings.providers.addProvider", "Add provider")}
+              </SettingsAddButton>
             }
           >
             {creatingCustomProvider || selectedProviderToAdd ? (
@@ -1303,153 +1273,3 @@ function ProviderSetupPanel({ open, onOpenChange, title, trigger, onBack, childr
   </Dialog>;
 }
 
-const PROVIDER_SEARCH_ALIASES: Record<string, string> = {
-  anthropic: "claude 克劳德 克勞德",
-  deepseek: "深度求索 深度探索",
-  zhipu: "智谱 智譜 glm z.ai",
-  dashscope: "阿里 通义 通義 千问 千問 qwen",
-  moonshot: "月之暗面 kimi",
-  kimi_coding: "月之暗面 kimi coding",
-  volcengine: "火山引擎 豆包 doubao",
-  volcengine_coding_plan: "火山引擎 豆包 doubao",
-  minimax: "海螺 稀宇",
-  minimax_anthropic: "海螺 稀宇",
-  siliconflow: "硅基流动 矽基流動 硅基流動",
-  stepfun: "阶跃星辰 階躍星辰",
-  xiaomi_mimo: "小米 mimo",
-  longcat: "美团 美團",
-  qianfan: "百度 千帆 文心",
-  ant_ling: "蚂蚁 螞蟻 百灵 百靈",
-};
-
-function ProviderSearchList({ providers, showBrandLogos, query, onQueryChange, onSelect, onCustom, onClose }: {
-  providers: SettingsPayload["providers"];
-  showBrandLogos: boolean;
-  query: string;
-  onQueryChange: (query: string) => void;
-  onSelect: (name: string) => void;
-  onCustom: () => void;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const mobile = useMediaQuery("(max-width: 639px)");
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (!mobile) inputRef.current?.focus({ preventScroll: true });
-  }, [mobile]);
-  const filtered = useMemo(() => {
-    const normalize = (value: string) => value.toLocaleLowerCase().replace(/[\s_.-]+/g, "");
-    return providers.filter((provider) => normalize(
-      `${provider.name} ${provider.label} ${PROVIDER_SEARCH_ALIASES[provider.name] ?? ""}`,
-    ).includes(normalize(query)));
-  }, [providers, query]);
-  const values = useMemo(() => filtered.map((provider) => provider.name), [filtered]);
-  const { inputProps, listProps, getOptionProps } = useComboboxNavigation({
-    open: true, values, onSelect, onClose,
-  });
-  const searchLabel = t("settings.providers.searchPlaceholder", { defaultValue: "Search providers" });
-  return <>
-    <div className="relative mx-5 mb-3 shrink-0">
-      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-      <Input {...inputProps} ref={inputRef} value={query} onChange={(event) => onQueryChange(event.target.value)}
-        aria-label={searchLabel} placeholder={searchLabel}
-        className="h-10 rounded-xl border-0 bg-muted/60 pl-9 text-sm shadow-none focus-visible:ring-1" />
-    </div>
-    <div {...listProps} aria-label={searchLabel}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 scrollbar-thin scrollbar-track-transparent">
-      {filtered.map((provider) => <ComboboxOption key={provider.name} {...getOptionProps(provider.name)}
-        aria-label={provider.label} className="min-h-11 gap-3 rounded-xl px-3 py-2 text-sm font-normal data-[highlighted]:bg-foreground/[0.06] dark:data-[highlighted]:bg-white/[0.08]">
-        <ProviderIcon provider={provider.name} showBrandLogos={showBrandLogos} compact />
-        <span className="min-w-0 flex-1 truncate">{provider.label}</span>
-        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden />
-      </ComboboxOption>)}
-      {filtered.length === 0 ? <p role="status" className="px-3 py-12 text-center text-sm text-muted-foreground">
-        {t("settings.providers.noMatches", { defaultValue: "No matching providers." })}
-      </p> : null}
-    </div>
-    <div className="shrink-0 border-t border-border/50 p-3">
-      <button type="button" onClick={onCustom}
-        className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <Plus className="h-6 w-6 shrink-0 p-0.5 text-muted-foreground" aria-hidden />
-        <span className="flex-1">{t("settings.providers.customProvider", { defaultValue: "Custom provider" })}</span>
-        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" aria-hidden />
-      </button>
-    </div>
-  </>;
-}
-
-function orderUnconfiguredProviders(
-  providers: SettingsPayload["providers"],
-): SettingsPayload["providers"] {
-  return providers
-    .map((provider, index) => ({ provider, index }))
-    .sort((left, right) => {
-      const rank = providerVisibilityRank(left.provider) - providerVisibilityRank(right.provider);
-      return rank || left.index - right.index;
-    })
-    .map(({ provider }) => provider);
-}
-
-function providerVisibilityRank(provider: SettingsPayload["providers"][number]): number {
-  const localRank = LOCAL_UNCONFIGURED_PROVIDER_ORDER.get(provider.name);
-  if (localRank !== undefined) return localRank;
-  if ((provider.api_key_required ?? true) === false) return 100;
-  return 200;
-}
-
-export function ProviderIcon({
-  provider,
-  showBrandLogos,
-  compact = false,
-}: {
-  provider: string;
-  showBrandLogos: boolean;
-  compact?: boolean;
-}) {
-  const brand = providerBrand(provider);
-  const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
-  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
-  const showRemoteLogo = showBrandLogos && Boolean(logoUrl);
-  const showLoadedLogo = showRemoteLogo && logoLoaded;
-  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
-
-  return (
-    <span
-      data-testid={`provider-logo-${provider}`}
-      className={cn(
-        "relative grid shrink-0 place-items-center overflow-hidden font-semibold text-muted-foreground",
-        compact ? "h-6 w-6 rounded-[7px] text-[9px]" : "h-8 w-8 rounded-[9px] text-[11px]",
-        showLoadedLogo ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
-      )}
-      aria-hidden
-    >
-      <span
-        className={cn(
-          "transition-opacity duration-150 motion-reduce:transition-none",
-          showLoadedLogo ? "opacity-0" : "opacity-100",
-        )}
-      >
-        {showBrandLogos && brand
-          ? brand.initials
-          : <Icon className="h-5 w-5" strokeWidth={2} />}
-      </span>
-      {showRemoteLogo ? (
-        <img
-          src={logoUrl}
-          alt=""
-          decoding="async"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          draggable={false}
-          className={cn(
-            "absolute object-contain transition-opacity duration-150 motion-reduce:transition-none",
-            isLogoTile ? (compact ? "h-6 w-6" : "h-8 w-8") : compact ? "h-[18px] w-[18px]" : "h-6 w-6",
-            logoLoaded ? "opacity-100" : "opacity-0",
-          )}
-          onLoad={onLogoLoad}
-          onError={onLogoError}
-        />
-      ) : null}
-    </span>
-  );
-}

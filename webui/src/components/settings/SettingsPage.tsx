@@ -118,6 +118,8 @@ export function SettingsPage({
     closeProviderOAuthFlow,
     completeProviderOAuthResponse,
     createCustomProvider,
+    removeProvider,
+    providerOperation,
     customMcpForm,
     editingProviderKeys,
     error,
@@ -361,7 +363,7 @@ export function SettingsPage({
               orderSaving={modelCallOrderSaving || modelConfigurationSaving}
               migrationSaving={modelMigrationSaving}
               showBrandLogos={localPrefs.brandLogos}
-              providerSaving={providerSaving}
+              providerSaving={providerOperation?.action === "login" ? providerSaving : null}
               onChangeCallOrder={changeModelCallOrder}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onSave={saveModelSettings}
@@ -409,6 +411,8 @@ export function SettingsPage({
               }
               onSaveProvider={saveProvider}
               onCreateCustomProvider={createCustomProvider}
+              onRemoveProvider={removeProvider}
+              providerOperation={providerOperation}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
             />

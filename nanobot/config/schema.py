@@ -231,6 +231,8 @@ class AgentsConfig(Base):
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
+    enabled: bool = Field(default=True, exclude_if=lambda value: value)
+
     # User-facing name for dynamic custom providers.
     display_name: str | None = Field(
         default=None,
@@ -253,6 +255,19 @@ class ProviderConfig(Base):
         "enable_thinking",
         "reasoning_split",
     )
+
+    @field_validator("proxy")
+    @classmethod
+    def normalize_proxy(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        # Environment references may expand to a complete URL at runtime.
+        if "://" in value or "${" in value:
+            return value
+        return f"http://{value}"
 
     @field_validator("thinking_style")
     @classmethod
@@ -579,7 +594,7 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
+                if not p.enabled or spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
                     return p, spec.name
 
         # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
@@ -596,7 +611,7 @@ class Config(BaseSettings):
             if spec.is_transcription_only:
                 continue
             p = getattr(self.providers, spec.name, None)
-            if p and any(_kw_matches(kw) for kw in spec.keywords):
+            if p and p.enabled and any(_kw_matches(kw) for kw in spec.keywords):
                 # Local providers (Ollama, vLLM, …) keep model-family keywords
                 # like "nemotron" or "llama" to enable bare-model auto-routing,
                 # but those keywords collide with cloud-hosted variants of the
@@ -626,7 +641,7 @@ class Config(BaseSettings):
                 if not spec.is_local:
                     continue
                 p = getattr(self.providers, spec.name, None)
-                if not (p and p.api_base):
+                if not (p and p.enabled and p.api_base):
                     continue
                 if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
                     return p, spec.name
@@ -641,12 +656,12 @@ class Config(BaseSettings):
             if spec.is_oauth or spec.is_transcription_only:
                 continue
             p = getattr(self.providers, spec.name, None)
-            if p and p.api_key:
+            if p and p.enabled and p.api_key:
                 return p, spec.name
 
         # Final fallback: check for any configured custom provider
         for attr_name, p in (self.providers.model_extra or {}).items():
-            if isinstance(p, ProviderConfig) and p.api_base:
+            if isinstance(p, ProviderConfig) and p.enabled and p.api_base:
                 return p, attr_name
 
         return None, None

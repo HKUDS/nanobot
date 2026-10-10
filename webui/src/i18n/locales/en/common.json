@@ -694,9 +694,9 @@
     },
     "models": {
       "catalogAuthRequired": "Authorization expired. Please sign in again.",
-      "catalogUnavailable": "Could not refresh models. Try again later.",
-      "catalogStale": "Showing cached models; the list may be out of date.",
-      "catalogFallback": "Showing built-in models; the list may be out of date.",
+      "catalogUnavailable": "Refresh failed. Click to retry",
+      "catalogStale": "Cached list may be out of date.",
+      "catalogFallback": "Built-in list may be out of date.",
       "selectModel": "Select model",
       "addConfiguration": "Add configuration",
       "newConfiguration": "New model configuration",
@@ -1185,11 +1185,15 @@
       "systemHelp": "Includes internal tasks and calls without a recorded source."
     },
     "providers": {
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "Local",
       "title": "Providers",
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search.",
       "addOwnProvider": "Add provider",
       "addProvider": "Add provider",
+      "removeProvider": "Remove",
       "backToProviders": "Back to providers",
       "customProvider": "Custom",
       "customProviderName": "Name",

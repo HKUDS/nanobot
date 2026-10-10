@@ -17,10 +17,8 @@ import { isNativeRuntime } from "@/lib/runtime";
 import type { NanobotFeatureInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export const SETTINGS_SEARCH_INPUT_CLASS = cn(
-  "border-border/45 bg-settings-surface transition-colors hover:border-border/70",
-  "focus-visible:border-border/70 focus-visible:bg-background",
-);
+export const SETTINGS_SEARCH_INPUT_CLASS =
+  "border-border/45 bg-settings-surface transition-colors hover:border-border/70";
 
 export function CapabilityInstallNotice({
   title,

@@ -99,6 +99,8 @@ def resolve_provider_route(
     provider_config = config.get_provider(model, preset=preset)
     if not provider_name:
         raise ValueError(f"No provider is configured for model '{model}'.")
+    if provider_config is not None and not provider_config.enabled:
+        raise ValueError(f"Provider '{provider_name}' is not enabled.")
     spec = _provider_spec_for_config(provider_name, provider_config)
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")

@@ -29,7 +29,7 @@ import {
   SidebarSelectionHighlight,
 } from "@/components/SidebarSelectionHighlight";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverHint } from "@/components/ui/tooltip";
 import type {
   ChatSummary,
   SidebarViewState,
@@ -149,7 +149,6 @@ export function Sidebar(props: SidebarProps) {
 
 
   return (
-    <TooltipProvider>
     <nav
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}
@@ -333,7 +332,6 @@ export function Sidebar(props: SidebarProps) {
         <HostSwitcher collapsed={collapsed} portalContainer={props.containActionMenus ? menuPortalContainer : undefined} />
       </div>
     </nav>
-    </TooltipProvider>
   );
 }
 
@@ -399,12 +397,11 @@ function SidebarActionButton({
     </Button>
   );
   return compact || shortcut ? (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side={collapsed ? "right" : "bottom"} className="flex items-center gap-4">
-        <span>{label}</span>
-        {shortcut ? <kbd className="whitespace-nowrap font-sans text-muted-foreground">{shortcut}</kbd> : null}
-      </TooltipContent>
-    </Tooltip>
+    <HoverHint side={collapsed ? "right" : "bottom"} contentClassName="flex items-center gap-4" content={<>
+      <span>{label}</span>
+      {shortcut ? <kbd className="whitespace-nowrap font-sans text-muted-foreground">{shortcut}</kbd> : null}
+    </>}>
+      {button}
+    </HoverHint>
   ) : button;
 }

@@ -113,17 +113,21 @@ class OAuthModelCatalog:
         self._inflight: set[str] = set()
         self._generation = 0
 
-    def get(self, *, cache_key: str, proxy: str | None = None) -> OAuthModelCatalogSnapshot:
-        """Return a fresh catalog, sharing concurrent work and retaining a fallback."""
+    def get(
+        self, *, cache_key: str, proxy: str | None = None, refresh: bool = False,
+    ) -> OAuthModelCatalogSnapshot:
+        """Reuse cached discovery unless explicitly refreshed, retaining fallback models."""
         with self._condition:
             generation = self._generation
-            cached = self._cached_result(cache_key)
-            if cached is not None:
-                return cached
-            while cache_key in self._inflight:
-                self._condition.wait()
-                if generation != self._generation:
-                    return self._stale_or_fallback(None, self._monotonic())
+            if not refresh:
+                cached = self._cached_result(cache_key)
+                if cached is not None:
+                    return cached
+            if cache_key in self._inflight:
+                while cache_key in self._inflight:
+                    self._condition.wait()
+                    if generation != self._generation:
+                        return self._stale_or_fallback(None, self._monotonic())
                 cached = self._cached_result(cache_key)
                 if cached is not None:
                     return cached
@@ -179,13 +183,13 @@ class OAuthModelCatalog:
     def _cached_result(self, cache_key: str) -> OAuthModelCatalogSnapshot | None:
         now = self._monotonic()
         entry = self._entries.get(cache_key)
-        if entry is not None and now - entry.stored_at < self._fresh_ttl_s:
-            return replace(entry.snapshot, source="cache")
         failure = self._failures.get(cache_key)
         if failure is not None and failure.retry_at <= now:
             self._failures.pop(cache_key, None)
         elif failure is not None:
             return self._stale_or_fallback(entry, now, failure.error_kind)
+        if entry is not None and now - entry.stored_at < self._fresh_ttl_s:
+            return replace(entry.snapshot, source="cache")
         return None
 
     def _failure_result(
@@ -241,20 +245,21 @@ def get_oauth_model_catalog(
     provider_name: str,
     *,
     proxy: str | None = None,
+    refresh: bool = False,
 ) -> OAuthModelCatalogSnapshot:
     """Discover models through the owning provider module."""
     if provider_name == "openai_codex":
         from nanobot.providers.openai_codex_provider import get_openai_codex_model_catalog
 
-        return get_openai_codex_model_catalog(proxy)
+        return get_openai_codex_model_catalog(proxy, refresh=refresh)
     if provider_name == "xai_grok":
         from nanobot.providers.xai_grok_provider import get_xai_grok_model_catalog
 
-        return get_xai_grok_model_catalog(proxy)
+        return get_xai_grok_model_catalog(proxy, refresh=refresh)
     if provider_name == "github_copilot":
         from nanobot.providers.github_copilot_provider import get_github_copilot_model_catalog
 
-        return get_github_copilot_model_catalog(proxy)
+        return get_github_copilot_model_catalog(proxy, refresh=refresh)
     raise ValueError(f"OAuth model discovery is not available for {provider_name}")
 
 

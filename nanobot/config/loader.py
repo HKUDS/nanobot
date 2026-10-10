@@ -161,11 +161,12 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     for alias, provider in (
         ("openaiCodex", config.providers.openai_codex),
         ("xaiGrok", config.providers.xai_grok),
+        ("githubCopilot", config.providers.github_copilot),
     ):
         settings = provider.model_dump(
             mode="json",
             by_alias=True,
-            include={"proxy", "extra_body"},
+            include={"enabled", "proxy", "extra_body"},
             exclude_none=True,
         )
         if settings:

@@ -6,7 +6,7 @@ import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import { formControlFocusClassName } from "@/components/ui/form-control";
+import { SearchInput } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -80,16 +80,12 @@ export function PromptNavigator({
                 aria-hidden
                 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
               />
-              <input
+              <SearchInput
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 aria-label={t("thread.promptNavigator.search")}
                 placeholder={t("thread.promptNavigator.search")}
-                className={cn(
-                  "touch-text-input h-10 w-full rounded-full border border-border bg-background pl-9 pr-3 text-sm",
-                  "transition-colors",
-                  formControlFocusClassName,
-                )}
+                className="h-10 rounded-full border-border bg-background pl-9 pr-3 text-sm transition-colors"
               />
             </div>
           </div>

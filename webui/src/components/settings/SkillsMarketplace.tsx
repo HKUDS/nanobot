@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   fetchMarketplaceSkillTrends,
@@ -200,7 +200,7 @@ export function SkillsMarketplace({
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden
           />
-          <Input
+          <SearchInput
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("settings.skills.marketplaceSearchPlaceholder", {

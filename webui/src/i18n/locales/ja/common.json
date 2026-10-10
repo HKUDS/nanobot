@@ -762,11 +762,15 @@
       }
     },
     "providers": {
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "ローカル",
       "title": "プロバイダー",
       "searchPlaceholder": "プロバイダーを検索",
       "noMatches": "一致するプロバイダーはありません。",
       "addOwnProvider": "プロバイダーを追加",
       "addProvider": "プロバイダーを追加",
+      "removeProvider": "削除",
       "backToProviders": "プロバイダー一覧に戻る",
       "customProvider": "カスタム",
       "customProviderName": "名前",
@@ -813,9 +817,9 @@
     },
     "models": {
       "catalogAuthRequired": "認証が失効しました。再度ログインしてください。",
-      "catalogUnavailable": "モデルを更新できません。しばらくしてから再試行してください。",
-      "catalogStale": "キャッシュ済みのモデルを表示しています。最新ではない可能性があります。",
-      "catalogFallback": "組み込みのモデルを表示しています。最新ではない可能性があります。",
+      "catalogUnavailable": "更新できません。クリックして再試行",
+      "catalogStale": "キャッシュ済みの一覧は古い可能性があります。",
+      "catalogFallback": "組み込みの一覧は古い可能性があります。",
       "selectModel": "モデルを選択",
       "addConfiguration": "設定を追加",
       "newConfiguration": "新しいモデル設定",
