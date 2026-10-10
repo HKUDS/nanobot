@@ -368,7 +368,7 @@ def _ensure_local_webui_channel(
     console.print(
         "  LAN access requires an explicit host change plus a WebUI password in config."
     )
-    _confirm_webui_action("Update the local WebUI channel in this config?", yes=yes)
+    _confirm_webui_action("Enable the WebUI channel?", yes=yes)
 
     if not model.enabled:
         model.enabled = True
