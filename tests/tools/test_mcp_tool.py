@@ -1930,7 +1930,7 @@ def _make_fake_session_with_capabilities(
                     description=f"{rname} resource",
                 )
             )
-        return SimpleNamespace(resources=resources)
+        return SimpleNamespace(resources=resources, nextCursor=None)
 
     async def list_prompts() -> SimpleNamespace:
         prompts = []
@@ -1942,7 +1942,7 @@ def _make_fake_session_with_capabilities(
                     arguments=None,
                 )
             )
-        return SimpleNamespace(prompts=prompts)
+        return SimpleNamespace(prompts=prompts, nextCursor=None)
 
     return SimpleNamespace(
         initialize=initialize,
@@ -1950,6 +1950,80 @@ def _make_fake_session_with_capabilities(
         list_resources=list_resources,
         list_prompts=list_prompts,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+async def test_connect_registers_all_resource_and_prompt_pages(
+    fake_mcp_runtime: dict[str, object | None], catalog: str,
+) -> None:
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    definition = (
+        SimpleNamespace(name="second", uri="file:///second", description="second resource")
+        if catalog == "resources"
+        else SimpleNamespace(name="second", description="second prompt", arguments=None)
+    )
+    pages = {
+        None: SimpleNamespace(**{catalog: []}, nextCursor=""),
+        "": SimpleNamespace(**{catalog: []}, nextCursor="opaque:+/="),
+        "opaque:+/=": SimpleNamespace(**{catalog: [definition]}, nextCursor=None),
+    }
+    cursors: list[str | None] = []
+
+    async def list_pages(*, params: SimpleNamespace | None = None) -> SimpleNamespace:
+        cursor = params.cursor if params is not None else None
+        cursors.append(cursor)
+        return pages[cursor]
+
+    setattr(session, f"list_{catalog}", list_pages)
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        assert cursors == [None, "", "opaque:+/="]
+        kind = "resource" if catalog == "resources" else "prompt"
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other, f"mcp_test_{kind}_second"}
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+@pytest.mark.parametrize("failure", ["request-error", "repeated-cursor"])
+async def test_connect_failed_catalog_pagination_preserves_other_capabilities(
+    fake_mcp_runtime: dict[str, object | None], catalog: str, failure: str,
+) -> None:
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    first_page = await getattr(session, f"list_{catalog}")()
+    first_page.nextCursor = "next"
+    cursors: list[str | None] = []
+
+    async def list_pages(*, params: SimpleNamespace | None = None) -> SimpleNamespace:
+        cursor = params.cursor if params is not None else None
+        cursors.append(cursor)
+        if cursor is None:
+            return first_page
+        if failure == "request-error":
+            raise RuntimeError("second page failed")
+        if len(cursors) > 2:
+            raise AssertionError("A repeated cursor must not be requested again")
+        return SimpleNamespace(**{catalog: []}, nextCursor="next")
+
+    setattr(session, f"list_{catalog}", list_pages)
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        assert cursors == [None, "next"]
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other}
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
 
 
 @pytest.mark.asyncio

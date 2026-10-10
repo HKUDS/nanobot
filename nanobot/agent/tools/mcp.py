@@ -1214,7 +1214,18 @@ async def connect_mcp_servers(
             if register_extras:
                 try:
                     resources_result = await session.list_resources()
-                    for resource in resources_result.resources:
+                    resources = list(resources_result.resources)
+                    resource_cursors: set[str] = set()
+                    while resources_result.nextCursor is not None:
+                        cursor = resources_result.nextCursor
+                        if cursor in resource_cursors:
+                            raise ValueError("MCP resources/list returned a repeated pagination cursor")
+                        resource_cursors.add(cursor)
+                        resources_result = await session.list_resources(
+                            params=types.PaginatedRequestParams(cursor=cursor)
+                        )
+                        resources.extend(resources_result.resources)
+                    for resource in resources:
                         wrapper = MCPResourceWrapper(
                             session, name, resource, resource_timeout=cfg.tool_timeout
                         )
@@ -1232,7 +1243,18 @@ async def connect_mcp_servers(
 
                 try:
                     prompts_result = await session.list_prompts()
-                    for prompt in prompts_result.prompts:
+                    prompts = list(prompts_result.prompts)
+                    prompt_cursors: set[str] = set()
+                    while prompts_result.nextCursor is not None:
+                        cursor = prompts_result.nextCursor
+                        if cursor in prompt_cursors:
+                            raise ValueError("MCP prompts/list returned a repeated pagination cursor")
+                        prompt_cursors.add(cursor)
+                        prompts_result = await session.list_prompts(
+                            params=types.PaginatedRequestParams(cursor=cursor)
+                        )
+                        prompts.extend(prompts_result.prompts)
+                    for prompt in prompts:
                         wrapper = MCPPromptWrapper(
                             session, name, prompt, prompt_timeout=cfg.tool_timeout
                         )
