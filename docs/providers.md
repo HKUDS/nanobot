@@ -314,6 +314,39 @@ DeepSeek's `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision
 
 The `deepseek-flash` alias uses Responses automatically at `https://api.deepseek.com`, including the `/v1` form. With a different `providers.deepseek.apiBase`, Auto uses Chat Completions for this alias. Select Responses in the preset if the proxy supports it. The V4 model names listed above use Responses with either endpoint configuration.
 
+### Tsubasa
+
+Select **Tsubasa** in **Settings → Models**, or configure a named preset:
+
+```json
+{
+  "providers": {
+    "tsubasa": {
+      "apiKey": "${TSUBASA_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "tsubasa",
+      "model": "tsubasa-pro",
+      "maxTokens": 4096,
+      "contextWindowTokens": 32768
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+The default endpoint is `https://api.tsubasa.sh/v1`. Both `tsubasa-fast` and
+`tsubasa-pro` use Chat Completions and share a 32,768-token input-plus-output
+context budget. The example reserves 4,096 tokens for output; keep the prompt
+and requested output within that total. The built-in model list is static
+metadata, not a service availability or capability check.
+
 ### Custom OpenAI-Compatible Endpoint
 
 The `custom` provider fits one OpenAI-compatible endpoint that is not represented by a named provider.

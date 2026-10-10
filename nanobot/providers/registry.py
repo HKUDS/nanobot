@@ -493,6 +493,20 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             supports_native_compaction=True,
         ),
     ),
+    ProviderSpec(
+        name="tsubasa",
+        keywords=("tsubasa",),
+        env_key="TSUBASA_API_KEY",
+        display_name="Tsubasa",
+        backend="openai_compat",
+        default_api_base="https://api.tsubasa.sh/v1",
+        strip_model_prefixes=("tsubasa",),
+        model_catalog="builtin",
+        builtin_models=(
+            ProviderModelSpec(id="tsubasa-fast", label="Tsubasa Fast", context_window=32_768),
+            ProviderModelSpec(id="tsubasa-pro", label="Tsubasa Pro", context_window=32_768),
+        ),
+    ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
         name="openai_codex",
