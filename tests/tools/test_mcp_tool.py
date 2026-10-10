@@ -113,7 +113,7 @@ def _fake_mcp_module(
         yield object(), object()
 
     @asynccontextmanager
-    async def _fake_sse_client(_url: str, httpx_client_factory=None):
+    async def _fake_sse_client(_url: str, httpx_client_factory=None, sse_read_timeout=None):
         yield object(), object()
 
     @asynccontextmanager
@@ -1194,7 +1194,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
             return False
 
     @asynccontextmanager
-    async def _capturing_sse_client(_url: str, httpx_client_factory=None):
+    async def _capturing_sse_client(_url: str, httpx_client_factory=None, sse_read_timeout=None):
         assert httpx_client_factory is not None
         async with httpx_client_factory():
             pass
@@ -1305,7 +1305,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
         return original_async_client(*args, **kwargs)
 
     @asynccontextmanager
-    async def _fake_sse_client(_url: str, httpx_client_factory=None):
+    async def _fake_sse_client(_url: str, httpx_client_factory=None, sse_read_timeout=None):
         assert httpx_client_factory is not None
         used_transports.append("sse")
         async with httpx_client_factory() as client:
@@ -1543,6 +1543,49 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     assert timeout.pool == 30.0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_timeout", "expected_read"),
+    [
+        (30, 300.0),  # default: keep the MCP SDK's SSE read timeout
+        (600, 600.0),  # long-running tools: the stream must not cut the call short
+    ],
+)
+async def test_connect_mcp_servers_sse_read_timeout_covers_tool_timeout(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+    tool_timeout: int,
+    expected_read: float,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    captured: dict[str, object] = {}
+
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _validate(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    @asynccontextmanager
+    async def _capturing_sse_client(_url: str, httpx_client_factory=None, sse_read_timeout=300.0):
+        captured["sse_read_timeout"] = sse_read_timeout
+        yield object(), object()
+
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(url="https://mcp.example.com/sse", tool_timeout=tool_timeout)},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert captured["sse_read_timeout"] == expected_read
+
+
 @pytest.mark.parametrize("transport", ["sse", "streamableHttp"])
 @pytest.mark.asyncio
 async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
@@ -1584,6 +1627,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
     async def _capturing_sse_client(
         _url: str,
         httpx_client_factory=None,
+        sse_read_timeout=None,
         auth=None,
     ):
         captured["transport_auth"] = auth
