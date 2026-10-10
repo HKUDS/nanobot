@@ -2234,6 +2234,18 @@
     "copy": "Copier",
     "copied": "Copié"
   },
+  "credentials": {
+    "title": "Identifiants pour {{service}}",
+    "notice": "Les valeurs sont envoyées directement au runtime nanobot local et enregistrées comme secrets nommés. Elles ne sont pas envoyées comme message de chat.",
+    "optional": "(facultatif)",
+    "submit": "Envoyer",
+    "submitting": "Envoi…",
+    "cancel": "Annuler",
+    "statusSubmitted": "Identifiants envoyés en toute sécurité.",
+    "statusCancelled": "Demande annulée.",
+    "statusExpired": "Cette demande d'identifiants a expiré.",
+    "statusClosed": "Cette demande d'identifiants n'est plus active."
+  },
   "workbench": {
     "aria": "Espace de travail",
     "panes": "Volets",

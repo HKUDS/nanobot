@@ -2248,6 +2248,18 @@
     "copy": "Copiar",
     "copied": "Copiado"
   },
+  "credentials": {
+    "title": "Credenciais para {{service}}",
+    "notice": "Os valores vão diretamente para o runtime local do nanobot e são armazenados como segredos nomeados. Eles não são enviados como mensagem de chat.",
+    "optional": "(opcional)",
+    "submit": "Enviar",
+    "submitting": "Enviando…",
+    "cancel": "Cancelar",
+    "statusSubmitted": "Credenciais enviadas com segurança.",
+    "statusCancelled": "Solicitação cancelada.",
+    "statusExpired": "Esta solicitação de credenciais expirou.",
+    "statusClosed": "Esta solicitação de credenciais não está mais ativa."
+  },
   "workbench": {
     "aria": "Área de trabalho",
     "panes": "Painéis",

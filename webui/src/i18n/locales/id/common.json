@@ -2234,6 +2234,18 @@
     "copy": "Salin",
     "copied": "Tersalin"
   },
+  "credentials": {
+    "title": "Kredensial untuk {{service}}",
+    "notice": "Nilai dikirim langsung ke runtime nanobot lokal dan disimpan sebagai secret bernama. Nilai tidak dikirim sebagai pesan chat.",
+    "optional": "(opsional)",
+    "submit": "Kirim",
+    "submitting": "Mengirim…",
+    "cancel": "Batal",
+    "statusSubmitted": "Kredensial terkirim dengan aman.",
+    "statusCancelled": "Permintaan dibatalkan.",
+    "statusExpired": "Permintaan kredensial ini kedaluwarsa.",
+    "statusClosed": "Permintaan kredensial ini tidak lagi aktif."
+  },
   "workbench": {
     "aria": "Ruang kerja",
     "panes": "Panel",

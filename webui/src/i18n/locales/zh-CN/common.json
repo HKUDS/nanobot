@@ -2434,6 +2434,18 @@
     "copy": "复制",
     "copied": "已复制"
   },
+  "credentials": {
+    "title": "{{service}} 的凭据",
+    "notice": "这些值会直接发送到本地 nanobot 运行时并以命名密钥的形式保存，不会作为聊天消息发送。",
+    "optional": "（可选）",
+    "submit": "提交",
+    "submitting": "正在提交…",
+    "cancel": "取消",
+    "statusSubmitted": "凭据已安全提交。",
+    "statusCancelled": "请求已取消。",
+    "statusExpired": "此凭据请求已过期。",
+    "statusClosed": "此凭据请求已不再有效。"
+  },
   "workbench": {
     "aria": "工作台",
     "panes": "窗格",

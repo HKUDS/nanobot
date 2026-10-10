@@ -2434,6 +2434,18 @@
     "copy": "Copy",
     "copied": "Copied"
   },
+  "credentials": {
+    "title": "Credentials for {{service}}",
+    "notice": "Values go directly to the local nanobot runtime and are stored as named secrets. They are not sent as a chat message.",
+    "optional": "(optional)",
+    "submit": "Submit",
+    "submitting": "Submitting…",
+    "cancel": "Cancel",
+    "statusSubmitted": "Credentials submitted securely.",
+    "statusCancelled": "Request cancelled.",
+    "statusExpired": "This credential request expired.",
+    "statusClosed": "This credential request is no longer active."
+  },
   "workbench": {
     "aria": "Workbench",
     "panes": "Panes",

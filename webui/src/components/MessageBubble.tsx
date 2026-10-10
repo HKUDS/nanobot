@@ -20,6 +20,7 @@ import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
+import { CredentialRequestCard } from "@/components/thread/CredentialRequestCard";
 import { UserMessageText } from "@/components/UserMessageText";
 import { HoverHint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ import { sessionHandleColor } from "@/lib/session-handle";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import type {
   CliAppInfo,
+  CredentialRequestUIData,
   McpPresetInfo,
   SlashCommand,
   UICliAppAttachment,
@@ -564,6 +566,11 @@ export function MessageBubble({
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
         </InlineImageProvider>
       )}
+      {message.agentUi?.kind === "credential_request" ? (
+        <CredentialRequestCard
+          data={message.agentUi.data as CredentialRequestUIData}
+        />
+      ) : null}
     </div>
   );
 }
