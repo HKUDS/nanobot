@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
+from agent.runner_helpers import failed_test_consolidator
 from openai import AsyncOpenAI
 
 from nanobot.agent.hook import AgentHook
@@ -15,7 +16,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import ProviderSpec
+from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -95,8 +96,8 @@ async def make_provider(monkeypatch):
         else:
             provider = OpenAICompatProvider(
                 api_key="test", default_model="gpt-5.2",
-                spec=ProviderSpec(name="openai", keywords=(), env_key=""),
-                api_type="chat_completions" if api == "chat" else "responses",
+                spec=find_by_name("openai"),
+                model_api=ModelAPICapabilities(("chat_completions",), "chat_completions") if api == "chat" else ModelAPICapabilities(("responses",), "responses"),
             )
         provider._client = client
         provider._CHAT_RETRY_DELAYS = ()
@@ -196,6 +197,7 @@ async def test_runner_streams_past_old_wall_limit_with_optional_ui(
         tools=ToolRegistry(),
         runtime=LLMRuntime.capture(provider, "gpt-5.2", context_window_tokens=128_000),
         max_iterations=1, max_tool_result_chars=1_000, hook=Hook(),
+        consolidate_history=failed_test_consolidator,
     ))
     assert result.stop_reason == "completed"
     assert result.final_content == "done"
@@ -231,6 +233,7 @@ async def test_chat_only_provider_still_has_a_timeout(monkeypatch, finalize):
         tools=ToolRegistry(),
         runtime=LLMRuntime.capture(provider, "test", context_window_tokens=128_000),
         max_iterations=1, max_tool_result_chars=1_000,
+        consolidate_history=failed_test_consolidator,
         max_iterations_message="Tool budget exhausted.",
     )), timeout=1)
     assert provider.calls == (2 if finalize else 1)

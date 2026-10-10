@@ -8,11 +8,11 @@
         "placeholder": "Jeton du bot Discord"
       },
       "allowChannels": {
-        "label": "Salons autorisés",
+        "label": "Canaux autorisés",
         "placeholder": "ID de salon séparés par des virgules"
       },
       "groupPolicy": {
-        "label": "Comportement en groupe",
+        "label": "Règles des groupes",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
@@ -27,7 +27,7 @@
         "label": "Mandataire réseau"
       },
       "proxyUsername": {
-        "label": "Nom d'utilisateur du proxy"
+        "label": "Utilisateur du proxy"
       },
       "proxyPassword": {
         "label": "Mot de passe proxy"
@@ -39,22 +39,22 @@
         "label": "Lire les emoji"
       },
       "workingEmoji": {
-        "label": "Emoji fonctionnel"
+        "label": "Emoji d’activité"
       },
       "workingEmojiDelay": {
-        "label": "Retard d'emoji fonctionnel"
+        "label": "Délai de l’emoji (secondes)"
       },
       "streaming": {
         "label": "Diffusion en continu",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "replyToMessage": {
         "label": "Répondre au message",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       }

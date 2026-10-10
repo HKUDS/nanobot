@@ -6,6 +6,10 @@ export type ChannelPresentation = {
   color: string;
   icon?: ComponentType<{ className?: string; strokeWidth?: string | number }>;
   logoUrl?: string;
+  /** Official site favicon to use when the primary asset is hosted on a CDN. */
+  logoFallbackUrl?: string;
+  /** The primary asset already includes its own background and safe area. */
+  logoLayout?: "tile";
   setup?: ChannelCatalogSetupPresentation;
 };
 

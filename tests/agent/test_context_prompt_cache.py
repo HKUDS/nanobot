@@ -118,9 +118,7 @@ def test_execution_rules_in_system_prompt(tmp_path) -> None:
 
     prompt = builder.build_system_prompt()
     assert "clear user request" in prompt
-    assert "multi-step tasks" in prompt
-    assert "read-only discovery before writes" in prompt
-    assert "verify the result" in prompt
+    assert "execution and verification" in prompt
 
 
 def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
@@ -142,6 +140,40 @@ def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
     assert soul_path.read_text(encoding="utf-8") == legacy_soul
 
 
+@pytest.mark.parametrize("legacy_workspace", [False, True])
+def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legacy_workspace) -> None:
+    """Default files can be skipped and old files must not hide the current contract."""
+    from nanobot.utils.helpers import sync_workspace_templates
+
+    workspace = _make_workspace(tmp_path)
+    agents_path = workspace / "AGENTS.md"
+    legacy_rule = (
+        "When the user asks for a recurring/periodic task, update HEARTBEAT.md "
+        "instead of creating a one-time cron reminder."
+    )
+    if legacy_workspace:
+        agents_path.write_text(f"# Workspace rules\nReply in Chinese.\n{legacy_rule}\n", encoding="utf-8")
+    sync_workspace_templates(workspace, silent=True)
+    original = agents_path.read_bytes()
+    builder = ContextBuilder(workspace)
+    messages = builder.build_messages(history=[], current_message="每天早上8点提醒我喝水")
+    system = messages[0]["content"]
+
+    assert '"Every day at 8am, remind me to drink water" is a cron task, not a heartbeat task.' in system
+    assert "Heartbeat does not guarantee a requested time or interval." in system
+    assert "background checks with flexible timing" in system
+    assert system.count("## Scheduling") == 1
+    if legacy_workspace:
+        assert "Reply in Chinese." in system
+        assert system.index(legacy_rule) < system.index("## Scheduling")
+        assert "even if workspace guidance describes recurring tasks as heartbeat tasks" in system
+    else:
+        assert "## AGENTS.md" not in system
+    assert "每天早上8点提醒我喝水" in messages[-1]["content"]
+    assert builder.build_messages(history=[], current_message="Check issues when convenient")[0] == messages[0]
+    assert agents_path.read_bytes() == original
+
+
 def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None:
     """SOUL owns personality while the always-injected contract owns execution policy."""
     soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
@@ -152,8 +184,8 @@ def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None
     assert "## Execution Rules" not in soul
     assert "clear user request" not in soul
     assert "clear user request" in contract
-    assert "multi-step tasks" in contract
-    assert "irreversible action needs confirmation" in contract
+    assert "execution and verification" in contract
+    assert "Ask for confirmation when an irreversible action requires it" in contract
 
 
 def test_channel_format_hint_telegram(tmp_path) -> None:
@@ -202,18 +234,6 @@ def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
     assert "messaging app" in system
 
 
-def test_system_prompt_keeps_message_tool_out_of_current_chat_replies(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel="slack")
-
-    assert "Do not use the 'message' tool for normal replies in the current chat" in prompt
-    assert "When 'generate_image' creates images" in prompt
-    assert "call 'message' with the artifact paths in the 'media' parameter" in prompt
-    assert "Wait for the tool results, then answer once" in prompt
-
-
 def test_memory_skill_is_lazy_loaded_from_skills_index(tmp_path) -> None:
     """Memory search guidance should be discoverable without loading its full body."""
     workspace = _make_workspace(tmp_path)
@@ -239,11 +259,10 @@ def test_fresh_workspace_omits_default_prompt_scaffolding(tmp_path) -> None:
     assert "## USER.md" not in prompt
     assert "8281248569" not in prompt
     assert "(your name)" not in prompt
-    assert prompt.count("Do not use the 'message' tool for normal replies") == 1
 
 
 def test_template_memory_md_is_skipped(tmp_path) -> None:
-    """MEMORY.md matching the bundled template should not inject the Memory section."""
+    """Template content is omitted while memory locations remain available."""
     workspace = _make_workspace(tmp_path)
     from nanobot.utils.helpers import sync_workspace_templates
     sync_workspace_templates(workspace, silent=True)
@@ -251,8 +270,8 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
     builder = ContextBuilder(workspace)
     prompt = builder.build_system_prompt()
 
-    # This block is produced only when populated long-term memory is injected.
-    assert "# Memory\n\n## Long-term Memory" not in prompt
+    assert "## Long-term Memory" not in prompt
+    assert "History log: memory/history.jsonl" in prompt
     assert "This file is automatically updated by nanobot" not in prompt
 
 

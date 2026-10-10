@@ -15,10 +15,10 @@
         "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "グループでの動作",
+        "label": "グループのルール",
         "choices": {
           "mention": "メンションのみ",
-          "open": "すべてのメッセージ",
+          "open": "全メッセージ",
           "allowlist": "許可リスト"
         }
       },
@@ -32,7 +32,7 @@
         "label": "Webhook パス"
       },
       "replyInThread": {
-        "label": "スレッド内で返信する",
+        "label": "スレッドで返信",
         "choices": {
           "true": "オン",
           "false": "オフ"
@@ -45,23 +45,23 @@
         "label": "完了絵文字"
       },
       "includeThreadContext": {
-        "label": "スレッドコンテキストを含める",
+        "label": "スレッドの文脈",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "threadContextLimit": {
-        "label": "スレッドコンテキストの制限"
+        "label": "コンテキストの上限"
       },
       "allowFrom": {
-        "label": "許可されたユーザー"
+        "label": "許可ユーザー"
       },
       "groupAllowFrom": {
-        "label": "許可されたチャネル"
+        "label": "許可チャンネル"
       },
       "groupRequireMention": {
-        "label": "チャンネルでのメンションを必須にする",
+        "label": "チャンネルのメンション必須",
         "choices": {
           "true": "オン",
           "false": "オフ"
@@ -82,7 +82,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "許可されたダイレクトメッセージユーザー"
+        "label": "許可する DM ユーザー"
       },
       "proxy": {
         "label": "ネットワークプロキシ",

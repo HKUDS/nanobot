@@ -15,6 +15,7 @@ from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.events import NO_EVENTS
 from nanobot.providers.base import LLMResponse
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 
 
 def _make_loop(
@@ -23,7 +24,7 @@ def _make_loop(
 ) -> AgentLoop:
     """Create a minimal AgentLoop for testing."""
     bus = MessageBus()
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.estimate_prompt_tokens.return_value = (10_000, "test")
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
@@ -80,7 +81,6 @@ def _make_fake_compact(
     summary: str = "Summary.",
     on_archive=None,
     track_archived: list | None = None,
-    track_count: bool = False,
 ):
     state = {"count": 0}
 
@@ -130,6 +130,25 @@ async def _drain_background_tasks(loop: AgentLoop) -> None:
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
     await asyncio.sleep(0)
+
+
+async def test_heartbeat_idle_compaction_persists_summary_without_channel_notices(tmp_path):
+    loop = _make_loop(tmp_path)
+    session = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
+    _add_turns(session, 2)
+    session.metadata["_compaction_route"] = {"channel": "telegram", "chat_id": "chat"}
+    session.updated_at = datetime.now() - timedelta(minutes=20)
+    loop.sessions.save(session)
+    loop.consolidator.archive_session = AsyncMock(return_value="Heartbeat summary.")
+
+    loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
+    await _drain_background_tasks(loop)
+
+    loop.consolidator.archive_session.assert_awaited_once()
+    loop.sessions.invalidate(HEARTBEAT_SESSION_KEY)
+    refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
+    assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
+    assert loop.bus.outbound.empty()
 
 
 class TestSessionTTLConfig:
@@ -231,33 +250,13 @@ class TestAgentLoopTTLParam:
         loop = _make_loop(tmp_path, session_ttl_minutes=25)
         assert loop.auto_compact._ttl == 25
 
-    def test_loop_default_ttl_zero(self, tmp_path):
-        """AutoCompact default TTL should be 0 (disabled)."""
+    def test_explicit_zero_ttl_disables_loop_compaction(self, tmp_path):
+        """An explicit zero TTL disables idle compaction in the loop."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
 
 class TestAutoCompact:
     """Test the _archive method."""
-
-    @pytest.mark.asyncio
-    async def test_is_expired_boundary(self, tmp_path):
-        """Exactly at TTL boundary should be expired (>= not >)."""
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        ts = datetime.now() - timedelta(minutes=15)
-        assert loop.auto_compact._is_expired(ts) is True
-        ts2 = datetime.now() - timedelta(minutes=14, seconds=59)
-        assert loop.auto_compact._is_expired(ts2) is False
-        await loop.aclose()
-
-    @pytest.mark.asyncio
-    async def test_is_expired_string_timestamp(self, tmp_path):
-        """_is_expired should parse ISO string timestamps."""
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        ts = (datetime.now() - timedelta(minutes=20)).isoformat()
-        assert loop.auto_compact._is_expired(ts) is True
-        assert loop.auto_compact._is_expired(None) is False
-        assert loop.auto_compact._is_expired("") is False
-        await loop.aclose()
 
     @pytest.mark.asyncio
     async def test_check_expired_only_archives_expired_sessions(self, tmp_path):
@@ -1156,7 +1155,7 @@ class TestSummaryPersistence:
         loop.sessions.invalidate("cli:test")
         reloaded = loop.sessions.get_or_create("cli:test")
 
-        # Every call returns the summary from metadata (no _consumed_keys gate)
+        # Every call returns the persisted summary.
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary is not None
         _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
@@ -1167,8 +1166,8 @@ class TestSummaryPersistence:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_metadata_cleanup_on_inmemory_path(self, tmp_path):
-        """In-memory _summaries path should also clean up _last_summary from metadata."""
+    async def test_inmemory_summary_preserves_metadata_for_restart(self, tmp_path):
+        """The in-memory summary path preserves _last_summary for restart recovery."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="hello")

@@ -1,16 +1,13 @@
 # Nanobot Python SDK: Run an AI Agent from Python
 
-Use nanobot as a Python library. The SDK gives you the same agent runtime used
-by the CLI, but from code: model routing, tools, workspace access, conversation
-history, memory, streaming events, and runtime helpers.
+Use nanobot as a Python library. The SDK gives you the same agent runtime used by the CLI, but from code: model routing, tools, workspace access, conversation history, memory, streaming events, and runtime helpers.
 
 If you have used the OpenAI SDK before, the most important difference is this:
 
 - OpenAI SDK calls a model.
 - nanobot SDK runs an agent around a model.
 
-That means one SDK call can read files, call tools, keep session history, use
-memory, stream progress, and return structured runtime information.
+That means one SDK call can read files, call tools, keep session history, use memory, stream progress, and return structured runtime information.
 
 ```text
 your Python code
@@ -25,36 +22,27 @@ your Python code
 
 ## Before You Start
 
-Install and configure nanobot first. If you have not done that yet, follow the
-[Quick Start](quick-start.md) and complete the setup wizard. For SDK-only Python
-environments, install the package with:
+Install and configure nanobot first. If you have not done that yet, follow the [Quick Start](quick-start.md) and complete the setup wizard. For SDK-only Python environments, install the package with:
 
 ```bash
 python -m pip install nanobot-ai
 ```
 
-`Nanobot.from_config()` reuses your normal `~/.nanobot/config.json` and
-`~/.nanobot/workspace/`. Provider, model, tools, memory, and session behavior
-match the CLI unless you override them. For the difference between config and
-workspace, see [Concepts: Config vs Workspace](concepts.md#config-vs-workspace).
+`Nanobot.from_config()` reuses your normal `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Provider, model, tools, memory, and session behavior match the CLI unless you override them. For the difference between config and workspace, see [Concepts: Config vs Workspace](concepts.md#config-vs-workspace).
 
-Before writing SDK code, run the same first-run checks from the main
-[Install and Quick Start](quick-start.md):
+Before writing SDK code, run the same first-run checks from the main [Install and Quick Start](quick-start.md):
 
 ```bash
 nanobot status
 ```
 
-`nanobot status` should show the config path, workspace path, active model or
-preset, and provider summary. Then send one real message:
+`nanobot status` should show the config path, workspace path, active model or preset, and provider summary. Then send one real message:
 
 ```bash
 nanobot agent -m "Hello!"
 ```
 
-A normal assistant reply means install, config, provider/model selection, and
-workspace access are all usable. Once that works, the SDK should see the same
-runtime.
+A normal assistant reply means install, config, provider/model selection, and workspace access are all usable. Once that works, the SDK should see the same runtime.
 
 ## 5-Minute Quick Start
 
@@ -75,14 +63,9 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Use `async with` when possible so tool connections and background cleanup are
-closed before the event loop exits. If you manage the instance manually, call
-`await bot.aclose()` in a `finally` block.
+Use `async with` when possible so tool connections and background cleanup are closed before the event loop exits. If you manage the instance manually, call `await bot.aclose()` in a `finally` block.
 
-The SDK is async-first because agent runs may stream tokens, execute tools, and
-wait on external services. In a normal Python script, wrap your async function
-with `asyncio.run(...)` as shown above. In a notebook or another async app, call
-`await bot.run(...)` directly from your existing event loop.
+The SDK is async-first because agent runs may stream tokens, execute tools, and wait on external services. In a normal Python script, wrap your async function with `asyncio.run(...)` as shown above. In a notebook or another async app, call `await bot.run(...)` directly from your existing event loop.
 
 ### Inspect What Happened
 
@@ -99,8 +82,7 @@ print(result.stop_reason) # why the run stopped
 
 ### Continue A Conversation
 
-Use a `session_key` when you want history to carry across turns. Different
-session keys are isolated from each other:
+Use a `session_key` when you want history to carry across turns. Different session keys are isolated from each other:
 
 ```python
 await bot.run("My name is Alice.", session_key="user:alice")
@@ -109,8 +91,7 @@ result = await bot.run("What is my name?", session_key="user:alice")
 print(result.content)
 ```
 
-This is the SDK equivalent of giving each user, task, eval case, or workflow
-its own conversation thread.
+This is the SDK equivalent of giving each user, task, eval case, or workflow its own conversation thread.
 
 ### Stream A Long Answer
 
@@ -124,8 +105,7 @@ async for event in bot.stream("Write a migration plan"):
         print(event.delta, end="", flush=True)
 ```
 
-Streaming returns structured events, so you can also observe tool calls,
-reasoning chunks, completion, and failures.
+Streaming returns structured events, so you can also observe tool calls, reasoning chunks, completion, and failures.
 
 ## Complete Starter Script
 
@@ -181,9 +161,7 @@ Run it:
 python sdk_demo.py "List the top-level files in the current workspace."
 ```
 
-You should see the configured model, workspace path, streamed assistant text,
-and final run metadata. The exact answer depends on your config and workspace,
-but a file-listing prompt may look like this:
+You should see the configured model, workspace path, streamed assistant text, and final run metadata. The exact answer depends on your config and workspace, but a file-listing prompt may look like this:
 
 ```text
 model: openai/gpt-4.1-mini
@@ -197,9 +175,7 @@ tools_used: ['list_dir']
 usage: {'prompt_tokens': ..., 'completion_tokens': ..., 'total_tokens': ...}
 ```
 
-This script shows the usual production shape: create one `Nanobot`, choose a
-stable `session_key`, stream events, keep the final `RunResult`, and let
-`async with` close runtime resources.
+This script shows the usual production shape: create one `Nanobot`, choose a stable `session_key`, stream events, keep the final `RunResult`, and let `async with` close runtime resources.
 
 ## Core Concepts
 
@@ -231,12 +207,9 @@ nanobot has two programming surfaces:
 | Python code running in the same process as nanobot | Python SDK | Direct access to `RunResult`, sessions, memory, runtime helpers, hooks, and stream events. |
 | Existing OpenAI-compatible clients, another language, or a separate process | [OpenAI-Compatible API](openai-api.md) | HTTP `/v1/chat/completions` compatibility with familiar client libraries. |
 
-The Python SDK is best when you are writing evals, notebooks, benchmark
-runners, product backends, local scripts, or integrations that should control
-nanobot directly.
+The Python SDK is best when you are writing evals, notebooks, benchmark runners, product backends, local scripts, or integrations that should control nanobot directly.
 
-The OpenAI-compatible API is best when you already have an HTTP client, want
-process isolation, or need to call nanobot from a non-Python service.
+The OpenAI-compatible API is best when you already have an HTTP client, want process isolation, or need to call nanobot from a non-Python service.
 
 ## Common Patterns
 
@@ -251,8 +224,7 @@ async with Nanobot.from_config(workspace="/my/project") as bot:
     result = await bot.run("Explain the project structure")
 ```
 
-Use a custom config when you run multiple nanobot instances or test an isolated
-setup:
+Use a custom config when you run multiple nanobot instances or test an isolated setup:
 
 ```python
 async with Nanobot.from_config(
@@ -262,9 +234,7 @@ async with Nanobot.from_config(
     result = await bot.run("Hello from bot A")
 ```
 
-The config controls what nanobot may use. The workspace is where nanobot keeps
-state for that instance. See [multiple-instances.md](multiple-instances.md) for
-multi-instance CLI and gateway examples.
+The config controls what nanobot may use. The workspace is where nanobot keeps state for that instance. See [multiple-instances.md](multiple-instances.md) for multi-instance CLI and gateway examples.
 
 ### Choose a default or per-run model
 
@@ -290,12 +260,7 @@ result = await bot.run("Think deeply about this bug", model_preset="reasoning")
 
 `model` and `model_preset` are mutually exclusive.
 
-For first setup, prefer named presets in `config.json`. Mixing an API key from
-one provider with a model ID from another is the most common first-run failure.
-For the exact difference between `provider`, `model`, `apiKey`, and `apiBase`,
-see [Providers: Provider, Model, API Key, and Base URL](providers.md#provider-model-api-key-and-base-url).
-If a run fails before the SDK does anything interesting, confirm the same
-provider and model work with `nanobot agent -m "Hello!"` first.
+For first setup, prefer named presets in `config.json`. Mixing an API key from one provider with a model ID from another is the most common first-run failure. For the exact difference between `provider`, `model`, `apiKey`, and `apiBase`, see [Providers: Provider, Model, API Key, and Base URL](providers.md#provider-model-api-key-and-base-url). If a run fails before the SDK does anything interesting, confirm the same provider and model work with `nanobot agent -m "Hello!"` first.
 
 ### Isolate conversations with `session_key`
 
@@ -313,15 +278,11 @@ session_key = f"user:{user_id}"
 result = await bot.run(user_message, session_key=session_key)
 ```
 
-Avoid using the default `"sdk:default"` for multiple users or unrelated
-workflows. It is convenient for local experiments, but stable product code
-should choose explicit keys such as `user:<id>`, `project:<id>`, or
-`eval:<case-id>`.
+Avoid using the default `"sdk:default"` for multiple users or unrelated workflows. It is convenient for local experiments, but stable product code should choose explicit keys such as `user:<id>`, `project:<id>`, or `eval:<case-id>`.
 
 ### Handle failures
 
-For a normal non-streamed run, catch exceptions around `bot.run(...)` and inspect
-`RunResult.error` when the runtime returns a structured failure:
+For a normal non-streamed run, catch exceptions around `bot.run(...)` and inspect `RunResult.error` when the runtime returns a structured failure:
 
 ```python
 try:
@@ -347,13 +308,11 @@ finally:
         await run.aclose()
 ```
 
-Use `await run.cancel()` when the user presses a stop button or leaves the page
-before the stream finishes.
+Use `await run.cancel()` when the user presses a stop button or leaves the page before the stream finishes.
 
 ### Stream long-running output
 
-Use `bot.stream()` when you want Cursor/OpenAI-style live events instead of
-waiting for the final `RunResult`:
+Use `bot.stream()` when you want Cursor/OpenAI-style live events instead of waiting for the final `RunResult`:
 
 ```python
 from nanobot import (
@@ -385,18 +344,13 @@ async for event in run.stream_events():
 result = await run.wait()
 ```
 
-Always either consume the stream, call `await run.wait()` / `await run.text()`,
-or close it with `await run.cancel()` / `await run.aclose()`. Exiting
-`stream_events()` or `bot.stream()` early cancels the underlying run so a
-half-consumed stream cannot leave a background task stuck behind backpressure.
+Always either consume the stream, call `await run.wait()` / `await run.text()`, or close it with `await run.cancel()` / `await run.aclose()`. Exiting `stream_events()` or `bot.stream()` early cancels the underlying run so a half-consumed stream cannot leave a background task stuck behind backpressure.
 
 ### Import an existing transcript
 
 This is useful for evals, benchmark runners, migrations, and tests.
 
-Use `bot.sessions.ingest()` when you already have a transcript and want it to
-become nanobot session history. Ingesting a transcript does not call the model,
-execute tools, update memory, or compact automatically.
+Use `bot.sessions.ingest()` when you already have a transcript and want it to become nanobot session history. Ingesting a transcript does not call the model, execute tools, update memory, or compact automatically.
 
 ```python
 await bot.sessions.ingest(
@@ -429,8 +383,7 @@ print(result.content)
 
 ### Attach hooks for observability
 
-Hooks are an advanced escape hatch. Use them when you want custom logging,
-metrics, tracing, or output post-processing without modifying nanobot internals:
+Hooks are an advanced escape hatch. Use them when you want custom logging, metrics, tracing, or output post-processing without modifying nanobot internals:
 
 ```python
 from nanobot.agent import AgentHook, AgentHookContext
@@ -447,8 +400,7 @@ result = await bot.run("Review this change", hooks=[AuditHook()])
 
 ## Where To Go Next
 
-The SDK page is the programming entry point. The fuller conceptual and
-configuration docs remain the source of truth for the runtime around it:
+The SDK page is the programming entry point. The fuller conceptual and configuration docs remain the source of truth for the runtime around it:
 
 | Need | Read |
 |------|------|
@@ -474,8 +426,7 @@ Create a `Nanobot` instance from a config file.
 | `model` | `str \| None` | `None` | Override the instance default model. |
 | `model_preset` | `str \| None` | `None` | Override the instance default model preset from `config.json`. |
 
-Raises `FileNotFoundError` if an explicit config path does not exist.
-Raises `ValueError` if both `model` and `model_preset` are provided.
+Raises `FileNotFoundError` if an explicit config path does not exist. Raises `ValueError` if both `model` and `model_preset` are provided.
 
 ### `await bot.run(...)`
 
@@ -495,15 +446,11 @@ Run the agent once and return a `RunResult`.
 | `model` | `str \| None` | `None` | Override the model for this run only. |
 | `model_preset` | `str \| None` | `None` | Override the model preset for this run only. |
 
-Without an override, a run uses the preset saved in its session, or the configured
-default when that session has no saved selection. `model` and `model_preset` are
-mutually exclusive per-run overrides; they do not change the saved session selection
-or `bot.runtime.model` after the run completes.
+Without an override, a run uses the preset saved in its session, or the configured default when that session has no saved selection. `model` and `model_preset` are mutually exclusive per-run overrides; they do not change the saved session selection or `bot.runtime.model` after the run completes.
 
 ### `await bot.run_streamed(...)`
 
-Start a streamed agent turn and return a `RunStream`. It accepts the same
-parameters as `bot.run(...)`.
+Start a streamed agent turn and return a `RunStream`. It accepts the same parameters as `bot.run(...)`.
 
 ```python
 run = await bot.run_streamed("Generate a long answer")
@@ -516,8 +463,7 @@ result = await run.wait()
 
 ### `bot.stream(...)`
 
-Convenience wrapper around `run_streamed()` for direct event iteration. It
-accepts the same parameters as `bot.run(...)`.
+Convenience wrapper around `run_streamed()` for direct event iteration. It accepts the same parameters as `bot.run(...)`.
 
 ```python
 async for event in bot.stream("Generate a long answer"):
@@ -534,9 +480,7 @@ async for event in bot.stream("Generate a long answer"):
 | `await cancel()` | Cancel the run and release stream resources. |
 | `await aclose()` | Close the stream; equivalent cleanup primitive for `async with` / manual lifecycle code. |
 
-SDK runs with different session keys may overlap, including runs with per-run
-`model` or `model_preset` overrides. Each run receives an immutable runtime without
-mutating the instance default. Runs sharing one session key remain serialized.
+SDK runs with different session keys may overlap, including runs with per-run `model` or `model_preset` overrides. Each run receives an immutable runtime without mutating the instance default. Runs sharing one session key remain serialized.
 
 ### `StreamEvent`
 
@@ -608,14 +552,9 @@ async with Nanobot.from_config() as bot:
 | `delete(session_key)` | Delete one session from disk and cache. |
 | `flush()` | Flush cached sessions to durable storage. |
 
-Ingested messages must include `role` and `content`. Roles may be `user`,
-`assistant`, `tool`, or `system`. Other fields, such as `timestamp`,
-`source_session_id`, or `source_date`, are persisted as message metadata.
+Ingested messages must include `role` and `content`. Roles may be `user`, `assistant`, `tool`, or `system`. Other fields, such as `timestamp`, `source_session_id`, or `source_date`, are persisted as message metadata.
 
-`get()` and snapshots returned by ordinary SDK operations are display-safe and omit
-model-only runtime context. `export()` is an explicit backup boundary and includes
-that internal context so `restore()` can preserve the exact model-visible history.
-Do not expose exported snapshots directly to chat users.
+`get()` and snapshots returned by ordinary SDK operations are display-safe and omit model-only runtime context. `export()` is an explicit backup boundary and includes that internal context so `restore()` can preserve the exact model-visible history. Do not expose exported snapshots directly to chat users.
 
 ### `bot.memory`
 
@@ -639,21 +578,9 @@ Do not expose exported snapshots directly to chat users.
 
 ### Host integration context and persisted-turn callbacks
 
-Host applications can attach external context without copying or modifying the
-nanobot agent loop. A context provider receives a `RequestContext` before each
-model turn and may return one or more `RuntimeContextBlock` values. Use
-`attributes` for caller-owned routing data; nanobot keeps it separate from
-trusted channel metadata and does not persist it in session messages.
+Host applications can attach external context without copying or modifying the nanobot agent loop. A context provider receives a `RequestContext` before each model turn and may return one or more `RuntimeContextBlock` values. Use `attributes` for caller-owned routing data; nanobot keeps it separate from trusted channel metadata and does not persist it in session messages.
 
-`on_session_turn_persisted()` invokes its callback after a non-ephemeral turn
-has been saved. The callback receives `SessionTurnPersisted` and may read the
-completed transcript through `bot.sessions`. Callbacks run in registration
-order, and async callbacks are awaited before the run continues. They are
-observational: callback exceptions are logged and suppressed so the completed
-local turn remains successful. Durable external synchronization must catch
-failures and persist retry work before the callback returns. During SDK runs,
-callbacks execute while the session is still serialized and must not re-enter
-`bot.run()` for the same session.
+`on_session_turn_persisted()` invokes its callback after a non-ephemeral turn has been saved. The callback receives `SessionTurnPersisted` and may read the completed transcript through `bot.sessions`. Callbacks run in registration order, and async callbacks are awaited before the run continues. They are observational: callback exceptions are logged and suppressed so the completed local turn remains successful. Durable external synchronization must catch failures and persist retry work before the callback returns. During SDK runs, callbacks execute while the session is still serialized and must not re-enter `bot.run()` for the same session.
 
 ```python
 import json
@@ -717,10 +644,7 @@ async def run_with_external_memory(external_memory, enqueue_retry) -> None:
             remove_context()
 ```
 
-Context providers are trusted host extensions, and `RuntimeContextBlock.content`
-is appended verbatim to model-visible context. Apply equivalent bounding,
-encoding, and delimiter escaping to untrusted external content.
-Persisted-turn callbacks are not invoked for `ephemeral=True` runs.
+Context providers are trusted host extensions, and `RuntimeContextBlock.content` is appended verbatim to model-visible context. Apply equivalent bounding, encoding, and delimiter escaping to untrusted external content. Persisted-turn callbacks are not invoked for `ephemeral=True` runs.
 
 ## Hooks
 

@@ -43,14 +43,12 @@ _reasoning_effort_values_for = models.reasoning_effort_values_for
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
-    "can_pick_folder": False,
     "can_open_logs": False,
     "can_export_diagnostics": False,
 }
 _NATIVE_RUNTIME_CAPABILITIES = {
     **_RUNTIME_CAPABILITIES,
     "can_restart_engine": True,
-    "can_pick_folder": True,
     "can_open_logs": True,
     "can_export_diagnostics": True,
 }
@@ -330,6 +328,14 @@ def update_provider_settings(
         requires_restart=restart_required,
         config_path=config_path,
     )
+
+
+def model_api_resolution_payload(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    return models.model_api_resolution_payload(_load_settings_config(config_path), query)
 
 
 def provider_models_payload(

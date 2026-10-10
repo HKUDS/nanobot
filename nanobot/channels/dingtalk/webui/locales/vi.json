@@ -16,17 +16,17 @@
         "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
       },
       "allowRemoteMediaRedirects": {
-        "label": "Cho phép chuyển hướng phương tiện",
+        "label": "Chuyển hướng media",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
         }
       },
       "remoteMediaRedirectAllowedHosts": {
-        "label": "Máy chủ chuyển hướng phương tiện"
+        "label": "Máy chủ chuyển hướng"
       },
       "groupUserIsolation": {
-        "label": "Các buổi nhóm riêng biệt",
+        "label": "Phiên theo thành viên",
         "choices": {
           "true": "Bật",
           "false": "Tắt"

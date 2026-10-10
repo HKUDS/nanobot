@@ -30,44 +30,44 @@
         "label": "Port d'écoute"
       },
       "replyInThread": {
-        "label": "Répondre dans le fil de discussion",
+        "label": "Réponses dans le fil",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "mentionOnlyResponse": {
-        "label": "Réponse avec mention uniquement"
+        "label": "Réponse à une mention seule"
       },
       "validateInboundAuth": {
-        "label": "Valider les demandes entrantes",
+        "label": "Vérifier les requêtes",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "refTtlDays": {
-        "label": "Durée de vie des conversations"
+        "label": "Durée des références (jours)"
       },
       "pruneWebChatRefs": {
-        "label": "Supprimer les conversations de chat Web",
+        "label": "Effacer les références Web Chat",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "Supprimer les conversations non personnelles",
+        "label": "Effacer les références de groupe",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "refTouchIntervalS": {
-        "label": "Intervalle d'actualisation des conversations"
+        "label": "Intervalle d’actualisation (secondes)"
       },
       "trustedServiceUrlHosts": {
-        "label": "Hôtes de services de confiance"
+        "label": "Hôtes de confiance"
       }
     }
   }

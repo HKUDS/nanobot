@@ -16,26 +16,26 @@
         "placeholder": "ID utilisateur séparés par des virgules"
       },
       "allowRemoteMediaRedirects": {
-        "label": "Autoriser les redirections multimédias",
+        "label": "Redirections des médias",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "remoteMediaRedirectAllowedHosts": {
-        "label": "Hôtes de redirection multimédia"
+        "label": "Hôtes de redirection"
       },
       "groupUserIsolation": {
-        "label": "Séances de groupe séparées",
+        "label": "Sessions par membre",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "disablePrivateChat": {
         "label": "Désactiver les messages directs",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       }

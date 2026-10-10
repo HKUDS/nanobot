@@ -5,7 +5,7 @@
     "officialLabel": "Buka WeChat",
     "fields": {
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "ID pengguna, dipisahkan koma"
       },
       "token": {
@@ -16,28 +16,28 @@
         "label": "Kirim progres"
       },
       "sendToolHints": {
-        "label": "Kirim ringkasan aktivitas alat"
+        "label": "Petunjuk alat"
       },
       "streaming": {
         "label": "Gunakan API streaming"
       },
       "replyProgressMessages": {
-        "label": "Kirim progres terstruktur"
+        "label": "Progres terperinci"
       },
       "replyProgressMaxMessages": {
-        "label": "Batas progres terstruktur"
+        "label": "Batas pesan progres"
       },
       "contextMessageBudget": {
-        "label": "Jumlah maksimum pesan konteks"
+        "label": "Batas pesan konteks"
       },
       "blockStreaming": {
-        "label": "Kirim respons per blok"
+        "label": "Balas per blok"
       },
       "blockStreamingMinChars": {
-        "label": "Jumlah minimum karakter per blok"
+        "label": "Panjang blok minimum (karakter)"
       },
       "blockStreamingMaxMessages": {
-        "label": "Batas pesan blok"
+        "label": "Batas jumlah blok"
       },
       "baseUrl": {
         "label": "URL API"

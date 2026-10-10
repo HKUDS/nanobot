@@ -1,6 +1,9 @@
 import type {
   ApiServicePayload,
+  AutomationChatsPayload,
+  AutomationChatUpdate,
   AutomationsPayload,
+  AutomaticModelAPIPayload,
   AutomationUpdatePayload,
   ChannelConfigurePayload,
   ChannelConnectPayload,
@@ -8,6 +11,7 @@ import type {
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
+  FileReferenceMetadata,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   McpOAuthFlowPayload,
@@ -37,14 +41,19 @@ import type {
   SkillsTrendingPayload,
   SlashCommand,
   SlashCommandLifecycle,
+  SubagentTaskSnapshot,
+  SubagentTasksPayload,
   TranscriptionSettingsUpdate,
+  ThreadProjectionEvent,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
+  WorkspaceDirectoriesPayload,
   WebuiThreadPersistedPayload,
   WebuiThreadTraceDetailPayload,
   WorkspaceScopePayload,
 } from "./types";
 import { fetchWithTimeout } from "./http";
+import { isSubagentTask } from "./subagent-tasks";
 
 const API_READ_TIMEOUT_MS = 20_000;
 const API_MUTATION_TIMEOUT_MS = 20_000;
@@ -231,6 +240,172 @@ export interface FetchWebuiThreadOptions {
   cached?: WebuiThreadPersistedPayload;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRecordArray(value: unknown): value is Array<Record<string, unknown>> {
+  return Array.isArray(value) && value.every(isRecord);
+}
+
+function isProjectionMedia(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.url === "string"
+    && (value.name === undefined || typeof value.name === "string")
+    && (value.kind === undefined || ["image", "video", "file"].includes(String(value.kind)));
+}
+
+function hasStringField(value: Record<string, unknown>, field: string): boolean {
+  return typeof value[field] === "string";
+}
+
+function isProjectionFileEdit(value: unknown): boolean {
+  return isRecord(value)
+    && hasStringField(value, "call_id")
+    && hasStringField(value, "tool")
+    && hasStringField(value, "path")
+    && typeof value.added === "number"
+    && typeof value.deleted === "number"
+    && ["editing", "done", "error"].includes(String(value.status));
+}
+
+function hasValidProjectionMetadata(value: Record<string, unknown>): boolean {
+  return (
+    (value.projection_id === undefined || typeof value.projection_id === "string")
+    && (value.created_at_ms === undefined || typeof value.created_at_ms === "number")
+    && (value.turn_id === undefined || typeof value.turn_id === "string")
+    && (value.turn_phase === undefined || [
+      "user", "reasoning", "activity", "answer", "complete",
+    ].includes(String(value.turn_phase)))
+    && (value.turn_seq === undefined || typeof value.turn_seq === "number")
+    && (
+      value.response_sources === undefined
+      || (isRecordArray(value.response_sources) && value.response_sources.every((source) => (
+        typeof source.provider === "string" && source.provider.length > 0
+        && typeof source.model === "string" && source.model.length > 0
+        && typeof source.preset === "string" && source.preset.length > 0
+        && (source.fallback === undefined || typeof source.fallback === "boolean")
+      )))
+    )
+    && (
+      value.source === undefined
+      || (
+        isRecord(value.source)
+        && typeof value.source.kind === "string"
+        && (value.source.label === undefined || typeof value.source.label === "string")
+      )
+    )
+  );
+}
+
+function isProjectionTraceDetail(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.ref === "string"
+    && /^\d{1,12}\.history-[0-9a-f]{20}$/.test(value.ref)
+    && typeof value.bytes === "number"
+    && Number.isFinite(value.bytes)
+    && value.bytes >= 0
+    && typeof value.traceCount === "number"
+    && Number.isInteger(value.traceCount)
+    && value.traceCount >= 0;
+}
+
+function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
+  if (!isRecord(value) || typeof value.event !== "string" || typeof value.chat_id !== "string") {
+    throw new Error("Invalid WebUI thread event");
+  }
+  if (!hasValidProjectionMetadata(value)) {
+    throw new Error("Invalid WebUI thread event metadata");
+  }
+  switch (value.event) {
+    case "user_message":
+      if (typeof value.text !== "string" || typeof value.starts_turn !== "boolean") break;
+      if (value.media_urls !== undefined && (
+        !Array.isArray(value.media_urls) || !value.media_urls.every(isProjectionMedia)
+      )) break;
+      if (value.cli_apps !== undefined && (
+        !isRecordArray(value.cli_apps) || !value.cli_apps.every((item) => hasStringField(item, "name"))
+      )) break;
+      if (value.mcp_presets !== undefined && (
+        !isRecordArray(value.mcp_presets)
+        || !value.mcp_presets.every((item) => hasStringField(item, "name"))
+      )) break;
+      if (value.session_mentions !== undefined && (
+        !isRecordArray(value.session_mentions)
+        || !value.session_mentions.every((item) => (
+          hasStringField(item, "name")
+          && hasStringField(item, "session_key")
+          && hasStringField(item, "title")
+        ))
+      )) break;
+      if (value.provenance !== undefined && (
+        !isRecord(value.provenance)
+        || !isRecord(value.provenance.session_message)
+        || !hasStringField(value.provenance.session_message, "message_id")
+        || !isRecord(value.provenance.session_message.session)
+      )) break;
+      return value as unknown as ThreadProjectionEvent;
+    case "message":
+      if (typeof value.text !== "string") break;
+      if (value.tool_events !== undefined && !isRecordArray(value.tool_events)) break;
+      if (value.trace_detail !== undefined && (
+        !["tool_hint", "progress"].includes(String(value.kind))
+        || !isProjectionTraceDetail(value.trace_detail)
+      )) break;
+      if (value.media_urls !== undefined && (
+        !Array.isArray(value.media_urls) || !value.media_urls.every(isProjectionMedia)
+      )) break;
+      return value as unknown as ThreadProjectionEvent;
+    case "file_edit":
+      if (!Array.isArray(value.edits) || !value.edits.every(isProjectionFileEdit)) break;
+      return value as unknown as ThreadProjectionEvent;
+    case "delta":
+    case "reasoning_delta":
+      if (typeof value.text !== "string") break;
+      return value as unknown as ThreadProjectionEvent;
+    case "stream_end":
+    case "reasoning_end":
+      if (value.text !== undefined && typeof value.text !== "string") break;
+      return value as unknown as ThreadProjectionEvent;
+    case "context_compaction":
+      if (typeof value.compaction_id !== "string" || typeof value.phase !== "string") break;
+      return value as unknown as ThreadProjectionEvent;
+    case "turn_end":
+      return value as unknown as ThreadProjectionEvent;
+  }
+  throw new Error(`Invalid WebUI thread projection event: ${value.event}`);
+}
+
+export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPayload {
+  if (!isRecord(value) || typeof value.schemaVersion !== "number") {
+    throw new Error("Invalid WebUI thread response");
+  }
+  if (value.projection !== "events" || !Array.isArray(value.events)) {
+    throw new Error("Invalid WebUI thread events");
+  }
+  const events = value.events.map(parseThreadProjectionEvent);
+  return {
+    ...value,
+    projection: "events",
+    events,
+  } as unknown as WebuiThreadPersistedPayload;
+}
+
+function parseWebuiThreadTraceDetailPayload(value: unknown): WebuiThreadTraceDetailPayload {
+  if (
+    !isRecord(value)
+    || typeof value.message_id !== "string"
+    || !/^history-[0-9a-f]{20}$/.test(value.message_id)
+    || !Array.isArray(value.events)
+  ) {
+    throw new Error("Invalid WebUI thread trace detail response");
+  }
+  return {
+    message_id: value.message_id,
+    events: value.events.map(parseThreadProjectionEvent),
+  };
+}
+
 export async function fetchWebuiThread(
   token: string,
   key: string,
@@ -257,7 +432,7 @@ export async function fetchWebuiThread(
   if (res.status === 304 && options?.cached) return options.cached;
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
-  return (await res.json()) as WebuiThreadPersistedPayload;
+  return parseWebuiThreadPayload(await res.json());
 }
 
 export async function fetchWebuiThreadTraceDetail(
@@ -274,7 +449,7 @@ export async function fetchWebuiThreadTraceDetail(
     cache: "no-store",
   });
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
-  return (await res.json()) as WebuiThreadTraceDetailPayload;
+  return parseWebuiThreadTraceDetailPayload(await res.json());
 }
 
 export async function fetchFilePreview(
@@ -288,7 +463,21 @@ export async function fetchFilePreview(
   return request<FilePreviewPayload>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
-    undefined,
+    { cache: "no-store" },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchFileReferenceMetadata(
+  token: string,
+  key: string,
+  path: string,
+): Promise<FileReferenceMetadata> {
+  const query = new URLSearchParams({ path, metadata: "1" });
+  return request<FileReferenceMetadata>(
+    `/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    { cache: "no-store" },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -305,7 +494,7 @@ export async function fetchFilePreviewAvailability(
   const payload = await request<{ available?: boolean }>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
-    undefined,
+    { cache: "no-store" },
     API_READ_TIMEOUT_MS,
   );
   return payload.available !== false;
@@ -336,6 +525,14 @@ export async function fetchAutomations(
   );
 }
 
+export async function fetchAutomationChats(token: string, id: string, signal?: AbortSignal): Promise<AutomationChatsPayload> {
+  return request(`/api/webui/automations/chats?id=${encodeURIComponent(id)}`, token, { signal }, API_READ_TIMEOUT_MS);
+}
+
+export async function changeAutomationChat(transport: WebUIMutationTransport, id: string, values: AutomationChatUpdate): Promise<AutomationsPayload> {
+  return mutation(transport, "automation.change_chat", { id, values });
+}
+
 export async function fetchAutomationRunResult(
   token: string,
   id: string,
@@ -363,6 +560,37 @@ export async function updateAutomation(
   values: AutomationUpdatePayload,
 ): Promise<AutomationsPayload> {
   return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
+}
+
+export async function fetchSubagentTasks(token: string, sessionKey: string): Promise<SubagentTasksPayload> {
+  const payload = await request<unknown>(
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`, token, undefined, API_READ_TIMEOUT_MS,
+  );
+  if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)
+    || new Set(payload.tasks.map((task) => task.task_id)).size !== payload.tasks.length) {
+    throw new Error("Invalid subagent tasks response");
+  }
+  return { tasks: payload.tasks };
+}
+
+export async function fetchSubagentThread(
+  token: string, sessionKey: string, taskId: string, signal?: AbortSignal,
+): Promise<WebuiThreadPersistedPayload> {
+  const payload = await request<unknown>(
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents/${encodeURIComponent(taskId)}/webui-thread`,
+    token, { signal, cache: "no-store" }, API_READ_TIMEOUT_MS,
+  );
+  return parseWebuiThreadPayload(payload);
+}
+
+export async function cancelSubagentTask(
+  transport: WebUIMutationTransport, sessionKey: string, taskId: string,
+): Promise<SubagentTaskSnapshot> {
+  const result = await mutation<unknown>(transport, "subagent.cancel", {
+    session_key: sessionKey, task_id: taskId,
+  });
+  if (!isSubagentTask(result) || result.task_id !== taskId) throw new Error("Invalid subagent cancellation response");
+  return result;
 }
 
 export async function fetchSkills(
@@ -553,6 +781,22 @@ export function updateNanobot(transport: WebUIMutationTransport, dev: boolean): 
   return mutation<NanobotUpdateStatus>(transport, "settings.nanobot.update", { dev });
 }
 
+export async function fetchWorkspaceDirectories(
+  token: string,
+  path: string,
+  query: string,
+  showHidden: boolean,
+  allowPartial = false,
+): Promise<WorkspaceDirectoriesPayload> {
+  const params = new URLSearchParams({ path, q: query, hidden: showHidden ? "1" : "0", partial: allowPartial ? "1" : "0" });
+  return request<WorkspaceDirectoriesPayload>(
+    `/api/workspaces/directories?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function fetchCliApps(
   token: string,
   base: string = "",
@@ -665,12 +909,12 @@ export async function runPairingAction(
   return mutation<PairingPayload>(transport, `settings.pairing.${action}`, { code });
 }
 
-export async function startChannelConnect(
+export async function startChannelConnect<T = ChannelConnectPayload>(
   transport: WebUIMutationTransport,
   channel: string,
   params: Readonly<Record<string, string | boolean>> = {},
-): Promise<ChannelConnectPayload> {
-  return mutation<ChannelConnectPayload>(
+): Promise<T> {
+  return mutation<T>(
     transport,
     "settings.channel.connect.start",
     {
@@ -819,6 +1063,27 @@ export async function cancelMcpOAuth(
   );
 }
 
+export async function fetchAutomaticModelAPI(
+  token: string,
+  provider: string,
+  model: string,
+  reasoningEffort: string,
+  base: string = "",
+): Promise<AutomaticModelAPIPayload> {
+  const query = new URLSearchParams({ provider, model, reasoning_effort: reasoningEffort });
+  const payload = await request<unknown>(
+    `${base}/api/settings/model-api?${query}`, token, undefined, API_READ_TIMEOUT_MS,
+  );
+  if (typeof payload !== "object" || payload === null) throw new Error("Invalid model API resolution");
+  const result = payload as Record<string, unknown>;
+  const api = result.api;
+  if (typeof result.provider !== "string" || (
+    api !== "chat_completions" && api !== "responses" && api !== "anthropic_messages"
+    && api !== "bedrock_converse" && api !== "transcription"
+  )) throw new Error("Invalid model API resolution");
+  return { provider: result.provider, api };
+}
+
 export async function fetchProviderModels(
   token: string,
   provider: string,
@@ -923,17 +1188,10 @@ export async function fetchSidebarState(
   );
 }
 
-export async function updateSidebarState(
-  transport: WebUIMutationTransport,
-  state: SidebarStatePayload,
-): Promise<SidebarStatePayload> {
-  return mutation<SidebarStatePayload>(transport, "sidebar.update", { state });
-}
-
 function modelGenerationSettingsPayload(
   configuration: Pick<
     ModelConfigurationCreate,
-    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
+    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort" | "api"
   >,
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
@@ -948,6 +1206,9 @@ function modelGenerationSettingsPayload(
   }
   if (configuration.reasoningEffort !== undefined) {
     payload.reasoning_effort = configuration.reasoningEffort ?? "";
+  }
+  if (configuration.api !== undefined) {
+    payload.api = configuration.api;
   }
   return payload;
 }
@@ -1052,6 +1313,16 @@ export async function completeProviderOAuth(
   );
 }
 
+export async function cancelProviderOAuth(
+  transport: WebUIMutationTransport,
+  provider: string,
+  flowId: string,
+): Promise<void> {
+  await mutation(transport, "settings.provider.oauth_complete", {
+    provider, flow_id: flowId, cancel: true,
+  });
+}
+
 export async function logoutProviderOAuth(
   transport: WebUIMutationTransport,
   provider: string,
@@ -1135,4 +1406,11 @@ export async function updateRuntimeConfigSettings(
   values: Record<string, import("@/lib/types").RuntimeConfigValue>,
 ): Promise<SettingsPayload> {
   return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
+}
+
+export function starPromptAction(
+  transport: WebUIMutationTransport,
+  action: "claim" | "dismiss",
+): Promise<{ show: boolean }> {
+  return mutation<{ show: boolean }>(transport, `star_prompt.${action}`);
 }

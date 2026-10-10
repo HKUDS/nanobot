@@ -16,17 +16,17 @@
         "placeholder": "User IDs, comma separated"
       },
       "allowRemoteMediaRedirects": {
-        "label": "Allow media redirects",
+        "label": "Media redirects",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "remoteMediaRedirectAllowedHosts": {
-        "label": "Media redirect hosts"
+        "label": "Redirect hosts"
       },
       "groupUserIsolation": {
-        "label": "Separate group sessions",
+        "label": "Per-member sessions",
         "choices": {
           "true": "On",
           "false": "Off"

@@ -20,6 +20,7 @@ from nanobot.bus.outbound_events import (
     TurnModelUpdatedEvent,
     UserInputEvent,
 )
+from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.session.webui_turns import clear_websocket_turn_if_current
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
@@ -59,6 +60,7 @@ class WebUIOutboundTransport(Protocol):
         model_preset: str | None = None,
         context_window_tokens: int | None = None,
         fallback: bool = False,
+        reauth_provider: str | None = None,
     ) -> None: ...
 
     async def send_user_input(
@@ -156,6 +158,7 @@ class WebUIOutboundProjector:
                 SessionUpdatedEvent,
                 GoalStatusEvent,
                 GoalStateSyncEvent,
+                SubagentTaskChanged,
                 ContextCompactionEvent,
             )
             log = (
@@ -173,6 +176,7 @@ class WebUIOutboundProjector:
                     model_preset=event.model_preset,
                     context_window_tokens=event.context_window_tokens,
                     fallback=event.fallback,
+                    reauth_provider=event.reauth_provider,
                 )
             return
         if isinstance(event, UserInputEvent):
@@ -241,6 +245,16 @@ class WebUIOutboundProjector:
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
             await self._transport.send_session_updated(msg.chat_id, scope=session_update_scope)
+            return
+        if isinstance(event, SubagentTaskChanged):
+            if conns:
+                task = self._session_projection.subagent_task(webui_session_key(msg.chat_id), event.task_id)
+                if task is not None:
+                    await self._transport.send_payload(
+                        msg.chat_id,
+                        {"event": "subagent_task", "chat_id": msg.chat_id, "task": task},
+                        persistence="transient",
+                    )
             return
         if isinstance(event, SessionUpdatedEvent):
             if conns:

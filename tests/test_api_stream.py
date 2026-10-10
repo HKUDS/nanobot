@@ -112,6 +112,7 @@ async def test_stream_true_returns_sse(aiohttp_client) -> None:
     )
     assert resp.status == 200
     assert resp.content_type == "text/event-stream"
+    assert resp.headers["X-Request-ID"]
 
     body = await resp.text()
     lines = [line for line in body.split("\n") if line.startswith("data: ")]

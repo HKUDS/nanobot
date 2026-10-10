@@ -1,8 +1,6 @@
 # AI Agent Memory in nanobot
 
-This page explains how nanobot implements long-term AI agent memory: session
-history, compressed archives, durable knowledge files, Dream consolidation, and
-Git-backed memory changes.
+This page explains how nanobot implements long-term AI agent memory: session history, compressed archives, durable knowledge files, Dream consolidation, and Git-backed memory changes.
 
 nanobot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
 
@@ -29,7 +27,11 @@ Memory moves through nanobot in two stages.
 
 ### Stage 1: Consolidator
 
-When a conversation grows large, the `Consolidator` summarizes older turns and appends the result to `memory/history.jsonl`, while keeping recent conversation available. Each summary preserves useful long-term facts and a short handoff for active work.
+When a conversation grows large, nanobot summarizes the conversation covered by compaction and appends the result to `memory/history.jsonl`. The model continues with the summary and any messages after it. The original messages remain in your saved chat history, but messages covered by the summary are no longer sent to the model verbatim. Each summary preserves useful long-term facts and a short handoff for active work.
+
+Compaction also runs after a configured period of inactivity, or when you send `/compact`. See [Auto Compact](./configuration.md#auto-compact) for idle timing and how to disable automatic idle compaction.
+
+Automatic compaction does not post lifecycle notices to built-in chat channels by default. This only silences chat messages: compaction still runs, and WebUI/TUI retain structured status and history. Manual `/compact` keeps its start and outcome feedback. Set `channels.showCompactionNotices: true` to enable automatic notices globally, or set `showCompactionNotices` in a channel's configuration to override that default. Omitted or `null` channel overrides inherit the global value; existing explicit QQ overrides are preserved.
 
 This file is:
 
@@ -62,13 +64,11 @@ This is why nanobot's memory is not just archival. It is interpretive.
 
 ## The Files
 
-In this page, `workspace` means the configured **agent workspace** (the default
-is `~/.nanobot/workspace/`, or the path passed with `--workspace`). Selecting a
-different project in the WebUI changes that chat's project context and tool
-working directory; it does not relocate the files below.
+In this page, `workspace` means the configured **agent workspace** (the default is `~/.nanobot/workspace/`, or the path passed with `--workspace`). Selecting a different project in the WebUI changes that chat's project context and tool working directory; it does not relocate the files below.
 
 ```text
 workspace/
+├── .git/                # Version history for long-term memory files
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
 ├── prompts/
@@ -78,14 +78,10 @@ workspace/
     ├── MEMORY.md        # Project facts, decisions, and durable context
     ├── history.jsonl    # Append-only history summaries
     ├── .cursor          # Consolidator write cursor
-    ├── .dream_cursor    # Dream consumption cursor
-    └── .git/            # Version history for long-term memory files
+    └── .dream_cursor    # Dream consumption cursor
 ```
 
-A selected project may provide its own `AGENTS.md`, but project-local `SOUL.md`,
-`USER.md`, and `memory/` do not replace the agent-owned files above. This keeps
-one agent's profile and memory continuous while it works across projects. Use a
-separate configured agent workspace when identity or memory must be isolated.
+A selected project may provide its own `AGENTS.md`, but project-local `SOUL.md`, `USER.md`, and `memory/` do not replace the agent-owned files above. This keeps one agent's profile and memory continuous while it works across projects. Use a separate configured agent workspace when identity or memory must be isolated.
 
 These files play different roles:
 
@@ -115,8 +111,20 @@ grep -i "keyword" memory/history.jsonl
 # jq
 cat memory/history.jsonl | jq -r 'select(.content | test("keyword"; "i")) | .content' | tail -20
 
-# Python
-python -c "import json; [print(json.loads(l).get('content','')) for l in open('memory/history.jsonl','r',encoding='utf-8') if l.strip() and 'keyword' in l.lower()][-20:]"
+# Python: last 20 matching entries
+python - <<'PY'
+import json
+from collections import deque
+
+matches = deque(maxlen=20)
+with open('memory/history.jsonl', encoding='utf-8') as history:
+    for line in history:
+        if line.strip():
+            content = json.loads(line).get('content', '')
+            if 'keyword' in content.lower():
+                matches.append(content)
+print('\n'.join(matches))
+PY
 ```
 
 The difference is philosophical as much as technical:
@@ -130,6 +138,7 @@ Memory is not hidden behind the curtain. Users can inspect and guide it.
 
 | Command | What it does |
 |---------|--------------|
+| `/compact` | Summarize the current conversation context while keeping saved chat history |
 | `/dream` | Run Dream immediately |
 | `/dream-log` | Show the latest Dream memory change |
 | `/dream-log <sha>` | Show a specific Dream change |

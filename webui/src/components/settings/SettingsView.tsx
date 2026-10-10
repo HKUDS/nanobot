@@ -2,7 +2,7 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 import type { SettingsExitGuard, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import type { SettingsPayload, SkillSummary } from "@/lib/types";
+import type { ChatSummary, SettingsPayload, SkillSummary } from "@/lib/types";
 
 export type { SettingsSectionKey } from "@/components/settings/contracts";
 
@@ -18,6 +18,8 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   skills?: SkillSummary[];
+  skillsLoading?: boolean;
+  skillsError?: boolean;
   onStartAutomationChat?: (
     content: string,
     images?: SendAttachment[],
@@ -25,6 +27,7 @@ interface SettingsViewProps {
     modelPreset?: string | null,
   ) => boolean | void | Promise<boolean | void>;
   titleOverrides?: Record<string, string>;
+  sessions?: ChatSummary[];
   onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
   onRestart?: () => void;
@@ -45,8 +48,11 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   skills = [],
+  skillsLoading = false,
+  skillsError = false,
   onStartAutomationChat,
   titleOverrides,
+  sessions,
   onSectionChange,
   onLogout,
   onRestart,
@@ -74,8 +80,11 @@ export function SettingsView({
       onToggleTheme={onToggleTheme}
       onBackToChat={onBackToChat}
       skills={skills}
+      skillsLoading={skillsLoading}
+      skillsError={skillsError}
       onStartAutomationChat={onStartAutomationChat}
       titleOverrides={titleOverrides}
+      sessions={sessions}
       onLogout={onLogout}
       isRestarting={isRestarting}
       hostChromeInset={hostChromeInset}

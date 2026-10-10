@@ -23,6 +23,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.security.network import PinnedDNSAsyncTransport
 
 
@@ -459,6 +460,10 @@ class WhatsAppChannel(BaseChannel):
         connect_task.add_done_callback(_on_done)
 
     async def send(self, msg: OutboundMessage) -> None:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         client = self._client
         if client is None or not self._connected:
             raise RuntimeError("WhatsApp channel is not connected")
@@ -674,7 +679,8 @@ class WhatsAppChannel(BaseChannel):
         if chat_jid == "status@broadcast":
             return
 
-        timestamp = float(_safe_attr(info, "Timestamp", 0) or 0)
+        # Neonize encodes MessageInfo.Timestamp as Unix milliseconds.
+        timestamp = float(_safe_attr(info, "Timestamp", 0) or 0) / 1000
         if self._started_at and timestamp and timestamp < self._started_at:
             return
 

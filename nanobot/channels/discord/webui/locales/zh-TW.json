@@ -8,26 +8,26 @@
         "placeholder": "Discord 機器人權杖"
       },
       "allowChannels": {
-        "label": "允許的頻道",
+        "label": "允許頻道",
         "placeholder": "頻道 ID，以逗號分隔"
       },
       "groupPolicy": {
-        "label": "群組行為",
+        "label": "群聊規則",
         "choices": {
-          "mention": "僅提及時",
-          "open": "所有訊息",
+          "mention": "提及回覆",
+          "open": "全部訊息",
           "allowlist": "允許清單"
         }
       },
       "allowFrom": {
-        "label": "允許的使用者",
+        "label": "允許使用者",
         "placeholder": "使用者 ID，以逗號分隔"
       },
       "proxy": {
         "label": "網路代理"
       },
       "proxyUsername": {
-        "label": "代理用戶名"
+        "label": "代理賬號"
       },
       "proxyPassword": {
         "label": "代理密碼"
@@ -39,10 +39,10 @@
         "label": "已讀表情"
       },
       "workingEmoji": {
-        "label": "處理中表情"
+        "label": "處理表情"
       },
       "workingEmojiDelay": {
-        "label": "處理中表情延遲"
+        "label": "表情延遲（秒）"
       },
       "streaming": {
         "label": "串流輸出",

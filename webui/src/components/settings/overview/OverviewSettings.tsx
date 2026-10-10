@@ -1,21 +1,25 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import {
+  ModelsIcon,
+  WebSearchIcon,
+  ImageGenerationIcon,
+  VoiceIcon,
+} from "@/components/icons/product-icons";
+import { useContext, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ArrowUpCircle,
-  Bot,
   BookOpen,
-  Github,
   MessageCircle,
   Check,
   ChevronRight,
   ExternalLink,
-  Globe2,
-  ImageIcon,
+  Github,
   Loader2,
-  Mic,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { HostNavigationContext } from "@/components/remote/HostSwitcher";
+import { StarLink } from "@/components/StarPrompt";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { NanobotUpdate } from "@/components/settings/overview/NanobotUpdate";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
@@ -39,6 +43,7 @@ import type {
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
 import type { SettingsPayload } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export function OverviewSettings({
@@ -65,9 +70,9 @@ export function OverviewSettings({
     ? settings.agent.model
     : tx("settings.values.notConfigured", "Not configured");
   const activeModelCaption = activeProviderConfigured
-    ? [activeProvider, activePreset].filter(Boolean).join(" · ")
+    ? [activeProvider, activePreset].filter(Boolean).join(" ")
     : activeProviderLabel || settings.agent.model
-      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" · ")
+      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" ")
       : tx("settings.byok.noConfiguredProviders", "No configured providers");
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
@@ -89,7 +94,7 @@ export function OverviewSettings({
         <SettingsSectionTitle>{tx("settings.sections.ai", "AI")}</SettingsSectionTitle>
         <SettingsGroup>
           <OverviewListRow
-            icon={Bot}
+            icon={ModelsIcon}
             valueLogoProvider={activeProvider}
             title={tx("settings.overview.model", "Current model")}
             value={activeModelValue}
@@ -104,7 +109,7 @@ export function OverviewSettings({
         <SettingsSectionTitle>{tx("settings.sections.capabilities", "Capabilities")}</SettingsSectionTitle>
         <SettingsGroup>
           <OverviewListRow
-            icon={Globe2}
+            icon={WebSearchIcon}
             valueLogoProvider={settings.web_search.provider}
             title={tx("settings.overview.webSearch", "Web search")}
             value={webStatus}
@@ -112,7 +117,7 @@ export function OverviewSettings({
             onClick={() => onSelectSection("browser")}
           />
           <OverviewListRow
-            icon={ImageIcon}
+            icon={ImageGenerationIcon}
             valueLogoProvider={settings.image_generation.provider}
             title={tx("settings.overview.imageGeneration", "Image generation")}
             value={imageStatus}
@@ -120,7 +125,7 @@ export function OverviewSettings({
             onClick={() => onSelectSection("image")}
           />
           <OverviewListRow
-            icon={Mic}
+            icon={VoiceIcon}
             valueLogoProvider={transcription.provider}
             title={tx("settings.overview.voiceInput", "Voice input")}
             value={voiceStatus}
@@ -134,23 +139,48 @@ export function OverviewSettings({
   );
 }
 
-export function AboutSettings({ currentVersion, onUpdateInstalled, nativeHost }: {
-  currentVersion?: string;
+type VersionInfoProps = { currentVersion?: string; currentCommit?: string | null };
+
+export function AboutSettings({ settings, onUpdateInstalled }: {
+  settings: SettingsPayload;
   onUpdateInstalled?: () => void;
-  nativeHost?: boolean;
 }) {
   const { t } = useTranslation();
+  const hostPicker = useContext(HostNavigationContext);
+  const currentVersion = settings.version?.current;
+  const currentCommit = settings.version?.commit;
+  const nativeHost = (settings.surface ?? settings.runtime_surface) === "native";
+  const environment = settings.environment;
+  const reportIssueUrl = new URL("https://github.com/HKUDS/nanobot/issues/new");
+  reportIssueUrl.searchParams.set("template", "bug_report.yml");
+  const reportedVersion = [currentVersion, currentCommit && `(commit ${currentCommit})`]
+    .filter(Boolean).join(" ");
+  if (reportedVersion) reportIssueUrl.searchParams.set("version", reportedVersion);
+  reportIssueUrl.searchParams.set("channel", "WebSocket");
+  if (environment) {
+    reportIssueUrl.searchParams.set("python_version", environment.python_version);
+    const osName = environment.os === "Darwin" ? "macOS" : environment.os;
+    const osVersion = [osName, environment.os_version].filter(Boolean).join(" ");
+    reportIssueUrl.searchParams.set("os", environment.architecture
+      ? `${osVersion} (${environment.architecture})` : osVersion);
+  }
+  if (settings.agent.model) reportIssueUrl.searchParams.set("model", settings.agent.model);
+  const provider = settings.agent.resolved_provider || settings.agent.provider;
+  if (provider) reportIssueUrl.searchParams.set("llm_provider", provider);
+  reportIssueUrl.searchParams.set("browser", navigator.userAgent);
+  reportIssueUrl.searchParams.set("connection", hostPicker?.kind === "embedded"
+    ? "Remote host" : hostPicker ? "Local host" : "Direct WebUI");
   const links = [
-    { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
     { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
-    { key: "reportIssue", icon: MessageCircle, href: "https://github.com/HKUDS/nanobot/issues" },
+    { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
+    { key: "reportIssue", icon: MessageCircle, href: reportIssueUrl.href },
   ];
   return (
-    <div className="settings-stack">
+    <div className="flex flex-1 flex-col gap-5">
       <div className="flex flex-col items-center gap-4 py-6 text-center">
         <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
-        <VersionCheckRow currentVersion={currentVersion} />
+        <VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit} />
       </div>
       {!nativeHost && <NanobotUpdate onInstalled={onUpdateInstalled} />}
       <SettingsGroup>
@@ -163,11 +193,14 @@ export function AboutSettings({ currentVersion, onUpdateInstalled, nativeHost }:
           </a>
         ))}
       </SettingsGroup>
+      <div className="mt-auto pt-8 text-center">
+        <StarLink />
+      </div>
     </div>
   );
 }
 
-function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
+function VersionCheckRow({ currentVersion, currentCommit }: VersionInfoProps) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const { token } = useClient();
@@ -208,6 +241,17 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
           {currentVersion ? `v${currentVersion}` : "nanobot"}
+          {currentCommit && (
+            <>
+              <span aria-hidden> (</span>
+              <a href={`https://github.com/HKUDS/nanobot/commit/${currentCommit}`}
+                target="_blank" rel="noopener noreferrer" title={currentCommit}
+                className="font-mono hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {currentCommit.slice(0, 7)}
+              </a>
+              <span aria-hidden>)</span>
+            </>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-2">
@@ -385,6 +429,23 @@ export function AppearanceSettings({
                 : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.notificationSound", "Completion sound")}
+            description={tx(
+              "settings.help.notificationSound",
+              "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.notificationSound}
+              onChange={(notificationSound) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, notificationSound }))}
+              ariaLabel={tx("settings.rows.notificationSound", "Completion sound")}
+              label={localPrefs.notificationSound
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
         </SettingsGroup>
       </section>
     </div>
@@ -397,7 +458,7 @@ function OverviewRowIcon({
   icon: LucideIcon;
 }) {
   return (
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 transition-colors group-hover:bg-muted/80 dark:bg-muted/70">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 transition-colors dark:bg-muted/70">
       <Icon className="h-4 w-4" aria-hidden />
     </span>
   );
@@ -411,7 +472,8 @@ function OverviewValueLogo({
   showBrandLogos: boolean;
 }) {
   const brand = provider ? providerBrand(provider) : null;
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
 
   if (!provider || !showBrandLogos || !brand) return null;
 
@@ -419,15 +481,33 @@ function OverviewValueLogo({
     return (
       <span
         data-testid={`overview-logo-${provider}`}
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background"
+        className={cn(
+          "grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md",
+          logoLoaded ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
+        )}
         aria-hidden
       >
+        <span
+          className={cn(
+            "col-start-1 row-start-1 grid h-full w-full place-items-center rounded-md text-[7.5px] font-semibold text-white",
+            logoLoaded ? "opacity-0" : "opacity-100",
+          )}
+          style={{ backgroundColor: brand.color }}
+        >
+          {brand.initials}
+        </span>
         <img
           src={logoUrl}
           alt=""
           decoding="async"
           loading="lazy"
-          className="h-3.5 w-3.5 object-contain"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          className={cn(
+            "col-start-1 row-start-1 object-contain",
+            isLogoTile ? "h-5 w-5" : "h-3.5 w-3.5",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />

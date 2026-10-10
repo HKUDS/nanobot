@@ -177,7 +177,6 @@ def _resolve_webui_config_path(config: str | None) -> Path:
         return get_config_path()
     config_path = Path(config).expanduser().resolve(strict=False)
     set_config_path(config_path)
-    console.print(f"[dim]Using config: {config_path}[/dim]")
     return config_path
 
 
@@ -369,7 +368,7 @@ def _ensure_local_webui_channel(
     console.print(
         "  LAN access requires an explicit host change plus a WebUI password in config."
     )
-    _confirm_webui_action("Update the local WebUI channel in this config?", yes=yes)
+    _confirm_webui_action("Enable the WebUI channel?", yes=yes)
 
     if not model.enabled:
         model.enabled = True

@@ -79,6 +79,7 @@ export function ChannelSetupPanel({
   onFeaturesUpdate,
   connectRequestId = 0,
   onBeforeCloseChange,
+  onConfigureMcp,
 }: {
   token: string;
   feature: NanobotFeatureInfo;
@@ -87,6 +88,7 @@ export function ChannelSetupPanel({
   onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   connectRequestId?: number;
+  onConfigureMcp?: (name: string) => void;
   onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -107,6 +109,8 @@ export function ChannelSetupPanel({
           showBrandLogos={showBrandLogos}
           onAction={onAction}
           onFeaturesUpdate={onFeaturesUpdate}
+          onBeforeCloseChange={onBeforeCloseChange}
+          onConfigureMcp={onConfigureMcp}
         />
       </Suspense>
     );

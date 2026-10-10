@@ -40,6 +40,10 @@ class RequestContext:
     turn_id: str | None = None
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
+    log_content: bool = True
+    # The host can consume completion messages after this request returns.
+    can_receive_background_results: bool = True
+    persist_session: bool = True
 
 
 @runtime_checkable
@@ -68,6 +72,12 @@ def request_context(ctx: RequestContext):
 
 def current_request_context() -> RequestContext | None:
     return _CURRENT_REQUEST_CONTEXT.get()
+
+
+def tool_log_content_allowed() -> bool:
+    """Whether diagnostics may include content from the current tool request."""
+    ctx = current_request_context()
+    return ctx is None or ctx.log_content
 
 
 def current_request_session_key() -> str | None:

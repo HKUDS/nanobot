@@ -281,7 +281,18 @@ def test_channels_config_keeps_shared_delivery_defaults():
 
 @pytest.mark.parametrize(
     "name",
-    ["websocket", "telegram", "discord", "slack", "email", "feishu", "matrix", "weixin", "whatsapp"],
+    [
+        "websocket",
+        "telegram",
+        "discord",
+        "slack",
+        "email",
+        "feishu",
+        "linear",
+        "matrix",
+        "weixin",
+        "whatsapp",
+    ],
 )
 def test_special_setup_validation_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
@@ -292,7 +303,7 @@ def test_special_setup_validation_is_owned_by_channel_package(name: str):
     assert plugin.setup.validator.__module__ == f"nanobot.channels.{name}.validation"
 
 
-@pytest.mark.parametrize("name", ["feishu", "weixin", "whatsapp"])
+@pytest.mark.parametrize("name", ["feishu", "linear", "weixin", "whatsapp"])
 def test_interactive_connector_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
 
@@ -2627,8 +2638,11 @@ def test_optional_dependency_metadata_for_enable():
 
     assert "boto3>=1.43.0" not in data["project"]["dependencies"]
     assert deps["bedrock"] == ["boto3>=1.43.0"]
+    # The built-in remote WebUI proxy now needs aiohttp even without channels.
+    # Keep the historical API extra installable for existing deployment commands.
+    assert "aiohttp>=3.14.3,<4.0.0" in required
+    assert deps["api"] == ["aiohttp>=3.9.0,<4.0.0"]
     for dep_name in (
-        "aiohttp",
         "dingtalk-stream",
         "lark-oapi",
         "msgpack",
@@ -2667,6 +2681,7 @@ def test_optional_dependency_metadata_for_enable():
         "dingtalk",
         "discord",
         "feishu",
+        "linear",
         "matrix",
         "mochat",
         "msteams",

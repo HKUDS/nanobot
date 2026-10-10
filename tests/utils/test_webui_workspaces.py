@@ -43,7 +43,6 @@ def test_workspace_payload_is_config_data_dir_scoped(tmp_path, monkeypatch) -> N
     assert payload["default_scope"]["access_mode"] == "full"
     assert payload["default_access_mode"] == "default"
     assert payload["controls"]["can_change_project"] is True
-    assert payload["controls"]["can_pick_folder"] is False
 
 
 def test_workspace_payload_allows_remote_project_selection_without_full_access(
@@ -64,7 +63,6 @@ def test_workspace_payload_allows_remote_project_selection_without_full_access(
     assert payload["default_scope"]["project_path"] == str(default.resolve())
     assert payload["controls"]["can_change_project"] is True
     assert payload["controls"]["can_use_full_access"] is False
-    assert payload["controls"]["can_pick_folder"] is False
 
 
 def test_workspace_payload_hides_project_selection_when_unavailable(
@@ -84,22 +82,6 @@ def test_workspace_payload_hides_project_selection_when_unavailable(
 
     assert payload["controls"]["can_change_project"] is False
     assert payload["controls"]["can_use_full_access"] is False
-
-
-def test_workspace_payload_advertises_native_folder_picker(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
-    default = tmp_path / "default"
-    default.mkdir()
-
-    payload = workspaces_payload(
-        default_workspace=default,
-        default_restrict_to_workspace=False,
-        can_change_project=True,
-        can_use_full_access=True,
-        folder_picker_available=True,
-    )
-
-    assert payload["controls"]["can_pick_folder"] is True
 
 
 def test_workspace_payload_uses_webui_default_access_mode(tmp_path, monkeypatch) -> None:
@@ -418,3 +400,54 @@ def test_project_selection_can_remain_disabled_for_untrusted_connections(
             can_change_project=False,
             can_use_full_access=False,
         )
+
+
+def test_recent_projects_survive_controller_restart_without_changing_access(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    project = tmp_path / "project"
+    default.mkdir()
+    project.mkdir()
+    controller = WebUIWorkspaceController(
+        session_manager=None, default_workspace=default, default_restrict_to_workspace=True,
+    )
+    scope = controller.scope_for_new_chat(
+        {WORKSPACE_SCOPE_METADATA_KEY: {"project_path": str(project), "access_mode": "restricted"}},
+        can_change_project=True, can_use_full_access=False,
+    )
+    controller.stage_scope("first", scope)
+    controller.stage_scope("second", scope)
+    restarted = WebUIWorkspaceController(
+        session_manager=None, default_workspace=default, default_restrict_to_workspace=True,
+    )
+    payload = restarted.payload(can_change_project=True, can_use_full_access=False)
+    assert payload["recent_projects"] == [{"name": "project", "path": str(project)}]
+    assert payload["default_scope"]["project_path"] == str(default)
+    assert payload["default_scope"]["access_mode"] == "restricted"
+    assert payload["controls"]["can_change_project"] is True
+
+
+def test_favorites_keep_pin_order_across_restart_and_can_remove_deleted_folder(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default, alpha, beta = (tmp_path / name for name in ("default", "alpha", "beta"))
+    for folder in (default, alpha, beta):
+        folder.mkdir()
+    controller = WebUIWorkspaceController(
+        session_manager=None, default_workspace=default, default_restrict_to_workspace=True,
+    )
+    controller.set_favorite_project(str(beta), True)
+    controller.set_favorite_project(str(alpha), True)
+    controller.set_favorite_project(str(beta), True)
+    controller.resolve_project(str(alpha))
+    restarted = WebUIWorkspaceController(
+        session_manager=None, default_workspace=default, default_restrict_to_workspace=True,
+    )
+    payload = restarted.payload(can_change_project=True, can_use_full_access=False)
+    assert [item["path"] for item in payload["favorite_projects"]] == [str(beta), str(alpha)]
+    assert [item["path"] for item in payload["recent_projects"]] == [str(alpha)]
+    assert payload["default_scope"]["project_path"] == str(default)
+    assert payload["default_scope"]["access_mode"] == "restricted"
+    beta.rmdir()
+    assert restarted.set_favorite_project(str(beta), False) == [{"name": "alpha", "path": str(alpha)}]
+    with pytest.raises(WorkspaceScopeError, match="existing directory"):
+        restarted.set_favorite_project(str(beta), True)

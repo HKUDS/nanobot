@@ -15,7 +15,7 @@
         "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Quy tắc nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
@@ -32,7 +32,7 @@
         "label": "Đường dẫn webhook"
       },
       "replyInThread": {
-        "label": "Trả lời trong chủ đề",
+        "label": "Trả lời trong luồng",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
@@ -45,23 +45,23 @@
         "label": "biểu tượng cảm xúc xong"
       },
       "includeThreadContext": {
-        "label": "Bao gồm bối cảnh chủ đề",
+        "label": "Ngữ cảnh luồng",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
         }
       },
       "threadContextLimit": {
-        "label": "Giới hạn bối cảnh của chủ đề"
+        "label": "Giới hạn ngữ cảnh"
       },
       "allowFrom": {
         "label": "Người dùng được phép"
       },
       "groupAllowFrom": {
-        "label": "Các kênh được phép"
+        "label": "Kênh được phép"
       },
       "groupRequireMention": {
-        "label": "Yêu cầu đề cập trong các kênh",
+        "label": "Yêu cầu nhắc trong kênh",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
@@ -82,7 +82,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Cho phép người dùng nhắn tin trực tiếp"
+        "label": "Người dùng DM được phép"
       },
       "proxy": {
         "label": "Proxy mạng",

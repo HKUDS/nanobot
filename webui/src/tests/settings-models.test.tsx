@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
@@ -86,8 +86,335 @@ async function togglePresetEditor(name = "primary") {
   fireEvent.click(within(row).getAllByRole("button")[0]);
 }
 
+async function openPresetAdvancedOptions() {
+  await togglePresetEditor();
+  fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+}
+
 describe("Settings models", () => {
   installSettingsViewTestHooks();
+
+  it.each(["legacy", "declaration"])("saves and restores a preset API declaration, then returns to automatic (%s host)", async (host) => {
+    let payload = settingsPayload();
+    const provider: SettingsPayload["providers"][number] = {
+      name: "openai", label: "OpenAI", configured: true,
+    };
+    if (host === "legacy") provider.model_api_configurable = true;
+    else provider.request_apis = ["chat_completions", "responses"];
+    payload.providers = [provider];
+    payload.model_presets[0].provider = "openai";
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    requestMutationMock.mockImplementation(async (action, args) => {
+      expect(action).toBe("settings.model_configuration.update");
+      payload = {
+        ...payload,
+        model_presets: payload.model_presets.map((preset) => ({ ...preset, api: args.api })),
+      };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models" });
+    await togglePresetEditor();
+    expect(screen.queryByRole("combobox", { name: "API connection" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    await openPopover(screen.getByLabelText("API connection"));
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("option", { name: "Responses" }));
+    expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update",
+      { name: "primary", api: { supported_apis: ["responses"], preferred_api: "responses" } },
+      20_000,
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await openPresetAdvancedOptions();
+    expect(screen.getByLabelText("API connection")).toHaveTextContent("Responses");
+    fireEvent.click(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update",
+      { name: "primary", api: { supported_apis: ["responses", "chat_completions"], preferred_api: "responses" } },
+      20_000,
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await openPresetAdvancedOptions();
+    expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).toBeChecked();
+    await openPopover(screen.getByLabelText("API connection"));
+    fireEvent.click(screen.getByRole("option", { name: "Responses" }));
+    expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await openPopover(screen.getByLabelText("API connection"));
+    fireEvent.click(screen.getByRole("option", { name: "Auto" }));
+    expect(screen.queryByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", { name: "primary", api: null }, 20_000,
+    ));
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/model-api?"))).toBe(false);
+  });
+
+  it("saves and restores Anthropic Messages for a custom gateway", async () => {
+    let payload = settingsPayload();
+    payload.providers = [{
+      name: "tenant", label: "Tenant", configured: true,
+      request_apis: ["chat_completions", "responses", "anthropic_messages"],
+    }];
+    payload.model_presets[0].provider = "tenant";
+    payload.model_presets[0].resolved_provider = "tenant";
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    requestMutationMock.mockImplementation(async (action, args) => {
+      expect(action).toBe("settings.model_configuration.update");
+      payload = {
+        ...payload,
+        model_presets: payload.model_presets.map((preset) => ({ ...preset, api: args.api })),
+      };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models" });
+    await openPresetAdvancedOptions();
+    await openPopover(screen.getByLabelText("API connection"));
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    fireEvent.click(screen.getByRole("option", { name: "Anthropic Messages" }));
+    expect(screen.queryByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update",
+      { name: "primary", api: { supported_apis: ["anthropic_messages"], preferred_api: "anthropic_messages" } },
+      20_000,
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await openPresetAdvancedOptions();
+    expect(screen.getByLabelText("API connection")).toHaveTextContent("Anthropic Messages");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await openPopover(screen.getByLabelText("API connection"));
+    fireEvent.click(screen.getByRole("option", { name: "Responses" }));
+    expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).not.toBeChecked();
+  });
+
+  it("saves an explicit API after an Auto provider resolves the changed model to a new connection", async () => {
+    const payload = settingsPayload();
+    payload.model_api_resolution_supported = true;
+    payload.model_presets[0] = {
+      ...payload.model_presets[0], provider: "auto", model: "anthropic/claude-sonnet-4",
+      resolved_provider: "anthropic",
+    };
+    payload.providers = [
+      { name: "anthropic", label: "Anthropic", configured: true, request_apis: ["anthropic_messages"] },
+      { name: "openai", label: "OpenAI", configured: true, request_apis: ["chat_completions", "responses"] },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname !== "/api/settings/model-api") return jsonResponse(payload);
+      return jsonResponse(url.searchParams.get("model")?.startsWith("gpt")
+        ? { provider: "openai", api: "chat_completions" }
+        : { provider: "anthropic", api: "anthropic_messages" });
+    }));
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await openPresetAdvancedOptions();
+    await openPopover(screen.getByRole("button", { name: "anthropic/claude-sonnet-4", exact: true }));
+    const search = screen.getByRole("combobox", { name: "Choose model" });
+    fireEvent.change(search, { target: { value: "gpt-4o" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));
+    await openPopover(screen.getByLabelText("API connection"));
+    fireEvent.click(screen.getByRole("option", { name: "Responses" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", {
+        name: "primary", model: "gpt-4o",
+        api: { supported_apis: ["responses"], preferred_api: "responses" },
+      }, 20_000,
+    ));
+  });
+
+  it("shows the host's automatic API and discards an older reasoning resolution", async () => {
+    const payload = settingsPayload();
+    payload.model_api_resolution_supported = true;
+    payload.model_presets[0].provider = "openai";
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      request_apis: ["chat_completions", "responses"],
+    }];
+    let finishHigh!: (response: Response) => void;
+    const highResponse = new Promise<Response>((resolve) => { finishHigh = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname !== "/api/settings/model-api") return jsonResponse(payload);
+      if (url.searchParams.get("reasoning_effort") === "high") return highResponse;
+      return jsonResponse({ provider: "openai", api: "chat_completions" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettingsView({ initialSection: "models" });
+    await openPresetAdvancedOptions();
+    await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await openPopover(screen.getByLabelText("API connection"));
+    expect(screen.getByRole("option", { name: "Auto (Chat Completions)" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("option", { name: "Auto (Chat Completions)" }));
+    fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "high" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("reasoning_effort=high"))).toBe(true));
+    fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "none" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("reasoning_effort=none"))).toBe(true));
+    await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));
+    await act(async () => { finishHigh(jsonResponse({ provider: "openai", api: "responses" })); });
+    expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("updates the Auto label from a valid host result without changing the preset declaration", async () => {
+    const payload = settingsPayload();
+    payload.model_api_resolution_supported = true;
+    payload.model_presets[0].provider = "openai";
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      request_apis: ["chat_completions", "responses"],
+    }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname !== "/api/settings/model-api") return jsonResponse(payload);
+      return jsonResponse({
+        provider: "openai", api: url.searchParams.get("reasoning_effort") === "high" ? "responses" : "chat_completions",
+      });
+    }));
+    renderSettingsView({ initialSection: "models" });
+    await openPresetAdvancedOptions();
+    await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)"));
+    fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "high" } });
+    await waitFor(() => expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Responses)"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { name: "primary", reasoning_effort: "high" }, 20_000,
+    ));
+  });
+
+  it.each(["future_api", null])("leaves the automatic API unconfirmed for an unsupported host result (%s)", async (api) => {
+    const payload = settingsPayload();
+    payload.model_api_resolution_supported = true;
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      request_apis: ["chat_completions", "responses"],
+    }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/model-api?")
+      ? jsonResponse({ provider: "openai", api }) : jsonResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettingsView({ initialSection: "models" });
+    await openPresetAdvancedOptions();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/model-api?"))).toBe(true));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByLabelText("API connection")).toHaveTextContent(/^Auto$/);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it.each([undefined, ["future_api"], ["future_api", "future_api_v2"], "responses"])("hides API controls when host support is unconfirmed (%s)", async (requestAPIs) => {
+    const payload = settingsPayload();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      ...payload,
+      providers: [{ name: "openai", label: "OpenAI", configured: true, request_apis: requestAPIs }],
+    })));
+    renderSettingsView({ initialSection: "models" });
+    await openPresetAdvancedOptions();
+    expect(screen.queryByRole("combobox", { name: "API connection" })).not.toBeInTheDocument();
+  });
+
+  it("uses the host's API declaration and preserves an existing Chat preference when renaming", async () => {
+    const payload = settingsPayload();
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      request_apis: ["chat_completions", "responses"],
+    }];
+    payload.model_presets[0].api = {
+      supported_apis: ["chat_completions", "responses"], preferred_api: "chat_completions",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models" });
+    await togglePresetEditor();
+    expect(screen.queryByRole("combobox", { name: "API connection" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Advanced options/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Preset name"), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { name: "primary", new_name: "Renamed" }, 20_000,
+    ));
+  });
+
+  it.each([
+    ["openai_codex", "OpenAI Codex", "responses", "Responses"],
+    ["anthropic", "Anthropic", "anthropic_messages", "Anthropic Messages"],
+    ["bedrock", "AWS Bedrock", "bedrock_converse", "Bedrock Converse"],
+  ] as const)("shows the fixed connection for %s", async (provider, label, api, apiLabel) => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: provider, label, configured: true, request_apis: [api] }];
+    payload.model_presets[0].provider = provider;
+    payload.model_presets[0].resolved_provider = provider;
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    renderSettingsView({ initialSection: "models" });
+    await openPresetAdvancedOptions();
+    expect(screen.getByText(apiLabel, { exact: true })).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "API connection" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it.each(["manual", "poll", "direct"])("reauthenticates from the catalog and preserves the preset draft (%s)", async (mode) => {
+    const payload = settingsPayload();
+    payload.providers = [{
+      name: "openai_codex", label: "OpenAI Codex", configured: true,
+      auth_type: "oauth", model_catalog: "hybrid", oauth_login_supported: true,
+    }];
+    let recovered = false;
+    const signedIn = () => {
+      recovered = true;
+      return { ...payload, providers: payload.providers.map((row) => ({ ...row })) };
+    };
+    requestMutationMock.mockImplementation(async (action, args) => {
+      if (action === "settings.provider.oauth_login") {
+        return mode === "direct" ? signedIn() : {
+          status: "authorization_required", provider: "openai_codex", flow_id: "flow-test",
+          authorization_url: "https://example.com/authorize", expires_in: 600,
+          completion_input: "callback_url",
+        };
+      }
+      if (action === "settings.provider.oauth_complete") {
+        return mode === "manual" && !args.authorization_response
+          ? { status: "pending", provider: "openai_codex", flow_id: "flow-test" }
+          : signedIn();
+      }
+      throw new Error(`Unexpected mutation: ${action}`);
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/provider-models?")) return jsonResponse({
+        provider: "openai_codex", label: "OpenAI Codex", status: "available", catalog_kind: "hybrid",
+        source: recovered ? "remote" : "fallback", error_kind: recovered ? null : "auth_required",
+        models: [{ id: recovered ? "openai-codex/new-model" : "openai-codex/offline-model" }], model_count: 1,
+      });
+      return jsonResponse(payload);
+    }));
+    renderSettingsView({ initialSection: "models" });
+    fireEvent.click(await screen.findByRole("button", { name: "New preset" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
+      target: { value: "My unsaved preset" },
+    });
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
+    if (mode === "manual") {
+      fireEvent.change(await screen.findByRole("textbox", { name: "Callback URL" }), {
+        target: { value: "http://localhost:1455/auth/callback?code=fixture&state=test" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    }
+    await waitFor(() => expect(recovered).toBe(true), { timeout: 3000 });
+    expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("My unsaved preset");
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    expect(await screen.findByRole("option", { name: /openai-codex\/new-model/ })).toBeVisible();
+    expect(screen.queryByText("Authorization expired. Please sign in again.")).not.toBeInTheDocument();
+    expect(requestMutationMock.mock.calls.every(([action]) => action.startsWith("settings.provider.oauth_"))).toBe(true);
+  });
 
   it("uses the preset name as the canonical identity", async () => {
     const payload = settingsPayload();
@@ -228,15 +555,46 @@ describe("Settings models", () => {
 
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByText("Temperature")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "500K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue("200k");
     const reasoningEffort = screen.getByLabelText("Reasoning effort");
     expect(reasoningEffort).toHaveProperty("type", "text");
     fireEvent.change(reasoningEffort, { target: { value: "provider-native-mode" } });
     expect(reasoningEffort).toHaveValue("provider-native-mode");
+  });
+
+  it.each([["128000", 128000], ["131072", 131072], ["272k", 272000], ["256K", 256000], ["1.5m", 1500000], ["1.001k", 1001]] as const)("saves a custom context budget (%s)", async (input, tokens) => {
+    const payload = settingsPayload();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    requestMutationMock.mockResolvedValue({
+      ...payload,
+      model_presets: payload.model_presets.map((preset) => ({ ...preset, context_window_tokens: tokens })),
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Context window" }), {
+      target: { value: input },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", expect.objectContaining({ context_window_tokens: tokens }), expect.any(Number),
+    ));
+    expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue(input);
+  });
+
+  it.each(["", "0", "-1", "1.5", "abc", "2ki", "0.0001k", "9007199254740992"])("keeps invalid context input unsaved (%s)", async (value) => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    await togglePresetEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    const input = screen.getByRole("textbox", { name: "Context window" });
+    fireEvent.change(input, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription("Enter a positive token count, such as 200k, 1m, or 131072.");
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    expect(input).toHaveValue(value);
   });
 
   it("opens the preset editor in a dialog and protects the primary preset", async () => {
@@ -502,6 +860,7 @@ describe("Settings models", () => {
 
     const enableSwitch = within(codexRow).getByRole("switch", { name: "Enable preset" });
     expect(enableSwitch).not.toBeChecked();
+    expect(enableSwitch).toHaveClass("h-5", "w-9", "bg-muted-foreground/25");
     fireEvent.click(enableSwitch);
 
     await waitFor(() => {
@@ -516,6 +875,16 @@ describe("Settings models", () => {
     expect(
       within(enabledCodexRow).getByRole("switch", { name: "Disable preset" }),
     ).toBeChecked();
+    expect(within(enabledCodexRow).getByRole("switch")).toHaveClass("h-5", "w-9", "bg-foreground");
+  });
+
+  it("does not allow disabling the last preset", () => {
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    const toggle = screen.getByRole("switch", { name: "Disable preset" });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeDisabled();
+    fireEvent.click(toggle);
+    expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
   it("appends a new model preset to the call order immediately", async () => {
@@ -565,15 +934,15 @@ describe("Settings models", () => {
         }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
-    expect(screen.getByRole("dialog", { name: "New model preset" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "Writer" },
     });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, {
       target: { value: "openai/gpt-4o-mini" },
@@ -605,12 +974,12 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     const nameInput = screen.getByRole("textbox", { name: "Preset name" });
     fireEvent.change(nameInput, { target: { value: "PRIMARY" } });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
@@ -712,7 +1081,7 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: freshPayload });
 
     expect(
-      await screen.findByRole("button", { name: "New model preset" }),
+      await screen.findByRole("button", { name: "New preset" }),
     ).toBeInTheDocument();
   });
 
@@ -1100,7 +1469,7 @@ describe("Settings models", () => {
     await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", { name: /open-codex\/gpt-5\.5/i });
     await openPopover(modelButtons[modelButtons.length - 1]);
-    const input = (await screen.findByPlaceholderText("Search or type model ID")) as HTMLInputElement;
+    const input = (await screen.findByPlaceholderText("Choose model")) as HTMLInputElement;
     expect(input.value).toBe("open-codex/gpt-5.5");
 
     fireEvent.change(input, { target: { value: "openai-codex/gpt-5.5" } });
@@ -1183,7 +1552,7 @@ describe("Settings models", () => {
       ),
     ).toBe(false);
 
-    fireEvent.change(screen.getByPlaceholderText("Search or type model ID"), {
+    fireEvent.change(screen.getByPlaceholderText("Choose model"), {
       target: { value: "cl" },
     });
 
@@ -1377,12 +1746,12 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    const createButton = await screen.findByRole("button", { name: "New model preset" });
+    const createButton = await screen.findByRole("button", { name: "New preset" });
     const previousPointerEvents = document.body.style.pointerEvents;
     expect(createButton).toHaveClass("w-full");
     fireEvent.click(createButton);
 
-    expect(screen.getByRole("dialog", { name: "New model preset" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toContainElement(screen.getByTestId("model-preset-editor"));
     expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("");
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
@@ -1391,14 +1760,14 @@ describe("Settings models", () => {
 
     await waitFor(() => expect(document.body.style.pointerEvents).toBe(previousPointerEvents));
 
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     const nameInput = await screen.findByRole("textbox", { name: "Preset name" });
     expect(nameInput).toHaveValue("");
     expect(nameInput).toHaveAttribute("placeholder", "e.g. Fast writing");
 
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
@@ -1409,7 +1778,7 @@ describe("Settings models", () => {
     fireEvent.change(nameInput, { target: { value: "Writer" } });
     await openPopover(screen.getByRole("button", { name: /openai\/gpt-4o-mini/ }));
     const nextModelSearch = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
+      name: "Choose model",
     });
     fireEvent.change(nextModelSearch, { target: { value: "openai/gpt-4.1-mini" } });
     fireEvent.keyDown(nextModelSearch, { key: "Enter" });

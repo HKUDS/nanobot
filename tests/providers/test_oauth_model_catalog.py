@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from nanobot.providers.oauth_model_catalog import (
+    OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     get_oauth_model_catalog,
     invalidate_oauth_model_catalog,
@@ -141,7 +142,12 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
 
 @pytest.mark.parametrize(
     ("model_id", "label"),
-    [("gpt-new", "GPT New"), ("gpt-6-astra", "GPT-6-Astra")],
+    [
+        ("gpt-new", "GPT New"),
+        ("gpt-6-astra", "GPT-6-Astra"),
+        ("gpt-6-sol", "GPT-6-Sol"),
+        ("gpt-6-luna", "GPT-6-Luna"),
+    ],
 )
 def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     monkeypatch: pytest.MonkeyPatch,
@@ -224,15 +230,43 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     request = captured["request"]
     assert isinstance(request, httpx.Request)
     assert request.url.copy_with(query=None) == httpx.URL(DEFAULT_OPENAI_CODEX_MODELS_URL)
-    # Assert the validated wire version, not the same constant used by the request.
-    assert request.url.params["client_version"] == "0.153.4"
+    # Assert the release-independent wire version, not the constant used by the request.
+    assert request.url.params["client_version"] == "99.99.99"
     assert request.headers["Authorization"] == "Bearer secret"
     assert request.headers["chatgpt-account-id"] == "account-42"
 
 
-def test_github_copilot_catalog_only_lists_compatible_chat_models(
+@pytest.mark.parametrize("detail", [
+    'Token refresh failed: 400 {"error":"invalid_grant","access_token":"synthetic-secret"}',
+    "OAuth credentials not found. Please run the login command.",
+])
+def test_codex_inference_classifies_sdk_reauth_without_exposing_response(detail: str) -> None:
+    from nanobot.providers.openai_codex_provider import _codex_error_response
+
+    response = _codex_error_response(RuntimeError(detail))
+    assert response.error_kind == "oauth_auth_required"
+    assert response.error_should_retry is False
+    assert "synthetic-secret" not in str(response)
+
+
+def test_xai_inference_classifies_typed_reauth() -> None:
+    from nanobot.providers.xai_grok_provider import _xai_error_response
+    from nanobot.providers.xai_oauth import XAIOAuthReauthRequiredError
+
+    response = _xai_error_response(XAIOAuthReauthRequiredError("synthetic-secret"))
+    assert response.error_kind == "oauth_auth_required"
+    assert response.error_should_retry is False
+    assert "synthetic-secret" not in str(response)
+
+
+@pytest.mark.parametrize(
+    "responses_model",
+    ["gpt-5.4-mini", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"],
+)
+def test_github_copilot_catalog_routes_advertised_model_apis(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    responses_model: str,
 ) -> None:
     original_client = httpx.Client
     captured: list[httpx.Request] = []
@@ -264,8 +298,7 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
                         },
                     },
                     {
-                        "id": "gpt-5.4-mini",
-                        "name": "GPT-5.4 Mini",
+                        "id": responses_model,
                         "model_picker_enabled": True,
                         "supported_endpoints": ["/responses"],
                     },
@@ -311,10 +344,28 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
     assert catalog.source == "remote"
     assert [model.id for model in catalog.models] == [
         "github-copilot/claude-sonnet",
-        "github-copilot/gpt-5.4-mini",
+        f"github-copilot/{responses_model}",
+        "github-copilot/unknown-responses-only",
     ]
     assert catalog.models[0].context_window == 200_000
     assert catalog.models[0].reasoning_efforts == ("low", "high")
+    assert catalog.models[0].api.supported_apis == ("chat_completions",)
+    assert catalog.models[2].api.supported_apis == ("responses",)
+    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
+    provider = GitHubCopilotProvider(default_model="github-copilot/unknown-responses-only")
+    assert provider._should_use_responses_api(None, None)
+    assert not provider._should_use_responses_api("github-copilot/claude-sonnet", "high")
+    from nanobot.config.schema import Config, ModelPresetConfig
+    from nanobot.providers.factory import resolve_automatic_model_api
+
+    for model, effort, expected in (
+        ("github-copilot/unknown-responses-only", None, "responses"),
+        ("github-copilot/claude-sonnet", "high", "chat_completions"),
+    ):
+        assert resolve_automatic_model_api(Config(), preset=ModelPresetConfig(
+            provider="github_copilot", model=model, reasoning_effort=effort,
+        )) == ("github_copilot", expected)
     assert len(captured) == 2
     assert captured[0].headers["Authorization"] == "token github-secret"
     assert captured[1].headers["Authorization"] == "Bearer copilot-secret"
@@ -513,3 +564,125 @@ def test_catalog_treats_empty_remote_list_as_failure_and_can_be_invalidated() ->
     assert refreshed.source == "remote"
     assert refreshed.models[0].id == "provider/new"
     assert calls == 2
+
+
+@pytest.mark.parametrize("with_cache", [False, True])
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (401, {"error": {"code": "token_revoked"}}, "auth_required"),
+        (401, "non-json", "auth_required"),
+        (400, {"error": "invalid_grant"}, "auth_required"),
+        (403, {"error": {"code": "token_revoked"}}, "auth_required"),
+        (403, {"error": "insufficient_scope"}, "unavailable"),
+        (429, {"error": "invalid_grant"}, "unavailable"),
+        (503, {}, "unavailable"),
+    ],
+)
+def test_catalog_retains_safe_error_kind_until_reauthentication(
+    with_cache: bool, status: int, body: object, expected: str,
+) -> None:
+    from loguru import logger
+
+    now = [0.0]
+    failing = [not with_cache]
+    calls = 0
+    sentinel = "private-token-and-account-fixture"
+    logs: list[str] = []
+
+    def fetch(_proxy):
+        nonlocal calls
+        calls += 1
+        if failing[0]:
+            request = httpx.Request("GET", f"https://example.com/{sentinel}")
+            response = httpx.Response(status, json=body, request=request)
+            raise httpx.HTTPStatusError(sentinel, request=request, response=response)
+        return (ProviderModelSpec(id="provider/new"),)
+
+    catalog = OAuthModelCatalog(
+        fallback_models=(_fallback_model(),), fetch=fetch,
+        fresh_ttl_s=10, stale_ttl_s=100, monotonic=lambda: now[0],
+    )
+    if with_cache:
+        assert catalog.get(cache_key="same-account").error_kind is None
+        now[0] = 11
+        failing[0] = True
+    sink = logger.add(lambda message: logs.append(str(message)))
+    try:
+        first = catalog.get(cache_key="same-account")
+        second = catalog.get(cache_key="same-account")
+    finally:
+        logger.remove(sink)
+    assert first.source == ("stale" if with_cache else "fallback")
+    assert first.error_kind == second.error_kind == expected
+    assert calls == (2 if with_cache else 1)
+    assert sentinel not in repr(first) + "".join(logs)
+    # Same account re-login must bypass both the stale list and negative cache.
+    failing[0] = False
+    catalog.invalidate()
+    recovered = catalog.get(cache_key="same-account")
+    assert recovered.source == "remote"
+    assert recovered.error_kind is None
+    assert recovered.message is None
+    assert recovered.models[0].id == "provider/new"
+
+
+@pytest.mark.parametrize("failure", [httpx.ConnectError("offline"), httpx.ReadTimeout("slow")])
+def test_catalog_network_errors_do_not_request_sign_in(failure: Exception) -> None:
+    def fetch(_proxy):
+        raise failure
+
+    catalog = OAuthModelCatalog(fallback_models=(_fallback_model(),), fetch=fetch)
+    assert catalog.get(cache_key="one").error_kind == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("message", "reauth"),
+    [
+        ('Token refresh failed: 400 {"error":"invalid_grant","token":"private"}', True),
+        ('Token refresh failed: 401 private', True),
+        ('Token refresh failed: 429 {"error":"invalid_grant"}', False),
+        ('Token refresh failed: 503 private', False),
+        ('network error mentions invalid_grant', False),
+        ('OAuth credentials not found. Please run the login command.', True),
+    ],
+)
+def test_codex_catalog_classifies_sdk_refresh_envelope(monkeypatch, message, reauth):
+    from nanobot.providers.openai_codex_provider import _fetch_openai_codex_models
+
+    def fail(**_kwargs):
+        raise RuntimeError(message)
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.get_codex_token", fail)
+    with pytest.raises(RuntimeError) as error:
+        _fetch_openai_codex_models(None)
+    assert isinstance(error.value, OAuthCatalogAuthRequiredError) is reauth
+    if reauth:
+        assert "private" not in str(error.value)
+
+
+def test_xai_catalog_classifies_expired_refresh_credentials(monkeypatch):
+    from nanobot.providers.xai_grok_provider import _fetch_xai_grok_models
+    from nanobot.providers.xai_oauth import XAIOAuthReauthRequiredError, _oauth_http_error
+
+    failure = _oauth_http_error(
+        httpx.Response(400, json={"error": "invalid_grant", "error_description": "private"}),
+        "token refresh",
+    )
+    assert isinstance(failure, XAIOAuthReauthRequiredError)
+    assert "private" not in str(failure)
+
+    def fail(**_kwargs):
+        raise failure
+
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider.get_xai_oauth_token", fail)
+    with pytest.raises(OAuthCatalogAuthRequiredError):
+        _fetch_xai_grok_models(None)
+
+
+@pytest.mark.parametrize("status", [403, 429, 503])
+def test_xai_oauth_other_failures_are_not_reauthentication(status):
+    from nanobot.providers.xai_oauth import XAIOAuthReauthRequiredError, _oauth_http_error
+
+    failure = _oauth_http_error(httpx.Response(status, json={}), "token refresh")
+    assert not isinstance(failure, XAIOAuthReauthRequiredError)

@@ -20,7 +20,7 @@
         }
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Quy tắc nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
@@ -32,10 +32,10 @@
         "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
       },
       "topicIsolation": {
-        "label": "Tách biệt chủ đề",
+        "label": "Phiên theo chủ đề",
         "choices": {
-          "true": "Phiên riêng cho từng chủ đề",
-          "false": "Dùng chung một phiên cho nhóm"
+          "true": "Phiên riêng",
+          "false": "Phiên dùng chung"
         }
       },
       "name": {
@@ -54,7 +54,7 @@
         "label": "biểu tượng cảm xúc xong"
       },
       "toolHintPrefix": {
-        "label": "Tiền tố gợi ý công cụ"
+        "label": "Tiền tố gợi ý"
       },
       "replyToMessage": {
         "label": "Trả lời tin nhắn",

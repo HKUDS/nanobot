@@ -29,6 +29,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.utils.helpers import safe_filename
 
 
@@ -239,6 +240,10 @@ class EmailChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send email via SMTP."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         if not self.config.consent_granted:
             self.logger.warning("Skip email send: consent_granted is false")
             return
@@ -852,7 +857,10 @@ class EmailChannel(BaseChannel):
                 except Exception:
                     payload_bytes = part.get_payload(decode=True) or b""
                     charset = part.get_content_charset() or "utf-8"
-                    payload = payload_bytes.decode(charset, errors="replace")
+                    try:
+                        payload = payload_bytes.decode(charset, errors="replace")
+                    except LookupError:
+                        payload = payload_bytes.decode("utf-8", errors="replace")
                 if not isinstance(payload, str):
                     continue
                 if content_type == "text/plain":
@@ -870,7 +878,10 @@ class EmailChannel(BaseChannel):
         except Exception:
             payload_bytes = msg.get_payload(decode=True) or b""
             charset = msg.get_content_charset() or "utf-8"
-            payload = payload_bytes.decode(charset, errors="replace")
+            try:
+                payload = payload_bytes.decode(charset, errors="replace")
+            except LookupError:
+                payload = payload_bytes.decode("utf-8", errors="replace")
         if not isinstance(payload, str):
             return ""
         if msg.get_content_type() == "text/html":

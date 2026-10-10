@@ -1,7 +1,6 @@
 # How to Configure Model Fallback in nanobot
 
-Model fallback lets nanobot try a primary model first, then fall back to one or
-more named presets when the primary provider fails or rate-limits.
+Model fallback lets nanobot try a primary model first, then fall back to one or more named presets when the primary provider fails or rate-limits.
 
 ## What you will build
 
@@ -11,8 +10,7 @@ more named presets when the primary provider fails or rate-limits.
 
 ## When to use this
 
-Use fallback when you want better reliability across rate limits, provider
-outages, local model downtime, or cost-sensitive routing.
+Use fallback when you want better reliability across rate limits, provider outages, local model downtime, or cost-sensitive routing.
 
 ## Install
 
@@ -26,8 +24,7 @@ Verify each provider works before adding it as a fallback.
 
 ## Minimal working example
 
-Merge this shape into `~/.nanobot/config.json` and replace provider/model names
-with ones you control:
+Merge this shape into `~/.nanobot/config.json` and replace provider/model names with ones you control:
 
 ```json
 {
@@ -56,15 +53,12 @@ with ones you control:
 }
 ```
 
-String entries in `fallbackModels` are preset names, not raw model IDs.
-Replace the placeholder model IDs with currently supported model IDs from your
-provider. The [Provider Cookbook](../provider-cookbook.md) has concrete recipes
-for common providers.
+String entries in `fallbackModels` are preset names, not raw model IDs. Replace the placeholder model IDs with currently supported model IDs from your provider. The [Provider Cookbook](../provider-cookbook.md) has concrete recipes for common providers.
 
 ## Production notes
 
-- Keep fallback context windows realistic; smaller fallback windows constrain
-  how much context can fit.
+- In the WebUI, a reply produced by a named fallback preset shows its provider logo and preset name next to the reply timestamp. Hover, focus, or click the badge for an explanation. The composer still shows your selected preset; primary replies have no fallback badge. Saved replies retain the name used for that invocation, even after a preset is renamed or deleted. Older replies without recorded attribution and unnamed inline fallback objects are not labeled.
+- Keep fallback context windows realistic; smaller fallback windows constrain how much context can fit.
 - Put cheaper or faster fallbacks before expensive ones when acceptable.
 - Use `/model <preset>` for runtime switching without editing config.
 - Keep preset names human-readable; the same name appears in the WebUI and `/model`.
@@ -77,12 +71,9 @@ for common providers.
 
 ## Troubleshooting
 
-- If a fallback never triggers, confirm the primary error is treated as
-  retryable/fallbackable.
-- If startup fails, check that each fallback string matches a key under
-  `modelPresets`.
-- If output is truncated after fallback, review `maxTokens` and
-  `contextWindowTokens`.
+- If a fallback never triggers, confirm the primary error is treated as retryable/fallbackable.
+- If startup fails, check that each fallback string matches a key under `modelPresets`.
+- If output is truncated after fallback, review `maxTokens` and `contextWindowTokens`.
 
 ## Related nanobot docs
 

@@ -95,8 +95,58 @@ describe("McpManagementDialog", () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith("test", "docs"));
     expect(within(dialog).queryByText("Not inspected")).not.toBeInTheDocument();
     expect(within(dialog).getByText("No tools available")).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Reload tools" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh tools" }));
     expect(onAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a skeleton for the first inspection and keeps tools and draft selections during reinspection", () => {
+    const emptyPreset = { ...connectedPreset, tool_count: 0, tool_names: [] };
+    const { updateDialog } = renderDialog({
+      initialTab: "tools",
+      preset: emptyPreset,
+      actionKey: "test:docs",
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Docs MCP" });
+    expect(within(dialog).getByRole("status", { name: "Loading tools…" })).toHaveAttribute("aria-busy", "true");
+    expect(within(dialog).queryByRole("textbox", { name: "Search tools" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("No tools available")).not.toBeInTheDocument();
+
+    updateDialog(connectedPreset);
+    expect(within(dialog).queryByRole("status", { name: "Loading tools…" })).not.toBeInTheDocument();
+    const searchDocs = within(dialog).getByRole("checkbox", { name: /search_docs/ });
+    fireEvent.click(searchDocs);
+    expect(searchDocs).not.toBeChecked();
+
+    updateDialog({ ...connectedPreset, tool_names: [] }, "test:docs");
+    expect(within(dialog).queryByRole("status", { name: "Loading tools…" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("checkbox", { name: /search_docs/ })).not.toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: /write_note/ })).toBeChecked();
+    expect(within(dialog).getByText("2 enabled")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Save changes" })).toBeEnabled();
+  });
+
+  it.each([
+    { error: undefined, message: "No tools available" },
+    { error: "Inspection failed", message: "Inspection failed" },
+  ])("offers recovery when inspection finishes with $message", ({ error, message }) => {
+    const onAction = vi.fn();
+    const emptyPreset = { ...connectedPreset, tool_count: 0, tool_names: [], error };
+    const { updateDialog } = renderDialog({
+      initialTab: "tools",
+      preset: emptyPreset,
+      actionKey: "test:docs",
+      onAction,
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Docs MCP" });
+    expect(within(dialog).getByRole("status", { name: "Loading tools…" })).toBeInTheDocument();
+    updateDialog(emptyPreset);
+    expect(within(dialog).queryByRole("status", { name: "Loading tools…" })).not.toBeInTheDocument();
+    expect(within(dialog).getByText(message)).toBeInTheDocument();
+    if (error) expect(within(dialog).getByRole("alert")).toHaveTextContent(error);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh tools" }));
+    expect(onAction).toHaveBeenLastCalledWith("test", "docs");
   });
 });
 
@@ -105,19 +155,21 @@ function renderDialog({
   onAction = vi.fn(),
   onToolsChange = vi.fn(),
   preset = connectedPreset,
+  actionKey = null,
 }: {
   initialTab: McpManagementTab;
   onAction?: ReturnType<typeof vi.fn>;
   onToolsChange?: ReturnType<typeof vi.fn>;
   preset?: McpPresetInfo;
+  actionKey?: string | null;
 }) {
-  function Harness() {
+  function Harness({ preset, actionKey }: { preset: McpPresetInfo; actionKey: string | null }) {
     const [tab, setTab] = useState(initialTab);
     return (
       <McpManagementDialog
         preset={preset}
         values={{}}
-        actionKey={null}
+        actionKey={actionKey}
         statusLabel="Connected"
         statusTone="success"
         tab={tab}
@@ -131,5 +183,11 @@ function renderDialog({
       />
     );
   }
-  return render(<Harness />);
+  const view = render(<Harness preset={preset} actionKey={actionKey} />);
+  return {
+    ...view,
+    updateDialog: (nextPreset: McpPresetInfo, nextActionKey: string | null = null) => {
+      view.rerender(<Harness preset={nextPreset} actionKey={nextActionKey} />);
+    },
+  };
 }

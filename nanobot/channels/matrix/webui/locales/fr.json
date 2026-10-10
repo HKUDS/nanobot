@@ -4,7 +4,7 @@
     "officialLabel": "Ouvrir la liste des clients Matrix",
     "fields": {
       "homeserver": {
-        "label": "Serveur d’accueil",
+        "label": "Homeserver",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -24,7 +24,7 @@
         "placeholder": "Requis avec un jeton d’accès"
       },
       "groupPolicy": {
-        "label": "Comportement en groupe",
+        "label": "Règles des groupes",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
@@ -37,40 +37,40 @@
       "e2eeEnabled": {
         "label": "Chiffrement de bout en bout",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "sasVerification": {
         "label": "Vérification SAS",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "syncStopGraceSeconds": {
-        "label": "Délai de grâce pour l'arrêt de la synchronisation"
+        "label": "Attente d’arrêt sync (secondes)"
       },
       "maxMediaBytes": {
-        "label": "Taille maximale du support"
+        "label": "Limite des médias (octets)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "Téléchargements multimédias simultanés"
+        "label": "Téléchargements simultanés"
       },
       "groupAllowFrom": {
         "label": "Groupes autorisés"
       },
       "allowRoomMentions": {
-        "label": "Autoriser les mentions de salles",
+        "label": "Mentions de salon",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "streaming": {
         "label": "Diffusion en continu",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },

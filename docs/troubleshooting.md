@@ -29,14 +29,25 @@ This separates failures into layers:
 
 If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
 
-`nanobot status` does not call the model. If provider/model setup is incomplete, it points to
-WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
+`nanobot status` does not call the model. If provider/model setup is incomplete, it points to WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
+
+## Session storage overlaps the workspace
+
+Sessions live at `<config-dir>/sessions/<workspace-id>/`, outside the agent workspace. If startup reports a conflict, compare the printed paths. A valid layout is `bot/config.json`, `bot/sessions/`, and `bot/workspace/`.
+
+`--workspace` overrides `agents.defaults.workspace` without moving sessions. The override is temporary for `agent` and `gateway`; `webui --workspace` saves it to the config.
+
+To fix an existing instance:
+
+1. Stop the instance and back up its config directory and workspace.
+2. Keep the workspace and `.nanobot/workspace-id` in place. Move the config file **and its runtime data, including sessions**, to a directory outside the workspace.
+3. Update `--config` in your launch command or service, check relative paths, and restart.
+
+Moving only the config leaves history behind. Choosing a new workspace without moving its contents (including memory, skills, and `.nanobot/workspace-id`) can start an empty workspace with a different session identity.
 
 ## How to Read `nanobot status`
 
-`nanobot status` does not call a model. It checks the selected config and workspace,
-resolves environment references, and validates the local settings required by the active
-provider/model without constructing a provider client.
+`nanobot status` does not call a model. It checks the selected config and workspace, resolves environment references, and validates the local settings required by the active provider/model without constructing a provider client.
 
 The output has this shape:
 
@@ -160,6 +171,10 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | xAI returns 400 `invalid-argument` | Read the bounded `Response body` appended to the provider error. Hosted `x_search` is sent only when xAI's model catalog advertises `supportsBackendSearch`; the model ID `grok-4.5` itself is valid. |
 | xAI model or X Search stops working after an upstream release | The integration follows Grok Build's public OAuth/proxy client contract. Update nanobot if xAI changes that contract. |
 
+### Local Token Estimation
+
+Gateway loads the fallback tokenizer in the background, caching it beside the active config under `cache/tiktoken` unless `TIKTOKEN_CACHE_DIR` or `DATA_GYM_CACHE_DIR` is set; chats use UTF-8 byte estimates while loading or after failure (restart to retry), and token estimates may differ from model usage.
+
 ## Langfuse Problems
 
 Langfuse tracing is optional and controlled by environment variables.
@@ -202,17 +217,9 @@ nanobot gateway --verbose
 
 ### Slow Optional Channel Dependency Installation
 
-Before loading enabled channels, the gateway checks the dependencies declared by their
-channel manifests. The CLI and WebUI normally install these dependencies when a channel is
-enabled. Installation during startup is a recovery path for an enabled config whose Python
-environment no longer has the required packages, for example after manually editing the
-config, upgrading nanobot, or recreating an isolated `uv tool`/`pipx` environment. The
-gateway waits for the install so an enabled channel is not silently skipped; later starts
-skip the installation once the dependencies are present.
+Before loading enabled channels, the gateway checks the dependencies declared by their channel manifests. The CLI and WebUI normally install these dependencies when a channel is enabled. Installation during startup is a recovery path for an enabled config whose Python environment no longer has the required packages, for example after manually editing the config, upgrading nanobot, or recreating an isolated `uv tool`/`pipx` environment. The gateway waits for the install so an enabled channel is not silently skipped; later starts skip the installation once the dependencies are present.
 
-If access to PyPI is slow in your region, configure pip to use a trusted package index. The
-installer honors the standard `PIP_INDEX_URL` environment variable, including when nanobot
-itself was installed with `uv tool`:
+If access to PyPI is slow in your region, configure pip to use a trusted package index. The installer honors the standard `PIP_INDEX_URL` environment variable, including when nanobot itself was installed with `uv tool`:
 
 ```bash
 PIP_INDEX_URL=https://your-trusted-mirror.example/simple nanobot gateway
@@ -236,9 +243,7 @@ systemctl --user daemon-reload
 systemctl --user restart nanobot-gateway.service
 ```
 
-For a system-level or custom service, use `sudo systemctl edit <unit>` instead. Prefer an
-HTTPS index operated by an organization you trust, and do not put index credentials in
-commands or logs.
+For a system-level or custom service, use `sudo systemctl edit <unit>` instead. Prefer an HTTPS index operated by an organization you trust, and do not put index credentials in commands or logs.
 
 ## WebUI Problems
 

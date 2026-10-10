@@ -24,7 +24,7 @@
         "placeholder": "액세스 토큰 사용 시 필수"
       },
       "groupPolicy": {
-        "label": "그룹 동작",
+        "label": "그룹 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
@@ -32,7 +32,7 @@
         }
       },
       "allowFrom": {
-        "label": "허용된 사용자"
+        "label": "허용 사용자"
       },
       "e2eeEnabled": {
         "label": "엔드투엔드 암호화",
@@ -49,19 +49,19 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "동기화 중지 유예 기간"
+        "label": "동기화 종료 대기(초)"
       },
       "maxMediaBytes": {
-        "label": "최대 미디어 크기"
+        "label": "미디어 크기 상한(바이트)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "동시 미디어 다운로드"
+        "label": "동시 다운로드"
       },
       "groupAllowFrom": {
-        "label": "허용된 그룹"
+        "label": "허용 그룹"
       },
       "allowRoomMentions": {
-        "label": "회의실 언급 허용",
+        "label": "방 멘션",
         "choices": {
           "true": "켜기",
           "false": "끄기"

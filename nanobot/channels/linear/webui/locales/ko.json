@@ -1,0 +1,137 @@
+{
+  "description": "Linear 이슈에서 네이티브 Agent Session을 통해 nanobot을 사용합니다.",
+  "requirements": "비공개 Linear OAuth 앱과 안정적인 공개 HTTPS 콜백 URL",
+  "setup": {
+    "docsLabel": "Linear 설정 가이드 열기",
+    "officialLabel": "Linear OAuth 앱 만들기",
+    "tryIt": "앱을 멘션하거나 이슈를 위임하세요. Agent Session 안에서는 다시 멘션할 필요가 없습니다.",
+    "summary": "비공개 Linear OAuth 앱을 만들고 인증 정보와 공개 URL을 저장한 다음 워크스페이스를 승인하세요. 앱 멘션이나 이슈 위임으로 세션을 시작할 수 있으며 일반 댓글은 무시됩니다.",
+    "steps": [
+      "이 nanobot 인스턴스를 안정적인 HTTPS URL로 공개하세요(터널을 사용할 수 있습니다).",
+      "Linear에서 read, write, app:mentionable, app:assignable 범위가 있는 비공개 OAuth 앱을 만드세요.",
+      "생성된 URL로 앱 webhook을 AgentSessionEvent, PermissionChange, OAuthAuthorization에 구독하세요.",
+      "OAuth로 워크스페이스를 연결한 뒤 앱을 멘션하거나 이슈를 위임하세요."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "OAuth 클라이언트 ID",
+        "placeholder": "Linear OAuth 클라이언트 ID",
+        "help": "비공개 OAuth 앱에서 복사하세요.\n\nLinear의 비공개 OAuth 앱에서 복사하세요."
+      },
+      "clientSecret": {
+        "label": "OAuth 클라이언트 시크릿",
+        "placeholder": "••••••",
+        "help": "이 nanobot 인스턴스에만 저장됩니다."
+      },
+      "webhookSigningSecret": {
+        "label": "Webhook 서명 시크릿",
+        "placeholder": "••••••",
+        "help": "Webhook 서명을 검증합니다.\n\nWebhook 본문을 파싱하기 전에 Linear-Signature를 검증하는 데 사용됩니다."
+      },
+      "publicBaseUrl": {
+        "label": "공개 HTTPS URL",
+        "placeholder": "https://nanobot.example.com",
+        "help": "경로가 없는 HTTPS URL을 입력하세요.\n\n아래 리스너로 연결되는 안정적인 HTTPS 오리진입니다. 경로는 포함하지 마세요."
+      },
+      "host": {
+        "label": "수신 호스트",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "수신 포트",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Webhook 경로",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "OAuth 콜백 경로",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "허용된 Linear 사용자",
+        "placeholder": "쉼표로 구분한 Linear 사용자 ID",
+        "help": "이 연결을 사용할 사용자를 선택하세요.\n\nnanobot 페어링을 사용하려면 비워 두세요. 연결된 워크스페이스의 모든 사용자를 허용하려면 *를 사용하세요."
+      },
+      "showReasoning": {
+        "label": "추론 표시",
+        "help": "추론을 생각 활동으로 게시합니다.\n\n모델의 추론을 Linear에 생각 활동으로 게시합니다. 더 간결한 세션을 원하면 끄세요."
+      }
+    }
+  },
+  "custom": {
+    "secretSaved": "저장됨",
+    "replaceSecret": "변경",
+    "replaceSecretLabel": "{{name}} 변경",
+    "enterSecret": "시크릿 입력",
+    "secretSaveFailed": "저장 결과를 확인할 수 없습니다. 다시 시도하거나 취소하세요.",
+    "authorizeTitle": "Linear에서 승인",
+    "authorizeDescription": "Linear에서 승인한 뒤 여기로 돌아오세요.\n\nLinear에서 워크스페이스를 선택하고 nanobot을 승인하세요. 완료한 후 여기로 돌아오세요.",
+    "waiting": "Linear 승인을 기다리는 중...",
+    "connected": "Linear가 연결되었습니다.",
+    "stopped": "승인이 중지되었습니다.",
+    "connecting": "연결 중...",
+    "connect": "Linear 연결",
+    "openLinear": "Linear에서 계속",
+    "createApp": "Linear 앱 만들기",
+    "savePublicUrl": "공개 HTTPS URL을 입력한 후 Linear 앱을 만드세요.",
+    "retrySave": "다시 시도",
+    "channelRunning": "채널 실행 중",
+    "accessAll": "승인된 워크스페이스의 모든 멤버가 이 에이전트를 실행할 수 있습니다.",
+    "accessRestricted": "고급 설정에 나열된 Linear 사용자 ID만 이 에이전트를 실행할 수 있습니다.",
+    "accessPairing": "처음 사용 시 페어링하고, Linear MCP를 연결해 이슈를 검색하거나 수정하세요.",
+    "configureTools": "Linear MCP 설정",
+    "workspacesTitle": "승인된 워크스페이스",
+    "refreshWorkspaces": "워크스페이스 새로 고침",
+    "loadingWorkspaces": "워크스페이스 불러오는 중",
+    "noWorkspaces": "승인된 워크스페이스가 없습니다. Linear 에이전트 요청을 받으려면 연결하세요.",
+    "refreshRequired": "승인 갱신 필요",
+    "missingScopes": "다시 연결하여 권한 부여: {{scopes}}",
+    "authorized": "승인됨",
+    "confirmDisconnect": "워크스페이스 제거",
+    "disconnect": "워크스페이스 제거",
+    "workspaceActions": "{{name}} 관리",
+    "reauthorize": "다시 승인",
+    "disconnectTitle": "{{name}}을(를) 제거할까요?",
+    "disconnectDescription": "작업 공간 접근을 해제하고 기록은 유지합니다.\n\n이 워크스페이스의 권한을 철회하고 nanobot의 멤버 접근 설정을 지웁니다. 이슈, 댓글 및 nanobot 대화 기록은 유지됩니다. 다른 워크스페이스에는 영향이 없으며 나중에 다시 승인할 수 있습니다.",
+    "disconnectLast": "마지막으로 연결된 워크스페이스이므로 Linear 채널도 꺼집니다.",
+    "disconnecting": "제거 중…",
+    "addWorkspace": "워크스페이스 연결",
+    "addWorkspaceDetails": "워크스페이스 연결 안내",
+    "addWorkspaceHelp": "현재 Linear 앱을 사용합니다. 다른 워크스페이스를 연결하려면 앱이 다른 워크스페이스에 설치될 수 있어야 합니다. 비공개 앱은 소속 워크스페이스에서만 사용할 수 있습니다. 기존 워크스페이스를 선택하면 중복 없이 권한을 갱신합니다.",
+    "resetConnection": "Linear 연결 초기화",
+    "resetTitle": "Linear를 초기화할까요?",
+    "resetDescription": "이 앱에 연결된 모든 워크스페이스의 연결을 해제하고 채널을 중지합니다.",
+    "resetClears": "삭제",
+    "resetClearsDetail": "멤버 접근 설정 및 저장된 자격 증명을 포함한 이 인스턴스의 앱 설정.",
+    "resetKeeps": "유지",
+    "resetKeepsDetail": "Linear 앱, 이슈, 댓글, 대화 기록 및 승인된 페어링.",
+    "resetConfirm": "초기화",
+    "resetting": "초기화 중…",
+    "resetIncomplete": "초기화가 완료되지 않았습니다. 이미 제거한 연결은 복구되지 않습니다. 다시 시도하여 완료하세요.",
+    "resetInspectFailed": "연결된 워크스페이스를 확인할 수 없습니다. 앱 설정은 유지됩니다.",
+    "resetChanged": "다른 워크스페이스가 연결되었습니다. 확인 후 다시 시도하세요.",
+    "resetStopFailed": "Linear 채널을 중지하지 못했습니다. 앱 설정은 유지됩니다.",
+    "resetSaveFailed": "앱 설정을 지우지 못했습니다. 다시 시도하세요."
+  },
+  "members": {
+    "title": "멤버 접근 권한",
+    "help": "멤버가 페어링 코드 없이 nanobot을 사용할 수 있도록 허용합니다. Linear의 기존 권한 범위는 유지되며 nanobot 관리 화면 접근 권한은 부여되지 않습니다. 끄면 새 요청은 차단되지만 실행 중인 작업은 중단되지 않습니다.",
+    "allowAll": "고급 설정에서 신규 멤버를 포함한 모든 멤버(*)를 허용하고 있습니다. 개별 끄기 설정이 우선합니다. 신규 멤버의 승인을 요구하려면 *를 제거하세요.",
+    "search": "멤버 검색",
+    "refresh": "멤버 새로고침",
+    "working": "저장 중…",
+    "saved": "저장됨",
+    "retry": "멤버를 새로고침하여 현재 상태를 확인한 후 다시 시도하세요.",
+    "empty": "일치하는 활성 멤버가 없습니다.",
+    "allow": "{{name}}의 nanobot 사용 허용",
+    "saveUnconfirmed": "권한 저장을 확인하지 못했습니다. 멤버를 새로고침한 후 다시 시도하세요.",
+    "guide": "멤버 접근 권한에서 코드 없이 동료를 승인하세요. 기존 승인은 끄지 않는 한 유지됩니다. Issue 검색이나 수정에는 Linear MCP를 연결하세요.",
+    "intro": "페어링 코드 없이 Linear에서 nanobot을 사용할 멤버를 선택하세요.",
+    "details": "멤버 접근 권한 안내",
+    "summary": "{{allowed}}명 사용 가능",
+    "loading": "멤버를 찾는 중…",
+    "refreshing": "업데이트 확인 중…"
+  }
+}

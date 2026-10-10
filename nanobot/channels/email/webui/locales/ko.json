@@ -15,7 +15,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "nanobot의 이메일 읽기 및 보내기 허용",
+        "label": "메일 읽기 및 쓰기",
         "choices": {
           "true": "동의함",
           "false": "동의하지 않음"
@@ -58,11 +58,11 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "이메일 확인 간격(초)",
+        "label": "메일 확인 간격(초)",
         "placeholder": "30"
       },
       "allowFrom": {
-        "label": "허용된 발신자",
+        "label": "허용 발신자",
         "placeholder": "이메일 주소, 쉼표로 구분"
       },
       "verifyDkim": {
@@ -125,41 +125,41 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "사서함으로 이동"
+        "label": "대상 메일함"
       },
       "postActionExpunge": {
-        "label": "영구적으로 작업 적용",
+        "label": "영구 삭제",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "건너뛴 메시지 무시",
+        "label": "건너뛴 메일 보존",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       },
       "maxBodyChars": {
-        "label": "최대 몸체 길이"
+        "label": "본문 길이 상한(글자)"
       },
       "subjectPrefix": {
-        "label": "답장 제목 접두어"
+        "label": "제목 접두사"
       },
       "allowedAttachmentTypes": {
-        "label": "허용되는 첨부 파일 유형"
+        "label": "첨부 파일 형식"
       },
       "maxAttachmentSize": {
-        "label": "최대 첨부 파일 크기"
+        "label": "첨부당 크기 상한(바이트)"
       },
       "maxAttachmentsPerEmail": {
-        "label": "최대 첨부 파일"
+        "label": "첨부 수 상한"
       },
       "trustedAuthservIds": {
         "label": "신뢰할 인증 서비스",
         "placeholder": "mx.google.com, 쉼표로 구분",
-        "help": "수신 메일 서비스가 추가한 정확한 authserv-id입니다. SPF 또는 DKIM 확인 시 필수입니다."
+        "help": "신뢰하는 authserv-id를 입력하세요.\n\n수신 메일 서비스가 추가한 정확한 authserv-id입니다. SPF 또는 DKIM 확인 시 필수입니다."
       }
     }
   }

@@ -1,3 +1,4 @@
+import { channelUiContribution } from "@/channel-plugins/registry";
 import { CircleHelp, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelSetup } from "@/components/settings/channels/ChannelIdentity";
@@ -16,7 +17,8 @@ export function ChannelHelpMenu({ feature, chatAppsDocsUrl }: {
     { url: setup.officialUrl, label: setup.officialLabel },
     { url: docsUrlWithBase(setup.docsUrl, chatAppsDocsUrl), label: setup.docsLabel },
   ].filter((link) => link.url);
-  if (!links.length) return null;
+  const HelpContent = channelUiContribution(feature.name, feature.webui)?.HelpContent;
+  if (!links.length && !HelpContent) return null;
   const label = t("settings.channels.help", { defaultValue: "Help" });
   return (
     <TooltipProvider>
@@ -25,7 +27,7 @@ export function ChannelHelpMenu({ feature, chatAppsDocsUrl }: {
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button type="button" aria-label={label}
-              className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+              className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
               <CircleHelp className="h-4 w-4" aria-hidden />
             </button>
           </DropdownMenuTrigger>
@@ -33,6 +35,7 @@ export function ChannelHelpMenu({ feature, chatAppsDocsUrl }: {
         <TooltipContent>{label}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end">
+        {HelpContent ? <HelpContent feature={feature} /> : null}
         {links.map((link) => (
           <DropdownMenuItem key={link.url} asChild>
             <a href={link.url} target="_blank" rel="noreferrer">

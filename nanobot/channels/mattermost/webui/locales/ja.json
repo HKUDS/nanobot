@@ -16,15 +16,15 @@
         "placeholder": "チーム ID（任意）"
       },
       "groupPolicy": {
-        "label": "チャンネルでの動作",
+        "label": "チャンネルのルール",
         "choices": {
           "mention": "メンションのみ",
-          "open": "すべてのメッセージ",
+          "open": "全メッセージ",
           "allowlist": "許可リスト"
         }
       },
       "groupPolicyInThread": {
-        "label": "スレッドでの動作",
+        "label": "スレッドのルール",
         "choices": {
           "mention": "メンションのみ",
           "open": "すべてのメッセージ (メンション不要)",
@@ -32,11 +32,11 @@
         }
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
       },
       "allowFromMatchMode": {
-        "label": "ユーザーマッチング",
+        "label": "ユーザーの照合",
         "choices": {
           "email": "電子メール",
           "id": "ユーザーID",
@@ -44,24 +44,24 @@
         }
       },
       "groupAllowFrom": {
-        "label": "許可されたチャネル"
+        "label": "許可チャンネル"
       },
       "replyInThread": {
-        "label": "スレッド内で返信する",
+        "label": "スレッドで返信",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "includeThreadContext": {
-        "label": "スレッドコンテキストを含める",
+        "label": "スレッドの文脈",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "threadContextLimit": {
-        "label": "スレッドコンテキストの制限"
+        "label": "コンテキストの上限"
       },
       "streaming": {
         "label": "ストリーミング",
@@ -77,14 +77,14 @@
         "label": "完了絵文字"
       },
       "sendProgress": {
-        "label": "進捗状況の送信",
+        "label": "進捗を送信",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "sendToolHints": {
-        "label": "ツールヒントを送信する",
+        "label": "ツールのヒント",
         "choices": {
           "true": "オン",
           "false": "オフ"
@@ -105,7 +105,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "許可されたダイレクトメッセージユーザー"
+        "label": "許可する DM ユーザー"
       }
     }
   }

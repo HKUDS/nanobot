@@ -2,13 +2,9 @@
 
 Thank you for being here.
 
-nanobot is built with a simple belief: good tools should feel calm, clear, and humane.
-We care deeply about useful features, but we also believe in achieving more with less:
-solutions should be powerful without becoming heavy, and ambitious without becoming
-needlessly complicated.
+nanobot is built with a simple belief: good tools should feel calm, clear, and humane. We care deeply about useful features, but we also believe in achieving more with less: solutions should be powerful without becoming heavy, and ambitious without becoming needlessly complicated.
 
-This guide is not only about how to open a PR. It is also about how we hope to build
-software together: with care, clarity, and respect for the next person reading the code.
+This guide is not only about how to open a PR. It is also about how we hope to build software together: with care, clarity, and respect for the next person reading the code.
 
 ## Maintainers
 
@@ -32,8 +28,9 @@ PRs are welcome for:
 - Refactoring that is clearly scoped and easy to review
 - Changes to APIs or configuration, when the impact is documented
 
-For riskier or larger changes, please open an issue or draft PR early so the
-shape of the work can be discussed before the implementation grows too large.
+For riskier or larger changes, please open an issue or draft PR early so the shape of the work can be discussed before the implementation grows too large.
+
+WebUI and remote-host interface changes must follow the [client/host compatibility review checklist](.agent/review-guide.md), including independent client/server upgrades, host isolation, and actionable update guidance.
 
 ### Starting Work
 
@@ -46,12 +43,9 @@ git pull --ff-only upstream main
 git switch -c your-topic-branch
 ```
 
-Use your primary HKUDS/nanobot remote in place of `upstream` if your checkout
-uses a different remote name.
+Use your primary HKUDS/nanobot remote in place of `upstream` if your checkout uses a different remote name.
 
-Keep unrelated local changes out of the topic branch. If your checkout already has
-work in progress, use a separate worktree or finish that work before starting a
-new branch.
+Keep unrelated local changes out of the topic branch. If your checkout already has work in progress, use a separate worktree or finish that work before starting a new branch.
 
 ## Development Setup
 
@@ -80,8 +74,7 @@ ruff format <files-you-changed>
 
 ### Strict Type Checking
 
-Strict type checking covers optional providers and channels. Reproduce the CI environment
-with the same dependency sources and commands:
+Strict type checking covers optional providers and channels. Reproduce the CI environment with the same dependency sources and commands:
 
 ```bash
 uv sync --all-extras --dev
@@ -89,13 +82,11 @@ uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
 uv run --no-sync basedpyright
 ```
 
-Keep `--no-sync` on the final commands: channel dependencies come from their package
-manifests and are installed explicitly by the setup step.
+Keep `--no-sync` on the final commands: channel dependencies come from their package manifests and are installed explicitly by the setup step.
 
 ## Contribution License
 
-By submitting a contribution, you confirm that you have the right to submit it
-and agree that it will be licensed under the project's MIT License.
+By submitting a contribution, you confirm that you have the right to submit it and agree that it will be licensed under the project's MIT License.
 
 ## Code Style
 
@@ -117,62 +108,34 @@ In practice:
 - Async: uses `asyncio` throughout; pytest with `asyncio_mode = "auto"`
 - Prefer readable code over magical code
 - Prefer focused patches over broad rewrites
-- Do not mix mechanical formatting, line wrapping, import sorting, or quote churn
-  into a feature or bugfix PR. If formatting cleanup is needed, make it a
-  separate formatting-only PR.
+- Do not mix mechanical formatting, line wrapping, import sorting, or quote churn into a feature or bugfix PR. If formatting cleanup is needed, make it a separate formatting-only PR.
 - If a new abstraction is introduced, it should clearly reduce complexity rather than move it around
 
 ## Modifying CI Workflows
 
-If your PR touches `.github/workflows/`, please keep the CI within
-GitHub Actions' free tier:
+If your PR touches `.github/workflows/`, please keep the CI within GitHub Actions' free tier:
 
 - Use only standard GitHub-hosted runners (`ubuntu-latest`, `windows-latest`)
-- Avoid macOS runners, larger runners (`*-cores`, `*-xlarge`, `*-gpu`),
-  and self-hosted runners
+- Avoid macOS runners, larger runners (`*-cores`, `*-xlarge`, `*-gpu`), and self-hosted runners
 - Avoid uploading large artifacts or using long retention
 - Avoid paid Marketplace actions
 
-If your change genuinely needs to step outside this, please call it out
-explicitly in the PR description so it can be discussed before merge.
+If your change genuinely needs to step outside this, please call it out explicitly in the PR description so it can be discussed before merge.
 
 ## Release Packaging Contract
 
-Use the [release checklist](./docs/releasing.md) for candidate preparation, package checks,
-documentation coordination, and the final publication handoff.
+Use the [release checklist](./docs/releasing.md) for candidate preparation, package checks, documentation coordination, and the final publication handoff.
 
-A stable install must never combine Python from one version with a TUI from another. Publish in
-this order:
+A stable install must never combine Python from one version with a TUI from another. Publish in this order:
 
-1. Before pushing a tag, set the package version, verify the exact candidate, build the source
-   distribution, all five platform wheels and TUI archives, and review licenses, source offer, and relinking
-   materials. Obtain the maintainer's source-offer commitment before publication.
-2. Merge the release preparation, verify that its packaged sources match the checked candidate,
-   then publish the matching GitHub release tag (`vX.Y.Z`). Recheck any changed sources first.
-3. Attach the preverified TUI archives and checksums to the matching GitHub Release. Alternatively,
-   manually run **Publish Terminal UI** for the exact tag with the compliance review confirmed;
-   reverify its outputs, since a rebuild does not preserve the preflight artifact hashes.
-4. Verify every platform archive and checksum is publicly downloadable for fallback/source-built
-   installations, then publish the same `X.Y.Z` source distribution and five platform wheels to PyPI.
+1. Before pushing a tag, set the package version, verify the exact candidate, build the source distribution, all five platform wheels and TUI archives, and review licenses, source offer, and relinking materials. Obtain the maintainer's source-offer commitment before publication.
+2. Merge the release preparation, verify that its packaged sources match the checked candidate, then publish the matching GitHub release tag (`vX.Y.Z`). Recheck any changed sources first.
+3. Attach the preverified TUI archives and checksums to the matching GitHub Release. Alternatively, manually run **Publish Terminal UI** for the exact tag with the compliance review confirmed; reverify its outputs, since a rebuild does not preserve the preflight artifact hashes.
+4. Verify every platform archive and checksum is publicly downloadable for fallback/source-built installations, then publish the same `X.Y.Z` source distribution and five platform wheels to PyPI.
 
-Each platform wheel contains the built WebUI and the matching native TUI. Pip chooses the wheel
-for the user's machine; launching the installed TUI must work without a GitHub download or Bun.
-The universal wheel produced by `uv build` is only an intermediate: use
-`scripts/build_tui_wheels.py` as described in the checklist, and do not upload that intermediate.
-The source distribution remains platform-neutral and does not bundle native binaries.
-Keep the platform-specific release archives for fallback/source-built installations. Both the
-wheel's `nanobot/tui/bin/` bundle and its matching archive must contain the executable,
-target-specific third-party notices, project and runtime licenses, corresponding application
-source, a written source offer, relinking instructions, and a checksum manifest. Never upload a
-naked TUI executable. Review the minimum OS, libc, architecture and runtime CPU requirements
-when changing Bun/OpenTUI; never apply portable platform tags without checking their binaries.
-Source checkouts use an editable Python install, run `tui/` with Bun, and
-rebuild stale `webui/` assets locally.
+Each platform wheel contains the built WebUI and the matching native TUI. Pip chooses the wheel for the user's machine; launching the installed TUI must work without a GitHub download or Bun. The universal wheel produced by `uv build` is only an intermediate: use `scripts/build_tui_wheels.py` as described in the checklist, and do not upload that intermediate. The source distribution remains platform-neutral and does not bundle native binaries. Keep the platform-specific release archives for fallback/source-built installations. Both the wheel's `nanobot/tui/bin/` bundle and its matching archive must contain the executable, target-specific third-party notices, project and runtime licenses, corresponding application source, a written source offer, relinking instructions, and a checksum manifest. Never upload a naked TUI executable. Review the minimum OS, libc, architecture and runtime CPU requirements when changing Bun/OpenTUI; never apply portable platform tags without checking their binaries. Source checkouts use an editable Python install, run `tui/` with Bun, and rebuild stale `webui/` assets locally.
 
-The confirmation is an operational commitment, not a cosmetic checkbox. Before accepting it,
-verify that the exact Bun/WebKit revisions remain retrievable and that the project can honor the
-archive's corresponding-source offer for its full stated period. Preserve published archives and
-their source materials.
+The confirmation is an operational commitment, not a cosmetic checkbox. Before accepting it, verify that the exact Bun/WebKit revisions remain retrievable and that the project can honor the archive's corresponding-source offer for its full stated period. Preserve published archives and their source materials.
 
 ## Questions?
 

@@ -17,6 +17,28 @@ function usage(days: Usage["days"]): Usage {
 }
 
 describe("Token usage card", () => {
+  it("uses the same plot box for stacked bars and the zero baseline, with dates outside", () => {
+    const days = Array.from({ length: 30 }, (_, index) => {
+      const date = `2026-09-${String(index + 1).padStart(2, "0")}`;
+      return { date, usage: day(date, index === 0 ? 30_000_000 : index === 1 ? 1 : 0) };
+    });
+    const { container } = render(<TokenUsageModelTrend days={days} modelDays={[
+      { date: days[0].date, provider: "openai", model: "a", total_tokens: 20_000_000 },
+      { date: days[0].date, provider: "xai", model: "b", total_tokens: 10_000_000 },
+      { date: days[1].date, provider: "openai", model: "a", total_tokens: 1 },
+    ]} />);
+    const plot = container.querySelector("[data-model-usage-plot]")!;
+    const bars = within(screen.getByRole("group", { name: "Model trends" })).getAllByRole("img");
+    expect(plot).toContainElement(bars[0]);
+    const baseline = container.querySelector('[data-model-usage-gridline="2"]')!;
+    expect(plot).toContainElement(baseline);
+    expect(baseline.parentElement).toHaveStyle({ top: "100%" });
+    expect(plot).not.toContainElement(screen.getByText("09-01"));
+    expect(bars[0].firstElementChild).toHaveStyle({ height: "100%" });
+    expect(bars[0].firstElementChild?.children).toHaveLength(2);
+    expect(bars[1].firstElementChild).toHaveStyle({ height: `${1 / 30_000_000 * 100}%` });
+    expect(bars[2].children).toHaveLength(0);
+  });
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-09T12:00:00Z"));
@@ -30,18 +52,18 @@ describe("Token usage card", () => {
       day("2026-08-10", 9000), day("2026-08-11", 100), today, day("2026-09-10", 9000),
     ])} />);
     expect(screen.getByLabelText("400 tokens")).toBeInTheDocument();
-    const bars = within(screen.getByRole("group", { name: "Daily token usage" })).getAllByRole("img");
+    const bars = within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img");
     expect(bars).toHaveLength(30);
     expect(bars.filter((bar) => bar.tabIndex === 0)).toEqual([bars[0], bars[29]]);
     expect(bars[0]).toHaveAccessibleName(/2026-08-11: 100 tokens, 1 requests/);
-    expect(bars[29]).toHaveAccessibleName(/Cached input: 120, Cache miss: 60, Cache status unknown: 60, Output: 60/);
+    expect(bars[29]).toHaveAccessibleName(/Cached input: 120, Cache miss: 60, Unknown status: 60, Output: 60/);
     const segments = bars[29].firstElementChild?.children;
     expect(segments).toHaveLength(4);
     expect(segments?.[0]).toHaveStyle({ height: "40%" });
     expect(segments?.[1]).toHaveStyle({ height: "20%" });
     expect(segments?.[2]).toHaveStyle({ height: "20%" });
     expect(segments?.[3]).toHaveStyle({ height: "20%" });
-    expect(bars[0]).toHaveAccessibleName(/Cache miss: 0, Cache status unknown: 100/);
+    expect(bars[0]).toHaveAccessibleName(/Cache miss: 0, Unknown status: 100/);
     expect(screen.getAllByText("50%")).toHaveLength(2);
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
   });
@@ -87,7 +109,7 @@ describe("Token usage card", () => {
     expect(column).toHaveAccessibleName(/2026-09-09: 2,200 tokens/);
     expect(column).toHaveAccessibleName(/model-5: 600/);
     expect(column).toHaveAccessibleName(/Other \/ unattributed: 200/);
-    const legend = screen.getByLabelText("model-5: Total tokens: 600 · 27.3%, Cache hit rate: 80%");
+    const legend = screen.getByLabelText("model-5: Total tokens: 600 (27.3%), Cache hit rate: 80%");
     expect(legend).toHaveAttribute("tabindex", "0");
   });
 });

@@ -44,6 +44,7 @@ from nanobot.webui.settings_api import (
     login_oauth_provider,
     logout_oauth_provider,
     migrate_model_configurations,
+    model_api_resolution_payload,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
@@ -112,6 +113,7 @@ _MODEL_ROUTES = {
     "/api/settings/provider/update": "provider-update",
     "/api/settings/provider/create": "provider-create",
     "/api/settings/provider-models": "provider-models",
+    "/api/settings/model-api": "model-api",
     "/api/settings/provider/oauth-login": "oauth-login",
     "/api/settings/provider/oauth-login/complete": "oauth-complete",
     "/api/settings/provider/oauth-logout": "oauth-logout",
@@ -491,6 +493,7 @@ class WebUISettingsRouter:
             update_provider=update_provider_settings,
             create_provider=create_provider_settings,
             provider_models=provider_models_payload,
+            model_api=model_api_resolution_payload,
             oauth_login=login_oauth_provider,
             oauth_complete=complete_oauth_provider,
             oauth_logout=logout_oauth_provider,
@@ -589,40 +592,6 @@ class WebUISettingsRouter:
                 load_channel_plugin=load_channel_plugin,
             )
         )
-
-    _coerce_channel_value = staticmethod(system_domain.coerce_channel_value)
-    _assign_channel_config_value = staticmethod(
-        system_domain.assign_channel_config_value
-    )
-
-    def _nanobot_features_payload(self) -> dict[str, Any]:
-        return nanobot_features_payload(config_path=self.settings.config.path)
-
-    def _nanobot_features_action(
-        self,
-        action: str,
-        query: QueryParams,
-        *,
-        allow_install: bool = True,
-    ) -> dict[str, Any]:
-        return self.settings.mutate(
-            nanobot_features_action,
-            action,
-            query,
-            allow_install=allow_install,
-        )
-
-    def _allow_feature_package_install(
-        self,
-        connection: Any,
-        request: WsRequest,
-    ) -> bool:
-        domain_request = self._domain_request(
-            connection,
-            request,
-            needs_local_browser=True,
-        )
-        return self._system.allow_feature_package_install(domain_request)
 
     async def _handle_mcp_oauth_start(self, request: WsRequest) -> Response:
         if not self._authorized(request):

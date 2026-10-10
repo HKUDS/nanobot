@@ -1,5 +1,7 @@
 """Unit tests for the Signal markdown → plain text + textStyle converter."""
 
+import pytest
+
 from nanobot.channels.signal.runtime import _markdown_to_signal, _partition_styles
 from nanobot.utils.helpers import split_message
 
@@ -36,57 +38,54 @@ def utf16_styles_for(plain: str, text_styles: list[str]) -> dict[str, list[str]]
 # ---------------------------------------------------------------------------
 
 
-def test_empty():
-    plain, styles = _markdown_to_signal("")
-    assert plain == ""
+@pytest.mark.parametrize(
+    "markdown, expected_plain",
+    [
+        pytest.param("", "", id="empty"),
+        pytest.param("hello world", "hello world", id="plain_text"),
+        pytest.param("> some quote", "some quote", id="blockquote_strips_marker"),
+        pytest.param(
+            "[Click here](https://example.com)",
+            "Click here (https://example.com)",
+            id="link_text_differs_from_url",
+        ),
+        pytest.param(
+            "[https://example.com](https://example.com)",
+            "https://example.com",
+            id="link_text_equals_url",
+        ),
+        pytest.param("**bold", "**bold", id="unclosed_bold_falls_through_as_plain"),
+        pytest.param("use `grep", "use `grep", id="unclosed_inline_code_falls_through_as_plain"),
+    ],
+)
+def test_markdown_without_styles(markdown, expected_plain):
+    plain, styles = _markdown_to_signal(markdown)
+    assert plain == expected_plain
     assert styles == []
 
 
-def test_plain_text():
-    plain, styles = _markdown_to_signal("hello world")
-    assert plain == "hello world"
-    assert styles == []
-
-
-def test_bold_stars():
-    plain, styles = _markdown_to_signal("say **hello** now")
-    assert plain == "say hello now"
-    assert styles_for(plain, styles) == {"hello": ["BOLD"]}
-
-
-def test_bold_underscores():
-    plain, styles = _markdown_to_signal("say __hello__ now")
-    assert plain == "say hello now"
-    assert styles_for(plain, styles) == {"hello": ["BOLD"]}
-
-
-def test_italic_star():
-    plain, styles = _markdown_to_signal("say *hello* now")
-    assert plain == "say hello now"
-    assert styles_for(plain, styles) == {"hello": ["ITALIC"]}
-
-
-def test_italic_underscore():
-    plain, styles = _markdown_to_signal("say _hello_ now")
-    assert plain == "say hello now"
-    assert styles_for(plain, styles) == {"hello": ["ITALIC"]}
-
-
-def test_strikethrough():
-    plain, styles = _markdown_to_signal("say ~~hello~~ now")
-    assert plain == "say hello now"
-    assert styles_for(plain, styles) == {"hello": ["STRIKETHROUGH"]}
+@pytest.mark.parametrize(
+    "markdown, expected_plain, styled_text, style",
+    [
+        pytest.param("say **hello** now", "say hello now", "hello", "BOLD", id="bold_stars"),
+        pytest.param("say __hello__ now", "say hello now", "hello", "BOLD", id="bold_underscores"),
+        pytest.param("say *hello* now", "say hello now", "hello", "ITALIC", id="italic_star"),
+        pytest.param("say _hello_ now", "say hello now", "hello", "ITALIC", id="italic_underscore"),
+        pytest.param("say ~~hello~~ now", "say hello now", "hello", "STRIKETHROUGH", id="strikethrough"),
+        pytest.param("run `ls -la` here", "run ls -la here", "ls -la", "MONOSPACE", id="inline_code"),
+        pytest.param("# My Title", "My Title", "My Title", "BOLD", id="header_becomes_bold"),
+        pytest.param("## Sub-section", "Sub-section", "Sub-section", "BOLD", id="h2_becomes_bold"),
+    ],
+)
+def test_markdown_style_mapping(markdown, expected_plain, styled_text, style):
+    plain, styles = _markdown_to_signal(markdown)
+    assert plain == expected_plain
+    assert styles_for(plain, styles) == {styled_text: [style]}
 
 
 # ---------------------------------------------------------------------------
 # Code
 # ---------------------------------------------------------------------------
-
-
-def test_inline_code():
-    plain, styles = _markdown_to_signal("run `ls -la` here")
-    assert plain == "run ls -la here"
-    assert styles_for(plain, styles) == {"ls -la": ["MONOSPACE"]}
 
 
 def test_code_block():
@@ -121,34 +120,6 @@ def test_inline_code_not_processed_further():
 
 
 # ---------------------------------------------------------------------------
-# Headers
-# ---------------------------------------------------------------------------
-
-
-def test_header_becomes_bold():
-    plain, styles = _markdown_to_signal("# My Title")
-    assert plain == "My Title"
-    assert styles_for(plain, styles) == {"My Title": ["BOLD"]}
-
-
-def test_h2_becomes_bold():
-    plain, styles = _markdown_to_signal("## Sub-section")
-    assert plain == "Sub-section"
-    assert styles_for(plain, styles) == {"Sub-section": ["BOLD"]}
-
-
-# ---------------------------------------------------------------------------
-# Blockquotes
-# ---------------------------------------------------------------------------
-
-
-def test_blockquote_strips_marker():
-    plain, styles = _markdown_to_signal("> some quote")
-    assert plain == "some quote"
-    assert styles == []
-
-
-# ---------------------------------------------------------------------------
 # Lists
 # ---------------------------------------------------------------------------
 
@@ -172,18 +143,6 @@ def test_numbered_list():
 # ---------------------------------------------------------------------------
 # Links
 # ---------------------------------------------------------------------------
-
-
-def test_link_text_differs_from_url():
-    plain, styles = _markdown_to_signal("[Click here](https://example.com)")
-    assert plain == "Click here (https://example.com)"
-    assert styles == []
-
-
-def test_link_text_equals_url():
-    plain, styles = _markdown_to_signal("[https://example.com](https://example.com)")
-    assert plain == "https://example.com"
-    assert styles == []
 
 
 def test_link_text_equals_url_without_scheme():
@@ -280,47 +239,21 @@ def assert_within_utf16_bounds(plain: str, styles: list[str]) -> None:
         assert start + length <= limit, f"range {entry} exceeds utf-16 length {limit} of {plain!r}"
 
 
-def test_bold_with_emoji_inside():
-    plain, styles = _markdown_to_signal("**hi 🎉 bye**")
-    assert plain == "hi 🎉 bye"
-    assert utf16_styles_for(plain, styles) == {"hi 🎉 bye": ["BOLD"]}
-    assert_within_utf16_bounds(plain, styles)
-
-
-def test_italic_with_trailing_emoji():
-    plain, styles = _markdown_to_signal("*bye 🎉*")
-    assert plain == "bye 🎉"
-    assert utf16_styles_for(plain, styles) == {"bye 🎉": ["ITALIC"]}
-    assert_within_utf16_bounds(plain, styles)
-
-
-def test_bold_after_emoji_prefix():
-    plain, styles = _markdown_to_signal("🎉 **bold**")
-    assert plain == "🎉 bold"
-    assert utf16_styles_for(plain, styles) == {"bold": ["BOLD"]}
-    assert_within_utf16_bounds(plain, styles)
-
-
-def test_bold_after_and_inside_emoji():
-    plain, styles = _markdown_to_signal("🎉 **a 🎊 b**")
-    assert plain == "🎉 a 🎊 b"
-    assert utf16_styles_for(plain, styles) == {"a 🎊 b": ["BOLD"]}
-    assert_within_utf16_bounds(plain, styles)
-
-
-def test_supplementary_cjk_in_bold():
-    """Non-BMP CJK (U+20BB7) proves the bug is UTF-16, not emoji-specific."""
-    plain, styles = _markdown_to_signal("**𠮷野家**")
-    assert plain == "𠮷野家"
-    assert utf16_styles_for(plain, styles) == {"𠮷野家": ["BOLD"]}
-    assert_within_utf16_bounds(plain, styles)
-
-
-def test_zwj_emoji_in_bold():
-    """ZWJ family sequence = multiple surrogate pairs + BMP ZWJs."""
-    plain, styles = _markdown_to_signal("**hi 👨‍👩‍👧 bye**")
-    assert plain == "hi 👨‍👩‍👧 bye"
-    assert utf16_styles_for(plain, styles) == {"hi 👨‍👩‍👧 bye": ["BOLD"]}
+@pytest.mark.parametrize(
+    "markdown, expected_plain, styled_text, style",
+    [
+        pytest.param("**hi 🎉 bye**", "hi 🎉 bye", "hi 🎉 bye", "BOLD", id="bold_with_emoji_inside"),
+        pytest.param("*bye 🎉*", "bye 🎉", "bye 🎉", "ITALIC", id="italic_with_trailing_emoji"),
+        pytest.param("🎉 **bold**", "🎉 bold", "bold", "BOLD", id="bold_after_emoji_prefix"),
+        pytest.param("🎉 **a 🎊 b**", "🎉 a 🎊 b", "a 🎊 b", "BOLD", id="bold_after_and_inside_emoji"),
+        pytest.param("**𠮷野家**", "𠮷野家", "𠮷野家", "BOLD", id="supplementary_cjk_in_bold"),
+        pytest.param("**hi 👨‍👩‍👧 bye**", "hi 👨‍👩‍👧 bye", "hi 👨‍👩‍👧 bye", "BOLD", id="zwj_emoji_in_bold"),
+    ],
+)
+def test_style_offsets_use_utf16(markdown, expected_plain, styled_text, style):
+    plain, styles = _markdown_to_signal(markdown)
+    assert plain == expected_plain
+    assert utf16_styles_for(plain, styles) == {styled_text: [style]}
     assert_within_utf16_bounds(plain, styles)
 
 
@@ -492,20 +425,6 @@ def test_bold_and_italic_adjacent_no_separator():
     sd = styles_for(plain, styles)
     assert sd.get("bold") == ["BOLD"]
     assert sd.get("italic") == ["ITALIC"]
-
-
-def test_unclosed_bold_falls_through_as_plain():
-    """An unmatched `**` opener round-trips as literal text with no style."""
-    plain, styles = _markdown_to_signal("**bold")
-    assert plain == "**bold"
-    assert styles == []
-
-
-def test_unclosed_inline_code_falls_through_as_plain():
-    """An unmatched backtick round-trips as literal text with no style."""
-    plain, styles = _markdown_to_signal("use `grep")
-    assert plain == "use `grep"
-    assert styles == []
 
 
 def test_inline_code_inside_blockquote():

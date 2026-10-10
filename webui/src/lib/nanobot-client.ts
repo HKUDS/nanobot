@@ -1,3 +1,5 @@
+import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments";
+import { DeliveryReceipts } from "../../../packages/client-events/delivery";
 import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
   ConnectionStatus,
@@ -54,6 +56,7 @@ function wsInboundDebugEnabled(): boolean {
 /** Shorten streaming text fields so logging stays usable for huge deltas. */
 function summarizeInboundWsPayload(ev: InboundEvent): unknown {
   const kind = (ev as { event?: string }).event;
+  if (kind === "ready") return { ...ev, upload: "[redacted]" };
   if (kind !== "delta" && kind !== "reasoning_delta") return ev;
   const row = { ...(ev as object) } as Record<string, unknown>;
   const text = typeof row.text === "string" ? row.text : "";
@@ -188,6 +191,8 @@ interface PendingMessageSend {
  */
 export class NanobotClient {
   private socket: WebSocket | null = null;
+  private upload: UploadCapability | null = null;
+  private receipts = new DeliveryReceipts();
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
@@ -221,6 +226,8 @@ export class NanobotClient {
   private lastSocketMessageSendKey: string | null = null;
   /** Canonically completed turns whose delayed websocket frames must be ignored. */
   private canonicalCompletedTurnIdsByChatId = new Map<string, Set<string>>();
+  /** Closed run identities; output/ACKs can still arrive after idle or local stop. */
+  private closedRunTurnIdsByChatId = new Map<string, Set<string>>();
   private static readonly COMPLETED_TURN_FENCE_MAX = 256;
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
@@ -328,6 +335,9 @@ export class NanobotClient {
   /** Clear the optimistic run state immediately after the user stops a turn. */
   finishRunLocally(chatId: string): void {
     const unsettled = [...(this.unsettledRunTurnIdsByChatId.get(chatId) ?? [])];
+    const latestTurnId = this.latestRunTurnIdByChatId.get(chatId);
+    if (latestTurnId) this.rememberRunCompletion(chatId, latestTurnId);
+    for (const turnId of unsettled) this.rememberRunCompletion(chatId, turnId);
     for (const turnId of unsettled) this.settleRunTurn(chatId, turnId);
     this.latestRunTurnIdByChatId.delete(chatId);
     if (this.runStartedAtByChatId.delete(chatId)) {
@@ -469,28 +479,8 @@ export class NanobotClient {
     completedTurnIds: readonly string[],
     snapshot?: CanonicalRunSnapshot,
   ): boolean {
+    this.fenceCanonicalCompletedTurns(chatId, completedTurnIds);
     const fences = this.canonicalCompletedTurnIdsByChatId.get(chatId) ?? new Set<string>();
-    for (const turnId of completedTurnIds) {
-      if (!turnId) continue;
-      fences.add(turnId);
-    }
-    while (fences.size > NanobotClient.COMPLETED_TURN_FENCE_MAX) {
-      const oldest = fences.values().next().value;
-      if (typeof oldest !== "string") break;
-      fences.delete(oldest);
-    }
-    if (fences.size > 0) this.canonicalCompletedTurnIdsByChatId.set(chatId, fences);
-    const pendingInbound = this.pendingInboundByChat.get(chatId);
-    if (pendingInbound) {
-      const remaining = pendingInbound.filter((event) => {
-        const turnId = "turn_id" in event && typeof event.turn_id === "string"
-          ? event.turn_id
-          : null;
-        return turnId === null || !fences.has(turnId);
-      });
-      if (remaining.length > 0) this.pendingInboundByChat.set(chatId, remaining);
-      else this.pendingInboundByChat.delete(chatId);
-    }
 
     if (!this.canReconcileCanonicalCompletion(
       chatId,
@@ -515,6 +505,7 @@ export class NanobotClient {
           observed,
           snapshot,
         )) continue;
+        this.rememberRunCompletion(chatId, turnId);
         unsettledTurnIds.delete(turnId);
         this.clearPendingMessageSend(chatId, turnId);
         this.runStartedAtByTurnKey.delete(this.runSendKey(chatId, turnId));
@@ -526,6 +517,32 @@ export class NanobotClient {
       this.emitRunStatus(chatId, null);
     }
     return true;
+  }
+
+  /** Remember explicit terminal facts even when a history snapshot cannot replace live UI. */
+  fenceCanonicalCompletedTurns(chatId: string, completedTurnIds: readonly string[]): void {
+    const fences = this.canonicalCompletedTurnIdsByChatId.get(chatId) ?? new Set<string>();
+    for (const turnId of completedTurnIds) {
+      if (!turnId) continue;
+      fences.add(turnId);
+    }
+    while (fences.size > NanobotClient.COMPLETED_TURN_FENCE_MAX) {
+      const oldest = fences.values().next().value;
+      if (typeof oldest !== "string") break;
+      fences.delete(oldest);
+    }
+    if (fences.size > 0) this.canonicalCompletedTurnIdsByChatId.set(chatId, fences);
+    const pendingInbound = this.pendingInboundByChat.get(chatId);
+    if (pendingInbound) {
+      const remaining = pendingInbound.filter((event) => {
+        const turnId = "turn_id" in event && typeof event.turn_id === "string"
+          ? event.turn_id
+          : null;
+        return turnId === null || !fences.has(turnId);
+      });
+      if (remaining.length > 0) this.pendingInboundByChat.set(chatId, remaining);
+      else this.pendingInboundByChat.delete(chatId);
+    }
   }
 
   /** Last ``goal_state`` payload for *chatId*, if any frame has arrived this connection. */
@@ -599,9 +616,22 @@ export class NanobotClient {
 
   private recordCanonicalTurnOwnership(
     ev: Extract<InboundEvent, { event: "message_accepted" | "user_message" }>,
-  ): void {
-    const activeTurnId = ev.active_turn_id;
-    if (!activeTurnId) return;
+  ): Extract<InboundEvent, { event: "message_accepted" | "user_message" }> {
+    const activeTurnId = ev.active_turn_id ?? (ev.starts_turn ? ev.turn_id : undefined);
+    if (!activeTurnId) return ev;
+
+    if (this.isRunCompleted(ev.chat_id, activeTurnId)) {
+      // The input is still valid, but its admission-time owner is already closed.
+      // Undo a local new-run guess when this input was actually steering that owner.
+      const pending = ev.turn_id
+        ? this.pendingMessageSends.get(this.runSendKey(ev.chat_id, ev.turn_id))
+        : undefined;
+      if (pending?.startsNewRun && ev.turn_id !== activeTurnId) {
+        this.recordRunRejection(ev.chat_id, ev.turn_id);
+        if (!this.hasUnsettledRun(ev.chat_id)) this.emitRunStatus(ev.chat_id, null);
+      }
+      return { ...ev, active_turn_id: undefined, started_at: undefined, starts_turn: false };
+    }
 
     // Two clients can optimistically submit while the chat still looks idle.
     // The gateway admits exactly one owner and classifies the other message as
@@ -623,6 +653,7 @@ export class NanobotClient {
       this.runStartedAtByChatId.set(ev.chat_id, ev.started_at);
       if (previous !== ev.started_at) this.emitRunStatus(ev.chat_id, ev.started_at);
     }
+    return ev;
   }
 
   private recordRunRejection(chatId: string, turnId?: string): void {
@@ -698,6 +729,22 @@ export class NanobotClient {
     );
   }
 
+  private isRunCompleted(chatId: string, turnId: string): boolean {
+    return this.closedRunTurnIdsByChatId.get(chatId)?.has(turnId) === true
+      || this.canonicalCompletedTurnIdsByChatId.get(chatId)?.has(turnId) === true;
+  }
+
+  private rememberRunCompletion(chatId: string, turnId: string): void {
+    const closed = this.closedRunTurnIdsByChatId.get(chatId) ?? new Set<string>();
+    closed.add(turnId);
+    while (closed.size > NanobotClient.COMPLETED_TURN_FENCE_MAX) {
+      const oldest = closed.values().next().value;
+      if (typeof oldest !== "string") break;
+      closed.delete(oldest);
+    }
+    this.closedRunTurnIdsByChatId.set(chatId, closed);
+  }
+
   private isSupersededRunCompletion(chatId: string, ev: InboundEvent): boolean {
     if (
       ev.event !== "turn_end"
@@ -716,6 +763,7 @@ export class NanobotClient {
   }
 
   private recordRunCompletion(chatId: string, turnId?: string): void {
+    if (turnId) this.rememberRunCompletion(chatId, turnId);
     this.settleRunTurn(chatId, turnId);
     const latestRunTurnId = this.latestRunTurnIdByChatId.get(chatId);
     const closesCurrentRun = latestRunTurnId === undefined || turnId === latestRunTurnId;
@@ -794,6 +842,8 @@ export class NanobotClient {
   }
 
   close(): void {
+    this.upload = null;
+    this.receipts.close();
     this.intentionallyClosed = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -967,10 +1017,36 @@ export class NanobotClient {
     }
   }
 
+  async sendAttachments(
+    chatId: string, content: string, media: OutboundMedia[],
+    options?: Parameters<NanobotClient["sendMessage"]>[3],
+  ): Promise<void> {
+    const socket = this.socket;
+    const capability = this.upload;
+    const turnId = options?.turnId ?? crypto.randomUUID();
+    const stillConnected = () => this.socket === socket
+      && socket?.readyState === WS_OPEN && this.upload === capability;
+    try {
+      const references = await uploadAttachments(media, capability,
+        typeof window !== "undefined" ? window.location.href : this.currentUrl,
+        stillConnected);
+      if (!stillConnected()) throw new Error("Connection changed during attachment send");
+      await this.receipts.wait(turnId, () => {
+        if (!this.sendMessage(chatId, content, references, { ...options, turnId })) {
+          throw new Error("Message exceeds the gateway's WebSocket frame limit; draft retained");
+        }
+      });
+    } catch (error) {
+      this.emitError({ kind: "turn_rejected", chatId, turnId, detail: "attachment_rejected",
+        reason: error instanceof Error ? error.message : "Attachment send failed" });
+      throw error;
+    }
+  }
+
   sendMessage(
     chatId: string,
     content: string,
-    media?: OutboundMedia[],
+    media?: AttachmentReference[],
     options?: {
       cliApps?: OutboundCliAppMention[];
       mcpPresets?: OutboundMcpPresetMention[];
@@ -982,7 +1058,7 @@ export class NanobotClient {
       /** False for side-channel or injected messages that do not own a lifecycle. */
       startsNewRun?: boolean;
     },
-  ): void {
+  ): boolean {
     const temporary = this.temporaryChatIds.has(chatId);
     if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
@@ -1010,7 +1086,7 @@ export class NanobotClient {
         chatId,
         ...(options?.turnId ? { turnId: options.turnId } : {}),
       });
-      return;
+      return false;
     }
     if (options?.turnId && !isSystemCommandTurnId(options.turnId)) {
       const startsNewRun = options.startsNewRun !== false;
@@ -1018,6 +1094,7 @@ export class NanobotClient {
       this.trackPendingMessageSend(chatId, options.turnId, startsNewRun);
     }
     this.queueSend(frame);
+    return true;
   }
 
   sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<void> {
@@ -1133,11 +1210,21 @@ export class NanobotClient {
       if (fallbackTurnId) parsed = { ...parsed, turn_id: fallbackTurnId };
     }
 
+    this.receipts.event(parsed);
     const turnId = "turn_id" in parsed && typeof parsed.turn_id === "string"
       ? parsed.turn_id
       : null;
+    const correlatedChatId = (parsed as { chat_id?: string }).chat_id;
+    // Fence before ownership, clocks, acceptance, or subscribers can mutate state.
+    if (correlatedChatId && this.isCanonicalCompletedTurnEvent(correlatedChatId, parsed)) return;
+    if (
+      correlatedChatId && turnId && this.isRunCompleted(correlatedChatId, turnId)
+      && parsed.event !== "message_accepted" && parsed.event !== "user_message"
+      && parsed.event !== "message" && parsed.event !== "turn_end"
+      && !(parsed.event === "goal_status" && parsed.status === "idle")
+    ) return;
     if (parsed.event === "message_accepted" || parsed.event === "user_message") {
-      this.recordCanonicalTurnOwnership(parsed);
+      parsed = this.recordCanonicalTurnOwnership(parsed);
     }
     if (parsed.event === "message_accepted") {
       this.recordRunAcceptance(parsed.chat_id, parsed.turn_id);
@@ -1158,7 +1245,6 @@ export class NanobotClient {
       return;
     }
 
-    const correlatedChatId = (parsed as { chat_id?: string }).chat_id;
     if (parsed.event === "error" && correlatedChatId && turnId) {
       this.recordRunRejection(correlatedChatId, turnId);
       if (parsed.detail !== "workspace_scope_rejected") {
@@ -1177,6 +1263,7 @@ export class NanobotClient {
     }
 
     if (parsed.event === "ready") {
+      this.upload = uploadCapability(parsed.upload);
       this.readyChatId = parsed.chat_id;
       this.knownChats.add(parsed.chat_id);
       return;
@@ -1249,7 +1336,6 @@ export class NanobotClient {
 
     const chatId = (parsed as { chat_id?: string }).chat_id;
     if (chatId) {
-      if (this.isCanonicalCompletedTurnEvent(chatId, parsed)) return;
       const supersededRunCompletion = this.isSupersededRunCompletion(chatId, parsed);
       this.recordGoalStatusForRunStrip(chatId, parsed);
       if (supersededRunCompletion) return;
@@ -1300,6 +1386,10 @@ export class NanobotClient {
       this.pendingInboundByChat.set(chatId, q);
     }
     q.push(ev);
+    // Temporary chats have no canonical history to recover evicted events from.
+    // Like their pinned message snapshots, retain them until resubscribe, close
+    // or disconnect. Disk-backed chats keep the bounded replay tail below.
+    if (this.temporaryChatIds.has(chatId)) return;
     const over = q.length - NanobotClient.PENDING_INBOUND_MAX;
     if (over > 0) {
       q.splice(0, over);
@@ -1307,6 +1397,8 @@ export class NanobotClient {
   }
 
   private handleClose(event?: { code?: number }): void {
+    this.upload = null;
+    this.receipts.close();
     this.socket = null;
     this.clearTemporaryChats();
     const willReconnect = !this.intentionallyClosed && this.shouldReconnect;
@@ -1481,6 +1573,7 @@ export class NanobotClient {
     this.latestRunTurnIdByChatId.delete(chatId);
     this.unsettledRunTurnIdsByChatId.delete(chatId);
     this.canonicalCompletedTurnIdsByChatId.delete(chatId);
+    this.closedRunTurnIdsByChatId.delete(chatId);
     this.goalStateByChatId.delete(chatId);
     for (const key of [...this.runStartedAtByTurnKey.keys()]) {
       if (key.startsWith(`${chatId}\u0000`)) this.runStartedAtByTurnKey.delete(key);

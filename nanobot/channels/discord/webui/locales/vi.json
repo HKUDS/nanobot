@@ -12,7 +12,7 @@
         "placeholder": "ID kênh, phân tách bằng dấu phẩy"
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Quy tắc nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
@@ -39,10 +39,10 @@
         "label": "Đọc biểu tượng cảm xúc"
       },
       "workingEmoji": {
-        "label": "Biểu tượng cảm xúc đang hoạt động"
+        "label": "Emoji đang xử lý"
       },
       "workingEmojiDelay": {
-        "label": "Độ trễ biểu tượng cảm xúc đang hoạt động"
+        "label": "Độ trễ emoji (giây)"
       },
       "streaming": {
         "label": "Truyền phát",

@@ -2,10 +2,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sessionTitle, useSessionHistory, useSessions } from "@/hooks/useSessions";
+import { useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
+import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
+import { canonicalThreadPayload } from "./thread-test-payload";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -16,6 +18,16 @@ vi.mock("@/lib/api", async (importOriginal) => {
     fetchWebuiThread: vi.fn(),
   };
 });
+
+const fetchThreadMock = vi.mocked(api.fetchWebuiThread);
+const rawMockResolvedValue = fetchThreadMock.mockResolvedValue.bind(fetchThreadMock);
+const rawMockResolvedValueOnce = fetchThreadMock.mockResolvedValueOnce.bind(fetchThreadMock);
+fetchThreadMock.mockResolvedValue = ((value) => rawMockResolvedValue(
+  canonicalThreadPayload(value as never),
+)) as typeof fetchThreadMock.mockResolvedValue;
+fetchThreadMock.mockResolvedValueOnce = ((value) => rawMockResolvedValueOnce(
+  canonicalThreadPayload(value as never),
+)) as typeof fetchThreadMock.mockResolvedValueOnce;
 
 function fakeClient() {
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
@@ -61,6 +73,27 @@ function wrap(
 }
 
 describe("useSessions", () => {
+  it("shows tab-cached sessions while revalidating and removes server-deleted rows", async () => {
+    activateReloadCache("ws://localhost:8765/");
+    writeReloadCache("sessions", [{
+      key: "websocket:cached", channel: "websocket", chatId: "cached", preview: "Saved answer",
+      createdAt: null, updatedAt: null,
+    }]);
+    let finish!: (rows: Awaited<ReturnType<typeof api.listSessions>>) => void;
+    vi.mocked(api.listSessions).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result, unmount } = renderHook(() => useSessions(), { wrapper: wrap(fakeClient()) });
+    try {
+      expect(result.current.sessions[0]?.key).toBe("websocket:cached");
+      expect(result.current.loading).toBe(true);
+      await act(async () => finish([]));
+      expect(result.current.sessions).toEqual([]);
+      expect(result.current.loading).toBe(false);
+    } finally {
+      unmount();
+      clearReloadCache();
+    }
+  });
+
   it("coalesces a burst across tasks and preserves unchanged session identities", async () => {
     const row = { key: "websocket:burst", channel: "websocket", chatId: "burst",
       createdAt: "2026-09-08", updatedAt: "2026-09-08", preview: "Stable" };
@@ -95,28 +128,6 @@ describe("useSessions", () => {
     vi.mocked(api.deleteSession).mockReset();
     vi.mocked(api.fetchWebuiThread).mockReset();
     webuiThreadCache.clear();
-  });
-
-  it("does not use low-information greetings as fallback session titles", () => {
-    expect(sessionTitle({
-      key: "websocket:chat-hi",
-      channel: "websocket",
-      chatId: "chat-hi",
-      createdAt: "2026-04-16T10:00:00Z",
-      updatedAt: "2026-04-16T10:00:00Z",
-      title: "",
-      preview: "hi",
-    })).toBe("New topic");
-
-    expect(sessionTitle({
-      key: "websocket:chat-work",
-      channel: "websocket",
-      chatId: "chat-work",
-      createdAt: "2026-04-16T10:00:00Z",
-      updatedAt: "2026-04-16T10:00:00Z",
-      title: "",
-      preview: "帮我优化 WebUI 性能",
-    })).toBe("帮我优化 WebUI 性能");
   });
 
   it("removes a session from the local list after delete succeeds", async () => {
@@ -568,6 +579,75 @@ describe("useSessions", () => {
     expect(result.current.messages[2]!.content).toBe("summary");
   });
 
+  it("projects canonical transcript events with the live event reducer", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      projection: "events",
+      events: [
+        {
+          event: "user_message",
+          chat_id: "chat-event-history",
+          text: "explain",
+          starts_turn: true,
+          projection_id: "history-user",
+          turn_id: "turn-history",
+          turn_phase: "user",
+          turn_seq: 1,
+        },
+        {
+          event: "reasoning_delta",
+          chat_id: "chat-event-history",
+          text: "thinking",
+          projection_id: "history-reasoning",
+          turn_id: "turn-history",
+          turn_phase: "reasoning",
+          turn_seq: 2,
+        },
+        {
+          event: "reasoning_end",
+          chat_id: "chat-event-history",
+          projection_id: "history-reasoning-end",
+          turn_id: "turn-history",
+          turn_phase: "reasoning",
+          turn_seq: 3,
+        },
+        {
+          event: "delta",
+          chat_id: "chat-event-history",
+          text: "answer",
+          projection_id: "history-answer",
+          turn_id: "turn-history",
+          turn_phase: "answer",
+          turn_seq: 4,
+        },
+        {
+          event: "turn_end",
+          chat_id: "chat-event-history",
+          projection_id: "history-end",
+          latency_ms: 25,
+          turn_id: "turn-history",
+          turn_phase: "complete",
+          turn_seq: 5,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-event-history"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[1]).toMatchObject({
+      role: "assistant",
+      content: "answer",
+      reasoning: "thinking",
+      latencyMs: 25,
+      turnId: "turn-history",
+    });
+  });
+
   it("shows a cached transcript immediately while revalidating it", async () => {
     const cached = {
       schemaVersion: 3,
@@ -888,6 +968,88 @@ describe("useSessions", () => {
     expect(result.current.continuity).toBe("initial");
   });
 
+  it("keeps older-history failures separate and retries them explicitly", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u2", role: "user", content: "latest question", createdAt: 2 },
+        ],
+        page: {
+          before_cursor: "cursor-2",
+          has_more_before: true,
+          loaded_message_count: 1,
+          user_message_offset: 1,
+        },
+      })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u1", role: "user", content: "earliest question", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+          loaded_message_count: 1,
+          user_message_offset: 0,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:retry-older"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.olderError).toBe("offline");
+    expect(result.current.hasMoreBefore).toBe(true);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.olderError).toBeNull();
+    expect(result.current.hasMoreBefore).toBe(false);
+    expect(result.current.messages.map((message) => message.id)).toEqual(["u1", "u2"]);
+  });
+
+  it("preserves a failed history cursor on refresh but clears it for another session", async () => {
+    const latest = {
+      schemaVersion: 3 as const,
+      messages: [{ id: "u2", role: "user" as const, content: "question", createdAt: 2 }],
+      page: {
+        before_cursor: "cursor-2", has_more_before: true,
+        loaded_message_count: 1, user_message_offset: 1,
+      },
+    };
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce(latest)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ ...latest })
+      .mockResolvedValueOnce({ schemaVersion: 3, messages: [] });
+    const { result, rerender } = renderHook(({ sessionKey }) => useSessionHistory(sessionKey), {
+      initialProps: { sessionKey: "websocket:failed-prefix" },
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await result.current.loadOlder(); });
+    expect(result.current.olderError).toBe("offline");
+
+    const previousVersion = result.current.version;
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.version).toBeGreaterThan(previousVersion));
+    expect(result.current.olderError).toBe("offline");
+    expect(result.current.error).toBeNull();
+
+    rerender({ sessionKey: "websocket:other-history" });
+    expect(result.current.olderError).toBeNull();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.messages).toEqual([]);
+  });
+
   it("aborts an older-history request when the consumer unmounts", async () => {
     let olderSignal: AbortSignal | undefined;
     vi.mocked(api.fetchWebuiThread)
@@ -1177,7 +1339,7 @@ describe("useSessions", () => {
     expect(result.current.lineage).toBeGreaterThan(oldLineage);
 
     await act(async () => {
-      resolveOlder?.({
+      resolveOlder?.(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "stale-prefix", role: "user", content: "stale prefix", createdAt: 1 },
@@ -1186,7 +1348,7 @@ describe("useSessions", () => {
           before_cursor: null,
           has_more_before: false,
         },
-      });
+      }));
       await olderRequest;
     });
 

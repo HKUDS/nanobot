@@ -7,7 +7,7 @@ import { channelValidationMessage } from "@/components/settings/channels/validat
 import type { ChannelValidationPayload, NanobotFeatureInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export function channelValidationStatusLabel(
+function channelValidationStatusLabel(
   status: string,
   t: ReturnType<typeof useTranslation>["t"],
 ): string {
@@ -107,10 +107,8 @@ export function ChannelValidationProgress({
   const status = validation?.status ?? (feature.configured ? "configured" : "needs_setup");
   const presentation = channelUiPresentation(feature.name, feature.webui);
   const identity = validation?.identity?.name
-    ? validation.identity.workspace
-      ? `${validation.identity.name} · ${validation.identity.workspace}`
-      : validation.identity.name
-    : presentation?.displayName ?? feature.display_name;
+    || presentation?.displayName || feature.display_name;
+  const workspace = validation?.identity?.workspace;
 
   return (
     <div
@@ -173,7 +171,10 @@ export function ChannelValidationProgress({
             )}
           >
             {channelValidationStatusIcon(status)}
-            <span className="min-w-0 truncate font-semibold">{identity}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-semibold">{identity}</span>
+              {workspace ? <span className="block truncate font-normal">{workspace}</span> : null}
+            </span>
             <span className="lowercase">{channelValidationStatusLabel(status, t)}</span>
           </div>
         ) : null}

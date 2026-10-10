@@ -37,6 +37,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
+from nanobot.utils.logging_bridge import redirect_lib_logging
 
 # ---------------------------------------------------------------------------
 # Protocol constants (from openclaw-weixin types.ts)
@@ -214,11 +216,9 @@ class WeixinConfig(Base):
     reply_progress_messages: bool = False
     reply_progress_max_messages: int = Field(default=2, ge=0, le=4)
     context_message_budget: int = Field(default=8, ge=1, le=10)
-    # Default on: WeChat iLink has no native incremental delivery (send_delta is
-    # buffered and the final answer is still sent in one shot), so streaming has
-    # zero user-facing effect here — it only switches the LLM call to the
-    # streaming API. That avoids upstream Anthropic relays that drop tool_use
-    # id/name/input on the non-streaming Messages path (a common third-party
+    # Default on: use the LLM streaming API even when block_streaming is off
+    # and visible delivery waits for stream end. This avoids upstream Anthropic
+    # relays that drop tool_use id/name/input on the non-streaming Messages path (a common third-party
     # relay bug). Set to false only if a relay's streaming/SSE path is broken.
     streaming: bool = True
     # Optional user-visible block streaming. Disabled by default because every
@@ -328,8 +328,8 @@ class WeixinChannel(BaseChannel):
         self._context_token_at: dict[str, float] = {}
         self._pending_tool_hints: dict[str, list[str]] = {}
         # Buffers streamed content deltas per chat. WeChat iLink has no native
-        # incremental delivery, so when streaming is enabled we accumulate the
-        # deltas and flush the full reply in one shot at _stream_end.
+        # incremental delivery. Optional block streaming sends bounded messages
+        # while deltas arrive; stream end flushes the remaining buffered reply.
         self._stream_buffers: dict[str, list[str]] = {}
         self._stream_sent_counts: dict[str, int] = {}
         self._stream_live_disabled: set[str] = set()
@@ -423,7 +423,7 @@ class WeixinChannel(BaseChannel):
                 self.config.base_url = base_url
             return bool(self._token)
         except Exception:
-            self.logger.error("Failed to load Weixin account state", exc_info=True)
+            self.logger.opt(exception=True).error("Failed to load Weixin account state")
             return False
 
     def _save_state(self, *, force: bool = False) -> None:
@@ -674,23 +674,6 @@ class WeixinChannel(BaseChannel):
             )
             return WeixinChannel._is_retryable_http_status(status_code)
         return False
-
-    async def _api_get(
-        self,
-        endpoint: str,
-        params: dict[str, Any] | None = None,
-        *,
-        auth: bool = True,
-        extra_headers: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-        assert self._client is not None
-        url = f"{self.config.base_url}/{endpoint}"
-        hdrs = self._make_headers(auth=auth)
-        if extra_headers:
-            hdrs.update(extra_headers)
-        return await self._request_json(
-            "GET", url, endpoint=endpoint, params=params, headers=hdrs,
-        )
 
     async def _api_get_with_base(
         self,
@@ -996,6 +979,7 @@ class WeixinChannel(BaseChannel):
                 self._client = None
 
     async def start(self) -> None:
+        redirect_lib_logging("httpx", level="WARNING")
         self._running = True
         self._next_poll_timeout_s = self.config.poll_timeout
         self._client = self._new_http_client(
@@ -1881,13 +1865,17 @@ class WeixinChannel(BaseChannel):
         self._record_context_send(context_token)
 
     async def send(self, msg: OutboundMessage) -> None:
+        event = getattr(msg, "event", None)
+        if isinstance(event, ContextCompactionEvent) and not (
+            event.notify or self.show_compaction_notices
+        ):
+            return
         if not self._client or not self._token:
             raise RuntimeError("WeChat client not initialized or not authenticated")
         self._assert_session_active()
 
         delivery_id = self._delivery_id(msg)
         delivery_state = self._delivery_state(delivery_id)
-        event = getattr(msg, "event", None)
         progress_event = event if isinstance(event, ProgressEvent) else None
         is_progress = progress_event is not None
 
@@ -2136,10 +2124,10 @@ class WeixinChannel(BaseChannel):
     ) -> None:
         """Deliver a streamed reply to WeChat.
 
-        WeChat iLink has no native incremental delivery, and the manager
-        bypasses :meth:`send` for the ``_streamed`` final answer. So we
-        accumulate content deltas and flush the full reply as a single message
-        at stream end. Reasoning deltas are invisible in WeChat and are dropped.
+        WeChat iLink has no native incremental delivery. Optional block streaming
+        sends bounded messages while deltas arrive; stream end flushes the
+        remaining reply. The manager skips the final ``StreamedResponseEvent``
+        to avoid duplicate delivery. Reasoning deltas are dropped.
         """
         meta = metadata or {}
         if meta.get("_reasoning_delta") or meta.get("_reasoning"):

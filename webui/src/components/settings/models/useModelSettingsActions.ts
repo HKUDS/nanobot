@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { TFunction } from "i18next";
 
 import type {
@@ -7,6 +7,7 @@ import type {
   PendingRestartSections,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
+import { modelAPISelection } from "@/components/settings/models/modelAPI";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
   providerFormFromRow,
@@ -16,6 +17,7 @@ import type { ModelSettingsState } from "@/components/settings/models/useModelSe
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
 import {
   ApiError,
+  cancelProviderOAuth,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -60,7 +62,7 @@ interface ModelSettingsActionsOptions {
   setError: Dispatch<SetStateAction<string | null>>;
   onModelNameChange: (modelName: string | null) => void;
   remoteBrowserAccess: boolean;
-  closeProviderOAuthFlow: () => void;
+  closeProviderOAuthFlow: (cancelPending?: boolean) => void;
   installCapabilities: (names: string[]) => Promise<boolean>;
   modelDirty: boolean;
   configuredModelProviderOptions: Array<{ name: string; label: string }>;
@@ -82,6 +84,11 @@ export function useModelSettingsActions({
   modelDirty,
   configuredModelProviderOptions,
 }: ModelSettingsActionsOptions) {
+  const oauthMounted = useRef(true);
+  useEffect(() => {
+    oauthMounted.current = true;
+    return () => { oauthMounted.current = false; };
+  }, []);
   const {
     expandedProvider,
     form,
@@ -153,7 +160,9 @@ export function useModelSettingsActions({
       !settings ||
       saving ||
       modelCallOrderSaving ||
-      modelConfigurationSaving
+      modelConfigurationSaving ||
+      !Number.isSafeInteger(form.contextWindowTokens) ||
+      form.contextWindowTokens <= 0
     ) {
       return;
     }
@@ -167,7 +176,6 @@ export function useModelSettingsActions({
         !provider ||
         !model ||
         form.maxTokens <= 0 ||
-        form.contextWindowTokens <= 0 ||
         form.temperature < 0 ||
         form.temperature > 2
       ) {
@@ -188,6 +196,7 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          api: form.api ?? undefined,
         });
         const createdPreset = payload.created_model_preset;
         const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
@@ -250,6 +259,8 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
+          ? form.api : undefined,
       });
       applyPayload(payload);
       setForm(agentDraftFromPayload(payload, nextName));
@@ -283,6 +294,7 @@ export function useModelSettingsActions({
       modelPreset: "",
       provider,
       model: "",
+      api: null,
       maxTokens: primaryPreset?.max_tokens ?? settings.agent.max_tokens,
       contextWindowTokens: normalizeContextWindowTokens(
         primaryPreset?.context_window_tokens ?? settings.agent.context_window_tokens,
@@ -395,9 +407,9 @@ export function useModelSettingsActions({
         update.apiKey = apiKey || undefined;
         update.apiBase = providerForm.apiBase.trim();
         if (provider.is_custom) update.displayName = providerForm.displayName.trim();
+        if (provider.provider_api_configurable) update.api = providerForm.api;
       }
       for (const field of provider.advanced_fields ?? []) {
-        if (field === "api_type") update.apiType = providerForm.apiType;
         if (field === "proxy") update.proxy = providerForm.proxy.trim();
         if (field === "extra_headers") {
           update.extraHeaders = providerForm.extraHeaders.trim();
@@ -448,6 +460,7 @@ export function useModelSettingsActions({
         name: draft.name.trim(),
         apiKey: draft.apiKey.trim() || undefined,
         apiBase: draft.apiBase.trim(),
+        ...(settings?.provider_api_configuration_supported ? { api: draft.api } : {}),
         proxy: draft.proxy.trim(),
         extraHeaders: draft.extraHeaders.trim(),
         extraBody: draft.extraBody.trim(),
@@ -492,6 +505,10 @@ export function useModelSettingsActions({
             )
           : await logoutProviderOAuth(client, providerName);
       if (isProviderOAuthAuthorizationRequired(payload)) {
+        if (payload.completion_input === "device_code" && !oauthMounted.current) {
+          await cancelProviderOAuth(client, payload.provider, payload.flow_id).catch(() => {});
+          return;
+        }
         try {
           if (popup && !popup.closed) popup.location.href = payload.authorization_url;
         } catch {
@@ -501,14 +518,12 @@ export function useModelSettingsActions({
         setProviderOAuthFlow(payload);
         setProviderOAuthResponse("");
         setProviderOAuthDialogError(null);
-        setExpandedProvider(providerName);
         setError(null);
         return;
       }
       popup?.close();
-      closeProviderOAuthFlow();
-      applyPayload(payload);
-      setExpandedProvider(providerName);
+      closeProviderOAuthFlow(false);
+      applyPayload(payload, { preserveAgentForm: action === "login" });
       setError(null);
     } catch (err) {
       popup?.close();
@@ -533,10 +548,9 @@ export function useModelSettingsActions({
       );
       if (providerOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
       if (isProviderOAuthPending(payload)) return;
-      applyPayload(payload);
-      setExpandedProvider(flow.provider);
+      applyPayload(payload, { preserveAgentForm: true });
       setError(null);
-      closeProviderOAuthFlow();
+      closeProviderOAuthFlow(false);
     } catch (err) {
       if (providerOAuthFlowRef.current?.flow_id === flow.flow_id) {
         setProviderOAuthDialogError((err as Error).message);

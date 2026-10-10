@@ -81,7 +81,6 @@ export function DeleteConfirm({
                     <span className="truncate">
                       {formatAutomationSchedule(job, t, locale)}
                     </span>
-                    <span aria-hidden>·</span>
                     <span className="truncate">{formatAutomationNextRun(job, t, locale)}</span>
                   </div>
                 </div>

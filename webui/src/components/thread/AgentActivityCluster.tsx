@@ -1,24 +1,20 @@
 import {
+  CompletedTaskIcon,
+  WebSearchIcon,
+  McpIcon,
+  ToolRunIcon,
+} from "@/components/icons/product-icons";
+import {
   Fragment,
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import {
-  CheckCircle2,
-  Clock3,
-  Layers,
-  Search,
-  Server,
-  Terminal,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+import { Clock3, Layers, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText } from "@/components/MarkdownText";
@@ -27,6 +23,7 @@ import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { coalesceActivityMessages } from "@/components/thread/activity/activity-message-model";
 import {
   compactActivityPath,
+  formatActivityTarget,
   redactShellCommand,
 } from "@/components/thread/activity/activity-text";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
@@ -43,7 +40,6 @@ import { ThinkingReasoningShell } from "@/components/thread/activity/ThinkingRea
 import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
 import {
   describeTraceLine,
-  type TraceDescription,
 } from "@/components/thread/activity/trace-activity-model";
 import { WebSearchRun } from "@/components/thread/activity/WebSearchRun";
 import { webSearchRunsByTraceLine } from "@/components/thread/activity/web-search-model";
@@ -52,6 +48,7 @@ import {
   isReasoningOnlyAssistant,
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
@@ -68,7 +65,6 @@ import type {
   UIMessage,
 } from "@/lib/types";
 
-const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
 const EMPTY_CLI_APPS: CliAppInfo[] = [];
 const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
 
@@ -164,6 +160,13 @@ interface AgentActivityClusterProps {
   traceDetailScope?: string | null;
   onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
+  /** Optional controlled expansion state for a completed inline activity block. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  /** Render only the controlled details; another control owns the disclosure label. */
+  hideHeader?: boolean;
+  /** Stable id used by an external disclosure control. */
+  detailsId?: string;
 }
 
 export function AgentActivityCluster(props: AgentActivityClusterProps) {
@@ -186,6 +189,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     items.push(
       <FoldedAgentActivity
         {...props}
+        detailsId={undefined}
         key={pending[0]?.id ?? "tail-status"}
         messages={pending}
         isTurnStreaming={last && props.isTurnStreaming}
@@ -219,7 +223,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
   }
   flush(true);
   return (
-    <div className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
+    <div id={props.detailsId} className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
       {items}
     </div>
   );
@@ -237,9 +241,13 @@ function FoldedAgentActivity({
   traceDetailScope = null,
   onLoadTraceDetails,
   onOpenFilePreview,
+  expanded,
+  onExpandedChange,
+  hideHeader = false,
+  detailsId,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
-  const fileEditDisplayMode = useFileEditDisplayMode();
+  const { activityMode, fileEditDisplayMode } = useLocalPreferences();
   const pageVisible = usePageVisibility();
   const threadVisible = useThreadVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
@@ -275,17 +283,17 @@ function FoldedAgentActivity({
   const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
   const [failedTraceDetailKey, setFailedTraceDetailKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [activityScrollFade, setActivityScrollFade] = useState({ top: false, bottom: false });
-  const activityScrollRef = useRef<HTMLDivElement>(null);
-  const activityContentRef = useRef<HTMLDivElement>(null);
-  const autoFollowActivityRef = useRef(true);
-  const scrollFrameRef = useRef<number | null>(null);
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
-  /** Live work stays open; completed work briefly shows the done state, then tucks away. */
-  const outerExpanded = userToggledOuter
-    ? outerOpenLocal
-    : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
+  /** Auto follows execution; expanded keeps details open unless manually collapsed. */
+  const outerExpanded = expanded ?? (
+    userToggledOuter
+      ? outerOpenLocal
+      : activityMode === "expanded" || isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming)
+  );
+  useEffect(() => {
+    setUserToggledOuter(false);
+  }, [activityMode]);
   const deferredTraceRefs = useMemo(
     () => Array.from(new Set(
       messages
@@ -319,6 +327,7 @@ function FoldedAgentActivity({
     startedAtMs,
   );
   const activityDuration = formatActivityDuration(durationMs);
+  const isCompletedDisclosure = !isTurnStreaming && expanded !== undefined;
   const retryError = retryStatus?.error_kind === "connection"
     ? t("message.retryConnection", { defaultValue: "Connection failed" })
     : retryStatus?.error_kind === "timeout"
@@ -337,14 +346,14 @@ function FoldedAgentActivity({
   const activityLabel = retryStatus?.state === "exhausted"
     ? t("message.retryExhausted", {
         error: retryError,
-        defaultValue: "{{error}} · ending turn",
+        defaultValue: "{{error}}. Ending turn.",
       })
     : retryStatus?.state === "waiting"
       ? t("message.retryWaiting", {
           error: retryError,
           seconds: retrySeconds,
           attempt: retryAttempt,
-          defaultValue: "{{error}} · retrying in {{seconds}}s · attempt {{attempt}}",
+          defaultValue: "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
         })
       : isTurnStreaming
     ? t("message.activityWorkingFor", {
@@ -358,75 +367,15 @@ function FoldedAgentActivity({
           defaultValue: "Worked for {{duration}}",
         });
 
-  const cancelActivityScrollFrame = useCallback(() => {
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-  }, []);
-
-  const syncActivityScrollFade = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    const scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop));
-    const next = {
-      top: scrollTop > 1,
-      bottom: maxScrollTop - scrollTop > 1,
-    };
-    setActivityScrollFade((current) =>
-      current.top === next.top && current.bottom === next.bottom ? current : next,
-    );
-  }, []);
-
-  const scrollActivityToBottom = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    syncActivityScrollFade();
-  }, [syncActivityScrollFade]);
-
-  const scheduleActivityScrollToBottom = useCallback(() => {
-    cancelActivityScrollFrame();
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      scrollActivityToBottom();
-    });
-  }, [cancelActivityScrollFrame, scrollActivityToBottom]);
-
   const toggleOuter = () => {
-    const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
-    if (nextOpen) {
-      autoFollowActivityRef.current = true;
+    if (expanded !== undefined) {
+      onExpandedChange?.(!expanded);
+      return;
     }
+    const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
     setUserToggledOuter(true);
     setOuterOpenLocal(nextOpen);
   };
-
-  useLayoutEffect(() => {
-    if (!outerExpanded || !autoFollowActivityRef.current) return;
-    scheduleActivityScrollToBottom();
-  }, [outerExpanded, activityMessages, isTurnStreaming, scheduleActivityScrollToBottom]);
-
-  useEffect(() => {
-    if (!outerExpanded) {
-      autoFollowActivityRef.current = true;
-      return;
-    }
-    const target = activityContentRef.current;
-    if (!target || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (autoFollowActivityRef.current) {
-        scheduleActivityScrollToBottom();
-      } else {
-        syncActivityScrollFade();
-      }
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [outerExpanded, scheduleActivityScrollToBottom, syncActivityScrollFade]);
-
-  useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
 
   useEffect(() => {
     if (outerExpanded && deferredTraceRefs.length > 0) {
@@ -454,17 +403,9 @@ function FoldedAgentActivity({
     return () => window.clearTimeout(timeout);
   }, [isTurnStreaming, userToggledOuter]);
 
-  const onActivityScroll = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    autoFollowActivityRef.current = distance < ACTIVITY_SCROLL_NEAR_BOTTOM_PX;
-    syncActivityScrollFade();
-  }, [syncActivityScrollFade]);
-
   if (!hasVisibleActivity && !isTurnStreaming) return null;
 
-  if (hasOnlyFileActivity) {
+  if (hasOnlyFileActivity && expanded === undefined) {
     return (
       <div className={cn("w-full", hasBodyBelow && "mb-2")}>
         <FileEditGroup
@@ -477,18 +418,17 @@ function FoldedAgentActivity({
   }
 
   return (
-    <div className={cn("w-full", hasBodyBelow && "mb-2")}>
+    <div className={cn("w-full", hasBodyBelow && expanded !== false && "mb-2")}>
       <ThinkingReasoningShell
         active={isTurnStreaming}
         expanded={outerExpanded}
+        contextual={isCompletedDisclosure}
+        showHeader={!hideHeader || outerExpanded}
+        collapseLabel={t("message.collapseActivity")}
+        contentId={detailsId}
         label={activityLabel}
-        viewportRef={activityScrollRef}
-        contentRef={activityContentRef}
-        fadeTop={activityScrollFade.top}
-        fadeBottom={activityScrollFade.bottom}
         hasDetails={hasVisibleActivity}
         onToggle={toggleOuter}
-        onScroll={onActivityScroll}
       >
         {traceDetailLoadFailed ? (
           <div role="alert" className="flex items-center gap-2 py-1 text-[12px] text-destructive">
@@ -550,7 +490,14 @@ function activityDurationMs(
   return Math.max(0, last - first);
 }
 
-function formatActivityDuration(ms: number): string {
+export function completedActivityDurationMs(
+  messages: UIMessage[],
+  completedLatencyMs?: number,
+): number {
+  return activityDurationMs(messages, false, 0, completedLatencyMs);
+}
+
+export function formatActivityDuration(ms: number): string {
   const seconds = ms > 0 && ms < 1000 ? 1 : Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -853,15 +800,16 @@ function ActivityTraceRow({
   active: boolean;
   state?: GenericToolState;
 }) {
+  const { t } = useTranslation();
   const status = state?.status ?? (active ? "running" : "done");
-  const trace = describeTraceLine(line, status, state?.result);
+  const trace = describeTraceLine(line, status, t, state?.result);
   const rowActive = status === "running" && active;
   const Icon = trace.icon === "clock" ? Clock3 : (trace.kind === "search"
-    ? Search
+    ? WebSearchIcon
     : trace.kind === "done"
-      ? CheckCircle2
+      ? CompletedTaskIcon
       : trace.kind === "tool"
-        ? Wrench
+        ? ToolRunIcon
         : Layers);
   if (trace.url && trace.host) {
     return (
@@ -877,10 +825,12 @@ function ActivityTraceRow({
   }
   return (
     <ActivityStep
-      marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={rowActive} />}
+      icon={Icon}
       active={rowActive && trace.kind !== "done"}
       tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
-      label={[trace.label, trace.detail].filter(Boolean).join(" ")}
+      label={trace.kind === "search" ? trace.label : formatActivityTarget(t, trace.label, trace.detail)}
+      detail={trace.kind === "search" ? trace.detail : trace.aside}
+      detailClassName={trace.kind === "search" ? "whitespace-pre-line" : undefined}
     />
   );
 }
@@ -927,30 +877,6 @@ function toolProgressError(error: unknown): string | undefined {
     }
   }
   return undefined;
-}
-
-function TraceIconMark({
-  trace,
-  fallbackIcon: FallbackIcon,
-  active,
-}: {
-  trace: TraceDescription;
-  fallbackIcon: LucideIcon;
-  active: boolean;
-}) {
-  return (
-    <FallbackIcon
-      className={cn(
-        "h-3.5 w-3.5 shrink-0",
-        trace.kind === "done"
-          ? "text-emerald-500/75"
-          : active
-            ? "text-muted-foreground/75"
-            : "text-muted-foreground/45",
-      )}
-      aria-hidden
-    />
-  );
 }
 
 const CLI_RUN_TOOL_NAMES = new Set(["run_cli_app", "cli_anything_run"]);
@@ -1319,6 +1245,7 @@ function CliRunGroup({
 }
 
 function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
+  const { t } = useTranslation();
   const args = compactActivityPath(redactShellCommand(formatCliArgs(run)));
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
@@ -1326,14 +1253,18 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const displayName = app?.display_name || titleFromPresetName(run.name);
-  const action = failed ? "Could not use" : rowActive ? "Using" : "Used";
-  const label = `${action} ${displayName}${args ? ` · ${args}` : ""}`;
+  const label = t(
+    `message.${failed ? "cliActivityFailedOne" : rowActive ? "cliActivityRunningOne" : "cliActivityRanOne"}`,
+    { name: displayName },
+  );
 
   return (
     <ActivityStep
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
+      detail={args}
+      detailClassName="font-mono text-[12px]"
       marker={(
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
@@ -1394,6 +1325,7 @@ function McpRunGroup({
 }
 
 function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo }) {
+  const { t } = useTranslation();
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
@@ -1404,14 +1336,16 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
     run.toolName,
     run.args,
     failed ? "error" : rowActive ? "running" : "done",
+    t,
   );
-  const label = `${activity.action}${activity.target ? ` ${activity.target}` : ""} · ${displayName}`;
+  const label = formatActivityTarget(t, activity.action, activity.target ?? "");
 
   return (
     <ActivityStep
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
+      detail={displayName}
       marker={(
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
@@ -1439,7 +1373,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
           ) : preset ? (
             mcpPresetInitials(preset).slice(0, 2)
           ) : (
-            <Server className="h-3 w-3" aria-hidden />
+            <McpIcon className="h-3 w-3" aria-hidden />
           )}
         </span>
       )}

@@ -41,6 +41,7 @@ from nanobot.utils.restart import (
 )
 
 if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -68,6 +69,7 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_progress": "sendProgress",
     "send_tool_hints": "sendToolHints",
     "show_reasoning": "showReasoning",
+    "show_compaction_notices": "showCompactionNotices",
 }
 
 def _default_channel_config(name: str) -> dict[str, Any] | None:
@@ -110,6 +112,8 @@ class ChannelManager:
         webui_recovery_action: (
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None,
+        webui_subagent_manager: SubagentManager | None = None,
+        webui_discard_session: Callable[[str], Awaitable[None]] | None = None,
         config_path: Path | None = None,
     ):
         if config_path is None:
@@ -133,6 +137,8 @@ class ChannelManager:
         self._webui_mcp_reload = webui_mcp_reload
         self._webui_skill_state_action = webui_skill_state_action
         self._webui_recovery_action = webui_recovery_action
+        self._webui_subagent_manager = webui_subagent_manager
+        self._webui_discard_session = webui_discard_session
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -210,6 +216,8 @@ class ChannelManager:
                 mcp_reload=self._webui_mcp_reload,
                 skill_state_action=self._webui_skill_state_action,
                 recovery_action=self._webui_recovery_action,
+                subagent_manager=self._webui_subagent_manager,
+                discard_session=self._webui_discard_session,
                 logger=logger,
             )
             kwargs["gateway"] = gateway
@@ -228,6 +236,13 @@ class ChannelManager:
         )
         channel.show_reasoning = self._resolve_bool_override(
             section, "show_reasoning", self.config.channels.show_reasoning,
+        )
+        # Retain adapter-validated legacy values (QQ already owned this option).
+        notice_default = self._resolve_bool_override(
+            channel.config, "show_compaction_notices", self.config.channels.show_compaction_notices,
+        )
+        channel.show_compaction_notices = self._resolve_bool_override(
+            section, "show_compaction_notices", notice_default,
         )
         return channel
 
@@ -975,7 +990,11 @@ class ChannelManager:
             is_delta = isinstance(next_event, StreamDeltaEvent)
             is_end = isinstance(next_event, StreamEndEvent)
 
-            if same_target and (is_delta or (is_end and next_msg.content)):
+            same_response_sources = (
+                next_msg.metadata.get("response_sources")
+                == first_msg.metadata.get("response_sources")
+            )
+            if same_target and same_response_sources and (is_delta or (is_end and next_msg.content)):
                 # Accumulate content
                 combined_content += next_msg.content
                 # If we see stream_end, remember it and stop coalescing this stream

@@ -110,9 +110,6 @@ class WebUIGatewayEndpoint:
             self.webui_connections.add(connection)
         return audience is not None
 
-    def is_webui_connection(self, connection: ServerConnection) -> bool:
-        return connection in self.webui_connections
-
     def discard_connection(self, connection: ServerConnection) -> None:
         self.webui_connections.discard(connection)
 

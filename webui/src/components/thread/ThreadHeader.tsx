@@ -1,4 +1,7 @@
-import { Menu, MessageCircleDashed, Moon, Sun } from "lucide-react";
+import {
+  TemporaryChatIcon,
+} from "@/components/icons/product-icons";
+import { Menu, Moon, Sun } from "lucide-react";
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -20,6 +23,7 @@ const controlsClassName = cn(
 );
 
 interface ThreadHeaderProps {
+  className?: string;
   title: string;
   handle?: SessionHandle | null;
   onToggleSidebar: () => void;
@@ -39,6 +43,7 @@ interface ThreadHeaderProps {
 }
 
 export function ThreadHeader({
+  className,
   title,
   handle = null,
   onToggleSidebar,
@@ -65,6 +70,7 @@ export function ThreadHeader({
         "pointer-events-none inset-x-0 top-0 z-30 flex shrink-0 items-center justify-between gap-3 px-3 py-1",
         "[position:var(--thread-header-position,absolute)]",
         minimal && "h-11",
+        className,
       )}
     >
       <div
@@ -81,7 +87,7 @@ export function ThreadHeader({
             aria-label={t("thread.header.toggleSidebar")}
             onClick={onToggleSidebar}
             className={cn(
-              "h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/35 hover:text-foreground",
+              "h-7 w-7 rounded-xl text-muted-foreground hover:text-foreground",
               hideSidebarToggleForHostChrome && "lg:hidden",
             )}
           >
@@ -121,11 +127,10 @@ export function ThreadHeader({
                   aria-pressed={temporaryChatEnabled}
                   onClick={() => onTemporaryChatEnabledChange(!temporaryChatEnabled)}
                   className={cn(
-                    "host-no-drag h-8 w-8 shrink-0 rounded-full bg-transparent text-muted-foreground shadow-none transition-none hover:text-foreground",
-                    temporaryChatEnabled ? "hover:bg-transparent" : "hover:bg-accent/45",
+                    "host-no-drag h-8 w-8 shrink-0 rounded-xl text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <MessageCircleDashed
+                  <TemporaryChatIcon
                     data-testid="temporary-chat-icon"
                     className={cn(
                       "h-4 w-4 motion-safe:transition-colors",
@@ -186,7 +191,7 @@ function ThemeButton({
       aria-label={label}
       onClick={onToggleTheme}
       className={cn(
-        "host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground",
+        "host-no-drag h-8 w-8 rounded-xl text-muted-foreground/85 hover:text-foreground",
         className,
       )}
     >

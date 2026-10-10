@@ -223,10 +223,13 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByText("src/**/*.json").tagName).toBe("CODE");
   });
 
-  it("does not wrap complete fenced code blocks in an extra pre", () => {
+  it.each([
+    ["complete", "\n```"],
+    ["streaming", ""],
+  ])("renders a %s fenced code block in one shell", (_state, closingFence) => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>
-        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace\n```"}
+        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace" + closingFence}
       </MarkdownTextRenderer>,
     );
 
@@ -248,27 +251,13 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelectorAll("pre")).toHaveLength(1);
   });
 
-  it("keeps streaming unfinished fenced code blocks to a single shell", () => {
-    const { container } = render(
-      <MarkdownTextRenderer highlightCode={false}>
-        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace"}
-      </MarkdownTextRenderer>,
-    );
-
-    expect(screen.getByText("/Users/renxubin/.nanobot/workspace")).toBeInTheDocument();
-    expect(container.querySelectorAll("pre")).toHaveLength(1);
-    expect(container.querySelector("pre div")).toBeNull();
-  });
 
   it("renders markdown images as inline previews", () => {
     render(<MarkdownTextRenderer>![Diagram](/api/media/sig/payload)</MarkdownTextRenderer>);
 
     const image = screen.getByRole("img", { name: "Diagram" });
     expect(image).toHaveAttribute("src", "/api/media/sig/payload");
-    expect(screen.getByRole("link", { name: "Open Diagram" })).toHaveAttribute(
-      "href",
-      "/api/media/sig/payload",
-    );
+    expect(screen.getByRole("button", { name: "View image: Diagram" })).toBeInTheDocument();
   });
 
   it("renders markdown videos as inline players", () => {
@@ -378,10 +367,7 @@ describe("MarkdownTextRenderer", () => {
       "src",
       "/api/media/sig/payload",
     );
-    expect(screen.getByRole("link", { name: "Open Diagram" })).toHaveAttribute(
-      "href",
-      "/api/media/sig/payload",
-    );
+    expect(screen.getByRole("button", { name: "View image: Diagram" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Code" })).not.toBeInTheDocument();
   });
 
@@ -483,7 +469,16 @@ describe("MarkdownTextRenderer", () => {
     expect(surface).toHaveAttribute("role", "region");
     expect(surface).toHaveAttribute("tabindex", "0");
     expect(surface).toHaveAccessibleName("Data table");
-    expect(screen.getByRole("table")).toHaveTextContent("nanobot");
+    const table = screen.getByRole("table");
+    expect(table).toHaveTextContent("nanobot");
+    expect(table).not.toHaveClass("min-w-max");
+    expect(table).toHaveClass(
+      "table-fixed",
+      "[&_th]:whitespace-normal",
+      "[&_th]:[overflow-wrap:anywhere]",
+      "[&_td]:whitespace-normal",
+      "[&_td]:[overflow-wrap:anywhere]",
+    );
     expect(container.firstElementChild).toHaveClass("space-y-4");
     expect(container.firstElementChild).not.toHaveClass("space-y-0");
   });
@@ -520,6 +515,30 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
     expect(container.querySelector("[data-nanobot-stream-unit]")).not.toBeInTheDocument();
   });
+
+  it("stops repairing completed markdown without replacing the streaming layout", () => {
+    const source = "The old snip_history() / _legal_history_tail() path was removed.\n\nA real maintenance cost.";
+    const { container, rerender } = render(
+      <MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>,
+    );
+    const firstParagraph = container.querySelector("p");
+    expect(container.querySelector("p:last-child")?.textContent).toBe("A real maintenance cost._");
+
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+
+    expect(container.querySelector("p:last-child")?.textContent).toBe("A real maintenance cost.");
+    expect(container.querySelector("p")).toBe(firstParagraph);
+  });
+
+  it.each(["A literal trailing underscore_", "**unfinished emphasis", "_legal_history_tail()"])(
+    "preserves completed source syntax: %s",
+    (source) => {
+      const { container } = render(
+        <MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>,
+      );
+      expect(container.textContent).toBe(source);
+    },
+  );
 
   it("repairs incomplete streaming markdown without exposing syntax fragments", () => {
     const { container, rerender } = render(
@@ -567,6 +586,63 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByRole("link", { name: "links" })).not.toHaveAttribute("node");
   });
 
+  it("keeps CJK prose outside a bold bare URL through stream completion", () => {
+    const url = "https://github.com/HKUDS/nanobot";
+    const source = `实际跳转到 **${url}**，不是推文页面。`;
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    const assertLink = () => {
+      const link = screen.getByRole("link", { name: url });
+      expect(link).toHaveAttribute("href", url);
+      expect(link.closest("strong")).not.toBeNull();
+      expect(container.textContent).toBe(`实际跳转到 ${url}，不是推文页面。`);
+    };
+    assertLink();
+
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    assertLink();
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    assertLink();
+  });
+
+  it.each([
+    ["https://example.com/中文?q=测试", "，后续说明。"],
+    ["https://example.com/a_(b)?x=1&y=2#section", "。后续说明"],
+    ["www.example.com/path", "；后续说明"],
+    ["https://例子.测试/路径", "，后续说明"],
+    ["http://localhost:7891/path", "，后续说明"],
+    ["https://example.com/foo*bar*baz", "，后续说明"],
+    ["https://example.com/escaped%EF%BC%8Cpath", "，后续说明"],
+  ])("bounds bare URL %s before CJK punctuation", (url, following) => {
+    const { container } = render(<MarkdownTextRenderer>{url + following}</MarkdownTextRenderer>);
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute(
+      "href", encodeURI(url.startsWith("www.") ? `http://${url}` : url).replace(/%25/g, "%"),
+    );
+    expect(container.textContent).toBe(url + following);
+  });
+
+  it("preserves explicit URL punctuation and literal URLs in code and escapes", () => {
+    const url = "https://example.com/中文，测试";
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {`[Explicit](${url}) <${url}>\n\n\`**${url}**\`\n\n\`\`\`text\n**${url}**\n\`\`\`\n\n\\*\\*${url}\\*\\*`}
+      </MarkdownTextRenderer>,
+    );
+    expect(screen.getByRole("link", { name: "Explicit" })).toHaveAttribute("href", encodeURI(url));
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", encodeURI(url));
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container.querySelector("code")?.textContent).toBe(`**${url}**`);
+  });
+
+  it("keeps GFM link boundaries before a partial Markdown resource containing CJK text", () => {
+    const url = "https://example.com/path";
+    const source = `${url}](中文，后续说明。`;
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(container.textContent).toBe(source);
+  });
+
   it("renders bold CJK text when more CJK text follows immediately", () => {
     render(
       <MarkdownTextRenderer streaming>
@@ -580,6 +656,53 @@ describe("MarkdownTextRenderer", () => {
       screen.getByText("结论：目前看风险可控，没有发现常驻或可疑安装。").tagName,
     ).toBe("STRONG");
     expect(screen.getByText(/如果你之后不想再用/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["**边界说明：**issue 只有截图，没有原始消息。", "issue 只有截图，没有原始消息。"],
+    ["**边界说明： **issue 只有截图，没有原始消息。", " issue 只有截图，没有原始消息。"],
+  ])("renders CJK bold labels before Latin text through stream completion: %s", (source, following) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    expect(container.textContent).toBe(`边界说明：${following}`);
+
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
+    expect(container.textContent).toBe(`边界说明：${following}`);
+  });
+
+  it("keeps literal bold markers in code and escaped text", () => {
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {"`**边界说明：**issue`\n\n```text\n**边界说明： **issue\n```\n\n\\*\\*边界说明：\\*\\*issue"}
+      </MarkdownTextRenderer>,
+    );
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container).toHaveTextContent("**边界说明：**issue");
+    expect(container).toHaveTextContent("**边界说明： **issue");
+    expect(container.querySelector("p:last-child")?.textContent).toBe("**边界说明：**issue");
+  });
+
+  it.each([
+    ["**结论：**继续 &amp; 其他说明。", "结论：继续 & 其他说明。"],
+    ["**边界说明：**issue &amp; details", "边界说明：issue & details"],
+    ["先写转义标点 \\#，然后 **结论：**继续说明。", "先写转义标点 #，然后 结论：继续说明。"],
+    ["\\*\\*字面符号：\\*\\*issue 和 **结论：**继续说明。", "**字面符号：**issue 和 结论：继续说明。"],
+    ["&#42;&#42;字面符号：&#42;&#42;issue 和 **结论：**继续说明。", "**字面符号：**issue 和 结论：继续说明。"],
+    ["- 第一行\n  **结论：**继续 &amp; 其他说明。", "第一行\n结论：继续 & 其他说明。"],
+  ])("recovers CJK bold labels without reinterpreting decoded text: %s", (source, text) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    expect(container.textContent?.trim()).toBe(text);
+    rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll("strong")).toHaveLength(1);
+    expect(container.textContent?.trim()).toBe(text);
   });
 
   it("adds line numbers to multiline fenced code without changing inline code", () => {
@@ -821,6 +944,48 @@ describe("MarkdownTextRenderer", () => {
     }
     expect(container.querySelector(".katex-error")).toBeNull();
     expect(container.querySelector("annotation")).toHaveTextContent("C = \\sum_i c_i");
+  });
+
+  it.each([false, true])("keeps TeX equations out of Markdown headings (streaming=%s)", (streaming) => {
+    const formula = String.raw`\tan\left(\frac{\mathrm{HFOV}}{2}\right)
+=
+\frac{X}{Z}`;
+    const source = "Before\n\n\\[\n" + formula + "\n\n\\]\n\nAfter";
+    const { container } = render(
+      <MarkdownTextRenderer streaming={streaming}>{source}</MarkdownTextRenderer>,
+    );
+    expect(container.querySelector(".katex-display annotation")?.textContent?.trim()).toBe(formula);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("h1, h2")).toBeNull();
+    expect(container).toHaveTextContent("Before");
+    expect(container).toHaveTextContent("After");
+  });
+
+  it("keeps an unfinished TeX command renderable when Remend adds a link suffix", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming>{"\\[\n\\"}</MarkdownTextRenderer>,
+    );
+    expect(container.textContent).not.toBe("");
+  });
+
+  it("recovers a complete TeX equation after every streaming prefix", () => {
+    const source = String.raw`\[
+\boxed{
+\mathrm{HFOV}
+=
+
+2\arctan\left(\frac{W}{2f_x}\right)
+}
+\]`;
+    const { container, rerender } = render(<MarkdownTextRenderer streaming>{""}</MarkdownTextRenderer>);
+    for (let end = 1; end <= source.length; end++) {
+      rerender(<MarkdownTextRenderer streaming>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    rerender(<MarkdownTextRenderer streaming>{source + "\n\nFollowing paragraph"}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("h1, h2")).toBeNull();
+    expect(container).toHaveTextContent("Following paragraph");
   });
 
   it("still renders explicit math blocks", () => {

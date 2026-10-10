@@ -36,6 +36,8 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
     const memory = screen.getByRole("switch", { name: "Memory consolidation" });
     const web = screen.getByRole("switch", { name: "Web access" });
+    expect(memory).toHaveClass("h-5", "w-9", "bg-foreground");
+    expect(web).toHaveClass("h-5", "w-9", "bg-foreground");
     const webStyle = web.className;
     fireEvent.click(memory);
     await waitFor(() => expect(memory).toBeDisabled());
@@ -44,6 +46,7 @@ describe("Settings capabilities", () => {
     expect(web.className).toBe(webStyle);
     fireEvent.click(web);
     expect(web).not.toBeChecked();
+    expect(web).toHaveClass("bg-muted-foreground/25");
     await act(async () => finishMemory(memorySaved));
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.runtime_config.update", { values: { "tools.web.enable": false } }, 20_000,
@@ -332,7 +335,6 @@ describe("Settings capabilities", () => {
       runtime_surface: "native" as const,
       runtime_capabilities: {
         can_restart_engine: true,
-        can_pick_folder: true,
         can_open_logs: true,
         can_export_diagnostics: true,
       },

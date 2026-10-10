@@ -1,4 +1,296 @@
 {
+  "remote": {
+    "compatibility": {
+      "title": "版本检查",
+      "client": "这台电脑",
+      "host": "服务器",
+      "unreported": "未报告",
+      "compatible": "兼容",
+      "compatibleHint": "可直接连接，无需更新。",
+      "unknown": "尚无法确认兼容性",
+      "unknownHint": "还无法确认这台服务器是否支持本地界面。请更新服务器上的 nanobot，然后重新连接。",
+      "update_host": "需要更新服务器",
+      "update_hostHint": "本地界面需要的功能在这台服务器上还不可用。请更新服务器上的 nanobot，然后重新连接。",
+      "update_client": "需要更新本地",
+      "update_clientHint": "这台服务器需要更新的本地界面。请更新这台电脑上的 nanobot，服务器无需改动。",
+      "unchecked": "尚未检查",
+      "uncheckedHint": "连接这台服务器后检查兼容性。无法获取版本不代表版本过旧。",
+      "localUpdateHint": "更新这台电脑上安装的 nanobot，然后重新打开 WebUI。不会更改远程服务器。",
+      "serverUpdateHint": "请更新服务器上实际运行的那份 nanobot。先备份配置和数据，重启前结束正在运行的任务。更新这台电脑不会更新服务器。",
+      "guide": "更新说明",
+      "preparation": "更新须知"
+    },
+    "rename": {
+      "action": "重命名",
+      "title": "重命名服务器",
+      "name": "名称",
+      "hint": "只修改这里显示的名称。"
+    },
+    "sameInstance": {
+      "forgetAction": "忘记",
+      "switchHint": "要使用另一份授权，请先断开当前连接。",
+      "title": "这个 nanobot 已连接过",
+      "saveAndOpen": "保存并打开",
+      "pairHint": "服务器列表只保留一条。这次授权也会保存，已有连接不会被删除。",
+      "details": "连接详情",
+      "detailsHint": "这些连接指向同一个 nanobot。选择一个使用，或管理它的授权。",
+      "connection": "连接 {{count}}",
+      "manageConnection": "管理连接 {{count}}",
+      "forgetConnection": "忘记此连接",
+      "forgetTitle": "忘记此连接？",
+      "forgetHint": "只移除此电脑上的这条连接，其他连接和服务器上的数据会保留。"
+    },
+    "activeForgetWarning": "也会断开正在使用此连接的标签页，未保存的内容可能丢失。",
+    "saved": "已保存",
+    "pair": {
+      "waitingForLocal": "正在连接本机 nanobot…",
+      "expiringDevice": "授权将于 {{date}} 到期。",
+      "expiredDevice": "授权已到期，重新连接前请再次配对。",
+      "introHint": "在服务器上运行一条命令，即可从这台电脑访问 nanobot。",
+      "copiedTitle": "命令已复制",
+      "afterCopyHint": "去服务器终端粘贴运行。确认授权后，点击返回链接回到这里。",
+      "copyAgain": "再次复制",
+      "otherWays": "其他方式",
+      "helpTitle": "使用条件与帮助",
+      "validityHint": "命令 10 分钟内有效。授权前，请确认访问权限。",
+      "linkDescription": "在服务器运行命令，点击返回链接",
+      "preparing": "正在准备连接…",
+      "linkRunHint": "将命令粘贴到云服务器终端，按提示授权这台电脑。命令有效期为 10 分钟。",
+      "showCommand": "查看命令",
+      "checkingLink": "正在核对连接链接…",
+      "returnTitle": "2. 返回 nanobot",
+      "returnHint": "授权后，在这台电脑上打开终端给出的链接，连接信息会自动填好。",
+      "pasteInstead": "连接码",
+      "confirmLinkDescription": "确认链接或码来自可信服务器终端",
+      "route": "网络路径",
+      "direct": "直接连接",
+      "savedRoute": "已有路径",
+      "routeDescription": "VPN 或自定义 SSH 网络路径",
+      "routeHint": "借用已有 SSH 网络路径\n\n可以借用同一服务器已有 SSH 连接的网络路径。不会复制其登录密钥或凭据。",
+      "title": "配对连接",
+      "description": "在服务器运行命令，再贴回连接码",
+      "steps": {
+        "run": "把配对命令复制到服务器终端运行。",
+        "paste": "贴回服务器生成的连接码。",
+        "connect": "确认服务器，打开 nanobot。"
+      },
+      "requirements": "需 Linux 和 nanobot\n\n适用于已安装 nanobot 的 Linux 服务器。仍需 SSH 网络可达；不需要中继，也不用公开 WebUI。",
+      "useSSH": "SSH 连接",
+      "start": "获取命令",
+      "runTitle": "1. 在服务器上运行",
+      "runHint": "在云控制台的终端粘贴命令，按提示操作。如果提示需要管理员权限，确认后即可继续。服务器也需安装当前版本的 nanobot。",
+      "command": "配对命令",
+      "copy": "复制命令",
+      "copied": "已复制",
+      "copyFailed": "复制失败，请选中上面的命令手动复制。",
+      "code": "连接码",
+      "codeHint": "粘贴终端里以 nbpc1. 开头的连接码，只能用于本次本地配对。",
+      "expired": "配对请求已过期，请重新生成命令。如果已在服务器授权，请用终端显示的撤销命令清理旧授权。",
+      "restart": "重新获取命令",
+      "review": "确认连接信息",
+      "confirmTitle": "打开这个 nanobot？",
+      "confirmDescription": "请确认连接码来自你自己的可信服务器终端。",
+      "access": "这台电脑将能访问此 nanobot 的聊天、设置，以及已启用的工具。",
+      "expiry": "设备授权有效期至 {{date}}。不会更改服务器现有的 SSH 和 nanobot 端口开放范围。",
+      "security": "授权管理",
+      "fingerprint": "连接时会核对服务器终端提供的 SSH 指纹：",
+      "revoke": "如需撤销新连接，在服务器运行以下命令，并关闭已打开的远程会话：",
+      "retryHint": "配对已保存，无需重复运行服务器命令。若网络或 VPN 阻断 SSH，配对无法绕过该限制。",
+      "forgetHint": "若还要撤销此设备的服务器授权，请在服务器运行："
+    },
+    "setup": {
+      "progress": "连接设置",
+      "server": "服务器",
+      "nanobot": "nanobot",
+      "signedIn": "SSH 已连接",
+      "changeServer": "更改",
+      "chooseNanobot": "打开哪一个 nanobot？",
+      "yourNanobot": "你的 nanobot",
+      "serviceAccount": "运行账户为 {{user}}。打开时将使用已有的 sudo 权限。",
+      "notFound": "没有找到 nanobot 配置",
+      "notFoundHint": "请确认服务器已安装并运行 nanobot。Docker 或自定义部署需要向部署者获取配置路径和服务账户。",
+      "limitedSearch": "已检查你的配置和 nanobot 系统服务。其他部署方式可能需要在下方指定路径。",
+      "manualLocation": "指定位置",
+      "keyHint": "填写这台电脑上的 SSH 私钥文件路径，不是密钥内容或模型 API Key。暂不支持仅用 SSH 密码登录。",
+      "locationHint": "这里填写服务器上的路径和账户。不会安装程序或修改权限。",
+      "sshSettings": "SSH 登录设置",
+      "checking": "正在登录并寻找 nanobot…",
+      "opening": "正在打开已有的 nanobot…",
+      "openNanobot": "打开 nanobot",
+      "chooseFile": "选择文件：{{field}}",
+      "pickingFile": "请在系统窗口中选择文件…"
+    },
+    "searchHosts": "搜索主机…",
+    "noMatchingHosts": "没有匹配的主机",
+    "commandHint": "填写 用户名@服务器，或选择已有 SSH 主机。我们会先登录服务器，再寻找 nanobot。",
+    "commandImported": "已填入 SSH 设置，可在「连接选项」中查看。",
+    "hostPlaceholder": "主机别名或 用户名@服务器",
+    "addressHint": "自动沿用已有 SSH 配置中的用户名、密钥和端口。",
+    "manualAddress": "没有匹配的别名，也可以直接连接上面输入的地址。",
+    "connectionOptions": "连接选项",
+    "editDescription": "保存连接设置，不立即切换服务器",
+    "save": "保存修改",
+    "saving": "正在保存…",
+    "connect": "连接",
+    "localShort": "本地",
+    "disconnectTitle": "断开与 {{name}} 的连接？",
+    "disconnectDescription": "断开共享连接，服务器仍继续运行\n\n将关闭此服务器页面及共享的 SSH 连接，可能丢失未保存的内容，并影响其他正在使用此连接的标签页。服务器上的 nanobot 会继续运行。",
+    "hostBar": "当前连接",
+    "switchHost": "切换主机",
+    "manageConnections": "管理连接",
+    "ready": "已就绪",
+    "preparing": "正在连接 {{name}}…",
+    "cancelSwitch": "取消切换",
+    "sshHosts": "来自 SSH 配置",
+    "refreshHosts": "刷新 SSH 主机",
+    "useHost": "使用 {{host}}",
+    "partialHosts": "部分配置未能列出，你仍可手动输入主机别名或地址。",
+    "discoveryError": "无法读取 SSH 主机，请重试或手动输入地址。",
+    "portPlaceholder": "沿用 SSH 配置",
+    "loading": "正在读取连接…",
+    "retry": "重试",
+    "unavailable": "请从本地运行的 nanobot 打开此页面，才能通过 SSH 连接服务器。",
+    "back": "返回",
+    "disconnect": "断开连接",
+    "verifyTitle": "身份验证",
+    "verifyDescription": "首次连接前请核对 SSH 指纹\n\n第一次连接前，请与服务器控制台或管理员核对下面的 SSH 指纹。",
+    "verifyHint": "指纹一致再继续。只保存这台服务器的公钥，不修改系统 SSH 配置。",
+    "verifyConnect": "指纹一致，继续连接",
+    "title": "远程连接",
+    "description": "连接远程 nanobot，数据留在服务器",
+    "local": "本地 nanobot",
+    "current": "正在使用",
+    "remote": "远程",
+    "returnLocal": "切回本地",
+    "add": "连接远程 nanobot",
+    "addTitle": "添加连接",
+    "addDescription": "连接已有 nanobot，数据留在服务器",
+    "host": "SSH 地址",
+    "name": "名称（可选）",
+    "namePlaceholder": "团队服务器",
+    "sshPort": "SSH 端口",
+    "ssh_config": "SSH 配置",
+    "identity_file": "私钥路径",
+    "config_path": "配置路径",
+    "runtime_user": "运行账号",
+    "connecting": "正在连接…",
+    "opening": "正在打开服务器…",
+    "frameTitle": "{{name}} 上的 nanobot",
+    "offline": "与服务器的连接已断开",
+    "noFallback": "当前仍在使用远程 nanobot，不会将操作转到本地 nanobot。",
+    "reconnect": "重新连接",
+    "manage": "管理 {{name}}",
+    "edit": "编辑连接",
+    "forget": "移除连接",
+    "forgetTitle": "忘记 {{name}}？",
+    "forgetDescription": "仅移除本机连接，服务器数据和密钥保留\n\n只移除本机保存的连接。服务器上的 nanobot、密钥和会话都不会被删除。",
+    "errors": {
+      "webui_compatibility_unknown": "还无法确认这台服务器是否支持本地界面。请更新服务器上的 nanobot，然后重新连接。",
+      "host_update_required": "本地界面需要的功能在这台服务器上还不可用。请更新服务器上的 nanobot，然后重新连接。",
+      "client_update_required": "这台服务器需要更新的本地界面。请更新这台电脑上的 nanobot，服务器无需改动。",
+      "local_webui_unavailable": "本地 WebUI 文件缺失。请修复或重新构建这台电脑上的 nanobot；服务器不需要安装前端文件。",
+      "invalid_name": "请输入 1–64 个字符的名称，不能包含换行。",
+      "local_connection_unavailable": "暂时无法连接这台电脑上的 nanobot，请确保它正在运行后重试。",
+      "disconnected": "此共享连接已断开，需要时可重新连接。",
+      "instance_changed": "此服务器的连接已发生变化。重新连接会重新打开页面，未发送的草稿可能丢失。",
+      "pair_authorization_rejected": "服务器不再接受这台设备的密钥，授权可能已撤销或过期。请从服务器终端重新配对。",
+      "pair_route_mismatch": "请选择指向同一台服务器的 SSH 连接。",
+      "pair_route_unsupported": "此连接使用了跳板机，请使用原有 SSH 连接入口。",
+      "pair_invalid": "连接码无效，或不属于本次配对，请从服务器终端重新复制。",
+      "pair_expired": "配对请求已过期，请重新获取命令。",
+      "pair_authorization_expired": "设备授权已过期，请重新配对。",
+      "pair_used": "此请求已使用，请重新获取命令。",
+      "pair_limit": "请关闭其他配对窗口后重试。",
+      "pair_managed": "更换服务器或凭据请重新配对。",
+      "ssh_connection_closed": "SSH 连接在建立过程中断开，还不能判断是密钥问题。请检查 VPN／代理，或使用终端中能登录的 SSH 配置。",
+      "ssh_refused": "服务器拒绝了 SSH 连接。请检查 SSH 端口及服务是否运行。",
+      "ssh_host_not_found": "无法解析服务器名称。请检查地址，或从 SSH 配置中选择主机。",
+      "ssh_too_many_keys": "SSH 尝试了过多密钥。请在 SSH 配置中指定正确密钥，并设置 IdentitiesOnly yes。",
+      "duplicate_instance": "这个 nanobot 已通过另一个 SSH 地址连接，请在「切换主机」中使用已有连接。",
+      "ssh_agent_refused": "SSH 密钥代理未同意使用密钥。请在密钥管理器中解锁或确认后重试。如果只有终端能连接，请从那个终端重新启动 nanobot。",
+      "ssh_key_permissions": "SSH 拒绝使用权限过宽的私钥文件。请将文件访问权限限制为你的账号后重试。",
+      "ssh_config_invalid": "OpenSSH 无法读取这些连接设置，请在终端检查所选 SSH 配置。",
+      "ssh_forwarding_denied": "SSH 已登录，但服务器禁止端口转发。请让管理员允许转发到 nanobot 的回环端口。",
+      "probe_failed": "SSH 已登录，但未能运行 nanobot 检查。请确认该账号能执行非交互式 Python 命令。",
+      "invalid_ssh_command": "可输入主机别名、用户名@服务器，或含 -p、-i、-F、-l 的 ssh 命令。含空格的路径请加引号；其他选项请写入 SSH 配置，不支持附带远程命令。",
+      "view_limit": "已保留 3 个服务器界面。请在管理连接中断开其中一个，再打开新服务器。",
+      "view_load_failed": "服务器界面加载较慢，请重试。当前界面保持不变。",
+      "same_instance": "这是你当前正在使用的 nanobot，无需再次连接。",
+      "ssh_config_unreadable": "无法读取此 SSH 配置，请检查文件路径、权限和格式。",
+      "local_port_in_use": "这个连接的本机端口正被其他程序占用。请关闭占用程序后重试，或忘记并重新添加连接。",
+      "host_key_scan_failed": "暂时无法获取服务器指纹。如果使用跳板机，请通过已有 SSH 配置验证身份。",
+      "unknown": "连接未成功，请检查服务器后重试。",
+      "directory_unavailable": "暂时无法读取已保存的服务器，请重试。",
+      "ssh_unavailable": "本机需要安装 OpenSSH 客户端才能连接。",
+      "ssh_auth_failed": "SSH 登录失败。请检查用户名和密钥；加密的密钥需要先在系统 SSH agent 中解锁。",
+      "ssh_unreachable": "无法连接服务器的 SSH，请检查地址、端口和网络。",
+      "host_key_unknown": "本机还没有验证过这台服务器。请先与服务器管理员核对 SSH 指纹后再连接。",
+      "host_key_changed": "服务器的 SSH 身份发生了变化，已阻止连接。请先与管理员确认，不要跳过这个警告。",
+      "local_file_not_found": "本机找不到指定的 SSH 配置文件或私钥。",
+      "file_picker_unavailable": "无法打开文件选择窗口，也可以直接填写本机文件路径。",
+      "runtime_user_denied": "SSH 已登录，但不能免密切换到这个运行账号，请与服务器管理员确认。",
+      "python_unavailable": "服务器需要 python3 来读取已有的 nanobot 配置。",
+      "config_not_found": "找不到 nanobot 配置，请在「连接选项」中填写它在服务器上的路径。",
+      "config_permission": "SSH 账号无权读取 nanobot 配置，请在「连接选项」中填写 nanobot 的运行账号。",
+      "config_invalid": "无法读取服务器上的 nanobot 配置。",
+      "webui_disabled": "服务器的 WebUI 尚未启用，请先在服务器上开启。",
+      "webui_auth_required": "服务器需要在配置中设置 WebUI 登录密钥。这里不需要模型 Key。",
+      "public_ws_unsupported": "这台服务器设置了公网 WebSocket 地址。首版支持通过 SSH 连接回环地址上的 WebUI。",
+      "remote_auth_failed": "服务器拒绝了 WebUI 登录凭据，请检查它实际运行的配置。",
+      "incompatible_gateway": "该地址不是兼容的 nanobot gateway，请检查配置或更新服务器版本。",
+      "webui_unavailable": "Gateway 在运行，但没有安装 WebUI。",
+      "remote_unreachable": "SSH 已连接，但 nanobot WebUI 没有响应，请确认它正在运行。",
+      "profile_store_invalid": "无法读取已保存的连接，原文件未被覆盖。",
+      "invalid_profile": "请检查服务器地址、端口和连接选项。",
+      "profile_not_found": "这个连接已不存在，请刷新列表。",
+      "profile_limit": "最多保存 20 条连接。请先在连接详情中移除不再使用的授权，或忘记不再使用的服务器。",
+      "connection_limit": "请先断开一台服务器，再建立新连接。",
+      "disconnect_before_edit": "请先断开这个服务器，再编辑连接信息。",
+      "local_io_error": "无法保存或打开连接，请检查本机文件权限。",
+      "invalid_remote_url": "连接返回了异常地址，已阻止打开。"
+    }
+  },
+  "previewTabs": {
+    "title": "预览",
+    "closeTab": "关闭 {{name}}",
+    "closeAll": "关闭预览栏",
+    "websiteInfo": "关于网页预览"
+  },
+  "webPreview": {
+    "viewLinks": "查看链接",
+    "back": "返回",
+    "original": "原链接",
+    "actions": "链接操作",
+    "open": "预览网页",
+    "external": "浏览器打开",
+    "copy": "复制链接",
+    "copied": "链接已复制",
+    "copyFailed": "无法复制链接",
+    "title": "网页预览",
+    "resize": "调整网页预览宽度",
+    "refresh": "刷新网页",
+    "close": "关闭预览",
+    "isolated": "受限的隔离预览，登录及部分交互功能可能无法使用。",
+    "blockedHint": "部分网站禁止嵌入。如果页面空白或加载失败，请在浏览器中打开。",
+    "loopback": "localhost 指向当前浏览器所在设备，而非远程网关。不会自动转发端口。",
+    "native": "原生客户端暂不支持嵌入预览，请在浏览器中打开此链接。",
+    "unsupported": "此浏览器不支持凭据隔离预览，请在新标签页中打开。",
+    "sameOrigin": "不能在此嵌入 nanobot 应用自身，请在新标签页中打开。",
+    "mixedContent": "HTTPS 页面不能在此预览 HTTP 网站，请在新标签页中打开。",
+    "invalid": "无法预览此地址。",
+    "frame": "网页预览：{{host}}"
+  },
+  "starPrompt": {
+    "footerAction": "给 nanobot 点个 Star",
+    "title": "很高兴，能帮上你的忙。",
+    "intro": "如果 nanobot 让你的日常轻松了一点，",
+    "invitation": "欢迎在 GitHub 留下一颗 Star。",
+    "thanks": "这份小小的鼓励，我们会认真珍惜。",
+    "action": "去点颗 Star",
+    "later": "下次再说",
+    "never": "不再提醒",
+    "saveError": "网络可能出了点问题，之后可能还会弹出此提醒。"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
@@ -24,8 +316,8 @@
     },
     "account": {
       "section": "账户",
-      "logoutHint": "断开此浏览器与网关的连接。",
-      "logout": "注销"
+      "logoutHint": "断开此浏览器与网关的连接",
+      "logout": "退出登录"
     },
     "system": {
       "section": "系统",
@@ -41,14 +333,14 @@
     },
     "documentTitle": {
       "base": "nanobot",
-      "chat": "{{title}} · nanobot"
+      "chat": "{{title}}"
     },
     "meta": {
       "description": "nanobot Web UI —— 与你的 nanobot 工作区对话。"
     },
     "pairing": {
-      "title": "配对你的聊天账号",
-      "description": "输入你在聊天平台中收到的配对码。",
+      "title": "账号配对",
+      "description": "输入聊天平台收到的配对码",
       "code": "配对码",
       "matched": "已匹配 {{channel}}，正在连接…",
       "expiresInline": "配对码将于 {{expires}} 过期。",
@@ -58,10 +350,10 @@
   },
   "temporaryChat": {
     "title": "临时聊天",
-    "retention": "不会保存到历史记录或记忆。",
-    "expiration": "刷新、关闭页面或连接中断后，临时聊天会结束。",
-    "externalEffects": "请求仍会发送给模型提供商，工具操作也可能留下更改。",
-    "clear": "清空临时聊天",
+    "retention": "不保存聊天记录或记忆",
+    "expiration": "刷新、关闭页面或连接中断后结束",
+    "externalEffects": "请求仍发给模型提供商，工具更改可能保留",
+    "clear": "清空聊天",
     "sectionTitle": "临时聊天",
     "closeAction": "关闭临时聊天：{{title}}"
   },
@@ -98,229 +390,229 @@
       "apiSaved": "已保存，重启 API 服务后生效。",
       "fields": {
         "agents_defaults_timezone_mode": {
-          "label": "使用系统时区",
-          "help": "关闭后可手动指定时区。"
+          "label": "系统时区",
+          "help": "关闭后可手动指定时区"
         },
         "agents_defaults_timezone": {
           "label": "时区",
-          "help": "选择时区。UTC 偏移按当前日期显示。"
+          "help": "UTC 偏移按当前日期显示"
         },
         "agents_defaults_dream_enabled": {
           "label": "记忆整理",
-          "help": "自动整理对话中的有用信息。关闭后停止整理，已有记忆仍可使用。"
+          "help": "自动整理记忆；关闭后仍可用已有记忆\n\n自动整理对话中的有用信息。关闭后停止整理，已有记忆仍可使用。"
         },
         "gateway_heartbeat_enabled": {
           "label": "心跳任务",
-          "help": "定期检查 HEARTBEAT.md 中的任务。"
+          "help": "定期检查 HEARTBEAT.md 任务\n\n定期检查 HEARTBEAT.md 中的任务。"
         },
         "gateway_heartbeat_interval_s": {
-          "label": "心跳检查间隔（秒）",
-          "help": "网关启动时按此间隔注册内置心跳任务。"
+          "label": "检查间隔",
+          "help": "心跳任务的检查间隔，单位秒"
         },
         "agents_defaults_max_tool_iterations": {
-          "label": "工具交互轮数上限",
-          "help": "每次回复中，模型与工具最多可以交互多少轮。"
+          "label": "交互上限",
+          "help": "每次回复最多与工具交互多少轮\n\n每次回复中，模型与工具最多可以交互多少轮。"
         },
         "agents_defaults_max_concurrent_subagents": {
-          "label": "子智能体并发上限",
-          "help": "限制同时执行任务的子智能体数量。"
+          "label": "并发上限",
+          "help": "同时执行任务的子智能体数量上限"
         },
         "agents_defaults_max_tool_result_chars": {
-          "label": "工具结果长度上限（字符）",
-          "help": "限制每条工具结果传入模型的长度，按字符计数。"
+          "label": "结果长度",
+          "help": "每条工具结果传给模型的字符上限\n\n限制每条工具结果传入模型的长度，按字符计数。"
         },
         "agents_defaults_provider_retry_mode": {
-          "label": "持续重试模型请求",
-          "help": "遇到可恢复的请求错误时持续重试。关闭后使用标准重试策略。"
+          "label": "持续重试",
+          "help": "可恢复错误持续重试；关闭用标准策略\n\n遇到可恢复的请求错误时持续重试。关闭后使用标准重试策略。"
         },
         "agents_defaults_tool_hint_max_length": {
-          "label": "工具提示长度上限（字符）",
-          "help": "工具执行时显示的简短提示最多包含多少个字符。"
+          "label": "提示长度",
+          "help": "工具执行提示的字符数上限\n\n工具执行时显示的简短提示最多包含多少个字符。"
         },
         "tools_max_session_messages_per_minute": {
-          "label": "每分钟工具消息上限",
-          "help": "限制工具每分钟向同一会话发送的消息数。"
+          "label": "消息频率",
+          "help": "工具每分钟向同一会话发消息的上限"
         },
         "agents_defaults_unified_session": {
-          "label": "跨平台共享会话",
-          "help": "让同一用户在不同聊天平台的对话共用会话记录。"
+          "label": "共享会话",
+          "help": "同一用户的跨平台对话共用记录\n\n让同一用户在不同聊天平台的对话共用会话记录。"
         },
         "tools_exec_enable": {
           "label": "执行命令",
-          "help": "允许智能体执行 Shell 命令。"
+          "help": "允许智能体执行 Shell 命令"
         },
         "tools_file_enable": {
           "label": "读写文件",
-          "help": "启用内置文件读取和编辑工具。"
+          "help": "允许使用内置文件读取和编辑工具"
         },
         "tools_web_enable": {
-          "label": "搜索和读取网页",
-          "help": "启用网页搜索和抓取工具。"
+          "label": "网页访问",
+          "help": "允许搜索网页和读取网页内容"
         },
         "tools_cli_apps_enable": {
-          "label": "使用命令行应用",
-          "help": "允许智能体安装、管理和运行命令行应用。"
+          "label": "CLI 应用",
+          "help": "允许安装、管理和运行 CLI 应用"
         },
         "tools_my_enable": {
-          "label": "查看自身配置",
-          "help": "允许智能体通过内置工具查看自身配置。"
+          "label": "查看配置",
+          "help": "允许智能体查看自身配置"
         },
         "tools_my_allow_set": {
-          "label": "修改自身配置",
-          "help": "允许智能体通过内置工具修改自身配置。"
+          "label": "修改配置",
+          "help": "允许智能体修改自身配置"
         },
         "tools_exec_timeout": {
-          "label": "命令执行超时（秒）",
-          "help": "超过此时长后终止命令。设为 0 表示不限制执行时长。"
+          "label": "执行超时",
+          "help": "执行超时即停止；0 为不限，单位秒\n\n超过此时长后终止命令。设为 0 表示不限制执行时长。"
         },
         "tools_exec_path_prepend": {
-          "label": "优先搜索的命令目录",
-          "help": "添加到 PATH 开头。多个目录在 Windows 上用分号分隔，在 Linux 和 macOS 上用冒号分隔。"
+          "label": "优先目录",
+          "help": "优先查找命令的目录\n\n添加到 PATH 开头。多个目录在 Windows 上用分号分隔，在 Linux 和 macOS 上用冒号分隔。"
         },
         "tools_exec_path_append": {
-          "label": "追加搜索的命令目录",
-          "help": "添加到 PATH 末尾。多个目录在 Windows 上用分号分隔，在 Linux 和 macOS 上用冒号分隔。"
+          "label": "追加目录",
+          "help": "最后查找命令的目录\n\n添加到 PATH 末尾。多个目录在 Windows 上用分号分隔，在 Linux 和 macOS 上用冒号分隔。"
         },
         "tools_exec_sandbox": {
           "label": "命令沙箱",
-          "help": "Linux 使用 bwrap，macOS 使用 Seatbelt。工作区路径限制本身不提供进程隔离。"
+          "help": "隔离命令进程，需系统支持\n\nLinux 使用 bwrap，macOS 使用 Seatbelt。工作区路径限制本身不提供进程隔离。"
         },
         "tools_exec_sandbox_ro_binds": {
-          "label": "沙箱额外只读路径",
-          "help": "额外挂载为只读的路径，每行一项。"
+          "label": "只读路径",
+          "help": "额外只读路径，每行一项"
         },
         "tools_exec_sandbox_rw_binds": {
-          "label": "沙箱额外可写路径",
-          "help": "额外挂载为可写的路径，每行一项。"
+          "label": "可写路径",
+          "help": "额外可写路径，每行一项"
         },
         "tools_exec_allowed_env_keys": {
-          "label": "额外传递的环境变量",
-          "help": "除必需变量外，还要从主机传递给命令的环境变量名称，每行一个。"
+          "label": "环境变量",
+          "help": "额外传给命令的变量名，每行一个\n\n除必需变量外，还要从主机传递给命令的环境变量名称，每行一个。"
         },
         "tools_exec_allow_patterns": {
-          "label": "允许执行的命令规则",
-          "help": "每行一个正则表达式。填写后，只允许每段命令都完整匹配规则的命令执行，且优先于内置和自定义拒绝规则；工作区和网络限制仍生效。"
+          "label": "允许命令",
+          "help": "只允许完整匹配规则的命令\n\n每行一个正则表达式。填写后，只允许每段命令都完整匹配规则的命令执行，且优先于内置和自定义拒绝规则；工作区和网络限制仍生效。"
         },
         "tools_exec_deny_patterns": {
-          "label": "禁止执行的命令规则",
-          "help": "每行一个正则表达式，与内置拒绝规则一同检查。完整匹配允许规则的命令会跳过这些检查。"
+          "label": "禁止命令",
+          "help": "阻止匹配规则的命令\n\n每行一个正则表达式，与内置拒绝规则一同检查。完整匹配允许规则的命令会跳过这些检查。"
         },
         "tools_web_proxy": {
-          "label": "网页访问代理",
-          "help": "网页搜索和读取使用的代理地址，留空使用默认网络设置。"
+          "label": "网页代理",
+          "help": "网页代理地址，留空用默认网络\n\n网页搜索和读取使用的代理地址，留空使用默认网络设置。"
         },
         "tools_web_user_agent": {
           "label": "User-Agent",
-          "help": "网页请求使用的 User-Agent 标识，留空使用默认值。"
+          "help": "网页请求标识，留空使用默认值\n\n网页请求使用的 User-Agent 标识，留空使用默认值。"
         },
         "tools_restrict_to_workspace": {
-          "label": "限制工具访问工作区以外的文件",
-          "help": "设置全局工作区访问限制；WebUI 中每个对话的权限单独设置。"
+          "label": "目录限制",
+          "help": "全局目录限制，WebUI 权限另设\n\n设置全局工作区访问限制；WebUI 中每个对话的权限单独设置。"
         },
         "tools_ssrf_whitelist": {
-          "label": "允许访问的 IP 和网段",
-          "help": "允许网页等出站请求访问这些受限地址。每行填写一个 IP 地址或 CIDR 网段。"
+          "label": "允许 IP",
+          "help": "允许访问的 IP 或 CIDR，每行一项\n\n允许网页等出站请求访问这些受限地址。每行填写一个 IP 地址或 CIDR 网段。"
         },
         "tools_webui_allow_remote_package_install": {
-          "label": "允许远程安装软件包",
-          "help": "允许从其他设备上的 WebUI 安装可选软件包和技能。此开关只能在运行网关的设备上修改。"
+          "label": "远程安装",
+          "help": "包和技能可远程安装，仅网关设备可设\n\n允许从其他设备上的 WebUI 安装可选软件包和技能。此开关只能在运行网关的设备上修改。"
         },
         "tools_cli_apps_install_timeout": {
-          "label": "安装超时（秒）",
-          "help": "安装命令行应用时最长等待多久。"
+          "label": "安装超时",
+          "help": "CLI 应用安装的最长等待秒数"
         },
         "tools_cli_apps_run_timeout": {
-          "label": "运行超时（秒）",
-          "help": "命令行应用中的命令最长可以运行多久。"
+          "label": "运行超时",
+          "help": "CLI 命令运行的最长秒数"
         },
         "tools_cli_apps_catalog_ttl_seconds": {
-          "label": "应用列表缓存时长（秒）",
-          "help": "命令行应用列表的缓存有效期。"
+          "label": "缓存时长",
+          "help": "CLI 应用列表的缓存有效秒数"
         },
         "gateway_host": {
-          "label": "网关监听地址",
-          "help": "网关使用的地址。WebUI 的监听地址需在聊天平台的 WebSocket 设置中单独配置。"
+          "label": "网关地址",
+          "help": "网关地址，WebUI 监听地址另设\n\n网关使用的地址。WebUI 的监听地址需在聊天平台的 WebSocket 设置中单独配置。"
         },
         "gateway_port": {
           "label": "网关端口",
-          "help": "网关使用的端口。启动时指定的命令行参数优先于此设置。"
+          "help": "网关端口，启动参数优先\n\n网关使用的端口。启动时指定的命令行参数优先于此设置。"
         },
         "gateway_restart_mode": {
           "label": "重启模式",
-          "help": "选择网关的重启方式。“自动”会根据运行环境选择。"
+          "help": "选择重启方式，自动按环境决定\n\n选择网关的重启方式。“自动”会根据运行环境选择。"
         },
         "api_host": {
-          "label": "API 监听地址",
-          "help": "允许其他设备连接前，请先在“系统”中设置 API 密钥。修改后需重启 API 服务。"
+          "label": "API 地址",
+          "help": "对外开放须设密钥；修改后重启 API\n\n允许其他设备连接前，请先在“系统”中设置 API 密钥。修改后需重启 API 服务。"
         },
         "api_timeout": {
-          "label": "API 请求超时（秒）",
-          "help": "每次 API 请求最长等待多久。修改后需重启 API 服务。"
+          "label": "API 超时",
+          "help": "API 最长等待秒数，重启服务生效\n\n每次 API 请求最长等待多久。修改后需重启 API 服务。"
         },
         "tools_image_generation_save_dir": {
-          "label": "生成图片保存目录",
-          "help": "nanobot 媒体目录内的子目录。请使用相对路径，已有图片不会迁移。"
+          "label": "保存目录",
+          "help": "媒体目录内相对路径，不迁移已有图片\n\nnanobot 媒体目录内的子目录。请使用相对路径，已有图片不会迁移。"
         }
       },
       "groups": {
         "chat": {
-          "title": "WebUI 会话权限",
-          "help": "WebUI 会话的本地服务访问和默认权限。"
+          "title": "WebUI 权限",
+          "help": "设置对话的本机服务访问和默认权限\n\nWebUI 会话的本地服务访问和默认权限。"
         },
         "identity": {
           "title": "时区",
-          "help": "选择计划任务使用的时区。"
+          "help": "选择计划任务使用的时区"
         },
         "memory": {
           "title": "记忆",
-          "help": "开启或关闭自动记忆整理。"
+          "help": "开启或关闭自动记忆整理"
         },
         "heartbeat": {
           "title": "心跳计划",
-          "help": "配置内置的定期任务检查。"
+          "help": "设置定期任务检查"
         },
         "execution": {
-          "title": "智能体运行限制",
-          "help": "调整工具执行上限和重试行为。"
+          "title": "运行限制",
+          "help": "设置工具上限和请求重试方式"
         },
         "sessions": {
           "title": "会话",
-          "help": "设置跨平台的会话共享。"
+          "help": "设置跨平台对话共享"
         },
         "tools": {
           "title": "内置工具",
-          "help": "选择智能体可以使用的工具。"
+          "help": "选择智能体可以使用的工具"
         },
         "shell": {
           "title": "Shell 与沙箱",
-          "help": "命令超时、环境、挂载路径和命令过滤。"
+          "help": "设置命令超时、环境和访问规则"
         },
         "network": {
-          "title": "网页连接设置",
-          "help": "设置网页访问代理和 User-Agent 标识。"
+          "title": "网页连接",
+          "help": "设置代理和 User-Agent\n\n设置网页访问代理和 User-Agent 标识。"
         },
         "safety": {
-          "title": "全局访问策略",
-          "help": "设置工作区访问限制、网络访问例外和远程安装权限。"
+          "title": "全局权限",
+          "help": "设置目录限制、网络例外和远程安装\n\n设置工作区访问限制、网络访问例外和远程安装权限。"
         },
         "cli": {
-          "title": "命令行应用限制",
-          "help": "设置安装和运行超时，以及应用列表的缓存时长。"
+          "title": "CLI 限制",
+          "help": "设置安装、运行超时和列表缓存\n\n设置安装和运行超时，以及应用列表的缓存时长。"
         },
         "gateway": {
-          "title": "网关进程",
-          "help": "部署和进程重启配置。"
+          "title": "网关",
+          "help": "设置部署和重启方式"
         },
         "api": {
-          "title": "API 服务高级设置",
-          "help": "设置监听地址和请求超时。"
+          "title": "API 设置",
+          "help": "设置监听地址和请求超时"
         },
         "storage": {
           "title": "图片存储",
-          "help": "选择生成图片的保存位置。"
+          "help": "选择生成图片的保存位置"
         },
         "maintenance": {
-          "title": "记忆调度",
+          "title": "记忆整理",
           "help": ""
         },
         "web": {
@@ -328,7 +620,7 @@
           "help": ""
         },
         "applications": {
-          "title": "命令行应用",
+          "title": "CLI 应用",
           "help": ""
         }
       },
@@ -361,7 +653,7 @@
       "capabilities": "功能",
       "general": "通用",
       "byok": "BYOK",
-      "overview": "概览",
+      "overview": "总览",
       "appearance": "外观",
       "models": "模型",
       "providers": "提供商",
@@ -369,7 +661,7 @@
       "voice": "语音",
       "browser": "网络",
       "channels": "聊天平台",
-      "cliApps": "命令行应用",
+      "cliApps": "CLI 应用",
       "mcp": "MCP",
       "runtime": "系统",
       "advanced": "高级",
@@ -384,23 +676,27 @@
       "system": "系统",
       "about": "关于",
       "status": "状态",
-      "localPreferences": "浏览器偏好设置",
+      "localPreferences": "界面偏好",
       "presets": "预设",
       "imageGeneration": "图片生成",
-      "imageDefaults": "图片默认设置",
+      "imageDefaults": "默认图片",
       "webSearch": "网络搜索",
-      "webBehavior": "网页访问设置",
-      "cliApps": "命令行应用",
+      "webBehavior": "网页访问",
+      "cliApps": "CLI 应用",
       "mcp": "MCP 服务",
-      "regional": "地区与时区",
+      "regional": "地区时区",
       "webuiSafety": "WebUI 安全",
       "capabilities": "功能",
       "apps": "应用",
       "nativeHost": "桌面应用",
       "hostSafety": "应用安全",
-      "voiceInput": "语音识别"
+      "voiceInput": "语音转写"
     },
     "models": {
+      "catalogAuthRequired": "授权已失效，请重新登录。",
+      "catalogUnavailable": "暂时无法刷新模型，请稍后重试。",
+      "catalogStale": "当前显示缓存的模型列表，可能不是最新。",
+      "catalogFallback": "当前显示内置模型列表，可能不是最新。",
       "selectModel": "选择模型",
       "addConfiguration": "添加配置",
       "newConfiguration": "新建模型配置",
@@ -408,27 +704,37 @@
       "configurationName": "配置名称",
       "configurationNameHelp": "重命名这个已保存的模型配置。",
       "configurationNamePlaceholder": "快速写作",
-      "callOrder": "模型调用顺序",
+      "callOrder": "使用顺序",
       "primary": "主模型",
       "fallbackNumber": "备用模型 {{number}}",
       "addToOrder": "启用预设",
-      "newPreset": "新建模型预设",
-      "newPresetHelp": "保存模型及其生成参数，方便在不同任务中选用。",
+      "newPreset": "新建预设",
+      "newPresetHelp": "保存模型和参数，方便下次选用",
       "presets": "模型预设",
       "editPreset": "编辑预设",
       "presetName": "预设名称",
-      "presetNameHelp": "用于界面和 /model 命令。请使用不重复的名称。",
+      "presetNameHelp": "名称不可重复，也用于 /model",
       "presetNameDuplicate": "已存在同名预设。",
       "presetNamePlaceholder": "例如：快速写作",
       "advancedOptions": "高级选项",
-      "advancedSummary": "上下文 {{context}} · 输出上限 {{max}} Token",
+      "requestAPI": "连接方式",
+      "requestAPIDescription": "自动选择使用连接默认值或已知模型规则，不会探测服务是否支持该 API。仅在服务要求特定 API 时手动选择。",
+      "apiAuto": "自动",
+      "fixedAPIDescription": "此连接固定使用 {{api}}。",
+      "apiFallback": "Responses 不兼容时尝试 Chat Completions",
+      "apiFallbackDescription": "Responses 接口不兼容时尝试 Chat Completions。仅在服务通过两种接口都支持同一个模型时开启。",
+      "apiTranscription": "语音转写",
+      "contextSummary": "上下文 {{context}}",
+      "outputSummary": "输出上限 {{max}} Token",
+      "contextWindowHint": "{{tokens}} Token",
+      "contextWindowError": "请输入正数 Token 数量，例如 200k、1m 或 131072。",
       "maxTokens": "输出 Token 上限",
       "temperature": "温度",
       "reasoningEffort": "推理强度",
-      "convertTitle": "转换现有模型设置",
-      "convertHelp": "把现有主模型和备用模型转换成预设，之后即可在这里管理调用顺序。",
+      "convertTitle": "转换设置",
+      "convertHelp": "将主模型和备用模型转为预设",
       "converting": "正在转换...",
-      "convertAction": "转换为预设",
+      "convertAction": "转为预设",
       "dragToReorder": "拖动调整顺序",
       "moveUp": "上移",
       "moveDown": "下移",
@@ -442,7 +748,7 @@
       "configureProviderBeforeSaving": "请先配置此提供商，再保存预设。",
       "deletePresetTitle": "删除模型预设？",
       "deletePresetHelp": "删除预设“{{name}}”，同时将它从备用模型列表中移除。提供商凭据会保留。",
-      "searchModels": "搜索或输入模型 ID",
+      "searchModels": "选择模型",
       "useCustomModel": "使用",
       "loadingModels": "正在加载模型...",
       "searchCatalog": "搜索此提供商的模型列表。",
@@ -460,34 +766,35 @@
       "provider": "提供商",
       "model": "模型",
       "restart": "重启 nanobot",
-      "configPath": "配置文件路径",
+      "configPath": "配置路径",
       "activePreset": "当前预设",
       "gateway": "网关",
       "restartState": "重启状态",
-      "pendingChanges": "待应用更改",
+      "pendingChanges": "待生效项",
       "currentModel": "当前配置",
-      "selectedPreset": "选中的预设",
+      "selectedPreset": "所选预设",
       "presetModel": "预设模型",
-      "activityMode": "活动详情",
-      "fileEditDisplay": "文件修改预览",
+      "activityMode": "处理过程",
+      "fileEditDisplay": "修改预览",
       "codeWrap": "代码换行",
       "brandLogos": "品牌图标",
       "browserNotifications": "任务通知",
-      "maxResults": "搜索结果数量上限",
-      "timeout": "搜索超时（秒）",
+      "notificationSound": "完成音效",
+      "maxResults": "结果上限",
+      "timeout": "搜索超时",
       "jinaReader": "Jina Reader",
       "imageGeneration": "图片生成",
-      "imageProvider": "图片生成提供商",
-      "imageProviderStatus": "提供商状态",
-      "imageProviderBase": "提供商地址",
-      "imageModel": "图片生成模型",
-      "defaultAspectRatio": "默认宽高比",
+      "imageProvider": "提供商",
+      "imageProviderStatus": "配置状态",
+      "imageProviderBase": "服务地址",
+      "imageModel": "图片模型",
+      "defaultAspectRatio": "默认比例",
       "defaultImageSize": "默认尺寸",
-      "maxImagesPerTurn": "单次生成图片上限",
+      "maxImagesPerTurn": "图片上限",
       "imageSaveDir": "保存目录",
       "timezone": "时区",
-      "workspacePath": "默认工作区",
-      "localServiceAccess": "允许访问本机服务",
+      "workspacePath": "工作目录",
+      "localServiceAccess": "本机服务",
       "webuiDefaultAccess": "默认权限",
       "cliAppsCatalog": "应用列表",
       "cliAppsFilter": "筛选",
@@ -497,53 +804,54 @@
       "contextWindow": "上下文窗口",
       "transcription": "语音转写",
       "transcriptionProvider": "提供商",
-      "transcriptionProviderStatus": "提供商状态",
+      "transcriptionProviderStatus": "配置状态",
       "transcriptionModel": "模型",
       "transcriptionLanguage": "语言",
       "voiceLimits": "限制"
     },
     "help": {
-      "theme": "在浅色和深色外观之间切换。",
-      "language": "选择 WebUI 使用的语言。",
-      "provider": "选择处理新模型请求的提供商。",
-      "model": "选择此预设使用的模型。",
-      "configPath": "当前网关正在使用的配置文件。",
-      "currentModel": "用于新的回复。",
+      "theme": "切换浅色或深色外观",
+      "language": "选择界面语言",
+      "provider": "选择处理新请求的提供商",
+      "model": "选择此预设使用的模型",
+      "configPath": "当前网关使用的配置文件",
+      "currentModel": "用于新的回复",
       "selectedModelProvider": "由选中的模型决定。",
       "selectedModelValue": "由选中的模型决定。",
-      "selectedPreset": "在“模型”中编辑已保存的预设。",
-      "presetModel": "在“模型”中选择预设，即可修改模型和提供商。",
-      "activityMode": "选择默认显示的智能体执行详情。",
-      "fileEditDisplay": "选择默认显示修改行数，还是展开代码差异。",
-      "codeWrap": "让长代码行在小屏幕上也易读。",
-      "brandLogos": "在设置中显示提供商和命令行应用的品牌图标。",
-      "browserNotifications": "仅在页面位于后台时通知，默认关闭。",
-      "maxResults": "每次网络搜索最多返回多少条结果。",
-      "timeout": "每次搜索请求最长等待多久。",
-      "jinaReader": "读取网页时，优先使用可用的 Jina Reader。",
-      "imageGeneration": "配置图片生成提供商后，即可在对话中生成图片。",
-      "imageProvider": "选择用于生成图片的提供商。",
-      "imageProviderStatus": "使用“提供商”中已保存的凭据。",
-      "imageModel": "选择当前图片提供商支持的模型。",
-      "defaultAspectRatio": "请求未指定宽高比时使用此设置。",
-      "defaultImageSize": "请求生成的图片尺寸，仅对支持此选项的提供商生效。",
-      "maxImagesPerTurn": "一次图片生成请求最多生成多少张图片。",
-      "timezone": "用于安排任务，以及回复与时间有关的问题。",
-      "cliAppsCatalog": "安装供 nanobot 使用的命令行工具，不会安装或修改对应的桌面应用。",
-      "cliAppsFilter": "按应用名称、分类或功能搜索。",
-      "localServiceAccess": "允许具有“完全访问权限”的 Shell 命令连接本机服务。",
-      "webuiDefaultAccess": "对话所属项目未单独设置权限时，使用此权限。",
-      "securityManagedControls": "网页请求默认禁止访问本机、内网和云元数据服务，明确允许的地址除外。聊天平台的安全设置单独管理。",
-      "logs": "打开桌面应用的引擎日志文件夹。",
-      "diagnostics": "导出运行诊断报告，方便排查问题。",
-      "localServiceAccessNative": "允许具有“完全访问权限”的 Shell 命令连接这台 Mac 上的服务。",
-      "webuiDefaultAccessNative": "桌面应用中的对话所属项目未单独设置权限时，使用此权限。",
-      "contextWindow": "设置此模型可使用的上下文 Token 数量。",
-      "transcription": "发送前先把麦克风输入转写到输入框。聊天平台里的语音消息也使用同一套设置。",
-      "transcriptionProvider": "使用“提供商”中已保存的凭据。",
-      "transcriptionProviderStatus": "API 密钥仍保存在“提供商”配置中，不写入“语音转写”设置。",
-      "transcriptionModel": "通常保留默认模型即可；提供商有特殊要求时，可填写模型 ID。",
-      "transcriptionLanguage": "可选填语言代码，例如 en（英语）、zh（中文）、ja（日语）或 ko（韩语）。"
+      "selectedPreset": "在模型页编辑已保存的预设",
+      "presetModel": "在模型页修改模型和提供商",
+      "activityMode": "选择处理过程的默认展示方式",
+      "fileEditDisplay": "默认显示行数或展开修改内容",
+      "codeWrap": "长代码自动换行，方便阅读",
+      "brandLogos": "在设置中显示提供商与应用图标\n\n在设置中显示提供商和命令行应用的品牌图标。",
+      "browserNotifications": "页面在后台时通知，默认关闭",
+      "notificationSound": "回复结束播放提示音，默认关闭\n\n回合结束时播放短促提示音，页面在后台时也会播放。默认关闭。",
+      "maxResults": "每次搜索最多显示多少条结果",
+      "timeout": "每次搜索最长等待时间，单位秒",
+      "jinaReader": "优先用 Jina Reader 读取网页\n\n读取网页时，优先使用可用的 Jina Reader。",
+      "imageGeneration": "配置提供商后即可在对话中生成图片\n\n配置图片生成提供商后，即可在对话中生成图片。",
+      "imageProvider": "选择生成图片的提供商",
+      "imageProviderStatus": "使用提供商页保存的凭据",
+      "imageModel": "选择提供商支持的图片模型",
+      "defaultAspectRatio": "未指定图片比例时使用",
+      "defaultImageSize": "默认图片尺寸，需提供商支持\n\n请求生成的图片尺寸，仅对支持此选项的提供商生效。",
+      "maxImagesPerTurn": "每次请求最多生成多少张图片",
+      "timezone": "用于任务安排和时间相关回复",
+      "cliAppsCatalog": "安装 CLI 工具，不改桌面应用\n\n安装供 nanobot 使用的命令行工具，不会安装或修改对应的桌面应用。",
+      "cliAppsFilter": "按名称、分类或功能搜索",
+      "localServiceAccess": "完全访问的 Shell 可连接本机服务\n\n允许具有“完全访问权限”的 Shell 命令连接本机服务。",
+      "webuiDefaultAccess": "项目未设置权限时使用\n\n对话所属项目未单独设置权限时，使用此权限。",
+      "securityManagedControls": "默认限制访问本机和内网\n\n网页请求默认禁止访问本机、内网和云元数据服务，明确允许的地址除外。聊天平台的安全设置单独管理。",
+      "logs": "打开桌面应用的引擎日志文件夹",
+      "diagnostics": "导出诊断报告，帮助排查问题",
+      "localServiceAccessNative": "完全访问的 Shell 可连接本机服务\n\n允许具有“完全访问权限”的 Shell 命令连接这台 Mac 上的服务。",
+      "webuiDefaultAccessNative": "桌面对话的项目未设权限时使用\n\n桌面应用中的对话所属项目未单独设置权限时，使用此权限。",
+      "contextWindow": "模型可用的上下文 Token 数量",
+      "transcription": "先将录音转为文字；聊天平台共用设置\n\n发送前先把麦克风输入转写到输入框。聊天平台里的语音消息也使用同一套设置。",
+      "transcriptionProvider": "使用提供商页保存的凭据",
+      "transcriptionProviderStatus": "API 密钥保存在提供商页\n\nAPI 密钥仍保存在“提供商”配置中，不写入“语音转写”设置。",
+      "transcriptionModel": "通常保留默认，可填写模型 ID\n\n通常保留默认模型即可；提供商有特殊要求时，可填写模型 ID。",
+      "transcriptionLanguage": "可填语言代码，如 zh、en\n\n可选填语言代码，例如 en（英语）、zh（中文）、ja（日语）或 ko（韩语）。"
     },
     "timezone": {
       "select": "选择时区",
@@ -611,10 +919,10 @@
       "filterInstalled": "已启用",
       "filterNotInstalled": "未启用",
       "searchPlaceholder": "搜索 MCP 预设",
-      "moreOptions": "添加 MCP 服务",
-      "moreOptionsSubtitle": "连接自定义 MCP 服务，或导入已有配置。",
-      "customTitle": "自定义 MCP 服务",
-      "customSubtitle": "添加任意 stdio、HTTP 或 SSE MCP 服务。",
+      "moreOptions": "添加 MCP",
+      "moreOptionsSubtitle": "连接自定义 MCP 或导入已有配置",
+      "customTitle": "自定义 MCP",
+      "customSubtitle": "支持 stdio、HTTP、SSE",
       "customAction": "自定义",
       "importAction": "导入",
       "serverName": "服务名称",
@@ -627,9 +935,9 @@
       "args": "启动参数（JSON）",
       "headers": "请求头（JSON）",
       "oauthAfterSave": "保存服务器后，选择“连接”以完成登录。",
-      "headersHelp": "添加此服务器要求的请求头。",
+      "headersHelp": "填写服务要求的请求头",
       "env": "环境变量（JSON）",
-      "timeout": "工具调用超时（秒）",
+      "timeout": "调用超时（秒）",
       "advancedOptions": "高级选项",
       "hideAdvanced": "收起高级选项",
       "saveCustom": "保存 MCP 服务",
@@ -652,8 +960,8 @@
       "connectTitle": "连接 {{name}}",
       "reconnectTitle": "重新连接 {{name}}",
       "actionsTitle": "{{name}} 操作",
-      "connectHint": "填写此服务账户中的密钥。",
-      "saveAndEnable": "保存并启用",
+      "connectHint": "填写服务密钥，保存后启用",
+      "saveAndEnable": "启用服务",
       "updateSetup": "更新配置",
       "configured": "已配置",
       "keepExisting": "留空则保留当前值",
@@ -681,7 +989,7 @@
       "manage": "管理",
       "manageTitle": "管理 {{name}}",
       "fixConnection": "修复连接",
-      "overviewTab": "概览",
+      "overviewTab": "总览",
       "connectionTab": "连接",
       "manageTabs": "MCP 管理",
       "about": "简介",
@@ -690,6 +998,7 @@
       "endpointLabel": "连接地址",
       "toolPreview": "工具",
       "noToolsAvailable": "没有可用工具",
+      "loadingTools": "正在加载工具…",
       "searchTools": "搜索工具",
       "searchToolsPlaceholder": "搜索工具",
       "selectedCount": "已启用 {{count}} 个",
@@ -702,24 +1011,24 @@
       "toolScope": "工具",
       "allTools": "全部启用",
       "noTools": "全部停用",
-      "reloadTools": "刷新工具列表",
+      "reloadTools": "刷新工具",
       "presetDescriptions": {
-        "browserbase": "使用 Browserbase 自动操作云端浏览器。",
-        "playwright": "使用 Playwright 检查和自动操作本地浏览器。",
-        "context7": "获取最新的库文档和代码示例。",
-        "firecrawl": "搜索、抓取网站并提取网页内容。",
-        "parallel-search": "搜索网页并读取相关页面。",
-        "exa": "搜索网页并提取正文。",
-        "microsoft-learn": "搜索并读取 Microsoft Learn 文档。",
-        "aws-docs": "搜索 AWS 文档和服务指南。",
-        "brave-search": "使用 Brave Search 搜索网页、新闻、图片、视频和本地信息。",
-        "postman": "查看并管理 Postman API、集合和工作区。",
-        "figma": "通过本地 Dev Mode MCP 读取 Figma 设计上下文。",
-        "xmind": "创建、读取和编辑 Xmind 云端思维导图。",
-        "notion": "读取和更新 Notion 工作区。",
-        "linear": "查找和管理 Linear 任务、项目和评论。",
-        "github": "管理 GitHub 仓库、Issue 和 Pull Request。",
-        "supabase": "查看和管理 Supabase 项目。"
+        "browserbase": "自动操作云端浏览器",
+        "playwright": "检查和自动操作本地浏览器",
+        "context7": "获取最新库文档和代码示例",
+        "firecrawl": "搜索、抓取网站并提取网页内容",
+        "parallel-search": "搜索网页并读取相关页面",
+        "exa": "搜索网页并提取正文",
+        "microsoft-learn": "搜索和读取微软技术文档",
+        "aws-docs": "搜索 AWS 文档和服务指南",
+        "brave-search": "搜索网页、新闻、图像、视频和本地信息",
+        "postman": "管理 API、集合和工作区",
+        "figma": "通过本地 Dev Mode 读取设计内容",
+        "xmind": "创建、读取和编辑云端思维导图",
+        "notion": "读取和更新工作区",
+        "linear": "查找和管理任务、项目及评论",
+        "github": "管理仓库、Issue 和 PR",
+        "supabase": "查看和管理项目"
       }
     },
     "values": {
@@ -736,13 +1045,13 @@
       "auto": "自动",
       "default": "默认",
       "expanded": "展开",
-      "summary": "摘要",
-      "diff": "差异",
-      "collapsedDiff": "折叠差异",
+      "summary": "概要",
+      "diff": "修改内容",
+      "collapsedDiff": "折叠修改",
       "on": "开启",
       "off": "关闭",
       "defaultPermission": "默认权限",
-      "fullAccess": "完全访问权限",
+      "fullAccess": "完全访问",
       "configured": "已配置",
       "notConfigured": "未配置",
       "pending": "等待中",
@@ -784,7 +1093,7 @@
       "exporting": "正在导出..."
     },
     "byok": {
-      "description": "配置你自己的提供商密钥，之后即可在模型预设中使用。",
+      "description": "配置提供商密钥，供模型预设使用",
       "configured": "已配置",
       "notConfigured": "未配置",
       "configuredSection": "已配置",
@@ -792,7 +1101,7 @@
       "showMore": "再显示 {{count}} 个",
       "showLess": "收起",
       "apiKey": "API 密钥",
-      "apiBase": "API 基础地址",
+      "apiBase": "API 地址",
       "apiKeyPlaceholder": "输入 API 密钥",
       "apiKeyConfiguredPlaceholder": "留空则保留当前密钥",
       "configuredKeyHint": "已配置的密钥",
@@ -810,14 +1119,14 @@
       },
       "webSearch": {
         "provider": "搜索提供商",
-        "providerHelp": "选择用于网络搜索的服务。",
+        "providerHelp": "选择用于网络搜索的服务",
         "selectProvider": "选择提供商",
         "credentials": "凭据",
         "noCredentialRequired": "无需密钥",
         "noCredentialHelp": "DuckDuckGo 无需保存 API 密钥。",
         "apiKeyHelp": "密钥保存后会隐藏显示。",
         "baseUrl": "服务地址",
-        "baseUrlHelp": "SearXNG 需要你自己的实例地址。",
+        "baseUrlHelp": "填写自己的 SearXNG 实例地址",
         "baseUrlPlaceholder": "https://search.example.com",
         "apiKeyRequired": "此搜索提供商需要 API 密钥。",
         "baseUrlRequired": "请填写 SearXNG 服务地址。",
@@ -832,8 +1141,8 @@
       "totalProviders": "共 {{count}} 个可用",
       "webSearch": "网络搜索",
       "imageGeneration": "图片生成",
-      "voiceInput": "语音识别",
-      "workspace": "工作区"
+      "voiceInput": "语音转写",
+      "workspace": "工作目录"
     },
     "usage": {
       "title": "Token 用量",
@@ -845,29 +1154,29 @@
       "dailyAverage": "日均用量",
       "inputTokens": "输入 Token",
       "cacheHitRate": "缓存命中率",
-      "requestTrend": "每日请求数",
+      "requestTrend": "每日请求",
       "cacheRateHelp": "缓存命中率仅统计缓存状态已知的输入。",
-      "dailyTrend": "每日 Token 用量",
+      "dailyTrend": "每日 Token",
       "bySource": "用量来源",
       "byModel": "模型用量",
-      "modelTrend": "模型用量趋势",
+      "modelTrend": "模型趋势",
       "modelsUnavailable": "暂无模型用量明细。",
       "otherModels": "其他模型 / 未分类",
       "unclassified": "未分类",
       "unavailable": "暂时无法获取用量数据。",
       "noActivity": "近 30 天暂无 Token 用量。",
       "cachedInput": "缓存命中",
-      "cacheMiss": "缓存未命中",
-      "cacheUnknown": "缓存状态未知",
+      "cacheMiss": "未命中",
+      "cacheUnknown": "状态未知",
       "outputTokens": "输出",
       "otherTokens": "其他 Token",
       "subtitle": "最近 12 个月由提供商上报的 Token 用量。",
       "empty": "模型产生新的回复后，这里会显示 Token 用量。",
       "totalTokens": "Token 总数",
       "peakTokens": "Token 峰值",
-      "thirtyDayTokens": "30 天 Token 用量",
-      "currentStreak": "当前连续天数",
-      "longestStreak": "最长连续天数",
+      "thirtyDayTokens": "30 天 Token",
+      "currentStreak": "连续天数",
+      "longestStreak": "最长连续",
       "daysValue": "{{count}} 天",
       "last30": "30 天",
       "activeDays": "活跃天数",
@@ -882,35 +1191,40 @@
         "dream": "记忆整理",
         "system": "辅助调用"
       },
-      "systemHelp": "辅助调用包括聊天标题生成等内部任务，以及未标注来源的调用。"
+      "systemHelp": "包括内部任务和未标注来源的调用"
     },
     "providers": {
-      "title": "模型提供商",
+      "title": "提供商",
       "searchPlaceholder": "搜索提供商",
       "noMatches": "没有匹配的提供商。",
-      "addOwnProvider": "添加自定义提供商",
-      "customProvider": "自定义提供商",
-      "customProviderName": "提供商名称",
+      "addOwnProvider": "添加提供商",
+      "addProvider": "添加提供商",
+      "backToProviders": "返回提供商列表",
+      "customProvider": "自定义",
+      "customProviderName": "名称",
       "customProviderNamePlaceholder": "例如：公司模型网关",
       "saveProvider": "保存提供商",
       "advancedOptions": "高级选项",
       "saveAdvancedBeforeSignIn": "请先保存高级选项再登录。",
-      "apiType": "API 类型",
+      "supportedAPIs": "支持的协议",
+      "supportedAPIsDescription": "选择服务支持的协议。预设只能使用此列表中的协议；不确定时请查看服务文档。",
+      "defaultAPI": "默认协议",
+      "defaultAPIDescription": "预设选择「自动」时使用此协议。单个预设可改用支持列表中的其他协议。",
+      "declareAPIs": "设置支持的协议",
+      "openaiDefaultAPIDescription": "设为「自动」的预设使用此默认协议。此处选择「自动」会遵循已知模型规则；单个预设可以覆盖此默认值。",
       "proxy": "网络代理",
-      "thinkingStyle": "推理参数格式",
+      "thinkingStyle": "推理格式",
       "region": "区域",
       "profile": "AWS 配置名称",
-      "extraHeaders": "额外请求头",
-      "extraBody": "附加请求体参数",
-      "extraQuery": "附加查询参数",
+      "extraHeaders": "请求头",
+      "extraBody": "请求体参数",
+      "extraQuery": "查询参数",
       "capabilityFastMode": "快速模式",
-      "capabilityFastModeHelp": "通过 OpenAI 优先服务层获取更快响应，会更快消耗额度。",
-      "capabilityDeepSeekSearch": "DeepSeek 联网搜索",
-      "capabilityDeepSeekSearchHelp": "允许 DeepSeek V4 Flash 通过 Responses API 搜索网络，并在对话中展示搜索过程。",
+      "capabilityFastModeHelp": "回复更快，额度消耗也更快\n\n通过 OpenAI 优先服务层获取更快响应，会更快消耗额度。",
       "capabilityXSearch": "X 搜索",
-      "capabilityXSearchHelp": "允许受支持的 Grok 模型使用 xAI 托管的 X Search，并在对话中展示搜索过程。",
+      "capabilityXSearchHelp": "支持的 Grok 模型可搜索 X\n\n允许受支持的 Grok 模型使用 xAI 托管的 X Search，并在对话中展示搜索过程。",
       "capabilityOpenAISearch": "OpenAI 联网搜索",
-      "capabilityOpenAISearchHelp": "允许兼容 Responses API 的模型搜索网络，并在对话中展示搜索过程。"
+      "capabilityOpenAISearchHelp": "支持的模型可联网搜索"
     },
     "legal": {
       "thirdPartyBrands": "产品名称、Logo 和品牌归各自所有者所有；此处仅用于识别，不代表背书或合作。"
@@ -935,7 +1249,7 @@
     "api": {
       "title": "API 服务",
       "openaiCompatible": "OpenAI 兼容 API",
-      "description": "让 SDK 和其他智能体通过兼容 OpenAI 的 API 连接 nanobot。",
+      "description": "通过兼容 OpenAI 的 API 连接",
       "start": "启动 API 服务",
       "starting": "正在启动...",
       "stop": "停止",
@@ -943,24 +1257,24 @@
       "access": "访问范围",
       "thisDevice": "仅此设备",
       "localNetwork": "局域网",
-      "localHelp": "只有当前设备可以连接。",
-      "networkHelp": "局域网内其他设备可以连接，因此必须设置 API 密钥。",
+      "localHelp": "仅当前设备可连接",
+      "networkHelp": "局域网可连接，须设置 API 密钥\n\n局域网内其他设备可以连接，因此必须设置 API 密钥。",
       "port": "端口",
-      "portHelp": "API 服务使用的本地端口。",
+      "portHelp": "API 服务使用的本地端口",
       "apiKey": "API 密钥",
-      "apiKeyHelp": "客户端使用 Bearer Token 发送此密钥。",
+      "apiKeyHelp": "通过 Bearer Token 发送密钥",
       "apiKeyRequired": "向局域网开放 API 前必须设置密钥。",
       "apiKeyPlaceholder": "输入 API 密钥",
       "autoInstall": "启动时会自动安装 API 服务所需的软件包。"
     },
     "observability": {
-      "title": "可观测性",
+      "title": "运行追踪",
       "configured": "nanobot 已检测到追踪凭证。",
       "environment": "设置 LANGFUSE_SECRET_KEY 和 LANGFUSE_PUBLIC_KEY 后重启 nanobot。",
-      "enable": "启用追踪支持"
+      "enable": "启用追踪"
     },
     "apps": {
-      "description": "将工具接入 nanobot，然后在对话中通过 @ 调用。",
+      "description": "接入工具，在对话中用 @ 调用",
       "cliLabel": "应用",
       "mcpLabel": "MCP",
       "channelLabel": "聊天平台",
@@ -970,7 +1284,6 @@
       "filterCli": "应用",
       "filterMcp": "MCP",
       "enabledSummary": "{{count}} 个可用",
-      "caption": "{{cli}} 个应用 · {{mcp}} 个 MCP 工具",
       "searchPlaceholder": "搜索工具",
       "featured": "工具",
       "mcpTools": "MCP 工具",
@@ -986,8 +1299,7 @@
       "restartRequired": "重启 nanobot 以应用更新后的应用和 MCP 工具。"
     },
     "channels": {
-      "description": "把聊天应用、邮箱和 WebUI 连接到 nanobot。",
-      "caption": "{{enabled}} 个运行中 · 共 {{total}} 个平台",
+      "description": "连接聊天应用、邮箱和 WebUI",
       "searchPlaceholder": "搜索聊天平台",
       "backToChannels": "所有平台",
       "catalog": "聊天平台",
@@ -1004,7 +1316,7 @@
       "connect": "连接",
       "reconnect": "重新连接",
       "advanced": "高级",
-      "checkAndEnable": "检查并启用",
+      "checkAndEnable": "启用平台",
       "checkConnection": "检查连接",
       "connectionChecks": "连接检查",
       "open": "打开",
@@ -1044,12 +1356,12 @@
       "toggleInstance": "启用 {{name}}",
       "validationFailed": "启用前请检查必需配置。",
       "completeSetupToEnable": "请先完成下方必需配置，然后即可启用此渠道。",
-      "chooseCredentialMethod": "选择一种凭据方式",
+      "chooseCredentialMethod": "凭据方式",
       "or": "或",
       "fieldRequired": "完成配置需要此字段。",
       "secretWillBeRemoved": "将被删除",
-      "keepSavedSecret": "保留已保存的凭据",
-      "removeSavedSecret": "删除已保存的凭据",
+      "keepSavedSecret": "保留凭据",
+      "removeSavedSecret": "删除凭据",
       "sections": {
         "account": "账户",
         "credentials": "凭据",
@@ -1091,8 +1403,8 @@
       "missingDependency": "缺少支持包",
       "installSupport": "安装支持包",
       "installConfirmTitle": "安装 {{name}} 所需的软件包？",
-      "installConfirmDescription": "安装所需软件包后，将启用 {{name}}。",
-      "installOnlyConfirmDescription": "将安装 {{name}} 所需的支持包。安装完成后即可连接。",
+      "installConfirmDescription": "安装依赖并启用 {{name}}",
+      "installOnlyConfirmDescription": "安装支持包后即可连接\n\n将安装 {{name}} 所需的支持包。安装完成后即可连接。",
       "installConfirmAction": "安装并启用",
       "installOnlyConfirmAction": "安装支持包",
       "websocketRequired": "WebUI 必需",
@@ -1100,6 +1412,33 @@
       "notEnabled": "未启用"
     },
     "automations": {
+      "chat": {
+        "changeBack": "改回「{{chat}}」",
+        "editInstructions": "修改说明",
+        "editInstructionsHint": "说明会与聊天更换一起保存。",
+        "saveAndChange": "保存并更换",
+        "conflict": "任务已在别处修改，草稿已保留。请重新打开任务，核对最新设置后再更换。",
+        "unavailable": "这个聊天已不可用，或工作目录、权限已改变。请选择其他聊天。",
+        "schedulerBusy": "有任务正在执行或排队。请等任务结束后再试。",
+        "label": "运行对话",
+        "new": "更换为",
+        "current": "当前聊天",
+        "web": "网页聊天",
+        "change": "更换聊天",
+        "previous": "当前",
+        "hint": "在此对话执行，结果默认发到这里",
+        "effect": "下次起参考新聊天，并在新聊天回复",
+        "message": "任务说明",
+        "review": "请检查说明中的收件人，更换聊天不会自动修改。新聊天的成员可见任务内容和结果。",
+        "history": "旧消息不转移，执行时间不变",
+        "busy": "任务正在执行或排队，暂时不能更换。",
+        "saved": "已更换为「{{chat}}」，下次执行生效。",
+        "failed": "未能确认更换成功，草稿已保留。",
+        "retry": "重新加载聊天",
+        "confirm": "确认并更换",
+        "saving": "正在更换…",
+        "available": "先在目标聊天给 nanobot 发一条消息。这里只列出已连接、工作目录和权限相同的聊天。"
+      },
       "taskInfo": "任务信息",
       "runDetails": {
         "loading": "正在加载回复…",
@@ -1110,8 +1449,8 @@
         "duration": "耗时",
         "noOutput": "此记录未保存回复正文。"
       },
-      "create": "创建自动任务",
-      "createPrompt": "想让 nanobot 自动帮你做什么？",
+      "create": "新建任务",
+      "createPrompt": "想让 nanobot 自动做什么？",
       "createInput": "描述一个自动任务",
       "errors": {
         "legacyMissingDestination": "这个旧版自动任务缺少发送目标，无法继续运行。请从关联会话中重新创建该任务。"
@@ -1126,17 +1465,17 @@
         "less": "收起",
         "noEntries": "本月没有运行记录。"
       },
-      "yourTasks": "你的自动任务",
+      "yourTasks": "我的任务",
       "systemTasks": "系统任务",
       "views": {
-        "label": "自动任务视图",
+        "label": "任务视图",
         "tasks": "任务",
         "calendar": "日历"
       },
       "filter": "筛选",
       "filteredBy": "筛选：{{status}}",
-      "commandCondition": "通过命令触发",
-      "instructions": "任务指令",
+      "commandCondition": "命令触发",
+      "instructions": "任务说明",
       "done": "完成",
       "moreDetails": "更多信息",
       "moreActions": "更多操作",
@@ -1160,12 +1499,12 @@
       "loading": "正在加载自动任务...",
       "noMatches": "当前视图没有匹配的自动任务。",
       "empty": "暂无自动任务。",
-      "emptyHint": "在聊天中告诉 nanobot 你想定期做什么，即可创建自动任务。",
+      "emptyHint": "告诉 nanobot 想定期做什么",
       "emptyAction": "打开对话",
       "clearFilters": "清除筛选",
       "oneShot": "一次性",
       "systemTask": "由 nanobot 管理的自动任务",
-      "localTrigger": "本地触发器",
+      "localTrigger": "CLI 触发器",
       "labels": {
         "schedule": "计划",
         "next": "下次运行",
@@ -1179,12 +1518,12 @@
       "edit": "编辑",
       "delete": "删除",
       "protected": "受保护",
-      "editTitle": "编辑自动任务",
+      "editTitle": "编辑任务",
       "save": "保存",
       "commandCopied": "已复制",
       "copyCommand": "复制",
       "deleteTitle": "删除自动任务？",
-      "deleteDescription": "将删除自动任务“{{name}}”。已有聊天记录会保留。",
+      "deleteDescription": "删除任务，保留聊天记录\n\n将删除自动任务“{{name}}”。已有聊天记录会保留。",
       "cancel": "取消",
       "status": {
         "system": "系统",
@@ -1263,7 +1602,11 @@
       }
     },
     "oauth": {
-      "authentication": "OAuth 认证",
+      "deviceCode": "设备码",
+      "deviceCodeHelp": "复制此设备码，前往 GitHub 输入并授权。完成后此窗口会自动更新。",
+      "waitingForDeviceApproval": "等待 GitHub 授权…",
+      "openGitHub": "前往 GitHub",
+      "authentication": "OAuth 登录",
       "signIn": "登录",
       "signingIn": "登录中...",
       "signInAgain": "重新登录",
@@ -1284,7 +1627,7 @@
       "localCallbackHelp": "请在浏览器中完成登录。若 nanobot 未自动完成连接，请复制地址栏中完整的 localhost 回调地址，粘贴到下方。",
       "remoteCallbackHelp": "在此浏览器中打开 ChatGPT 并完成登录。当 localhost 页面无法打开时，请复制地址栏中的完整 URL 并粘贴到下方。",
       "authorizationCode": "授权码",
-      "callbackUrl": "完整回调 URL",
+      "callbackUrl": "回调 URL",
       "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
       "openChatGPT": "打开 ChatGPT",
       "pasteCallbackToContinue": "粘贴回调 URL 以继续。",
@@ -1292,8 +1635,7 @@
       "finishSignIn": "完成登录"
     },
     "skills": {
-      "description": "管理智能体在对话中可使用的技能。",
-      "caption": "{{available}} 个可用 · 共 {{total}} 个",
+      "description": "选择对话中可用的技能",
       "views": "技能视图",
       "installedTab": "已安装",
       "discoverTab": "发现",
@@ -1305,27 +1647,30 @@
       "filterEnabled": "已启用",
       "filterDisabled": "已停用",
       "noMatching": "没有匹配的技能。",
+      "loading": "技能加载中…",
+      "catalogLoadFailed": "无法加载技能。",
+      "retry": "重试",
       "statusDisabled": "已停用",
       "statusEnabled": "已启用",
       "statusNeedsSetup": "需要设置",
       "showLess": "收起",
       "showMore": "展开",
-      "enabledControl": "使用此技能",
-      "enabledDescription": "满足运行条件后，允许智能体加载并使用此技能。",
+      "enabledControl": "使用技能",
+      "enabledDescription": "满足运行条件后允许加载和使用",
       "enableSkill": "启用 {{name}}",
       "disableSkill": "停用 {{name}}",
       "updateFailed": "无法更新此技能。",
       "deleteTitle": "删除技能",
-      "deleteDescription": "从当前工作区移除此技能。",
+      "deleteDescription": "从当前工作区移除此技能",
       "deleteAction": "删除",
       "deleteFailed": "无法删除此技能。",
       "deleteConfirmTitle": "删除 {{name}}？",
-      "deleteConfirmDescription": "这会从当前工作区移除该技能的文件，且无法撤销。",
+      "deleteConfirmDescription": "从工作区删除技能文件，无法撤销",
       "deleteConfirmAction": "删除技能",
       "instructionsTitle": "技能说明",
       "setupRequired": "需要设置",
-      "setupDescription": "请在运行 nanobot 的设备上安装缺少的依赖，然后重新检查。",
-      "copySetupCommand": "复制安装命令",
+      "setupDescription": "在网关设备安装依赖，再重新检查\n\n请在运行 nanobot 的设备上安装缺少的依赖，然后重新检查。",
+      "copySetupCommand": "复制命令",
       "checkAgain": "重新检查",
       "marketplaceSearchFailed": "暂时无法搜索技能市场。",
       "marketplaceInstallFailed": "无法安装此技能。",
@@ -1334,13 +1679,13 @@
       "marketplaceSearching": "正在搜索",
       "marketplaceProviderFilter": "技能来源",
       "marketplaceProviderAll": "全部",
-      "marketplaceTrendingTitle": "各市场热门技能",
-      "marketplaceTrendingDescription": "各市场的排名和安装量按各自的统计口径展示。",
+      "marketplaceTrendingTitle": "热门技能",
+      "marketplaceTrendingDescription": "排名和安装量按各市场口径统计",
       "marketplaceViewAll": "查看全部",
       "marketplaceTrendingUnavailable": "暂时无法获取热门技能。",
       "marketplaceEmpty": "没有找到与“{{query}}”相关的技能。",
       "marketplaceConfirmTitle": "安装 {{name}}？",
-      "marketplaceConfirmDescription": "此第三方技能来自 {{provider}}（{{source}}），其中可能包含操作指令或可执行脚本。",
+      "marketplaceConfirmDescription": "第三方技能可能包含指令或脚本\n\n此第三方技能来自 {{provider}}（{{source}}），其中可能包含操作指令或可执行脚本。",
       "marketplaceConfirmInstall": "安装技能",
       "marketplaceOpen": "在 {{provider}} 中打开 {{name}}",
       "marketplaceOpenProvider": "打开 {{provider}}",
@@ -1352,7 +1697,7 @@
       "marketplaceInstall": "安装",
       "marketplaceNoTrend": "暂无趋势",
       "marketplaceTrendLabel": "近 8 周安装趋势",
-      "featured": "智能体技能",
+      "featured": "技能",
       "empty": "暂无可用技能。",
       "sourceWorkspace": "自定义",
       "sourceBuiltin": "内置",
@@ -1362,16 +1707,16 @@
       "openDetails": "查看 {{name}} 详情",
       "loadingDetail": "正在加载技能详情...",
       "loadFailed": "无法加载技能详情。",
-      "descriptionTitle": "完整描述",
+      "descriptionTitle": "详细说明",
       "source": "来源",
       "status": "状态",
       "requirements": "运行条件",
       "noRequirements": "未声明额外运行条件。",
       "commands": "命令",
       "environment": "环境变量",
-      "missingCommands": "缺少命令行工具",
+      "missingCommands": "缺少工具",
       "missingEnvironment": "缺少环境变量",
-      "unavailableReasonLabel": "不可用原因",
+      "unavailableReasonLabel": "缺少什么",
       "rawInstructions": "技能文件（SKILL.md）",
       "rawInstructionsEmpty": "暂无技能文件内容。",
       "detailDescription": "{{name}} 的详情。"
@@ -1401,11 +1746,11 @@
     "pin": "置顶",
     "unpin": "取消置顶",
     "rename": "重命名",
-    "renameTitle": "重命名话题",
-    "renameDescription": "为这个话题设置一个仅用于 WebUI 侧边栏的名称。",
+    "renameTitle": "话题改名",
+    "renameDescription": "修改 WebUI 中显示的话题名称",
     "renamePlaceholder": "话题名称",
-    "renameProjectTitle": "重命名项目",
-    "renameProjectDescription": "为这个项目设置一个仅用于 WebUI 侧边栏的名称。",
+    "renameProjectTitle": "项目改名",
+    "renameProjectDescription": "仅修改 WebUI 侧栏中的项目名称",
     "renameProjectPlaceholder": "项目名称",
     "renameSave": "保存",
     "archive": "归档",
@@ -1435,7 +1780,7 @@
     "descriptionMany": "此操作无法撤销。",
     "cancel": "取消",
     "confirm": "删除",
-    "automationsDescription": "这个话题有关联的自动任务。删除话题也会删除这些自动任务。",
+    "automationsDescription": "删除话题也会删除关联的自动任务",
     "automationsDescriptionMany": "关联的自动任务也会一并删除。",
     "moreAutomations": "另有 {{count}} 个",
     "confirmWithAutomations": "删除",
@@ -1463,6 +1808,36 @@
     "error": "连接出错"
   },
   "thread": {
+    "subagents": {
+      "loadFailed": "无法加载子任务。",
+      "stopFailed": "无法停止此任务。",
+      "stopTask": "停止 {{label}}",
+      "receiptHelp": "已送达表示消息已进入子任务的下一次模型请求，不代表已执行完成。",
+      "states": {
+        "queued": "排队中",
+        "running": "执行中",
+        "stopping": "正在停止",
+        "done": "已完成",
+        "incomplete": "未完成",
+        "error": "失败",
+        "cancelled": "已取消",
+        "interrupted": "已中断"
+      },
+      "receipts": {
+        "accepted": "已排队：{{count}}",
+        "delivered": "已送达：{{count}}",
+        "undelivered": "未送达：{{count}}"
+      },
+      "interruptedHelp": "后端重启时此任务尚未结束，任务没有自动恢复或重新执行。",
+      "workTitle": "子任务",
+      "otherWorkTitle": "其他任务",
+      "unlinkedHelp": "未找到这些任务在当前显示消息中的原始请求。",
+      "progress": "已完成 {{completed}} / {{total}} 项",
+      "running": "{{count}} 项进行中",
+      "finished": "{{count}} 项已结束",
+      "needsReview": "{{count}} 项需检查",
+      "messages": "消息状态"
+    },
     "compaction": {
       "cancelled": "上下文压缩已取消",
       "empty": "无需压缩上下文",
@@ -1480,15 +1855,15 @@
       },
       "quickActions": {
         "plan": {
-          "title": "创建项目计划",
+          "title": "制定计划",
           "prompt": "帮我为接下来要做的事情写一份简洁的项目计划。"
         },
         "analyze": {
-          "title": "分析这些数据",
+          "title": "分析数据",
           "prompt": "帮我分析这些数据，并指出最重要的模式。"
         },
         "brainstorm": {
-          "title": "头脑风暴想法",
+          "title": "构思想法",
           "prompt": "围绕这个问题头脑风暴几个实用方案，并说明取舍。"
         },
         "code": {
@@ -1496,7 +1871,7 @@
           "prompt": "帮我为这个任务写代码，先从最小可用改动开始。"
         },
         "summarize": {
-          "title": "总结这份文档",
+          "title": "总结文档",
           "prompt": "帮我总结这份文档，并列出关键要点。"
         },
         "more": {
@@ -1506,7 +1881,7 @@
       },
       "imageQuickActions": {
         "icon": {
-          "title": "设计应用图标",
+          "title": "设计图标",
           "prompt": "生成一个干净的 1:1 nanobot 应用图标：友好的机器人，简洁矢量风格，蓝白柔和配色，不要文字。"
         },
         "sticker": {
@@ -1514,7 +1889,7 @@
           "prompt": "生成一张可爱的贴纸风小机器人助手图片，背景像透明贴纸，表情活泼有趣。"
         },
         "poster": {
-          "title": "创建海报",
+          "title": "制作海报",
           "prompt": "生成一张个人 AI 助手的精致海报概念图，现代构图，视觉层级清晰，适合落地页展示。"
         },
         "product": {
@@ -1522,7 +1897,7 @@
           "prompt": "生成一张对话式 AI Web 应用的干净产品样机图，极简界面，高级光影，真实设备边框。"
         },
         "portrait": {
-          "title": "风格化头像",
+          "title": "制作头像",
           "prompt": "生成一个友好的 AI 伙伴风格化头像，柔和光线，细节丰富但亲切，现代插画风格。"
         },
         "edit": {
@@ -1566,25 +1941,28 @@
     },
     "composer": {
       "placeholderThread": "输入消息…",
-      "placeholderHero": "问任何问题...",
+      "placeholderHero": "描述你想做的事",
       "placeholderOpening": "正在打开新话题…",
       "placeholderStreaming": "模型正在回复…",
       "inputAria": "消息输入框",
-      "sendHint": "Enter 发送 · Shift+Enter 换行",
-      "runRuntimeTitle": "运行中 · {{elapsed}}",
-      "goalStateStrip": "目标 · {{label}}",
+      "goalStateStrip": "目标：{{label}}",
       "goalStateFallback": "目标",
       "goalStateExpandAria": "查看完整目标",
       "goalStateSheetTitle": "目标",
       "send": "发送消息",
       "stop": "停止响应",
       "quotedContext": "引用内容",
-      "removeQuotedContext": "移除引用内容",
+      "removeQuotedContext": "移除引用",
       "modelNotConfigured": "模型未配置",
       "configureModel": "配置模型",
-      "chooseAI": "选择你的 AI",
-      "switchModel": "切换本次对话所用模型",
-      "manageModels": "管理模型预设",
+      "chooseAI": "选择模型",
+      "switchModel": "切换模型",
+      "manageModels": "管理预设",
+      "fallbackNotice": "本次已使用备用模型：{{model}}。",
+      "checkModelSettings": "检查模型设置",
+      "reauthNotice": "{{provider}} 授权已失效，请重新登录。",
+      "reauthFallback": "本次已由备用模型继续回复。",
+      "reauthSettings": "打开模型设置",
       "context": {
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "打开上下文用量",
@@ -1598,16 +1976,16 @@
         "duration": "生成耗时"
       },
       "queued": {
-        "label": "排队中的引导消息",
-        "guide": "引导",
-        "delete": "删除引导",
-        "edit": "编辑引导",
+        "label": "等待发送",
+        "guide": "立即发送",
+        "delete": "删除消息",
+        "edit": "编辑消息",
         "drag": "拖动排序"
       },
       "attachImage": "添加文件",
       "imageMode": {
         "label": "图片生成",
-        "toggle": "切换图片生成模式",
+        "toggle": "图片模式",
         "placeholder": "描述或编辑图片…",
         "aspectAria": "图片画幅",
         "aspectLabel": "图片画幅",
@@ -1622,12 +2000,12 @@
       },
       "tools": {
         "search": "搜索",
-        "reason": "推理",
+        "reason": "思考",
         "deepResearch": "深度研究",
         "voice": "语音输入"
       },
       "voice": {
-        "hint": "点击进行听写或长按",
+        "hint": "点击听写或长按录音",
         "stop": "停止录音",
         "transcribing": "正在转写...",
         "recordingStatus": "正在录音 {{time}}"
@@ -1662,63 +2040,63 @@
         "commands": {
           "new": {
             "title": "新建话题",
-            "description": "重置当前话题，并开始一个新的话题。"
+            "description": "重置当前话题，开始新话题"
           },
           "compact": {
             "title": "压缩上下文",
-            "description": "压缩当前对话的上下文并继续对话。"
+            "description": "压缩上下文后继续对话"
           },
           "stop": {
-            "title": "停止当前任务",
-            "description": "取消这个对话中正在运行的智能体回合。"
+            "title": "停止任务",
+            "description": "停止此对话正在执行的任务"
           },
           "restart": {
             "title": "重启 nanobot",
-            "description": "原地重启 bot 进程。"
+            "description": "重启 nanobot 进程"
           },
           "status": {
             "title": "查看状态",
-            "description": "显示运行时、提供商和聊天平台状态。"
+            "description": "查看运行、提供商和聊天平台状态"
           },
           "model": {
             "title": "模型",
-            "description": "查看或切换当前模型预设。"
+            "description": "查看或切换当前模型预设"
           },
           "history": {
-            "title": "查看对话历史",
-            "description": "打印最近 N 条已持久化的对话消息。"
+            "title": "对话记录",
+            "description": "查看最近 N 条已保存的消息"
           },
           "dream": {
             "title": "运行 Dream",
-            "description": "手动触发记忆整理。"
+            "description": "手动整理记忆"
           },
           "dream_log": {
-            "title": "查看 Dream 日志",
-            "description": "查看上一次 Dream 整理改变了什么。"
+            "title": "Dream 日志",
+            "description": "查看上次 Dream 整理的修改"
           },
           "dream_restore": {
             "title": "恢复记忆",
-            "description": "将记忆恢复到之前的 Dream 快照。"
+            "description": "恢复到之前的 Dream 记忆快照"
           },
           "dream_prompt": {
-            "title": "Dream 记忆",
-            "description": "设置 Dream 如何整理当前工作区的记忆。"
+            "title": "Dream 设置",
+            "description": "设置 Dream 如何整理当前工作区记忆"
           },
           "goal": {
             "title": "长期目标",
-            "description": "让助手把当前请求当作需要多步骤持续推进的目标。"
+            "description": "让助手持续推进当前目标"
           },
           "trigger": {
-            "title": "创建本地触发器",
-            "description": "创建绑定到当前聊天会话的 CLI 触发器。"
+            "title": "CLI 触发器",
+            "description": "创建绑定当前对话的 CLI 触发器"
           },
           "help": {
             "title": "查看帮助",
-            "description": "列出可用的斜杠命令。"
+            "description": "查看可用的斜杠命令"
           },
           "pairing": {
             "title": "配对",
-            "description": "管理配对请求。"
+            "description": "管理配对请求"
           }
         }
       },
@@ -1730,8 +2108,8 @@
         "sessionGroup": "Nanobot 对话",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
-        "cliDescription": "使用 @{{name}} 调用本地 CLI",
-        "mcpDescription": "使用 @{{name}} 调用 MCP 服务",
+        "cliDescription": "用 @{{name}} 调用 CLI",
+        "mcpDescription": "用 @{{name}} 调用 MCP",
         "cliTitle": "CLI 应用：{{name}}",
         "mcpTitle": "MCP 服务：{{name}}",
         "sessionBadge": "Nanobot 对话",
@@ -1750,33 +2128,39 @@
         "decode_failed": "无法解码这张图片",
         "too_large": "文件太大，请换一个小一点的",
         "total_too_large": "附件总大小过大，请移除部分文件或使用更小的文件",
-        "transport_too_large": "该附件会超过网关的传输上限",
         "io": "无法读取该文件"
       },
       "goalStateCloseAria": "关闭目标",
       "workspace": {
         "accessAria": "工作区访问权限",
         "projectAria": "选择项目",
-        "projectPlaceholder": "选择项目",
         "default": "默认权限",
         "defaultShort": "默认",
-        "full": "完全访问权限",
-        "fullShort": "完全"
+        "full": "完全访问",
+        "fullShort": "完全",
+        "defaultDescription": "仅在当前工作目录内读写和执行命令",
+        "fullDescription": "可读写目录外文件并执行命令"
       }
     },
     "scrollToBottom": "滚动到底部",
     "loadEarlier": "加载更早消息",
+    "history": {
+      "loading": "正在加载更早的消息…",
+      "error": "加载失败",
+      "retry": "重试"
+    },
     "forkedFromHistory": "从历史消息分叉",
     "promptNavigator": {
-      "open": "打开提示词导航",
-      "title": "提示词列表",
-      "search": "搜索提示词",
-      "noResults": "没有匹配的提示词。",
-      "jumpTo": "跳转到提示词：{{label}}",
-      "railAria": "用户提示词导航"
+      "open": "消息导航",
+      "title": "我的消息",
+      "search": "搜索消息",
+      "noResults": "没有匹配的消息。",
+      "jumpTo": "跳转到消息：{{label}}",
+      "railAria": "我的消息导航"
     }
   },
   "message": {
+    "actions": "消息操作",
     "streaming": "流式输出中",
     "delivery": {
       "sending": "发送中…",
@@ -1787,21 +2171,169 @@
     "toolMany": "已使用 {{count}} 个工具",
     "toolSummary": "{{count}} 个工具",
     "toolSummaryMany": "{{count}} 个工具",
-    "reasoningTools": "推理 · {{count}} 个工具",
-    "reasoningToolsSingular": "推理 · 1 个工具",
     "reasoning": "思考过程",
     "reasoningStreaming": "正在思考…",
-    "reasoningSummary": "推理",
-    "agentActivitySummary": "{{reasoning}} 步 · {{tools}} 次工具调用",
+    "reasoningSummary": "思考",
     "agentActivityToolsOnly": "{{tools}} 次工具调用",
-    "agentActivityLiveSummary": "进行中… · {{reasoning}} 步 · {{tools}} 次工具调用",
-    "agentActivityLiveToolsOnly": "进行中… · {{tools}} 次工具调用",
     "activityThinkingFor": "思考中 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "思考了 {{duration}}",
     "activityWorkingFor": "处理中 {{duration}}",
     "activityWorked": "已处理",
-    "activityWorkedFor": "处理了 {{duration}}",
+    "agentActivity": {
+      "reviewingSources": "正在查阅资料",
+      "reviewedSources": "资料查阅完成",
+      "reviewSourcesFailed": "资料查阅失败",
+      "searchingFiles": "正在搜索文件",
+      "searchedFiles": "文件搜索完成",
+      "searchFilesFailed": "文件搜索失败",
+      "findingFiles": "正在查找文件",
+      "foundFiles": "文件查找完成",
+      "findFilesFailed": "文件查找失败",
+      "listingFiles": "正在列出文件",
+      "listedFiles": "列出文件",
+      "listFilesFailed": "无法列出文件",
+      "readingSource": "正在读取资料",
+      "readSource": "资料读取完成",
+      "readSourceFailed": "资料读取失败",
+      "readingFile": "正在读取文件",
+      "readFile": "读取文件",
+      "readFileFailed": "无法读取文件",
+      "searchingMemory": "正在搜索记忆",
+      "searchedMemory": "记忆搜索完成",
+      "searchMemoryFailed": "记忆搜索失败",
+      "generatingImage": "正在生成图片",
+      "generatedImage": "已生成图片",
+      "generateImageFailed": "无法生成图片",
+      "delegatingTask": "正在创建子任务",
+      "delegatedTask": "子任务已创建",
+      "delegateTaskFailed": "无法创建子任务",
+      "checkingSubtask": "正在查询子任务状态",
+      "checkedSubtask": "已获取子任务状态",
+      "checkSubtaskFailed": "无法查询子任务状态",
+      "messagingSubtask": "正在向子任务发送消息",
+      "queuedSubtaskMessage": "消息已加入子任务队列",
+      "messageSubtaskFailed": "无法向子任务发送消息",
+      "stoppingSubtask": "正在停止子任务",
+      "requestedSubtaskStop": "已处理停止请求",
+      "stopSubtaskFailed": "无法停止子任务",
+      "managingSubtasks": "正在处理子任务操作",
+      "managedSubtasks": "子任务操作已完成",
+      "manageSubtasksFailed": "子任务操作失败",
+      "sendingMessage": "正在发送消息",
+      "sentMessage": "已发送消息",
+      "sendMessageFailed": "无法发送消息",
+      "updatingAgentSettings": "正在更新智能体设置",
+      "updatedAgentSettings": "已更新智能体设置",
+      "updateAgentSettingsFailed": "无法更新智能体设置",
+      "checkingAgentSettings": "正在检查智能体设置",
+      "checkedAgentSettings": "已检查智能体设置",
+      "checkAgentSettingsFailed": "无法检查智能体设置",
+      "schedulingAutomation": "正在安排自动化",
+      "scheduledAutomation": "已安排自动化",
+      "scheduleAutomationFailed": "无法安排自动化",
+      "removingAutomation": "正在移除自动化",
+      "removedAutomation": "已移除自动化",
+      "removeAutomationFailed": "无法移除自动化",
+      "checkingAutomations": "正在检查自动化",
+      "checkedAutomations": "已检查自动化",
+      "checkAutomationsFailed": "无法检查自动化",
+      "startingLongTask": "正在启动长期任务",
+      "startedLongTask": "已启动长期任务",
+      "startLongTaskFailed": "无法启动长期任务",
+      "updatingLongTask": "正在更新长期任务",
+      "updatedLongTask": "已更新长期任务",
+      "updateLongTaskFailed": "无法更新长期任务",
+      "continuingCommand": "正在继续命令",
+      "continuedCommand": "已继续命令",
+      "continueCommandFailed": "无法继续命令",
+      "checkingRunningCommands": "正在检查运行中的命令",
+      "checkedRunningCommands": "已检查运行中的命令",
+      "checkRunningCommandsFailed": "无法检查运行中的命令",
+      "capturingScreenshot": "正在截取屏幕截图",
+      "capturedScreenshot": "已截取屏幕截图",
+      "captureScreenshotFailed": "无法截取屏幕截图",
+      "runningTool": "正在运行 {{name}}",
+      "completedTool": "已完成 {{name}}",
+      "completeToolFailed": "无法完成 {{name}}",
+      "files_one": "{{count}} 个文件",
+      "files_other": "{{count}} 个文件",
+      "searches_one": "{{count}} 次",
+      "searches_other": "{{count}} 次",
+      "actions_one": "{{count}} 个操作",
+      "actions_other": "{{count}} 个操作",
+      "searching": "正在搜索 {{target}}",
+      "searched": "{{target}} 搜索完成",
+      "searchFailed": "无法搜索 {{target}}",
+      "web": "网页",
+      "reading": "正在读取",
+      "read": "已读取",
+      "readFailed": "无法读取",
+      "privateAddress": "私有地址",
+      "writingFile": "正在写入文件",
+      "wroteFile": "写入文件",
+      "writeFileFailed": "无法写入文件",
+      "editingFile": "正在编辑文件",
+      "editedFile": "编辑文件",
+      "editFileFailed": "无法编辑文件",
+      "working": "正在处理",
+      "completedStep": "已完成步骤",
+      "stepFailed": "步骤失败",
+      "checkingCurrentTime": "正在检查当前时间",
+      "checkedCurrentTime": "已检查当前时间",
+      "checkCurrentTimeFailed": "无法检查当前时间",
+      "runningCommand": "正在运行命令",
+      "ranCommand": "已运行命令",
+      "commandFailed": "命令运行失败",
+      "command": "命令",
+      "scriptLines_one": "脚本，{{count}} 行",
+      "scriptLines_other": "脚本，{{count}} 行",
+      "opening": "正在打开",
+      "opened": "已打开",
+      "openFailed": "无法打开",
+      "clicking": "正在点击",
+      "clicked": "已点击",
+      "clickFailed": "无法点击",
+      "enteringText": "正在输入文本",
+      "enteredText": "已输入文本",
+      "enterTextFailed": "无法输入文本",
+      "inTarget": "至 {{target}}",
+      "pressing": "正在按下",
+      "pressed": "已按下",
+      "pressFailed": "无法按下",
+      "hovering": "正在悬停于",
+      "hovered": "已悬停于",
+      "hoverFailed": "无法悬停于",
+      "selecting": "正在选择",
+      "selected": "已选择",
+      "selectFailed": "无法选择",
+      "inspectingPage": "正在检查页面",
+      "inspectedPage": "已检查页面",
+      "inspectPageFailed": "无法检查页面",
+      "waitingForPage": "正在等待页面",
+      "waitedForPage": "已等待页面",
+      "pageNotReady": "页面未就绪",
+      "searchingPlain": "正在搜索",
+      "searchedPlain": "搜索完成",
+      "searchFailedPlain": "无法搜索",
+      "toolFailed": "{{name}} 失败",
+      "toolCompleted": "{{name}} 已完成",
+      "toolCall": "工具调用",
+      "actionTarget": "{{action}} {{target}}",
+      "actionTargetRich": "<action>{{action}}</action> <target></target>",
+      "deleteFileFailed": "无法删除",
+      "editFileFailedShort": "无法编辑",
+      "deletingFile": "正在删除",
+      "editingFileShort": "正在编辑",
+      "deletedFile": "删除",
+      "createdFile": "创建",
+      "editedFileShort": "编辑"
+    },
+    "activityWorkedFor": "已处理 {{duration}}",
+    "collapseActivity": "收起处理过程",
+    "activityShow": "查看过程",
+    "activityShowFor": "查看过程 {{duration}}",
+    "activityHide": "收起过程",
     "traceDetailsLoadFailed": "无法加载完整活动详情。",
     "retryTraceDetails": "重试",
     "retryConnection": "连接失败",
@@ -1809,11 +2341,11 @@
     "retryRateLimit": "请求频率受限",
     "retryServer": "模型服务不可用",
     "retryUnknown": "模型请求失败",
-    "retryWaiting": "{{error}} · {{seconds}} 秒后重试 · 第 {{attempt}} 次",
-    "retryExhausted": "{{error}} · 正在结束本次任务",
+    "retryWaiting": "{{error}}，{{seconds}} 秒后重试（第 {{attempt}} 次）。",
+    "retryExhausted": "{{error}}，正在结束本次任务。",
     "cliActivityRunningOne": "正在使用 {{name}}",
     "cliActivityRanOne": "已使用 {{name}}",
-    "cliActivityFailedOne": "使用 {{name}} 失败",
+    "cliActivityFailedOne": "无法使用 {{name}}",
     "cliActivityRunningMany": "正在使用 {{count}} 个 CLI 应用",
     "cliActivityRanMany": "已使用 {{count}} 个 CLI 应用",
     "cliActivityFailedMany": "{{count}} 个 CLI 应用失败",
@@ -1825,25 +2357,26 @@
     "fileAttachment": "文件附件",
     "attachmentUnavailable": "附件不可用",
     "dataTable": "数据表",
-    "fileEditPreparing": "正在准备文件编辑…",
+    "fileEditPreparing": "准备编辑文件…",
     "openLink": "打开链接：{{label}}",
     "openAttachment": "打开 {{name}}",
     "skill": "技能：{{name}}",
     "automationSourceFallback": "自动化",
     "automationTriggered": "自动触发",
-    "askAboutSelection": "询问此内容",
-    "forkFromHere": "从此处分叉",
+    "askAboutSelection": "询问选文",
+    "forkFromHere": "另开对话",
+    "fallbackResponse": "本条回复已切换至备用模型，由 {{preset}} 回答。",
     "copyReply": "复制",
     "copiedReply": "已复制",
-    "turnLatencyTitle": "本轮耗时（端到端）",
-    "fileEditViewDiff": "查看差异",
-    "fileEditViewLargeDiff": "查看大型差异",
+    "turnLatencyTitle": "回复耗时",
+    "fileEditViewDiff": "查看修改",
+    "fileEditViewLargeDiff": "展开修改",
     "fileEditDiffLineCount": "{{count}} 行",
     "fileEditUnchangedLinesHidden": "已隐藏 {{count}} 行未修改内容",
     "fileEditShowMoreLines": "显示剩余 {{count}} 行",
     "fileEditShowFewerLines": "收起部分行",
     "fileEditOpenFile": "打开文件",
-    "fileEditDiffTruncated": "差异内容已截断。打开文件可查看完整更改。",
+    "fileEditDiffTruncated": "仅显示部分差异，打开文件可查看完整内容。",
     "usage": {
       "context": "当前上下文：{{tokens}}{{capacity}}",
       "requests": "本轮 {{count}} 次模型调用",
@@ -1863,11 +2396,29 @@
     "continue": "继续"
   },
   "lightbox": {
+    "viewAll": "查看全部 {{count}} 张图片",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "适应窗口",
+    "gestures": "双指捏合或双击缩放，放大后拖动查看。也可按 +、− 或 0 缩放或复位。",
     "title": "图片预览",
     "open": "查看图片",
     "prev": "上一张",
     "next": "下一张",
     "close": "关闭预览"
+  },
+  "fileActions": {
+    "menu": "{{name}} 的文件操作",
+    "title": "文件操作",
+    "preview": "预览",
+    "copyAbsolute": "复制绝对路径",
+    "copyRelative": "复制相对路径",
+    "copyReference": "复制引用",
+    "copied": "已复制",
+    "failed": "复制失败，请重试。",
+    "unavailable": "无法解析此文件，可复制原始引用。",
+    "loading": "正在解析文件…",
+    "gatewayPath": "路径指向网关所在的机器。"
   },
   "filePreview": {
     "aria": "文件预览",
@@ -1886,7 +2437,7 @@
     "copied": "已复制"
   },
   "workbench": {
-    "aria": "会话工作台",
+    "aria": "工作台",
     "panes": "窗格",
     "tabAria": "分组：{{title}}",
     "panesInTab": "{{title}} 中的窗格",
@@ -1895,27 +2446,27 @@
     "dropPane": "将 {{pane}} 移入 {{tab}}",
     "createGroup": "创建分组",
     "moveTo": "移动到",
-    "renameGroupTitle": "重命名分组",
+    "renameGroupTitle": "分组改名",
     "renameGroupDescription": "为这个分组命名。",
     "renameGroupPlaceholder": "分组名称",
     "dissolveTab": "解散分组",
-    "layout": "窗格布局",
+    "layout": "布局",
     "addPane": "添加窗格",
     "paneLimit": "最多 {{count}} 个窗格",
-    "deleteConversations": "删除所有对话",
+    "deleteConversations": "整组删除",
     "movePane": "移动 {{title}} 窗格",
-    "movePaneHint": "拖动换位 · 也可以使用方向键",
+    "movePaneHint": "拖动换位，也可以使用方向键。",
     "resizePaneBoundary": "调整窗格边界 {{index}}",
     "promotePane": "将 {{title}} 设为主窗格",
     "paneActions": "{{title}} 窗格操作",
     "detachPane": "移出",
     "composerAria": "向 {{title}} 发送消息",
     "layouts": {
-      "columns": "列布局",
-      "rows": "行布局",
+      "columns": "左右排列",
+      "rows": "上下排列",
       "grid": "网格",
       "bsp": "BSP",
-      "main-stack": "主窗格与堆栈"
+      "main-stack": "主次排列"
     }
   },
   "common": {
@@ -1951,11 +2502,34 @@
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "默认工作区",
       "manual": "粘贴路径",
-      "manualPlaceholder": "/Users/name/project",
-      "usePath": "使用路径",
       "absolutePathRequired": "请输入这台机器上的绝对文件夹路径。"
+    },
+    "picker": {
+      "favorites": "收藏",
+      "recent": "最近项目",
+      "pin": "收藏 {{name}}",
+      "unpin": "取消收藏 {{name}}",
+      "description": "选择当前主机已有文件夹，确认后生效",
+      "shortcuts": "快捷位置",
+      "favoriteHint": "点击文件夹旁的星标收藏。",
+      "loading": "正在加载文件夹…",
+      "truncated": "已显示 500 个文件夹，继续输入路径以缩小范围。",
+      "hidden": "显示隐藏",
+      "select": "确认",
+      "title": "选择目录",
+      "back": "返回",
+      "forward": "前进",
+      "history": "上一次访问的目录",
+      "editPath": "编辑路径",
+      "location": "当前位置",
+      "filter": "筛选目录",
+      "pathNotFound": "没有匹配的文件夹，请检查路径后重试。",
+      "empty": "无子文件夹",
+      "noMatches": "没有匹配的文件夹。",
+      "retry": "重试",
+      "cancel": "取消",
+      "switchDirectory": "切换目录"
     }
   }
 }

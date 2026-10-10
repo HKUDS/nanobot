@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
@@ -229,17 +230,20 @@ def test_dependency_error_is_bounded_and_does_not_expose_callback(
 def test_remote_flow_expires_while_waiting_for_callback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    now = 0.0
+    monkeypatch.setattr(codex_oauth, "time", SimpleNamespace(monotonic=lambda: now))
     monkeypatch.setattr(
         codex_oauth,
         "login_oauth_interactive",
         _fake_interactive_login({}),
     )
     flow = start_openai_codex_oauth_login(
-        timeout_s=0.05,
+        timeout_s=60,
         open_browser=False,
     )
     try:
-        time.sleep(0.08)
+        assert complete_openai_codex_oauth_login(flow) is None
+        now = 61.0
         with pytest.raises(OpenAICodexOAuthError, match="expired"):
             complete_openai_codex_oauth_login(flow)
     finally:

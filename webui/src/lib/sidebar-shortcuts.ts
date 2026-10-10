@@ -1,4 +1,4 @@
-export const SIDEBAR_SHORTCUTS = {
+const SIDEBAR_SHORTCUTS = {
   newChat: { key: "O", shift: true },
   search: { key: "K", shift: false },
   apps: { key: "1", shift: true },
