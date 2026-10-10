@@ -34,10 +34,7 @@ python -m nanobot --version
 
 `python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
 
-`--home <directory>` is a global option; place it before the subcommand. It selects
-`<directory>/config.json` and the default `<directory>/workspace/`. Explicit `--config`
-and workspace settings still apply. See [Multiple Instances](./multiple-instances.md)
-for runtime data locations and port selection. `-h` and `--help` display help.
+`--home <directory>` is a global option; place it before the subcommand. It selects `<directory>/config.json` and the default `<directory>/workspace/`. Explicit `--config` and workspace settings still apply. See [Multiple Instances](./multiple-instances.md) for runtime data locations and port selection. `-h` and `--help` display help.
 
 ### Coexisting with Nanobot Desktop
 
