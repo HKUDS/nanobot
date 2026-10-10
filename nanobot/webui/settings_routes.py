@@ -6,7 +6,7 @@ import asyncio
 import html
 import json
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
@@ -67,6 +67,9 @@ from nanobot.webui.settings_contracts import (
 from nanobot.webui.settings_runtime import runtime_config_payload
 from nanobot.webui.settings_services import WebUISettingsServices
 from nanobot.webui.version_check import check_for_update
+
+if TYPE_CHECKING:
+    from nanobot.webui.access import WebUIAccess
 
 _WEBUI_MUTATION_PAYLOAD_ATTR = "_nanobot_webui_mutation_payload"
 _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
@@ -153,6 +156,7 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/webui-access/update",
     "/api/settings/runtime-config/update",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
@@ -234,6 +238,7 @@ class WebUISettingsRouter:
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         mcp_oauth_redirect_uri: Callable[[WsRequest], str] | None = None,
+        access: WebUIAccess | None = None,
     ) -> None:
         self.settings = settings
         self.bus = bus
@@ -249,6 +254,7 @@ class WebUISettingsRouter:
         self._mcp_runtime_status = mcp_runtime_status
         self._mcp_reload = mcp_reload
         self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
+        self._access = access
         self._mcp_oauth = McpOAuthManager()
         self._restart_sections: set[str] = set()
         self._restart_baselines: dict[str, dict[str, Any]] = {}
@@ -279,6 +285,23 @@ class WebUISettingsRouter:
                 405,
                 "WebUI mutations require an authenticated WebSocket",
             )
+        if path == "/api/settings/webui-access/update" and self._access is not None:
+            if not self._authorized(request):
+                return self._unauthorized()
+            from nanobot.webui.access import WebUIAccessError
+
+            try:
+                payload = _mutation_payload(request) or {}
+                await asyncio.to_thread(
+                    self._access.update_scope, payload.get("allow_other_devices"),
+                    payload.get("password"),
+                    local_browser=_is_local_browser_request(connection, request.headers),
+                )
+                return await asyncio.to_thread(self._handle_settings)
+            except WebUIAccessError as exc:
+                return self._error_response(exc.status, exc.code)
+            except (OSError, ValueError):
+                return self._error_response(500, "save_failed")
         if path == MCP_OAUTH_CALLBACK_PATH:
             return self._handle_mcp_oauth_callback(request)
         if path == "/api/settings/mcp-oauth/start":
@@ -429,6 +452,11 @@ class WebUISettingsRouter:
             self._restart_sections.add(section)
         sections = sorted(self._restart_sections | set(self._restart_changes.values()))
         updated = dict(payload)
+        if self._access is not None:
+            access = self._access.payload()
+            updated["webui_access"] = access
+            if access["requires_restart"] and "runtime" not in sections:
+                sections.append("runtime")
         if sections:
             updated["requires_restart"] = True
         return decorate_settings_payload(

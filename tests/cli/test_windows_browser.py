@@ -481,9 +481,9 @@ def test_native_private_file_permissions_sharing_and_cleanup(tmp_path, monkeypat
     assert not path.exists()
 
 
-def test_linux_browser_behavior_is_unchanged(monkeypatch):
+def test_linux_uses_the_unix_browser_launcher(monkeypatch):
     monkeypatch.setattr(browser.sys, "platform", "linux")
     opened = MagicMock(return_value=True)
-    monkeypatch.setattr(webui_support.webbrowser, "open", opened)
+    monkeypatch.setattr(webui_support, "_launch_unix_browser", opened)
     assert webui_support._launch_browser("http://localhost/")
-    opened.assert_called_once_with("http://localhost/", new=2, autoraise=True)
+    opened.assert_called_once_with("http://localhost/")

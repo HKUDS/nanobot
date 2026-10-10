@@ -117,6 +117,7 @@ type BootState =
       ingressLimits: BootstrapResponse["limits"] | null;
       runtimeSurface: RuntimeSurface;
       webuiCapabilities: string[];
+      canSetAccessPassword: boolean;
     };
 
 function bootstrapCapabilities(boot: BootstrapResponse): string[] {
@@ -905,6 +906,10 @@ export default function App() {
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
   const bootstrapSecretRef = useRef("");
+  const updateAccessPassword = useCallback((password: string) => {
+    bootstrapSecretRef.current = password;
+    saveSecret(password);
+  }, []);
 
   const refreshReadyClient = useCallback(
     async (client: NanobotClient, fallbackSurface: RuntimeSurface) => {
@@ -931,6 +936,7 @@ export default function App() {
               ingressLimits: boot.limits ?? current.ingressLimits,
               runtimeSurface,
               webuiCapabilities: bootstrapCapabilities(boot),
+              canSetAccessPassword: boot.host_compatibility === undefined,
             }
           : current,
       );
@@ -979,6 +985,7 @@ export default function App() {
             ingressLimits: boot.limits ?? null,
             runtimeSurface,
             webuiCapabilities: bootstrapCapabilities(boot),
+            canSetAccessPassword: boot.host_compatibility === undefined,
           });
         } catch (e) {
           if (cancelled) return;
@@ -1099,6 +1106,7 @@ export default function App() {
       modelName={state.modelName}
       ingressLimits={state.ingressLimits}
       webuiCapabilities={state.webuiCapabilities}
+      onAccessPasswordChange={state.canSetAccessPassword ? updateAccessPassword : undefined}
     >
       <RemoteInstances><Shell
         runtimeSurface={state.runtimeSurface}

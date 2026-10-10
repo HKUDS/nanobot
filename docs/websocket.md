@@ -243,6 +243,7 @@ All fields go under `channels.websocket` in `config.json`. Unrecognized options 
 | `websocketRequiresToken` | bool | `true` | When `true` and no static `token` is configured, clients must still present a valid issued token, unless `trustedProxyAuth` authenticates the direct proxy peer. Set to `false` to allow unauthenticated connections (only safe for local/trusted networks). |
 | `tokenIssuePath` | string | `""` | HTTP path for issuing short-lived tokens. Must differ from `path`. See [Token Issuance](#token-issuance). |
 | `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning). `/webui/bootstrap` issues tokens for local/secret-authenticated requests; trusted-proxy requests intentionally receive no bootstrap or API token. |
+| `tokenIssueSecretGenerated` | bool | `false` | Set by `nanobot webui` when it generates the initial local credential. The network-access switch requires a user-selected password before enabling other devices, then clears this flag. Existing configurations without this flag retain their credentials. |
 | `trustedProxyAuth` | object or `null` | `null` | Optional two-part no-token authorization for a directly connected upstream proxy. Both `trustedPeerCidrs` and a non-empty `assertionHeader` value must match; a CIDR alone never authorizes bootstrap or WebSocket/API access. |
 | `trustedProxyAuth.trustedPeerCidrs` | list of CIDR strings | — | Direct TCP peer networks that may present the assertion. IPv4, IPv6, and IPv4-mapped IPv6 peers are supported; universal CIDRs (`0.0.0.0/0`, `::/0`) are rejected. |
 | `trustedProxyAuth.assertionHeader` | string | — | Header injected by the identity-aware proxy after successful authentication. Routing/client metadata headers (`Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `CF-Connecting-IP`) are rejected; nanobot trusts the remaining header's non-empty value but does not cryptographically validate it. |
@@ -290,7 +291,7 @@ For production deployments where `websocketRequiresToken: true`, use short-lived
 3. Client opens WebSocket with `?token=nbwt_aBcDeFg...&client_id=...`.
 4. The token is consumed (single use) and cannot be reused.
 
-The embedded WebUI's `/webui/bootstrap` route returns a WebSocket token and REST `api_token` for local or secret-authenticated requests. When `trustedProxyAuth` authenticates the direct proxy peer, it returns connection metadata only: no bootstrap token, no REST API token, and no token query parameter is required for the WebSocket handshake or subsequent REST requests.
+The embedded WebUI's `/webui/bootstrap` route returns a WebSocket token for local or secret-authenticated requests, but returns a REST `api_token` only after verifying `tokenIssueSecret` or `token`. When `trustedProxyAuth` authenticates the direct proxy peer, it returns connection metadata only: no bootstrap token, no REST API token, and no token query parameter is required for the WebSocket handshake or subsequent REST requests.
 
 ### Trusted proxy no-token bootstrap
 

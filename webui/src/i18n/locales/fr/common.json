@@ -1055,6 +1055,27 @@
         "supabase": "Consultez et gérez les projets."
       }
     },
+    "webuiAccess": {
+      "title": "Accès à la WebUI",
+      "allowOtherDevices": "Autoriser l’accès depuis d’autres appareils",
+      "description": "Les autres appareils doivent toujours s’authentifier pour se connecter.",
+      "activeHost": "Adresse d’écoute actuelle",
+      "localActive": "Actuellement, seul cet ordinateur peut se connecter.",
+      "networkActive": "Actuellement, les autres appareils peuvent se connecter après authentification.",
+      "managed": "Cette écoute est gérée par l’hôte et ne peut pas être modifiée ici.",
+      "pendingEnable": "Enregistré. Redémarrez pour autoriser les autres appareils à se connecter.",
+      "pendingDisable": "Enregistré. Après le redémarrage, les autres appareils seront déconnectés. Ouvrez l’adresse localhost sur cet ordinateur pour vous reconnecter.",
+      "networkScope": "Ce réglage modifie uniquement l’écoute de la WebUI. Il ne configure pas les pare-feu, les routeurs ni les tunnels publics.",
+      "saveFailed": "Impossible d’enregistrer les paramètres d’accès. Réessayez.",
+      "passwordTitle": "Définir un mot de passe d’accès",
+      "passwordDescription": "Utilisez des lettres anglaises, des chiffres ou des symboles ASCII.",
+      "passwordConfirm": "Confirmer le mot de passe",
+      "passwordSubmit": "Définir le mot de passe et autoriser l’accès",
+      "passwordInvalid": "Utilisez de 8 à 1024 caractères ASCII visibles, sans espaces ni $.",
+      "passwordMismatch": "Les mots de passe ne correspondent pas. Saisissez-les à nouveau.",
+      "passwordAlreadySet": "Une autre page a déjà défini le mot de passe. Actualisez cette page avant de modifier l’accès.",
+      "passwordLocalOnly": "Définissez le mot de passe sur l’ordinateur qui exécute nanobot."
+    },
     "api": {
       "title": "Serveur API", "openaiCompatible": "API compatible OpenAI", "description": "Connectez-vous via une API compatible OpenAI.",
       "start": "Démarrer le serveur API", "starting": "Démarrage...", "stop": "Arrêter", "stopping": "Arrêt...",

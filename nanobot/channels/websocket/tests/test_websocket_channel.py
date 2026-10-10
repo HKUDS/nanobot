@@ -290,7 +290,6 @@ def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
     wth._WEBSOCKET_TURN_OWNERS.clear()
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
         "nanobot.webui.workspaces.get_webui_dir",
         lambda: tmp_path / "webui",

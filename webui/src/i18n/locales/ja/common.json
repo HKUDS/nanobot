@@ -1055,6 +1055,27 @@
         "supabase": "プロジェクトを確認・管理します。"
       }
     },
+    "webuiAccess": {
+      "title": "WebUI アクセス",
+      "allowOtherDevices": "他のデバイスからのアクセスを許可",
+      "description": "他のデバイスから接続する場合も認証が必要です。",
+      "activeHost": "現在の待ち受けアドレス",
+      "localActive": "現在、このコンピューターからのみ接続できます。",
+      "networkActive": "現在、認証後に他のデバイスから接続できます。",
+      "managed": "この待ち受け設定はホストが管理しているため、ここでは変更できません。",
+      "pendingEnable": "保存しました。再起動すると他のデバイスから接続できるようになります。",
+      "pendingDisable": "保存しました。再起動すると他のデバイスは切断されます。このコンピューターで localhost のアドレスを開いて再接続してください。",
+      "networkScope": "WebUI の待ち受け範囲のみを変更します。ファイアウォール、ルーター、公開トンネルの設定は変更しません。",
+      "saveFailed": "アクセス設定を保存できませんでした。もう一度お試しください。",
+      "passwordTitle": "アクセスパスワードを設定",
+      "passwordDescription": "英字、数字、半角記号を使用できます。",
+      "passwordConfirm": "パスワードを確認",
+      "passwordSubmit": "パスワードを設定してアクセスを許可",
+      "passwordInvalid": "8〜1024文字の表示可能なASCII文字を入力してください。空白と $ は使用できません。",
+      "passwordMismatch": "パスワードが一致しません。もう一度入力してください。",
+      "passwordAlreadySet": "別のページですでにパスワードが設定されています。ページを再読み込みしてからアクセス設定を変更してください。",
+      "passwordLocalOnly": "nanobot を実行しているコンピューターでパスワードを設定してください。"
+    },
     "api": {
       "title": "API サーバー", "openaiCompatible": "OpenAI 互換 API", "description": "OpenAI 互換の API で接続します。",
       "start": "API サーバーを起動", "starting": "起動中...", "stop": "停止", "stopping": "停止中...",

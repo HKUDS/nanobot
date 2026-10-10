@@ -1244,6 +1244,27 @@
       "searchInstallOnSave": "保存时会自动安装 Olostep 所需的软件包。",
       "installing": "正在安装所需软件包…"
     },
+    "webuiAccess": {
+      "title": "网页访问",
+      "allowOtherDevices": "允许其他设备访问",
+      "description": "其他设备连接仍需通过身份验证。",
+      "activeHost": "当前监听地址",
+      "localActive": "当前仅允许本机连接。",
+      "networkActive": "当前允许其他设备通过身份验证后连接。",
+      "managed": "当前监听方式由主机管理，无法在此更改。",
+      "pendingEnable": "已保存，重启后允许其他设备连接。",
+      "pendingDisable": "已保存，重启后其他设备将断开连接，请在本机打开 localhost 地址重新连接。",
+      "networkScope": "此设置只更改 WebUI 的监听范围，不会配置防火墙、路由器或公网隧道。",
+      "saveFailed": "访问设置保存失败，请重试。",
+      "passwordTitle": "设置访问密码",
+      "passwordDescription": "使用英文字母、数字或半角符号。",
+      "passwordConfirm": "确认密码",
+      "passwordSubmit": "设置密码并开启",
+      "passwordInvalid": "请输入 8–1024 位密码，仅限英文字母、数字或半角符号，不含空格或 $。",
+      "passwordMismatch": "两次密码不一致，请重新输入。",
+      "passwordAlreadySet": "其他页面已设置密码，请刷新后再更改访问设置。",
+      "passwordLocalOnly": "请在运行 nanobot 的本机设置访问密码。"
+    },
     "api": {
       "title": "API 服务",
       "openaiCompatible": "OpenAI 兼容 API",

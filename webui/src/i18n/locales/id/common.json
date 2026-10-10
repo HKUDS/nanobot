@@ -1055,6 +1055,27 @@
         "supabase": "Lihat dan kelola proyek."
       }
     },
+    "webuiAccess": {
+      "title": "Akses WebUI",
+      "allowOtherDevices": "Izinkan akses dari perangkat lain",
+      "description": "Perangkat lain tetap harus diautentikasi untuk terhubung.",
+      "activeHost": "Alamat dengar saat ini",
+      "localActive": "Saat ini, hanya komputer ini yang dapat terhubung.",
+      "networkActive": "Saat ini, perangkat lain dapat terhubung setelah autentikasi.",
+      "managed": "Pengaturan pendengar ini dikelola oleh host dan tidak dapat diubah di sini.",
+      "pendingEnable": "Tersimpan. Mulai ulang untuk mengizinkan perangkat lain terhubung.",
+      "pendingDisable": "Tersimpan. Setelah memulai ulang, perangkat lain akan terputus. Buka alamat localhost di komputer ini untuk terhubung kembali.",
+      "networkScope": "Ini hanya mengubah cakupan alamat dengar WebUI. Tidak mengonfigurasi firewall, router, atau tunnel publik.",
+      "saveFailed": "Pengaturan akses tidak dapat disimpan. Coba lagi.",
+      "passwordTitle": "Atur kata sandi akses",
+      "passwordDescription": "Gunakan huruf bahasa Inggris, angka, atau simbol ASCII.",
+      "passwordConfirm": "Konfirmasi kata sandi",
+      "passwordSubmit": "Atur kata sandi dan izinkan akses",
+      "passwordInvalid": "Gunakan 8–1024 karakter ASCII yang terlihat, tanpa spasi atau $.",
+      "passwordMismatch": "Kata sandi tidak cocok. Masukkan kembali.",
+      "passwordAlreadySet": "Halaman lain sudah mengatur kata sandi. Muat ulang halaman ini sebelum mengubah akses.",
+      "passwordLocalOnly": "Atur kata sandi di komputer yang menjalankan nanobot."
+    },
     "api": {
       "title": "Server API", "openaiCompatible": "API kompatibel OpenAI", "description": "Hubungkan melalui API yang kompatibel dengan OpenAI.",
       "start": "Mulai server API", "starting": "Memulai...", "stop": "Hentikan", "stopping": "Menghentikan...",

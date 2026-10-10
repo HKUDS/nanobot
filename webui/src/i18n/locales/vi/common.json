@@ -1055,6 +1055,27 @@
         "supabase": "Xem và quản lý dự án."
       }
     },
+    "webuiAccess": {
+      "title": "Truy cập WebUI",
+      "allowOtherDevices": "Cho phép thiết bị khác truy cập",
+      "description": "Các thiết bị khác vẫn phải xác thực để kết nối.",
+      "activeHost": "Địa chỉ lắng nghe hiện tại",
+      "localActive": "Hiện chỉ máy tính này có thể kết nối.",
+      "networkActive": "Hiện các thiết bị khác có thể kết nối sau khi xác thực.",
+      "managed": "Chế độ lắng nghe này do máy chủ quản lý và không thể thay đổi ở đây.",
+      "pendingEnable": "Đã lưu. Khởi động lại để cho phép các thiết bị khác kết nối.",
+      "pendingDisable": "Đã lưu. Sau khi khởi động lại, các thiết bị khác sẽ bị ngắt kết nối. Mở địa chỉ localhost trên máy tính này để kết nối lại.",
+      "networkScope": "Chỉ thay đổi phạm vi lắng nghe của WebUI. Không cấu hình tường lửa, bộ định tuyến hay đường hầm công khai.",
+      "saveFailed": "Không thể lưu cài đặt truy cập. Vui lòng thử lại.",
+      "passwordTitle": "Đặt mật khẩu truy cập",
+      "passwordDescription": "Dùng chữ cái tiếng Anh, số hoặc ký hiệu ASCII.",
+      "passwordConfirm": "Xác nhận mật khẩu",
+      "passwordSubmit": "Đặt mật khẩu và cho phép truy cập",
+      "passwordInvalid": "Dùng 8–1024 ký tự ASCII hiển thị được, không chứa khoảng trắng hoặc $.",
+      "passwordMismatch": "Mật khẩu không khớp. Vui lòng nhập lại.",
+      "passwordAlreadySet": "Một trang khác đã đặt mật khẩu. Hãy tải lại trang này trước khi thay đổi quyền truy cập.",
+      "passwordLocalOnly": "Đặt mật khẩu trên máy tính chạy nanobot."
+    },
     "api": {
       "title": "Máy chủ API", "openaiCompatible": "API tương thích OpenAI", "description": "Kết nối qua API tương thích OpenAI.",
       "start": "Khởi động API", "starting": "Đang khởi động...", "stop": "Dừng", "stopping": "Đang dừng...",

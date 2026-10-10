@@ -1244,6 +1244,27 @@
       "searchInstallOnSave": "Required Olostep packages will be installed automatically when you save.",
       "installing": "Installing required packages…"
     },
+    "webuiAccess": {
+      "title": "WebUI access",
+      "allowOtherDevices": "Allow access from other devices",
+      "description": "Other devices still need to authenticate to connect.",
+      "activeHost": "Current listening address",
+      "localActive": "Currently, only this computer can connect.",
+      "networkActive": "Currently, other devices can connect after authenticating.",
+      "managed": "This listener is managed by the host and cannot be changed here.",
+      "pendingEnable": "Saved. Restart to allow other devices to connect.",
+      "pendingDisable": "Saved. After restarting, other devices will disconnect. Open this computer’s localhost address to reconnect.",
+      "networkScope": "This only changes where WebUI listens. It does not configure firewalls, routers or public tunnels.",
+      "saveFailed": "Could not save access settings. Try again.",
+      "passwordTitle": "Set an access password",
+      "passwordDescription": "Use English letters, numbers, or ASCII symbols.",
+      "passwordConfirm": "Confirm password",
+      "passwordSubmit": "Set password and allow access",
+      "passwordInvalid": "Use 8–1024 visible ASCII characters, without spaces or $.",
+      "passwordMismatch": "The passwords do not match. Enter them again.",
+      "passwordAlreadySet": "Another page has already set the password. Refresh this page before changing access.",
+      "passwordLocalOnly": "Set the password on the computer running nanobot."
+    },
     "api": {
       "title": "API server",
       "openaiCompatible": "OpenAI-compatible API",

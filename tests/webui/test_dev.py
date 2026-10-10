@@ -93,14 +93,13 @@ def test_start_webui_dev_server_uses_vite_directly_and_sets_proxy_target(
 
     assert server.process is process
     command, kwargs = popen_calls[0]
-    assert command == ["node", str(vite_cli)]
+    assert command == ["node", str(vite_cli), "--logLevel", "warn", "--clearScreen", "false"]
     assert kwargs["cwd"] == source
     assert kwargs["env"] == {
         "EXISTING": "value",
         "NANOBOT_API_URL": "http://127.0.0.1:8899",
     }
-    assert output == ["WebUI dev server: http://127.0.0.1:5173/"]
-    assert "secret" not in output[0]
+    assert output == []
 
 
 def test_dev_server_installs_locked_dependencies_when_vite_is_missing(tmp_path: Path) -> None:

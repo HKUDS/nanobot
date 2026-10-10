@@ -273,7 +273,7 @@ Open:
 http://127.0.0.1:8765
 ```
 
-If accessing from another device, bind the WebSocket channel to `0.0.0.0` and set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds without a token or token issue secret.
+For first access, copy the complete login link printed by `nanobot webui`, including the fragment after `#`. In WSL, open that link in your Windows browser if automatic opening fails. The plain page address does not sign in a new browser. To use another device, enable **Allow access from other devices** in **Settings → System**, set a password when prompted, and restart. The WebSocket channel refuses non-loopback binds without a token, token issue secret, or trusted-proxy authentication.
 
 | Symptom | Check |
 |---|---|

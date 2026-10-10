@@ -214,6 +214,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.image_generation.update": "/api/settings/image-generation/update",
     "settings.transcription.update": "/api/settings/transcription/update",
     "settings.runtime_config.update": "/api/settings/runtime-config/update",
+    "settings.webui_access.update": "/api/settings/webui-access/update",
     "settings.network_safety.update": "/api/settings/network-safety/update",
     "settings.cli_app.install": "/api/settings/cli-apps/install",
     "settings.cli_app.update": "/api/settings/cli-apps/update",
@@ -394,6 +395,9 @@ class GatewayHTTPHandler:
         self.ingress = ingress
         self.workspaces = workspaces
         self.settings = settings
+        from nanobot.webui.access import WebUIAccess
+
+        self.access = WebUIAccess(config, settings.config)
         from nanobot.webui.remote_instances import RemoteInstances
 
         self.remote_instances = RemoteInstances(
@@ -435,6 +439,7 @@ class GatewayHTTPHandler:
             mcp_runtime_status=mcp_runtime_status,
             mcp_reload=mcp_reload,
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
+            access=self.access,
         )
 
     def workspace_project_selection_available(self, connection: Any) -> bool:

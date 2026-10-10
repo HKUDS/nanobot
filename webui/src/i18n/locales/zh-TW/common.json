@@ -1055,6 +1055,27 @@
         "supabase": "檢視和管理專案"
       }
     },
+    "webuiAccess": {
+      "title": "網頁存取",
+      "allowOtherDevices": "允許其他裝置存取",
+      "description": "其他裝置連線仍須通過身分驗證。",
+      "activeHost": "目前監聽位址",
+      "localActive": "目前僅允許本機連線。",
+      "networkActive": "目前允許其他裝置通過身分驗證後連線。",
+      "managed": "目前的監聽方式由主機管理，無法在此變更。",
+      "pendingEnable": "已儲存，重新啟動後允許其他裝置連線。",
+      "pendingDisable": "已儲存，重新啟動後其他裝置將中斷連線，請在本機開啟 localhost 網址重新連線。",
+      "networkScope": "此設定只變更 WebUI 的監聽範圍，不會設定防火牆、路由器或公網通道。",
+      "saveFailed": "存取設定儲存失敗，請重試。",
+      "passwordTitle": "設定存取密碼",
+      "passwordDescription": "使用英文字母、數字或半形符號。",
+      "passwordConfirm": "確認密碼",
+      "passwordSubmit": "設定密碼並開啟",
+      "passwordInvalid": "請輸入 8–1024 位密碼，僅限英文字母、數字或半形符號，不含空白或 $。",
+      "passwordMismatch": "兩次密碼不一致，請重新輸入。",
+      "passwordAlreadySet": "其他頁面已設定密碼，請重新整理後再變更存取設定。",
+      "passwordLocalOnly": "請在執行 nanobot 的本機設定存取密碼。"
+    },
     "api": {
       "title": "API 伺服器", "openaiCompatible": "OpenAI 相容 API", "description": "透過相容 OpenAI 的 API 連線",
       "start": "啟動 API 伺服器", "starting": "正在啟動…", "stop": "停止", "stopping": "正在停止…",
