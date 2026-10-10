@@ -861,7 +861,7 @@ export function ModelsSettings({
         )}
         <div className="settings-footer flex flex-wrap justify-end gap-2">
           {orderSaving ? (
-            <span role="status" className="mr-auto text-[12px] text-muted-foreground">
+            <span role="status" className="order-last w-full text-[12px] text-muted-foreground">
               <SettingsStatusMessage>
                 <span className="inline-flex items-center gap-1.5">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -873,9 +873,9 @@ export function ModelsSettings({
           {!showMigration ? (
             <Button
               type="button"
-              variant="outline"
+              variant="link"
               size="sm"
-              className={cn("h-11 gap-2 text-[13px] font-normal sm:h-9",
+              className={cn("mr-auto h-11 gap-2 text-[13px] font-normal text-muted-foreground hover:font-semibold hover:text-orange-700 hover:no-underline dark:hover:text-orange-400 sm:h-9",
                 hideEditorReturnFocus && "focus-visible:ring-0 focus-visible:ring-offset-0")}
               onKeyDown={(event) => { if (event.key !== "Escape") setHideEditorReturnFocus(false); }}
               disabled={callOrderBusy}
@@ -890,8 +890,8 @@ export function ModelsSettings({
               {tx("settings.models.newPreset", "New preset")}
             </Button>
           ) : null}
-          <Button type="button" variant="outline" size="sm"
-            className="h-11 shrink-0 text-[13px] font-normal sm:h-9"
+          <Button type="button" variant="link" size="sm"
+            className="h-11 shrink-0 text-[13px] font-normal text-muted-foreground hover:font-semibold hover:text-orange-700 hover:no-underline dark:hover:text-orange-400 sm:h-9"
             onClick={(event) => onManageProviders(event.currentTarget)}>
             {t("settings.providers.manageProviders")}
           </Button>
