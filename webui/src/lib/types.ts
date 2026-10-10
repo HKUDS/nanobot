@@ -669,6 +669,14 @@ export type RuntimeConfigValue = string | number | boolean | string[] | null;
 
 
 export interface SettingsPayload {
+  webui_access?: {
+    allow_other_devices: boolean;
+    active_allow_other_devices: boolean;
+    host: string;
+    active_host: string;
+    requires_restart: boolean;
+    can_change: boolean;
+  };
   runtime_config?: Record<string, RuntimeConfigValue>;
   surface?: RuntimeSurface;
   runtime_surface?: RuntimeSurface;

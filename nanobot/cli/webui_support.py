@@ -313,7 +313,7 @@ def _gateway_health_bind_note(host: str) -> str:
 def webui_bootstrap_secret(config: Config) -> str:
     """Return the shared local bootstrap credential for WebUI protocol clients."""
     ws_cfg = _webui_config_dict(config)
-    return str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
+    return str(ws_cfg.get("tokenIssueSecret") or "").strip() or str(ws_cfg.get("token") or "").strip()
 
 
 def _webui_browser_url(config: Config) -> str:
@@ -330,11 +330,7 @@ def _webui_browser_url(config: Config) -> str:
 
 
 def _webui_display_url(url: str) -> str:
-    marker = "bootstrapSecret="
-    if marker not in url:
-        return url
-    prefix, _ = url.split(marker, 1)
-    return f"{prefix}{marker}<redacted>"
+    return url.split("#", 1)[0].rstrip("/")
 
 
 def _ensure_local_webui_channel(
@@ -345,51 +341,46 @@ def _ensure_local_webui_channel(
 ) -> bool:
     """Enable the local WebUI channel with safe localhost defaults."""
     from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.config.loader import resolve_config_env_vars
 
     current: Any = getattr(config.channels, "websocket", None) or {}
-    model = WebSocketConfig.model_validate(current)
+    resolved = resolve_config_env_vars(config.model_copy(deep=True))
+    model = WebSocketConfig.model_validate(getattr(resolved.channels, "websocket", None) or {})
+    saved: dict[str, Any] = dict(current) if current else model.model_dump(by_alias=True, exclude_none=True)
     changed = False
 
     needs_enable = not model.enabled
     needs_port = port is not None and model.port != port
-    needs_secret = not model.token_issue_secret.strip() and not model.token.strip()
-    if not needs_enable and not needs_port and not needs_secret:
+    if current and not needs_enable and not needs_port:
         return False
 
     target_port = port if port is not None else model.port
     console.print()
     console.print("[bold]Local WebUI setup[/bold]")
     console.print(f"  URL: [cyan]http://127.0.0.1:{target_port}[/cyan]")
-    console.print("  Bind: [cyan]127.0.0.1 only[/cyan] (not exposed to your LAN)")
-    if needs_secret:
-        console.print("  WebUI password: will be generated and stored in config")
+    console.print(f"  Bind: [cyan]{model.host}[/cyan]")
+    if not model.has_access_auth:
+        console.print("  Set your WebUI access password on the first page.")
     else:
-        console.print("  WebUI password: already stored in config")
+        console.print("  WebUI authentication: already configured")
     console.print(
-        "  LAN access requires an explicit host change plus a WebUI password in config."
+        "  To allow other devices, use WebUI Settings after signing in."
     )
     _confirm_webui_action("Enable the WebUI channel?", yes=yes)
 
     if not model.enabled:
-        model.enabled = True
-        changed = True
-    if model.host != "127.0.0.1":
-        model.host = "127.0.0.1"
+        saved["enabled"] = True
         changed = True
     if port is not None and model.port != port:
-        model.port = port
+        saved["port"] = port
         changed = True
-    if not model.websocket_requires_token:
-        model.websocket_requires_token = True
-        changed = True
-    if needs_secret:
-        import secrets
-
-        model.token_issue_secret = secrets.token_urlsafe(32)
+    if not model.has_access_auth and not model.websocket_requires_token:
+        saved.pop("websocket_requires_token", None)
+        saved["websocketRequiresToken"] = True
         changed = True
 
-    setattr(config.channels, "websocket", model.model_dump(by_alias=True, exclude_none=True))
-    return changed
+    setattr(config.channels, "websocket", saved)
+    return changed or not current
 
 
 def _warn_webui_bind_scope(config: Config) -> None:
@@ -399,7 +390,7 @@ def _warn_webui_bind_scope(config: Config) -> None:
         return
     console.print(
         "[yellow]Warning: WebUI is configured to bind outside localhost. "
-        "Keep tokenIssueSecret set and use this only on trusted networks.[/yellow]"
+        "Keep access authentication configured and use this only on trusted networks.[/yellow]"
     )
 
 
@@ -538,10 +529,15 @@ def _print_webui_manual_access(config: Config, config_path: Path, url: str) -> N
     console.print()
     console.print("[bold]Open the WebUI manually[/bold]")
     console.print(f"  WebUI: [cyan]{browser_url}[/cyan]")
-    console.print(
-        "  WebUI password: "
-        f"[cyan]channels.websocket.{password_key}[/cyan] in [cyan]{config_path}[/cyan]"
-    )
+    if webui_bootstrap_secret(config):
+        console.print(
+            "  WebUI password: "
+            f"[cyan]channels.websocket.{password_key}[/cyan] in [cyan]{config_path}[/cyan]"
+        )
+    elif ws_cfg.get("trustedProxyAuth"):
+        console.print("  Sign in through your configured trusted proxy.")
+    else:
+        console.print("  Set your access password on this page, then enter the WebUI.")
     console.print()
     console.print("If nanobot is running on another machine, create an SSH tunnel from yours:")
     console.print(

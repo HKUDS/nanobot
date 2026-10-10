@@ -15,8 +15,18 @@ export async function fetchGatewayConnection(
   apiUrl: string,
   clientId: string,
 ): Promise<GatewayConnection> {
+  const headers: Record<string, string> = {}
+  if (bootstrapSecret) {
+    if (/^[\x20-\x7e]*$/.test(bootstrapSecret)) {
+      headers["X-Nanobot-Auth"] = bootstrapSecret
+    } else {
+      headers["X-Nanobot-Auth-Encoded"] = btoa(
+        Array.from(new TextEncoder().encode(bootstrapSecret), (byte) => String.fromCharCode(byte)).join(""),
+      )
+    }
+  }
   const response = await fetch(bootstrapUrl, {
-    headers: bootstrapSecret ? { "X-Nanobot-Auth": bootstrapSecret } : {},
+    headers,
   })
   if (!response.ok) {
     const retryable = response.status === 408 || response.status === 429 || response.status >= 500

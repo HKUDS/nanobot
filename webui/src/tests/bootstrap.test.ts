@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  BootstrapSetupRequiredError,
   consumeUrlBootstrapSecret,
   deriveWsUrl,
   fetchBootstrap,
@@ -87,6 +88,25 @@ describe("bootstrap helpers", () => {
       ws_path: "/",
       ws_url: "wss://proxy.example/",
     });
+  });
+
+  it("reports setup separately from a password login", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "setup_required" }), { status: 428 },
+    )));
+    await expect(fetchBootstrap()).rejects.toBeInstanceOf(BootstrapSetupRequiredError);
+  });
+
+  it.each([
+    ["existing-password", { "X-Nanobot-Auth": "existing-password" }],
+    ["访问密码🔐", { "X-Nanobot-Auth-Encoded": Buffer.from("访问密码🔐").toString("base64") }],
+  ])("sends %s using a compatible HTTP authentication header", async (secret, headers) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ws_path: "/" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchBootstrap("", secret);
+
+    expect(fetchMock).toHaveBeenCalledWith("/webui/bootstrap", expect.objectContaining({ headers }));
   });
 
   it("consumes bootstrap secrets from the URL fragment", () => {

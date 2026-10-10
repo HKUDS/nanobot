@@ -69,6 +69,7 @@ def _channel() -> WebSocketChannel:
         enabled=True,
         allow_from=["*"],
         websocket_requires_token=False,
+        token_issue_secret="synthetic-access-secret",
     )
     gateway = build_gateway_services(
         config=config,

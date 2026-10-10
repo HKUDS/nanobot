@@ -22,7 +22,8 @@ from nanobot.webui.gateway_services import build_gateway_services
 def _make_channel(session_manager: SessionManager | None = None) -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
-    cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
+    cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False,
+           "tokenIssueSecret": "synthetic-access-secret"}
     parsed = WebSocketConfig.model_validate(cfg)
     gateway = build_gateway_services(
         config=parsed,

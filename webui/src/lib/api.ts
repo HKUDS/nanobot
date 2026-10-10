@@ -1393,6 +1393,15 @@ export async function updateRuntimeConfigSettings(
   return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
 }
 
+export async function updateWebuiAccessSettings(
+  transport: WebUIMutationTransport,
+  allowOtherDevices: boolean,
+): Promise<SettingsPayload> {
+  return mutation<SettingsPayload>(transport, "settings.webui_access.update", {
+    allow_other_devices: allowOtherDevices,
+  });
+}
+
 export function starPromptAction(
   transport: WebUIMutationTransport,
   action: "claim" | "dismiss",

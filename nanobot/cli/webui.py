@@ -155,8 +155,11 @@ def webui(
             port=port,
             yes=yes,
         )
-        _warn_webui_bind_scope(setup_config)
-        webui_url = _webui_browser_url(setup_config)
+        resolved_webui_config = resolve_config_env_vars(
+            setup_config.model_copy(deep=True), config_path=config_path,
+        )
+        _warn_webui_bind_scope(resolved_webui_config)
+        webui_url = _webui_browser_url(resolved_webui_config)
     except ValidationError as exc:
         retry_command = f'nanobot webui --config "{config_path}"'
         _print_runtime_config_validation_error(

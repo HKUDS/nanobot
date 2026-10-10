@@ -40,6 +40,7 @@ import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings"
 import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
+import { WebuiAccessSettings } from "@/components/settings/system/WebuiAccessSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import type { ChatSummary, SessionAutomationJob, SkillSummary } from "@/lib/types";
@@ -647,6 +648,14 @@ export function SettingsPage({
       case "runtime":
         return (
           <div className="settings-stack">
+            {controller.webuiAccessAvailable && settings.webui_access ? (
+              <WebuiAccessSettings
+                access={settings.webui_access}
+                saving={controller.webuiAccessSaving}
+                error={controller.webuiAccessError}
+                onChange={(allow) => void controller.saveWebuiAccess(allow)}
+              />
+            ) : null}
             {runtimeConfiguration("runtime")}
             <RuntimeSettings
               form={form}

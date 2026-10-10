@@ -53,7 +53,8 @@ def manager_with_storage(workspace, sessions_root):
 
 def gateway_for(manager, sessions, workspace):
     gateway = build_gateway_services(
-        config=WebSocketConfig(), bus=manager.bus, session_manager=sessions,
+        config=WebSocketConfig(token_issue_secret="synthetic-access-secret"),
+        bus=manager.bus, session_manager=sessions,
         static_dist_path=None, workspace_path=workspace, default_restrict_to_workspace=True,
         config_path=workspace.parent / "config.json", runtime_model_name=None,
         runtime_surface="gateway", runtime_capabilities_overrides=None, subagent_manager=manager,

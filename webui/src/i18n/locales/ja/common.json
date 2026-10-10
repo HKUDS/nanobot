@@ -314,6 +314,19 @@
       "required": "パスワードを入力",
       "invalid": "パスワードが違います"
     },
+    "setup": {
+      "title": "アクセスパスワードを設定",
+      "description": "このコンピューターでパスワードを設定して nanobot を使い始めましょう。",
+      "confirmPassword": "パスワードを確認",
+      "submit": "設定して続ける",
+      "submitting": "保存中…",
+      "required": "アクセスパスワードを入力してください。",
+      "mismatch": "パスワードが一致しません。もう一度入力してください。",
+      "invalidPassword": "前後の空白を除き、1〜1024文字のパスワードを使用してください。${ は使用できません。",
+      "localOnly": "nanobot を実行しているコンピューターで localhost のアドレスを開き、初期設定を完了してください。",
+      "saveFailed": "パスワードを保存できませんでした。もう一度お試しください。",
+      "alreadyInitialized": "別のページですでにパスワードが設定されています。そのパスワードを入力して接続してください。"
+    },
     "account": {
       "section": "アカウント",
       "logoutHint": "このブラウザーとゲートウェイの接続を切ります。",
@@ -1054,6 +1067,19 @@
         "github": "リポジトリ、Issue、PR を管理します。",
         "supabase": "プロジェクトを確認・管理します。"
       }
+    },
+    "webuiAccess": {
+      "title": "WebUI アクセス",
+      "allowOtherDevices": "他のデバイスからのアクセスを許可",
+      "description": "他のデバイスから接続する場合も認証が必要です。",
+      "activeHost": "現在の待ち受けアドレス",
+      "localActive": "現在、このコンピューターからのみ接続できます。",
+      "networkActive": "現在、認証後に他のデバイスから接続できます。",
+      "managed": "この待ち受け設定はホストが管理しているため、ここでは変更できません。",
+      "pendingEnable": "保存しました。再起動すると他のデバイスから接続できるようになります。",
+      "pendingDisable": "保存しました。再起動すると他のデバイスは切断されます。このコンピューターで localhost のアドレスを開いて再接続してください。",
+      "networkScope": "WebUI の待ち受け範囲のみを変更します。ファイアウォール、ルーター、公開トンネルの設定は変更しません。",
+      "saveFailed": "アクセス設定を保存できませんでした。もう一度お試しください。"
     },
     "api": {
       "title": "API サーバー", "openaiCompatible": "OpenAI 互換 API", "description": "OpenAI 互換の API で接続します。",

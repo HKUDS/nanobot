@@ -53,6 +53,7 @@ def _ch(
         "port": port,
         "path": "/",
         "websocketRequiresToken": False,
+        "tokenIssueSecret": "synthetic-access-secret",
     }
     parsed = WebSocketConfig.model_validate(cfg)
     gateway = build_gateway_services(

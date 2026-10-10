@@ -314,6 +314,19 @@
       "required": "请输入密码",
       "invalid": "密码不正确，请重试"
     },
+    "setup": {
+      "title": "设置访问密码",
+      "description": "在本机设置访问密码后开始使用。",
+      "confirmPassword": "确认密码",
+      "submit": "设置并进入",
+      "submitting": "正在保存…",
+      "required": "请输入访问密码。",
+      "mismatch": "两次密码不一致，请重新输入。",
+      "invalidPassword": "密码去掉前后空白后须为 1–1024 个字符，且不能包含 ${。",
+      "localOnly": "请在运行 nanobot 的电脑上打开 localhost 地址，完成首次设置。",
+      "saveFailed": "密码保存失败，请重试。",
+      "alreadyInitialized": "其他页面已完成密码设置，请输入该密码连接。"
+    },
     "account": {
       "section": "账户",
       "logoutHint": "断开此浏览器与网关的连接",
@@ -1243,6 +1256,19 @@
       "searchSupport": "搜索服务支持包",
       "searchInstallOnSave": "保存时会自动安装 Olostep 所需的软件包。",
       "installing": "正在安装所需软件包…"
+    },
+    "webuiAccess": {
+      "title": "网页访问",
+      "allowOtherDevices": "允许其他设备访问",
+      "description": "其他设备连接仍需通过身份验证。",
+      "activeHost": "当前监听地址",
+      "localActive": "当前仅允许本机连接。",
+      "networkActive": "当前允许其他设备通过身份验证后连接。",
+      "managed": "当前监听方式由主机管理，无法在此更改。",
+      "pendingEnable": "已保存，重启后允许其他设备连接。",
+      "pendingDisable": "已保存，重启后其他设备将断开连接，请在本机打开 localhost 地址重新连接。",
+      "networkScope": "此设置只更改 WebUI 的监听范围，不会配置防火墙、路由器或公网隧道。",
+      "saveFailed": "访问设置保存失败，请重试。"
     },
     "api": {
       "title": "API 服务",

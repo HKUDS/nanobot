@@ -34,7 +34,7 @@ import { useSystemSettingsEffects } from "@/components/settings/system/useSystem
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
+import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage, updateWebuiAccessSettings } from "@/lib/api";
 import {
   readLocalPreferences,
   writeLocalPreferences,
@@ -79,7 +79,7 @@ export function useSettingsController({
   onNativeEngineRestart,
 }: SettingsControllerOptions) {
   const { t } = useTranslation();
-  const { client, getToken, token } = useClient();
+  const { client, getToken, token, webuiCapabilities } = useClient();
   const pageVisible = usePageVisibility();
   const remoteBrowserAccess =
     typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
@@ -87,6 +87,9 @@ export function useSettingsController({
   const [loading, setLoading] = useState(() => initialSettings === null);
   const [hostEngineApplying, setHostEngineApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [webuiAccessSaving, setWebuiAccessSaving] = useState(false);
+  const [webuiAccessError, setWebuiAccessError] = useState<string | null>(null);
+  const webuiAccessAvailable = webuiCapabilities.includes("webui.access.v1") && !!settings?.webui_access;
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
   const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
     EMPTY_PENDING_RESTART_SECTIONS,
@@ -178,6 +181,20 @@ export function useSettingsController({
   );
 
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
+
+  const saveWebuiAccess = async (allowOtherDevices: boolean) => {
+    if (!webuiAccessAvailable || !settings?.webui_access?.can_change || webuiAccessSaving) return;
+    setWebuiAccessSaving(true);
+    setWebuiAccessError(null);
+    try {
+      const payload = await updateWebuiAccessSettings(client, allowOtherDevices);
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+    } catch {
+      setWebuiAccessError(t("settings.webuiAccess.saveFailed"));
+    } finally {
+      setWebuiAccessSaving(false);
+    }
+  };
 
   const closeProviderOAuthFlow = useCallback((cancelPending = true) => {
     const flow = providerOAuthFlowRef.current;
@@ -597,6 +614,7 @@ export function useSettingsController({
     saveNetworkSafetySettings,
     saveProvider,
     saveTranscriptionSettings,
+    saveWebuiAccess,
     saveWebSearch,
     saving,
     selectSection,
@@ -641,6 +659,9 @@ export function useSettingsController({
     transcriptionForm,
     transcriptionSaving,
     visibleProviderKeys,
+    webuiAccessAvailable,
+    webuiAccessError,
+    webuiAccessSaving,
     webSearchForm,
     webSearchKeyEditing,
     webSearchKeyVisible,

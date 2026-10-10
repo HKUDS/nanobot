@@ -128,6 +128,7 @@ export function settingsPayload(): SettingsPayload {
 export function renderSettingsView(
   options: {
     client?: NanobotClient;
+    webuiCapabilities?: string[];
     initialSection?:
       | "overview"
       | "appearance"
@@ -158,7 +159,7 @@ export function renderSettingsView(
         handler("open");
         return () => {};
       },
-    } as never} token="tok">
+    } as never} token="tok" webuiCapabilities={options.webuiCapabilities}>
       <SettingsView
         theme="light"
         initialSection={options.initialSection ?? "apps"}

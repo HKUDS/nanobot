@@ -6,6 +6,7 @@ import hashlib
 import io
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import time
@@ -86,8 +87,20 @@ def launch_tui(
     """Run the native TUI against the shared local gateway."""
     chat_id = _initial_tui_chat_id(session_id)
     tui_workspace = _initial_tui_workspace(workspace_override)
-    command = resolve_tui_command()
     base_url, bootstrap_secret = _tui_gateway_connection(config)
+    raw: object = getattr(config.channels, "websocket", None)
+    settings = cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
+    trusted_proxy = settings.get("trustedProxyAuth") or settings.get("trusted_proxy_auth")
+    if not bootstrap_secret and not trusted_proxy:
+        setup_command = ["nanobot", "webui", "--config", str(config_path)]
+        if workspace_override:
+            setup_command.extend(["--workspace", str(tui_workspace)])
+        raise TuiUnavailableError(
+            "WebUI access is not initialized. Run "
+            f"`{shlex.join(setup_command)}` on this machine, set an access password "
+            "in the local browser, then retry `nanobot agent`."
+        )
+    command = resolve_tui_command()
     gateway: _GatewayHandle | None = None
     process: subprocess.Popen[Any] | None = None
     try:
@@ -513,12 +526,11 @@ def _tui_gateway_connection(config: Config) -> tuple[str, str]:
         port = int(settings.get("port") or 8765)
     except (TypeError, ValueError):
         port = 8765
-    secret = str(
-        settings.get("tokenIssueSecret")
-        or settings.get("token_issue_secret")
-        or settings.get("token")
-        or ""
-    ).strip()
+    secret = (
+        str(settings.get("tokenIssueSecret") or "").strip()
+        or str(settings.get("token_issue_secret") or "").strip()
+        or str(settings.get("token") or "").strip()
+    )
     return f"http://{host}:{port}", secret
 
 

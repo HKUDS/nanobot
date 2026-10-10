@@ -218,13 +218,8 @@ vi.mock("@/hooks/useTheme", async () => {
   };
 });
 
-vi.mock("@/lib/bootstrap", () => ({
-  BootstrapAuthRequiredError: class BootstrapAuthRequiredError extends Error {
-    constructor(message = "bootstrap authentication required") {
-      super(message);
-      this.name = "BootstrapAuthRequiredError";
-    }
-  },
+vi.mock("@/lib/bootstrap", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/bootstrap")>(),
   fetchBootstrap: vi.fn().mockResolvedValue({
     token: "tok",
     api_token: "api-tok",
@@ -236,6 +231,7 @@ vi.mock("@/lib/bootstrap", () => ({
   loadSavedSecret: vi.fn(() => ""),
   saveSecret: vi.fn(),
   clearSavedSecret: vi.fn(),
+  initializeWebui: vi.fn(),
 }));
 
 vi.mock("@/lib/nanobot-client", async (importOriginal) => {
@@ -288,8 +284,12 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
 
 import {
   BootstrapAuthRequiredError,
+  BootstrapSetupRequiredError,
+  WebuiSetupError,
   deriveWsUrl,
   fetchBootstrap,
+  initializeWebui,
+  saveSecret,
 } from "@/lib/bootstrap";
 import App from "@/App";
 import { mockBrowserFocus } from "./browser-focus";
@@ -339,6 +339,8 @@ describe("App layout", () => {
       expires_in: 300,
     });
     vi.mocked(deriveWsUrl).mockReset().mockReturnValue("ws://test");
+    vi.mocked(initializeWebui).mockReset().mockResolvedValue(undefined);
+    vi.mocked(saveSecret).mockClear();
     mockFetchRoutes({});
   });
 
@@ -406,6 +408,42 @@ describe("App layout", () => {
     );
     expect(password).not.toHaveAttribute("placeholder");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("requires password setup before connecting and enters with the saved password", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(new BootstrapSetupRequiredError());
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Set your access password" });
+    expect(connectSpy).not.toHaveBeenCalled();
+    expect(saveSecret).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("WebUI password"), { target: { value: "  新密码🔐  " } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "新密码🔐" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set password and continue" }));
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalledTimes(1));
+    expect(initializeWebui).toHaveBeenCalledWith("新密码🔐");
+    expect(fetchBootstrap).toHaveBeenLastCalledWith("", "新密码🔐");
+    expect(saveSecret).toHaveBeenCalledWith("新密码🔐");
+    expect(window.location.href).not.toContain("新密码");
+  });
+
+  it("returns to login when another tab has already initialized access", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(new BootstrapSetupRequiredError());
+    vi.mocked(initializeWebui).mockRejectedValueOnce(new WebuiSetupError("already_initialized"));
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText("WebUI password"), { target: { value: "second-tab" } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "second-tab" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set password and continue" }));
+
+    await screen.findByRole("heading", { name: "Connect to nanobot" });
+    expect(screen.getByRole("status")).toHaveTextContent("Another page has already set the password");
+    expect(screen.getByLabelText("WebUI password")).toHaveValue("");
+    expect(initializeWebui).toHaveBeenCalledTimes(1);
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
+    expect(saveSecret).not.toHaveBeenCalled();
     expect(connectSpy).not.toHaveBeenCalled();
   });
 

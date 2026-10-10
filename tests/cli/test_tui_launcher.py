@@ -1,5 +1,6 @@
 import hashlib
 import io
+import shlex
 import subprocess
 import zipfile
 from pathlib import Path
@@ -85,13 +86,51 @@ def test_default_tui_workspace_is_the_launch_directory(
     assert _initial_tui_workspace(str(override)) == override.resolve()
 
 
-def test_launcher_passes_the_canonical_model_preset_to_the_tui(
+def test_uninitialized_launcher_explains_local_setup_before_starting_the_tui(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    config = Config(
-        channels={"websocket": {"tokenIssueSecret": "bootstrap-secret"}},
+    config_path = tmp_path / "custom config" / "config.json"
+    workspace = tmp_path / "custom workspace"
+    monkeypatch.setattr(
+        tui_launcher,
+        "resolve_tui_command",
+        lambda: pytest.fail("uninitialized access must not download or start the TUI"),
     )
+    monkeypatch.setattr(
+        tui_launcher,
+        "_ensure_gateway",
+        lambda *args, **kwargs: pytest.fail("setup guidance must not start a gateway"),
+    )
+
+    with pytest.raises(TuiUnavailableError, match="WebUI access is not initialized") as error:
+        launch_tui(
+            Config(), config_path=config_path, workspace_override=str(workspace),
+            session_id=None, theme="auto",
+        )
+
+    command = shlex.join([
+        "nanobot", "webui", "--config", str(config_path), "--workspace", str(workspace),
+    ])
+    assert command in str(error.value)
+    assert "set an access password in the local browser" in str(error.value)
+    assert not config_path.exists()
+
+
+@pytest.mark.parametrize(("websocket", "expected_secret"), [
+    ({"tokenIssueSecret": "bootstrap-secret"}, "bootstrap-secret"),
+    ({"tokenIssueSecret": "  ", "token": "static-secret"}, "static-secret"),
+    ({"trustedProxyAuth": {
+        "trustedPeerCidrs": ["127.0.0.1/32"], "assertionHeader": "X-Authenticated-User",
+    }}, None),
+])
+def test_launcher_passes_the_canonical_model_preset_to_the_tui(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    websocket: dict[str, object],
+    expected_secret: str | None,
+) -> None:
+    config = Config(channels={"websocket": websocket})
     config.model_presets["Deep Research"] = ModelPresetConfig(model="openai/gpt-5.6")
     config.agents.defaults.model_preset = "Deep Research"
     captured: dict[str, str] = {}
@@ -143,7 +182,7 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
         "http://127.0.0.1:8765/webui/bootstrap"
     )
     assert captured["NANOBOT_TUI_HEALTH_URL"] == "http://127.0.0.1:18790/health"
-    assert captured["NANOBOT_TUI_BOOTSTRAP_SECRET"] == "bootstrap-secret"
+    assert captured.get("NANOBOT_TUI_BOOTSTRAP_SECRET") == expected_secret
     assert "NANOBOT_TUI_WS_URL" not in captured
     assert "NANOBOT_TUI_API_TOKEN" not in captured
     assert "NANOBOT_TUI_CHAT_ID" not in captured
@@ -156,7 +195,7 @@ def test_launcher_terminates_the_tui_when_gateway_start_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    config = Config()
+    config = Config(channels={"websocket": {"tokenIssueSecret": "synthetic-access-secret"}})
     terminated: list[bool] = []
 
     class FakeProcess:
@@ -196,7 +235,7 @@ def test_launcher_keeps_the_tui_alive_while_an_existing_gateway_recovers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    config = Config()
+    config = Config(channels={"websocket": {"tokenIssueSecret": "synthetic-access-secret"}})
     events: list[str] = []
     status_calls = 0
 
@@ -274,7 +313,7 @@ def test_launcher_promotes_the_gateway_when_the_tui_detaches(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    config = Config()
+    config = Config(channels={"websocket": {"tokenIssueSecret": "synthetic-access-secret"}})
     events: list[str] = []
     captured: dict[str, str] = {}
 

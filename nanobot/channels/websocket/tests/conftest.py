@@ -11,4 +11,4 @@ def isolate_websocket_runtime_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Keep transcripts and other runtime files out of the active user data directory."""
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")

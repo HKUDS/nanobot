@@ -214,6 +214,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.image_generation.update": "/api/settings/image-generation/update",
     "settings.transcription.update": "/api/settings/transcription/update",
     "settings.runtime_config.update": "/api/settings/runtime-config/update",
+    "settings.webui_access.update": "/api/settings/webui-access/update",
     "settings.network_safety.update": "/api/settings/network-safety/update",
     "settings.cli_app.install": "/api/settings/cli-apps/install",
     "settings.cli_app.update": "/api/settings/cli-apps/update",
@@ -394,6 +395,9 @@ class GatewayHTTPHandler:
         self.ingress = ingress
         self.workspaces = workspaces
         self.settings = settings
+        from nanobot.webui.access import WebUIAccess
+
+        self.access = WebUIAccess(config, settings.config)
         from nanobot.webui.remote_instances import RemoteInstances
 
         self.remote_instances = RemoteInstances(
@@ -435,6 +439,7 @@ class GatewayHTTPHandler:
             mcp_runtime_status=mcp_runtime_status,
             mcp_reload=mcp_reload,
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
+            access=self.access,
         )
 
     def workspace_project_selection_available(self, connection: Any) -> bool:
@@ -469,6 +474,8 @@ class GatewayHTTPHandler:
     # -- Token management ---------------------------------------------------
 
     def check_api_token(self, request: WsRequest) -> bool:
+        if self.access.setup_required:
+            return False
         if getattr(request, "_nanobot_trusted_proxy_authenticated", False):
             return True
         return self.tokens.check_api_token(request)
@@ -582,6 +589,18 @@ class GatewayHTTPHandler:
         request: WsRequest,
         got: str,
     ) -> Any | None:
+        if self.access.setup_required:
+            if (self.static_dist_path is not None
+                    and not got.startswith(("/api/", "/webui/", "/auth/"))
+                    and got != self.config.token_issue_path):
+                response = self._serve_static(
+                    got, accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+                )
+                if response is not None:
+                    return response
+            return _http_json_response(
+                {"error": "setup_required"}, status=428, extra_headers=_NO_STORE_HEADERS,
+            )
         if got == "/api/remote-instances" or got.startswith("/api/remote-instances/"):
             return await self._dispatch_remote_instances(connection, request, got)
         # Token issue endpoint
@@ -695,15 +714,14 @@ class GatewayHTTPHandler:
     # -- Token issue --------------------------------------------------------
 
     def _handle_token_issue(self, connection: Any, request: Any) -> Any:
+        if self.access.setup_required:
+            return _http_error(428, "setup_required")
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return connection.respond(401, "Unauthorized")
-        else:
-            self._log.warning(
-                "token_issue_path is set but token_issue_secret is empty; "
-                "any client can obtain connection tokens — set token_issue_secret for production."
-            )
+        elif not _is_trusted_proxy_authenticated_request(connection, request.headers, self.config):
+            return connection.respond(401, "Unauthorized")
         if not self.tokens.can_issue():
             self._log.error(
                 "too many outstanding issued tokens ({}), rejecting issuance",
@@ -725,6 +743,10 @@ class GatewayHTTPHandler:
     def _handle_bootstrap(
         self, connection: Any, request: Any, *, terminal_probe: bool = False,
     ) -> Response:
+        if self.access.setup_required:
+            return _http_json_response(
+                {"error": "setup_required"}, status=428, extra_headers=_NO_STORE_HEADERS,
+            )
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         is_local_browser = _is_local_browser_request(connection, request.headers)
         is_proxy_authenticated = _is_trusted_proxy_authenticated_request(
@@ -736,8 +758,8 @@ class GatewayHTTPHandler:
             if secret:
                 if not _issue_route_secret_matches(request.headers, secret):
                     return _http_error(401, "Unauthorized")
-            elif not is_local_browser:
-                return _http_error(403, "bootstrap is localhost-only")
+            else:
+                return _http_error(401, "Unauthorized")
 
         from nanobot.webui.client_contract import gateway_identity
 

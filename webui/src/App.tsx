@@ -21,6 +21,7 @@ import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
+import { WebuiSetupForm } from "@/components/WebuiSetupForm";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
@@ -61,6 +62,7 @@ import { logoFallbackUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import {
   BootstrapAuthRequiredError,
+  BootstrapSetupRequiredError,
   clearSavedSecret,
   consumeUrlBootstrapSecret,
   deriveWsUrl,
@@ -107,7 +109,8 @@ import {
 type BootState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "auth"; failed?: boolean }
+  | { status: "auth"; failed?: boolean; alreadyInitialized?: boolean }
+  | { status: "setup" }
   | {
       status: "ready";
       client: NanobotClient;
@@ -377,9 +380,11 @@ function tokenRefreshDelayMs(expiresAt: number): number {
 
 function AuthForm({
   failed,
+  alreadyInitialized,
   onSecret,
 }: {
   failed: boolean;
+  alreadyInitialized?: boolean;
   onSecret: (secret: string) => void;
 }) {
   const { t } = useTranslation();
@@ -433,6 +438,9 @@ function AuthForm({
             <h1 id="webui-auth-title" className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-[1.75rem]">
               {t("app.auth.title")}
             </h1>
+            {alreadyInitialized ? (
+              <p role="status" className="mt-3 text-sm leading-6 text-muted-foreground">{t("app.setup.alreadyInitialized")}</p>
+            ) : null}
           </div>
           <form onSubmit={handleSubmit} className="mt-8">
             <div className="relative">
@@ -982,7 +990,13 @@ export default function App() {
           });
         } catch (e) {
           if (cancelled) return;
-          if (isBootstrapAuthRequired(e)) {
+          if (e instanceof BootstrapSetupRequiredError) {
+            clearSavedSecret();
+            clearReloadCache();
+            clearStoredComposerDrafts();
+            webuiThreadCache.clear();
+            setState({ status: "setup" });
+          } else if (isBootstrapAuthRequired(e)) {
             clearReloadCache();
             clearStoredComposerDrafts();
             webuiThreadCache.clear();
@@ -1032,7 +1046,19 @@ export default function App() {
     return (
       <AuthForm
         failed={!!state.failed}
+        alreadyInitialized={state.alreadyInitialized}
         onSecret={(s) => bootstrapWithSecret(s)}
+      />
+    );
+  }
+  if (state.status === "setup") {
+    return (
+      <WebuiSetupForm
+        onInitialized={(password) => {
+          saveSecret(password);
+          bootstrapWithSecret(password);
+        }}
+        onAlreadyInitialized={() => setState({ status: "auth", alreadyInitialized: true })}
       />
     );
   }

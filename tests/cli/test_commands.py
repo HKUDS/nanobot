@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import pytest
 from typer.testing import CliRunner
@@ -2217,8 +2217,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert websocket["host"] == "127.0.0.1"
     assert websocket["port"] == 8899
     assert websocket["websocketRequiresToken"] is True
-    assert isinstance(websocket["tokenIssueSecret"], str)
-    assert len(websocket["tokenIssueSecret"]) >= 32
+    assert websocket["tokenIssueSecret"] == ""
     assert data["agents"]["defaults"]["workspace"] == str(workspace)
     assert seen["templates"] == workspace
     options = seen["start_options"]
@@ -2227,7 +2226,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert options.workspace == str(workspace.resolve(strict=False))
     compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
     assert "Open the WebUI manually" in compact_output
-    assert "channels.websocket.tokenIssueSecret" in compact_output
+    assert "Set your access password on this page" in compact_output
     assert "ssh -N -L 8899:127.0.0.1:8899 <user>@<server>" in compact_output
     assert seen["lease_release_wait_for_stop"] is False
     assert "stop_timeout" not in seen
@@ -2345,7 +2344,7 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     assert dev_kwargs["target_url"] == "http://127.0.0.1:8899"
     browser_url = dev_kwargs["browser_url"]
     assert isinstance(browser_url, str)
-    assert browser_url.startswith("http://127.0.0.1:5173/#/?bootstrapSecret=")
+    assert browser_url == "http://127.0.0.1:5173"
     assert seen["start_options"].port == 18888
     assert seen["attached_while_dev_running"] is True
     assert seen["attach_kwargs"] == {"poll_hook": seen["dev_server"].ensure_running}
@@ -2353,7 +2352,7 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     assert seen["dev_running"] is False
     assert seen["dev_running_at_release"] is False
     assert seen["lease_release_wait_for_stop"] is False
-    assert "WebUI dev: http://127.0.0.1:5173/#/?bootstrapSecret=<redacted>" in re.sub(
+    assert "WebUI dev: http://127.0.0.1:5173" in re.sub(
         r"\s+", " ", _strip_ansi(result.stdout)
     )
 
@@ -2479,7 +2478,7 @@ def test_webui_resumes_first_run_without_provider_setup(
     assert "Quick Start" not in resumed.stdout
     assert json.loads(config_file.read_text(encoding="utf-8")) == saved_config
     assert saved_config["channels"]["websocket"]["host"] == "127.0.0.1"
-    assert saved_config["channels"]["websocket"]["tokenIssueSecret"]
+    assert saved_config["channels"]["websocket"]["tokenIssueSecret"] == ""
 
 
 def test_webui_missing_runtime_env_fails_before_starting_gateway(
@@ -2569,7 +2568,8 @@ def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> Non
 
     assert opened == [url]
     output = _strip_ansi(capsys.readouterr().out)
-    assert "bootstrapSecret=<redacted>" in output
+    assert "http://127.0.0.1:8765" in output
+    assert "bootstrapSecret=" not in output
     assert "super-secret" not in output
 
 
@@ -2743,8 +2743,7 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     assert isinstance(opened_url, str)
     parsed = urlparse(opened_url)
     assert f"{parsed.scheme}://{parsed.netloc}" == "http://127.0.0.1:8765"
-    fragment = parsed.fragment.removeprefix("/?")
-    assert parse_qs(fragment).get("bootstrapSecret")
+    assert not parsed.fragment
     assert seen["open_kwargs"] == {"wait": False}
     assert seen["lease_release_wait_for_stop"] is False
 
@@ -2943,7 +2942,8 @@ def test_webui_foreground_reports_an_existing_gateway_without_leaking_secret(
 
     assert result.exit_code == 1
     assert "gateway is already running for this local instance" in result.stdout
-    assert "bootstrapSecret=<redacted>" in result.stdout
+    assert "http://127.0.0.1:8765" in result.stdout
+    assert "bootstrapSecret=" not in result.stdout
     assert "do-not-leak" not in result.stdout
 
 

@@ -131,7 +131,7 @@ describe("Desktop attach-only protocol", () => {
 })
 
 describe("gateway protocol", () => {
-  test("bootstraps fresh websocket and API credentials", async () => {
+  test.each(["bootstrap-secret", "本机密码-😀"])("bootstraps credentials with password %s", async (secret) => {
     const original = globalThis.fetch
     let headers: Headers | undefined
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -146,11 +146,17 @@ describe("gateway protocol", () => {
     try {
       const connection = await fetchGatewayConnection(
         "http://nanobot.test/webui/bootstrap",
-        "bootstrap-secret",
+        secret,
         "http://nanobot.test",
         "tui-42",
       )
-      expect(headers?.get("X-Nanobot-Auth")).toBe("bootstrap-secret")
+      if (secret === "bootstrap-secret") {
+        expect(headers?.get("X-Nanobot-Auth")).toBe(secret)
+        expect(headers?.has("X-Nanobot-Auth-Encoded")).toBe(false)
+      } else {
+        expect(headers?.has("X-Nanobot-Auth")).toBe(false)
+        expect(Buffer.from(headers?.get("X-Nanobot-Auth-Encoded") || "", "base64").toString("utf8")).toBe(secret)
+      }
       expect(connection).toEqual({
         wsUrl: "ws://nanobot.test/ws?mode=local&token=socket+token&client_id=tui-42",
         apiUrl: "http://nanobot.test",

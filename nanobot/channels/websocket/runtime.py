@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
 from weakref import WeakSet
 
+from aiohttp import web
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import Server, ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
@@ -280,14 +281,18 @@ class WebSocketConfig(Base):
             raise ValueError("token_issue_path must differ from path (the WebSocket upgrade path)")
         return self
 
+    @property
+    def has_access_auth(self) -> bool:
+        return bool(self.token.strip() or self.token_issue_secret.strip() or self.trusted_proxy_auth)
+
     @model_validator(mode="after")
-    def wildcard_host_requires_auth(self) -> Self:
-        if self.host not in ("0.0.0.0", "::"):
-            return self
-        if self.token.strip() or self.token_issue_secret.strip() or self.trusted_proxy_auth is not None:
+    def external_host_requires_auth(self) -> Self:
+        from nanobot.webui.http_utils import is_loopback_host
+
+        if is_loopback_host(self.host) or self.has_access_auth:
             return self
         raise ValueError(
-            "host is 0.0.0.0 (all interfaces) but neither token, token_issue_secret, "
+            "host is outside localhost but neither token, token_issue_secret, "
             "nor trusted_proxy_auth is set — set one to prevent unauthenticated access"
         )
 
@@ -698,7 +703,12 @@ class WebSocketChannel(BaseChannel):
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
-        bridge = BinaryHTTPBridge(self._uploads.handle)
+        async def handle_body_request(request: web.BaseRequest) -> web.StreamResponse:
+            if request.path == "/webui/setup":
+                return await self.gateway.http.access.handle_setup(request)
+            return await self._uploads.handle(request)
+
+        bridge = BinaryHTTPBridge(handle_body_request)
 
         async def prune_uploads() -> None:
             while not stop_event.is_set():

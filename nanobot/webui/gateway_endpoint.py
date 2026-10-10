@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from websockets.asyncio.server import ServerConnection
 from websockets.http11 import Request as WsRequest
 
+from nanobot.webui.access import browser_origin_allowed
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.http_utils import (
     is_trusted_proxy_authenticated_request,
@@ -81,6 +82,10 @@ class WebUIGatewayEndpoint:
         headers: Any = None,
     ) -> Any:
         """Authorize a WebSocket upgrade and remember trusted WebUI connections."""
+        if self._http.access.setup_required:
+            return connection.respond(428, "setup_required")
+        if not browser_origin_allowed(headers or {}, public_ws_url=self._config.public_ws_url):
+            return connection.respond(403, "Forbidden origin")
         if is_trusted_proxy_authenticated_request(connection, headers or {}, self._config):
             self.webui_connections.add(connection)
             return None
@@ -88,7 +93,7 @@ class WebUIGatewayEndpoint:
         supplied = query_first(query, "token")
         static_token = self._config.token.strip()
         if static_token:
-            if supplied and hmac.compare_digest(supplied, static_token):
+            if supplied and hmac.compare_digest(supplied.encode("utf-8"), static_token.encode("utf-8")):
                 return None
             if supplied and self.consume_issued_token(connection, supplied):
                 return None

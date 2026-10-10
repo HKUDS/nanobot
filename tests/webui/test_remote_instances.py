@@ -677,7 +677,8 @@ def test_errors_never_echo_raw_ssh_output(stderr, code):
 @pytest.fixture
 def gateway(tmp_path):
     return build_gateway_services(
-        config=WebSocketConfig(host="127.0.0.1"), bus=MagicMock(), session_manager=None,
+        config=WebSocketConfig(host="127.0.0.1", token_issue_secret="synthetic-access-secret"),
+        bus=MagicMock(), session_manager=None,
         static_dist_path=None, workspace_path=tmp_path, config_path=tmp_path / "config.json",
         default_restrict_to_workspace=False, runtime_model_name=None,
         runtime_surface="browser", runtime_capabilities_overrides=None,

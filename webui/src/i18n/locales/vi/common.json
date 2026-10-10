@@ -314,6 +314,19 @@
       "required": "Nhập mật khẩu",
       "invalid": "Mật khẩu không đúng"
     },
+    "setup": {
+      "title": "Đặt mật khẩu truy cập",
+      "description": "Đặt mật khẩu trên máy tính này để bắt đầu sử dụng nanobot.",
+      "confirmPassword": "Xác nhận mật khẩu",
+      "submit": "Đặt mật khẩu và tiếp tục",
+      "submitting": "Đang lưu…",
+      "required": "Nhập mật khẩu truy cập.",
+      "mismatch": "Mật khẩu không khớp. Vui lòng nhập lại.",
+      "invalidPassword": "Dùng mật khẩu dài 1–1024 ký tự, không tính khoảng trắng ở đầu và cuối. Mật khẩu không được chứa ${.",
+      "localOnly": "Mở địa chỉ localhost trên máy tính chạy nanobot để hoàn tất thiết lập ban đầu.",
+      "saveFailed": "Không thể lưu mật khẩu. Vui lòng thử lại.",
+      "alreadyInitialized": "Một trang khác đã đặt mật khẩu. Nhập mật khẩu đó để kết nối."
+    },
     "account": {
       "section": "Tài khoản",
       "logoutHint": "Ngắt kết nối trình duyệt này với gateway.",
@@ -1054,6 +1067,19 @@
         "github": "Quản lý kho mã, issue và PR.",
         "supabase": "Xem và quản lý dự án."
       }
+    },
+    "webuiAccess": {
+      "title": "Truy cập WebUI",
+      "allowOtherDevices": "Cho phép thiết bị khác truy cập",
+      "description": "Các thiết bị khác vẫn phải xác thực để kết nối.",
+      "activeHost": "Địa chỉ lắng nghe hiện tại",
+      "localActive": "Hiện chỉ máy tính này có thể kết nối.",
+      "networkActive": "Hiện các thiết bị khác có thể kết nối sau khi xác thực.",
+      "managed": "Chế độ lắng nghe này do máy chủ quản lý và không thể thay đổi ở đây.",
+      "pendingEnable": "Đã lưu. Khởi động lại để cho phép các thiết bị khác kết nối.",
+      "pendingDisable": "Đã lưu. Sau khi khởi động lại, các thiết bị khác sẽ bị ngắt kết nối. Mở địa chỉ localhost trên máy tính này để kết nối lại.",
+      "networkScope": "Chỉ thay đổi phạm vi lắng nghe của WebUI. Không cấu hình tường lửa, bộ định tuyến hay đường hầm công khai.",
+      "saveFailed": "Không thể lưu cài đặt truy cập. Vui lòng thử lại."
     },
     "api": {
       "title": "Máy chủ API", "openaiCompatible": "API tương thích OpenAI", "description": "Kết nối qua API tương thích OpenAI.",
