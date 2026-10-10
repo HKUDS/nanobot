@@ -9,6 +9,7 @@ Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, Linear, 
 | Slack | [Build a Slack AI Agent with nanobot](./guides/slack-ai-agent.md) |
 | Feishu | [Build a Feishu AI Agent with nanobot](./guides/feishu-ai-agent.md) |
 | WhatsApp | [Build a WhatsApp AI Agent with nanobot](./guides/whatsapp-ai-agent.md) |
+| WhatsApp Agent Platform | [Build an official WhatsApp agent with nanobot](./guides/whatsapp-agent-platform.md) |
 | WeChat | [Build a WeChat AI Agent with nanobot](./guides/wechat-ai-agent.md) |
 | QQ | [Build a QQ AI Agent with nanobot](./guides/qq-ai-agent.md) |
 | Email | [Build an Email AI Agent with nanobot](./guides/email-ai-agent.md) |
@@ -50,7 +51,7 @@ The sections below explain what each chat platform requires and provide manual c
 > nanobot plugins enable <channel>
 > ```
 >
-> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`, `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`. To turn a channel off later, run `nanobot plugins disable <channel>`. nanobot keeps the saved settings, but stops loading that channel after the next restart.
+> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`, `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, `msteams`, or `whatsapp_agent`. To turn a channel off later, run `nanobot plugins disable <channel>`. nanobot keeps the saved settings, but stops loading that channel after the next restart.
 
 ## Manual Setup Pattern
 
@@ -86,6 +87,7 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Telegram** | Bot token from @BotFather |
 | **Discord** | Bot token + Message Content intent |
 | **WhatsApp** | QR code scan (`nanobot channels login whatsapp`) |
+| **WhatsApp Agent Platform** | Agent API token from WhatsApp → Settings → Agents |
 | **WeChat (Weixin)** | QR code scan (`nanobot channels login weixin`) |
 | **Feishu** | QR code scan (`nanobot channels login feishu`) or App ID + App Secret |
 | **DingTalk** | App Key + App Secret |
@@ -466,6 +468,47 @@ Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobo
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><b>WhatsApp Agent Platform</b></summary>
+
+Connects nanobot through the **official** WhatsApp Agent Platform API. The agent appears as its own chat in WhatsApp and can only talk to you, its creator. No QR pairing, no linked device, and no optional Python dependencies.
+
+This is a different channel from `whatsapp`. See the [official WhatsApp agent guide](./guides/whatsapp-agent-platform.md) for the full comparison and walkthrough.
+
+**1. Create the agent in WhatsApp**
+
+Open WhatsApp → **Settings → Agents → Create an agent**, then copy the key from the agent's chat → **Chat info → API key**. This feature is available only in limited countries and might not be in your account yet.
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "whatsapp_agent": {
+      "enabled": true,
+      "token": "${WA_AGENT_TOKEN}"
+    }
+  }
+}
+```
+
+`allowFrom` is optional. The platform already restricts the chat to the agent's creator; leave `allowFrom` empty to require pairing approval instead of a static list.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+**Notes**
+
+- At most one gateway may poll a given agent token. A second one causes `409` and is logged as a duplicate-poller error.
+- Agent conversations are not end-to-end encrypted: Meta processes them on the agent's behalf. Your other chats are unaffected.
+- Replies are split at 4096 characters. Progress and tool-hint messages are off by default because every send spends the same 12-per-minute budget.
+- Ambiguous send outcomes (HTTP `500`, read timeouts) are not retried by default, because a duplicate is worse than a miss. Set `retryAmbiguousSends: true` to opt in.
 
 </details>
 

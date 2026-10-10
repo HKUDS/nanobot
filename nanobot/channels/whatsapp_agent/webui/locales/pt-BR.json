@@ -1,0 +1,79 @@
+{
+  "setup": {
+    "docsLabel": "Abrir o guia de configuração do agente",
+    "officialLabel": "Abrir a ajuda de agentes do WhatsApp",
+    "summary": "Conecte o nanobot como agente oficial de terceiros na sua própria conta do WhatsApp. Só você pode conversar com ele, e ele não acessa suas outras conversas.",
+    "fields": {
+      "token": {
+        "label": "Token de API",
+        "placeholder": "No WhatsApp, abra Configurações → Agentes, crie o agente e copie a chave em conversa do agente → Informações da conversa → Chave de API.",
+        "help": "No WhatsApp, abra Configurações → Agentes, crie o agente e copie a chave em conversa do agente → Informações da conversa → Chave de API."
+      },
+      "allowFrom": {
+        "label": "Remetentes permitidos",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "Diretório de estado",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "Tempo limite de sondagem (segundos)",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "Tamanho máximo de mídia (MB)",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "Enviar confirmações de leitura",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      },
+      "typingIndicator": {
+        "label": "Mostrar indicador de digitação",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      },
+      "downloadMedia": {
+        "label": "Baixar mídia recebida",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "Excluir mídia após baixar",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "Repetir envios de resultado desconhecido",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      },
+      "sendProgress": {
+        "label": "Enviar mensagens de progresso",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      },
+      "sendToolHints": {
+        "label": "Enviar dicas de ferramentas",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      }
+    }
+  }
+}

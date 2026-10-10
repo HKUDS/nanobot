@@ -2,6 +2,9 @@
 
 This guide connects nanobot to WhatsApp through the `whatsapp` channel. The channel links as a WhatsApp device and uses the same nanobot agent runtime, tools, memory, and workspace as the CLI and WebUI.
 
+> [!NOTE]
+> WhatsApp also offers an official Agent Platform where the agent appears as its own chat and talks only to you. That is a separate channel with different tradeoffs — no group support, no end-to-end encryption, and limited country availability, but an officially supported interface that does not rely on a linked device. See [Build an official WhatsApp agent with nanobot](./whatsapp-agent-platform.md) to compare them.
+
 ## What this guide builds
 
 - WhatsApp optional dependencies installed

@@ -1,0 +1,79 @@
+{
+  "setup": {
+    "docsLabel": "打开智能体设置指南",
+    "officialLabel": "打开 WhatsApp 智能体帮助",
+    "summary": "将 nanobot 作为官方第三方智能体接入你自己的 WhatsApp 账号。只有你可以与它对话，它无法访问你的其他聊天。",
+    "fields": {
+      "token": {
+        "label": "API 令牌",
+        "placeholder": "在 WhatsApp 中打开 设置 → 智能体，创建智能体，然后从智能体聊天 → 聊天信息 → API 密钥 复制密钥。",
+        "help": "在 WhatsApp 中打开 设置 → 智能体，创建智能体，然后从智能体聊天 → 聊天信息 → API 密钥 复制密钥。"
+      },
+      "allowFrom": {
+        "label": "允许的发送者",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "状态目录",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "轮询超时（秒）",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "媒体大小上限（MB）",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "发送已读回执",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "typingIndicator": {
+        "label": "显示正在输入",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "downloadMedia": {
+        "label": "下载传入媒体",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "下载后删除媒体",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "重试结果不明的发送",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "sendProgress": {
+        "label": "发送进度消息",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "sendToolHints": {
+        "label": "发送工具提示",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "setup": {
+    "docsLabel": "Open agent setup guide",
+    "officialLabel": "Open WhatsApp agent help",
+    "summary": "Connect nanobot as an official third-party agent in your own WhatsApp account. Only you can chat with it, and it cannot access your other chats.",
+    "fields": {
+      "token": {
+        "label": "API token",
+        "placeholder": "In WhatsApp, open Settings → Agents, create the agent, then copy the key from the agent chat → Chat info → API key.",
+        "help": "In WhatsApp, open Settings → Agents, create the agent, then copy the key from the agent chat → Chat info → API key."
+      },
+      "allowFrom": {
+        "label": "Allowed senders",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "State directory",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "Poll timeout (seconds)",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "Max media size (MB)",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "Send read receipts",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "typingIndicator": {
+        "label": "Show typing indicator",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "downloadMedia": {
+        "label": "Download incoming media",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "Delete media after download",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "Retry unknown send outcomes",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "sendProgress": {
+        "label": "Send progress messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "sendToolHints": {
+        "label": "Send tool hints",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      }
+    }
+  }
+}
