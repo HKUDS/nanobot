@@ -87,6 +87,9 @@ def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
     if len(objective) > MAX_GOAL_OBJECTIVE_CHARS:
         objective = objective[:MAX_GOAL_OBJECTIVE_CHARS].rstrip() + "\n… (truncated)"
     out = ["Goal (active):", objective]
+    criteria = str(goal.get("acceptance_criteria") or "").strip()
+    if criteria:
+        out.extend(["Acceptance criteria (independent review required):", criteria[:4000]])
     hint = str(goal.get("ui_summary") or "").strip()
     if hint:
         out.append(f"Summary: {hint}")

@@ -16,6 +16,8 @@ The objective may be replayed after compaction, retries, or resumption. Write on
 5. **Explicit about done-ness** — Name the evidence that proves completion: tests pass, an artifact exists, a checklist is satisfied, or another concrete condition holds.
 6. **Independent of `ui_summary`** — Keep `ui_summary` short and non-load-bearing; every requirement needed after compaction belongs in the objective.
 
+For work with concrete deliverables, also supply `acceptance_criteria` to `create_goal`. These criteria are frozen for the goal and enable independent completion review. Describe the required outcome and its evidence; do not add requirements beyond the user's request.
+
 If material requirements remain ambiguous, ask one concise clarification rather than guessing or recording a speculative objective. Ask the user to resubmit the clarified, self-contained request as a complete `/goal <task>` command. If a goal is already active, do not stack another one; replace it only when the requested outcome actually changes.
 {% endif %}
 
@@ -26,6 +28,7 @@ If material requirements remain ambiguous, ask one concise clarification rather 
 - Use ordinary tools and keep work reviewable. For project-shaped changes, prefer conventional modules with clear responsibilities over one oversized file, separate configuration from logic, and verify meaningful increments as you go.
 - Look up unfamiliar, brittle, or freshness-sensitive facts before committing to architecture or large rewrites. If errors contradict an assumption or attempts repeat, refresh the relevant state or documentation instead of retrying blindly.
 - Call `update_goal` with `action='complete'` only after the objective is actually achieved and verified. Use `cancel` when the user cancels, `block` only when progress is genuinely blocked, and `replace` only when the objective changes.
+- When acceptance criteria are present, collect fresh tool evidence in this run and call `update_goal` with `action='complete'` and a concrete recap as a separate tool call. A rejected review leaves the goal active for correction; there are at most two reviews per goal. An unavailable review or exhausted review budget blocks the goal. Explain that outcome honestly. A replacement goal needs its own acceptance criteria.
 {% endif %}
 
 [/Goal Runtime Guidance]
