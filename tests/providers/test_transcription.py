@@ -20,7 +20,7 @@ from nanobot.audio.transcription_registry import (
     resolve_transcription_provider,
     transcription_provider_names,
 )
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ProviderConfig
 from nanobot.providers.transcription import (
     AssemblyAITranscriptionProvider,
     GroqTranscriptionProvider,
@@ -66,7 +66,7 @@ def test_resolver_uses_legacy_channel_provider_when_top_level_is_unset() -> None
     config = Config()
     config.channels.transcription_provider = "openai"
     config.channels.transcription_language = "en"
-    config.providers.openai.api_key = "sk-test"
+    config.providers.openai = ProviderConfig(api_key="sk-test")
     config.providers.openai.api_base = "https://proxy.example/v1"
 
     resolved = resolve_transcription_config(config)
@@ -86,7 +86,7 @@ def test_resolver_prefers_top_level_transcription_over_legacy_channels() -> None
     config.transcription.provider = "groq"
     config.transcription.model = "whisper-large-v3-turbo"
     config.transcription.language = "ko"
-    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq = ProviderConfig(api_key="gsk-test")
     config.providers.groq.api_base = "https://groq.example/openai/v1"
 
     resolved = resolve_transcription_config(config)
@@ -103,7 +103,7 @@ def test_resolver_supports_openrouter_transcription_provider() -> None:
     config.transcription.provider = "openrouter"
     config.transcription.model = "nvidia/parakeet-tdt-0.6b-v3"
     config.transcription.language = "en"
-    config.providers.openrouter.api_key = "sk-or-test"
+    config.providers.openrouter = ProviderConfig(api_key="sk-or-test")
     config.providers.openrouter.api_base = "https://openrouter.ai/api/v1"
 
     resolved = resolve_transcription_config(config)
@@ -120,7 +120,7 @@ def test_resolver_supports_siliconflow_transcription_provider() -> None:
     config.transcription.provider = "siliconflow"
     config.transcription.model = "TeleAI/TeleSpeechASR"
     config.transcription.language = "zh"
-    config.providers.siliconflow.api_key = "sf-test"
+    config.providers.siliconflow = ProviderConfig(api_key="sf-test")
     config.providers.siliconflow.api_base = "https://api.siliconflow.cn/v1"
 
     resolved = resolve_transcription_config(config)
@@ -135,7 +135,7 @@ def test_resolver_supports_siliconflow_transcription_provider() -> None:
 def test_resolver_defaults_siliconflow_transcription_api_base() -> None:
     config = Config()
     config.transcription.provider = "siliconflow"
-    config.providers.siliconflow.api_key = "sf-test"
+    config.providers.siliconflow = ProviderConfig(api_key="sf-test")
 
     resolved = resolve_transcription_config(config)
 
@@ -147,6 +147,7 @@ def test_resolver_defaults_siliconflow_transcription_api_base() -> None:
 
 def test_resolver_supports_siliconflow_transcription_api_key_env() -> None:
     config = Config()
+    config.providers.siliconflow = ProviderConfig()
     config.transcription.provider = "siliconflow"
 
     with patch.dict(os.environ, {"SILICONFLOW_API_KEY": "sf-env-key"}, clear=True):
@@ -163,7 +164,7 @@ def test_resolver_interpolates_env_ref_in_api_key() -> None:
     # than sent verbatim to the provider (which yields a 401).
     config = Config()
     config.transcription.provider = "groq"
-    config.providers.groq.api_key = "${MY_GROQ_KEY}"
+    config.providers.groq = ProviderConfig(api_key="${MY_GROQ_KEY}")
 
     with patch.dict(os.environ, {"MY_GROQ_KEY": "gsk-real-value"}, clear=True):
         resolved = resolve_transcription_config(config)
@@ -174,7 +175,7 @@ def test_resolver_interpolates_env_ref_in_api_key() -> None:
 def test_resolver_env_ref_missing_var_degrades_to_not_configured() -> None:
     config = Config()
     config.transcription.provider = "groq"
-    config.providers.groq.api_key = "${MISSING_GROQ_KEY}"
+    config.providers.groq = ProviderConfig(api_key="${MISSING_GROQ_KEY}")
 
     with patch.dict(os.environ, {}, clear=True):
         resolved = resolve_transcription_config(config)
@@ -188,7 +189,7 @@ def test_resolver_env_ref_missing_var_degrades_to_not_configured() -> None:
 def test_resolver_missing_embedded_api_key_ref_degrades_to_not_configured() -> None:
     config = Config()
     config.transcription.provider = "groq"
-    config.providers.groq.api_key = "Bearer ${MISSING_GROQ_KEY}"
+    config.providers.groq = ProviderConfig(api_key="Bearer ${MISSING_GROQ_KEY}")
 
     with patch.dict(os.environ, {}, clear=True):
         resolved = resolve_transcription_config(config)
@@ -200,7 +201,7 @@ def test_resolver_missing_embedded_api_key_ref_degrades_to_not_configured() -> N
 def test_resolver_interpolates_env_ref_in_api_base() -> None:
     config = Config()
     config.transcription.provider = "groq"
-    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq = ProviderConfig(api_key="gsk-test")
     config.providers.groq.api_base = "${MY_GROQ_BASE}"
 
     with patch.dict(os.environ, {"MY_GROQ_BASE": "https://groq.example/v1"}, clear=True):
@@ -212,7 +213,7 @@ def test_resolver_interpolates_env_ref_in_api_base() -> None:
 def test_resolver_missing_embedded_api_base_ref_uses_provider_default() -> None:
     config = Config()
     config.transcription.provider = "groq"
-    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq = ProviderConfig(api_key="gsk-test")
     config.providers.groq.api_base = "https://${MISSING_GROQ_HOST}/openai/v1"
 
     with patch.dict(os.environ, {}, clear=True):
@@ -226,7 +227,7 @@ def test_resolver_supports_xiaomi_mimo_transcription_provider() -> None:
     config.transcription.provider = "xiaomi_mimo"
     config.transcription.model = "mimo-v2.5-asr"
     config.transcription.language = "zh"
-    config.providers.xiaomi_mimo.api_key = "mimo-test"
+    config.providers.xiaomi_mimo = ProviderConfig(api_key="mimo-test")
     config.providers.xiaomi_mimo.api_base = "https://api.xiaomimimo.com/v1"
 
     resolved = resolve_transcription_config(config)
@@ -242,7 +243,7 @@ def test_resolver_accepts_legacy_xiaomi_transcription_alias() -> None:
     config = Config()
     config.channels.transcription_provider = "xiaomi"
     config.channels.transcription_language = "zh"
-    config.providers.xiaomi_mimo.api_key = "mimo-test"
+    config.providers.xiaomi_mimo = ProviderConfig(api_key="mimo-test")
 
     resolved = resolve_transcription_config(config)
 
@@ -270,7 +271,7 @@ def test_resolver_supports_assemblyai_provider_config() -> None:
     config.transcription.provider = "assemblyai"
     config.transcription.model = "universal-3-pro"
     config.transcription.language = "en"
-    config.providers.assemblyai.api_key = "aai-test"
+    config.providers.assemblyai = ProviderConfig(api_key="aai-test")
     config.providers.assemblyai.api_base = "https://assembly.example/v2"
 
     resolved = resolve_transcription_config(config)
@@ -392,7 +393,7 @@ async def test_transcribe_audio_file_routes_assemblyai_provider(audio_file: Path
 
 def test_resolved_transcription_repr_hides_api_key() -> None:
     config = Config()
-    config.providers.groq.api_key = "gsk-secret"
+    config.providers.groq = ProviderConfig(api_key="gsk-secret")
 
     resolved = resolve_transcription_config(config)
 
