@@ -1,40 +1,30 @@
 import { useEffect, useId, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
-  Bot,
-  Brain,
   Check,
   CircleAlert,
-  Cloud,
-  Cpu,
-  Database,
-  Gem,
-  Grid3X3,
   Hexagon,
-  Layers,
-  Loader2,
-  Moon,
-  Orbit,
   Pencil,
-  Search,
-  Sparkles,
-  Triangle,
-  Waves,
-  Zap,
-  type LucideIcon,
+  Plus,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { Button } from "@/components/ui/button";
 import { ControlChevron } from "@/components/ui/control-chevron";
 import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchInput } from "@/components/ui/input";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { fetchProviderModels } from "@/lib/api";
+import { useProviderModelCatalog } from "@/hooks/useProviderModelCatalog";
+import { formatContextWindow } from "@/lib/model-context-format";
 import { providerBrand } from "@/lib/provider-brand";
+import { PROVIDER_ICONS } from "@/lib/provider-icons";
 import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+export { formatContextWindow, formatModelContextWindow } from "@/lib/model-context-format";
+export { PROVIDER_ICONS } from "@/lib/provider-icons";
 
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
@@ -88,16 +78,10 @@ export function settingsProviderConfigured(
   provider: string | null | undefined,
   resolvedProvider?: string | null,
 ): boolean {
-  const row = settingsProviderRow(payload, provider);
-  if (row) return row.configured;
-  if (provider === "auto") {
-    const resolvedRow = settingsProviderRow(
-      payload,
-      resolvedProvider ?? payload.agent.resolved_provider ?? payload.agent.provider,
-    );
-    if (resolvedRow) return resolvedRow.configured;
-  }
-  return payload.agent.has_api_key;
+  const concreteProvider = provider === "auto"
+    ? resolvedProvider ?? payload.agent.resolved_provider ?? payload.agent.provider
+    : provider;
+  return settingsProviderRow(payload, concreteProvider)?.configured ?? false;
 }
 
 export function ProviderPicker({
@@ -107,6 +91,8 @@ export function ProviderPicker({
   emptyLabel,
   showProviderLogos = false,
   onChange,
+  onAddProvider,
+  onConfigureProvider,
 }: {
   providers: Array<{ name: string; label: string }>;
   value: string;
@@ -114,13 +100,27 @@ export function ProviderPicker({
   emptyLabel: string;
   showProviderLogos?: boolean;
   onChange: (provider: string) => void;
+  onAddProvider?: (trigger: HTMLButtonElement | null) => void;
+  onConfigureProvider?: (provider: string, trigger: HTMLButtonElement | null) => void;
 }) {
+  const { t } = useTranslation();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const openingProviderSetup = useRef(false);
   const selectedProvider = providers.find((provider) => provider.name === value) ?? null;
-  const disabled = !!triggerProps?.disabled || providers.length === 0;
+  const disabled = !!triggerProps?.disabled || (providers.length === 0 && !onAddProvider);
 
   return (
-    <Select value={value} onValueChange={onChange} disabled={disabled}>
+    <Select value={value} onValueChange={(provider) => {
+      if (provider === ":add-provider") {
+        openingProviderSetup.current = true;
+        onAddProvider?.(triggerRef.current);
+      } else if (provider === ":configure-provider") {
+        openingProviderSetup.current = true;
+        onConfigureProvider?.(value, triggerRef.current);
+      } else onChange(provider);
+    }} disabled={disabled}>
         <SelectTrigger
+          ref={triggerRef}
           {...triggerProps}
           aria-label={triggerProps?.["aria-label"] ?? selectedProvider?.label ?? emptyLabel}
           type="button"
@@ -141,7 +141,12 @@ export function ProviderPicker({
             <span className="truncate">{selectedProvider?.label ?? emptyLabel}</span>
           </span></SelectValue>
         </SelectTrigger>
-      <SelectContent>
+      <SelectContent onCloseAutoFocus={(event) => {
+        if (openingProviderSetup.current) {
+          event.preventDefault();
+          openingProviderSetup.current = false;
+        }
+      }}>
         {providers.map((provider) => {
           return (
             <SelectItem
@@ -160,6 +165,21 @@ export function ProviderPicker({
             </SelectItem>
           );
         })}
+        {onAddProvider || onConfigureProvider ? <>
+          {providers.length > 0 ? <SelectSeparator className="my-1 h-px bg-border" /> : null}
+          {onConfigureProvider && selectedProvider ? <SelectItem value=":configure-provider">
+            <span className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-muted-foreground" aria-hidden />
+              {t("settings.providers.configureProvider", { provider: selectedProvider.label })}
+            </span>
+          </SelectItem> : null}
+          {onAddProvider ? <SelectItem value=":add-provider">
+            <span className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-muted-foreground" aria-hidden />
+              {t("settings.providers.addProvider", { defaultValue: "Add provider" })}
+            </span>
+          </SelectItem> : null}
+        </> : null}
       </SelectContent>
     </Select>
   );
@@ -190,19 +210,16 @@ export function ModelIdPicker({
   emptyMessage?: string;
   onProviderOAuthLogin?: (provider: string) => void;
   providerSigningIn?: boolean;
-  onChange: (model: string) => void;
+  onChange: (model: string, info?: ProviderModelsPayload["models"][number]) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [payload, setPayload] = useState<ProviderModelsPayload | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const catalogNoticeId = useId();
   const catalogSignInRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const restoreInputOnClose = useRef(false);
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
   const hasConcreteProvider = Boolean(effectiveProvider && effectiveProvider !== "auto");
@@ -224,6 +241,17 @@ export function ModelIdPicker({
     !hasStaticModels &&
     hasConcreteProvider && providerConfigured && !providerUsesManualModelIds;
   const normalizedQuery = query.trim().toLowerCase();
+  const defersModelList = DEFERRED_MODEL_LIST_PROVIDERS.has(effectiveProvider);
+  const hasDeferredSearchQuery =
+    normalizedQuery.length >= DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH;
+  const shouldFetchModels =
+    canFetchModels && (!defersModelList || hasDeferredSearchQuery);
+  const { payload, loading, refreshing, failed, needsSignIn, retry } = useProviderModelCatalog({
+    revision: providerRow ?? settings,
+    token,
+    provider: effectiveProvider,
+    enabled: open && shouldFetchModels,
+  });
   const providerModels: ProviderModelsPayload["models"] = useMemo(
     () => hasStaticModels
       ? (models?.map((id) => ({ id })) ?? [])
@@ -241,15 +269,10 @@ export function ModelIdPicker({
     [normalizedQuery, providerModels],
   );
   const isCatalog = payload?.catalog_kind === "catalog";
-  const defersModelList = DEFERRED_MODEL_LIST_PROVIDERS.has(effectiveProvider);
-  const hasDeferredSearchQuery =
-    normalizedQuery.length >= DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH;
-  const shouldFetchModels =
-    canFetchModels && (!defersModelList || hasDeferredSearchQuery);
   const waitingForModelSearch =
     open && canFetchModels && defersModelList && !hasDeferredSearchQuery;
   const hasModelList = hasStaticModels || payload?.status === "available";
-  const catalogNeedsSignIn = !hasStaticModels && payload?.error_kind === "auth_required";
+  const catalogNeedsSignIn = !hasStaticModels && needsSignIn;
   const showModels = Boolean(
     !catalogNeedsSignIn && hasModelList
       && (hasStaticModels || (payload && (!isCatalog || normalizedQuery))),
@@ -262,49 +285,36 @@ export function ModelIdPicker({
   );
   const providerModelCount = payload?.model_count ?? providerModels.length;
   const modelUnconfigured = !value.trim() || !providerConfigured;
-  const showCatalogNotice = payload && (catalogNeedsSignIn
-    || (!loading && payload.status === "available"
-      && (payload.source === "stale" || payload.source === "fallback")));
+  const showCatalogNotice = !hasStaticModels && (catalogNeedsSignIn
+    || (open && shouldFetchModels && !refreshing && failed));
 
   useEffect(() => {
-    if (open && catalogNeedsSignIn && !loading) catalogSignInRef.current?.focus();
+    if (!open || loading) return;
+    if (catalogNeedsSignIn) catalogSignInRef.current?.focus();
+    else searchInputRef.current?.focus();
   }, [open, catalogNeedsSignIn, loading]);
 
   useEffect(() => {
-    if (!open) return;
     setQuery(providerUsesManualModelIds || !hasConcreteProvider ? value : "");
-  }, [open, effectiveProvider, hasConcreteProvider, providerUsesManualModelIds, value]);
+  }, [effectiveProvider, hasConcreteProvider, providerUsesManualModelIds, value]);
 
-  useEffect(() => {
-    // Reopening does not restore authorization. Keep a confirmed rejection until
-    // discovery completes, without carrying it into another provider's picker.
-    setPayload((current) => shouldFetchModels && current?.provider === effectiveProvider
-      && current.error_kind === "auth_required" ? current : null);
-    setError(null);
-    setLoading(open && shouldFetchModels);
-    if (!open || !shouldFetchModels) {
-      return;
+  const openPicker = (nextQuery?: string) => {
+    if (nextQuery !== undefined || !open) {
+      setQuery(nextQuery ?? (providerUsesManualModelIds || !hasConcreteProvider ? value : ""));
     }
-    let cancelled = false;
-    fetchProviderModels(tokenRef.current, effectiveProvider)
-      .then((nextPayload) => {
-        if (!cancelled) setPayload(nextPayload);
-      })
-      .catch((err) => {
-        if (!cancelled) setError((err as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  // Successful OAuth completion replaces the settings row even for the same account.
-  }, [effectiveProvider, open, shouldFetchModels, providerRow]);
+    restoreInputOnClose.current = false;
+    setOpen(true);
+  };
 
-  const selectModel = (model: string) => {
-    onChange(model);
+  const closePicker = (restoreFocus = false) => {
+    restoreInputOnClose.current = restoreFocus;
     setOpen(false);
+  };
+  const selectModel = (model: string) => {
+    const info = providerModels.find((entry) => entry.id === model);
+    if (info) onChange(model, info);
+    else onChange(model);
+    closePicker(true);
   };
   const navigationValues = useMemo(
     () => [
@@ -318,7 +328,7 @@ export function ModelIdPicker({
     values: navigationValues,
     selectedValue: value,
     onSelect: selectModel,
-    onClose: () => setOpen(false),
+    onClose: () => closePicker(true),
   });
 
   const renderModelRow = (
@@ -360,59 +370,67 @@ export function ModelIdPicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="control"
-          className={cn(
-            "w-full justify-between rounded-full border-input bg-background text-[13px] font-normal shadow-none",
-            "settings-hover focus-visible:ring-2 focus-visible:ring-ring",
-          )}
-        >
-          <span className="flex min-w-0 items-center gap-2">
+      <PopoverAnchor asChild>
+        <div className="relative w-full">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
             <ProviderPickerIcon
               provider={effectiveProvider}
               showBrandLogos={showProviderLogos}
               unconfigured={modelUnconfigured}
             />
-            <span
-              className={cn(
-                "min-w-0 truncate font-medium",
-                value ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {value || emptyLabel || tx("settings.models.selectModel", "Select model")}
-            </span>
           </span>
-          <ControlChevron />
-        </Button>
-      </PopoverTrigger>
+          <SearchInput
+            ref={searchInputRef}
+            type="search"
+            name="model-search"
+            autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            value={open && !catalogNeedsSignIn ? query : value}
+            readOnly={catalogNeedsSignIn}
+            onClick={() => openPicker()}
+            onChange={(event) => openPicker(event.target.value)}
+            {...navigation.inputProps}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (!open && ["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) {
+                event.preventDefault();
+                openPicker();
+                return;
+              }
+              navigation.inputProps.onKeyDown(event);
+            }}
+            placeholder={open
+              ? searchPlaceholder || tx("settings.models.searchModels", "Search or type model ID")
+              : emptyLabel || tx("settings.models.selectModel", "Select model")}
+            aria-label={emptyLabel || tx("settings.models.selectModel", "Select model")}
+            aria-expanded={open}
+            aria-describedby={showCatalogNotice ? catalogNoticeId : undefined}
+            className="h-9 appearance-none pl-9 pr-9 text-[13px] font-medium [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
+          />
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+            <ControlChevron />
+          </span>
+        </div>
+      </PopoverAnchor>
       <PopoverContent
         align="end"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (restoreInputOnClose.current) {
+            restoreInputOnClose.current = false;
+            searchInputRef.current?.focus({ preventScroll: true });
+          }
+        }}
+        onEscapeKeyDown={() => { restoreInputOnClose.current = true; }}
+        onInteractOutside={(event) => {
+          if (event.target === searchInputRef.current) event.preventDefault();
+          else restoreInputOnClose.current = false;
+        }}
         className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-1.5"
       >
-        {!catalogNeedsSignIn ? <div className="p-1 pb-1.5">
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              {...navigation.inputProps}
-              placeholder={
-                searchPlaceholder || tx("settings.models.searchModels", "Search or type model ID")
-              }
-              aria-label={
-                searchPlaceholder || tx("settings.models.searchModels", "Search or type model ID")
-              }
-              aria-describedby={showCatalogNotice ? catalogNoticeId : undefined}
-              className="h-8 rounded-full pl-8 pr-3 text-[12px]"
-            />
-          </div>
-        </div> : null}
 
         {showCatalogNotice ? (
           <div className="mx-1 mb-1.5 flex items-start gap-2 rounded-control bg-muted/60 px-2.5 py-2 text-[11px] leading-4">
@@ -425,12 +443,21 @@ export function ModelIdPicker({
                 <p className="font-medium text-foreground">
                   {catalogNeedsSignIn
                     ? tx("settings.models.catalogAuthRequired", "Authorization expired. Please sign in again.")
-                    : tx("settings.models.catalogUnavailable", "Could not refresh models. Try again later.")}
+                    : <button
+                        type="button"
+                        className="rounded-sm text-left underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => {
+                          void retry();
+                          searchInputRef.current?.focus();
+                        }}
+                      >
+                        {tx("settings.models.catalogUnavailable", "Refresh failed. Click to retry")}
+                      </button>}
                 </p>
-                {!catalogNeedsSignIn ? <p className="mt-1 text-muted-foreground">
-                  {payload.source === "stale"
-                    ? tx("settings.models.catalogStale", "Showing cached models; the list may be out of date.")
-                    : tx("settings.models.catalogFallback", "Showing built-in models; the list may be out of date.")}
+                {!catalogNeedsSignIn && payload?.status === "available" ? <p className="mt-1 text-muted-foreground">
+                  {payload.source !== "fallback"
+                    ? tx("settings.models.catalogStale", "Cached list may be out of date.")
+                    : tx("settings.models.catalogFallback", "Built-in list may be out of date.")}
                 </p> : null}
               </div>
               {catalogNeedsSignIn && onProviderOAuthLogin && providerRow?.oauth_login_supported ? (
@@ -443,7 +470,7 @@ export function ModelIdPicker({
                   disabled={providerSigningIn}
                   aria-describedby={catalogNoticeId}
                   onClick={() => {
-                    setOpen(false);
+                    closePicker();
                     onProviderOAuthLogin(effectiveProvider);
                   }}
                 >
@@ -477,14 +504,20 @@ export function ModelIdPicker({
             {tx("settings.models.searchCatalog", "Search this provider’s model catalog.")}
           </div>
         ) : loading ? (
-          <div className="flex items-center gap-2 px-2 py-1.5 text-[11px] text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-            {tx("settings.models.loadingModels", "Loading models...")}
-          </div>
-        ) : error || payload?.status === "error" ? (
-          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
-            {payload?.message || error || tx("settings.models.loadFailed", "Model list unavailable.")}
-          </div>
+          <SkeletonStatus
+            label={tx("settings.models.loadingModels", "Loading models...")}
+            className="space-y-0.5 py-1"
+          >
+            {["w-3/5", "w-4/5", "w-1/2"].map((width) => (
+              <div key={width} className="flex items-center gap-2 px-2 py-1.5">
+                <div className="h-3.5 w-3.5 shrink-0 rounded-full bg-muted-foreground/20" />
+                <div className="min-w-0 flex-1">
+                  <div className={cn("h-3 rounded bg-muted-foreground/20", width)} />
+                  <div className="mt-1.5 h-2.5 w-2/5 rounded bg-muted-foreground/10" />
+                </div>
+              </div>
+            ))}
+          </SkeletonStatus>
         ) : payload?.status === "not_configured" ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.providerNotConfigured", "Configure this provider before loading models.")}
@@ -507,7 +540,7 @@ export function ModelIdPicker({
           <div
             {...navigation.listProps}
             aria-label={searchPlaceholder || tx("settings.models.selectModel", "Select model")}
-            className="max-h-[16rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent"
+            className="max-h-[16rem] overflow-y-auto scrollbar-thin"
           >
             {showModels
               ? visibleModels.map((model) =>
@@ -543,25 +576,6 @@ export function ModelIdPicker({
       </PopoverContent>
     </Popover>
   );
-}
-
-export function formatContextWindow(tokens: number): string {
-  if (tokens >= 1_000_000) {
-    const value = tokens / 1_000_000;
-    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}M`;
-  }
-  if (tokens >= 1_000) {
-    const value = tokens / 1_000;
-    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}K`;
-  }
-  return String(tokens);
-}
-
-export function formatModelContextWindow(tokens: number): string {
-  if (tokens === 65_536) return "64K";
-  if (tokens === 262_144) return "256K";
-  if (tokens === 1_048_576) return "1M";
-  return formatContextWindow(tokens);
 }
 
 export function ProviderPickerIcon({
@@ -659,47 +673,3 @@ export function optionRowsWithCurrent(
   return [{ name: value, label: value }, ...options];
 }
 
-export const PROVIDER_ICONS: Record<string, LucideIcon> = {
-  custom: Hexagon,
-  openrouter: Sparkles,
-  orcarouter: Sparkles,
-  skywork: Sparkles,
-  aihubmix: Triangle,
-  anthropic: Brain,
-  openai: Bot,
-  deepseek: Waves,
-  zhipu: Grid3X3,
-  dashscope: Cloud,
-  modelscope: Layers,
-  moonshot: Moon,
-  minimax: Zap,
-  minimax_anthropic: Brain,
-  groq: Cpu,
-  huggingface: Layers,
-  gemini: Gem,
-  mistral: Orbit,
-  siliconflow: Layers,
-  volcengine: Cloud,
-  volcengine_coding_plan: Cloud,
-  byteplus: Cloud,
-  byteplus_coding_plan: Cloud,
-  qianfan: Database,
-  ant_ling: Sparkles,
-  azure_openai: Cloud,
-  bedrock: Database,
-  bocha: Search,
-  brave: Search,
-  duckduckgo: Search,
-  exa: Search,
-  jina: Search,
-  kagi: Search,
-  olostep: Search,
-  searxng: Search,
-  tavily: Search,
-  vllm: Cpu,
-  ollama: Cpu,
-  lm_studio: Cpu,
-  atomic_chat: Cpu,
-  ovms: Cpu,
-  nvidia: Zap,
-};

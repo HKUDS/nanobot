@@ -38,10 +38,10 @@ If you prefer to inspect the scripts first, open [`install.sh`](../scripts/insta
 
 Keep the installer terminal open. The browser opens the local WebUI; go to **Settings → Models** and:
 
-1. Choose the provider or endpoint that owns your credential.
-2. Enter its API key or base URL when required.
-3. Create or select a model preset using a model ID that provider can run.
-4. Save the configuration.
+1. Choose **New preset** and give it a name. If **Convert to presets** appears, choose it first.
+2. Open **Provider** and select your provider. To add one, choose **Add provider** from the same menu, then enter and save its connection details or complete sign-in.
+3. Choose a model from the list or enter a model ID available to your account.
+4. Choose **Save**.
 
 The WebUI launcher creates or updates:
 

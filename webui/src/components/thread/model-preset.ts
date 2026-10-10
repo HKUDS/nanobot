@@ -91,6 +91,8 @@ export function modelPresetOptionsFromSettings(
       return {
         name,
         model: preset.model,
+        contextWindowTokens: preset.context_window_tokens,
+        reasoningEffort: preset.reasoning_effort,
         provider: preset.resolved_provider || preset.provider,
       };
     });

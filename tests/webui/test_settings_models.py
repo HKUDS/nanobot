@@ -8,6 +8,7 @@ from nanobot.config.schema import Config
 from nanobot.webui.settings_models import (
     WebUISettingsError,
     model_settings_payload,
+    provider_models_payload,
     update_agent_model_settings,
     update_provider_settings,
 )
@@ -83,3 +84,22 @@ def test_default_context_window_rejects_invalid_tokens(value: str) -> None:
             config, {"context_window_tokens": [value]}, oauth_status=_oauth_status,
         )
     assert config.agents.defaults.context_window_tokens == 200_000
+
+
+@pytest.mark.parametrize("provider", ["openai_codex", "xai_grok", "github_copilot"])
+@pytest.mark.parametrize("refresh", [False, True])
+def test_provider_model_refresh_reaches_oauth_catalog(monkeypatch, provider, refresh):
+    from unittest.mock import Mock
+
+    from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot
+
+    catalog = Mock(return_value=OAuthModelCatalogSnapshot(models=(), source="remote", fetched_at=123))
+    monkeypatch.setattr("nanobot.webui.settings_models.get_oauth_model_catalog", catalog)
+    query = {"provider": [provider]}
+    if refresh:
+        query["refresh"] = ["1"]
+
+    config = Config.model_validate({"providers": {provider: {}}})
+    provider_models_payload(config, query, http_get=Mock())
+
+    catalog.assert_called_once_with(provider, proxy=None, refresh=refresh)

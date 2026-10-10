@@ -121,7 +121,7 @@ export function SidebarSelectionHighlight({
         data-testid={`${scope}-selection-highlight`}
         data-active-id={activeId ?? undefined}
         aria-hidden="true"
-        className={cn("pointer-events-none absolute left-0 top-0 z-0 !mt-0 rounded-xl bg-sidebar-foreground/[0.055] opacity-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none dark:bg-white/[0.07]", highlightClassName)}
+        className={cn("pointer-events-none absolute left-0 top-0 z-0 !mt-0 rounded-control bg-sidebar-foreground/[0.055] opacity-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none dark:bg-white/[0.07]", highlightClassName)}
       />
     </div>
   );

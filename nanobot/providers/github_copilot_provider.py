@@ -355,9 +355,11 @@ def cached_github_copilot_model_api(
 
 def get_github_copilot_model_catalog(
     proxy: str | None = None,
+    *,
+    refresh: bool = False,
 ) -> OAuthModelCatalogSnapshot:
     return _GITHUB_COPILOT_MODEL_CATALOG.get(
-        cache_key=_copilot_catalog_cache_key(proxy), proxy=proxy,
+        cache_key=_copilot_catalog_cache_key(proxy), proxy=proxy, refresh=refresh,
     )
 
 

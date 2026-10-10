@@ -378,6 +378,35 @@ def test_github_copilot_catalog_routes_advertised_model_apis(
     assert len(captured) == 4
 
 
+def test_explicit_refresh_bypasses_cached_models_and_retry_delay() -> None:
+    calls = 0
+
+    def fetch(_proxy):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            request = httpx.Request("GET", "https://example.com/models")
+            raise httpx.HTTPStatusError("expired", request=request, response=httpx.Response(401))
+        return (ProviderModelSpec(id=f"provider/model-{calls}"),)
+
+    catalog = OAuthModelCatalog(fallback_models=(), fetch=fetch)
+    assert catalog.get(cache_key="account").models[0].id == "provider/model-1"
+    assert catalog.get(cache_key="account").source == "cache"
+    assert calls == 1
+
+    failed = catalog.get(cache_key="account", refresh=True)
+    assert failed.source == "stale"
+    assert failed.error_kind == "auth_required"
+    assert catalog.get(cache_key="account").error_kind == "auth_required"
+    assert calls == 2
+
+    refreshed = catalog.get(cache_key="account", refresh=True)
+    assert refreshed.source == "remote"
+    assert refreshed.error_kind is None
+    assert refreshed.models[0].id == "provider/model-3"
+    assert calls == 3
+
+
 def test_catalog_single_flights_concurrent_refreshes() -> None:
     calls = 0
     calls_lock = threading.Lock()

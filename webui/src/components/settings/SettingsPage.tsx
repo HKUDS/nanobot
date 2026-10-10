@@ -1,5 +1,5 @@
 import { ChevronLeft, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { SettingsExitGuard } from "@/components/settings/contracts";
@@ -18,8 +18,9 @@ import {
 import {
   ProviderOAuthLoginDialog,
   ProvidersSettings,
-  providerFormFromRow,
+  type ProviderSettingsEntry,
 } from "@/components/settings/models/ProviderSettings";
+import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
 import { SettingsSidebar, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
 import {
@@ -88,6 +89,12 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
+  const presetDeletedCallback = useRef<(() => void) | null>(null);
+  const [providerPanel, setProviderPanel] = useState<ProviderSettingsEntry | null>(null);
+  const providerSetupOrigin = useRef<{
+    trigger: HTMLButtonElement | null;
+    onAdded?: (provider: string) => void;
+  } | null>(null);
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
   const [automationDetailReturn, setAutomationDetailReturn] =
     useState<SessionAutomationJob | null>(null);
@@ -118,10 +125,10 @@ export function SettingsPage({
     closeProviderOAuthFlow,
     completeProviderOAuthResponse,
     createCustomProvider,
+    providerOperation,
     customMcpForm,
     editingProviderKeys,
     error,
-    expandedProvider,
     featureCatalog,
     form,
     handleApiServiceAction,
@@ -140,7 +147,7 @@ export function SettingsPage({
     handleMigrateModelConfigurations,
     handleNanobotFeatureAction,
     handleSaveCustomMcp,
-    handleToggleProvider,
+    resetProviderDraft,
     handleWebSearchProviderChange,
     hostEngineApplying,
     imageGenerationDirty,
@@ -361,9 +368,22 @@ export function SettingsPage({
               orderSaving={modelCallOrderSaving || modelConfigurationSaving}
               migrationSaving={modelMigrationSaving}
               showBrandLogos={localPrefs.brandLogos}
-              providerSaving={providerSaving}
+              providerSaving={providerOperation?.action === "login" ? providerSaving : null}
               onChangeCallOrder={changeModelCallOrder}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
+              onAddProvider={(trigger, onAdded) => {
+                providerSetupOrigin.current = { trigger, onAdded };
+                setProviderPanel({ kind: "add" });
+              }}
+              onConfigureProvider={(provider, trigger) => {
+                providerSetupOrigin.current = { trigger };
+                resetProviderDraft(provider);
+                setProviderPanel({ kind: "edit", provider });
+              }}
+              onManageProviders={(trigger) => {
+                providerSetupOrigin.current = { trigger };
+                setProviderPanel({ kind: "manage" });
+              }}
               onSave={saveModelSettings}
               onMigrate={handleMigrateModelConfigurations}
               onBeginCreate={beginModelPresetCreation}
@@ -375,43 +395,54 @@ export function SettingsPage({
                 setModelPresetNameError(null);
                 modelPresetBeforeCreateRef.current = null;
               }}
-              onDeleteConfiguration={setModelPresetPendingDelete}
+              onDeleteConfiguration={(preset, onDeleted) => {
+                presetDeletedCallback.current = onDeleted;
+                setModelPresetPendingDelete(preset);
+              }}
             />
-            <ProvidersSettings
+            {providerPanel ? <ProvidersSettings
+              entry={providerPanel}
+              onClose={() => setProviderPanel(null)}
+              onProviderAdded={providerSetupOrigin.current?.onAdded
+                ? (provider) => providerSetupOrigin.current?.onAdded?.(provider)
+                : undefined}
+              onCloseAutoFocus={(event) => {
+                if (providerSetupOrigin.current) {
+                  event.preventDefault();
+                  providerSetupOrigin.current.trigger?.focus({ preventScroll: true });
+                  providerSetupOrigin.current = null;
+                }
+              }}
               settings={settings}
               nanobotFeatures={nanobotFeatures}
               featureAction={nanobotFeatureAction}
               capabilityError={nanobotFeaturesError}
-              expandedProvider={expandedProvider}
               providerForms={providerForms}
               visibleProviderKeys={visibleProviderKeys}
               editingProviderKeys={editingProviderKeys}
               providerSaving={providerSaving}
               showBrandLogos={localPrefs.brandLogos}
               remoteBrowserAccess={remoteBrowserAccess}
-              onToggleProvider={handleToggleProvider}
+              onResetProviderDraft={resetProviderDraft}
               onToggleProviderKey={toggleProviderKeyVisibility}
               onToggleProviderKeyEditing={toggleProviderKeyEditing}
-              onChangeProviderForm={(provider, value) =>
+              onChangeProviderForm={(provider, value) => {
+                const row = settings.providers.find((item) => item.name === provider);
+                if (!row) return;
                 setProviderForms((prev) => ({
                   ...prev,
                   [provider]: {
-                    ...(prev[provider] ?? providerFormFromRow(
-                      settings.providers.find((row) => row.name === provider) ?? {
-                        name: provider,
-                        label: provider,
-                        configured: false,
-                      },
-                    )),
+                    ...(prev[provider] ?? providerFormFromRow(row)),
                     ...value,
                   },
-                }))
-              }
+                }));
+              }}
               onSaveProvider={saveProvider}
               onCreateCustomProvider={createCustomProvider}
+              providerOperation={providerOperation}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
-            />
+            /> : null}
           </div>
         );
       case "image":
@@ -678,9 +709,17 @@ export function SettingsPage({
         preset={modelPresetPendingDelete}
         deleting={saving}
         onOpenChange={(open) => {
-          if (!open) setModelPresetPendingDelete(null);
+          if (!open) {
+            setModelPresetPendingDelete(null);
+            presetDeletedCallback.current = null;
+          }
         }}
-        onConfirm={handleDeleteModelConfiguration}
+        onConfirm={async () => {
+          if (await handleDeleteModelConfiguration()) {
+            presetDeletedCallback.current?.();
+            presetDeletedCallback.current = null;
+          }
+        }}
       />
 
       <ProviderOAuthLoginDialog

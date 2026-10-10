@@ -1,3 +1,4 @@
+import { formatModelContextWindow } from "@/lib/model-context-format";
 import {
   ModelsIcon,
 } from "@/components/icons/product-icons";
@@ -79,6 +80,8 @@ function compactModelName(model?: string | null): string | null {
 
 export interface ModelPresetOption {
   name: string;
+  contextWindowTokens?: number;
+  reasoningEffort?: string | null;
   model?: string | null;
   provider?: string | null;
 }
@@ -133,6 +136,10 @@ export function ModelPresetBadge({
     label,
     modelDetail,
     providerLabel,
+    [
+      activePreset.contextWindowTokens ? formatModelContextWindow(activePreset.contextWindowTokens) : null,
+      activePreset.reasoningEffort,
+    ].filter(Boolean).join("  "),
   ].filter((part): part is string => Boolean(part)))];
   const presets = !activeName
     ? modelPresets
@@ -290,8 +297,8 @@ export function ModelPresetBadge({
         type={opensSetup ? "button" : undefined}
         onClick={opensSetup ? onClick : undefined}
         className={cn(
-          "thread-composer-model-badge group inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] appearance-none border-0 bg-transparent p-0 shadow-none",
-          opensSetup && "cursor-pointer focus-visible:outline-none",
+          "thread-composer-model-badge group inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
+          opensSetup && "cursor-pointer",
           isHero ? "h-8" : "h-9",
         )}
       >
@@ -462,7 +469,7 @@ export function ModelPresetBadge({
       <Tooltip open={tooltipParts.length > 1 && tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
         {badge}
         <TooltipContent side="top" className="max-w-[min(24rem,calc(100vw-2rem))] space-y-1 break-words">
-          {tooltipParts.map((part, index) => <p key={part} className={index === 0 ? "font-medium" : "text-xs text-muted-foreground"}>{part}{index < tooltipParts.length - 1 ? " " : ""}</p>)}
+          {tooltipParts.map((part, index) => <p key={part} className={index === 0 ? "font-medium" : "whitespace-pre-wrap text-xs text-muted-foreground"}>{part}{index < tooltipParts.length - 1 ? " " : ""}</p>)}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

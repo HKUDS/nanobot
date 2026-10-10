@@ -1071,9 +1071,11 @@ export async function fetchProviderModels(
   token: string,
   provider: string,
   base: string = "",
+  options?: { refresh?: boolean },
 ): Promise<ProviderModelsPayload> {
   const query = new URLSearchParams();
   query.set("provider", provider);
+  if (options?.refresh) query.set("refresh", "1");
   return request<ProviderModelsPayload>(
     `${base}/api/settings/provider-models?${query}`,
     token,

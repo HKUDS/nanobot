@@ -263,6 +263,8 @@ Some settings take effect immediately. Runtime settings that affect the gateway 
 
 Browser-only display preferences, such as file edit display mode, take effect immediately for the current browser and do not change gateway configuration.
 
+To add a model, follow [Configure Your Model](./quick-start.md#2-configure-your-model).
+
 ## LAN Access
 
 To open the WebUI from another device on the same network, bind the WebSocket channel to all interfaces and set a token or token issue secret:

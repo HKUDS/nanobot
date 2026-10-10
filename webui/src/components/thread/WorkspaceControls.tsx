@@ -6,8 +6,8 @@ import { useTranslation } from "react-i18next";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { Button } from "@/components/ui/button";
 import { floatingItemClassName, floatingItemFocusClassName } from "@/components/ui/floating-surface";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Input } from "@/components/ui/input";
+import { HoverHint } from "@/components/ui/tooltip";
+import { Input, SearchInput } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SidebarSelectionHighlight, SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
 import type { WorkspaceScopePayload, ProjectDirectory, WorkspaceDirectoriesPayload, WorkspacesPayload } from "@/lib/types";
@@ -22,13 +22,13 @@ function WorkspaceFavoriteButton({ path, pinned, busy, onToggle }: {
   const { t } = useTranslation();
   const label = t(pinned ? "workspace.picker.unpin" : "workspace.picker.pin", { name: projectNameFromPath(path) });
   return (
-    <WorkspacePickerTooltip label={label}>
+    <HoverHint content={label}>
       <button type="button" aria-label={label} aria-pressed={pinned} disabled={busy}
         onMouseDown={event => event.preventDefault()} onClick={onToggle}
         className="workspace-picker-favorite touch-target absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-control text-muted-foreground outline-none hover:bg-foreground/[0.055] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none">
         <Star className={cn("h-3.5 w-3.5", pinned && "fill-current text-foreground")} />
       </button>
-    </WorkspacePickerTooltip>
+    </HoverHint>
   );
 }
 
@@ -42,22 +42,13 @@ function directoryVisit(path: string, ancestors: PickerAncestor[] = [], scrollTo
   return { path, ancestors: ancestors.map(({ path, parent, selectedPath }) => ({ path, parent, selectedPath })), filter: "", scrollLeft: null, scrollTops };
 }
 
-function WorkspacePickerTooltip({ label, children }: { label: string; children: ReactElement }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))] whitespace-pre-line break-all">{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function PickerToolButton({ label, disabled, onClick, children }: {
   label: string; disabled?: boolean; onClick: () => void; children: ReactElement;
 }) {
-  return <WorkspacePickerTooltip label={label}>
+  return <HoverHint content={label}>
     <Button type="button" variant="ghost" size="icon" aria-label={label} disabled={disabled} onClick={onClick}
       className="h-11 w-11 shrink-0 rounded-control text-muted-foreground sm:h-9 sm:w-9">{children}</Button>
-  </WorkspacePickerTooltip>;
+  </HoverHint>;
 }
 
 const DIRECTORY_ROW_HEIGHT = 44;
@@ -555,23 +546,22 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     {compact && <Button variant="ghost" size="sm" aria-expanded={showLocations} onClick={() => setShowLocations(value => !value)} className="h-11 shrink-0 gap-1.5 rounded-control px-2 text-[13px] leading-5"><Star className="h-3.5 w-3.5" />{t("workspace.picker.shortcuts")}</Button>}
     <div className="relative min-w-0 flex-1">
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input aria-label={t("workspace.picker.filter")} placeholder={t("workspace.picker.filter")} value={filterQuery} disabled={pickingFolder || editingPath || compact && showLocations} onChange={event => { setFilterQuery(event.target.value); setActiveIndex(0); setActiveColumn(currentColumnIndex); setHighlightActive(false); }} className={cn("h-11 rounded-[var(--picker-field-radius)] border-transparent focus-visible:ring-0 pl-8 text-[16px] leading-5 shadow-none sm:h-9 sm:text-[13px]", compact ? "bg-muted/60" : "bg-background/80")} />
+      <SearchInput aria-label={t("workspace.picker.filter")} placeholder={t("workspace.picker.filter")} value={filterQuery} disabled={pickingFolder || editingPath || compact && showLocations} onChange={event => { setFilterQuery(event.target.value); setActiveIndex(0); setActiveColumn(currentColumnIndex); setHighlightActive(false); }} className={cn("h-11 rounded-[var(--picker-field-radius)] border-transparent pl-8 text-[16px] leading-5 shadow-none sm:h-9 sm:text-[13px]", compact ? "bg-muted/60" : "bg-background/80")} />
     </div>
   </div>;
 
   if (!visible || !defaultScope || !onChange) return null;
   return (
     <div className="inline-flex min-w-0 max-w-[11rem] shrink items-center">
-      <TooltipProvider>
       <Dialog open={open} onOpenChange={setOpen}>
-        <WorkspacePickerTooltip label={`${t("workspace.picker.switchDirectory")}\n${displayedScope?.project_path ?? ""}`}>
+        <HoverHint content={`${t("workspace.picker.switchDirectory")}\n${displayedScope?.project_path ?? ""}`}>
           <DialogTrigger asChild>
             <button ref={triggerRef} onClick={event => { openedWithKeyboard.current = event.detail === 0; }} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.055] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
               <WorkspaceIcon className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">{projectLabel}</span>
             </button>
           </DialogTrigger>
-        </WorkspacePickerTooltip>
+        </HoverHint>
         <DialogContent showCloseButton={false} layoutAnchor={layoutAnchor} centerInLayoutAnchor className="flex h-[min(37rem,calc(100%-2rem))] max-w-5xl flex-col gap-0 overflow-hidden p-0 text-[13px] leading-5 [--picker-sidebar-width:11rem] [--picker-toolbar-inset:0.75rem] [--picker-field-radius:calc(var(--radius-modal)_-_var(--picker-toolbar-inset))] sm:[--picker-toolbar-inset:1rem] dark:bg-background"
           onOpenAutoFocus={event => { event.preventDefault(); if (canBrowse) focusDirectory(); else inputRef.current?.focus(); }}
           onPointerDownCapture={() => setKeyboardInteraction(false)}
@@ -610,10 +600,10 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
                   <button type="button" disabled={pickingFolder} aria-current={index === breadcrumbs.length - 1 ? "location" : undefined} onClick={() => navigate(crumb.path)}
                     className="h-11 max-w-48 cursor-pointer truncate rounded-[var(--picker-field-radius)] px-2 text-muted-foreground outline-none hover:bg-foreground/[0.055] focus-visible:ring-2 focus-visible:ring-ring aria-[current=location]:font-medium aria-[current=location]:text-foreground sm:h-9">{crumb.name}</button>
               </span>)}
-              <WorkspacePickerTooltip label={t("workspace.picker.editPath")}>
+              <HoverHint content={t("workspace.picker.editPath")}>
                 <button type="button" disabled={pickingFolder} aria-label={`${t("workspace.picker.editPath")}: ${currentPath}`} onClick={editPath}
                   className="min-w-8 flex-1 cursor-text self-stretch rounded-[var(--picker-field-radius)] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-              </WorkspacePickerTooltip>
+              </HoverHint>
             </nav>}
             </div>
             {!compact && filterToolbar}
@@ -647,7 +637,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             <div className={cn("mr-[var(--picker-toolbar-inset)] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--picker-field-radius)] bg-[#fcfcfc] dark:bg-muted", compact && showLocations && canBrowse && "hidden")}>
             <div ref={attachColumns} data-workspace-columns className="sidebar-scrollbar flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain">
               {columns.map((column, columnIndex) => (!compact || columnIndex === currentColumnIndex) && <WorkspaceDirectoryColumn key={columnIndex} options={column.options} selectedPath={column.selectedPath} initialScrollTop={previewingPath ? 0 : currentVisit.scrollTops[columnIndex] ?? 0} visitRevision={history.revision} activeIndex={highlightActive && columnIndex === activeColumn ? activeOption : null}
-                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className="sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 outline-none"
+                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className="sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
                 onFocus={event => { if (event.target === event.currentTarget) { setActiveColumn(columnIndex); setActiveIndex(0); } }}
                 onKeyDown={event => {
                   if (event.target !== event.currentTarget || event.altKey || event.metaKey || event.ctrlKey || pickingFolder) return;
@@ -685,7 +675,6 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
           </div>
         </DialogContent>
       </Dialog>
-      </TooltipProvider>
       {error && !open && <span role="alert" className="ml-2 min-w-0 truncate text-[11.5px] font-medium text-destructive">{error}</span>}
     </div>
   );
@@ -716,9 +705,8 @@ export function WorkspaceAccessToggle({
   const accessAriaLabel = `${t("thread.composer.workspace.accessAria")}: ${accessLabel}`;
 
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
+    <HoverHint side="top" contentClassName="w-max max-w-[calc(100vw-2rem)] text-left leading-relaxed"
+      content={t(isFull ? "thread.composer.workspace.fullDescription" : "thread.composer.workspace.defaultDescription")}>
           <Button
             type="button"
             variant={null}
@@ -746,11 +734,6 @@ export function WorkspaceAccessToggle({
               {shortAccessLabel}
             </span>
           </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="w-max max-w-[calc(100vw-2rem)] text-left leading-relaxed">
-          {t(isFull ? "thread.composer.workspace.fullDescription" : "thread.composer.workspace.defaultDescription")}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    </HoverHint>
   );
 }

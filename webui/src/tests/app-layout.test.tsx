@@ -660,9 +660,10 @@ describe("App layout", () => {
     expect(
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Providers")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add provider" }))
-      .toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model presets" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Manage providers" }));
+    expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
@@ -986,7 +987,7 @@ describe("App layout", () => {
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     const temporaryToggle = screen.getByRole("button", { name: "Temporary chat" });
-    expect(temporaryToggle).toHaveClass("h-8", "w-8", "rounded-xl");
+    expect(temporaryToggle).toHaveClass("h-8", "w-8", "rounded-control");
     expect(within(temporaryToggle).queryByText("Temporary chat")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");

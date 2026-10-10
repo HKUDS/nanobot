@@ -626,13 +626,15 @@ def _should_retry_status(
 
 def get_openai_codex_model_catalog(
     proxy: str | None = None,
+    *,
+    refresh: bool = False,
 ) -> OAuthModelCatalogSnapshot:
     storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
     token = storage.load()
     account_id = getattr(token, "account_id", None)
     account_key = _catalog_account_key(account_id)
     cache_key = f"{storage.get_token_path()}\0{account_key}\0{proxy or ''}"
-    return _OPENAI_CODEX_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy)
+    return _OPENAI_CODEX_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy, refresh=refresh)
 
 
 def invalidate_openai_codex_model_catalog() -> None:

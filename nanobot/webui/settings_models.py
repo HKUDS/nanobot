@@ -690,7 +690,9 @@ def provider_models_payload(
         }
     if catalog_kind == "hybrid":
         proxy = _resolve_env_placeholders(provider_config.proxy)
-        catalog = get_oauth_model_catalog(spec.name, proxy=proxy)
+        catalog = get_oauth_model_catalog(
+            spec.name, proxy=proxy, refresh=query_first(query, "refresh") == "1",
+        )
         rows = [
             {
                 "id": model.id,
