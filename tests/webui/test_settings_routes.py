@@ -60,6 +60,117 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
+async def test_driver_uninstall_reaches_authenticated_mutation_route(tmp_path, monkeypatch):
+    from nanobot.apps.cua_driver import UNINSTALL_CAPABILITY, CuaDriver
+    from nanobot.webui.ws_http import GatewayHTTPHandler
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}")
+    remove = AsyncMock()
+    monkeypatch.setattr(CuaDriver, "uninstall", remove)
+    monkeypatch.setattr(CuaDriver, "stop", AsyncMock())
+    payload = {"name": "cua-driver", "consent": UNINSTALL_CAPABILITY}
+    path = GatewayHTTPHandler._webui_mutation_path("settings.mcp.uninstall", payload)
+    assert path == "/api/settings/mcp-presets/uninstall"
+    router = _router(config_path=config_path)
+    response = await _router(authorized=False, config_path=config_path).dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 401
+    response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
+    assert response.status_code == 405
+    response = await router.dispatch(None, _mutation_request(path, {"name": "cua-driver"}), path)
+    assert response.status_code == 409
+    remove.assert_not_awaited()
+    response = await router.dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 200
+    remove.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_driver_install_is_authenticated_consented_and_separate_from_enable(tmp_path, monkeypatch):
+    from nanobot.apps.cua_driver import CAPABILITY, CuaDriver
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"agents": {"defaults": {"workspace": str(tmp_path / "workspace")}}}))
+    install = AsyncMock()
+    monkeypatch.setattr(CuaDriver, "install", install)
+    path = "/api/settings/mcp-presets/install"
+    router = _router(config_path=config_path)
+    payload = {"name": "cua-driver", "consent": f"{CAPABILITY}:install"}
+    response = await _router(authorized=False, config_path=config_path).dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 401
+    response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
+    assert response.status_code == 405
+    response = await router.dispatch(None, _mutation_request(path, {"name": "cua-driver"}), path)
+    assert response.status_code == 409
+    install.assert_not_awaited()
+    response = await router.dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 200
+    assert CAPABILITY in json.loads(response.body)["capabilities"]
+    assert "cua-driver" not in router.settings.config.load().tools.mcp_servers
+    enable_path = "/api/settings/mcp-presets/enable"
+    # A frozen old client sends only name; installing must not make that enough.
+    response = await router.dispatch(None, _mutation_request(enable_path, {"name": "cua-driver"}), enable_path)
+    assert response.status_code == 409
+    install.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_native_setup_is_authenticated_and_cannot_enable_access(tmp_path, monkeypatch):
+    from nanobot.apps.cua_driver import SETUP_CAPABILITY, CuaDriver
+
+    path = "/api/settings/mcp-presets/setup"
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"agents": {"defaults": {"workspace": str(tmp_path / "workspace")}}}))
+    open_setup = AsyncMock()
+    monkeypatch.setattr(CuaDriver, "open_setup", open_setup)
+    payload = {"name": "cua-driver", "target": "finder"}
+    router = _router(config_path=config_path)
+    response = await _router(authorized=False, config_path=config_path).dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 401
+    response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
+    assert response.status_code == 405
+    open_setup.assert_not_awaited()
+    response = await router.dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 200
+    assert SETUP_CAPABILITY in json.loads(response.body)["capabilities"]
+    open_setup.assert_awaited_once_with("finder")
+    assert "cua-driver" not in router.settings.config.load().tools.mcp_servers
+    response = await router.dispatch(None, _mutation_request(path, {"name": "other", "target": "finder"}), path)
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_cua_reconnect_is_authenticated_and_targets_only_its_runtime(tmp_path, monkeypatch):
+    from nanobot.apps.cua_driver import RECONNECT_CAPABILITY, CuaDriver
+
+    path = "/api/settings/mcp-presets/reconnect"
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}")
+    monkeypatch.setattr(CuaDriver, "installed", lambda self: True)
+    stop = AsyncMock()
+    monkeypatch.setattr(CuaDriver, "stop", stop)
+    monkeypatch.setattr(CuaDriver, "check", AsyncMock(return_value={
+        "connected": True, "accessibility": True, "screen_recording": True, "capture_verified": False,
+    }))
+    reload = AsyncMock(return_value={"ok": True, "requires_restart": False})
+    router = _router(config_path=config_path, mcp_reload=reload)
+    router.settings.config.update(lambda cfg: cfg.tools.mcp_servers.update({
+        "cua-driver": CuaDriver(config_path).configuration("observe"),
+    }))
+    payload = {"name": "cua-driver"}
+    denied = await _router(authorized=False, config_path=config_path, mcp_reload=reload).dispatch(
+        None, _mutation_request(path, payload), path)
+    assert denied.status_code == 401
+    stop.assert_not_awaited()
+    reload.assert_not_awaited()
+    response = await router.dispatch(None, _mutation_request(path, payload), path)
+    assert response.status_code == 200
+    assert RECONNECT_CAPABILITY in json.loads(response.body)["capabilities"]
+    reload.assert_awaited_once_with(reconnect="cua-driver")
+    stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_close_releases_channel_connectors() -> None:
     router = _router()
     closed = False

@@ -122,6 +122,7 @@ import {
   logoFallbackUrls,
 } from "@/lib/provider-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
+import { mcpPresetBrand } from "@/lib/mcp-preset-brand";
 import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
   isRegisteredSlashCommand,
@@ -716,7 +717,7 @@ function cliAppMentionPayload(app: CliAppInfo): OutboundCliAppMention {
 function mcpPresetMentionPayload(preset: McpPresetInfo): OutboundMcpPresetMention {
   return {
     name: preset.name,
-    display_name: preset.display_name,
+    display_name: mcpPresetBrand(preset).display_name,
     category: preset.category,
     transport: preset.transport,
     status: preset.status,
@@ -1485,6 +1486,7 @@ export function ThreadComposer({
         const haystack = [
           preset.name,
           preset.display_name,
+          mcpPresetBrand(preset).display_name,
           preset.category,
           preset.description,
           preset.transport,
@@ -1494,9 +1496,9 @@ export function ThreadComposer({
       .map((preset) => ({
         kind: "mcp",
         name: preset.name,
-        displayName: preset.display_name,
+        displayName: mcpPresetBrand(preset).display_name,
         brandColor: preset.brand_color ?? null,
-        logoUrl: preset.logo_url ?? null,
+        logoUrl: mcpPresetBrand(preset).logo_url ?? null,
         initials: mcpPresetInitials(preset),
       }));
     const groups = [

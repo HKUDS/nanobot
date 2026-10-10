@@ -649,6 +649,39 @@ def test_import_mcp_config_and_tool_allowlist(
     assert load_config().tools.mcp_servers["docs"].enabled_tools == []
 
 
+def test_import_and_connection_edits_preserve_observation_policy(tmp_path, monkeypatch):
+    _use_config(tmp_path, monkeypatch)
+    custom_mcp_action("import", {"config": [json.dumps({"mcpServers": {"desktop": {
+        "command": "cua-driver", "args": ["mcp"],
+        "imageOutput": "inline", "retryToolCalls": False,
+        "enabledTools": ["get_window_state"],
+    }}})]})
+    config = load_config().tools.mcp_servers["desktop"]
+    assert config.image_output == "inline"
+    assert config.retry_tool_calls is False
+
+    # Existing clients omit the new fields; editing the connection must not
+    # silently re-enable automatic replay of desktop actions.
+    custom_mcp_action("custom", {
+        "name": ["desktop"], "transport": ["stdio"], "command": ["cua-driver"],
+        "args": ['["mcp"]'], "enabled_tools": ['["get_window_state"]'],
+    })
+    custom_mcp_action("tools", {"name": ["desktop"], "enabled_tools": ['["get_window_state", "click"]']})
+    config = load_config().tools.mcp_servers["desktop"]
+    assert config.image_output == "inline"
+    assert config.retry_tool_calls is False
+
+
+@pytest.mark.parametrize("options", [{"imageOutput": "typo"}, {"retryToolCalls": "false"}])
+def test_import_rejects_invalid_observation_policy(tmp_path, monkeypatch, options):
+    _use_config(tmp_path, monkeypatch)
+    with pytest.raises(McpPresetError):
+        custom_mcp_action("import", {"config": [json.dumps({"desktop": {
+            "command": "cua-driver", **options,
+        }})]})
+    assert "desktop" not in load_config().tools.mcp_servers
+
+
 def test_import_recognizes_known_and_explicit_oauth_servers(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

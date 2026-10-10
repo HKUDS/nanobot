@@ -75,5 +75,6 @@ Restart nanobot and ask a question that requires the MCP tool.
 ## Related nanobot docs
 
 - [MCP tools for AI agents](./mcp-tools-for-ai-agents.md)
+- [Computer use with Cua Driver](./computer-use-cua-driver.md)
 - [Configuration: MCP](../configuration.md#mcp-model-context-protocol)
 - [Security](../configuration.md#security)

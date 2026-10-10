@@ -14,6 +14,7 @@ import type {
   FileReferenceMetadata,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  McpPresetAction,
   McpOAuthFlowPayload,
   MarketplaceProvider,
   NanobotFeaturesPayload,
@@ -1084,7 +1085,7 @@ export async function fetchProviderModels(
 
 export async function runMcpPresetAction(
   transport: WebUIMutationTransport,
-  action: "enable" | "disable" | "remove" | "test" | "reconnect",
+  action: McpPresetAction,
   name: string,
   values: Record<string, string> = {},
 ): Promise<McpPresetsPayload> {
@@ -1092,6 +1093,7 @@ export async function runMcpPresetAction(
     transport,
     `settings.mcp.${action}`,
     { name, ...compactMcpValues(values) },
+    name === "cua-driver" ? (action === "install" ? 660_000 : 60_000) : API_MUTATION_TIMEOUT_MS,
   );
 }
 

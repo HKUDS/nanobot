@@ -39,16 +39,58 @@ Repeat for `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-
 
 ### Build the PyPI platform wheels
 
+#### Computer Use payloads for macOS
+
+Before packaging the two macOS wheels, build `packages/computer-use` from this exact
+release checkout on the matching Mac architectures. Use the pinned Cua source
+revision and committed Cargo.lock, following its [build guide](../packages/computer-use/README.md).
+Keep `native-package.json` and `native-package.tar.gz` under
+`<verified-computer-use>/darwin-arm64/` and `darwin-x64/`. These are inert wheel
+payloads, not a second user-visible installer. Linux/Windows use the pinned
+official driver and do not include this payload.
+
+Run `verify_package.py --runtime` on each Mac: default installation without
+developer staging, signature verification, status/tool discovery without capture,
+observation-mode input refusal, stopped-sharing refusal, uninstall and reinstall.
+Separately test a downloaded wheel in a fresh account with no previous TCC grants:
+Apps must install only **nanobot Computer Use**, request the two grants sequentially,
+show the real system sharing indicator and branded cursor during a bounded task,
+and respect Stop Sharing, cancellation and uninstall. Record each architecture's
+native evidence; fixture tests and cross-compilation are not a substitute.
+
+Review the target-specific notices, pinned Cua MIT and derived-code credits,
+Inter's OFL, and bundled MPL sources/license. `NANOBOT-SOURCES.tar` must match this
+checkout. The packager rejects missing, stale or mismatched payloads. No user
+configuration, temporary sockets or build caches belong in the archive.
+
+The current builder ad-hoc signs the app. That is **not** Developer ID signing or
+Apple notarization and does not establish a clean Gatekeeper download experience.
+Before public release, record the maintainer's distribution/signing decision and
+prove the downloaded-install flow without disabling system protections. If that
+flow needs Developer ID/notarization, complete it and regenerate the hashes before
+publishing; do not claim that ad-hoc signatures satisfy it. No macOS GitHub Actions
+runner is added by this feature; use local/release infrastructure under the existing
+CI policy. Do not publish a macOS wheel with a missing native package or silently
+fall back to a differently named permission owner.
+
 From the exact release checkout, after `uv build` and the native archive checks:
 
 ```bash
 uv run python -m scripts.build_tui_wheels \
   --wheel <intermediates>/nanobot_ai-X.Y.Z-py3-none-any.whl \
   --tui-dir <verified-tui-archives> \
+  --computer-use-dir <verified-computer-use> \
   --out-dir <final-wheels>
 ```
 
 The script verifies the Python version and RECORD, native checksums, architecture, notices and embedded source against the checkout, then writes five wheels with complete TUI bundles and regenerated RECORDs. It refuses to overwrite an existing candidate. `--target <target>` builds one platform for a targeted check. Minimum tags are macOS 13, manylinux glibc 2.17 and Windows x64; x64 builds use Bun's baseline (SSE4.2) runtime instead of requiring AVX2. Recheck both Bun and OpenTUI when upgrading either dependency. No musl or Windows ARM64 wheel is provided. Native execution checks must still validate the actual binaries; tags alone do not prove compatibility. Test pip selection for all five supported platforms.
+
+Computer Use is optional and requires macOS 14.2+, independently of the macOS 13
+minimum for Python/TUI. The macOS wheel contains its app payload and notices;
+installing the wheel does not launch the app or enable desktop access. Existing
+official driver installations retain their identity; switching requires explicit
+disable/uninstall/reinstall. Source-only installations do not contain native
+binaries and need a matching platform wheel or a build from the matching checkout.
 
 The final PyPI upload set is **five platform wheels plus one source distribution**. Do not upload the intermediate `py3-none-any.whl` or native ZIPs to PyPI. Keep the source distribution produced by the same build; it remains usable for Python/classic and WebUI installations on other platforms.
 
@@ -67,4 +109,4 @@ Keep an artifact manifest with the source commit, version, filenames, hashes, ch
 
 ## If a gate fails
 
-Do not publish to PyPI while a required TUI artifact or verification is missing. Keep the documentation's public `latest` on the previous stable version until the new version is usable. If a published package needs a correction, prepare a new version; do not silently replace the code behind an existing release tag. Stop all old processes and follow the documented session rollback procedure before downgrading a migrated installation.
+Do not publish to PyPI while a required TUI or Computer Use artifact or verification is missing. Keep the documentation's public `latest` on the previous stable version until the new version is usable. If a published package needs a correction, prepare a new version; do not silently replace the code behind an existing release tag. Stop all old processes and follow the documented session rollback procedure before downgrading a migrated installation.

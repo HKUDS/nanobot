@@ -665,6 +665,31 @@ _PNG_B64 = (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("is_error", [False, True])
+async def test_execute_preserves_structured_only_result(is_error: bool) -> None:
+    payload = {"status": "unavailable" if is_error else "ready"}
+    session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(
+        content=[], structuredContent=payload, isError=is_error,
+    )))
+
+    result = await _make_wrapper(session).execute()
+
+    assert json.loads(result) == {"structuredContent": payload}
+    assert is_tool_error_result(result) is is_error
+
+
+@pytest.mark.asyncio
+async def test_execute_does_not_duplicate_structured_content_already_in_text() -> None:
+    payload = {"result": 1, "status": "ready"}
+    text = json.dumps(payload, indent=2, sort_keys=True)
+    session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(
+        content=[_FakeTextContent(text)], structuredContent=payload,
+    )))
+
+    assert await _make_wrapper(session).execute() == text
+
+
+@pytest.mark.asyncio
 async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
     from nanobot.config.loader import set_config_path
 
@@ -709,6 +734,26 @@ async def test_execute_notes_unstorable_image_block(tmp_path: Path) -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool returned an image that could not be stored)"
+
+
+@pytest.mark.asyncio
+async def test_inline_image_error_stays_a_text_error(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.utils.artifacts.get_media_dir", lambda: tmp_path)
+    session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(
+        content=[_FakeTextContent("Target disappeared"), _FakeImageContent(_PNG_B64)],
+        isError=True,
+    )))
+    tool_def = SimpleNamespace(name="observe", description="observe", inputSchema={})
+    wrapper = MCPToolWrapper(session, "desktop", tool_def, image_output="inline")
+    registry = ToolRegistry()
+    registry.register(wrapper)
+
+    result = await registry.execute(wrapper.name, {})
+
+    assert is_tool_error_result(result)
+    assert "Target disappeared" in result
+    assert _PNG_B64 not in result
+    assert "artifacts" in result
 
 
 @pytest.mark.asyncio

@@ -54,6 +54,7 @@ import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { logoFallbackUrls } from "@/lib/provider-brand";
+import { mcpPresetBrand } from "@/lib/mcp-preset-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
 import type {
@@ -1329,9 +1330,10 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
-  const logoUrls = useMemo(() => logoFallbackUrls(preset?.logo_url), [preset?.logo_url]);
+  const brand = preset ? mcpPresetBrand(preset) : undefined;
+  const logoUrls = useMemo(() => logoFallbackUrls(brand?.logo_url), [brand?.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-  const displayName = preset?.display_name || run.displayName;
+  const displayName = brand?.display_name || run.displayName;
   const activity = describeMcpActivity(
     run.toolName,
     run.args,

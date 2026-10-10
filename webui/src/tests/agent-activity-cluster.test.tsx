@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import computerUseIcon from "@/assets/apps/computer-use.webp";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
@@ -1450,6 +1451,21 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByText(/browser_navigate/)).not.toBeInTheDocument();
     expect(screen.getByTestId("activity-mcp-logo-browserbase")).toBeInTheDocument();
     expect(screen.queryByText(/mcp_browserbase_browser_navigate/)).not.toBeInTheDocument();
+  });
+
+  it("uses the Computer Use product identity in MCP activity", () => {
+    render(<AgentActivityCluster
+      messages={[{
+        id: "t-cua", role: "tool", kind: "trace", content: "mcp_cua-driver_screenshot()",
+        toolEvents: [{ phase: "start", call_id: "call-cua", name: "mcp_cua-driver_screenshot", arguments: {} }],
+      }]}
+      isTurnStreaming
+      hasBodyBelow={false}
+      mcpPresets={[{ ...BROWSERBASE_MCP, name: "cua-driver", display_name: "Cua Driver", source: "preset", logo_url: null }]}
+    />);
+    expect(screen.getByText("Computer Use")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-mcp-logo-cua-driver").querySelector("img"))
+      .toHaveAttribute("src", computerUseIcon);
   });
 
   it("renders public web fetch traces with the site favicon", () => {

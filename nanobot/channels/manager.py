@@ -42,6 +42,7 @@ from nanobot.utils.restart import (
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.mcp import MCPReload
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -107,7 +108,7 @@ class ChannelManager:
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
         webui_mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
-        webui_mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        webui_mcp_reload: MCPReload | None = None,
         webui_skill_state_action: Callable[[set[str]], None] | None = None,
         webui_recovery_action: (
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None

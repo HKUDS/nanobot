@@ -99,6 +99,16 @@ describe("McpManagementDialog", () => {
     expect(onAction).toHaveBeenCalledTimes(2);
   });
 
+  it("lets users inspect an app and open its tool scope without changing the connection", () => {
+    const onAction = vi.fn();
+    renderDialog({ initialTab: "overview", onAction });
+    const dialog = screen.getByRole("dialog", { name: "Docs MCP" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Tools 3 / 3" }));
+    expect(within(dialog).getByRole("tab", { name: "Tools" })).toHaveAttribute("aria-selected", "true");
+    expect(within(dialog).getByRole("checkbox", { name: /search_docs/ })).toBeChecked();
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
   it("shows a skeleton for the first inspection and keeps tools and draft selections during reinspection", () => {
     const emptyPreset = { ...connectedPreset, tool_count: 0, tool_names: [] };
     const { updateDialog } = renderDialog({

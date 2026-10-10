@@ -1,0 +1,28 @@
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/cursor/overlay.rs b/libs/cua-driver/rust/crates/platform-macos/src/cursor/overlay.rs
+--- a/libs/cua-driver/rust/crates/platform-macos/src/cursor/overlay.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/cursor/overlay.rs
+@@ -720,9 +720,10 @@ unsafe fn run_appkit(rx: std::sync::mpsc::Receiver<MacOverlayMsg>) {
+     let _: bool = msg_send![app, setActivationPolicy: 1i64];
+     let _: () = msg_send![app, finishLaunching];
+ 
+-    if !rebuild_appkit_host() {
+-        return;
+-    }
++    // No active displays (sleep, detach or session transition) is temporary.
++    // Keep AppKit and the administration socket alive. The display callback
++    // rebuilds surfaces when a display becomes available; no capture is started.
++    let _ = rebuild_appkit_host();
+     register_display_reconfiguration_callback();
+ 
+     std::thread::spawn(move || render_loop(rx));
+@@ -788,4 +789,10 @@ fn render_loop(rx: std::sync::mpsc::Receiver<MacOverlayMsg>) {
+         let woke_from_idle = first_msg.is_some();
++        // A first permission grant need not emit a display-change callback.
++        // Retry only when real cursor work arrives, never with an idle poll.
++        if woke_from_idle && HOST.lock().unwrap().is_none() {
++            dispatch_rebuild_appkit_host();
++        }
++
+         let now = Instant::now();
+         let dt = if woke_from_idle {
+             0.0

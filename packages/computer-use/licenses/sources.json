@@ -1,0 +1,62 @@
+[
+  {
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "4fc083f1c6d6784577e38b0ee8dbd344481e2fd2",
+    "url": "https://raw.githubusercontent.com/madsmtm/objc2/4fc083f1c6d6784577e38b0ee8dbd344481e2fd2/LICENSE.txt",
+    "file": "objc2-legacy.txt"
+  },
+  {
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "b4167b582b2f75f9a1be75495c41b765344fd03c",
+    "url": "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+    "file": "objc2-b416.txt"
+  },
+  {
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+    "url": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+    "file": "objc2-8852.txt"
+  },
+  {
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "url": "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt",
+    "file": "objc2-e282.txt"
+  },
+  {
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+    "file": "objc2-7b1a.txt"
+  },
+  {
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+    "url": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+    "file": "objc2-8d21.txt"
+  },
+  {
+    "repository": "https://github.com/Stranger6667/jsonschema",
+    "revision": "ecaeceac2340908a8fbf71404442296bd1536520",
+    "url": "https://raw.githubusercontent.com/Stranger6667/jsonschema/ecaeceac2340908a8fbf71404442296bd1536520/LICENSE",
+    "file": "jsonschema.txt"
+  },
+  {
+    "repository": "https://github.com/Nugine/simd",
+    "revision": "d74c030d9dc4f3cae02146d1f497ff62726ef09a",
+    "url": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+    "file": "simd.txt"
+  },
+  {
+    "repository": "https://github.com/mozilla/uniffi-rs",
+    "revision": "309762f55db3f0548194a9ceba3027fa64b18a93",
+    "url": "https://raw.githubusercontent.com/mozilla/uniffi-rs/309762f55db3f0548194a9ceba3027fa64b18a93/LICENSE",
+    "file": "uniffi.txt"
+  },
+  {
+    "repository": "https://github.com/trycua/cua",
+    "revision": "cua-driver-rs-v0.33.4",
+    "url": "https://raw.githubusercontent.com/trycua/cua/cua-driver-rs-v0.33.4/libs/cua-driver/rust/THIRD_PARTY_NOTICES.md",
+    "file": "cua-derived.txt"
+  }
+]

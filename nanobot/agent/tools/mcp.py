@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from mcp.types import Tool as MCPToolDefinition
 
     from nanobot.agent.tools.mcp_oauth import MCPOAuthHandlers
+    from nanobot.apps.computer_use_turn import NativeTurnTransport
     from nanobot.config.schema import Config, MCPServerConfig
 
 # Transient connection errors that warrant a single retry.
@@ -62,6 +63,10 @@ _SANITIZE_RE = re.compile(r"_+")
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 MCPServerLoader = Callable[[], Mapping[str, "MCPServerConfig"]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
+
+
+class MCPReload(Protocol):
+    async def __call__(self, *, reconnect: str | None = None) -> dict[str, Any]: ...
 
 
 class MCPConnection(Protocol):
@@ -523,6 +528,9 @@ class _MCPWrapperBase(Tool):
     def set_reconnect_handler(self, reconnect: _ReconnectCallback) -> None:
         self._reconnect = reconnect
 
+    def _adopt_refreshed_tool(self, refreshed_tool: Tool | None) -> None:
+        """Refresh wrapper-specific state after the shared session is replaced."""
+
     async def _refresh_session_after_termination(
         self,
         exc: BaseException,
@@ -532,7 +540,7 @@ class _MCPWrapperBase(Tool):
         if already_refreshed or not _is_session_terminated(exc) or self._reconnect is None:
             return False
         logger.warning(
-            "MCP {} '{}' session terminated; reconnecting server '{}' before retry",
+            "MCP {} '{}' session terminated; reconnecting server '{}'",
             capability_kind,
             self._name,
             self._server_name,
@@ -548,6 +556,7 @@ class _MCPWrapperBase(Tool):
             )
             return False
         self._session = refreshed_session
+        self._adopt_refreshed_tool(refreshed_tool)
         return True
 
 
@@ -609,6 +618,10 @@ class MCPToolWrapper(_MCPWrapperBase):
         server_name: str,
         tool_def: MCPToolDefinition,
         tool_timeout: int = 30,
+        *,
+        image_output: Literal["artifact", "inline"] = "artifact",
+        retry_tool_calls: bool = True,
+        native_turn: NativeTurnTransport | None = None,
     ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
@@ -617,6 +630,14 @@ class MCPToolWrapper(_MCPWrapperBase):
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        self._image_output = image_output
+        self._retry_tool_calls = retry_tool_calls
+        self._native_turn = native_turn
+
+    def _adopt_refreshed_tool(self, refreshed_tool: Tool | None) -> None:
+        self._native_turn = (
+            refreshed_tool._native_turn if isinstance(refreshed_tool, MCPToolWrapper) else None
+        )
 
     @property
     def name(self) -> str:
@@ -630,20 +651,29 @@ class MCPToolWrapper(_MCPWrapperBase):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
-    async def execute(self, **kwargs: Any) -> str:
+    def _transport_error(self, message: str) -> ToolResult:
+        if not self._retry_tool_calls:
+            message += (
+                " The action may already have occurred; this call was not replayed."
+                " Inspect the current state before issuing another action."
+            )
+        return ToolResult.error(message)
+
+    async def execute(self, **kwargs: Any) -> str | list[dict[str, Any]]:
         retried_transient = False
         refreshed_session = False
         while True:
             try:
                 result = await asyncio.wait_for(
-                    self._session.call_tool(self._original_name, arguments=kwargs),
+                    self._native_turn.call_tool(self._original_name, kwargs) if self._native_turn is not None
+                    else self._session.call_tool(self._original_name, arguments=kwargs),
                     timeout=self._tool_timeout,
                 )
             except asyncio.TimeoutError:
                 logger.warning(
                     "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
                 )
-                return ToolResult.error(
+                return self._transport_error(
                     f"(MCP tool call timed out after {self._tool_timeout}s)"
                 )
             except asyncio.CancelledError:
@@ -652,15 +682,21 @@ class MCPToolWrapper(_MCPWrapperBase):
                 if task_is_cancelling():
                     raise
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-                return ToolResult.error("(MCP tool call was cancelled)")
+                return self._transport_error("(MCP tool call was cancelled)")
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
                     refreshed_session,
                     "tool",
                 ):
-                    refreshed_session = True
-                    continue
+                    # Reconnect for the next observation even when replay is disabled.
+                    if self._retry_tool_calls:
+                        refreshed_session = True
+                        continue
+                if not self._retry_tool_calls:
+                    return self._transport_error(
+                        f"(MCP tool call failed: {type(exc).__name__})"
+                    )
                 if _is_transient(exc):
                     if not retried_transient:
                         retried_transient = True
@@ -690,12 +726,12 @@ class MCPToolWrapper(_MCPWrapperBase):
                     f"(MCP tool call failed: {type(exc).__name__})"
                 )
             else:
-                # Success — extract text and persist any image content as artifacts.
+                # Keep structured images out of string error handling.
                 try:
-                    rendered = self._render_call_result(result.content, kwargs)
-                    if getattr(result, "isError", False):
-                        return ToolResult.error(rendered)
-                    return rendered
+                    return self._render_call_result(
+                        result.content, kwargs, is_error=bool(getattr(result, "isError", False)),
+                        structured_content=getattr(result, "structuredContent", None),
+                    )
                 except Exception as exc:
                     logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP tool '{}' failed while rendering result: {}: {}",
@@ -707,35 +743,64 @@ class MCPToolWrapper(_MCPWrapperBase):
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
 
-    def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
-        """Turn MCP content blocks into a tool result string.
-
-        Text is concatenated as before. Image blocks are decoded and saved as
-        local artifacts (mirroring the built-in image generation tool) so the
-        model can deliver them via the message tool instead of trying to forward
-        base64 — which would be truncated and bloat the context window.
-        """
+    def _render_call_result(
+        self, content: Any, arguments: Mapping[str, Any], *, is_error: bool = False,
+        structured_content: dict[str, Any] | None = None,
+    ) -> str | list[dict[str, Any]]:
+        """Persist images; optionally expose successful observations to a vision model."""
         from mcp import types
 
-        text_parts: list[str] = []
         artifacts: list[dict[str, Any]] = []
+        blocks: list[dict[str, Any]] = []
         for block in content:
             if isinstance(block, types.TextContent):
-                text_parts.append(block.text)
+                blocks.append({"type": "text", "text": block.text})
                 continue
             data_url = _image_block_data_url(block, types)
             if data_url is not None:
                 stored = self._store_image_block(data_url, arguments)
                 if stored is not None:
                     artifacts.append(stored)
+                    blocks.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_url},
+                        "_meta": {"path": stored["path"]},
+                    })
                 else:
-                    text_parts.append("(MCP tool returned an image that could not be stored)")
+                    text = "(MCP tool returned an image that could not be stored)"
+                    blocks.append({"type": "text", "text": text})
                 continue
-            text_parts.append(str(block))
+            blocks.append({"type": "text", "text": str(block)})
 
-        if artifacts:
-            return _mcp_image_tool_result(text_parts, artifacts)
-        return "\n".join(text_parts) or "(no output)"
+        if structured_content is not None:
+            # MCP's structured result may contain actionable data omitted from
+            # its human-readable summary (e.g. Cua's snapshot-bound tokens).
+            # Servers may also serialize it as text for older clients; retain
+            # that representation without adding a second identical payload.
+            for block in blocks:
+                if block["type"] != "text":
+                    continue
+                try:
+                    if json.loads(block["text"]) == structured_content:
+                        break
+                except json.JSONDecodeError:
+                    continue
+            else:
+                blocks.insert(0, {
+                    "type": "text",
+                    "text": json.dumps({"structuredContent": structured_content}, ensure_ascii=False, separators=(",", ":")),
+                })
+
+        if artifacts and self._image_output == "inline" and not is_error:
+            return blocks
+        text_parts = [block["text"] for block in blocks if block["type"] == "text"]
+        text_result = (
+            _mcp_image_tool_result(text_parts, artifacts)
+            if artifacts else "\n".join(text_parts) or "(no output)"
+        )
+        if is_error:
+            return ToolResult.error(text_result)
+        return text_result
 
     def _store_image_block(
         self, data_url: str, arguments: Mapping[str, Any]
@@ -1167,6 +1232,11 @@ async def connect_mcp_servers(
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tool_defs]
             available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tool_defs]
+            native_turn = None
+            if cfg.env.get("NANOBOT_COMPUTER_USE_NATIVE") == "1":
+                from nanobot.apps.computer_use_turn import NativeTurnTransport
+
+                native_turn = NativeTurnTransport(session)
             for tool_def in tool_defs:
                 wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                 if (
@@ -1180,7 +1250,11 @@ async def connect_mcp_servers(
                         name,
                     )
                     continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(
+                    session, name, tool_def, tool_timeout=cfg.tool_timeout,
+                    image_output=cfg.image_output, retry_tool_calls=cfg.retry_tool_calls,
+                    native_turn=native_turn,
+                )
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
@@ -1496,7 +1570,7 @@ class MCPProvider:
                     exc,
                 )
 
-    async def reload(self) -> dict[str, Any]:
+    async def reload(self, *, reconnect: str | None = None) -> dict[str, Any]:
         """Reconcile live MCP connections with the current configuration."""
         async with self._lock:
             if self._closing:
@@ -1527,7 +1601,7 @@ class MCPProvider:
             changed = sorted(
                 name
                 for name in current_names & next_names
-                if _server_signature(current_servers[name])
+                if name == reconnect or _server_signature(current_servers[name])
                 != _server_signature(next_servers[name])
             )
 

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import computerUseIcon from "@/assets/apps/computer-use.webp";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
@@ -2113,6 +2114,31 @@ describe("ThreadComposer", () => {
         logo_url: "https://example.invalid/browserbase.svg",
         brand_color: "#111827",
       }],
+    });
+  });
+
+  it.each(["computer", "use", "cua"])("finds Computer Use by %s and keeps the MCP invocation identifier", (query) => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} mcpPresets={[{
+      ...MCP_PRESETS[0], name: "cua-driver", display_name: "Cua Driver", source: "preset", logo_url: null,
+    }]} />);
+    const input = screen.getByLabelText("Message input");
+    const text = `use @${query}`;
+    fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
+    const option = screen.getByRole("option", { name: /Computer Use.*@cua-driver/ });
+    expect(option.querySelector("img")).toHaveAttribute("src", computerUseIcon);
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input).toHaveValue("use @\u00a0Computer Use ");
+    const mention = screen.getByTestId("composer-mcp-mention-cua-driver");
+    expect(mention.textContent).toBe("@\u00a0Computer Use");
+    expect(mention.querySelector("img")).toHaveAttribute("src", computerUseIcon);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("use @cua-driver", undefined, {
+      mcpPresets: [expect.objectContaining({
+        name: "cua-driver", display_name: "Computer Use",
+        // Do not persist this WebUI build's hashed asset URL in the session.
+        logo_url: null,
+      })],
     });
   });
 

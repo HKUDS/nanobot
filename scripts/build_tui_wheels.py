@@ -85,7 +85,7 @@ def _base_files(wheel: Path, version: str) -> tuple[dict[str, bytes], dict[str, 
         for name in names:
             path = PurePosixPath(name)
             if (path.is_absolute() or ".." in path.parts or "\\" in name
-                    or name.startswith("nanobot/tui/bin/")
+                    or name.startswith(("nanobot/tui/bin/", "nanobot/apps/computer_use_bundle/"))
                     or name.endswith(("/RECORD.jws", "/RECORD.p7s"))):
                 raise ValueError(f"Unexpected base wheel entry: {name}")
         files = {name: archive.read(name) for name in names if not name.endswith("/")}
@@ -108,7 +108,7 @@ def _base_files(wheel: Path, version: str) -> tuple[dict[str, bytes], dict[str, 
 
 
 def build_wheel(wheel: Path, tui_dir: Path, out_dir: Path, target: str, *,
-                root: Path = ROOT) -> Path:
+                root: Path = ROOT, computer_use_dir: Path | None = None) -> Path:
     """Fail closed on stale sources, damaged archives, or existing output files."""
     version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
     tag = f"py3-none-{PLATFORMS[target]}"
@@ -136,6 +136,14 @@ def build_wheel(wheel: Path, tui_dir: Path, out_dir: Path, target: str, *,
         path = f"nanobot/tui/bin/{name}"
         files[path] = content
         modes[path] = stat.S_IFREG | (0o755 if name == asset else 0o644)
+    if target.startswith("darwin-"):
+        if computer_use_dir is None:
+            raise ValueError("macOS wheels require --computer-use-dir with both verified native payloads")
+        architecture = "arm64" if target == "darwin-arm64" else "x86_64"
+        native_packager = runpy.run_path(str(root / "packages/computer-use/package_materials.py"))
+        for name, content in native_packager["verified_bundle"](computer_use_dir / target, architecture).items():
+            path = f"nanobot/apps/computer_use_bundle/{name}"
+            files[path], modes[path] = content, stat.S_IFREG | 0o644
     metadata = BytesParser().parsebytes(files[f"{info_dir}/WHEEL"])
     metadata.replace_header("Root-Is-Purelib", "false")
     metadata.replace_header("Tag", tag)
@@ -170,9 +178,10 @@ def main() -> None:
     parser.add_argument("--tui-dir", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--target", choices=PLATFORMS)
+    parser.add_argument("--computer-use-dir", type=Path, help="Verified darwin-arm64/ and darwin-x64/ Computer Use payloads")
     args = parser.parse_args()
     for target in [args.target] if args.target else PLATFORMS:
-        result = build_wheel(args.wheel, args.tui_dir, args.out_dir, target)
+        result = build_wheel(args.wheel, args.tui_dir, args.out_dir, target, computer_use_dir=args.computer_use_dir)
         print(f"{result} ({result.stat().st_size / 1024 / 1024:.1f} MiB)")
 
 

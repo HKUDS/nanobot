@@ -1,12 +1,14 @@
 import type { CapabilityMentionSegment } from "@/components/CliAppMentionText";
+import { mcpPresetBrand } from "@/lib/mcp-preset-brand";
 
 export function composerMentionLabel(segment: CapabilityMentionSegment): string {
   const app = segment.kind === "cli" ? segment.app : segment.kind === "mcp" ? segment.preset : null;
   if (!app) return segment.text;
+  const brand = segment.kind === "mcp" ? mcpPresetBrand(segment.preset) : app;
   // A no-break space gives logos breathing room without separating them from the name.
   // Keep it in both the textarea and overlay, including while a logo is loading or unavailable.
-  const gap = app.logo_url ? "\u00a0" : "";
-  return `@${gap}${app.display_name?.trim().replace(/[\r\n\t]/g, " ") || app.name}`;
+  const gap = brand.logo_url ? "\u00a0" : "";
+  return `@${gap}${brand.display_name?.trim().replace(/[\r\n\t]/g, " ") || app.name}`;
 }
 
 type MentionRange = { start: number; end: number; displayStart: number; displayEnd: number };

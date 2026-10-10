@@ -2053,6 +2053,24 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
+For visual tools such as desktop automation, two per-server options control how
+observations and failed calls are handled:
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `imageOutput` | `"artifact"` | Save images as local artifacts and return their paths. Set `"inline"` to additionally return successful image observations as native image blocks to a vision-capable model, preserving text/image order. |
+| `retryToolCalls` | `true` | Retry transient tool-call failures using the existing reconnect policy. Set `false` for actions that must not be blindly replayed, such as clicks and typing. A terminated connection may still reconnect, but the failed call is returned to the model without replay. |
+
+Inline images are also stored in nanobot's media directory. Error results remain
+text errors with artifact references, never base64 serialized into error text.
+Resource and prompt reads retain their existing retry behavior. A timeout,
+disconnect, or cancellation does **not** roll back a desktop action; inspect the
+current state before taking another action.
+
+See [Computer use with Cua Driver](guides/computer-use-cua-driver.md) for a scoped
+setup and a small acceptance task. This uses MCP; it does not add a bundled desktop
+driver or automatically grant OS permissions.
+
 
 
 

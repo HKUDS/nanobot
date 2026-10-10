@@ -181,6 +181,23 @@ async def test_tool_success_on_first_try_no_retry():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [ConnectionResetError(), asyncio.TimeoutError(), asyncio.CancelledError()])
+async def test_opt_out_never_replays_failed_actions(failure):
+    session = AsyncMock()
+    session.call_tool.side_effect = failure
+    wrapper = MCPToolWrapper(
+        session, "desktop", _make_tool_def(), retry_tool_calls=False,
+    )
+
+    output = await wrapper.execute()
+
+    assert is_tool_error_result(output)
+    assert "not replayed" in output
+    assert "Inspect the current state" in output
+    session.call_tool.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_tool_does_not_retry_on_cancelled_error():
     """`asyncio.CancelledError` must short-circuit the retry loop.
 

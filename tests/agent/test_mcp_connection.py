@@ -367,6 +367,43 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
 
 
 @pytest.mark.asyncio
+async def test_explicit_reconnect_replaces_only_the_requested_configured_connection(monkeypatch):
+    servers = {"cua-driver": _stdio_server("driver"), "other": _stdio_server("other")}
+    registry = ToolRegistry()
+    provider = MCPProvider(servers, registry, server_loader=lambda: servers)
+    closed: list[str] = []
+    connected: list[str] = []
+
+    async def close(name):
+        closed.append(name)
+
+    async def connect(configs, registry):
+        result = {}
+        for name in configs:
+            connected.append(name)
+            registry.register(_FakeMcpTool(f"mcp_{name.replace('-', '_')}_observe"))
+            stack = AsyncExitStack()
+            stack.push_async_callback(close, name)
+            result[name] = stack
+        return result
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", connect)
+    await provider.reload()
+    assert (await provider.reload())["changed"] == []
+    result = await provider.reload(reconnect="cua-driver")
+    assert result["changed"] == ["cua-driver"]
+    assert result["ok"] and closed == ["cua-driver"]
+    assert connected == ["cua-driver", "other", "cua-driver"]
+    # A concurrent Disable remains authoritative; reconnect never reinstalls it.
+    del servers["cua-driver"]
+    result = await provider.reload(reconnect="cua-driver")
+    assert result["removed"] == ["cua-driver"]
+    assert connected == ["cua-driver", "other", "cua-driver"]
+    assert provider.connected_server_names == {"other"}
+    await provider.aclose()
+
+
+@pytest.mark.asyncio
 async def test_reload_is_a_direct_provider_operation_without_an_agent_loop(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

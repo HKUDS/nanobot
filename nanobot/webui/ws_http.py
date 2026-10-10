@@ -225,6 +225,9 @@ _WEBUI_MUTATION_PATHS = {
     "settings.channel.configure": "/api/settings/channels/configure",
     "settings.pairing.approve": "/api/settings/pairing/approve",
     "settings.pairing.deny": "/api/settings/pairing/deny",
+    "settings.mcp.install": "/api/settings/mcp-presets/install",
+    "settings.mcp.uninstall": "/api/settings/mcp-presets/uninstall",
+    "settings.mcp.setup": "/api/settings/mcp-presets/setup",
     "settings.mcp.enable": "/api/settings/mcp-presets/enable",
     "settings.mcp.disable": "/api/settings/mcp-presets/disable",
     "settings.mcp.remove": "/api/settings/mcp-presets/remove",
@@ -271,6 +274,7 @@ for _ext, _ctype in _MIME_FIXES.items():
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.mcp import MCPReload
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
@@ -375,7 +379,7 @@ class GatewayHTTPHandler:
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
-        mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        mcp_reload: MCPReload | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
         recovery_action: (
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
