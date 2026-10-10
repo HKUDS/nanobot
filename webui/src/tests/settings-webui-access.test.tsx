@@ -58,7 +58,8 @@ describe("WebUI access settings", () => {
     expect(requestMutationMock).toHaveBeenCalledWith("settings.webui_access.update", { allow_other_devices: true }, expect.any(Number));
     const access = screen.getByRole("region", { name: "WebUI access" });
     expect(within(access).getByText("127.0.0.1")).toBeVisible();
-    expect(within(access).getByText("Currently, only this computer can connect.")).toBeVisible();
+    fireEvent.click(within(access).getByRole("button", { name: "Current listening address" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Currently, only this computer can connect.");
     expect(within(access).getByRole("status")).toHaveTextContent("Saved. Restart to allow other devices to connect.");
     expect(restart).not.toHaveBeenCalled();
     fireEvent.click(within(screen.getByRole("complementary")).getByRole("button", { name: "Restart" }));

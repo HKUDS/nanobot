@@ -32,6 +32,7 @@ export function WebuiAccessSettings({ access, canSetPassword, saving, error, onC
   const [attempted, setAttempted] = useState(false);
   const formError = validationError ?? (attempted ? error : null);
   const passwordUnavailable = access.password_required && !canSetPassword;
+  const statusVisible = passwordUnavailable || access.requires_restart || Boolean(error && !passwordOpen);
 
   const toggleAccess = (allow: boolean) => {
     if (allow && access.password_required) {
@@ -70,29 +71,33 @@ export function WebuiAccessSettings({ access, canSetPassword, saving, error, onC
       <SettingsGroup>
         <SettingsRow
           title={t("settings.webuiAccess.allowOtherDevices")}
-          description={t(access.can_change ? "settings.webuiAccess.description" : "settings.webuiAccess.managed")}
+          description={`${t(access.can_change ? "settings.webuiAccess.description" : "settings.webuiAccess.managed")} ${t("settings.webuiAccess.networkScope")}`}
         >
           <ToggleButton
             checked={access.allow_other_devices}
             disabled={saving || !access.can_change || (!access.allow_other_devices && passwordUnavailable)}
             onChange={toggleAccess}
             label={t("settings.webuiAccess.allowOtherDevices")}
-            aria-describedby="webui-access-status"
+            aria-describedby={statusVisible ? "webui-access-status" : undefined}
           />
         </SettingsRow>
-        <ReadOnlyRow title={t("settings.webuiAccess.activeHost")} value={access.active_host} />
+        <ReadOnlyRow
+          title={t("settings.webuiAccess.activeHost")}
+          value={access.active_host}
+          description={t(access.active_allow_other_devices ? "settings.webuiAccess.networkActive" : "settings.webuiAccess.localActive")}
+        />
       </SettingsGroup>
-      <div id="webui-access-status" className="mt-3 space-y-2 text-[13px] leading-5 text-muted-foreground">
-        <p>{t(passwordUnavailable ? "settings.webuiAccess.passwordLocalOnly"
-          : access.active_allow_other_devices ? "settings.webuiAccess.networkActive" : "settings.webuiAccess.localActive")}</p>
-        {access.requires_restart ? (
-          <p role="status" className="text-foreground">
-            {t(access.allow_other_devices ? "settings.webuiAccess.pendingEnable" : "settings.webuiAccess.pendingDisable")}
-          </p>
-        ) : null}
-        <p>{t("settings.webuiAccess.networkScope")}</p>
-        {error && !passwordOpen ? <p role="alert" className="text-destructive">{error}</p> : null}
-      </div>
+      {statusVisible ? (
+        <div id="webui-access-status" className="mt-3 space-y-2 text-[13px] leading-5 text-muted-foreground">
+          {passwordUnavailable ? <p>{t("settings.webuiAccess.passwordLocalOnly")}</p> : null}
+          {access.requires_restart ? (
+            <p role="status" className="text-foreground">
+              {t(access.allow_other_devices ? "settings.webuiAccess.pendingEnable" : "settings.webuiAccess.pendingDisable")}
+            </p>
+          ) : null}
+          {error && !passwordOpen ? <p role="alert" className="text-destructive">{error}</p> : null}
+        </div>
+      ) : null}
       <Dialog open={passwordOpen} onOpenChange={(open) => { if (!saving) setPasswordOpen(open); }}>
         <DialogContent
           showCloseButton={!saving}
