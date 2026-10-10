@@ -28,11 +28,15 @@ function settingsPayloadWithBackup(): {
         {
           name: "openai",
           label: "OpenAI",
+          api_key_required: true,
+          has_config: true,
           configured: true,
         },
         {
           name: "anthropic",
           label: "Anthropic",
+          api_key_required: true,
+          has_config: true,
           configured: true,
         },
       ],
@@ -70,6 +74,7 @@ function autoDynamicProviderPayload(
       {
         name: "companyProxy",
         label: "Company Proxy",
+        has_config: true,
         configured: options.configured,
         auth_type: "api_key",
         api_key_required: false,
@@ -103,7 +108,7 @@ describe("Settings models", () => {
   it.each(["legacy", "declaration"])("saves and restores a preset API declaration, then returns to automatic (%s host)", async (host) => {
     let payload = settingsPayload();
     const provider: SettingsPayload["providers"][number] = {
-      name: "openai", label: "OpenAI", configured: true,
+      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
     };
     if (host === "legacy") provider.model_api_configurable = true;
     else provider.request_apis = ["chat_completions", "responses"];
@@ -164,7 +169,7 @@ describe("Settings models", () => {
   it("saves and restores Anthropic Messages for a custom gateway", async () => {
     let payload = settingsPayload();
     payload.providers = [{
-      name: "tenant", label: "Tenant", configured: true,
+      name: "tenant", label: "Tenant", api_key_required: false, has_config: true, configured: true,
       request_apis: ["chat_completions", "responses", "anthropic_messages"],
     }];
     payload.model_presets[0].provider = "tenant";
@@ -208,8 +213,8 @@ describe("Settings models", () => {
       resolved_provider: "anthropic",
     };
     payload.providers = [
-      { name: "anthropic", label: "Anthropic", configured: true, request_apis: ["anthropic_messages"] },
-      { name: "openai", label: "OpenAI", configured: true, request_apis: ["chat_completions", "responses"] },
+      { name: "anthropic", label: "Anthropic", api_key_required: true, has_config: true, configured: true, request_apis: ["anthropic_messages"] },
+      { name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true, request_apis: ["chat_completions", "responses"] },
     ];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
@@ -241,7 +246,7 @@ describe("Settings models", () => {
     payload.model_api_resolution_supported = true;
     payload.model_presets[0].provider = "openai";
     payload.providers = [{
-      name: "openai", label: "OpenAI", configured: true,
+      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
       request_apis: ["chat_completions", "responses"],
     }];
     let finishHigh!: (response: Response) => void;
@@ -275,7 +280,7 @@ describe("Settings models", () => {
     payload.model_api_resolution_supported = true;
     payload.model_presets[0].provider = "openai";
     payload.providers = [{
-      name: "openai", label: "OpenAI", configured: true,
+      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
       request_apis: ["chat_completions", "responses"],
     }];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -300,7 +305,7 @@ describe("Settings models", () => {
     const payload = settingsPayload();
     payload.model_api_resolution_supported = true;
     payload.providers = [{
-      name: "openai", label: "OpenAI", configured: true,
+      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
       request_apis: ["chat_completions", "responses"],
     }];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/model-api?")
@@ -318,7 +323,7 @@ describe("Settings models", () => {
     const payload = settingsPayload();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
       ...payload,
-      providers: [{ name: "openai", label: "OpenAI", configured: true, request_apis: requestAPIs }],
+      providers: [{ name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true, request_apis: requestAPIs }],
     })));
     renderSettingsView({ initialSection: "models" });
     await openPresetAdvancedOptions();
@@ -328,7 +333,7 @@ describe("Settings models", () => {
   it("uses the host's API declaration and preserves an existing Chat preference when renaming", async () => {
     const payload = settingsPayload();
     payload.providers = [{
-      name: "openai", label: "OpenAI", configured: true,
+      name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true,
       request_apis: ["chat_completions", "responses"],
     }];
     payload.model_presets[0].api = {
@@ -354,7 +359,7 @@ describe("Settings models", () => {
     ["bedrock", "AWS Bedrock", "bedrock_converse", "Bedrock Converse"],
   ] as const)("shows the fixed connection for %s", async (provider, label, api, apiLabel) => {
     const payload = settingsPayload();
-    payload.providers = [{ name: provider, label, configured: true, request_apis: [api] }];
+    payload.providers = [{ name: provider, label, api_key_required: true, has_config: true, configured: true, request_apis: [api] }];
     payload.model_presets[0].provider = provider;
     payload.model_presets[0].resolved_provider = provider;
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
@@ -369,7 +374,8 @@ describe("Settings models", () => {
   it.each(["manual", "poll", "direct"])("reauthenticates from the catalog and preserves the preset draft (%s)", async (mode) => {
     const payload = settingsPayload();
     payload.providers = [{
-      name: "openai_codex", label: "OpenAI Codex", configured: true,
+      name: "openai_codex", label: "OpenAI Codex", api_key_required: false, has_config: true, configured: true,
+      oauth_authenticated: true,
       auth_type: "oauth", model_catalog: "hybrid", oauth_login_supported: true,
     }];
     let recovered = false;
@@ -1122,7 +1128,9 @@ describe("Settings models", () => {
         {
           name: "openai_codex",
           label: "OpenAI Codex",
+          has_config: true,
           configured: true,
+          oauth_authenticated: true,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1135,6 +1143,7 @@ describe("Settings models", () => {
         {
           name: "minimax_anthropic",
           label: "MiniMax (Anthropic)",
+          has_config: true,
           configured: true,
           auth_type: "api_key",
           api_key_required: true,
@@ -1170,7 +1179,7 @@ describe("Settings models", () => {
       model_call_order: [],
       model_call_order_editable: false,
       providers: [{
-        name: "openai", label: "openai", configured: true,
+        name: "openai", label: "openai", has_config: true, configured: true,
         api_key_required: true, api_key_hint: "sk-...",
       }],
     };
@@ -1235,7 +1244,9 @@ describe("Settings models", () => {
         {
           name: "openai_codex",
           label: "OpenAI Codex",
+          has_config: true,
           configured: false,
+          oauth_authenticated: false,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1291,6 +1302,7 @@ describe("Settings models", () => {
         {
           name: "deepseek",
           label: "DeepSeek",
+          has_config: true,
           configured: true,
           auth_type: "api_key",
           api_key_required: true,
@@ -1301,7 +1313,9 @@ describe("Settings models", () => {
         {
           name: "openai_codex",
           label: "OpenAI Codex",
+          has_config: true,
           configured: false,
+          oauth_authenticated: false,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1314,7 +1328,9 @@ describe("Settings models", () => {
         {
           name: "github_copilot",
           label: "GitHub Copilot",
+          has_config: true,
           configured: false,
+          oauth_authenticated: false,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1370,7 +1386,9 @@ describe("Settings models", () => {
         {
           name: "openai_codex",
           label: "OpenAI Codex",
+          has_config: true,
           configured: false,
+          oauth_authenticated: false,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1383,7 +1401,9 @@ describe("Settings models", () => {
         {
           name: "github_copilot",
           label: "GitHub Copilot",
+          has_config: true,
           configured: false,
+          oauth_authenticated: false,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1442,7 +1462,9 @@ describe("Settings models", () => {
         {
           name: "openai_codex",
           label: "OpenAI Codex",
+          has_config: true,
           configured: true,
+          oauth_authenticated: true,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1504,6 +1526,7 @@ describe("Settings models", () => {
         {
           name: "orcarouter",
           label: "OrcaRouter",
+          has_config: true,
           configured: true,
           auth_type: "api_key",
           api_key_required: true,
@@ -1586,7 +1609,9 @@ describe("Settings models", () => {
         {
           name: "openai_codex",
           label: "OpenAI Codex",
+          has_config: true,
           configured: true,
+          oauth_authenticated: true,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1658,7 +1683,9 @@ describe("Settings models", () => {
         {
           name: "xai_grok",
           label: "xAI Grok",
+          has_config: true,
           configured: true,
+          oauth_authenticated: true,
           auth_type: "oauth",
           api_key_required: false,
           api_key_hint: null,
@@ -1722,7 +1749,7 @@ describe("Settings models", () => {
 
   it("creates presets in a dialog and can cancel", async () => {
     const payload = settingsPayload();
-    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
+    payload.providers = [{ name: "openai", label: "OpenAI", api_key_required: true, has_config: true, configured: true }];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -1793,6 +1820,7 @@ describe("Settings models", () => {
         {
           name: "deepseek",
           label: "DeepSeek",
+          has_config: true,
           configured: true,
           auth_type: "api_key",
           api_key_required: true,

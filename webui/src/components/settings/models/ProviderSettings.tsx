@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 
 import { SettingsAddButton } from "@/components/settings/shared/SettingsAddButton";
 import type { ProviderOperation } from "@/components/settings/models/useModelSettingsState";
+import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
 import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { ProviderSearchList } from "@/components/settings/models/ProviderSearchList";
 export { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
@@ -543,6 +544,7 @@ export function ProvidersSettings({
   onChangeProviderForm,
   onSaveProvider,
   onCreateCustomProvider,
+  onRemoveProvider,
   providerOperation,
   onProviderOAuthLogin,
   onProviderOAuthLogout,
@@ -564,6 +566,7 @@ export function ProvidersSettings({
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
   onSaveProvider: (provider: string) => void;
   onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
+  onRemoveProvider: (provider: string) => void;
   providerOperation?: ProviderOperation | null;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
@@ -578,16 +581,16 @@ export function ProvidersSettings({
   const [customProviderDraft, setCustomProviderDraft] = useState<CustomProviderDraft>(
     emptyCustomProviderDraft,
   );
-  const configuredProviders = settings.providers.filter((provider) => provider.configured);
-  const unconfiguredProviders = useMemo(
+  const providersWithConfig = settings.providers.filter((provider) => provider.has_config);
+  const providersWithoutConfig = useMemo(
     () =>
       settings.providers.filter(
-        (provider) => !provider.configured && provider.name !== "custom",
+        (provider) => !provider.has_config && provider.name !== "custom",
       ),
     [settings.providers],
   );
-  const selectedUnconfiguredProvider =
-    unconfiguredProviders.find((provider) => provider.name === expandedProvider) ?? null;
+  const selectedProviderWithoutConfig =
+    providersWithoutConfig.find((provider) => provider.name === expandedProvider) ?? null;
   const customProviderSaving = providerSaving === CUSTOM_PROVIDER_CREATION_KEY;
   const selectedProviderToAdd = settings.providers.find((provider) => provider.name === providerToAdd);
   useEffect(() => {
@@ -637,12 +640,11 @@ export function ProvidersSettings({
     const form = providerForms[provider.name] ?? providerFormFromRow(provider);
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
-    const oauthAuthenticated = provider.configured;
+    const oauthAuthenticated = provider.oauth_authenticated === true;
     const supportsOauthAdvancedSettings =
       isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.api_key_hint || !!editingProviderKeys[provider.name];
-    const apiKeyRequired = provider.api_key_required ?? true;
     const apiKey = form.apiKey.trim();
     const apiBase = form.apiBase.trim();
     const advancedFields = provider.advanced_fields ?? [];
@@ -652,7 +654,7 @@ export function ProvidersSettings({
     );
     const oauthSettingsSaving = saving && providerOperation?.action === "save";
     const oauthActionBusy = saving && (providerOperation?.action === "login" || providerOperation?.action === "logout");
-    const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
+    const missingRequiredApiKey = !isOauthProvider && provider.api_key_required && !provider.configured && !apiKey;
     const hasOptionalProviderSetting = Boolean(
       apiKey
       || apiBase
@@ -666,9 +668,15 @@ export function ProvidersSettings({
     );
     const missingOptionalCredential =
       !isOauthProvider
-      && !apiKeyRequired
+      && !provider.api_key_required
       && !provider.configured
       && !hasOptionalProviderSetting;
+    const removeAction = provider.has_config ? (
+      <RemoveActionButton className="mr-auto" disabled={saving}
+        onClick={() => onRemoveProvider(provider.name)}>
+        {tx("settings.providers.removeProvider", "Remove")}
+      </RemoveActionButton>
+    ) : null;
     const supportName = provider.name === "bedrock"
       ? "bedrock"
       : provider.name === "azure_openai"
@@ -770,19 +778,20 @@ export function ProvidersSettings({
                   />
                 ) : null}
                 <div className="flex flex-wrap items-center justify-end gap-2 py-3">
+                  {removeAction}
                   <Button size="sm" variant="ghost" onClick={() => toggleProvider(provider.name)}
                     disabled={saving} className="rounded-full">
                     {t("settings.actions.cancel")}
                   </Button>
-                  {supportsOauthAdvancedSettings ? (
-                    <Button size="sm" variant="outline" onClick={() => onSaveProvider(provider.name)}
-                      disabled={saving || !oauthSettingsDirty} className="rounded-full">
-                      {oauthSettingsSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-                      {oauthSettingsSaving
-                        ? t("settings.actions.saving")
+                  <Button size="sm" variant="outline" onClick={() => onSaveProvider(provider.name)}
+                    disabled={saving || (provider.has_config && !oauthSettingsDirty)} className="rounded-full">
+                    {oauthSettingsSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                    {oauthSettingsSaving
+                      ? t("settings.actions.saving")
+                      : !provider.has_config
+                        ? tx("settings.providers.addProvider", "Add provider")
                         : tx("settings.providers.saveProvider", "Save provider")}
-                    </Button>
-                  ) : null}
+                  </Button>
                 </div>
               </>
             ) : (
@@ -899,6 +908,7 @@ export function ProvidersSettings({
                   ))}
                 </ProviderAdvancedOptions>
                 <div className="flex flex-wrap items-center justify-end gap-2">
+                  {removeAction}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -921,7 +931,7 @@ export function ProvidersSettings({
                   >
                     {saving
                       ? t("settings.actions.saving")
-                      : provider.configured
+                      : provider.has_config
                         ? tx("settings.providers.saveProvider", "Save provider")
                         : tx("settings.providers.addProvider", "Add provider")}
                   </Button>
@@ -1084,9 +1094,9 @@ export function ProvidersSettings({
           {tx("settings.providers.title", "Model providers")}
         </SettingsSectionTitle>
         <SettingsGroup>
-          {configuredProviders.map((provider) => renderProviderRow(provider))}
-          {selectedUnconfiguredProvider && !addingProvider
-            ? renderProviderRow(selectedUnconfiguredProvider)
+          {providersWithConfig.map((provider) => renderProviderRow(provider))}
+          {selectedProviderWithoutConfig && !addingProvider
+            ? renderProviderRow(selectedProviderWithoutConfig)
             : null}
           <ProviderSetupPanel
             open={addingProvider}
@@ -1112,7 +1122,7 @@ export function ProvidersSettings({
                 {creatingCustomProvider ? customProviderForm : renderProviderRow(selectedProviderToAdd!, true)}
               </div>
             ) : (
-              <ProviderSearchList providers={unconfiguredProviders} showBrandLogos={showBrandLogos}
+              <ProviderSearchList providers={providersWithoutConfig} showBrandLogos={showBrandLogos}
                 query={providerSearch} onQueryChange={setProviderSearch}
                 onSelect={(name) => {
                   setProviderToAdd(name);

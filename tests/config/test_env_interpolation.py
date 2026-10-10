@@ -127,7 +127,7 @@ class TestResolveConfig:
         assert schedule.kind == "cron"
         assert schedule.expr == "0 */4 * * *"
 
-    def test_save_keeps_oauth_provider_configs_excluded(self, tmp_path):
+    def test_save_preserves_oauth_connections_without_credentials(self, tmp_path):
         config_path = tmp_path / "config.json"
         config_path.write_text(
             json.dumps(
@@ -149,9 +149,9 @@ class TestResolveConfig:
 
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved["agents"]["defaults"]["dream"]["cron"] == "0 */4 * * *"
-        assert "openaiCodex" not in saved["providers"]
-        assert "xaiGrok" not in saved["providers"]
-        assert "githubCopilot" not in saved["providers"]
+        assert saved["providers"]["openaiCodex"] == {}
+        assert saved["providers"]["xaiGrok"] == {}
+        assert saved["providers"]["githubCopilot"] == {}
         assert saved["providers"]["groq"]["apiKey"] == "groq-secret"
 
     @pytest.mark.parametrize("proxy_input", ["http://127.0.0.1:23458", "127.0.0.1:23458"])

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ProviderConfig
 from nanobot.webui.settings_capabilities import (
     capability_settings_payload,
     update_api_settings,
@@ -19,7 +19,7 @@ def _oauth_status(_spec: Any) -> dict[str, Any]:
 
 def test_capability_domain_updates_representative_settings() -> None:
     config = Config()
-    config.providers.openrouter.api_key = "sk-test"
+    config.providers.openrouter = ProviderConfig(api_key="sk-test")
 
     web_changed, web_restart = update_web_search_settings(
         config,

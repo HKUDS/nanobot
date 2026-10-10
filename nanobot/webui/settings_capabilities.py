@@ -134,7 +134,10 @@ def _transcription_provider_rows(config: Config) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "label": spec.label if spec is not None else name,
-                "configured": bool(getattr(provider_config, "api_key", None)),
+                "configured": bool(
+                    provider_config is not None
+                    and provider_config.api_key
+                ),
                 "api_key_hint": mask_secret_hint(getattr(provider_config, "api_key", None)),
                 "api_base": getattr(provider_config, "api_base", None),
                 "default_api_base": (

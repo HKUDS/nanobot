@@ -285,6 +285,8 @@ describe("Settings system domains", () => {
     settings.providers = [{
       name: "openai",
       label: "OpenAI",
+      api_key_required: true,
+      has_config: true,
       configured: true,
     }];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {

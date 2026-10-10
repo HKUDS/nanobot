@@ -771,6 +771,7 @@
       "noMatches": "Không có nhà cung cấp phù hợp.",
       "addOwnProvider": "Thêm nhà cung cấp",
       "addProvider": "Thêm nhà cung cấp",
+      "removeProvider": "Xóa",
       "backToProviders": "Quay lại danh sách nhà cung cấp",
       "customProvider": "Tùy chỉnh",
       "customProviderName": "Tên",

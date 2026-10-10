@@ -312,7 +312,8 @@ export function ModelsSettings({
     ? form.provider
     : "";
   const selectedProviderNeedsSignIn =
-    selectedProvider?.auth_type === "oauth" && !selectedProvider.configured;
+    selectedProvider?.has_config && selectedProvider.auth_type === "oauth"
+    && selectedProvider.oauth_authenticated !== true;
   const selectedProviderSigningIn = providerSaving === selectedProvider?.name;
   const selectedProviderConfigured = settingsProviderConfigured(
     settings,

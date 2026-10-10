@@ -12,7 +12,8 @@ describe("Copilot device sign-in", () => {
   it.each(["approve", "close", "unmount", "close-before-start"])("handles %s without losing the preset draft", async (ending) => {
     const payload = settingsPayload();
     payload.providers = [{
-      name: "github_copilot", label: "GitHub Copilot", configured: true,
+      name: "github_copilot", label: "GitHub Copilot", api_key_required: false, has_config: true, configured: true,
+      oauth_authenticated: true,
       auth_type: "oauth", model_catalog: "hybrid", oauth_login_supported: true,
     }];
     const flow = {

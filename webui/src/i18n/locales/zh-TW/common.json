@@ -771,6 +771,7 @@
       "noMatches": "沒有符合的供應商。",
       "addOwnProvider": "新增提供商",
       "addProvider": "新增供應商",
+      "removeProvider": "移除",
       "backToProviders": "返回供應商列表",
       "customProvider": "自定義",
       "customProviderName": "名稱",

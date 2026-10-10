@@ -1194,6 +1194,7 @@
       "noMatches": "No providers match this search.",
       "addOwnProvider": "Add provider",
       "addProvider": "Add provider",
+      "removeProvider": "Remove",
       "backToProviders": "Back to providers",
       "customProvider": "Custom",
       "customProviderName": "Name",

@@ -35,6 +35,7 @@ from nanobot.cli.webui_support import (
 from nanobot.config.paths import is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayInstance
+from nanobot.providers.factory import ProviderSnapshot
 from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import (
     HEARTBEAT_SESSION_KEY,
@@ -51,6 +52,29 @@ from nanobot.webui.sidebar_state import read_webui_sidebar_state
 __all__ = ["_run_gateway"]
 
 console = Console()
+
+
+def _load_gateway_provider_snapshot(
+    config_path: Path | None = None,
+    *,
+    preset_name: str | None = None,
+    allow_incomplete_setup: bool = False,
+) -> ProviderSnapshot:
+    """Reload the selected connection, including its removal while running."""
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+    from nanobot.providers.factory import (
+        build_provider_snapshot,
+        build_unconfigured_provider_snapshot,
+    )
+    from nanobot.providers.routing import ProviderNotConfiguredError
+
+    config = resolve_config_env_vars(load_config(config_path), config_path=config_path)
+    try:
+        return build_provider_snapshot(config, preset_name=preset_name)
+    except ValueError as exc:
+        if not isinstance(exc, ProviderNotConfiguredError) and not allow_incomplete_setup:
+            raise
+        return build_unconfigured_provider_snapshot(config, str(exc), preset_name=preset_name)
 
 
 class _MCPReadinessHook(AgentHook):
@@ -371,10 +395,8 @@ def _run_gateway(
     from nanobot.llm_usage import record_llm_call
     from nanobot.llm_usage.context import llm_usage_source
     from nanobot.providers.factory import (
-        ProviderSnapshot,
         build_provider_snapshot,
         build_unconfigured_provider_snapshot,
-        load_provider_snapshot,
     )
     from nanobot.providers.fallback_provider import FallbackProvider
     from nanobot.providers.image_generation import image_gen_provider_configs
@@ -423,16 +445,16 @@ def _run_gateway(
             snapshot.provider.set_fallback_model_observer(fallback_model_observer)
         return snapshot
 
-    def _load_gateway_provider_snapshot(
-        *args: Any,
-        **kwargs: Any,
+    def _load_observed_provider_snapshot(
+        config_path: Path | None = None,
+        *,
+        preset_name: str | None = None,
     ) -> ProviderSnapshot:
-        try:
-            return _observe_provider(load_provider_snapshot(*args, **kwargs))
-        except ValueError as exc:
-            if unconfigured_provider_error is None:
-                raise
-            return _observe_provider(build_unconfigured_provider_snapshot(config, str(exc)))
+        return _observe_provider(_load_gateway_provider_snapshot(
+            config_path,
+            preset_name=preset_name,
+            allow_incomplete_setup=unconfigured_provider_error is not None,
+        ))
 
     if unconfigured_provider_error is not None:
         provider_snapshot = _observe_provider(
@@ -493,7 +515,7 @@ def _run_gateway(
         cron_service=cron,
         session_manager=session_manager,
         image_generation_provider_configs=image_gen_provider_configs(config),
-        provider_snapshot_loader=_load_gateway_provider_snapshot,
+        provider_snapshot_loader=_load_observed_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,

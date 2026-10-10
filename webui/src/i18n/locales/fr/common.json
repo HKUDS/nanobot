@@ -771,6 +771,7 @@
       "noMatches": "Aucun fournisseur ne correspond.",
       "addOwnProvider": "Ajouter un fournisseur",
       "addProvider": "Ajouter un fournisseur",
+      "removeProvider": "Retirer",
       "backToProviders": "Retour aux fournisseurs",
       "customProvider": "Personnalisé",
       "customProviderName": "Nom",

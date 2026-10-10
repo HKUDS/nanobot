@@ -8,7 +8,7 @@ from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
 from nanobot.cli import models, onboard
-from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.config.schema import Config, ModelPresetConfig, ProviderConfig
 
 
 @pytest.fixture
@@ -28,8 +28,7 @@ def catalog_http(monkeypatch):
 
 def configured():
     config = Config()
-    config.providers.custom.api_base = "https://catalog.example/v1"
-    config.providers.custom.api_key = "draft-key"
+    config.providers.custom = ProviderConfig(api_base="https://catalog.example/v1", api_key="draft-key")
     return config
 
 

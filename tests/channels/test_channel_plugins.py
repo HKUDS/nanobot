@@ -36,7 +36,7 @@ from nanobot.channels.contracts import (
 from nanobot.channels.manager import ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE, ChannelManager
 from nanobot.channels.plugin import ChannelPlugin, load_channel_package
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import ChannelsConfig, Config
+from nanobot.config.schema import ChannelsConfig, Config, ProviderConfig
 from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
 from nanobot.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
 from nanobot.utils.restart import RestartNotice
@@ -1047,7 +1047,7 @@ async def test_base_channel_reads_current_transcription_config_each_call(
     config.transcription.provider = "openai"
     config.transcription.model = "whisper-custom"
     config.transcription.language = "en"
-    config.providers.openai.api_key = "openai-key"
+    config.providers.openai = ProviderConfig(api_key="openai-key")
     config.providers.openai.api_base = "http://openai.local/v1/audio/transcriptions"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
@@ -1091,7 +1091,7 @@ async def test_base_channel_reads_current_transcription_config_each_call(
         config.transcription.provider = "groq"
         config.transcription.model = "whisper-large-v3-turbo"
         config.transcription.language = "ko"
-        config.providers.groq.api_key = "groq-key"
+        config.providers.groq = ProviderConfig(api_key="groq-key")
         config.providers.groq.api_base = "http://groq.local/v1/audio/transcriptions"
         save_config(config, config_path)
 
@@ -1123,7 +1123,7 @@ async def test_base_channel_respects_disabled_transcription_config(
     config_path = tmp_path / "config.json"
     config = Config()
     config.transcription.enabled = False
-    config.providers.groq.api_key = "groq-key"
+    config.providers.groq = ProviderConfig(api_key="groq-key")
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
