@@ -779,8 +779,8 @@ def _make_tool_def(name: str) -> SimpleNamespace:
 
 
 def _make_fake_session(tool_names: list[str]) -> SimpleNamespace:
-    async def initialize() -> None:
-        return None
+    async def initialize() -> SimpleNamespace:
+        return SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace()))
 
     async def list_tools() -> SimpleNamespace:
         return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
@@ -1914,8 +1914,8 @@ def _make_fake_session_with_capabilities(
     resource_names: list[str] | None = None,
     prompt_names: list[str] | None = None,
 ) -> SimpleNamespace:
-    async def initialize() -> None:
-        return None
+    async def initialize() -> SimpleNamespace:
+        return SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace()))
 
     async def list_tools() -> SimpleNamespace:
         return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
@@ -1972,6 +1972,35 @@ async def test_connect_registers_resources_and_prompts(
     assert "mcp_test_tool_a" in registry.tool_names
     assert "mcp_test_resource_res_b" in registry.tool_names
     assert "mcp_test_prompt_prompt_c" in registry.tool_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+async def test_connect_accepts_servers_without_tools_capability(
+    fake_mcp_runtime: dict[str, object | None], catalog: str,
+) -> None:
+    from mcp.shared.exceptions import McpError
+
+    session = _make_fake_session_with_capabilities(
+        tool_names=[],
+        resource_names=["document"] if catalog == "resources" else [],
+        prompt_names=["review"] if catalog == "prompts" else [],
+    )
+    session.initialize = AsyncMock(
+        return_value=SimpleNamespace(capabilities=SimpleNamespace(tools=None)),
+    )
+    session.list_tools = AsyncMock(side_effect=McpError(code=-32601, message="Method not found"))
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        expected = "mcp_test_resource_document" if catalog == "resources" else "mcp_test_prompt_review"
+        assert registry.tool_names == [expected]
+        session.list_tools.assert_not_awaited()
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
 
 
 # ---------------------------------------------------------------------------
