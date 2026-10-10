@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import RequestContext, current_request_context
 from nanobot.agent.turn_delivery import TurnRoute
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
@@ -513,30 +513,81 @@ class WebuiTurnRoutePolicy:
         return routed
 
 
-def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserver:
-    """Translate provider fallback choices into chat-scoped WebUI events."""
+def _fallback_notice_content(model: str) -> str:
+    """User-facing chat-channel text for the fallback notice."""
+
+    return f"Primary model unavailable; using fallback model {model}."
+
+
+def build_fallback_model_observer(bus: MessageBus) -> FallbackModelObserver:
+    """Translate provider fallback choices into chat-scoped model events.
+
+    Websocket turns keep the per-selection WebUI event. Chat channels get an
+    edge-triggered notice: published when a fallback first serves a chat, then
+    silent until a turn for that chat completes without a fallback. Delivery
+    is still gated per channel by ``channels.notifyModelFallback`` in the
+    outbound dispatcher.
+    """
+
+    # Chats with a fallback notice outstanding, and the in-flight turns that
+    # saw a fallback selection — the chat latch must survive those turns'
+    # completion so a fallback-serving streak stays silent after its first
+    # notice.
+    latched_chats: set[tuple[str, str]] = set()
+    fallback_turns: set[str] = set()
+
+    async def _turn_completed(event: TurnCompleted) -> None:
+        if event.context.session_key in fallback_turns:
+            fallback_turns.discard(event.context.session_key)
+            return
+        latched_chats.discard((event.context.channel, event.context.chat_id))
+
+    bus.subscribe(_turn_completed, TurnCompleted)
+
+    def _event_for(
+        context: RequestContext,
+        selection: FallbackModelSelection,
+    ) -> TurnModelUpdatedEvent:
+        return TurnModelUpdatedEvent(
+            model=selection.model,
+            model_preset=(
+                context.runtime.model_preset
+                if context.runtime is not None
+                else None
+            ),
+            fallback=True,
+            reauth_provider=selection.reauth_provider,
+        )
 
     async def _publish(selection: FallbackModelSelection) -> None:
         context = current_request_context()
-        if context is None or context.channel != "websocket":
+        if context is None:
             return
         chat_id = str(context.chat_id or "").strip()
         if not chat_id:
+            return
+        if context.channel != "websocket":
+            if context.session_key:
+                fallback_turns.add(context.session_key)
+            chat_key = (context.channel, chat_id)
+            if chat_key in latched_chats:
+                return
+            latched_chats.add(chat_key)
+            await bus.publish_outbound(
+                outbound_message_for_event(
+                    channel=context.channel,
+                    chat_id=chat_id,
+                    content=_fallback_notice_content(selection.model),
+                    event=_event_for(context, selection),
+                    metadata=context.metadata,
+                )
+            )
             return
         await bus.publish_outbound(
             outbound_message_for_event(
                 channel=context.channel,
                 chat_id=chat_id,
-                event=TurnModelUpdatedEvent(
-                    model=selection.model,
-                    model_preset=(
-                        context.runtime.model_preset
-                        if context.runtime is not None
-                        else None
-                    ),
-                    fallback=True,
-                    reauth_provider=selection.reauth_provider,
-                ),
+                event=_event_for(context, selection),
                 metadata=context.metadata,
             )
         )

@@ -37,6 +37,7 @@ class ChannelsConfig(Base):
     send_tool_hints: bool = True  # stream tool-call hints (e.g. read_file("…"))
     show_reasoning: bool = True  # surface model reasoning when channel implements it
     show_compaction_notices: bool = False  # automatic compaction chat notices, not UI lifecycle events
+    notify_model_fallback: bool = False  # chat notice when a fallback model first serves a chat
     extract_document_text: bool = True  # Deprecated and ignored; documents are read on demand
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Deprecated: use top-level transcription.provider
