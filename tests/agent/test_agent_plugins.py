@@ -94,6 +94,20 @@ def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
     assert "Built-in body" in (loader.load_skill("shared") or "")
 
 
+def test_plugin_skill_summary_supports_symlinked_workspace(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    workspace = tmp_path / "link"
+    try:
+        workspace.symlink_to(tmp_path / "real", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    _skill(_plugin(workspace) / "skills", "hello")
+    set_agent_plugin_enabled(workspace, "demo", True)
+    loader = SkillsLoader(workspace, builtin_skills_dir=tmp_path / "builtin")
+
+    assert "`demo/skills/hello/SKILL.md`" in loader.build_skills_summary()
+
+
 def test_plugin_skills_are_direct_valid_and_contained(tmp_path: Path) -> None:
     plugin = _plugin(tmp_path)
     skills = plugin / "skills"
