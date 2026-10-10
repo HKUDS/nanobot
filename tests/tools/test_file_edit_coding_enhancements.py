@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
 
@@ -120,6 +122,40 @@ def test_edit_file_line_hint_can_cover_multiline_match(tmp_path):
 
     assert "Patch applied:" in result
     assert target.read_text() == "before\nstart\nchanged\nend\nafter\n"
+
+
+@pytest.mark.parametrize("old_text", ["beta", "beta\ngamma"], ids=["exact", "trim-fallback"])
+def test_edit_file_line_hint_matches_read_file_numbering(tmp_path, old_text):
+    target = tmp_path / "pages.py"
+    # GNU-style page break: the form feed is line 2's content, not a line break.
+    target.write_text("alpha\n\f\n    beta\n    gamma\n")
+
+    listing = asyncio.run(ReadFileTool(workspace=tmp_path).execute(path=str(target)))
+    assert "3|     beta" in listing
+    assert "4 lines total" in listing
+
+    result = asyncio.run(EditFileTool(workspace=tmp_path).execute(
+        path=str(target),
+        old_text=old_text,
+        new_text=old_text.replace("beta", "changed"),
+        line_hint=3,
+    ))
+
+    assert "Patch applied:" in result
+    assert target.read_text() == "alpha\n\f\n    changed\n    gamma\n"
+
+
+def test_edit_file_best_match_line_matches_read_file_numbering(tmp_path):
+    target = tmp_path / "pages.py"
+    target.write_text("alpha\n\f\n    beta = 1\n    gamma\n    delta\n")
+
+    result = asyncio.run(EditFileTool(workspace=tmp_path).execute(
+        path=str(target),
+        old_text="    beta = 2\n    gamma\n    delta\n",
+        new_text="    beta = 3\n    gamma\n    delta\n",
+    ))
+
+    assert "at line 3:" in result
 
 
 def test_edit_file_can_edit_ipynb_as_json(tmp_path):
