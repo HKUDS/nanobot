@@ -65,6 +65,7 @@ class SubagentSessions:
             effective = SessionPolicy(
                 persist=parent.policy.persist and requested.persist,
                 log_content=parent.policy.log_content and requested.log_content,
+                disabled_tools=parent.policy.disabled_tools | requested.disabled_tools,
             )
             if effective.persist and self.sessions.read_session_metadata(parent.key) is None:
                 self.sessions.save(parent, fsync=True)

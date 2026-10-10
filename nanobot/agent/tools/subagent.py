@@ -151,5 +151,6 @@ class SubagentTool(Tool):
             session_policy=SessionPolicy(
                 persist=request_ctx.persist_session,
                 log_content=request_ctx.log_content,
+                disabled_tools=request_ctx.disabled_tools,
             ),
         )
