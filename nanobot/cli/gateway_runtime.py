@@ -154,20 +154,6 @@ def _advance_dream_cursor_if_behind(memory: Any) -> None:
         memory.set_last_dream_cursor(latest)
 
 
-def _commit_dream_changes(memory: Any) -> str | None:
-    """Commit durable Dream edits, without entering the commit path for a no-op run."""
-    if not memory.git.is_initialized():
-        return None
-    diff_body = memory.dream_content_diff()
-    if not diff_body:
-        return None
-    message = memory.build_dream_commit_message(
-        "dream: periodic memory consolidation",
-        diff_body,
-    )
-    return memory.git.auto_commit(message)
-
-
 _HEARTBEAT_PREAMBLE = (
     "[Your response will be delivered directly to the user's messaging app. "
     "Output ONLY the final user-facing message. Never reference internal "
@@ -566,62 +552,28 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            from nanobot.agent.memory import MemoryStore
+            from nanobot.agent.dream import run_dream
 
-            dream_session_key = MemoryStore.dream_session_key
-            prune_dream_sessions = MemoryStore.prune_dream_sessions
-
-            store = agent.context.memory
-            resp = None
-            diff_body = ""
-            try:
-                result = store.build_dream_prompt()
-                if result is None:
-                    logger.info("Dream: nothing to process")
-                    return None
-                prompt, last_cursor = result
-                key = dream_session_key()
-                dream_runtime = agent.dream_runtime()
-                await mcp_provider.connect()
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key=key,
-                    ephemeral=True,
-                    tools=store.build_dream_tools(),
-                    on_progress=_silent,
-                    runtime=dream_runtime,
-                )
-                # The real file delta grounds the audit record; normal completion
-                # decides whether this history batch has finished processing.
-                diff_body = store.dream_content_diff()
-                completed = MemoryStore.dream_run_completed(resp)
-                if completed:
-                    store.set_last_dream_cursor(last_cursor)
-                    if diff_body:
-                        logger.info(
-                            "Dream cron job completed, cursor advanced to {}",
-                            last_cursor,
-                        )
-                    else:
-                        logger.info(
-                            "Dream cron job completed with no memory changes; "
-                            "cursor advanced to {}",
-                            last_cursor,
-                        )
+            result = await run_dream(agent, kind="scheduled", before_run=mcp_provider.connect)
+            if result.status == "empty":
+                logger.info("Dream: nothing to process")
+            elif result.status == "completed":
+                if result.content_diff:
+                    logger.info("Dream cron job completed, cursor advanced to {}", result.cursor)
                 else:
-                    logger.warning(
-                        "Dream cron job did not complete ({}); cursor remains at {}",
-                        MemoryStore.dream_incompletion_reason(resp),
-                        store.get_last_dream_cursor(),
+                    logger.info(
+                        "Dream cron job completed with no memory changes; cursor advanced to {}",
+                        result.cursor,
                     )
-            except Exception:
-                logger.exception("Dream cron job failed")
-            finally:
-                sha = _commit_dream_changes(store)
-                if sha:
-                    logger.info("Dream commit: {}", sha)
-                store.compact_history()
-                prune_dream_sessions(agent.sessions)
+            elif result.status == "incomplete":
+                logger.warning(
+                    "Dream cron job did not complete ({}); cursor remains at {}",
+                    result.reason, result.cursor,
+                )
+            else:
+                logger.opt(exception=result.error).error("Dream cron job failed")
+            if result.commit_sha:
+                logger.info("Dream commit: {}", result.commit_sha)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.

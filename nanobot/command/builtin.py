@@ -452,74 +452,33 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     """Manually trigger a Dream consolidation run."""
-    import time
+    from nanobot.agent.dream import run_dream
 
     loop = ctx.loop
     msg = ctx.msg
 
     async def _run_dream():
-        from nanobot.agent.memory import MemoryStore
-
-        async def _silent(*_args: Any, **_kwargs: Any) -> None:
-            pass
-
-        dream_session_key = MemoryStore.dream_session_key
-        build_dream_commit_message = MemoryStore.build_dream_commit_message
-        prune_dream_sessions = MemoryStore.prune_dream_sessions
-
-        store = loop.context.memory
-        content = ""
-        resp = None
-        diff_body = ""
-        t0 = time.monotonic()
-        try:
-            result = store.build_dream_prompt()
-            if result is None:
-                await loop.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content=_format_dream_no_input_message(),
-                    metadata={"render_as": "text"},
-                ))
-                return
-            prompt, last_cursor = result
-            key = dream_session_key()
-            dream_runtime = loop.dream_runtime()
-            resp = await loop.process_direct(
-                prompt,
-                session_key=key,
-                ephemeral=True,
-                tools=store.build_dream_tools(),
-                on_progress=_silent,
-                runtime=dream_runtime,
+        result = await run_dream(loop, kind="manual")
+        if result.status == "empty":
+            await loop.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=_format_dream_no_input_message(),
+                metadata={"render_as": "text"},
+            ))
+            return
+        if result.status == "completed":
+            content = f"Dream completed in {result.elapsed:.1f}s."
+            if not result.content_diff:
+                content = f"Dream completed in {result.elapsed:.1f}s; no memory changes."
+        elif result.status == "incomplete":
+            content = (
+                f"Dream did not complete after {result.elapsed:.1f}s ({result.reason}); "
+                "memory cursor was not advanced."
             )
-            elapsed = time.monotonic() - t0
-            # The real file delta grounds the audit record; normal completion
-            # decides whether this history batch has finished processing.
-            diff_body = store.dream_content_diff()
-            completed = MemoryStore.dream_run_completed(resp)
-            if completed:
-                store.set_last_dream_cursor(last_cursor)
-                if diff_body:
-                    content = f"Dream completed in {elapsed:.1f}s."
-                else:
-                    content = f"Dream completed in {elapsed:.1f}s; no memory changes."
-            else:
-                reason = MemoryStore.dream_incompletion_reason(resp)
-                content = (
-                    f"Dream did not complete after {elapsed:.1f}s ({reason}); "
-                    "memory cursor was not advanced."
-                )
-        except Exception as e:
-            elapsed = time.monotonic() - t0
-            content = f"Dream failed after {elapsed:.1f}s: {e}"
-        finally:
-            if store.git.is_initialized():
-                commit_msg = build_dream_commit_message("dream: manual run", diff_body)
-                sha = store.git.auto_commit(commit_msg)
-                if sha:
-                    content += f" (commit {sha})"
-            store.compact_history()
-            prune_dream_sessions(loop.sessions)
+        else:
+            content = f"Dream failed after {result.elapsed:.1f}s: {result.error}"
+        if result.commit_sha:
+            content += f" (commit {result.commit_sha})"
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))

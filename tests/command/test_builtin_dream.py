@@ -29,6 +29,7 @@ class _FakeStore:
         content_diff: str = "",
     ):
         self.git = git
+        self.dream_lock = asyncio.Lock()
         self._last_dream_cursor = last_dream_cursor
         self._dream_prompt_result = dream_prompt_result
         self._content_diff = content_diff
@@ -103,9 +104,11 @@ class _FakeGit:
 class _FakeBus:
     def __init__(self):
         self.outbound = []
+        self.published = asyncio.Event()
 
     async def publish_outbound(self, message):
         self.outbound.append(message)
+        self.published.set()
 
 
 def _make_sessions(tmp_path) -> SessionManager:
@@ -168,6 +171,8 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
 
     async def process_direct(*args, **kwargs):
         calls.append((args, kwargs))
+        await kwargs["on_progress"]("Consolidating private notes.")
+        await kwargs["on_progress"]("Writing memory.", tool_event={"name": "write_file"})
         return OutboundMessage(
             channel="cli",
             chat_id="direct",
@@ -185,12 +190,37 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 
-    await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    immediate = await cmd_dream(ctx)
+    await asyncio.wait_for(bus.published.wait(), timeout=5)
 
+    assert immediate.content == "Dreaming..."
     assert len(calls) == 1
-    assert callable(calls[0][1]["on_progress"])
     assert calls[0][1]["runtime"] is dream_runtime
+    final, = bus.outbound
+    assert final.channel == "feishu"
+    assert final.chat_id == "chat1"
+    assert final.content.startswith("Dream completed in ")
+    assert final.content.endswith("; no memory changes.")
+
+
+@pytest.mark.asyncio
+async def test_dream_reports_failure_to_originating_chat(tmp_path, monkeypatch) -> None:
+    ctx, bus = _make_dream_ctx(tmp_path)
+    ctx.loop.context.memory._dream_prompt_result = ("dream prompt", 42)
+
+    async def process_direct(*_args, **_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(ctx.loop, "process_direct", process_direct, raising=False)
+    monkeypatch.setattr(ctx.loop, "dream_runtime", lambda: object(), raising=False)
+    immediate = await cmd_dream(ctx)
+    await asyncio.wait_for(bus.published.wait(), timeout=5)
+
+    assert immediate.content == "Dreaming..."
+    final, = bus.outbound
+    assert (final.channel, final.chat_id) == (ctx.msg.channel, ctx.msg.chat_id)
+    assert final.content.startswith("Dream failed after ")
+    assert final.content.endswith(": provider unavailable")
 
 
 def _build_runnable_dream(
