@@ -6,7 +6,7 @@ import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEff
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { Fragment, useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   GripVertical,
   ListOrdered,
@@ -695,7 +695,12 @@ export function ModelsSettings({
         ) : presetRows.length ? (
           <div ref={presetDrag.listRef} {...presetDrag.listProps} className="flex flex-col"
             role="list" aria-label={t("settings.models.callOrder")}>
-            {/* Preview with CSS order so moving a card does not interrupt its height transition. */}
+            {callOrder.length > 0 && presetRows.length > 1 ? (
+              <div role="presentation" className="order-1 mt-6">
+                <SettingsSectionTitle>{t("settings.models.otherPresets")}</SettingsSectionTitle>
+              </div>
+            ) : null}
+            {/* Keep card nodes stable while previewing their order. */}
             {presetRows.map(({ key, name, preset }, rowIndex) => {
               const orderIndex = presetDrag.previewKeys.indexOf(key);
               const ordered = orderIndex >= 0;
@@ -708,126 +713,119 @@ export function ModelsSettings({
               const isSelected = editorOpen && !creating && activeEditorRowKey === key
                 && selectedPreset?.name === name;
               return (
-                <Fragment key={key}>
-                  {callOrder.length > 0 && rowIndex === 1 ? (
-                    <div role="presentation" className="order-1 mt-6" data-preset-sort-surface="heading">
-                      <SettingsSectionTitle>{t("settings.models.otherPresets")}</SettingsSectionTitle>
-                    </div>
-                  ) : null}
-                  <div role="listitem" data-call-order-index={orderIndex} data-preset-sort-key={key}
-                    style={{ order: (ordered ? orderIndex : rowIndex) * 2 }} className={cn(!primary && "mb-2")}>
-                    <div data-preset-sort-surface={key}
-                      className={cn("relative rounded-panel", isDragging && "z-10 shadow-md ring-1 ring-border/50")}>
-                      <SettingsGroup>
-                        <div
-                          tabIndex={ordered ? 0 : -1}
-                          onDragStart={(event) => event.preventDefault()}
-                          aria-label={ordered ? `${name}. ${t("settings.models.dragToReorder")}` : name}
-                          data-testid={`model-call-order-row-${name}`}
-                          onPointerDown={(event) => {
-                            setHideEditorReturnFocus(false);
-                            presetDrag.start(event, key);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key !== "Escape") setHideEditorReturnFocus(false);
-                            if (event.currentTarget !== event.target) return;
-                            if (ordered && event.key === "ArrowUp") {
-                              event.preventDefault();
-                              moveCallOrderItem(orderIndex, -1);
-                            } else if (ordered && event.key === "ArrowDown") {
-                              event.preventDefault();
-                              moveCallOrderItem(orderIndex, 1);
-                            } else if ((event.key === "Enter" || event.key === " ") && preset) {
-                              event.preventDefault();
-                              selectPreset(preset, key);
-                            }
-                          }}
-                          className={cn(
-                            "settings-list-inset group relative grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-x-3 select-none outline-none transition-[padding,background-color] [transition-duration:240ms] motion-reduce:transition-none",
-                            primary ? "py-5 [--preset-title-size:1.375rem] sm:py-6 sm:[--preset-title-size:1.625rem]" : "py-4",
-                            ordered && (callOrderBusy ? "cursor-wait" : "cursor-grab active:cursor-grabbing"),
-                            !isDragging && "settings-hover",
-                            isSelected && "bg-muted/45",
-                            !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                          )}
-                        >
-                          <div className="contents">
-                            <button
-                              type="button"
-                              aria-pressed={selectedPreset?.name === name}
-                              aria-haspopup="dialog"
-                              disabled={!preset}
-                              onClick={() => preset && selectPreset(preset, key)}
-                              className={cn("col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none",
-                                !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-ring")}
-                            >
-                              {presetConfigured ? (
-                                <span className={cn("relative aspect-square min-w-8", primary ? "w-[calc(var(--preset-title-size)*1.375+1.5rem)]" : "h-8")}>
-                                  <span className="absolute inset-0">
-                                    <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} fill />
+                <div key={key} role="listitem" data-call-order-index={orderIndex} data-preset-sort-key={key}
+                  style={{ order: (ordered ? orderIndex : rowIndex) * 2 }} className={cn(!primary && "mb-2")}>
+                  <div data-preset-sort-surface={key}
+                    className={cn("relative origin-top-left rounded-panel", isDragging && "z-10 shadow-md ring-1 ring-border/50")}>
+                    <SettingsGroup>
+                      <div
+                        tabIndex={ordered ? 0 : -1}
+                        onDragStart={(event) => event.preventDefault()}
+                        aria-label={ordered ? `${name}. ${t("settings.models.dragToReorder")}` : name}
+                        data-testid={`model-call-order-row-${name}`}
+                        onPointerDown={(event) => {
+                          setHideEditorReturnFocus(false);
+                          presetDrag.start(event, key);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Escape") setHideEditorReturnFocus(false);
+                          if (event.currentTarget !== event.target) return;
+                          if (ordered && event.key === "ArrowUp") {
+                            event.preventDefault();
+                            moveCallOrderItem(orderIndex, -1);
+                          } else if (ordered && event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveCallOrderItem(orderIndex, 1);
+                          } else if ((event.key === "Enter" || event.key === " ") && preset) {
+                            event.preventDefault();
+                            selectPreset(preset, key);
+                          }
+                        }}
+                        className={cn(
+                          "settings-list-inset group relative grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-x-3 select-none outline-none transition-colors [transition-duration:240ms] motion-reduce:transition-none",
+                          primary ? "py-5 [--preset-title-size:1.375rem] sm:py-6 sm:[--preset-title-size:1.625rem]" : "py-4",
+                          ordered && (callOrderBusy ? "cursor-wait" : "cursor-grab active:cursor-grabbing"),
+                          !isDragging && "settings-hover",
+                          isSelected && "bg-muted/45",
+                          !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                        )}
+                      >
+                        <div className="contents">
+                          <button
+                            type="button"
+                            aria-pressed={selectedPreset?.name === name}
+                            aria-haspopup="dialog"
+                            disabled={!preset}
+                            onClick={() => preset && selectPreset(preset, key)}
+                            className={cn("col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none",
+                              !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-ring")}
+                          >
+                            {presetConfigured ? (
+                              <span className={cn("relative aspect-square min-w-8", primary ? "w-[calc(var(--preset-title-size)*1.375+1.5rem)]" : "h-8")}>
+                                <span className="absolute inset-0">
+                                  <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} fill />
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="grid h-8 w-8 shrink-0 place-items-center">
+                                <ProviderPickerIcon provider={provider} showBrandLogos={showBrandLogos} unconfigured />
+                              </span>
+                            )}
+                            <span className="min-w-0 flex-1">
+                              <span className="flex min-w-0 items-center gap-x-2">
+                                <TruncatedTextTooltip text={name} className={cn("font-medium text-foreground",
+                                  primary ? "text-[length:var(--preset-title-size)] leading-snug tracking-tight" : "text-[14px]")} />
+                                {primary ? (
+                                  <span className="shrink-0 whitespace-nowrap"><StatusPill tone="success">{t("settings.models.primary")}</StatusPill></span>
+                                ) : !ordered ? (
+                                  <span className="text-[11px] leading-5 text-muted-foreground">
+                                    {t("settings.models.disabled")}
                                   </span>
-                                </span>
-                              ) : (
-                                <span className="grid h-8 w-8 shrink-0 place-items-center">
-                                  <ProviderPickerIcon provider={provider} showBrandLogos={showBrandLogos} unconfigured />
-                                </span>
-                              )}
-                              <span className="min-w-0 flex-1">
-                                <span className="flex min-w-0 items-center gap-x-2">
-                                  <TruncatedTextTooltip text={name} className={cn("font-medium text-foreground transition-[font-size,line-height,letter-spacing] [transition-duration:240ms] motion-reduce:transition-none",
-                                    primary ? "text-[length:var(--preset-title-size)] leading-snug tracking-tight" : "text-[14px]")} />
-                                  {primary ? (
-                                    <span className="shrink-0 whitespace-nowrap"><StatusPill tone="success">{t("settings.models.primary")}</StatusPill></span>
-                                  ) : !ordered ? (
-                                    <span className="text-[11px] leading-5 text-muted-foreground">
-                                      {t("settings.models.disabled")}
-                                    </span>
-                                  ) : null}
-                                </span>
-                                {preset ? (
-                                  <TruncatedTextTooltip
-                                    text={primary
-                                      ? `${preset.model}  ${formatModelContextWindow(preset.context_window_tokens)}  ${preset.reasoning_effort || t("settings.values.default")}`
-                                      : preset.model}
-                                    className={cn("mt-1 block whitespace-pre text-muted-foreground", primary ? "text-[13px] leading-5" : "text-[12px]")} />
                                 ) : null}
                               </span>
-                            </button>
-                            <Button type="button" variant="link" size="sm"
-                              className="h-auto px-0 text-[13px] font-normal text-muted-foreground hover:text-foreground hover:no-underline"
-                              disabled={!preset}
-                              onClick={() => preset && selectPreset(preset, key)}>
-                              <span className="sr-only sm:not-sr-only">{t("settings.configure")}</span>
-                              <Pencil className="h-4 w-4 sm:hidden" aria-hidden />
-                            </Button>
-                            {ordered ? (
-                              <GripVertical
-                                className="h-4 w-4 shrink-0 touch-none text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
-                                aria-hidden
-                              />
-                            ) : (
-                              <span className="h-4 w-4 shrink-0" aria-hidden />
-                            )}
-                            <ToggleButton
-                              checked={ordered}
-                              label={t(ordered ? "settings.models.removeFromOrder" : "settings.models.addToOrder")}
-                              disabled={callOrderBusy || (ordered && callOrder.length <= 1)}
-                              onChange={() => {
-                                if (ordered) removeCallOrderItem(orderIndex);
-                                else if (preset) onChangeCallOrder([...callOrder, preset.name]);
-                              }}
+                              {preset ? (
+                                <TruncatedTextTooltip
+                                  text={primary
+                                    ? `${preset.model}  ${formatModelContextWindow(preset.context_window_tokens)}  ${preset.reasoning_effort || t("settings.values.default")}`
+                                    : preset.model}
+                                  className={cn("mt-1 block whitespace-pre text-muted-foreground", primary ? "text-[13px] leading-5" : "text-[12px]")} />
+                              ) : null}
+                            </span>
+                          </button>
+                          <Button type="button" variant="link" size="sm"
+                            className="h-auto px-0 text-[13px] font-normal text-muted-foreground hover:text-foreground hover:no-underline"
+                            disabled={!preset}
+                            onClick={() => preset && selectPreset(preset, key)}>
+                            <span className="sr-only sm:not-sr-only">{t("settings.configure")}</span>
+                            <Pencil className="h-4 w-4 sm:hidden" aria-hidden />
+                          </Button>
+                          {ordered ? (
+                            <GripVertical
+                              className="h-4 w-4 shrink-0 touch-none text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
+                              aria-hidden
                             />
-                          </div>
-                          {!presetConfigured ? (
-                            <p className="col-[2/-1] mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                              {t("settings.models.providerSetupRequired")}
-                            </p>
-                          ) : null}
+                          ) : (
+                            <span className="h-4 w-4 shrink-0" aria-hidden />
+                          )}
+                          <ToggleButton
+                            checked={ordered}
+                            label={t(ordered ? "settings.models.removeFromOrder" : "settings.models.addToOrder")}
+                            disabled={callOrderBusy || (ordered && callOrder.length <= 1)}
+                            onChange={() => {
+                              if (ordered) removeCallOrderItem(orderIndex);
+                              else if (preset) onChangeCallOrder([...callOrder, preset.name]);
+                            }}
+                          />
                         </div>
-                      </SettingsGroup>
-                    </div>
+                        {!presetConfigured ? (
+                          <p className="col-[2/-1] mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                            {t("settings.models.providerSetupRequired")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </SettingsGroup>
                   </div>
-                </Fragment>
+                </div>
               );
             })}
           </div>

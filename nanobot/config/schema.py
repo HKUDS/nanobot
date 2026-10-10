@@ -254,19 +254,6 @@ class ProviderConfig(Base):
         "reasoning_split",
     )
 
-    @field_validator("proxy")
-    @classmethod
-    def normalize_proxy(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            return None
-        # Environment references may expand to a complete URL at runtime.
-        if "://" in value or "${" in value:
-            return value
-        return f"http://{value}"
-
     @field_validator("thinking_style")
     @classmethod
     def _validate_thinking_style(cls, v: str | None) -> str | None:

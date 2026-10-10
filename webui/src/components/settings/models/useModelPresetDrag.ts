@@ -22,7 +22,7 @@ export function useModelPresetDrag({
   const drag = useRef<PresetDrag | null>(null);
   const frame = useRef<number>();
   const suppressClick = useRef(false);
-  const positions = useRef<Map<string, number> | null>(null);
+  const positions = useRef<Map<string, DOMRect> | null>(null);
   const animations = useRef(new Map<string, Animation>());
   const [preview, setPreview] = useState<{ key: string; keys: string[] } | null>(null);
 
@@ -31,7 +31,7 @@ export function useModelPresetDrag({
   );
   const rememberPositions = () => {
     positions.current = new Map(surfaces().map((element) => [
-      element.dataset.presetSortSurface!, element.getBoundingClientRect().top,
+      element.dataset.presetSortSurface!, element.getBoundingClientRect(),
     ]));
     for (const animation of animations.current.values()) animation.cancel();
     animations.current.clear();
@@ -55,14 +55,24 @@ export function useModelPresetDrag({
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     for (const element of surfaces()) {
       const key = element.dataset.presetSortSurface!;
-      if (key === drag.current?.key && drag.current.active) continue;
-      element.style.transform = "";
-      const previousTop = previous.get(key);
-      if (previousTop === undefined || reduceMotion || typeof element.animate !== "function") continue;
-      const offset = previousTop - element.getBoundingClientRect().top;
-      if (Math.abs(offset) < 0.5) continue;
+      const dragging = key === drag.current?.key && drag.current.active;
+      if (!dragging) element.style.transform = "";
+      const before = previous.get(key);
+      if (!before || reduceMotion || typeof element.animate !== "function") continue;
+      const after = element.getBoundingClientRect();
+      const offset = dragging ? 0 : before.top - after.top;
+      const resized = Math.abs(before.height - after.height) >= 0.5;
+      if (Math.abs(offset) < 0.5 && !resized) continue;
+      // Animate visual size, not layout height, so section headings stay still.
+      // Pointer tracking owns the dragged card's translation throughout.
+      const from: Keyframe = { scale: `1 ${before.height / after.height}` };
+      const to: Keyframe = { scale: "1 1" };
+      if (!dragging) {
+        from.transform = `translateY(${offset}px)`;
+        to.transform = "translateY(0)";
+      }
       const animation = element.animate(
-        [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0)" }],
+        [from, to],
         { duration: 240, easing: "cubic-bezier(0.2, 0, 0, 1)" },
       );
       animations.current.set(key, animation);

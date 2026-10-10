@@ -154,8 +154,7 @@ class TestResolveConfig:
         assert "githubCopilot" not in saved["providers"]
         assert saved["providers"]["groq"]["apiKey"] == "groq-secret"
 
-    @pytest.mark.parametrize("proxy_input", ["http://127.0.0.1:23458", "127.0.0.1:23458"])
-    def test_save_preserves_openai_codex_proxy_config(self, tmp_path, proxy_input):
+    def test_save_preserves_openai_codex_proxy_config(self, tmp_path):
         config_path = tmp_path / "config.json"
         proxy = "http://127.0.0.1:23458"
         config = Config.model_validate(
@@ -163,7 +162,7 @@ class TestResolveConfig:
                 "providers": {
                     "openaiCodex": {
                         "apiKey": "codex-secret",
-                        "proxy": proxy_input,
+                        "proxy": proxy,
                         "extraBody": {"service_tier": "priority"},
                     },
                     "groq": {"apiKey": "groq-secret"},
