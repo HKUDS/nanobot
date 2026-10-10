@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import json
 import time
+from datetime import date
 from types import SimpleNamespace
 
 import httpx
@@ -41,6 +42,10 @@ from nanobot.webui.settings_api import (
     update_provider_settings,
     update_transcription_settings,
     update_web_search_settings,
+)
+from nanobot.webui.settings_models import (
+    _extract_model_rows,
+    _model_catalog_row_active,
 )
 from nanobot.webui.settings_services import WebUIOAuthFlowRegistry
 
@@ -2180,6 +2185,74 @@ def test_provider_models_payload_fetches_openai_compatible_models(
     assert payload["model_count"] == 2
     assert payload["models"][0]["id"] == "deepseek-chat"
     assert payload["models"][1]["context_window"] == 65536
+
+
+def test_model_catalog_row_active_respects_openai_shutdown_date() -> None:
+    ref = date(2026, 9, 29)
+    live = {"id": "gpt-5-nano", "shutdown_date": None}
+    retired = {"id": "gpt-5-chat-latest", "shutdown_date": "2026-07-23"}
+    scheduled = {"id": "gpt-5.9-chat-latest", "shutdown_date": "2026-12-01"}
+
+    assert _model_catalog_row_active(live, on=ref)
+    assert not _model_catalog_row_active(retired, on=ref)
+    assert _model_catalog_row_active(scheduled, on=ref)
+    assert not _model_catalog_row_active(retired, on=date(2026, 7, 23))
+    assert _model_catalog_row_active(retired, on=date(2026, 7, 22))
+
+
+def test_extract_model_rows_skips_shut_down_openai_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models._model_catalog_row_active",
+        lambda row, *, on=None: _model_catalog_row_active(row, on=date(2026, 9, 29)),
+    )
+    body = {
+        "data": [
+            {"id": "gpt-5-nano", "shutdown_date": None},
+            {"id": "gpt-5-chat-latest", "shutdown_date": "2026-07-23"},
+            {"id": "chat-latest", "shutdown_date": None},
+        ]
+    }
+    rows = _extract_model_rows(body)
+    ids = [row["id"] for row in rows]
+    assert ids == ["gpt-5-nano", "chat-latest"]
+
+
+def test_provider_models_payload_omits_openai_models_past_shutdown_date(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.openai.com/v1/models"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "gpt-5-nano", "owned_by": "system", "shutdown_date": None},
+                    {"id": "gpt-5-chat-latest", "owned_by": "system", "shutdown_date": "2026-07-23"},
+                ]
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models._model_catalog_row_active",
+        lambda row, *, on=None: _model_catalog_row_active(row, on=date(2026, 9, 29)),
+    )
+
+    payload = provider_models_payload({"provider": ["openai"]})
+
+    assert payload["status"] == "available"
+    assert payload["model_count"] == 1
+    assert payload["models"][0]["id"] == "gpt-5-nano"
 
 
 def test_provider_models_payload_returns_online_openai_codex_models(
