@@ -1583,7 +1583,7 @@ class TestCompactIdleSession:
         assert not lock.locked()
 
 
-class TestRawArchiveTruncation:
+class TestRawArchiveChunks:
     """raw_archive() keeps complete journal content with bounded individual entries."""
 
     @pytest.mark.parametrize("boundary", ["A ", "\n\n", "<think>PRIVATE</think>"])

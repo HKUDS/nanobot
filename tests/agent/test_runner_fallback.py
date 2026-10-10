@@ -1617,7 +1617,7 @@ class TestFailoverOnAuthenticationError:
         factory.assert_called_once_with(fallback_preset)
 
 
-class TestNoFallbackOnNonRetryableError:
+class TestFallbackErrorClassification:
     @pytest.mark.asyncio
     async def test_bad_request(self) -> None:
         primary = _FakeProvider(
@@ -1666,7 +1666,7 @@ class TestNoFallbackOnNonRetryableError:
         factory.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_timeout(self) -> None:
+    async def test_timeout_triggers_fallback(self) -> None:
         primary = _FakeProvider(
             "primary",
             _make_response("timed out", finish_reason="error", error_kind="timeout"),
