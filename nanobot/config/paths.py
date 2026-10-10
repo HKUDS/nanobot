@@ -44,7 +44,7 @@ def get_logs_dir() -> Path:
 
 
 def get_webui_dir() -> Path:
-    """Return the directory for WebUI-only persisted display threads (JSON)."""
+    """Return the directory for WebUI JSONL transcripts and legacy JSON snapshots."""
     return get_runtime_subdir("webui")
 
 

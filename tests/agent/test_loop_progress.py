@@ -277,7 +277,7 @@ class TestToolEventProgress:
 
     @pytest.mark.asyncio
     async def test_bus_progress_forwards_tool_events_to_outbound_metadata(self, tmp_path: Path) -> None:
-        """When run() handles a bus message, _tool_events lands in OutboundMessage metadata."""
+        """Bus-dispatched turns deliver tool activity through ProgressEvent.tool_events."""
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
