@@ -84,7 +84,7 @@ def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None
     assert state["view"] == {
         "density": "comfortable",
         "show_previews": False,
-        "show_timestamps": False,
+        "show_timestamps": True,
         "show_archived": True,
         "sort": "updated_desc",
     }
