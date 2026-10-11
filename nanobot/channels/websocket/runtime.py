@@ -203,7 +203,6 @@ class WebSocketConfig(Base):
     token: str = ""
     token_issue_path: str = ""
     token_issue_secret: str = ""
-    token_issue_secret_generated: bool = False
     trusted_proxy_auth: TrustedProxyAuthConfig | None = None
     token_ttl_s: int = Field(default=300, ge=30, le=86_400)
     websocket_requires_token: bool = True
@@ -281,18 +280,14 @@ class WebSocketConfig(Base):
             raise ValueError("token_issue_path must differ from path (the WebSocket upgrade path)")
         return self
 
-    @property
-    def has_access_auth(self) -> bool:
-        return bool(self.token.strip() or self.token_issue_secret.strip() or self.trusted_proxy_auth)
-
     @model_validator(mode="after")
-    def external_host_requires_auth(self) -> Self:
-        from nanobot.webui.http_utils import is_loopback_host
-
-        if is_loopback_host(self.host) or self.has_access_auth:
+    def wildcard_host_requires_auth(self) -> Self:
+        if self.host not in ("0.0.0.0", "::"):
+            return self
+        if self.token.strip() or self.token_issue_secret.strip() or self.trusted_proxy_auth is not None:
             return self
         raise ValueError(
-            "host is outside localhost but neither token, token_issue_secret, "
+            "host is 0.0.0.0 (all interfaces) but neither token, token_issue_secret, "
             "nor trusted_proxy_auth is set — set one to prevent unauthenticated access"
         )
 

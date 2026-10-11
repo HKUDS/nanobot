@@ -31,9 +31,7 @@ from nanobot.cli.webui_support import (
     _warn_webui_bind_scope,
     _webui_browser_url,
     _webui_build_mode_for_interactive,
-    _webui_credentials_match,
     _webui_endpoint_reachable,
-    webui_bootstrap_secret,
 )
 from nanobot.config.paths import get_workspace_path
 from nanobot.utils.helpers import sync_workspace_templates
@@ -216,43 +214,41 @@ def webui(
 
     gateway_ready = _gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
     webui_ready = _webui_endpoint_reachable(webui_url)
-    if gateway_ready and webui_ready:
-        secret = webui_bootstrap_secret(runtime_config)
-        if not runtime.status().running and secret and not _webui_credentials_match(webui_url, secret):
+    existing_gateway = gateway_ready and webui_ready
+    if not existing_gateway:
+        gateway_port_taken = gateway_ready or _tcp_endpoint_reachable(
+            _host_for_local_browser(runtime_config.gateway.host),
+            effective_gateway_port,
+        )
+        if gateway_port_taken or webui_ready:
             _print_foreground_port_conflict(
                 webui_url=webui_url,
                 gateway_host=runtime_config.gateway.host,
                 gateway_port=effective_gateway_port,
             )
             raise typer.Exit(1)
-        lease = GatewayClientLease(runtime, kind="webui")
-        lease.acquire()
-        try:
-            if changed_webui and runtime.status().running:
-                ensure_shared_gateway(client_lease=lease)
-                gateway_ready = _gateway_health_ready(
-                    runtime_config.gateway.host,
-                    effective_gateway_port,
-                )
-                webui_ready = _webui_endpoint_reachable(webui_url)
-                if not gateway_ready or not webui_ready:
-                    console.print("[red]Gateway did not become ready after the config update.[/red]")
-                    raise typer.Exit(1)
-            if not dev:
-                managed = runtime.status().running
-                announce_ready(webui_url, managed=managed)
-                if managed:
-                    _attach_to_background_gateway(runtime, log_cursor=log_cursor)
-                return
 
+    lease = GatewayClientLease(runtime, kind="webui")
+    lease.acquire()
+    try:
+        if not existing_gateway:
+            console.print("[dim]Starting WebUI…[/dim]")
+            ensure_shared_gateway(client_lease=lease)
+        elif changed_webui and runtime.status().running:
+            ensure_shared_gateway(client_lease=lease)
+            if not (_gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
+                    and _webui_endpoint_reachable(webui_url)):
+                console.print("[red]Gateway did not become ready after the config update.[/red]")
+                raise typer.Exit(1)
+
+        if dev_browser_url:
             try:
-                assert dev_browser_url is not None
                 with run_webui_dev_server(
                     target_url=webui_dev_proxy_target(webui_url),
                     browser_url=dev_browser_url,
                     output=lambda message: console.print(message, style="dim", markup=False),
                 ) as dev_server:
-                    managed = runtime.status().running
+                    managed = not existing_gateway or runtime.status().running
                     announce_ready(dev_browser_url, managed=managed)
                     if managed:
                         _attach_to_background_gateway(
@@ -270,47 +266,10 @@ def webui(
                 console.print(f"[red]Error: {exc}[/red]")
                 raise typer.Exit(1) from exc
             return
-        finally:
-            lease.release(wait_for_stop=False)
 
-    gateway_port_taken = gateway_ready or _tcp_endpoint_reachable(
-        _host_for_local_browser(runtime_config.gateway.host),
-        effective_gateway_port,
-    )
-    webui_port_taken = webui_ready
-    if gateway_port_taken or webui_port_taken:
-        _print_foreground_port_conflict(
-            webui_url=webui_url,
-            gateway_host=runtime_config.gateway.host,
-            gateway_port=effective_gateway_port,
-        )
-        raise typer.Exit(1)
-
-    lease = GatewayClientLease(runtime, kind="webui")
-    lease.acquire()
-    try:
-        console.print("[dim]Starting WebUI…[/dim]")
-        ensure_shared_gateway(client_lease=lease)
-        if dev_browser_url:
-            dev_proxy_target = webui_dev_proxy_target(webui_url)
-            try:
-                with run_webui_dev_server(
-                    target_url=dev_proxy_target,
-                    browser_url=dev_browser_url,
-                    output=lambda message: console.print(message, style="dim", markup=False),
-                ) as dev_server:
-                    announce_ready(dev_browser_url, managed=True)
-                    _attach_to_background_gateway(
-                        runtime,
-                        log_cursor=log_cursor,
-                        poll_hook=dev_server.ensure_running,
-                    )
-            except WebUIDevError as exc:
-                console.print(f"[red]Error: {exc}[/red]")
-                raise typer.Exit(1) from exc
-            return
-
-        announce_ready(webui_url, managed=True)
-        _attach_to_background_gateway(runtime, log_cursor=log_cursor)
+        managed = not existing_gateway or runtime.status().running
+        announce_ready(webui_url, managed=managed)
+        if managed:
+            _attach_to_background_gateway(runtime, log_cursor=log_cursor)
     finally:
         lease.release(wait_for_stop=False)

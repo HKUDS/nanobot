@@ -2,7 +2,6 @@
 
 import os
 import re
-import secrets
 import shutil
 import sys
 import time
@@ -10,7 +9,7 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, cast
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 import typer
 from pydantic import ValidationError
@@ -61,7 +60,6 @@ __all__ = [
     "webui_bootstrap_secret",
     "_webui_build_mode_for_interactive",
     "_webui_channel_enabled",
-    "_webui_credentials_match",
     "_webui_display_url",
     "_webui_endpoint_reachable",
 ]
@@ -366,7 +364,7 @@ def _gateway_health_bind_note(host: str) -> str:
 def webui_bootstrap_secret(config: Config) -> str:
     """Return the shared local bootstrap credential for WebUI protocol clients."""
     ws_cfg = _webui_config_dict(config)
-    return str(ws_cfg.get("tokenIssueSecret") or "").strip() or str(ws_cfg.get("token") or "").strip()
+    return str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
 
 
 def _webui_browser_url(config: Config) -> str:
@@ -394,40 +392,39 @@ def _ensure_local_webui_channel(
 ) -> bool:
     """Enable the local WebUI channel with safe localhost defaults."""
     from nanobot.channels.websocket.runtime import WebSocketConfig
-    from nanobot.config.loader import resolve_config_env_vars
 
     current: Any = getattr(config.channels, "websocket", None) or {}
-    resolved = resolve_config_env_vars(config.model_copy(deep=True))
-    model = WebSocketConfig.model_validate(getattr(resolved.channels, "websocket", None) or {})
-    saved: dict[str, Any] = dict(current) if current else model.model_dump(by_alias=True, exclude_none=True)
+    model = WebSocketConfig.model_validate(current)
     changed = False
 
     needs_enable = not model.enabled
     needs_port = port is not None and model.port != port
-    needs_secret = not model.has_access_auth
-    if current and not needs_enable and not needs_port and not needs_secret:
+    needs_secret = not model.token_issue_secret.strip() and not model.token.strip()
+    if not needs_enable and not needs_port and not needs_secret:
         return False
 
     _confirm_webui_action("Set up WebUI?", yes=yes)
 
     if not model.enabled:
-        saved["enabled"] = True
+        model.enabled = True
+        changed = True
+    if model.host != "127.0.0.1":
+        model.host = "127.0.0.1"
         changed = True
     if port is not None and model.port != port:
-        saved["port"] = port
+        model.port = port
+        changed = True
+    if not model.websocket_requires_token:
+        model.websocket_requires_token = True
         changed = True
     if needs_secret:
-        saved.pop("token_issue_secret", None)
-        saved.pop("token_issue_secret_generated", None)
-        saved["tokenIssueSecret"] = secrets.token_urlsafe(32)
-        saved["tokenIssueSecretGenerated"] = True
-        if not model.websocket_requires_token:
-            saved.pop("websocket_requires_token", None)
-            saved["websocketRequiresToken"] = True
+        import secrets
+
+        model.token_issue_secret = secrets.token_urlsafe(32)
         changed = True
 
-    setattr(config.channels, "websocket", saved)
-    return changed or not current
+    setattr(config.channels, "websocket", model.model_dump(by_alias=True, exclude_none=True))
+    return changed
 
 
 def _warn_webui_bind_scope(config: Config) -> None:
@@ -437,21 +434,15 @@ def _warn_webui_bind_scope(config: Config) -> None:
         return
     console.print(
         "[yellow]Warning: WebUI is configured to bind outside localhost. "
-        "Keep access authentication configured and use this only on trusted networks.[/yellow]"
+        "Keep tokenIssueSecret set and use this only on trusted networks.[/yellow]"
     )
 
 
 def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> bool:
     """Return whether the WebUI listener becomes available within the timeout."""
-    import time
-    from urllib.parse import urlparse
-
-    parsed = urlparse(url)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        if _tcp_endpoint_reachable(host, port, timeout_s=0.2):
+        if _webui_endpoint_reachable(url, timeout_s=0.2):
             return True
         time.sleep(0.1)
     return False
@@ -501,27 +492,6 @@ def _webui_endpoint_reachable(url: str, *, timeout_s: float = 0.25) -> bool:
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     return _tcp_endpoint_reachable(host, port, timeout_s=timeout_s)
-
-
-def _webui_credentials_match(url: str, secret: str) -> bool:
-    """Verify login before reusing a listener without this instance's runtime record."""
-    from urllib.parse import urlsplit, urlunsplit
-
-    import httpx
-
-    parsed = urlsplit(url)
-    bootstrap_url = urlunsplit((parsed.scheme, parsed.netloc, "/webui/bootstrap", "", ""))
-    try:
-        response = httpx.get(
-            bootstrap_url, headers={"X-Nanobot-Auth": secret}, timeout=2,
-            trust_env=False, follow_redirects=False,
-        )
-        if response.status_code != 200:
-            return False
-        payload = response.json()
-        return isinstance(payload, dict) and bool(cast(dict[str, Any], payload).get("api_token"))
-    except (httpx.HTTPError, ValueError):
-        return False
 
 
 def _print_foreground_port_conflict(
@@ -583,15 +553,13 @@ def _print_webui_ready(
     console.print("[bold green]WebUI ready[/bold green]" + (" [dim](development)[/dim]" if dev else ""))
     console.print()
     console.print("Open in your browser:")
+    # Terminal wrapping keeps this one copyable line, including in narrow panes.
+    console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
     if webui_bootstrap_secret(config):
-        # Terminal wrapping keeps this one copyable line, including in narrow panes.
-        console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
         console.print("[dim]This link signs you in. Do not share it.[/dim]")
         console.print(Text(f"Page: {_webui_display_url(url)}", style="dim"), soft_wrap=True)
-    else:
-        console.print(url, style="cyan", markup=False, highlight=False, soft_wrap=True)
-        if ws_cfg.get("trustedProxyAuth"):
-            console.print("Sign in through your configured trusted proxy.")
+    elif ws_cfg.get("trustedProxyAuth"):
+        console.print("Sign in through your configured trusted proxy.")
     if provider_error:
         console.print()
         console.print("[bold]Next step[/bold]")

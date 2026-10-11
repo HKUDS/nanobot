@@ -545,7 +545,6 @@ export interface SidebarStatePayload {
 }
 
 export interface BootstrapResponse {
-  host_compatibility?: unknown;
   terminal?: {
     webui?: { capabilities?: string[] };
   };
@@ -670,15 +669,6 @@ export type RuntimeConfigValue = string | number | boolean | string[] | null;
 
 
 export interface SettingsPayload {
-  webui_access?: {
-    password_required: boolean;
-    allow_other_devices: boolean;
-    active_allow_other_devices: boolean;
-    host: string;
-    active_host: string;
-    requires_restart: boolean;
-    can_change: boolean;
-  };
   runtime_config?: Record<string, RuntimeConfigValue>;
   surface?: RuntimeSurface;
   runtime_surface?: RuntimeSurface;

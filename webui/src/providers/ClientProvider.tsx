@@ -17,7 +17,6 @@ interface ClientContextValue {
   modelName: string | null;
   ingressLimits: WebUIIngressLimits | null;
   webuiCapabilities: string[];
-  onAccessPasswordChange?: (password: string) => void;
 }
 
 const ClientContext = createContext<ClientContextValue | null>(null);
@@ -28,7 +27,6 @@ export function ClientProvider({
   modelName = null,
   ingressLimits = null,
   webuiCapabilities = [],
-  onAccessPasswordChange,
   children,
 }: {
   client: NanobotClient;
@@ -36,15 +34,14 @@ export function ClientProvider({
   modelName?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
   webuiCapabilities?: string[];
-  onAccessPasswordChange?: (password: string) => void;
   children: ReactNode;
 }) {
   const tokenRef = useRef(token);
   tokenRef.current = token;
   const getToken = useCallback(() => tokenRef.current, []);
   const value = useMemo(
-    () => ({ client, token, getToken, modelName, ingressLimits, webuiCapabilities, onAccessPasswordChange }),
-    [client, getToken, ingressLimits, modelName, token, webuiCapabilities, onAccessPasswordChange],
+    () => ({ client, token, getToken, modelName, ingressLimits, webuiCapabilities }),
+    [client, getToken, ingressLimits, modelName, token, webuiCapabilities],
   );
 
   return (

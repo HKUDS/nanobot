@@ -2224,7 +2224,6 @@ def test_webui_creates_config_and_enables_local_websocket_with_one_confirmation(
     assert websocket["port"] == 8899
     assert websocket["websocketRequiresToken"] is True
     assert len(websocket["tokenIssueSecret"]) >= 32
-    assert websocket["tokenIssueSecretGenerated"] is True
     assert data["agents"]["defaults"]["workspace"] == str(workspace)
     assert seen["templates"] == workspace
     assert seen["templates_options"] == {"silent": True}
@@ -2504,7 +2503,6 @@ def test_webui_resumes_first_run_without_provider_setup(
     assert json.loads(config_file.read_text(encoding="utf-8")) == saved_config
     assert saved_config["channels"]["websocket"]["host"] == "127.0.0.1"
     assert saved_config["channels"]["websocket"]["tokenIssueSecret"]
-    assert saved_config["channels"]["websocket"]["tokenIssueSecretGenerated"] is True
 
 
 def test_webui_missing_runtime_env_fails_before_starting_gateway(
@@ -2865,9 +2863,10 @@ def test_attach_to_background_gateway_checks_owned_sidecar(tmp_path: Path) -> No
         )
 
 
-@pytest.mark.parametrize("credentials_match", [True, False])
-def test_webui_only_reuses_an_unmanaged_gateway_with_matching_credentials(
-    monkeypatch, tmp_path: Path, mock_webui_bundle: MagicMock, credentials_match: bool,
+@pytest.mark.parametrize("dev", [False, True])
+@pytest.mark.parametrize("no_open", [False, True])
+def test_webui_foreground_does_not_claim_unmanaged_gateway(
+    monkeypatch, tmp_path: Path, mock_webui_bundle: MagicMock, dev: bool, no_open: bool,
 ) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
@@ -2881,12 +2880,24 @@ def test_webui_only_reuses_an_unmanaged_gateway_with_matching_credentials(
         lambda url, **_kwargs: opened.append(url),
     )
     monkeypatch.setattr(
-        "nanobot.cli.webui._webui_credentials_match", lambda *_args: credentials_match,
-    )
-    monkeypatch.setattr(
         "nanobot.cli.webui._attach_to_background_gateway",
         lambda _runtime: pytest.fail("unmanaged gateway must not be attached"),
     )
+    seen: dict[str, object] = {}
+    _record_gateway_lease_release(monkeypatch, seen)
+    dev_server = MagicMock()
+
+    @contextmanager
+    def fake_dev_server(**_kwargs):
+        seen["dev_running"] = True
+        try:
+            yield dev_server
+        finally:
+            seen["dev_running"] = False
+
+    wait_for_gateway = MagicMock()
+    monkeypatch.setattr(cli_webui, "run_webui_dev_server", fake_dev_server)
+    monkeypatch.setattr(cli_webui, "_wait_with_existing_foreground_gateway", wait_for_gateway)
 
     class _FakeRuntime:
         def __init__(self, **kwargs) -> None:
@@ -2897,19 +2908,23 @@ def test_webui_only_reuses_an_unmanaged_gateway_with_matching_credentials(
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
 
-    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
+    result = runner.invoke(app, [
+        "webui", "--config", str(config_file), "--yes",
+        *(["--dev"] if dev else []), *(["--no-open"] if no_open else []),
+    ])
 
-    assert result.exit_code == (0 if credentials_match else 1)
-    if credentials_match:
-        assert "WebUI is already running" in result.stdout
-        assert len(opened) == 1
+    assert result.exit_code == 0, result.output
+    assert "WebUI is already running" in result.stdout
+    assert len(opened) == (0 if no_open else 1)
+    assert seen["lease_release_wait_for_stop"] is False
+    if dev:
+        wait_for_gateway.assert_called_once_with("127.0.0.1", 18790, dev_server)
+        assert seen["dev_running_at_release"] is False
+        mock_webui_bundle.assert_not_called()
     else:
-        assert "address is already in use" in result.stdout
-        assert "--port" in result.stdout and "--gateway-port" in result.stdout
-        assert opened == []
-        assert "bootstrapSecret=" not in result.stdout
-    mock_webui_bundle.assert_called_once()
-    assert mock_webui_bundle.call_args.kwargs == {"mode": "auto"}
+        wait_for_gateway.assert_not_called()
+        mock_webui_bundle.assert_called_once()
+        assert mock_webui_bundle.call_args.kwargs == {"mode": "auto"}
 
 
 def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Path) -> None:

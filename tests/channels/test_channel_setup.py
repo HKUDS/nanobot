@@ -55,7 +55,6 @@ INTERNAL_CHANNEL_FIELDS = {
         "token",
         "tokenIssuePath",
         "tokenIssueSecret",
-        "tokenIssueSecretGenerated",
         "tokenTtlS",
         "trustedProxyAuth",
         "unixSocketPath",
