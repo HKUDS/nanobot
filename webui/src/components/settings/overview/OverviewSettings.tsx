@@ -192,25 +192,8 @@ export function AppearanceSettings({ theme, onToggleTheme, localPrefs, onChangeL
   localPrefs: LocalPreferences;
   onChangeLocalPrefs: Dispatch<SetStateAction<LocalPreferences>>;
 }) {
-  const changeBrowserNotifications = (enabled: boolean) => {
-    if (!enabled) {
-      onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: false }));
-      return;
-    }
-    if (typeof Notification === "undefined") return;
-    if (Notification.permission === "granted") {
-      onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: true }));
-      return;
-    }
-    void Notification.requestPermission().then((permission) => {
-      if (permission === "granted") {
-        onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: true }));
-      }
-    });
-  };
   return <AppearanceSettingsView theme={theme} onToggleTheme={onToggleTheme}
-    localPrefs={localPrefs} onChangeLocalPrefs={onChangeLocalPrefs}
-    onChangeBrowserNotifications={changeBrowserNotifications} />;
+    localPrefs={localPrefs} onChangeLocalPrefs={onChangeLocalPrefs} />;
 }
 
 function OverviewRowIcon({

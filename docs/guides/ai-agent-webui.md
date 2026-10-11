@@ -29,6 +29,32 @@ The launcher checks setup, enables the local WebSocket channel after confirmatio
 
 When nanobot edits a file, the WebUI activity timeline can show the changed line counts, a unified diff, and an **Open file** action for a read-only preview. File previews use the chat's current workspace access mode: restricted access stays inside the selected workspace, while Full Access can preview files outside the workspace when the gateway allows it.
 
+## Browser notifications
+
+In **Settings → Appearance**, enable **Browser notifications** and allow the
+browser's permission request. Notifications are off by default and saved in
+this browser, separately from the completion sound. Use **Test notification**
+to check delivery; a successful submission does not prove that the operating
+system displayed it. Check system notification and Do Not Disturb settings if
+nothing appears.
+
+Notifications require HTTPS (or localhost), notification permission, and an
+active service worker. On iPhone or iPad, use the web app from the Home Screen;
+some browsers, including embedded browsers, cannot provide notifications.
+The settings page explains unavailable permissions or browser features.
+
+While the page is in the background, notifications report completion, failure,
+or required recovery for chats connected by that page, including chats you have
+switched away from. They do not include chat text or error details. Clicking
+opens the chat on the same gateway, with normal authentication. A temporary
+chat can only be reopened while its original page connection exists.
+
+Keep the page open and connected. This is **not Web Push**: a closed or suspended
+page cannot receive new task events. This is not a notification feed for every
+gateway task. Recent events are deduplicated across tabs and reconnects (up to
+256 events within 24 hours); browser storage restrictions can limit deduplication
+after a service worker restarts.
+
 ## Production notes
 
 - Use `nanobot gateway --background` when you do not want to keep a terminal open, then open the configured WebUI URL in a browser.

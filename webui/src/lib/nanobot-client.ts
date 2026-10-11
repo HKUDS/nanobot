@@ -73,6 +73,10 @@ function summarizeInboundWsPayload(ev: InboundEvent): unknown {
 
 type Unsubscribe = () => void;
 type EventHandler = (ev: InboundEvent) => void;
+export interface TaskNotice {
+  event: Extract<InboundEvent, { event: "turn_end" | "recovery_state" }>;
+  temporary: boolean;
+}
 type StatusHandler = (status: ConnectionStatus) => void;
 type RunCompletionHandler = (chatId: string) => void;
 type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
@@ -214,6 +218,7 @@ export class NanobotClient {
   private runStatusHandlers = new Set<RunStatusHandler>();
   private runCompletionHandlers = new Set<RunCompletionHandler>();
   private errorHandlers = new Set<ErrorHandler>();
+  private taskNoticeHandlers = new Set<(notice: TaskNotice) => void>();
   private chatHandlers = new Map<string, Set<EventHandler>>();
   private transcriptHandlers = new Map<string, { handler: EventHandler }>();
   /** Inbound frames received while the transcript owner is absent, regardless of observers. */
@@ -308,6 +313,12 @@ export class NanobotClient {
     return () => {
       this.runStatusHandlers.delete(handler);
     };
+  }
+
+  /** Live lifecycle events, independent of mounted chats. Never replays history. */
+  onTaskNotice(handler: (notice: TaskNotice) => void): Unsubscribe {
+    this.taskNoticeHandlers.add(handler);
+    return () => { this.taskNoticeHandlers.delete(handler); };
   }
 
   /** Subscribe to transport-level faults (see :type:`StreamError`). */
@@ -992,6 +1003,13 @@ export class NanobotClient {
 
     if (correlatedChatId) {
       this.recordGoalStateSnapshot(correlatedChatId, parsed);
+      if (parsed.event === "turn_end" || parsed.event === "recovery_state") {
+        for (const handler of this.taskNoticeHandlers) {
+          // Optional browser features must never interrupt delivery or cleanup.
+          try { handler({ event: parsed, temporary: this.temporaryChatIds.has(correlatedChatId) }); }
+          catch { /* The notification owner reports its own delivery failure. */ }
+        }
+      }
       this.dispatch(correlatedChatId, parsed);
     }
   }
