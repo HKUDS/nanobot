@@ -49,17 +49,25 @@ interface LoadedSw {
   fetchMock: ReturnType<typeof vi.fn>;
   skipWaitingMock: ReturnType<typeof vi.fn>;
   claimMock: ReturnType<typeof vi.fn>;
+  showNotification: ReturnType<typeof vi.fn>;
+  matchClients: ReturnType<typeof vi.fn>;
+  openWindow: ReturnType<typeof vi.fn>;
+  noticeStore: FakeCacheStore;
   fire: (type: string, event?: Record<string, unknown>) => Promise<void>;
 }
 
-function loadSw(): LoadedSw {
+function loadSw(noticeStore = new FakeCacheStore()): LoadedSw {
   const listeners = new Map<string, Array<(event: Record<string, unknown>) => void>>();
   const skipWaitingMock = vi.fn();
   const claimMock = vi.fn();
+  const showNotification = vi.fn().mockResolvedValue(undefined);
+  const matchClients = vi.fn().mockResolvedValue([]);
+  const openWindow = vi.fn().mockResolvedValue(null);
   const self = {
     location: { origin: ORIGIN },
     skipWaiting: skipWaitingMock,
-    clients: { claim: claimMock },
+    clients: { claim: claimMock, matchAll: matchClients, openWindow },
+    registration: { showNotification },
     addEventListener: (type: string, cb: (event: Record<string, unknown>) => void) => {
       listeners.set(type, [...(listeners.get(type) ?? []), cb]);
     },
@@ -69,6 +77,7 @@ function loadSw(): LoadedSw {
   const stores = new Map<string, FakeCacheStore>([
     [CACHE_NAME, store],
     [ICON_CACHE_NAME, iconStore],
+    ["nanobot-notification-receipts-v1", noticeStore],
   ]);
   const deletedCacheNames: string[] = [];
   const caches = {
@@ -125,9 +134,81 @@ function loadSw(): LoadedSw {
     fetchMock,
     skipWaitingMock,
     claimMock,
+    showNotification,
+    matchClients,
+    openWindow,
+    noticeStore,
     fire,
   };
 }
+
+describe("browser notification worker", () => {
+  const source = { id: "tab-1", url: `${ORIGIN}/?token=private` };
+  const url = `${ORIGIN}/#/chat/websocket%3Aone`;
+  const data = { type: "nanobot:notify", key: "turn-1", body: "Task completed", url };
+  async function send(sw: LoadedSw, overrides = {}) {
+    const reply = vi.fn();
+    await sw.fire("message", { data: { ...data, ...overrides }, source, ports: [{ postMessage: reply }] });
+    return reply;
+  }
+
+  it("deduplicates concurrent tabs, dismissed notifications, and worker restarts", async () => {
+    const sw = loadSw();
+    const replies = await Promise.all([send(sw), send(sw)]);
+    expect(sw.showNotification).toHaveBeenCalledOnce();
+    expect(replies[0]).toHaveBeenCalledWith("submitted");
+    expect(replies[1]).toHaveBeenCalledWith("skipped");
+    const restarted = loadSw(sw.noticeStore);
+    expect(await send(restarted)).toHaveBeenCalledWith("skipped");
+    expect(restarted.showNotification).not.toHaveBeenCalled();
+    expect(sw.showNotification).toHaveBeenCalledWith("nanobot", expect.objectContaining({
+      body: "Task completed", data: { url, clientId: "tab-1" },
+    }));
+  });
+
+  it("isolates display rejection, then allows a later test or task", async () => {
+    const sw = loadSw();
+    sw.showNotification.mockRejectedValueOnce(new TypeError("unsupported display"));
+    expect(await send(sw)).toHaveBeenCalledWith("displayFailed");
+    expect(await send(sw)).toHaveBeenCalledWith("submitted");
+  });
+
+  it("suppresses background tabs if another tab on the host is visible, but permits testing", async () => {
+    const sw = loadSw();
+    sw.matchClients.mockResolvedValue([{ visibilityState: "visible" }]);
+    expect(await send(sw)).toHaveBeenCalledWith("skipped");
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    expect(await send(sw, { key: "test-1", test: true })).toHaveBeenCalledWith("submitted");
+  });
+
+  it.each(["https://evil.test/#/chat/one", `${ORIGIN}/?token=secret#/chat/one`, `${ORIGIN}/admin`, `https://user:pass@nanobot.test/#/chat/one`])("rejects an unsafe destination %s", async (unsafe) => {
+    const sw = loadSw();
+    expect(await send(sw, { url: unsafe })).toHaveBeenCalledWith("displayFailed");
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: unsafe } } });
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("focuses the original tab without reloading its connection or drafts", async () => {
+    const sw = loadSw();
+    const tab = { id: "tab-1", frameType: "top-level", postMessage: vi.fn(), focus: vi.fn().mockResolvedValue(null) };
+    sw.matchClients.mockResolvedValue([tab]);
+    const close = vi.fn();
+    await sw.fire("notificationclick", { notification: { close, data: { url, clientId: "tab-1" } } });
+    expect(close).toHaveBeenCalledOnce();
+    expect(tab.postMessage).toHaveBeenCalledWith({ type: "nanobot:notification-click", url });
+    expect(tab.focus).toHaveBeenCalledOnce();
+    expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("opens the same host with ordinary auth, but cannot restore a closed temporary chat", async () => {
+    const sw = loadSw();
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenCalledWith(url);
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: `${ORIGIN}/#/temporary/one`, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenLastCalledWith("/#/new");
+  });
+});
 
 function indexHtml(assetPaths: string[]): Response {
   const refs = assetPaths

@@ -241,6 +241,7 @@ vi.mock("@/lib/bootstrap", () => ({
 vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/nanobot-client")>();
   class MockClient {
+    onTaskNotice = () => () => {};
     status = "idle" as const;
     defaultChatId: string | null = null;
     connect = connectSpy;

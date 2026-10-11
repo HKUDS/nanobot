@@ -3,6 +3,10 @@ const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const ICON_CACHE_PREFIX = "nanobot-icons-";
 const ICON_CACHE_NAME = `${ICON_CACHE_PREFIX}v1`;
 const ICON_CACHE_LIMIT = 128;
+const NOTICE_CACHE = "nanobot-notification-receipts-v1";
+const NOTICE_RECEIPTS = "/__notification_receipts__";
+let noticeQueue = Promise.resolve();
+let noticeReceipts;
 const ASSET_MANIFEST_PATH = "/asset-manifest.json";
 const PRECACHE = ["/", "/manifest.json", ASSET_MANIFEST_PATH];
 const NETWORK_FIRST_STATIC_PATHS = new Set([
@@ -16,6 +20,73 @@ const NETWORK_FIRST_STATIC_PATHS = new Set([
   "/brand/nanobot_icon_maskable.png",
   "/brand/nanobot_mark.svg",
 ]);
+
+function notificationTarget(value) {
+  try {
+    const url = new URL(value);
+    if (url.origin !== self.location.origin || url.username || url.password || url.search || url.pathname !== "/") return null;
+    return /^#\/(?:chat|temporary)\/[^?]+$/.test(url.hash)
+      || url.hash === "#/settings?section=appearance" ? url.href : null;
+  } catch { return null; }
+}
+
+async function notifyClient(source, data) {
+  const url = notificationTarget(data.url);
+  if (!url || typeof data.key !== "string" || data.key.length > 2048 || typeof data.body !== "string" || data.body.length > 300) return "displayFailed";
+  // One worker serializes all tabs. Retain bounded receipts even after a
+  // notification is dismissed, so a reconnect does not show it again.
+  if (!noticeReceipts) {
+    try {
+      const saved = await (await caches.open(NOTICE_CACHE)).match(NOTICE_RECEIPTS);
+      noticeReceipts = saved ? await saved.json() : [];
+    } catch { noticeReceipts = []; }
+  }
+  noticeReceipts = noticeReceipts.filter((item) => item.time > Date.now() - 86_400_000);
+  if (noticeReceipts.some((item) => item.key === data.key)) return "skipped";
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const visible = !data.test && windows.some((client) => client.visibilityState === "visible");
+  if (!visible) {
+    await self.registration.showNotification("nanobot", {
+      body: data.body, tag: data.key, icon: "/brand/nanobot_icon_192.png",
+      data: { url, clientId: source.id },
+    });
+  }
+  noticeReceipts = [...noticeReceipts, { key: data.key, time: Date.now() }].slice(-256);
+  try {
+    await (await caches.open(NOTICE_CACHE)).put(NOTICE_RECEIPTS, new Response(JSON.stringify(noticeReceipts)));
+  } catch { /* Storage is optional; the worker still deduplicates live tabs. */ }
+  return visible ? "skipped" : "submitted";
+}
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type !== "nanobot:notify" || !event.source?.url
+    || new URL(event.source.url).origin !== self.location.origin) return;
+  const work = noticeQueue.then(() => notifyClient(event.source, event.data));
+  noticeQueue = work.then(() => undefined, () => undefined);
+  event.waitUntil(work.then(
+    (result) => event.ports[0]?.postMessage(result),
+    () => event.ports[0]?.postMessage("displayFailed"),
+  ));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = notificationTarget(event.notification.data?.url);
+  if (!url) return;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const source = windows.find((client) => client.id === event.notification.data.clientId);
+    const temporary = new URL(url).hash.startsWith("#/temporary/");
+    const target = source || (!temporary && windows.find((client) => client.frameType === "top-level"));
+    if (target) {
+      target.postMessage({ type: "nanobot:notification-click", url });
+      await target.focus();
+    } else {
+      // Temporary chats belong to their original connection, not another tab.
+      await self.clients.openWindow(temporary ? "/#/new" : url);
+    }
+  })());
+});
 
 function responseMayBeCached(response) {
   const cacheControl = response.headers?.get("Cache-Control") ?? "";

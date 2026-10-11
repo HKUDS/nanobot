@@ -12,6 +12,7 @@ import { HostNavigationContext, HostSwitcher, RemoteHostMenu, type HostPicker } 
 import { useSidebarHostBridge } from "./useSidebarHostBridge";
 import { readPairReturn, subscribePairReturn } from "@/lib/remote-pair-return";
 import type { HostConnectionState } from "./HostConnectionStatus";
+import { NOTIFICATION_OPEN_EVENT } from "@/lib/browser-notifications";
 
 const RemoteContext = createContext<{
   available: boolean;
@@ -57,7 +58,16 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
     if (lastLocalFocus.current?.isConnected) lastLocalFocus.current.focus({ preventScroll: true });
   };
   const message = error ? t(`remote.errors.${error}`, { defaultValue: t("remote.errors.unknown") }) : "";
-  const bridge = useSidebarHostBridge(frames, selected?.id, frameNodes, restoreLocalFocus, { pendingName: pending?.name, error: message }, managing, () => changeManagement(false));
+  const bridge = useSidebarHostBridge(frames, selected?.id, frameNodes, restoreLocalFocus, { pendingName: pending?.name, error: message }, managing, () => changeManagement(false), (id) => {
+    if (hosts.reveal(id)) changeManagement(false);
+  });
+  useEffect(() => {
+    const revealLocal = () => {
+      if (window.parent === window) { returnLocal(); setManaging(false); }
+    };
+    window.addEventListener(NOTIFICATION_OPEN_EVENT, revealLocal);
+    return () => window.removeEventListener(NOTIFICATION_OPEN_EVENT, revealLocal);
+  }, [returnLocal]);
   useEffect(() => {
     if (!managing || !selected || !bridge.surface?.theme) return;
     // Management is drawn by the local shell, beside this host's sidebar.

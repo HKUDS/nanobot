@@ -69,6 +69,10 @@ function summarizeInboundWsPayload(ev: InboundEvent): unknown {
 
 type Unsubscribe = () => void;
 type EventHandler = (ev: InboundEvent) => void;
+export interface TaskNotice {
+  event: Extract<InboundEvent, { event: "turn_end" | "recovery_state" }>;
+  temporary: boolean;
+}
 type StatusHandler = (status: ConnectionStatus) => void;
 type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
 type SessionUpdateScope = "metadata" | "thread" | string;
@@ -199,6 +203,7 @@ export class NanobotClient {
   private sidebarStateUpdateHandlers = new Set<SidebarStateUpdateHandler>();
   private runStatusHandlers = new Set<RunStatusHandler>();
   private errorHandlers = new Set<ErrorHandler>();
+  private taskNoticeHandlers = new Set<(notice: TaskNotice) => void>();
   // chat_id -> handlers listening on it
   private chatHandlers = new Map<string, Set<EventHandler>>();
   /** Inbound frames received while no subscriber is registered (e.g. user switched away). */
@@ -311,6 +316,12 @@ export class NanobotClient {
     return () => {
       this.runStatusHandlers.delete(handler);
     };
+  }
+
+  /** Live lifecycle events, independent of mounted chats. Never replays history. */
+  onTaskNotice(handler: (notice: TaskNotice) => void): Unsubscribe {
+    this.taskNoticeHandlers.add(handler);
+    return () => { this.taskNoticeHandlers.delete(handler); };
   }
 
   /** Subscribe to transport-level faults (see :type:`StreamError`). */
@@ -1340,6 +1351,13 @@ export class NanobotClient {
       this.recordGoalStatusForRunStrip(chatId, parsed);
       if (supersededRunCompletion) return;
       this.recordGoalStateSnapshot(chatId, parsed);
+      if (parsed.event === "turn_end" || parsed.event === "recovery_state") {
+        for (const handler of this.taskNoticeHandlers) {
+          // Optional browser features must never interrupt delivery or cleanup.
+          try { handler({ event: parsed, temporary: this.temporaryChatIds.has(chatId) }); }
+          catch { /* The notification owner reports its own delivery failure. */ }
+        }
+      }
       this.dispatch(chatId, parsed);
     }
   }

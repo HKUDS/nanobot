@@ -43,6 +43,19 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("host session lifecycle", () => {
+  it("reveals only a loaded live view for notifications, without connecting", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    await ready(result, 1);
+    mocks.request.mockClear();
+    act(() => { expect(result.current.reveal(ids[0])).toBe(true); });
+    expect(result.current.selected?.id).toBe(ids[0]);
+    act(() => { expect(result.current.reveal(ids[3])).toBe(false); });
+    mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) => ({ ...p, connected: false })) });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    act(() => { expect(result.current.reveal(ids[1])).toBe(false); });
+    expect(mocks.request).not.toHaveBeenCalled();
+  });
   it("clears a failed reconnect only after that host's loaded view recovers", async () => {
     const { result } = renderHook(useHostSessions);
     await ready(result, 0);

@@ -71,6 +71,23 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("emits live task notices without mounted chats, not when the chat replays", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    const broken = client.onTaskNotice(() => { throw new Error("optional notification failed"); });
+    const notice = vi.fn();
+    const unsubscribe = client.onTaskNotice(notice);
+    const event = { event: "turn_end", chat_id: "away", turn_id: "turn", outcome: "completed" };
+    lastSocket().fakeMessage(event);
+    expect(notice).toHaveBeenCalledWith({ event, temporary: false });
+    const replay = vi.fn();
+    client.onChat("away", replay);
+    expect(replay).toHaveBeenCalledWith(event);
+    expect(notice).toHaveBeenCalledOnce();
+    broken(); unsubscribe(); client.close();
+  });
   it("bounds regular replay tails but retains temporary events until discard", async () => {
     const client = new NanobotClient({
       url: "ws://test", reconnect: false,
