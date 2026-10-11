@@ -168,6 +168,11 @@ def _thinking_styles_for(spec: ProviderSpec | None, model_name: str) -> list[str
     styles: list[str] = []
     if spec and spec.thinking_style:
         styles.append(spec.thinking_style)
+    elif spec and spec.name == "zhipu" and _model_slug(model_name) in {
+        "glm-4.6", "glm-4.7", "glm-5", "glm-5.1", "glm-5.2",
+    }:
+        # Keep this model-specific: GLM-5.3 requires thinking and cannot disable it.
+        styles.append("thinking_type")
     model_style = _model_thinking_style(model_name)
     if model_style and model_style not in styles:
         styles.append(model_style)

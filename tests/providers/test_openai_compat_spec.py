@@ -1485,6 +1485,26 @@ def _build_kwargs_for(provider_name: str, model: str, reasoning_effort=None):
     )
 
 
+@pytest.mark.parametrize("provider, model, effort, thinking_type", [
+    ("zhipu", "glm-4.6", "none", "disabled"),
+    ("zhipu", "glm-4.7", "none", "disabled"),
+    ("zhipu", "glm-5", "none", "disabled"),
+    ("zhipu", "glm-5.1", "none", "disabled"),
+    ("zhipu", "glm-5.2", "none", "disabled"),
+    ("zhipu", "glm-5.2", "minimal", "disabled"),
+    ("zhipu", "glm-4.7", "high", "enabled"),
+    ("zhipu", "glm-4.7", None, None),
+    ("zhipu", "glm-5.3", "none", None),
+    ("zhipu", "glm-5.3-flash", "none", None),
+    ("custom", "glm-4.7", "none", None),
+])
+def test_zhipu_glm_thinking_controls(provider, model, effort, thinking_type) -> None:
+    kw = _build_kwargs_for(provider, model, reasoning_effort=effort)
+    assert kw.get("extra_body", {}).get("thinking", {}).get("type") == thinking_type
+    if effort == "none":
+        assert "reasoning_effort" not in kw
+
+
 def test_dashscope_thinking_enabled_with_reasoning_effort() -> None:
     kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="medium")
     assert kw["extra_body"] == {"enable_thinking": True}
