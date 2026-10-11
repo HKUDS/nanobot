@@ -1244,7 +1244,9 @@ class OpenAICompatProvider(LLMProvider):
                     model_name,
                 )
             )
-        is_deepseek = bool(self._spec and self._spec.name == "deepseek")
+        supports_reasoning_none = bool(
+            self._spec and self._spec.name in {"deepseek", "xiaomi_mimo"}
+        )
         capabilities = self._responses_capabilities()
         preserve_reasoning = (
             capabilities is not None and capabilities.reasoning_replay == "plaintext"
@@ -1273,7 +1275,7 @@ class OpenAICompatProvider(LLMProvider):
             and capabilities.reasoning_replay == "encrypted"
         ):
             body["include"] = ["reasoning.encrypted_content"]
-        if reasoning_effort and (reasoning_effort.lower() != "none" or is_deepseek):
+        if reasoning_effort and (reasoning_effort.lower() != "none" or supports_reasoning_none):
             body["reasoning"] = {"effort": reasoning_effort}
         if prepared.replayed and "gpt-5.6" in model_name.lower():
             body.setdefault("reasoning", {})["context"] = "all_turns"

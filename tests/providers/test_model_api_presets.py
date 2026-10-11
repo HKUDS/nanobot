@@ -116,6 +116,30 @@ async def bind_transport():
 
 
 @pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("effort", [None, "none", "low"])
+async def test_mimo_responses_preserves_reasoning_setting(bind_transport, stream, effort):
+    config = Config.model_validate({"providers": {"xiaomi_mimo": {"apiKey": "fixture"}}})
+    preset = ModelPresetConfig(
+        provider="xiaomi_mimo", model="mimo-v2.5-pro", reasoning_effort=effort,
+        api=ModelAPIConfig(supported_apis=["responses"]),
+    )
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return _answer(request)
+
+    provider = bind_transport(make_provider(config, preset=preset), handler)
+    invoke = provider.chat_stream_with_retry if stream else provider.chat_with_retry
+    result = await invoke([{"role": "user", "content": "hello"}])
+    assert result.content == "ok"
+    assert len(requests) == 1
+    assert requests[0].url.path == "/v1/responses"
+    body = json.loads(requests[0].content)
+    assert body.get("reasoning") == ({"effort": effort} if effort is not None else None)
+
+
+@pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize(("provider_name", "model", "api_base", "effort"), [
     ("tenant", "gpt-6-luna", "https://tenant.test/v1", "high"),
     ("openai", "openai/gpt-6-luna", "https://api.openai.com/v1", None),
