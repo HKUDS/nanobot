@@ -75,11 +75,19 @@ def _launch_browser(url: str) -> bool:
     """Open *url* and request a foreground browser window."""
     if sys.platform == "darwin":
         return _launch_macos_browser(url)
-    if sys.platform == "win32":
+    if sys.platform == "win32" or _use_wsl_browser():
         from nanobot.cli.windows_browser import launch_browser
 
         return launch_browser(url)
     return _launch_unix_browser(url)
+
+
+def _use_wsl_browser() -> bool:
+    """Use the Windows desktop in WSL unless the user selected a browser."""
+    return (
+        sys.platform == "linux" and bool(os.environ.get("WSL_DISTRO_NAME"))
+        and not os.environ.get("BROWSER")
+    )
 
 
 def _launch_unix_browser(url: str) -> bool:
@@ -125,7 +133,7 @@ def _launch_browser_command(command: list[str]) -> bool:
 
 def _text_only_browser_name() -> str | None:
     """Return the configured text browser name when it cannot run the WebUI."""
-    if sys.platform in {"darwin", "win32"}:
+    if sys.platform in {"darwin", "win32"} or _use_wsl_browser():
         return None
 
     try:

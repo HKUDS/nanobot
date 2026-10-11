@@ -2631,6 +2631,7 @@ def test_open_webui_browser_rejects_text_only_browser(monkeypatch, capsys) -> No
 
 def test_text_only_browser_name_detects_links(monkeypatch) -> None:
     monkeypatch.setattr(cli_webui_support.sys, "platform", "linux")
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     monkeypatch.setattr(
         cli_webui_support.webbrowser,
         "get",
@@ -2656,6 +2657,7 @@ def test_launch_browser_uses_macos_url_services(monkeypatch) -> None:
 def test_launch_browser_uses_unix_launcher_on_linux(monkeypatch) -> None:
     opened: list[str] = []
     monkeypatch.setattr(cli_webui_support.sys, "platform", "linux")
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     monkeypatch.setattr(
         cli_webui_support,
         "_launch_unix_browser",

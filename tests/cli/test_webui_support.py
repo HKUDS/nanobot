@@ -88,6 +88,7 @@ def test_unix_browser_reports_delayed_launcher_failure_without_raw_output(monkey
     )
     browser = webbrowser.BackgroundBrowser([sys.executable, str(launcher), "%s"])
     monkeypatch.setattr(webui_support.sys, "platform", "linux")
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     monkeypatch.delenv("BROWSER", raising=False)
     monkeypatch.setattr(webui_support.webbrowser, "get", lambda _choice=None: browser)
 
@@ -112,6 +113,7 @@ def test_unix_browser_preserves_custom_commands_and_candidate_order(monkeypatch,
         encoding="utf-8",
     )
     command = shlex.join([sys.executable, str(launcher), str(result), "%s"])
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
     monkeypatch.setenv("BROWSER", f"unavailable-nanobot-test-browser{os.pathsep}{command}")
     monkeypatch.setenv("DISPLAY", "")
     monkeypatch.setenv("WAYLAND_DISPLAY", "")

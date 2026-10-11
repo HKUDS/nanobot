@@ -28,7 +28,7 @@ nanobot gateway --background
 
 Each foreground WebUI or TUI launcher releases only its own client. The last interactive launcher stops an on-demand gateway. `nanobot gateway --background` makes the gateway persistent; manage it with `nanobot gateway status`, `nanobot gateway logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
 
-The browser signs in automatically using the generated credential in the launch URL. You do not need to choose a password for local use. The terminal also prints the complete login link: if automatic opening fails, copy that link into your browser, including the fragment after `#`. In WSL, use the link in your Windows browser. Opening the plain page address in a browser that has not signed in still requires authentication. Treat the login link as a credential and do not share it.
+The browser signs in automatically using the generated credential in the launch URL. You do not need to choose a password for local use. The terminal also prints the complete login link: if automatic opening fails, copy that link into your browser, including the fragment after `#`. In WSL, the launcher opens your Windows default browser through Windows PowerShell; an explicit `BROWSER` setting takes precedence. If Windows integration is unavailable, open the printed link in your Windows browser. Opening the plain page address in a browser that has not signed in still requires authentication. Treat the login link as a credential and do not share it.
 
 `nanobot webui --no-open` prints the same login link without opening a browser. Development mode uses the Vite address, normally `http://127.0.0.1:5173`, with the same gateway authentication; the dev proxy remains loopback-only.
 
