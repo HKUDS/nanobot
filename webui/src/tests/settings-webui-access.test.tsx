@@ -56,7 +56,7 @@ describe("WebUI access settings", () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toBeChecked());
     expect(requestMutationMock).toHaveBeenCalledWith("settings.webui_access.update", { allow_other_devices: true }, expect.any(Number));
-    const access = screen.getByRole("region", { name: "WebUI access" });
+    const access = screen.getByRole("region", { name: "Public network access" });
     expect(within(access).getByText("127.0.0.1")).toBeVisible();
     fireEvent.click(within(access).getByRole("button", { name: "Current listening address" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Currently, only this computer can connect.");
@@ -66,7 +66,7 @@ describe("WebUI access settings", () => {
     expect(restart).toHaveBeenCalledTimes(1);
   });
 
-  it("explains that disabling remote access disconnects other devices after restarting", async () => {
+  it("shows that disabling remote access takes effect after restarting", async () => {
     const networkAccess = { ...localAccess, allow_other_devices: true, active_allow_other_devices: true, host: "0.0.0.0", active_host: "0.0.0.0" };
     requestMutationMock.mockResolvedValue({
       ...settingsPayload(),
@@ -82,9 +82,8 @@ describe("WebUI access settings", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Allow access from other devices" }));
     await waitFor(() => expect(screen.getByRole("switch", { name: "Allow access from other devices" })).not.toBeChecked());
     expect(requestMutationMock).toHaveBeenCalledWith("settings.webui_access.update", { allow_other_devices: false }, expect.any(Number));
-    const access = screen.getByRole("region", { name: "WebUI access" });
-    expect(within(access).getByRole("status")).toHaveTextContent("other devices will disconnect");
-    expect(within(access).getByRole("status")).toHaveTextContent("localhost");
+    const access = screen.getByRole("region", { name: "Public network access" });
+    expect(within(access).getByRole("status")).toHaveTextContent("Takes effect after restart");
     expect(within(access).getByText("0.0.0.0")).toBeVisible();
   });
 
@@ -208,7 +207,7 @@ describe("WebUI access settings", () => {
     }, expect.any(Number));
     expect(credentialsChanged).toHaveBeenCalledTimes(1);
     expect(credentialsChanged).toHaveBeenCalledWith(secret);
-    const access = screen.getByRole("region", { name: "WebUI access" });
+    const access = screen.getByRole("region", { name: "Public network access" });
     expect(within(access).getByText("127.0.0.1")).toBeVisible();
     expect(within(access).getByRole("status")).toHaveTextContent("Saved. Restart to allow other devices to connect.");
   });

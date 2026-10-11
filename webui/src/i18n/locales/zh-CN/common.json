@@ -1245,7 +1245,7 @@
       "installing": "正在安装所需软件包…"
     },
     "webuiAccess": {
-      "title": "网页访问",
+      "title": "公网访问",
       "allowOtherDevices": "允许其他设备访问",
       "description": "其他设备连接仍需通过身份验证。",
       "activeHost": "当前监听地址",
@@ -1253,7 +1253,7 @@
       "networkActive": "当前允许其他设备通过身份验证后连接。",
       "managed": "当前监听方式由主机管理，无法在此更改。",
       "pendingEnable": "已保存，重启后允许其他设备连接。",
-      "pendingDisable": "已保存，重启后其他设备将断开连接，请在本机打开 localhost 地址重新连接。",
+      "pendingDisable": "重启后生效",
       "networkScope": "此设置只更改 WebUI 的监听范围，不会配置防火墙、路由器或公网隧道。",
       "saveFailed": "访问设置保存失败，请重试。",
       "passwordTitle": "设置访问密码",

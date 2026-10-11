@@ -1056,7 +1056,7 @@
       }
     },
     "webuiAccess": {
-      "title": "Truy cập WebUI",
+      "title": "Truy cập qua Internet",
       "allowOtherDevices": "Cho phép thiết bị khác truy cập",
       "description": "Các thiết bị khác vẫn phải xác thực để kết nối.",
       "activeHost": "Địa chỉ lắng nghe hiện tại",
@@ -1064,7 +1064,7 @@
       "networkActive": "Hiện các thiết bị khác có thể kết nối sau khi xác thực.",
       "managed": "Chế độ lắng nghe này do máy chủ quản lý và không thể thay đổi ở đây.",
       "pendingEnable": "Đã lưu. Khởi động lại để cho phép các thiết bị khác kết nối.",
-      "pendingDisable": "Đã lưu. Sau khi khởi động lại, các thiết bị khác sẽ bị ngắt kết nối. Mở địa chỉ localhost trên máy tính này để kết nối lại.",
+      "pendingDisable": "Có hiệu lực sau khi khởi động lại",
       "networkScope": "Chỉ thay đổi phạm vi lắng nghe của WebUI. Không cấu hình tường lửa, bộ định tuyến hay đường hầm công khai.",
       "saveFailed": "Không thể lưu cài đặt truy cập. Vui lòng thử lại.",
       "passwordTitle": "Đặt mật khẩu truy cập",

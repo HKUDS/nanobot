@@ -1245,7 +1245,7 @@
       "installing": "Installing required packages…"
     },
     "webuiAccess": {
-      "title": "WebUI access",
+      "title": "Public network access",
       "allowOtherDevices": "Allow access from other devices",
       "description": "Other devices still need to authenticate to connect.",
       "activeHost": "Current listening address",
@@ -1253,7 +1253,7 @@
       "networkActive": "Currently, other devices can connect after authenticating.",
       "managed": "This listener is managed by the host and cannot be changed here.",
       "pendingEnable": "Saved. Restart to allow other devices to connect.",
-      "pendingDisable": "Saved. After restarting, other devices will disconnect. Open this computer’s localhost address to reconnect.",
+      "pendingDisable": "Takes effect after restart",
       "networkScope": "This only changes where WebUI listens. It does not configure firewalls, routers or public tunnels.",
       "saveFailed": "Could not save access settings. Try again.",
       "passwordTitle": "Set an access password",

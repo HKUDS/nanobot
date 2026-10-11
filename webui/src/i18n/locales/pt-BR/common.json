@@ -1059,7 +1059,7 @@
       "installing": "Instalando dependências…"
     },
     "webuiAccess": {
-      "title": "Acesso à WebUI",
+      "title": "Acesso pela Internet",
       "allowOtherDevices": "Permitir acesso de outros dispositivos",
       "description": "Os outros dispositivos também precisam se autenticar para se conectar.",
       "activeHost": "Endereço de escuta atual",
@@ -1067,7 +1067,7 @@
       "networkActive": "No momento, outros dispositivos podem se conectar após a autenticação.",
       "managed": "Esta escuta é gerenciada pelo host e não pode ser alterada aqui.",
       "pendingEnable": "Salvo. Reinicie para permitir a conexão de outros dispositivos.",
-      "pendingDisable": "Salvo. Após reiniciar, os outros dispositivos serão desconectados. Abra o endereço localhost neste computador para se reconectar.",
+      "pendingDisable": "Entra em vigor após reiniciar",
       "networkScope": "Isso altera apenas onde a WebUI escuta. Não configura firewalls, roteadores ou túneis públicos.",
       "saveFailed": "Não foi possível salvar as configurações de acesso. Tente novamente.",
       "passwordTitle": "Definir senha de acesso",

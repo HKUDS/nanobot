@@ -1056,7 +1056,7 @@
       }
     },
     "webuiAccess": {
-      "title": "WebUI 접속",
+      "title": "인터넷에서 접속",
       "allowOtherDevices": "다른 기기의 접속 허용",
       "description": "다른 기기에서도 연결하려면 인증이 필요합니다.",
       "activeHost": "현재 수신 주소",
@@ -1064,7 +1064,7 @@
       "networkActive": "현재 다른 기기에서도 인증 후 연결할 수 있습니다.",
       "managed": "이 수신 설정은 호스트에서 관리하므로 여기서 변경할 수 없습니다.",
       "pendingEnable": "저장했습니다. 다시 시작하면 다른 기기에서도 연결할 수 있습니다.",
-      "pendingDisable": "저장했습니다. 다시 시작하면 다른 기기의 연결이 끊어집니다. 이 컴퓨터에서 localhost 주소를 열어 다시 연결하세요.",
+      "pendingDisable": "다시 시작 후 적용",
       "networkScope": "WebUI의 수신 범위만 변경합니다. 방화벽, 라우터 또는 공개 터널은 설정하지 않습니다.",
       "saveFailed": "접속 설정을 저장하지 못했습니다. 다시 시도하세요.",
       "passwordTitle": "접속 비밀번호 설정",

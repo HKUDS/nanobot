@@ -1056,7 +1056,7 @@
       }
     },
     "webuiAccess": {
-      "title": "Akses WebUI",
+      "title": "Akses melalui internet",
       "allowOtherDevices": "Izinkan akses dari perangkat lain",
       "description": "Perangkat lain tetap harus diautentikasi untuk terhubung.",
       "activeHost": "Alamat dengar saat ini",
@@ -1064,7 +1064,7 @@
       "networkActive": "Saat ini, perangkat lain dapat terhubung setelah autentikasi.",
       "managed": "Pengaturan pendengar ini dikelola oleh host dan tidak dapat diubah di sini.",
       "pendingEnable": "Tersimpan. Mulai ulang untuk mengizinkan perangkat lain terhubung.",
-      "pendingDisable": "Tersimpan. Setelah memulai ulang, perangkat lain akan terputus. Buka alamat localhost di komputer ini untuk terhubung kembali.",
+      "pendingDisable": "Berlaku setelah memulai ulang",
       "networkScope": "Ini hanya mengubah cakupan alamat dengar WebUI. Tidak mengonfigurasi firewall, router, atau tunnel publik.",
       "saveFailed": "Pengaturan akses tidak dapat disimpan. Coba lagi.",
       "passwordTitle": "Atur kata sandi akses",

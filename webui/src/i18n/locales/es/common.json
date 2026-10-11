@@ -1056,7 +1056,7 @@
       }
     },
     "webuiAccess": {
-      "title": "Acceso a la WebUI",
+      "title": "Acceso desde Internet",
       "allowOtherDevices": "Permitir el acceso desde otros dispositivos",
       "description": "Los otros dispositivos también deben autenticarse para conectarse.",
       "activeHost": "Dirección de escucha actual",
@@ -1064,7 +1064,7 @@
       "networkActive": "Actualmente, otros dispositivos pueden conectarse tras autenticarse.",
       "managed": "El host gestiona esta escucha y no se puede cambiar aquí.",
       "pendingEnable": "Guardado. Reinicia para permitir que otros dispositivos se conecten.",
-      "pendingDisable": "Guardado. Al reiniciar, los otros dispositivos se desconectarán. Abre la dirección localhost en este equipo para volver a conectarte.",
+      "pendingDisable": "Se aplica al reiniciar",
       "networkScope": "Esto solo cambia dónde escucha la WebUI. No configura cortafuegos, routers ni túneles públicos.",
       "saveFailed": "No se pudo guardar la configuración de acceso. Inténtalo de nuevo.",
       "passwordTitle": "Establecer una contraseña de acceso",

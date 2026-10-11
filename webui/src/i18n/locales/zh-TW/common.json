@@ -1056,7 +1056,7 @@
       }
     },
     "webuiAccess": {
-      "title": "網頁存取",
+      "title": "公網存取",
       "allowOtherDevices": "允許其他裝置存取",
       "description": "其他裝置連線仍須通過身分驗證。",
       "activeHost": "目前監聽位址",
@@ -1064,7 +1064,7 @@
       "networkActive": "目前允許其他裝置通過身分驗證後連線。",
       "managed": "目前的監聽方式由主機管理，無法在此變更。",
       "pendingEnable": "已儲存，重新啟動後允許其他裝置連線。",
-      "pendingDisable": "已儲存，重新啟動後其他裝置將中斷連線，請在本機開啟 localhost 網址重新連線。",
+      "pendingDisable": "重新啟動後生效",
       "networkScope": "此設定只變更 WebUI 的監聽範圍，不會設定防火牆、路由器或公網通道。",
       "saveFailed": "存取設定儲存失敗，請重試。",
       "passwordTitle": "設定存取密碼",
