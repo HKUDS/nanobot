@@ -7,6 +7,7 @@ import base64
 import binascii
 import re
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -1453,22 +1454,26 @@ class CodexImageGenerationClient(ImageGenerationProvider):
         logger.info("Codex Responses API request: POST {}/codex/responses body={}",
                        self.api_base, {k: v for k, v in body.items() if k != "input"})
 
-        response = await self._http_post(
-            f"{self.api_base}/codex/responses",
-            headers=headers,
-            body=body,
+        # Parse SSE before transport EOF so a completed image survives a late disconnect.
+        client_context = (
+            nullcontext(self._client) if self._client is not None
+            else httpx.AsyncClient(**self._http_client_kwargs())
         )
+        async with client_context as client:
+            async with client.stream(
+                "POST", f"{self.api_base}/codex/responses", headers=headers, json=body,
+            ) as response:
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    await response.aread()
+                    detail = response.text[:1000]
+                    logger.error("Codex Responses API error ({}): {}", response.status_code, detail)
+                    raise ImageGenerationError(
+                        f"Codex image generation failed (HTTP {response.status_code}): {detail}"
+                    ) from exc
 
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            detail = response.text[:1000]
-            logger.error("Codex Responses API error ({}): {}", response.status_code, detail)
-            raise ImageGenerationError(
-                f"Codex image generation failed (HTTP {response.status_code}): {detail}"
-            ) from exc
-
-        images, content_text = await _parse_codex_sse_images(response)
+                images, content_text = await _parse_codex_sse_images(response)
 
         raw = {"status": "completed"}
         self._require_images(images, raw)
