@@ -59,7 +59,7 @@ def test_tool_context_has_required_fields():
     required = {
         "config", "workspace", "bus", "subagent_manager",
         "cron_service", "exec_session_manager", "file_state_store",
-        "provider_snapshot_loader", "image_generation_provider_configs", "timezone",
+        "provider_snapshot_loader", "providers_config", "timezone",
         "runtime_control",
     }
     assert required <= field_names
@@ -72,7 +72,7 @@ def test_tool_context_defaults():
     assert ctx.cron_service is None
     assert ctx.exec_session_manager is None
     assert ctx.provider_snapshot_loader is None
-    assert ctx.image_generation_provider_configs is None
+    assert ctx.providers_config is None
     assert ctx.runtime_control is None
     assert ctx.timezone == "UTC"
 
@@ -354,14 +354,16 @@ def test_image_gen_tool_enabled():
 
 def test_image_gen_tool_create():
     from nanobot.agent.tools.image_generation import ImageGenerationTool
+    from nanobot.config.schema import ProviderConfig, ProvidersConfig
     mock_config = MagicMock()
     mock_config.image_generation = MagicMock()
     ctx = ToolContext(
         config=mock_config, workspace="/tmp",
-        image_generation_provider_configs={"openrouter": MagicMock()},
+        providers_config=ProvidersConfig(openrouter=ProviderConfig(api_key="image-key")),
     )
     tool = ImageGenerationTool.create(ctx)
     assert isinstance(tool, ImageGenerationTool)
+    assert tool.provider_configs["openrouter"].api_key == "image-key"
 
 
 # --- Task 7: MyToolConfig + MCP wrappers ---

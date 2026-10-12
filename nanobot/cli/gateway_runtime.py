@@ -377,7 +377,6 @@ def _run_gateway(
         load_provider_snapshot,
     )
     from nanobot.providers.fallback_provider import FallbackProvider
-    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
     from nanobot.session.recovery import RecoveryCoordinator
     from nanobot.session.webui_turns import (
@@ -492,7 +491,6 @@ def _run_gateway(
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-        image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
         turn_delivery_factory=turn_delivery_factory,

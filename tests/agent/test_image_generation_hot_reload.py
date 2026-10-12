@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent import context as agent_context
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.image_generation import (
     ImageGenerationTool,
     reload_image_generation_tool,
@@ -16,15 +16,6 @@ from nanobot.agent.tools.image_generation import (
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import ToolsConfig
-
-
-def _runtime_state(tmp_path):
-    return SimpleNamespace(
-        workspace=tmp_path,
-        tools_config=ToolsConfig(),
-        _image_generation_provider_configs={},
-    )
 
 
 @pytest.mark.asyncio
@@ -41,37 +32,40 @@ async def test_image_generation_reload_replaces_and_removes_live_tool(
     config.tools.image_generation.model = "openai/first-image-model"
     save_config(config)
 
-    state = _runtime_state(tmp_path)
     registry = ToolRegistry()
-    result = await reload_image_generation_tool(state, registry)
+    assert registry.get_definitions() == []
+    result = await reload_image_generation_tool(tmp_path, registry)
 
     first_tool = registry.get("generate_image")
     assert result["requires_restart"] is False
     assert isinstance(first_tool, ImageGenerationTool)
     assert first_tool.config.model == "openai/first-image-model"
     assert first_tool.provider_configs["openrouter"].api_key == "first-key"
+    assert [definition["function"]["name"] for definition in registry.get_definitions()] == [
+        "generate_image"
+    ]
 
     config = load_config()
     config.providers.openrouter.api_key = "second-key"
     config.tools.image_generation.model = "openai/second-image-model"
     save_config(config)
 
-    result = await reload_image_generation_tool(state, registry)
+    result = await reload_image_generation_tool(tmp_path, registry)
     second_tool = registry.get("generate_image")
     assert result["requires_restart"] is False
     assert isinstance(second_tool, ImageGenerationTool)
     assert second_tool is not first_tool
     assert second_tool.config.model == "openai/second-image-model"
     assert second_tool.provider_configs["openrouter"].api_key == "second-key"
-    assert state.tools_config.image_generation.model == "openai/second-image-model"
 
     config = load_config()
     config.tools.image_generation.enabled = False
     save_config(config)
 
-    result = await reload_image_generation_tool(state, registry)
+    result = await reload_image_generation_tool(tmp_path, registry)
     assert result["requires_restart"] is False
     assert not registry.has("generate_image")
+    assert registry.get_definitions() == []
 
 
 @pytest.mark.asyncio
@@ -87,17 +81,47 @@ async def test_image_generation_reload_reaches_agent_runtime_control(
     save_config(config)
 
     bus = MessageBus()
-    state = _runtime_state(tmp_path)
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
+    consumer = asyncio.create_task(loop.run())
+    try:
+        result = await request_image_generation_reload(bus, timeout=2.0)
+
+        assert result["ok"] is True
+        assert result["requires_restart"] is False
+        assert loop.tools.has("generate_image")
+        assert loop.tools.has("read_file")
+        provider.chat_stream_with_retry.assert_not_called()
+    finally:
+        loop.stop()
+        consumer.cancel()
+        await asyncio.gather(consumer, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_image_generation_reload_failure_preserves_live_tool(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    config = load_config()
+    config.tools.image_generation.enabled = True
+    config.providers.openrouter.api_key = "working-key"
+    save_config(config)
     registry = ToolRegistry()
+    await reload_image_generation_tool(tmp_path, registry)
+    working_tool = registry.get("generate_image")
+    definitions = registry.get_definitions()
 
-    async def consume_control() -> None:
-        message = await bus.consume_inbound()
-        assert await agent_context.handle_runtime_control(state, message, registry) is True
+    missing_env = "NANOBOT_TEST_IMAGE_RELOAD_KEY"
+    monkeypatch.delenv(missing_env, raising=False)
+    config.providers.openrouter.api_key = f"${{{missing_env}}}"
+    save_config(config)
+    result = await reload_image_generation_tool(tmp_path, registry)
 
-    consumer = asyncio.create_task(consume_control())
-    result = await request_image_generation_reload(bus, timeout=2.0)
-    await consumer
-
-    assert result["ok"] is True
-    assert result["requires_restart"] is False
-    assert registry.has("generate_image")
+    assert result["ok"] is False
+    assert result["requires_restart"] is True
+    assert registry.get("generate_image") is working_tool
+    assert registry.get_definitions() == definitions

@@ -118,6 +118,23 @@ def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
     assert bot._mcp_provider._registry is bot._loop.tools
 
 
+def test_from_config_uses_instance_image_settings(tmp_path, monkeypatch):
+    from nanobot.agent.tools.image_generation import ImageGenerationTool
+
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "default.json")
+    config_path = _write_config(
+        tmp_path,
+        {"tools": {"imageGeneration": {"enabled": True, "model": "instance-image-model"}}},
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    tool = bot._loop.tools.get("generate_image")
+    assert isinstance(tool, ImageGenerationTool)
+    assert tool.config.model == "instance-image-model"
+    assert tool.provider_configs["openrouter"].api_key == "sk-test-key"
+
+
 def test_from_config_accepts_default_model_override(tmp_path):
     config_path = _write_config(tmp_path)
 

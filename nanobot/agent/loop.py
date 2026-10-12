@@ -25,6 +25,7 @@ from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver, TranscriptInput
+from nanobot.agent.control import handle_runtime_control
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.goal_permission import GoalInputScope
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
@@ -110,7 +111,7 @@ if TYPE_CHECKING:
     from nanobot.config.schema import (
         ChannelsConfig,
         Config,
-        ProviderConfig,
+        ProvidersConfig,
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
@@ -281,8 +282,7 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
-        image_generation_provider_config: ProviderConfig | None = None,
-        image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
+        providers_config: ProvidersConfig | None = None,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
         model_presets: dict[str, ModelPresetConfig] | None = None,
@@ -351,12 +351,6 @@ class AgentLoop:
         self.tools_config = _tc
         self.web_config = _tc.web
         self.exec_config = _tc.exec
-        self._image_generation_provider_configs = dict(image_generation_provider_configs or {})
-        if (
-            image_generation_provider_config is not None
-            and "openrouter" not in self._image_generation_provider_configs
-        ):
-            self._image_generation_provider_configs["openrouter"] = image_generation_provider_config
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.restrict_to_workspace = restrict_to_workspace
@@ -445,7 +439,10 @@ class AgentLoop:
         self._next_idle_compact_check_at = time.monotonic()
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
-        self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
+        self._register_default_tools(
+            providers_config=providers_config,
+            provider_snapshot_loader=provider_snapshot_loader,
+        )
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -506,6 +503,7 @@ class AgentLoop:
             session_ttl_minutes=defaults.session_ttl_minutes,
             idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
             tools_config=config.tools,
+            providers_config=config.providers,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
             dream_model_preset=defaults.dream.model_override,
@@ -614,6 +612,7 @@ class AgentLoop:
     def _register_default_tools(
         self,
         *,
+        providers_config: ProvidersConfig | None,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None,
     ) -> None:
         """Register the default set of tools via plugin loader."""
@@ -631,7 +630,7 @@ class AgentLoop:
             exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
-            image_generation_provider_configs=self._image_generation_provider_configs,
+            providers_config=providers_config,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_control=runtime_control,
@@ -1367,7 +1366,12 @@ class AgentLoop:
 
                 raw = command_text(msg)
                 effective_key = self._effective_session_key(msg)
-                if await agent_context.handle_runtime_control(self, msg, self.tools):
+                if await handle_runtime_control(
+                    msg,
+                    workspace=self.workspace,
+                    tools=self.tools,
+                    discard_session=self.discard_session,
+                ):
                     continue
                 if (
                     msg.require_existing_session

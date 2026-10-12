@@ -10,7 +10,12 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import set_config_path
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
+from nanobot.config.schema import (
+    ImageGenerationToolConfig,
+    ProviderConfig,
+    ProvidersConfig,
+    ToolsConfig,
+)
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.image_generation import GeneratedImageResponse
 
@@ -66,7 +71,7 @@ async def test_generate_image_does_not_attach_media_to_final_response(
         tools_config=ToolsConfig(
             image_generation=ImageGenerationToolConfig(enabled=True),
         ),
-        image_generation_provider_config=ProviderConfig(api_key="sk-or-test"),
+        providers_config=ProvidersConfig(openrouter=ProviderConfig(api_key="sk-or-test")),
     )
 
     result = await loop._process_message(

@@ -15,7 +15,7 @@ from urllib.parse import urljoin
 import httpx
 from loguru import logger
 
-from nanobot.config.schema import Config, ProviderConfig
+from nanobot.config.schema import ProviderConfig, ProvidersConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -262,12 +262,11 @@ def image_gen_provider_names() -> tuple[str, ...]:
     return tuple(_IMAGE_GEN_PROVIDERS)
 
 
-def image_gen_provider_configs(config: Config) -> dict[str, ProviderConfig]:
-    providers_cfg = config.providers
+def image_gen_provider_configs(providers: ProvidersConfig | None) -> dict[str, ProviderConfig]:
     return {
         name: pc
         for name in _IMAGE_GEN_PROVIDERS
-        if (pc := getattr(providers_cfg, name, None)) is not None
+        if (pc := getattr(providers, name, None)) is not None
     }
 
 

@@ -130,7 +130,6 @@ def agent(
     from nanobot.cli.stream import ThinkingSpinner
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import make_provider
-    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
     from nanobot.utils.restart import (
         format_restart_completed_message,
@@ -173,7 +172,6 @@ def agent(
             bus,
             provider=provider,
             cron_service=cron,
-            image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
         )

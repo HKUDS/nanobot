@@ -99,7 +99,7 @@ class ImageGenerationTool(Tool):
         return cls(
             workspace=ctx.workspace,
             config=ctx.config.image_generation,
-            provider_configs=ctx.image_generation_provider_configs,
+            provider_configs=image_gen_provider_configs(ctx.providers_config),
         )
 
     def __init__(
@@ -224,14 +224,17 @@ class ImageGenerationTool(Tool):
             return ToolResult.error(f"Error: {exc}")
 
 
-async def reload_image_generation_tool(state: Any, registry: ToolRegistry) -> dict[str, Any]:
+async def reload_image_generation_tool(
+    workspace: str | Path,
+    registry: ToolRegistry,
+) -> dict[str, Any]:
     """Apply the persisted image configuration to the running agent."""
     try:
         from nanobot.config.loader import load_config, resolve_config_env_vars
 
         config = resolve_config_env_vars(load_config())
         tool_config = config.tools.image_generation
-        provider_configs = image_gen_provider_configs(config)
+        provider_configs = image_gen_provider_configs(config.providers)
     except Exception as exc:
         logger.warning("Image generation hot reload could not read config: {}", exc)
         return {
@@ -243,7 +246,7 @@ async def reload_image_generation_tool(state: Any, registry: ToolRegistry) -> di
 
     next_tool = (
         ImageGenerationTool(  # pyright: ignore[reportAbstractUsage]
-            workspace=state.workspace,
+            workspace=workspace,
             config=tool_config,
             provider_configs=provider_configs,
         )
@@ -251,8 +254,6 @@ async def reload_image_generation_tool(state: Any, registry: ToolRegistry) -> di
         else None
     )
 
-    state.tools_config.image_generation = tool_config
-    state._image_generation_provider_configs = provider_configs
     if next_tool is not None:
         registry.register(next_tool)
     else:
@@ -312,8 +313,8 @@ async def request_image_generation_reload(
 
 
 async def handle_runtime_control(
-    state: Any,
     msg: InboundMessage,
+    workspace: str | Path,
     registry: ToolRegistry,
 ) -> bool:
     """Handle an in-process image generation reload request."""
@@ -323,7 +324,7 @@ async def handle_runtime_control(
 
     ack = metadata.get(RUNTIME_CONTROL_ACK)
     try:
-        result = await reload_image_generation_tool(state, registry)
+        result = await reload_image_generation_tool(workspace, registry)
     except Exception as exc:
         logger.exception("Image generation hot reload failed")
         result = {

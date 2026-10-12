@@ -14,7 +14,6 @@ from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import Config
 from nanobot.providers.base import LLMUsage
-from nanobot.providers.image_generation import image_gen_provider_configs
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
 from nanobot.sdk.runtime import (
     build_process_direct_kwargs,
@@ -135,7 +134,6 @@ class Nanobot:
         mcp_provider = MCPProvider.from_config(config, tools)
         loop = AgentLoop.from_config(
             config,
-            image_generation_provider_configs=image_gen_provider_configs(config),
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
         )

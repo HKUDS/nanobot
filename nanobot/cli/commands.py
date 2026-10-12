@@ -371,7 +371,6 @@ def serve(
 
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
     _set_nanobot_logs(verbose)
@@ -396,7 +395,6 @@ def serve(
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
             session_manager=session_manager,
-            image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
         )
