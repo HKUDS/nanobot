@@ -6,11 +6,7 @@ This is the full reference. If this is your first install, start with [`quick-st
 
 For normal local use, prefer the WebUI before editing JSON: **Settings → Models** manages model choices and provider credentials, **Channels** guides chat-platform setup, other Settings pages cover built-in capabilities, and **Apps** manages CLI App and MCP integrations. Use direct configuration for fields without a graphical control; expand the manual alternatives for headless deployments or configuration managed as code.
 
-Use the graphical steps for settings exposed in the WebUI. Their JSON alternatives
-are collapsed under **Manual configuration**. Settings without a graphical control
-retain direct configuration instructions. JSON examples are usually partial snippets
-to merge into your existing config, not full replacement files. For the mental model
-behind config, workspace, gateway, channels, sessions, tools, and memory, see [`concepts.md`](./concepts.md).
+Use the graphical steps for settings exposed in the WebUI. Their JSON alternatives are collapsed under **Manual configuration**. Settings without a graphical control retain direct configuration instructions. JSON examples are usually partial snippets to merge into your existing config, not full replacement files. For the mental model behind config, workspace, gateway, channels, sessions, tools, and memory, see [`concepts.md`](./concepts.md).
 
 The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`. snake_case keys are also accepted for compatibility, but the docs prefer camelCase because that is what nanobot writes back to disk.
 
@@ -256,25 +252,14 @@ For a normal first setup:
 4. Choose a model available to your account, save the preset, and select it in chat.
 5. Send `Hello!` before changing advanced options.
 
-Built-in hosted providers use their default service endpoints. You normally do not
-need to find or enter a Base URL, choose a request API, or configure a proxy. The
-endpoint field can stay at its supplied default. Some providers, such as Azure,
-need an account-specific resource address; enter it when the setup form requires it.
+Built-in hosted providers use their default service endpoints. You normally do not need to find or enter a Base URL, choose a request API, or configure a proxy. The endpoint field can stay at its supplied default. Some providers, such as Azure, need an account-specific resource address; enter it when the setup form requires it.
 
-For a company gateway, a custom service, or a local model server at a different
-address, expand the connection notes below. Ollama and LM Studio also have local
-defaults; change them only if your server runs elsewhere.
+For a company gateway, a custom service, or a local model server at a different address, expand the connection notes below. Ollama and LM Studio also have local defaults; change them only if your server runs elsewhere.
 
 <details>
 <summary>Custom endpoints and provider-specific options</summary>
 
-A Base URL is the service address nanobot sends model requests to. Change it only
-when your service supplies a different endpoint, such as a company proxy, a regional
-service, or a subscription-specific endpoint. Prefer a dedicated built-in provider
-when one matches your subscription. For an unlisted service, create a custom
-connection and enter its address and any required credential; choose the request API
-under **Advanced options** only when that service requires it. See
-[custom connection APIs](#custom-connection-apis) for protocol details.
+A Base URL is the service address nanobot sends model requests to. Change it only when your service supplies a different endpoint, such as a company proxy, a regional service, or a subscription-specific endpoint. Prefer a dedicated built-in provider when one matches your subscription. For an unlisted service, create a custom connection and enter its address and any required credential; choose the request API under **Advanced options** only when that service requires it. See [custom connection APIs](#custom-connection-apis) for protocol details.
 
 > [!TIP]
 > - **Voice transcription**: Choose Groq, OpenAI, OpenRouter, Xiaomi MiMo, StepFun, AssemblyAI, or SiliconFlow in **Settings → Capabilities → Transcription**. Voice messages and WebUI microphone input share these settings; Groq is the runtime default. Configure the matching provider credential in **Settings → Models**.
@@ -1803,12 +1788,7 @@ Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.1
 
 HTTP/SSE MCP connections use the same process-wide proxy environment behavior as `web_fetch`: proxied targets use the configured proxy, and URLs excluded by `NO_PROXY` remain DNS-pinned direct connections.
 
-In WebUI, open **Settings → Capabilities → Web access → Configure → Advanced options**
-to set the web proxy. This setting applies to the agent's web search and page reading,
-not model providers, MCP, or your browser. `127.0.0.1` refers to the machine that runs
-nanobot, not the phone or computer that opens WebUI. Clear the field to use the default
-network settings, which can include proxy environment variables. After saving, restart
-nanobot when WebUI requests it. You can configure the proxy before enabling web access.
+In WebUI, open **Settings → Capabilities → Web access → Configure → Advanced options** to set the web proxy. This setting applies to the agent's web search and page reading, not model providers, MCP, or your browser. `127.0.0.1` refers to the machine that runs nanobot, not the phone or computer that opens WebUI. Clear the field to use the default network settings, which can include proxy environment variables. After saving, restart nanobot when WebUI requests it. You can configure the proxy before enabling web access.
 
 > [!TIP]
 > Use `proxy` in `tools.web` to route web requests through a proxy:
@@ -2297,24 +2277,9 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | For channels using the common sender allowlist, omit to require pairing, set `["*"]` to allow everyone, or list specific user IDs. Slack and Mattermost instead use `dm.policy` / `dm.allowFrom` for DMs and default to open DMs; review their group policy separately. See [Pairing](#pairing). |
 
-Each new user request includes the current project and file-access restriction in model-only
-context. This uses the same policy resolver as the tools, including restrictions from
-a configured exec sandbox. It does not grant access or change OS permissions.
-The context is stored with that request, not rewritten in earlier messages. New requests
-refresh it after a project switch or context compaction. It is hidden from the chat view.
-This adds a small amount of input text per user request. Tool continuations and transient
-retries reuse the stored context; they do not add another copy. Access-mode changes do not
-rewrite the system prompt, tool definitions, or previous messages. Changing the project or
-compacting history can change the prompt prefix. Cache hits still depend on the provider.
+Each new user request includes the current project and file-access restriction in model-only context. This uses the same policy resolver as the tools, including restrictions from a configured exec sandbox. It does not grant access or change OS permissions. The context is stored with that request, not rewritten in earlier messages. New requests refresh it after a project switch or context compaction. It is hidden from the chat view. This adds a small amount of input text per user request. Tool continuations and transient retries reuse the stored context; they do not add another copy. Access-mode changes do not rewrite the system prompt, tool definitions, or previous messages. Changing the project or compacting history can change the prompt prefix. Cache hits still depend on the provider.
 
-To diagnose a path error, the agent can call `my(action="check", key="workspace_sandbox")`.
-This read-only result shows the current tool directory and workspace restriction, including
-the restriction from `tools.exec.sandbox`. The older `workspace` value is an agent-directory
-display; it does not select the current project or grant access.
-Check `exec_config` for the configured shell sandbox and extra binds. Those binds do not grant
-file-tool access or permit an external shell `working_dir`. OS file permissions still apply.
-The `workspace_sandbox.enforced` field reports external sandbox markers, not whether a
-configured shell sandbox has started successfully.
+To diagnose a path error, the agent can call `my(action="check", key="workspace_sandbox")`. This read-only result shows the current tool directory and workspace restriction, including the restriction from `tools.exec.sandbox`. The older `workspace` value is an agent-directory display; it does not select the current project or grant access. Check `exec_config` for the configured shell sandbox and extra binds. Those binds do not grant file-tool access or permit an external shell `working_dir`. OS file permissions still apply. The `workspace_sandbox.enforced` field reports external sandbox markers, not whether a configured shell sandbox has started successfully.
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. The default `docker-compose.yml` drops all Linux capabilities except the `CHOWN`, `SETGID`, and `SETUID` capabilities required by the root entrypoint to initialize bind-mount ownership and become UID 1000. It enables `no-new-privileges` so the final non-root process cannot regain those bootstrap capabilities, and keeps Docker's default AppArmor/seccomp profiles enabled. If you enable `"tools.exec.sandbox": "bwrap"` inside Docker, start Compose with `docker-compose.bwrap.yml` as an additional override so bubblewrap can create nested namespaces. The host must also allow unprivileged user namespaces; the override cannot bypass a host-level namespace restriction.
 

@@ -45,23 +45,16 @@ The result should start with `Python 3.11` or a newer number. If the command is 
 
 ## 2. Prepare Your Model Details
 
-A chat website account is not automatically an API credential. nanobot needs a
-supported provider connection: an API key, a supported sign-in flow, or a local
-model server. Check the chosen service's billing and available models before using it.
+A chat website account is not automatically an API credential. nanobot needs a supported provider connection: an API key, a supported sign-in flow, or a local model server. Check the chosen service's billing and available models before using it.
 
 If you do not have a provider yet, here is one API-based example:
 
 1. Create an account at [OpenRouter](https://openrouter.ai/).
-2. Open its [API keys page](https://openrouter.ai/settings/keys) and create a key.
-   Keep it private; you will paste it into nanobot's provider form.
-3. Choose a model from the [model catalog](https://openrouter.ai/models), check its
-   price and account requirements, and copy its model ID. For file/tool tasks, choose
-   a model that supports tool calling. See the [official quickstart](https://openrouter.ai/docs/quickstart).
-4. In step 4 below, add the built-in **OpenRouter** provider with that key, keep its
-   default endpoint, and select the model you chose. This is one option, not a required provider.
+2. Open its [API keys page](https://openrouter.ai/settings/keys) and create a key. Keep it private; you will paste it into nanobot's provider form.
+3. Choose a model from the [model catalog](https://openrouter.ai/models), check its price and account requirements, and copy its model ID. For file/tool tasks, choose a model that supports tool calling. See the [official quickstart](https://openrouter.ai/docs/quickstart).
+4. In step 4 below, add the built-in **OpenRouter** provider with that key, keep its default endpoint, and select the model you chose. This is one option, not a required provider.
 
-For a model running on your own computer, use the [Ollama setup recipe](./provider-cookbook.md#recipe-ollama-local-model)
-instead. For a company-managed service, ask your administrator for the connection details.
+For a model running on your own computer, use the [Ollama setup recipe](./provider-cookbook.md#recipe-ollama-local-model) instead. For a company-managed service, ask your administrator for the connection details.
 
 If you already have a provider, have these details nearby:
 
@@ -148,20 +141,13 @@ For a chat platform's account, bot, token, or permission prerequisites, use the 
 
 ## Your First File Task
 
-1. Create a practice folder, for example `Documents/nanobot-practice`, and put a
-   copy of a short text file in it. Keep originals elsewhere for this first task.
-2. Start a new topic in the WebUI. Open the workspace folder selector, choose that
-   folder, and select **Confirm**. Choose **Restricted** access.
-3. Ask: "Read notes.txt and write a short summary to summary.md in this folder."
-   Replace `notes.txt` with your file's name, then open `summary.md` in the selected folder.
+1. Create a practice folder, for example `Documents/nanobot-practice`, and put a copy of a short text file in it. Keep originals elsewhere for this first task.
+2. Start a new topic in the WebUI. Open the workspace folder selector, choose that folder, and select **Confirm**. Choose **Restricted** access.
+3. Ask: "Read notes.txt and write a short summary to summary.md in this folder." Replace `notes.txt` with your file's name, then open `summary.md` in the selected folder.
 
-The workspace selects the folder the agent works in on the machine running nanobot.
-Attaching a file sends that file to the conversation; it does not change the workspace.
-For PDF and Office files, see [File tools](./webui.md#apps).
+The workspace selects the folder the agent works in on the machine running nanobot. Attaching a file sends that file to the conversation; it does not change the workspace. For PDF and Office files, see [File tools](./webui.md#apps).
 
-Return to the saved topic to continue later. A new topic or a different project
-folder does not create separate long-term memory. For clients whose preferences
-must stay separate, use [separate instances](./multiple-instances.md).
+Return to the saved topic to continue later. A new topic or a different project folder does not create separate long-term memory. For clients whose preferences must stay separate, use [separate instances](./multiple-instances.md).
 
 ## If Something Fails
 

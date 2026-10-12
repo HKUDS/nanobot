@@ -437,19 +437,14 @@ These custom names define direct connections: `apiBase` is required and `apiKey`
 
 Follow the server preparation below, then open **Settings → Models → New preset**, select or add an Ollama connection at `http://localhost:11434/v1`, choose the downloaded model, and save. Select the preset in chat. If nanobot runs in a container or on another computer, `localhost` refers to that host; use an address reachable from nanobot.
 
-If Ollama is not installed, follow its [official quickstart](https://docs.ollama.com/quickstart)
-([Linux setup](https://docs.ollama.com/linux)). Keep the Ollama app or service running.
-If no service is running, start `ollama serve` in a terminal and leave it open; do
-not start a second server when the app or system service already owns the port.
-In a separate terminal, download a model and confirm it is listed:
+If Ollama is not installed, follow its [official quickstart](https://docs.ollama.com/quickstart) ([Linux setup](https://docs.ollama.com/linux)). Keep the Ollama app or service running. If no service is running, start `ollama serve` in a terminal and leave it open; do not start a second server when the app or system service already owns the port. In a separate terminal, download a model and confirm it is listed:
 
 ```bash
 ollama pull llama3.2
 ollama list
 ```
 
-Use that exact model name in nanobot. Downloading requires internet access and disk
-space; model inference then runs on the machine hosting Ollama.
+Use that exact model name in nanobot. Downloading requires internet access and disk space; model inference then runs on the machine hosting Ollama.
 
 <details>
 <summary>Manual configuration</summary>

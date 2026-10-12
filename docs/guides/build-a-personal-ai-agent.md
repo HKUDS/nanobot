@@ -19,11 +19,7 @@ Follow [Quick Start](../quick-start.md) to install nanobot using the recommended
 
 ## Minimal working example
 
-Continue in the WebUI from Quick Start. Start a new topic, select a practice folder
-and **Restricted** access, and ask nanobot to summarize a file there. See
-[Your first file task](../start-without-technical-background.md#your-first-file-task)
-for a complete example. Reopen the same instance with `nanobot webui` if it is not
-running; the launcher starts or joins its gateway.
+Continue in the WebUI from Quick Start. Start a new topic, select a practice folder and **Restricted** access, and ask nanobot to summarize a file there. See [Your first file task](../start-without-technical-background.md#your-first-file-task) for a complete example. Reopen the same instance with `nanobot webui` if it is not running; the launcher starts or joins its gateway.
 
 ## Production notes
 

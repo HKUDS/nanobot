@@ -5,8 +5,7 @@ description: "Answer nanobot usage, configuration, and troubleshooting questions
 
 # nanobot Documentation
 
-Use the documentation in `references/` beside this skill. It ships with the installed
-version of nanobot. Load only the material needed for the user's question.
+Use the documentation in `references/` beside this skill. It ships with the installed version of nanobot. Load only the material needed for the user's question.
 
 | Topic | Entry point |
 |---|---|
@@ -19,12 +18,6 @@ version of nanobot. Load only the material needed for the user's question.
 | Errors | [Troubleshooting](references/troubleshooting.md) |
 | Other topics | [Documentation index](references/README.md) |
 
-Prefer documented WebUI steps when the setting has a graphical control, unless
-headless or config-file setup is requested. Configuration examples are partial
-snippets to merge unless stated otherwise.
+Prefer documented WebUI steps when the setting has a graphical control, unless headless or config-file setup is requested. Configuration examples are partial snippets to merge unless stated otherwise.
 
-Bundled docs match this installation's source and may be newer than the stable
-release. For latest-release questions or missing bundled docs, consult the
-[published documentation](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview)
-and make any version mismatch explicit. Links leaving `references/` refer to
-repository files that may not be bundled.
+Bundled docs match this installation's source and may be newer than the stable release. For latest-release questions or missing bundled docs, consult the [published documentation](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) and make any version mismatch explicit. Links leaving `references/` refer to repository files that may not be bundled.

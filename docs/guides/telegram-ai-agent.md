@@ -18,13 +18,9 @@ This guide connects one Telegram bot to nanobot. Messages sent to that bot use y
 
 ## Continue from your running instance
 
-If you are already chatting in the WebUI, keep it open and continue below. It has
-already started the gateway. To reopen it later, use the same installation's
-`nanobot webui` command; there is no need to install nanobot again.
+If you are already chatting in the WebUI, keep it open and continue below. It has already started the gateway. To reopen it later, use the same installation's `nanobot webui` command; there is no need to install nanobot again.
 
-For terminal or server setup, use the manual configuration section below. Reuse
-the config/home and executable from your working instance. Docker users should
-use the [container commands](../deployment.md#docker-compose).
+For terminal or server setup, use the manual configuration section below. Reuse the config/home and executable from your working instance. Docker users should use the [container commands](../deployment.md#docker-compose).
 
 ## Connect Telegram in the WebUI
 
@@ -74,14 +70,9 @@ Telegram uses long polling by default. Webhook mode is available for public HTTP
 
 ## Apply the settings
 
-In the WebUI, follow any restart prompt and keep the launcher running for the first
-test. You do not need to start another gateway. For unattended operation afterward,
-use [background or service mode](../cli-reference.md#gateway).
+In the WebUI, follow any restart prompt and keep the launcher running for the first test. You do not need to start another gateway. For unattended operation afterward, use [background or service mode](../cli-reference.md#gateway).
 
-For manual config changes, restart the existing gateway through its owning terminal,
-`nanobot gateway restart` for background mode, or its service/container supervisor.
-If none is running, start `nanobot gateway` and leave it running. Run diagnostic CLI
-commands in a separate terminal using the same installation and config.
+For manual config changes, restart the existing gateway through its owning terminal, `nanobot gateway restart` for background mode, or its service/container supervisor. If none is running, start `nanobot gateway` and leave it running. Run diagnostic CLI commands in a separate terminal using the same installation and config.
 
 ## Test a message
 

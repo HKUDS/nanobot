@@ -55,9 +55,7 @@ Use `async with` when possible so tool connections and background cleanup are cl
 
 The SDK is async-first because agent runs may stream tokens, execute tools, and wait on external services. In a normal Python script, wrap your async function with `asyncio.run(...)` as shown above. In a notebook or another async app, call `await bot.run(...)` directly from your existing event loop.
 
-The default agent workspace comes from config, not the notebook's current directory.
-For a notebook that should use its current folder as both file workspace and agent
-state, choose it explicitly:
+The default agent workspace comes from config, not the notebook's current directory. For a notebook that should use its current folder as both file workspace and agent state, choose it explicitly:
 
 ```python
 from pathlib import Path
@@ -66,8 +64,7 @@ async with Nanobot.from_config(workspace=Path.cwd()) as bot:
     result = await bot.run("List the files in this workspace.")
 ```
 
-This also places memory and skills in that workspace. Use a separate configured
-instance when notebook experiments must not share existing agent state.
+This also places memory and skills in that workspace. Use a separate configured instance when notebook experiments must not share existing agent state.
 
 ### Inspect What Happened
 

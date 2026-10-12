@@ -91,12 +91,7 @@ If your gateway listens on a non-default port, point the dev server at it:
 NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
 ```
 
-This variable sets the HTTP target. Check the bootstrap response's `ws_url` when
-HTTP works but chat cannot connect: that address must be reachable by the browser.
-For a reverse proxy, configure the gateway's `channels.websocket.publicWsUrl` as
-described in [WebSocket deployment](../docs/websocket.md), rather than adding a
-Vite WebSocket proxy. If authentication is enabled, use the launcher's full login
-link or sign in with the configured bootstrap secret.
+This variable sets the HTTP target. Check the bootstrap response's `ws_url` when HTTP works but chat cannot connect: that address must be reachable by the browser. For a reverse proxy, configure the gateway's `channels.websocket.publicWsUrl` as described in [WebSocket deployment](../docs/websocket.md), rather than adding a Vite WebSocket proxy. If authentication is enabled, use the launcher's full login link or sign in with the configured bootstrap secret.
 
 ## Build for packaged runtime
 
@@ -120,12 +115,7 @@ bun run test
 bun run build
 ```
 
-`lint` runs ESLint; `test` runs Vitest, including channel-owned frontend tests;
-`build` runs TypeScript checking and produces the production bundle. Keep tests near the changed
-behavior and exercise settings save/reload in the browser. Browser-only preferences
-stay in the frontend; persistent configuration and security policy belong to the
-Python gateway. When changing that boundary, also run the relevant Python tests
-from [CONTRIBUTING.md](../CONTRIBUTING.md).
+`lint` runs ESLint; `test` runs Vitest, including channel-owned frontend tests; `build` runs TypeScript checking and produces the production bundle. Keep tests near the changed behavior and exercise settings save/reload in the browser. Browser-only preferences stay in the frontend; persistent configuration and security policy belong to the Python gateway. When changing that boundary, also run the relevant Python tests from [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Acknowledgements
 

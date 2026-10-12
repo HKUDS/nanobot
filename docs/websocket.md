@@ -39,9 +39,7 @@ The WebSocket channel is enabled by default. Add only the fields you want to ove
 
 ### 2. Apply the configuration
 
-Replace `your-webui-password` with a private secret before using the configuration.
-Restart the gateway that owns this config if it is already running. If none is
-running, start it with the same installation and config:
+Replace `your-webui-password` with a private secret before using the configuration. Restart the gateway that owns this config if it is already running. If none is running, start it with the same installation and config:
 
 ```bash
 nanobot gateway
@@ -51,9 +49,7 @@ Keep it running while connecting clients from another terminal.
 
 ### 3. Obtain a token and connect
 
-The secret above authorizes token issuance; it is not itself an issued connection
-token. Each WebSocket connection needs a new single-use token. Choose either client
-below. Both use the `/auth/token` path configured in step 1.
+The secret above authorizes token issuance; it is not itself an issued connection token. Each WebSocket connection needs a new single-use token. Choose either client below. Both use the `/auth/token` path configured in step 1.
 
 With `curl` and `websocat` installed:
 
@@ -64,12 +60,9 @@ curl --fail -H "Authorization: Bearer your-webui-password" http://127.0.0.1:8765
 websocat "ws://127.0.0.1:8765/?client_id=alice&token=TOKEN_FROM_RESPONSE"
 ```
 
-After the `ready` event, send `{"content":"Hello nanobot!"}`. Obtain another token
-before reconnecting. Do not share the secret or the token URL.
+After the `ready` event, send `{"content":"Hello nanobot!"}`. Obtain another token before reconnecting. Do not share the secret or the token URL.
 
-Alternatively, save and run this Python example in an environment with `websockets`
-installed. It asks for the configured secret, obtains its own token, and prints
-server events until you press Ctrl+C:
+Alternatively, save and run this Python example in an environment with `websockets` installed. It asks for the configured secret, obtains its own token, and prints server events until you press Ctrl+C:
 
 ```python
 import asyncio

@@ -4,9 +4,7 @@ Use these docs to get a working agent first, then open a task guide only when yo
 
 Repository docs follow the current source tree and can be newer than the latest package release. For published release docs, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
 
-Use the graphical setup steps first when the WebUI exposes the setting. Expand
-**Manual configuration** for headless deployments or configuration managed as code.
-Settings without a graphical control keep their direct configuration instructions.
+Use the graphical setup steps first when the WebUI exposes the setting. Expand **Manual configuration** for headless deployments or configuration managed as code. Settings without a graphical control keep their direct configuration instructions.
 
 ## Start Here
 

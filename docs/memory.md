@@ -45,10 +45,7 @@ Each line is a JSON object:
 {"cursor": 42, "timestamp": "2026-04-03 00:02", "content": "- User prefers dark mode\n- Decided to use PostgreSQL"}
 ```
 
-After scheduled or manual Dream runs, nanobot can prune the oldest entries already
-processed by Dream and atomically rewrite the file. The default retention target
-is 1000 entries; entries Dream has not processed are retained even when this exceeds
-the target. The journal is therefore not a permanent archive of every summary.
+After scheduled or manual Dream runs, nanobot can prune the oldest entries already processed by Dream and atomically rewrite the file. The default retention target is 1000 entries; entries Dream has not processed are retained even when this exceeds the target. The journal is therefore not a permanent archive of every summary.
 
 It is not the final memory. It is the material from which final memory is shaped.
 

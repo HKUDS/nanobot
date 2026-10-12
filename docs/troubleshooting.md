@@ -33,18 +33,11 @@ If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram,
 
 ## Empty topics after a WebUI restart
 
-The Restart button in WebUI settings does not create a conversation or add messages
-to an existing conversation. Reopening WebUI or reconnecting to the gateway also
-does not save a topic until a message or another session action creates it.
+The Restart button in WebUI settings does not create a conversation or add messages to an existing conversation. Reopening WebUI or reconnecting to the gateway also does not save a topic until a message or another session action creates it.
 
-Older gateway versions could save an empty topic when the Restart button had no
-current chat. Update the gateway to stop creating these topics. Existing topics
-are not deleted by the update; check their contents before removing them. A typed
-`/restart` command remains part of that chat's display history.
+Older gateway versions could save an empty topic when the Restart button had no current chat. Update the gateway to stop creating these topics. Existing topics are not deleted by the update; check their contents before removing them. A typed `/restart` command remains part of that chat's display history.
 
-If settings stay disabled after a restart while another tab has reconnected,
-reload the affected page. Updated WebUI clients track restart completion per tab,
-so one tab cannot leave another tab waiting by clearing the shared restart marker.
+If settings stay disabled after a restart while another tab has reconnected, reload the affected page. Updated WebUI clients track restart completion per tab, so one tab cannot leave another tab waiting by clearing the shared restart marker.
 
 ## Session storage overlaps the workspace
 
