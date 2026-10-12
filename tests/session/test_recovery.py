@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -19,8 +20,66 @@ from nanobot.session.recovery import (
     acknowledge_pending_followups,
     pending_followups,
     record_pending_followup,
+    restore_runtime_checkpoint,
 )
 from nanobot.webui import session_list_index, transcript
+
+
+def _cumulative_checkpoint() -> dict:
+    rows = []
+    for n in (1, 2):
+        rows.extend([
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": f"call-{n}", "function": {"name": "write_file"}},
+            ]},
+            {"role": "tool", "tool_call_id": f"call-{n}", "name": "write_file",
+             "content": f"Wrote receipt {n}"},
+        ])
+    return {
+        "phase": "tools_completed",
+        "assistant_message": rows[-2],
+        "completed_tool_results": rows[-1:],
+        "pending_tool_calls": [],
+        "turn_messages": rows,
+    }
+
+
+def test_cumulative_checkpoint_overlap_is_restored_once() -> None:
+    checkpoint = _cumulative_checkpoint()
+    session = Session(key="websocket:chat")
+    session.messages = [
+        {"role": "user", "content": "Write two receipts"},
+        *deepcopy(checkpoint["turn_messages"][:2]),
+    ]
+    session.metadata[RUNTIME_CHECKPOINT_KEY] = deepcopy(checkpoint)
+    assert restore_runtime_checkpoint(session)
+    expected = [{"role": "user", "content": "Write two receipts"}, *checkpoint["turn_messages"]]
+    assert session.messages == expected
+    session.metadata[RUNTIME_CHECKPOINT_KEY] = deepcopy(checkpoint)
+    assert restore_runtime_checkpoint(session)
+    assert session.messages == expected
+    assert not restore_runtime_checkpoint(session)
+
+
+@pytest.mark.asyncio
+async def test_missing_earlier_tool_result_blocks_cumulative_recovery(tmp_path: Path) -> None:
+    """A valid final iteration must not mask an incomplete persisted prefix."""
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:chat")
+    checkpoint = _cumulative_checkpoint()
+    del checkpoint["turn_messages"][1]
+    session.metadata[RUNTIME_CHECKPOINT_KEY] = checkpoint
+    _persist(sessions, session)
+    coordinator, bus, restarted = _coordinator(tmp_path)
+    await coordinator.scan()
+    state = restarted.get_or_create(session.key).metadata[RECOVERY_METADATA_KEY]
+    assert state["reason"] == "checkpoint_invalid"
+    assert state["can_continue"] is False
+    assert bus.inbound.empty()
+    with pytest.raises(RecoveryActionError):
+        await coordinator.handle_action("continue", {
+            "chat_id": "chat", "recovery_id": state["recovery_id"],
+        })
 
 
 def _persist(manager: SessionManager, session: Session) -> None:

@@ -292,6 +292,19 @@ class AgentRunner:
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
         messages, compaction = self._initial_transcript_and_compaction(spec)
+        checkpoint_callback = spec.checkpoint_callback
+        if checkpoint_callback is not None:
+            turn_start = len(messages)
+
+            async def checkpoint_turn(payload: dict[str, Any]) -> None:
+                # The raw transcript is append-only even when model context is compacted.
+                # A later iteration must not overwrite evidence of completed work.
+                await checkpoint_callback({
+                    **payload,
+                    "turn_messages": deepcopy(messages[turn_start:]),
+                })
+
+            spec = replace(spec, checkpoint_callback=checkpoint_turn)
         context = AgentRunHookContext(messages=deepcopy(messages))
         llm_usage_source_token = bind_llm_usage_source(
             spec.llm_usage_source or source_from_session_key(spec.session_key)
