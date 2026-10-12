@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeAlias
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
@@ -14,6 +14,13 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session
     from nanobot.utils.llm_runtime import LLMRuntime
 
+
+@dataclass(frozen=True, slots=True)
+class CommandHandled:
+    """A matched command completed without a text reply."""
+
+
+CommandResult: TypeAlias = InboundMessage | OutboundMessage | CommandHandled | None
 Handler = Callable[["CommandContext"], Awaitable["InboundMessage | OutboundMessage | None"]]
 _BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
@@ -111,15 +118,16 @@ class CommandRouter:
                 return True
         return self.command_name(text) is not None
 
-    async def dispatch_priority(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
+    async def dispatch_priority(self, ctx: CommandContext) -> CommandResult:
         """Dispatch a priority command. Called from run() without the lock."""
         ctx.raw = normalize_command_text(ctx.raw)
         handler = self._priority.get(ctx.raw.lower())
         if handler:
-            return await handler(ctx)
+            result = await handler(ctx)
+            return result if result is not None else CommandHandled()
         return None
 
-    async def dispatch(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
+    async def dispatch(self, ctx: CommandContext) -> CommandResult:
         """Try exact and prefix handlers, then validate registered commands."""
         if ctx.msg.metadata.get("original_command"):
             return None
@@ -127,12 +135,14 @@ class CommandRouter:
         cmd = ctx.raw.lower()
 
         if handler := self._exact.get(cmd):
-            return await handler(ctx)
+            result = await handler(ctx)
+            return result if result is not None else CommandHandled()
 
         for pfx, handler in self._prefix:
             if cmd.startswith(pfx):
                 ctx.args = ctx.raw[len(pfx):]
-                return await handler(ctx)
+                result = await handler(ctx)
+                return result if result is not None else CommandHandled()
 
         return self._invalid_command_response(ctx)
 

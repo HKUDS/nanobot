@@ -51,7 +51,13 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
+from nanobot.command import (
+    CommandContext,
+    CommandHandled,
+    CommandResult,
+    CommandRouter,
+    register_builtin_commands,
+)
 from nanobot.command.router import command_text, normalize_command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
@@ -782,7 +788,7 @@ class AgentLoop:
         msg: InboundMessage,
         key: str,
         raw: str,
-        dispatch_fn: Callable[[CommandContext], Awaitable[InboundMessage | OutboundMessage | None]],
+        dispatch_fn: Callable[[CommandContext], Awaitable[CommandResult]],
     ) -> None:
         """Dispatch a command directly from the run() loop and publish the result."""
         if normalize_command_text(raw).lower() == "/compact":
@@ -801,6 +807,8 @@ class AgentLoop:
                 ),
             )
             result = await dispatch_fn(ctx)
+            if isinstance(result, CommandHandled):
+                return
             if isinstance(result, InboundMessage):
                 self._enqueue_session_message(result)
             elif result:
@@ -2039,8 +2047,7 @@ class AgentLoop:
             ctx.msg = result
             result = None
         ctx.turn_scopes.append(GoalInputScope(ctx.msg))
-        if cmd_ctx.raw.lower() == "/compact":
-            # Compaction reports through events, not an archiveable command reply.
+        if isinstance(result, CommandHandled):
             return True
         if result is not None:
             ctx.outbound = result

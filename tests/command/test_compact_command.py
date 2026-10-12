@@ -12,7 +12,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
-from nanobot.command.builtin import cmd_stop
+from nanobot.command.builtin import cmd_compact, cmd_stop
 from nanobot.command.router import CommandContext
 from nanobot.providers.base import GenerationSettings, LLMResponse, ProviderConversationState
 from nanobot.runtime_context import public_history_message
@@ -45,8 +45,9 @@ async def loop(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["/compact", " /COMPACT@nanobot "])
+@pytest.mark.parametrize("command", ["/compact", " /COMPACT@nanobot ", "/summarize"])
 async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) -> None:
+    loop.commands.exact("/summarize", cmd_compact)
     bus = loop.bus
     session = loop.sessions.get_or_create("cli:test")
     session.add_message("user", "important question")
