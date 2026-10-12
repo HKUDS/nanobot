@@ -12,7 +12,7 @@ RUN mkdir -p /app/nanobot/web && npm run build
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates git bubblewrap openssh-client libmagic1 && \
+    apt-get install -y --no-install-recommends ca-certificates curl git bubblewrap openssh-client libmagic1 && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -53,6 +53,11 @@ RUN for channel in $(printf '%s' "$NANOBOT_CHANNELS" | tr ',' ' '); do \
 # at startup). Lives in the code dir (/app), not the data dir, so a mounted disk
 # won't shadow it. Only used when RENDER=true; ignored by local runs.
 COPY render-config.json ./
+
+# Local Docker deploy template (see docker-compose.yml): container-appropriate
+# binds with the WebUI token and API key baked in by the entrypoint at first
+# boot. Same /app location so a mounted data dir can't shadow it.
+COPY docker-config.json ./
 
 # Create the non-root user and hand ownership of the writable virtualenv to it.
 RUN useradd -m -u 1000 -s /bin/bash nanobot && \

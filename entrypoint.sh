@@ -1,24 +1,41 @@
 #!/bin/sh
 dir="$HOME/.nanobot"
 
-# Render deploy path (see render.yaml + render-config.json). Gated on Render's
-# automatic RENDER=true env var so local Docker/podman usage is unaffected.
-# Initializes the on-disk config from the committed template (wiring secrets via
-# ${VAR} env vars, keeping runtime data on the persistent disk) and appends the
-# --config flag. Logs each decision so a failed start is diagnosable in Render's
-# logs. Privilege dropping is handled below, for every root start (not just here).
-if [ "$RENDER" = "true" ]; then
-    echo "[entrypoint] Render deploy — starting as $(id)"
+# Container config bootstrap. Two deploy paths share the init-once logic:
+# - Render (RENDER=true): template wires secrets via ${VAR} env vars, resolved
+#   at startup by the config loader.
+# - Local Docker (NANOBOT_DOCKER_BOOTSTRAP=1, set by docker-compose.yml): a
+#   template with binds that work across the container boundary, and secrets
+#   baked in at first boot (env value if provided, otherwise generated) so a
+#   missing env var can never crash-loop the containers.
+# Initializes the on-disk config only when it does not already exist, so
+# WebUI/provider settings edited at runtime survive restarts.
+# Logs each decision so a failed start is diagnosable in the container logs.
+# Privilege dropping is handled below, for every root start (not just here).
+if [ "$RENDER" = "true" ] || [ "$NANOBOT_DOCKER_BOOTSTRAP" = "1" ]; then
+    echo "[entrypoint] container deploy — starting as $(id)"
     mkdir -p "$dir" || echo "[entrypoint] warning: mkdir $dir failed"
     config="$dir/config.json"
-    # Initialize config only when it does not already exist, so WebUI/provider
-    # settings edited at runtime survive restarts. The disk persists config.json
-    # across deploys; overwriting it every boot would discard those changes.
     if [ ! -f "$config" ]; then
-        echo "[entrypoint] initializing $config from render-config.json"
-        cp /app/render-config.json "$config" || echo "[entrypoint] warning: cp config failed"
+        if [ "$RENDER" = "true" ]; then
+            echo "[entrypoint] initializing $config from render-config.json"
+            cp /app/render-config.json "$config" || echo "[entrypoint] warning: cp config failed"
+        else
+            web_token="${NANOBOT_WEB_TOKEN:-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}"
+            api_key="${NANOBOT_API_KEY:-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}"
+            echo "[entrypoint] initializing $config from docker-config.json"
+            sed -e "s|\${NANOBOT_WEB_TOKEN}|$web_token|" \
+                -e "s|\${NANOBOT_API_KEY}|$api_key|" \
+                /app/docker-config.json > "$config" \
+                || echo "[entrypoint] warning: config bootstrap failed"
+            echo "[entrypoint] WebUI: http://localhost:8765 — password: $web_token"
+            echo "[entrypoint] OpenAI-compatible API: http://127.0.0.1:8900/v1 — api key: $api_key"
+        fi
     else
         echo "[entrypoint] existing $config found — leaving it in place"
+        if [ "$NANOBOT_DOCKER_BOOTSTRAP" = "1" ]; then
+            echo "[entrypoint] WebUI password lives in $config (channels.websocket.tokenIssueSecret)"
+        fi
     fi
     set -- "$@" --config "$config"
 fi

@@ -4,6 +4,12 @@ x-common-config: &common-config
     dockerfile: Dockerfile
     args:
       NANOBOT_CHANNELS: ${NANOBOT_CHANNELS:-whatsapp}
+  environment:
+    # Bootstrap a working config.json on first boot (binds that work across
+    # the container boundary; secrets generated if not provided).
+    NANOBOT_DOCKER_BOOTSTRAP: "1"
+    NANOBOT_WEB_TOKEN: ${NANOBOT_WEB_TOKEN:-}
+    NANOBOT_API_KEY: ${NANOBOT_API_KEY:-}
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
   cap_drop:
@@ -39,6 +45,11 @@ services:
   nanobot-api:
     container_name: nanobot-api
     <<: *common-config
+    # Optional: the OpenAI-compatible API needs a configured provider before it
+    # can serve, so it is not part of the default `docker compose up`. Start it
+    # with `docker compose --profile api up -d` once a provider is configured.
+    profiles:
+      - api
     command:
       ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
     restart: unless-stopped
