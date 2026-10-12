@@ -2117,7 +2117,7 @@ async def test_remote_webui_scope_allows_access_reduction(
 
 
 @pytest.mark.asyncio
-async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
+async def test_in_flight_message_without_scope_uses_latest_access_mode(
     bus: MagicMock,
     tmp_path,
     monkeypatch,
@@ -2154,10 +2154,6 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
                 "chat_id": chat_id,
                 "content": "hello",
                 "webui": True,
-                "workspace_scope": {
-                    "project_path": str(default_workspace),
-                    "access_mode": "full",
-                },
             },
         )
     )
@@ -2178,18 +2174,16 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
     release_hydrate.set()
     await message_task
 
-    assert sessions.read_session_file(f"websocket:{chat_id}") is None
+    saved = sessions.read_session_file(f"websocket:{chat_id}")
+    assert saved["metadata"]["workspace_scope"]["access_mode"] == "restricted"
     assert channel.gateway.workspaces.scope_for_session_key(
         f"websocket:{chat_id}"
     ).access_mode == "restricted"
-    payload = json.loads(message_conn.send.await_args.args[0])
-    assert payload["event"] == "error"
-    assert payload["detail"] == "workspace_scope_rejected"
-    bus.publish_inbound.assert_not_awaited()
+    bus.publish_inbound.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_remote_webui_scope_rejects_full_access_for_custom_scope(
+async def test_remote_webui_scope_allows_full_access_for_custom_scope(
     bus: MagicMock,
     tmp_path,
 ) -> None:
@@ -2220,11 +2214,11 @@ async def test_remote_webui_scope_rejects_full_access_for_custom_scope(
     )
 
     payload = json.loads(conn.send.await_args.args[0])
-    assert payload["event"] == "error"
-    assert payload["detail"] == "workspace_scope_rejected"
-    assert payload["reason"] == "full workspace access is unavailable for this connection"
-    assert payload["chat_id"] == "chat-remote"
-    assert sessions.read_session_file("websocket:chat-remote") is None
+    assert payload["event"] == "session_updated"
+    assert payload["workspace_scope"]["access_mode"] == "full"
+    assert channel.gateway.workspaces.scope_for_session_key(
+        "websocket:chat-remote"
+    ).project_path == project.resolve()
 
 
 @pytest.mark.asyncio
@@ -6621,15 +6615,12 @@ def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
     ]
 
 
-@pytest.mark.parametrize("headers,allowed", [
-    (None, False),
-    ([], False),
-    ({}, False),
-    ({"Host": "localhost:8765"}, True),
-    ({"Host": "remote.example"}, False),
-    ({"Host": "localhost:8765", "X-Forwarded-For": "203.0.113.8"}, False),
+@pytest.mark.parametrize("headers", [
+    {"Host": "localhost:8765"},
+    {"Host": "remote.example"},
+    {"Host": "localhost:8765", "X-Forwarded-For": "203.0.113.8"},
 ])
-async def test_full_access_requires_local_handshake(bus, tmp_path, headers, allowed):
+async def test_webui_access_mode_can_toggle_back_to_full(bus, tmp_path, headers):
     sessions = SessionManager(tmp_path / "sessions")
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
@@ -6639,17 +6630,17 @@ async def test_full_access_requires_local_handshake(bus, tmp_path, headers, allo
     )
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
-    conn.request = SimpleNamespace(headers=headers) if headers is not None else None
-    await channel._dispatch_envelope(conn, "client", {
-        "type": "set_workspace_scope",
-        "chat_id": "handshake-scope",
-        "workspace_scope": {"project_path": str(tmp_path), "access_mode": "full"},
-    })
-    result = json.loads(conn.send.await_args.args[0])
-    if allowed:
+    conn.request = SimpleNamespace(headers=headers)
+    for mode in ("full", "restricted", "full"):
+        conn.send.reset_mock()
+        await channel._dispatch_envelope(conn, "client", {
+            "type": "set_workspace_scope",
+            "chat_id": "handshake-scope",
+            "workspace_scope": {"project_path": str(tmp_path), "access_mode": mode},
+        })
+        result = json.loads(conn.send.await_args.args[0])
         assert result["event"] == "session_updated"
-        assert result["workspace_scope"]["access_mode"] == "full"
-    else:
-        assert result["event"] == "error"
-        assert result["reason"] == "full workspace access is unavailable for this connection"
-        assert sessions.read_session_file("websocket:handshake-scope") is None
+        assert result["workspace_scope"]["access_mode"] == mode
+        assert channel.gateway.workspaces.scope_for_session_key(
+            "websocket:handshake-scope"
+        ).access_mode == mode

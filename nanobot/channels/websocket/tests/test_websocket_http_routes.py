@@ -2531,7 +2531,7 @@ async def test_webui_automation_result_is_authenticated_and_returns_only_selecte
 
 
 @pytest.mark.asyncio
-async def test_remote_new_chat_accepts_server_project_path_but_rejects_remote_full_access(
+async def test_remote_new_chat_accepts_server_project_path_and_full_access(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     project = tmp_path / "remote-project"
@@ -2585,18 +2585,15 @@ async def test_remote_new_chat_accepts_server_project_path_but_rejects_remote_fu
         },
     )
 
-    rejected = [
-        json.loads(call.args[0])
-        for call in connection.send.await_args_list
-        if json.loads(call.args[0]).get("event") == "error"
-    ]
-    assert rejected == [
-        {
-            "event": "error",
-            "detail": "workspace_scope_rejected",
-            "reason": "full workspace access is unavailable for this connection",
-        }
-    ]
+    attached = next(
+        json.loads(call.args[0]) for call in connection.send.await_args_list
+        if json.loads(call.args[0]).get("event") == "attached"
+    )
+    scope = channel.gateway.workspaces.scope_for_session_key(
+        f"websocket:{attached['chat_id']}"
+    )
+    assert scope.project_path == other_project.resolve()
+    assert scope.access_mode == "full"
 
 
 @pytest.mark.asyncio
@@ -3658,8 +3655,8 @@ async def test_recovery_mutation_uses_authenticated_websocket_action(bus: MagicM
 @pytest.mark.parametrize(
     ("connection", "headers", "can_use_full_access"),
     [
-        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, False),
-        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, False),
+        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, True),
+        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, True),
         (_LOCAL, {"Host": "127.0.0.1:8765"}, True),
     ],
 )

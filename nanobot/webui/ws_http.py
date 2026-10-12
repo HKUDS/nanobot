@@ -451,20 +451,13 @@ class GatewayHTTPHandler:
         connection: Any,
         headers: Any | None = None,
     ) -> bool:
-        """Return whether this request may opt into Full Access.
+        """Allow authenticated WebUI clients to select the chat access mode.
 
-        A reverse proxy can make a remote browser look like a localhost TCP
-        peer. Inspect the original browser headers before granting this
-        capability so proxy-local requests keep the remote restriction.
+        Authentication is enforced by the HTTP route or WebSocket handshake.
+        Browser location does not change the permissions of that authenticated
+        user; restricting a chat must not prevent switching it back to Full Access.
         """
-        if self._runtime_surface == "native":
-            return True
-        if headers is None:
-            request = getattr(connection, "request", None)
-            headers = getattr(request, "headers", None)
-        if not isinstance(headers, Mapping):
-            return False
-        return _is_local_browser_request(connection, headers)
+        return True
 
     # -- Token management ---------------------------------------------------
 

@@ -176,7 +176,7 @@ The access control in the composer controls the local capability level for the c
 
 In Restricted mode, ordinary file and shell work stays inside the selected project. To preserve agent continuity, filesystem/search tools receive narrow, read-only access to built-in skills, custom skills in the agent workspace, and the exact agent `memory/history.jsonl` file. This does not grant access to neighboring memory or profile files, and it does not allow writes outside the selected project. These tool exceptions do not broaden the browser's file preview boundary.
 
-Remote WebUI connections may reduce access for the current workspace and may select a different workspace by browsing folders or entering its server-side path. A remote project change must use Restricted mode; enabling Full Access remains limited to local and native clients.
+Authenticated WebUI clients can switch regular topics between Default permissions (Restricted mode) and Full Access, including when connected remotely or through a reverse proxy. Switching to Default permissions does not prevent switching back to Full Access. Project paths are interpreted on the gateway host.
 
 ## Composer
 
