@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.tools.filesystem import ListDirTool, WriteFileTool
+from nanobot.agent.tools.search import GrepTool
 
 
 def _write_skill(
@@ -298,7 +300,7 @@ def test_disabled_skills_excluded_from_build_skills_summary(tmp_path: Path) -> N
     assert "beta" in summary
 
 
-def test_build_skills_summary_uses_relative_roots_in_agent_workspace(tmp_path: Path) -> None:
+def test_build_skills_summary_keeps_builtin_root_absolute_in_agent_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace_skills = workspace / "skills"
     workspace_skills.mkdir(parents=True)
@@ -309,12 +311,43 @@ def test_build_skills_summary_uses_relative_roots_in_agent_workspace(tmp_path: P
     summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary()
 
     assert str(workspace_skills) not in summary
-    assert str(builtin) not in summary
+    assert f"### Built-in skills (`{builtin.resolve()}`)" in summary
     assert str(workspace_path) not in summary
     assert str(builtin_path) not in summary
-    assert summary.count("(`skills`)") == 2
+    assert summary.count("(`skills`)") == 1
     assert "`alpha/SKILL.md`" in summary
     assert "`beta/SKILL.md`" in summary
+
+
+async def test_builtin_summary_root_supports_restricted_reference_search(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    builtin = tmp_path / "builtin"
+    _write_skill(builtin, "documentation", body="# Documentation")
+    references = builtin / "documentation" / "references"
+    references.mkdir()
+    guide = references / "usage.md"
+    guide.write_text("Choose a timezone", encoding="utf-8")
+    summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary()
+    heading = next(line for line in summary.splitlines() if line.startswith("### Built-in skills"))
+    reference_path = str(Path(heading.split("`")[1]) / "documentation" / "references")
+    options = {
+        "workspace": workspace,
+        "allowed_dir": workspace,
+        "restrict_to_workspace": True,
+        "extra_read_allowed_dirs": [builtin],
+    }
+
+    listing = await ListDirTool(**options).execute(path=reference_path)
+    matches = await GrepTool(**options).execute(
+        pattern="timezone", path=reference_path, glob="*.md", output_mode="files_with_matches",
+    )
+
+    assert "usage.md" in listing
+    assert "usage.md" in matches
+    rejected = await WriteFileTool(**options).execute(path=str(guide), content="replace")
+    assert rejected.is_error
+    assert guide.read_text(encoding="utf-8") == "Choose a timezone"
 
 
 def test_build_skills_summary_keeps_absolute_roots_for_selected_project(tmp_path: Path) -> None:

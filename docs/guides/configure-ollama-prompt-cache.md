@@ -144,12 +144,14 @@ Ollama reuses the existing model layers. The new tag adds a small template and m
 
 ## Select the derived model in nanobot
 
-Open **Settings → Models → New preset**, select your Ollama connection, enter the derived model name, and save. Select that preset in the composer for the cache check.
+Open **Settings → Models → New preset**, select your Ollama connection, enter the derived model name, and save. Use **Enable preset** if it is disabled, then drag it to the first enabled position, marked **Primary**. This saves the default model used by sessions without their own model selection, including the fresh CLI session below.
+
+Run the CLI commands with the same nanobot home as the WebUI. If the WebUI uses a custom home, add `--home <path>` before each subcommand.
 
 <details>
 <summary>Manual configuration</summary>
 
-Merge this preset into `~/.nanobot/config.json` and select it:
+Merge this preset into your instance's `config.json` to make it the default:
 
 ```json
 {
@@ -177,7 +179,7 @@ Merge this preset into `~/.nanobot/config.json` and select it:
 
 </details>
 
-Verify the selected model and repeat the two-turn check:
+Run `nanobot status` and confirm that **Model** shows `llama3.1:8b-prefix-stable-v1`, then repeat the two-turn check. If `cli:ollama-stable-check` already exists with a saved model selection, use a new session name for both turns.
 
 ```bash
 nanobot status
@@ -191,7 +193,16 @@ In one controlled test with Ollama 0.32.1, `llama3.1:8b`, and one slot, the seco
 
 ## Roll back
 
-Switch `agents.defaults.modelPreset` back to the original preset. When no config uses the derived tag, remove it with:
+In **Settings → Models**, move the original preset back to the first enabled position and disable the derived preset. For conversations with a saved model selection, select the original preset in the composer as well.
+
+<details>
+<summary>Manual configuration</summary>
+
+Set `agents.defaults.modelPreset` back to the original preset in your instance's `config.json`.
+
+</details>
+
+When no configuration or session uses the derived tag, remove it with:
 
 ```bash
 ollama rm llama3.1:8b-prefix-stable-v1

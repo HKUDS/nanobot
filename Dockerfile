@@ -22,26 +22,23 @@ ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 RUN uv venv --seed "$VIRTUAL_ENV"
 
-# Install Python dependencies first (cached layer). Hatch reads the custom build
-# hook and its revision helper even for this metadata-only install.
+# Install Python dependencies without building the project (cached layer).
+# Source and documentation changes only invalidate the final package install.
 ARG NANOBOT_EXTRAS=
-COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
-COPY nanobot/build_info.py nanobot/
-RUN mkdir -p nanobot && touch nanobot/__init__.py && \
-    if [ -n "$NANOBOT_EXTRAS" ]; then \
-        NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \
-            --python "$VIRTUAL_ENV/bin/python" --no-cache ".[${NANOBOT_EXTRAS}]"; \
-    else \
-        NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \
-            --python "$VIRTUAL_ENV/bin/python" --no-cache .; \
-    fi && \
-    rm -rf nanobot
+COPY pyproject.toml ./
+RUN set -- && \
+    for extra in $(printf '%s' "$NANOBOT_EXTRAS" | tr ',' ' '); do \
+        set -- "$@" --extra "$extra"; \
+    done && \
+    uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache -r pyproject.toml "$@"
 
 # Copy the full source and install
+COPY README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
+COPY docs/ docs/
 COPY nanobot/ nanobot/
 COPY scripts/install_channel_dependencies.py scripts/
 COPY --from=webui-builder /app/nanobot/web/dist/ nanobot/web/dist/
-RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache .
+RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache --no-deps .
 
 # Preinstall selected channel dependencies from their manifests. A comma-separated
 # list keeps the image configurable while preserving WhatsApp in the default image.

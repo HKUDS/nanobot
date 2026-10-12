@@ -49,19 +49,22 @@ class WebUIBuildHook(BuildHookInterface):
         references_dir = root / "nanobot" / "skills" / "nanobot-document" / "references"
         if not (docs_dir / "README.md").is_file():
             raise RuntimeError("[nanobot-document] docs/README.md is required to bundle documentation")
-        # Generate the same read-only skill resources for packaged and editable installs.
-        # Recreate the directory so renamed/deleted docs cannot survive a rebuild.
-        if references_dir.exists():
-            shutil.rmtree(references_dir)
+        # Refresh generated files without removing directories that Windows
+        # editors or file watchers may hold open during editable installs.
+        current_docs: set[Path] = set()
         for source in docs_dir.rglob("*.md"):
             relative = source.relative_to(docs_dir)
             if relative.parts[0] in {"plans", "superpowers"}:
                 continue
+            current_docs.add(relative)
             destination = references_dir / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
-        build_data.setdefault("force_include", {})[str(references_dir)] = (
-            "nanobot/skills/nanobot-document/references"
+        for generated in references_dir.rglob("*.md"):
+            if generated.relative_to(references_dir) not in current_docs:
+                generated.unlink()
+        build_data.setdefault("artifacts", []).append(
+            "nanobot/skills/nanobot-document/references/**/*.md"
         )
         webui_dir = root / "webui"
         package_json = webui_dir / "package.json"

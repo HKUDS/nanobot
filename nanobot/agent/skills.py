@@ -243,7 +243,9 @@ class SkillsLoader:
                 continue
 
             resolved_root = root.expanduser().resolve()
-            if use_relative_roots:
+            # Directory tools need the real built-in root; only read_file resolves
+            # workspace-relative skills/<name>/... aliases to bundled resources.
+            if use_relative_roots and source != "builtin":
                 display_root = Path("plugins" if source == "plugin" else "skills")
             else:
                 display_root = resolved_root
