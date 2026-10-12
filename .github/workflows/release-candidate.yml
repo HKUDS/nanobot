@@ -1,0 +1,179 @@
+name: Verify Release Candidate
+
+# Preparation only: no cron, tags, GitHub Releases, PyPI or channel-feed writes.
+on:
+  workflow_dispatch:
+    inputs:
+      next_stable:
+        description: Next stable base (for example 0.3.6); must not have a stable tag
+        required: true
+        type: string
+      retain_installable:
+        description: Retain this exact installable candidate and source for 1 day (~400 MB); not publication
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE_COMMIT: ${{ github.sha }}
+      NEXT_STABLE: ${{ inputs.next_stable }}
+      PREVIEW_SEQUENCE: ${{ github.run_number }}
+
+    steps:
+      - name: Set candidate directory
+        run: echo "CANDIDATE_DIR=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: astral-sh/setup-uv@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: Install isolated build and verification tools
+        run: |
+          uv venv "$RUNNER_TEMP/release-tools"
+          uv pip install --python "$RUNNER_TEMP/release-tools/bin/python" -e '.[dev]' build twine
+          echo "$RUNNER_TEMP/release-tools/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare an exact, separate candidate
+        run: |
+          python -m scripts.release_candidate prepare \
+            --source-commit "$SOURCE_COMMIT" --base "$NEXT_STABLE" \
+            --sequence "$PREVIEW_SEQUENCE" --output "$CANDIDATE_DIR" \
+            > "$RUNNER_TEMP/candidate.json"
+
+      - name: Verify packaging and selection contracts
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          python -m pytest tests/test_release_candidate.py tests/test_releases.py \
+            tests/test_release_install_guide.py tests/test_installed_release_probe.py tests/cli/test_tui_wheels.py \
+            tests/cli/test_tui_release_packaging.py -q
+
+      - name: Check WebUI and build Python distributions
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          cd webui
+          bun install --frozen-lockfile
+          bun run lint
+          bun run test
+          cd ..
+          uv build --out-dir "$RUNNER_TEMP/python-dist"
+
+      - name: Check and cross-build the five native targets
+        working-directory: ${{ env.CANDIDATE_DIR }}/tui
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun run test
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
+            bun scripts/prepare-target.ts "$target"
+            bun run build -- "$target"
+          done
+
+      - name: Ad-hoc sign macOS arm64
+        uses: indygreg/apple-code-sign-action@44d0985b7f4363198e80b6fea63ac3e9dd3e9957
+        with:
+          input_path: ${{ env.CANDIDATE_DIR }}/tui/dist/nanobot-tui-darwin-arm64
+          rcodesign_version: 0.29.0
+
+      - name: Ad-hoc sign macOS x64
+        uses: indygreg/apple-code-sign-action@44d0985b7f4363198e80b6fea63ac3e9dd3e9957
+        with:
+          input_path: ${{ env.CANDIDATE_DIR }}/tui/dist/nanobot-tui-darwin-x64
+          rcodesign_version: 0.29.0
+
+      - name: Package licensed native archives
+        working-directory: ${{ env.CANDIDATE_DIR }}/tui
+        run: |
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
+            bun scripts/prepare-target.ts "$target"
+            bun scripts/release-notices.ts "$target"
+            python scripts/package-release.py "$target"
+          done
+
+      - name: Assemble and verify the complete candidate
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          version="${NEXT_STABLE}.dev${PREVIEW_SEQUENCE}"
+          python -m scripts.release_candidate assemble --source-commit "$SOURCE_COMMIT" \
+            --wheel "$RUNNER_TEMP/python-dist/nanobot_ai-${version}-py3-none-any.whl" \
+            --sdist "$RUNNER_TEMP/python-dist/nanobot_ai-${version}.tar.gz" \
+            --tui-dir tui/dist --output "$RUNNER_TEMP/release-artifacts"
+          python -m twine check "$RUNNER_TEMP/release-artifacts/"*.whl \
+            "$RUNNER_TEMP/release-artifacts/"*.tar.gz
+
+      - name: Install and probe the Linux wheel without frontend build tools
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          version="${NEXT_STABLE}.dev${PREVIEW_SEQUENCE}"
+          uv_bin="$(command -v uv)"
+          uv venv --python 3.11 "$RUNNER_TEMP/installed-candidate"
+          mkdir "$RUNNER_TEMP/empty-install-path"
+          env PATH="$RUNNER_TEMP/empty-install-path" "$uv_bin" pip install \
+            --python "$RUNNER_TEMP/installed-candidate/bin/python" --only-binary :all: \
+            "$RUNNER_TEMP/release-artifacts/nanobot_ai-${version}-py3-none-manylinux_2_17_x86_64.whl"
+          uv pip check --python "$RUNNER_TEMP/installed-candidate/bin/python"
+          "$RUNNER_TEMP/installed-candidate/bin/python" -I scripts/verify_installed_release.py \
+            --version "$version" --commit "$(git rev-parse HEAD)" --gateway \
+            --report "$RUNNER_TEMP/installed-candidate-report.json"
+
+      - name: Generate the exact candidate installation handoff
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          python -m scripts.release_candidate instructions --source-commit "$SOURCE_COMMIT" \
+            --artifacts "$RUNNER_TEMP/release-artifacts" \
+            --output "$RUNNER_TEMP/install-candidate.md"
+
+      # Keep the default preflight cheap: no ~400 MB archive upload per manual run.
+      # These reports are not installable releases or publication approvals.
+      - name: Retain identity, structural and native Linux probe reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-report-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/candidate.json
+            ${{ runner.temp }}/release-artifacts/release-manifest.json
+            ${{ runner.temp }}/installed-candidate-report.json
+            ${{ runner.temp }}/install-candidate.md
+          if-no-files-found: error
+          retention-days: 3
+
+      # Explicit, short-lived release handoff only. This is the documented
+      # exception to report-only preflight; never enable it on a daily schedule.
+      - name: Preserve the verified bytes and independent candidate source
+        if: ${{ inputs.retain_installable }}
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          python -m scripts.release_candidate retain --source-commit "$SOURCE_COMMIT" \
+            --artifacts "$RUNNER_TEMP/release-artifacts" \
+            --output "$RUNNER_TEMP/retained-candidate"
+
+      - name: Retain installable candidate for approved release handoff
+        if: ${{ inputs.retain_installable }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: installable-candidate-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retained-candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1

@@ -68,3 +68,206 @@ Keep an artifact manifest with the source commit, version, filenames, hashes, ch
 ## If a gate fails
 
 Do not publish to PyPI while a required TUI artifact or verification is missing. Keep the documentation's public `latest` on the previous stable version until the new version is usable. If a published package needs a correction, prepare a new version; do not silently replace the code behind an existing release tag. Stop all old processes and follow the documented session rollback procedure before downgrading a migrated installation.
+
+## Installer identity checks
+
+Run `pytest tests/test_install_scripts.py` with `uv` and `pipx` available. These
+checks use private homes, offline fixture wheels and actual package managers; they
+do not start a gateway or install the real application. Unix uses `install.sh` and
+Windows uses Windows PowerShell with `install.ps1`. CI provisions pipx separately
+from the application's dependency environment.
+
+The installer starts the verified persistent environment's Python in isolated mode,
+not `pipx run`, a disposable tool execution or whichever `nanobot` is on PATH. An
+existing recognized uv/pipx/installer-managed environment takes priority over a newly
+available manager. Multiple recognized installations require an explicit manual
+choice. An active ordinary venv remains an explicit target; an activated uv/pipx
+environment must be updated through its manager instead of pip. Existing manager
+constraints remain in force, so a pinned installation can stay at its pinned version.
+
+A failed selected manager no longer falls through to another installation, including
+on first install. Fix the reported error and retry, or deliberately choose the manual
+installation route. These checks do not establish maintenance, backup or restart
+safety for a running gateway; the managed in-app update lifecycle is a separate gate.
+
+The installers also accept an exact, already downloaded native wheel from a verified
+release handoff. With this version of the scripts, use `install.sh --wheel <path>
+--sha256 <published-hash>` or `install.ps1 -Wheel <path> -Sha256 <published-hash>`.
+Both verify the file's checksum and package/version identity before installation;
+`--dry-run` / `-DryRun` performs those checks without installing or starting setup.
+The existing owner is still selected first. uv retains its receipt constraints; pipx
+uses its upgrade-in-place operation and carries forward the requested extras. A wheel
+missing a recorded pipx extra is refused before the manager is run. Manager version
+requirements are the same as the tested exact-target handoff below.
+
+After an exact install, the persistent environment must contain the requested version
+before onboarding can start. A successful pinned/locked skip is reported as a failure
+to install that target, not as a successful update. Keep the downloaded wheel at its
+original path because the manager can record it as the installation source. Use trusted
+release metadata for the hash; a checksum alone does not authenticate an unknown publisher.
+
+For automatic platform selection of one published version, use `install.sh --release
+<version> --manifest-sha256 <trusted-manifest-hash>` or `install.ps1 -Release <version>
+-ManifestSha256 <trusted-manifest-hash>`. These options read the official release's
+complete manifest, select the native wheel for the target installation's Python, and
+verify size, SHA-256 and wheel identity before invoking the original owner. Downloads
+use the official GitHub HTTPS hosts and the user's configured HTTPS proxy. Verified
+wheels remain under `~/.nanobot/downloads/releases` (override with
+`NANOBOT_RELEASE_CACHE`); failed partial downloads are removed. Do not remove a cache
+file while a manager still records it as its installation source.
+
+The five supported platform tags are a closed bootstrap set; no extra Python package
+or frontend toolchain is installed to choose a wheel. The package manager still checks
+the target's Python and dependency requirements. In release mode, `--dry-run` / `-DryRun`
+fetches and validates only the manifest: no wheel, cache, environment or setup is created.
+It does not claim that wheel bytes or dependency resolution have been checked.
+
+This is an exact-version handoff, not latest-Preview discovery or a channel subscription.
+Use scripts that actually contain these options; older installers do not. It does not
+stop gateways or back up data. Stop affected
+writers and complete a backup first. Plain pip environments still require explicit review
+of extras, and suffixed/custom installations require their own manager instructions.
+
+## Non-publishing preview preflight
+
+**Verify Release Candidate** is a manually dispatched preparation workflow, not an
+available Preview channel. It has read-only repository permission and never creates
+tags/releases, uploads to PyPI, or advances a release catalogue. It builds and structurally
+checks all five platform wheels, the source distribution and licensed fallback archives.
+By default it retains only the small identity/manifest reports for three days, not
+installable binaries. Cross-compilation is not native execution or release approval.
+
+For one candidate intended for maintainer acceptance, explicitly select
+`retain_installable`. This preserves the same checked wheels, sdist, native archives,
+manifest, installation guide and a self-contained shallow Git repository for **one day**. It does
+not rebuild, publish, update a channel or claim release approval. That repository contains
+the candidate and its source parent, not unrelated history, checkout configuration or
+untracked files. The final `handoff.json` records identity only after the copied
+artifacts pass verification. An interrupted retention is not an accepted handoff.
+
+This opt-in is a bounded exception to the contribution guideline against large CI
+artifacts: approximately 400 MB per retained candidate. Keep it
+off for routine preflight and schedules; assess storage before using it. Download and
+preserve an approved handoff before the one-day expiry. Do not rebuild expired files
+and reuse their old verification report. This workflow change requires that resource
+exception to be called out explicitly in the PR before merge.
+
+After assembly, the workflow installs the Linux x64 wheel and its binary dependencies
+in a separate venv with no Bun/Node/Git on the install PATH. It then uses that venv's
+isolated Python to check version/commit/import identity, serve every Vite-manifest asset
+(including lazy chunks) through the installed asset handler on loopback, and execute
+the bundled TUI's `--desktop-protocol` probe with downloads disabled and an empty private
+HOME. With `--gateway`, the workflow also starts the installed CLI's foreground gateway
+with a new, private profile, no configured provider/MCP servers, disabled heartbeat and
+two loopback-only ports. It verifies readiness, the running version through the protected
+WebUI identity endpoint, the actual HTML response, and process/listener cleanup. Unix
+must exit gracefully; Windows cleanup uses process termination and is labelled as such,
+not graceful-shutdown evidence. No model task or external channel is exercised.
+
+The small report identifies its actual OS, CPU and which probes ran. This is native
+package/startup verification, not interactive TUI/WebUI, updater-managed restart, migration,
+public-download or five-platform E2E coverage.
+
+The same check can run against a disposable native installation on another supported
+platform; it neither installs nor changes the package being checked:
+
+```bash
+<installed-venv-python> -I scripts/verify_installed_release.py \
+  --version <candidate-version> --commit <candidate-commit> \
+  --gateway --report <new-report-path>
+```
+
+Use the prepared candidate commit, not its source parent. Reports are written only on
+success and never replace earlier evidence. The probe rejects checkout imports and
+unisolated invocation; it does not read the user's gateway configuration or credentials.
+Omit `--gateway` to run only asset and native TUI probes. A failed startup writes no
+success report and prints a bounded, secret-redacted log tail after cleaning up its child.
+
+To reproduce preparation locally, use a full source SHA and a new output directory
+outside the checkout. The example base/sequence are illustrative, not published versions:
+
+```bash
+python -m scripts.release_candidate prepare \
+  --source-commit <full-commit-sha> --base 0.3.6 --sequence 42 \
+  --output <new-candidate-directory>
+```
+
+This leaves the source checkout untouched and creates a candidate commit with only the
+package and fallback version changes. Identical source/base/sequence inputs produce the
+same candidate commit. Build Python distributions and all native targets from that
+candidate using the commands above. Then, from its directory:
+
+```bash
+python -m scripts.release_candidate assemble --source-commit <original-source-sha> \
+  --wheel <intermediates>/nanobot_ai-0.3.6.dev42-py3-none-any.whl \
+  --sdist <intermediates>/nanobot_ai-0.3.6.dev42.tar.gz \
+  --tui-dir tui/dist --output <new-artifact-directory>
+```
+
+Assembly refuses an existing output directory. It emits `release-manifest.json` only
+after checking the complete set, version/commit identity, WebUI presence, wheel RECORDs,
+native bundle/source correspondence and executable permissions. It also compares the
+sdist's application sources/resources with the tracked candidate (using the packaging
+exclusions), then requires every platform wheel to carry the same application and built
+WebUI bytes as that sdist. A commit marker or a valid RECORD alone does not establish
+that correspondence. This byte comparison does not prove reproducible frontend/native
+compilation or replace the clean build and native execution gates. `verify --source-commit
+<original-source-sha> --artifacts <artifact-directory>` rechecks the same candidate;
+it may reuse an identical manifest but never overwrite one with different bytes.
+
+Generate the installation handoff from that same candidate:
+
+```bash
+python -m scripts.release_candidate instructions --source-commit <original-source-sha> \
+  --artifacts <artifact-directory> --output <new-install-guide-path.md>
+```
+
+This rechecks all artifacts against the candidate and retained manifest before writing
+commands. The guide is a review report outside the immutable upload directory;
+it cannot overwrite different earlier evidence. When both candidate installers match
+the known implementation, it leads with macOS/Linux and Windows commands that download
+the installer from that exact candidate commit and pass the retained manifest's SHA-256.
+These select the platform automatically. Older candidates retain the manual handoff;
+the generator never points them to a mutable `main` script or assumes support for new flags.
+Publishing must also make the pinned installer source publicly reachable.
+
+The guide includes the exact version, source and candidate commits, five platform wheels
+with hash-bound URLs, and separate new/existing
+base-package commands for uv, pipx and an ordinary pip venv. Users save the selected wheel
+in a directory they own; the commands check its size and SHA-256 with the standard library
+before passing that local file to the manager. Do not rely on a URL hash fragment alone:
+the tested uv tool commands did not reject an incorrect fragment. Retain the saved wheel
+because a manager may record its path. No new manifest schema or installer executable is
+introduced. The manual commands are folded into an advanced section when the automatic
+entry is available. CI retains this guide alongside the other small reports.
+
+The guide is not publication approval or automatic channel selection. Before offering it
+to users, publish and verify the exact public files and add the release-specific changes,
+native coverage, migration and recovery instructions. Existing installs must be stopped
+and backed up first; extras, suffixed/locked installs and external deployment owners need
+their recorded options reviewed. A successful manager exit can mean a pinned package was
+left unchanged: verify the persistent package and then the restarted gateway separately.
+The real offline manager fixtures test command semantics, not gateway restart or migration.
+
+The candidate clone borrows Git objects from its source repository. Preserve that
+repository until the candidate is retained in an approved permanent ref; the temporary
+clone is not a durable source archive by itself. Partial assembly has no accepted manifest
+and must not be uploaded. Native launch, clean installation, upgrade/recovery, source-offer
+commitment and the final publication procedure remain required gates. Existing TUI
+publication now refuses to overwrite assets; recover missing uploads from the original
+verified files instead of rebuilding and replacing a public release.
+
+To retain the exact local handoff outside a temporary build checkout:
+
+```bash
+python -m scripts.release_candidate retain --source-commit <original-source-sha> \
+  --artifacts <verified-artifact-directory> --output <new-retained-directory>
+```
+
+The `artifacts/` subdirectory is the only release upload set. `source.git/`,
+`install.md` and `handoff.json` are maintenance handoff files, not additional PyPI
+packages. Restore the source with `git clone --no-local <retained>/source.git <new-checkout>`
+and check its HEAD against `handoff.json`. Re-run `release_candidate verify` against
+the retained `artifacts/` before the separately approved publication. Keep native
+test reports and release notes with the handoff; retention itself adds no native,
+migration, interactive UI or public-download acceptance evidence.

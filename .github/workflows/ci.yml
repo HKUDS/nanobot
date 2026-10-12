@@ -162,7 +162,7 @@ jobs:
             coverage: false
             # Real PowerShell/process-tree tests run serially in a separate
             # job. Keep them out of xdist so workers never share a console.
-            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py"
+            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/test_install_scripts.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -190,6 +190,13 @@ jobs:
 
       - name: Verify dependency consistency
         run: uv pip check
+
+      - name: Install pipx for offline installer checks
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          uv tool install pipx==1.17.12
+          uv tool dir --bin >> "$GITHUB_PATH"
 
       # Channel requirements live in manifests rather than uv.lock. Avoid a
       # later uv run sync pruning the packages installed by the previous step.
@@ -238,6 +245,8 @@ jobs:
     if: needs.changes.outputs.python_required == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed"
 
     steps:
       - uses: actions/checkout@v4
@@ -267,6 +276,18 @@ jobs:
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py
           --durations=25 --durations-min=1.0
+
+      - name: Install pipx for offline installer checks
+        shell: bash
+        run: |
+          uv tool install pipx==1.17.12
+          uv tool dir --bin >> "$GITHUB_PATH"
+
+      # Installer subprocesses run here, parallel to the broad Windows suite.
+      # Each case owns an isolated manager/config root, so individual cases can
+      # run concurrently without sharing a console or package installation.
+      - name: Run Windows installer checks
+        run: uv run --no-sync python -m pytest tests/test_install_scripts.py -n 4 --dist load -x -vv --durations=10
 
   webui:
     needs: changes
