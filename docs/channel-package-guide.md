@@ -1,8 +1,6 @@
 # Channel Package Guide
 
-Use this guide to add a self-contained channel package to the nanobot repository. A channel is part of nanobot when its package lives at `nanobot/channels/<channel>/`; there is no separate external channel-plugin path.
-
-> **Breaking change:** nanobot no longer discovers the `nanobot.channels` Python entry-point group. Move an entry-point implementation into `nanobot/channels/<channel>/` with a package-owned manifest, runtime, tests, and optional WebUI contribution.
+Use this guide to add a self-contained channel package to the nanobot repository. Each channel lives at `nanobot/channels/<channel>/` and owns its manifest, runtime, tests, and optional WebUI contribution.
 
 ## How It Works
 
@@ -485,7 +483,7 @@ class OutboundMessage:
     event: object | None # typed runtime/UI event; usually inspect with isinstance()
 ```
 
-Runtime/UI semantics live on `msg.event`. Plugin-authored outbound messages should use typed events instead of legacy metadata flags such as `_progress`, `_stream_delta`, `_stream_end`, `_reasoning_delta`, `_turn_end`, or `_goal_status`. nanobot still accepts those old flags as a compatibility bridge for existing in-process extensions, but new plugin code should not add fresh dependencies on them.
+Runtime/UI semantics live on `msg.event`. Use `outbound_message_for_event()` from `nanobot.bus.outbound_events` to build outbound messages with the appropriate typed event. Keep `metadata` for channel routing context, such as message and thread IDs, and optional `OUTBOUND_META_AGENT_UI` payloads.
 
 ## Streaming Support
 
@@ -524,7 +522,7 @@ async def send_delta(
     # delta contains a small chunk of text (a few tokens)
 ```
 
-Streaming state is passed through keyword-only arguments, not `_stream_delta` or `_stream_end` metadata flags. Use `stream_id` to key any per-stream buffers; fall back to `chat_id` when it is missing.
+Streaming state is passed through keyword-only arguments. Use `stream_id` to key any per-stream buffers; fall back to `chat_id` when it is missing.
 
 ### Example: Webhook with Streaming
 

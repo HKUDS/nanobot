@@ -308,8 +308,8 @@ describe("PaneWorkbench", () => {
     render(<WorkbenchHarness />);
 
     const header = screen.getByTestId("workbench-header-host");
-    expect(within(header).getAllByRole("button", { name: "Pane layout" })).toHaveLength(1);
-    fireEvent.pointerDown(within(header).getByRole("button", { name: "Pane layout" }), {
+    expect(within(header).getAllByRole("button", { name: "Layout" })).toHaveLength(1);
+    fireEvent.pointerDown(within(header).getByRole("button", { name: "Layout" }), {
       button: 0,
       ctrlKey: false,
     });
@@ -317,7 +317,7 @@ describe("PaneWorkbench", () => {
     expect(screen.getByTestId("pane-grid")).toHaveAttribute("data-layout", "rows");
     await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
 
-    fireEvent.pointerDown(within(header).getByRole("button", { name: "Pane layout" }), {
+    fireEvent.pointerDown(within(header).getByRole("button", { name: "Layout" }), {
       button: 0,
       ctrlKey: false,
     });
@@ -403,7 +403,7 @@ describe("PaneWorkbench", () => {
 
     expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
     expect(screen.getByTestId("workbench-pane-gamma")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Pane layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Layout" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
     expect(screen.queryByRole("separator")).not.toBeInTheDocument();
 

@@ -8,11 +8,11 @@
         "placeholder": "Discord 봇 토큰"
       },
       "allowChannels": {
-        "label": "허용된 채널",
+        "label": "허용 채널",
         "placeholder": "채널 ID, 쉼표로 구분"
       },
       "groupPolicy": {
-        "label": "그룹 동작",
+        "label": "그룹 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
@@ -20,7 +20,7 @@
         }
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
       },
       "proxy": {
@@ -39,10 +39,10 @@
         "label": "이모티콘 읽기"
       },
       "workingEmoji": {
-        "label": "일하는 이모티콘"
+        "label": "처리 중 이모지"
       },
       "workingEmojiDelay": {
-        "label": "작동하는 이모티콘 지연"
+        "label": "이모지 지연(초)"
       },
       "streaming": {
         "label": "스트리밍",

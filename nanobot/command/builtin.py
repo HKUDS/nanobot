@@ -279,7 +279,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     if ctx_est <= 0:
         ctx_est = last_usage.input_tokens if last_usage is not None else 0
 
-    # Fetch web search provider usage (best-effort, never blocks the response)
+    # Await web search provider usage; network requests have a bounded timeout.
     search_usage_text: str | None = None
     # Never let usage fetch break /status
     with suppress(Exception):
@@ -1070,7 +1070,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
-    router.exact("/compact", cmd_compact)
+    router.exact("/compact", cmd_compact, session_queue=True)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)

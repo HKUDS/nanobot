@@ -15,10 +15,10 @@
         "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "群组行为",
+        "label": "群聊规则",
         "choices": {
-          "mention": "仅提及时",
-          "open": "所有消息",
+          "mention": "提及回复",
+          "open": "全部消息",
           "allowlist": "白名单"
         }
       },
@@ -32,7 +32,7 @@
         "label": "Webhook 路径"
       },
       "replyInThread": {
-        "label": "在话题中回复",
+        "label": "话题回复",
         "choices": {
           "true": "开启",
           "false": "关闭"
@@ -45,23 +45,23 @@
         "label": "完成表情"
       },
       "includeThreadContext": {
-        "label": "包含话题上下文",
+        "label": "话题上下文",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "threadContextLimit": {
-        "label": "话题上下文上限"
+        "label": "上下文上限"
       },
       "allowFrom": {
-        "label": "允许的用户"
+        "label": "允许用户"
       },
       "groupAllowFrom": {
-        "label": "允许的频道"
+        "label": "允许频道"
       },
       "groupRequireMention": {
-        "label": "频道中需要提及",
+        "label": "提及回复",
         "choices": {
           "true": "开启",
           "false": "关闭"
@@ -82,7 +82,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "允许私聊的用户"
+        "label": "私聊用户"
       },
       "proxy": {
         "label": "网络代理",

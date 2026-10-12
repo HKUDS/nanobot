@@ -9,16 +9,9 @@ from typing import Any, Mapping, Sequence, cast
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.tools import image_generation as image_generation_tools
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools import sessions as session_tools
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import utils as cli_app_utils
-from nanobot.bus.events import (
-    INBOUND_META_RUNTIME_CONTROL,
-    RUNTIME_CONTROL_SESSION_DISCARD,
-    InboundMessage,
-)
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
@@ -39,13 +32,6 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
         | mcp_tools.session_extra(metadata)
         | session_tools.session_extra(metadata)
     )
-
-
-async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolRegistry) -> bool:
-    if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
-        await state.discard_session(msg.session_key)
-        return True
-    return await image_generation_tools.handle_runtime_control(state, msg, tools)
 
 
 @dataclass(frozen=True, slots=True)

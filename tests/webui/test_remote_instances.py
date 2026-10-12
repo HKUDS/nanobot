@@ -694,30 +694,30 @@ async def test_http_mutations_are_not_gettable_even_with_token(gateway, action):
 
 @pytest.mark.parametrize("path", ["/local/ssh-config", None])
 async def test_file_picker_returns_path_without_saving_profile(manager, monkeypatch, path):
-    from nanobot.webui import native_folder_picker
+    from nanobot.webui import native_file_picker
 
     choose = AsyncMock(return_value=path)
-    monkeypatch.setattr(native_folder_picker, "pick_native_file", choose)
+    monkeypatch.setattr(native_file_picker, "pick_native_file", choose)
     assert await manager.action("pick_file", {}) == {"path": path}
     assert not manager.path.exists()
     choose.assert_awaited_once_with()
 
 
 async def test_file_picker_failure_does_not_expose_native_error(manager, monkeypatch):
-    from nanobot.webui import native_folder_picker
+    from nanobot.webui import native_file_picker
 
-    monkeypatch.setattr(native_folder_picker, "pick_native_file", AsyncMock(
-        side_effect=native_folder_picker.NativeFolderPickerError("private diagnostic"),
+    monkeypatch.setattr(native_file_picker, "pick_native_file", AsyncMock(
+        side_effect=native_file_picker.NativeFilePickerError("private diagnostic"),
     ))
     with pytest.raises(RemoteError, match="^file_picker_unavailable$"):
         await manager.action("pick_file", {})
 
 
 async def test_file_picker_does_not_open_multiple_system_dialogs(manager, monkeypatch):
-    from nanobot.webui import native_folder_picker
+    from nanobot.webui import native_file_picker
 
     choose = AsyncMock()
-    monkeypatch.setattr(native_folder_picker, "pick_native_file", choose)
+    monkeypatch.setattr(native_file_picker, "pick_native_file", choose)
     async with manager._picker_lock:
         with pytest.raises(RemoteError, match="file_picker_unavailable"):
             await manager.action("pick_file", {})
@@ -730,10 +730,10 @@ async def test_file_picker_does_not_open_multiple_system_dialogs(manager, monkey
     ("127.0.0.1", "127.0.0.1:8765", "https://evil.example"),
 ])
 async def test_remote_clients_cannot_open_local_file_picker(gateway, monkeypatch, peer, host, origin):
-    from nanobot.webui import native_folder_picker
+    from nanobot.webui import native_file_picker
 
     choose = AsyncMock()
-    monkeypatch.setattr(native_folder_picker, "pick_native_file", choose)
+    monkeypatch.setattr(native_file_picker, "pick_native_file", choose)
     connection = SimpleNamespace(remote_address=(peer, 10000), request=SimpleNamespace(
         headers=Headers({"Host": host, "Origin": origin}),
     ))

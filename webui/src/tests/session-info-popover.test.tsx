@@ -79,7 +79,7 @@ describe("SessionInfoPopover", () => {
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Morning check" });
     expect(detail).toHaveClass("max-w-[520px]", "rounded-modal");
-    expect(within(detail).queryByText("Instructions")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("Task instructions")).not.toBeInTheDocument();
     expect(within(detail).getByText("Check the project status")).toBeInTheDocument();
     await user.click(within(detail).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Morning check" })).not.toBeInTheDocument());
@@ -143,7 +143,7 @@ describe("SessionInfoPopover", () => {
     await user.click(screen.getByRole("button", { name: "Session details" }));
     await user.click(await screen.findByRole("button", { name: /Morning check/ }));
     await user.click(screen.getByRole("button", { name: "Edit", exact: true }));
-    const editor = await screen.findByRole("dialog", { name: "Edit automation" });
+    const editor = await screen.findByRole("dialog", { name: "Edit task" });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     await user.click(within(editor).getByRole("button", { name: "Cancel", exact: true }));
 

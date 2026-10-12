@@ -1,6 +1,6 @@
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { Eye, EyeOff, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -96,6 +96,7 @@ export function WebSettings({
   olostepFeature,
   olostepInstalling,
   capabilityError,
+  children,
 }: {
   embedded?: boolean;
   error?: string;
@@ -118,6 +119,7 @@ export function WebSettings({
   olostepFeature?: NanobotFeatureInfo;
   olostepInstalling: boolean;
   capabilityError: string | null;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -272,6 +274,7 @@ export function WebSettings({
               label={effectiveJinaReader ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          {children}
           </SettingsAdvancedOptions>
           </div>
           <RestartSettingsFooter

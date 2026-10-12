@@ -15,6 +15,7 @@ from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.events import NO_EVENTS
 from nanobot.providers.base import LLMResponse
+from nanobot.runtime_context import public_history_message
 from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 
 
@@ -250,8 +251,8 @@ class TestAgentLoopTTLParam:
         loop = _make_loop(tmp_path, session_ttl_minutes=25)
         assert loop.auto_compact._ttl == 25
 
-    def test_loop_default_ttl_zero(self, tmp_path):
-        """AutoCompact default TTL should be 0 (disabled)."""
+    def test_explicit_zero_ttl_disables_loop_compaction(self, tmp_path):
+        """An explicit zero TTL disables idle compaction in the loop."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
 
@@ -422,7 +423,7 @@ class TestAutoCompactIdleDetection:
             m["content"] == "old user 0"
             for m in session_after.get_history(max_messages=len(session_after.messages))
         )
-        assert any(m["content"] == "new msg" for m in session_after.messages)
+        assert any(public_history_message(m)["content"] == "new msg" for m in session_after.messages)
         await loop.aclose()
 
     @pytest.mark.asyncio
@@ -692,9 +693,10 @@ class TestAutoCompactIntegration:
             "[Resumed Session]" in str(m.get("content", "")) for m in session_after.messages
         )
         assert resumed_system_prompt.count(overview) == 1
-        # Runtime context end marker should NOT be persisted
+        # Persisted model-only context must not leak into the public history.
         assert not any(
-            "[/Runtime Context]" in str(m.get("content", "")) for m in session_after.messages
+            "[/Runtime Context]" in str(public_history_message(m).get("content", ""))
+            for m in session_after.messages
         )
 
         # Pending summary should be consumed (one-shot)
@@ -706,8 +708,8 @@ class TestAutoCompactIntegration:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_runtime_context_markers_not_persisted_for_multi_paragraph_turn(self, tmp_path):
-        """Auto-compact resume context must not leak runtime markers into persisted session history."""
+    async def test_runtime_context_markers_hidden_for_multi_paragraph_turn(self, tmp_path):
+        """Auto-compact resume context must not leak runtime markers into public history."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         session.add_message("user", "old message")
@@ -728,7 +730,7 @@ class TestAutoCompactIntegration:
         session_after = loop.sessions.get_or_create("cli:test")
         assert any(m.get("content") == "old message" for m in session_after.messages)
         for persisted in session_after.messages:
-            content = str(persisted.get("content", ""))
+            content = str(public_history_message(persisted).get("content", ""))
             assert "[Runtime Context" not in content
             assert "[/Runtime Context]" not in content
         await loop.aclose()
@@ -1155,7 +1157,7 @@ class TestSummaryPersistence:
         loop.sessions.invalidate("cli:test")
         reloaded = loop.sessions.get_or_create("cli:test")
 
-        # Every call returns the summary from metadata (no _consumed_keys gate)
+        # Every call returns the persisted summary.
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary is not None
         _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
@@ -1166,8 +1168,8 @@ class TestSummaryPersistence:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_metadata_cleanup_on_inmemory_path(self, tmp_path):
-        """In-memory _summaries path should also clean up _last_summary from metadata."""
+    async def test_inmemory_summary_preserves_metadata_for_restart(self, tmp_path):
+        """The in-memory summary path preserves _last_summary for restart recovery."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="hello")

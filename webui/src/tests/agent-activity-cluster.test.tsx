@@ -793,7 +793,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("View large diff");
+      expect(toggle).toHaveTextContent("Expand changes");
       expect(toggle).toHaveTextContent("165 lines");
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("line-1")).not.toBeInTheDocument();
@@ -882,7 +882,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("View diff");
+      expect(toggle).toHaveTextContent("View changes");
       expect(toggle).toHaveTextContent("3 lines");
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("return <New />;")).not.toBeInTheDocument();
@@ -940,7 +940,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("View large diff");
+      expect(toggle).toHaveTextContent("Expand changes");
       expect(screen.queryByTestId("file-edit-diff-truncated")).not.toBeInTheDocument();
 
       fireEvent.click(toggle);

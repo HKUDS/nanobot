@@ -12,7 +12,7 @@ from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ async def test_adapters_replay_tool_results_and_reasoning(responses_peer, monkey
         provider = OpenAICompatProvider(
             api_key="fixture", api_base=f"{url}/v1", spec=find_by_name(adapter),
             default_model="deepseek-v4-flash" if adapter == "deepseek" else "gpt-5.4",
-            api_type="responses", extra_body={"store": True} if adapter == "openai" else None,
+            model_api=ModelAPICapabilities(("responses",), "responses"), extra_body={"store": True} if adapter == "openai" else None,
             provider_name=adapter,
         )
     progress = []

@@ -395,6 +395,7 @@ def pairing_payload(
     for item in list_pending():
         expires_at = float(item.get("expires_at", 0) or 0)
         created_at = float(item.get("created_at", 0) or 0)
+        delivery_status = item.get("delivery_status")
         requests.append(
             {
                 "code": str(item.get("code", "")),
@@ -404,6 +405,12 @@ def pairing_payload(
                 "expires_at_ms": int(expires_at * 1000) if expires_at else None,
                 "expires_in_seconds": (
                     max(0, int(expires_at - current_time)) if expires_at else None
+                ),
+                **(
+                    {"delivery_status": delivery_status}
+                    if isinstance(delivery_status, str)
+                    and delivery_status in {"sending", "sent", "failed"}
+                    else {}
                 ),
             }
         )

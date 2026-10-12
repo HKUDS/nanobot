@@ -28,7 +28,7 @@ describe("Token usage card", () => {
       { date: days[1].date, provider: "openai", model: "a", total_tokens: 1 },
     ]} />);
     const plot = container.querySelector("[data-model-usage-plot]")!;
-    const bars = within(screen.getByRole("group", { name: "Model usage over time" })).getAllByRole("img");
+    const bars = within(screen.getByRole("group", { name: "Model trends" })).getAllByRole("img");
     expect(plot).toContainElement(bars[0]);
     const baseline = container.querySelector('[data-model-usage-gridline="2"]')!;
     expect(plot).toContainElement(baseline);
@@ -52,18 +52,18 @@ describe("Token usage card", () => {
       day("2026-08-10", 9000), day("2026-08-11", 100), today, day("2026-09-10", 9000),
     ])} />);
     expect(screen.getByLabelText("400 tokens")).toBeInTheDocument();
-    const bars = within(screen.getByRole("group", { name: "Daily token usage" })).getAllByRole("img");
+    const bars = within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img");
     expect(bars).toHaveLength(30);
     expect(bars.filter((bar) => bar.tabIndex === 0)).toEqual([bars[0], bars[29]]);
     expect(bars[0]).toHaveAccessibleName(/2026-08-11: 100 tokens, 1 requests/);
-    expect(bars[29]).toHaveAccessibleName(/Cached input: 120, Cache miss: 60, Cache status unknown: 60, Output: 60/);
+    expect(bars[29]).toHaveAccessibleName(/Cached input: 120, Cache miss: 60, Unknown status: 60, Output: 60/);
     const segments = bars[29].firstElementChild?.children;
     expect(segments).toHaveLength(4);
     expect(segments?.[0]).toHaveStyle({ height: "40%" });
     expect(segments?.[1]).toHaveStyle({ height: "20%" });
     expect(segments?.[2]).toHaveStyle({ height: "20%" });
     expect(segments?.[3]).toHaveStyle({ height: "20%" });
-    expect(bars[0]).toHaveAccessibleName(/Cache miss: 0, Cache status unknown: 100/);
+    expect(bars[0]).toHaveAccessibleName(/Cache miss: 0, Unknown status: 100/);
     expect(screen.getAllByText("50%")).toHaveLength(2);
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
   });

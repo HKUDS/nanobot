@@ -15,7 +15,7 @@
         "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "그룹 동작",
+        "label": "그룹 규칙",
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
@@ -32,7 +32,7 @@
         "label": "웹훅 경로"
       },
       "replyInThread": {
-        "label": "스레드로 답장하기",
+        "label": "스레드 답변",
         "choices": {
           "true": "켜기",
           "false": "끄기"
@@ -45,23 +45,23 @@
         "label": "이모티콘 완료"
       },
       "includeThreadContext": {
-        "label": "스레드 컨텍스트 포함",
+        "label": "스레드 컨텍스트",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       },
       "threadContextLimit": {
-        "label": "스레드 컨텍스트 제한"
+        "label": "컨텍스트 상한"
       },
       "allowFrom": {
-        "label": "허용된 사용자"
+        "label": "허용 사용자"
       },
       "groupAllowFrom": {
-        "label": "허용된 채널"
+        "label": "허용 채널"
       },
       "groupRequireMention": {
-        "label": "채널에서 멘션 필요",
+        "label": "채널 멘션 필요",
         "choices": {
           "true": "켜기",
           "false": "끄기"
@@ -82,7 +82,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "허용된 직접 메시지 사용자"
+        "label": "허용 DM 사용자"
       },
       "proxy": {
         "label": "네트워크 프록시",

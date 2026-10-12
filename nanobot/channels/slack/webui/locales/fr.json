@@ -15,7 +15,7 @@
         "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "Comportement en groupe",
+        "label": "Règles des groupes",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
@@ -32,9 +32,9 @@
         "label": "Chemin du webhook"
       },
       "replyInThread": {
-        "label": "Répondre dans le fil de discussion",
+        "label": "Réponses dans le fil",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
@@ -45,32 +45,32 @@
         "label": "Terminé emoji"
       },
       "includeThreadContext": {
-        "label": "Inclure le contexte du fil de discussion",
+        "label": "Contexte du fil",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "threadContextLimit": {
-        "label": "Limite du contexte du fil de discussion"
+        "label": "Limite du contexte"
       },
       "allowFrom": {
         "label": "Utilisateurs autorisés"
       },
       "groupAllowFrom": {
-        "label": "Chaînes autorisées"
+        "label": "Canaux autorisés"
       },
       "groupRequireMention": {
-        "label": "Exiger des mentions dans les chaînes",
+        "label": "Exiger une mention dans le canal",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "dm_enabled": {
         "label": "Activer les messages directs",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
@@ -82,7 +82,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Utilisateurs de messagerie directe autorisés"
+        "label": "Utilisateurs de DM autorisés"
       },
       "proxy": {
         "label": "Proxy réseau",

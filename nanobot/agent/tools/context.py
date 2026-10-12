@@ -13,10 +13,10 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.file_state import FileStates
     from nanobot.agent.tools.runtime_control import RuntimeControl
     from nanobot.bus.queue import MessageBus
-    from nanobot.config.schema import ProviderConfig, ToolsConfig
+    from nanobot.config.schema import ProvidersConfig, ToolsConfig
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import ProviderSnapshot
-    from nanobot.security.workspace_access import WorkspaceSandboxStatus
+    from nanobot.security.workspace_access import WorkspaceSandboxStatus, WorkspaceScope
     from nanobot.session.manager import SessionManager
     from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -44,6 +44,8 @@ class RequestContext:
     # The host can consume completion messages after this request returns.
     can_receive_background_results: bool = True
     persist_session: bool = True
+    # Effective tool scope; injected inputs retain the active run's scope.
+    workspace_scope: WorkspaceScope | None = None
 
 
 @runtime_checkable
@@ -96,7 +98,7 @@ class ToolContext:
     sessions: SessionManager | None = None
     file_state_store: FileStates | None = None
     provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None
-    image_generation_provider_configs: dict[str, ProviderConfig] | None = None
+    providers_config: ProvidersConfig | None = None
     timezone: str = "UTC"
     workspace_sandbox: WorkspaceSandboxStatus | None = None
     runtime_control: RuntimeControl | None = None

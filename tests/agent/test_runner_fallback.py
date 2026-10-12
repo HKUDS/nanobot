@@ -321,7 +321,7 @@ def test_factory_injects_configured_identity_into_primary_and_fallback_leaves() 
 
 
 def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
-    from nanobot.config.schema import Config
+    from nanobot.config.schema import Config, InlineFallbackConfig
     from nanobot.providers.factory import provider_signature
 
     config = Config.model_validate({
@@ -349,7 +349,13 @@ def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
     signature = provider_signature(config)
     fallback_signatures = signature[-1]
 
-    assert fallback_signatures[0][13] is None
+    config.model_presets["fast"].reasoning_effort = "low"
+    assert provider_signature(config)[-1] == fallback_signatures
+
+    config.agents.defaults.fallback_models = [
+        InlineFallbackConfig(provider="openai", model="gpt-4.1", reasoning_effort="low")
+    ]
+    assert provider_signature(config)[-1] != fallback_signatures
 
 
 # -- FallbackProvider tests --
@@ -1611,7 +1617,7 @@ class TestFailoverOnAuthenticationError:
         factory.assert_called_once_with(fallback_preset)
 
 
-class TestNoFallbackOnNonRetryableError:
+class TestFallbackErrorClassification:
     @pytest.mark.asyncio
     async def test_bad_request(self) -> None:
         primary = _FakeProvider(
@@ -1660,7 +1666,7 @@ class TestNoFallbackOnNonRetryableError:
         factory.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_timeout(self) -> None:
+    async def test_timeout_triggers_fallback(self) -> None:
         primary = _FakeProvider(
             "primary",
             _make_response("timed out", finish_reason="error", error_kind="timeout"),

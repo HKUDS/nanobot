@@ -23,19 +23,19 @@
         }
       },
       "ackMessage": {
-        "label": "Thông báo xác nhận"
+        "label": "Tin nhắn xác nhận nhận"
       },
       "mediaDir": {
         "label": "Thư mục phương tiện"
       },
       "downloadChunkSize": {
-        "label": "Kích thước khối tải xuống"
+        "label": "Kích thước khối (byte)"
       },
       "downloadMaxBytes": {
-        "label": "Kích thước tải xuống tối đa"
+        "label": "Giới hạn tải xuống (byte)"
       },
       "showCompactionNotices": {
-        "label": "Thông báo nén ngữ cảnh",
+        "label": "Thông báo nén",
         "choices": {
           "true": "Bật",
           "false": "Tắt"

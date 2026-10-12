@@ -157,7 +157,7 @@ def start_webui_dev_server(
         subprocess_run=subprocess_run,
         output=output,
     )
-    command = _vite_command(command_runner, vite_cli)
+    command = [*_vite_command(command_runner, vite_cli), "--logLevel", "warn", "--clearScreen", "false"]
     child_env = dict(environ or os.environ)
     child_env["NANOBOT_API_URL"] = target_url
 
@@ -176,12 +176,6 @@ def start_webui_dev_server(
                 f"WebUI development server exited before it was ready (code {process.returncode})"
             )
         if endpoint_reachable(WEBUI_DEV_HOST, WEBUI_DEV_PORT):
-            if output is not None:
-                parsed_url = urlsplit(browser_url)
-                display_url = urlunsplit(
-                    (parsed_url.scheme, parsed_url.netloc, parsed_url.path, "", "")
-                )
-                output(f"WebUI dev server: {display_url}")
             return server
         sleep(0.1)
 

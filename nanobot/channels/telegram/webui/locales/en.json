@@ -16,9 +16,9 @@
         "placeholder": "* or Telegram user IDs"
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Group rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }
@@ -54,7 +54,7 @@
         }
       },
       "inlineKeyboards": {
-        "label": "Inline keyboards",
+        "label": "Message buttons",
         "choices": {
           "true": "On",
           "false": "Off"
@@ -68,7 +68,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "Stream update interval"
+        "label": "Update interval (seconds)"
       },
       "webhookUrl": {
         "label": "Webhook URL"
@@ -86,7 +86,7 @@
         "label": "Webhook secret token"
       },
       "webhookMaxConnections": {
-        "label": "Maximum webhook connections"
+        "label": "Webhook connection limit"
       }
     }
   }

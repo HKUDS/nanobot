@@ -11,6 +11,7 @@ from nanobot.pairing.store import (
     handle_pairing_command,
     is_approved,
     list_pending,
+    record_delivery,
     revoke,
     revoke_channel,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "handle_pairing_command",
     "is_approved",
     "list_pending",
+    "record_delivery",
     "revoke",
     "revoke_channel",
     "PAIRING_CODE_META_KEY",

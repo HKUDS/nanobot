@@ -12,7 +12,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
       },
       "welcomeMessage": {

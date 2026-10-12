@@ -1,8 +1,6 @@
 # Build a WhatsApp AI Agent with nanobot
 
-This guide connects nanobot to WhatsApp through the `whatsapp` channel. The
-channel links as a WhatsApp device and uses the same nanobot agent runtime,
-tools, memory, and workspace as the CLI and WebUI.
+This guide connects nanobot to WhatsApp through the `whatsapp` channel. The channel links as a WhatsApp device and uses the same nanobot agent runtime, tools, memory, and workspace as the CLI and WebUI.
 
 ## What this guide builds
 
@@ -58,9 +56,7 @@ Merge this snippet into `~/.nanobot/config.json`:
 }
 ```
 
-Omitting `allowFrom` enables pairing-only mode for private chats. `groupPolicy`
-defaults to `"open"` in the channel, but `"mention"` is safer for a first
-deployment.
+Omitting `allowFrom` enables pairing-only mode for private chats. `groupPolicy` defaults to `"open"` in the channel, but `"mention"` is safer for a first deployment.
 
 ## Run nanobot gateway
 
@@ -71,33 +67,27 @@ nanobot gateway
 
 ## Test a message
 
-Send the bot a private WhatsApp message. It should return a pairing code.
-Approve it from a trusted local surface:
+Send the bot a private WhatsApp message. It should return a pairing code. Approve it from a trusted local surface:
 
 ```bash
 nanobot agent -m "/pairing approve ABCD-EFGH"
 ```
 
-Send the message again after approval. The reply should use the same model and
-workspace as your local CLI check.
+Send the message again after approval. The reply should use the same model and workspace as your local CLI check.
 
 ## Security notes
 
 - Treat the WhatsApp session database as account access.
-- Prefer pairing-only mode for first setup. Add `allowFrom` only when you want a
-  static allowlist.
+- Prefer pairing-only mode for first setup. Add `allowFrom` only when you want a static allowlist.
 - Keep `groupPolicy` as `"mention"` before adding the bot to groups.
 - Avoid `allowFrom: ["*"]` unless the bot is intentionally public or isolated.
 
 ## Troubleshooting
 
 - If QR linking fails, rerun `nanobot channels login whatsapp`.
-- If you are migrating from the old bridge, remove `bridgeUrl` and
-  `bridgeToken`, then re-login.
-- If a sender appears as a LID instead of a phone number, let nanobot learn the
-  mapping at runtime or use `lidMappings` in the full reference.
-- If a first private message returns a pairing code, approve it before testing
-  normal replies.
+- If you are migrating from the old bridge, remove `bridgeUrl` and `bridgeToken`, then re-login.
+- If a sender appears as a LID instead of a phone number, let nanobot learn the mapping at runtime or use `lidMappings` in the full reference.
+- If a first private message returns a pairing code, approve it before testing normal replies.
 
 ## Next: memory, automations, MCP tools
 

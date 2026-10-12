@@ -98,3 +98,45 @@ async def test_session_message_text_is_not_dispatched_as_a_slash_command(
     finally:
         loop.stop()
         await asyncio.wait_for(task, timeout=2)
+
+
+async def test_path_followup_reaches_running_turn(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    first_call = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+    path = "/home/user/project"
+
+    async def respond(**kwargs):
+        calls.append(str(kwargs["messages"]))
+        if len(calls) == 1:
+            first_call.set()
+            await release.wait()
+        return LLMResponse(content="Reviewed")
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    run = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="weixin", sender_id="user", chat_id="path", content="Review the project",
+        ))
+        await asyncio.wait_for(first_call.wait(), 3)
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="weixin", sender_id="user", chat_id="path", content=path,
+        ))
+        async with asyncio.timeout(3):
+            while loop._pending_queues["weixin:path"].empty():
+                await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*loop._active_tasks["weixin:path"]), 5)
+
+        assert len(calls) == 2
+        assert path in calls[1]
+        session = loop.sessions.get_or_create("weixin:path")
+        visible = [public_history_message(row) for row in session.messages]
+        assert any(row["content"] == path for row in visible)
+        assert not any(row.get("_command") for row in session.messages)
+    finally:
+        release.set()
+        loop.stop()
+        await asyncio.wait_for(run, 5)

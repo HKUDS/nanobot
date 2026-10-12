@@ -5,14 +5,14 @@
     "officialLabel": "開啟 WhatsApp 說明",
     "fields": {
       "allowFrom": {
-        "label": "允許的聯絡人",
+        "label": "允許名單",
         "placeholder": "電話號碼或 WhatsApp ID"
       },
       "groupPolicy": {
-        "label": "群組行為",
+        "label": "群聊規則",
         "choices": {
-          "mention": "僅提及時",
-          "open": "所有訊息",
+          "mention": "提及回覆",
+          "open": "全部訊息",
           "allowlist": "允許清單"
         }
       },

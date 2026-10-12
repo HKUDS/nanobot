@@ -29,7 +29,7 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-  "fixed z-50 flex flex-col gap-4 bg-background transition ease-in-out",
+  "fixed z-50 flex flex-col gap-4 bg-background outline-none transition ease-in-out",
   {
     variants: {
       side: {
@@ -99,7 +99,7 @@ const SheetContent = React.forwardRef<
         {showCloseButton ? (
           <DialogPrimitive.Close
             className={cn(
-              "absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity",
+              "absolute right-4 top-4 rounded-mark opacity-70 ring-offset-background transition-opacity",
               "hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
               "disabled:pointer-events-none",
               closeButtonClassName,

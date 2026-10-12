@@ -1,8 +1,6 @@
 # AI Agent Memory in nanobot
 
-This page explains how nanobot implements long-term AI agent memory: session
-history, compressed archives, durable knowledge files, Dream consolidation, and
-Git-backed memory changes.
+This page explains how nanobot implements long-term AI agent memory: session history, compressed archives, durable knowledge files, Dream consolidation, and Git-backed memory changes.
 
 nanobot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
 
@@ -66,10 +64,7 @@ This is why nanobot's memory is not just archival. It is interpretive.
 
 ## The Files
 
-In this page, `workspace` means the configured **agent workspace** (the default
-is `~/.nanobot/workspace/`, or the path passed with `--workspace`). Selecting a
-different project in the WebUI changes that chat's project context and tool
-working directory; it does not relocate the files below.
+In this page, `workspace` means the configured **agent workspace** (the default is `~/.nanobot/workspace/`, or the path passed with `--workspace`). Selecting a different project in the WebUI changes that chat's project context and tool working directory; it does not relocate the files below.
 
 ```text
 workspace/
@@ -86,10 +81,7 @@ workspace/
     └── .dream_cursor    # Dream consumption cursor
 ```
 
-A selected project may provide its own `AGENTS.md`, but project-local `SOUL.md`,
-`USER.md`, and `memory/` do not replace the agent-owned files above. This keeps
-one agent's profile and memory continuous while it works across projects. Use a
-separate configured agent workspace when identity or memory must be isolated.
+A selected project may provide its own `AGENTS.md`, but project-local `SOUL.md`, `USER.md`, and `memory/` do not replace the agent-owned files above. This keeps one agent's profile and memory continuous while it works across projects. Use a separate configured agent workspace when identity or memory must be isolated.
 
 These files play different roles:
 

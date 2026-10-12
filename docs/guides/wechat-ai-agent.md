@@ -1,7 +1,6 @@
 # Build a WeChat AI Agent with nanobot
 
-This guide connects nanobot to WeChat through the `weixin` channel. The channel
-uses HTTP long polling with QR-code login through the supported upstream API.
+This guide connects nanobot to WeChat through the `weixin` channel. The channel uses HTTP long polling with QR-code login through the supported upstream API.
 
 ## What this guide builds
 
@@ -47,8 +46,7 @@ Merge this snippet into `~/.nanobot/config.json`:
 }
 ```
 
-Omitting `allowFrom` enables pairing-only mode. The first private WeChat message
-from a new sender gets a pairing code instead of agent access.
+Omitting `allowFrom` enables pairing-only mode. The first private WeChat message from a new sender gets a pairing code instead of agent access.
 
 Log in:
 
@@ -67,33 +65,26 @@ nanobot gateway
 
 ## Test a message
 
-Send a private WeChat message to the bot. It should reply with a pairing code.
-Approve it from a trusted local surface:
+Send a private WeChat message to the bot. It should reply with a pairing code. Approve it from a trusted local surface:
 
 ```bash
 nanobot agent -m "/pairing approve ABCD-EFGH"
 ```
 
-Send the message again after approval and watch gateway logs for the sender ID
-and reply.
+Send the message again after approval and watch gateway logs for the sender ID and reply.
 
 ## Security notes
 
-- Prefer pairing-only mode for first setup. Add `allowFrom` only when you want a
-  static allowlist.
+- Prefer pairing-only mode for first setup. Add `allowFrom` only when you want a static allowlist.
 - Treat saved login state as sensitive account access.
-- Avoid connecting personal accounts to untrusted workspaces or broad tool
-  permissions.
+- Avoid connecting personal accounts to untrusted workspaces or broad tool permissions.
 
 ## Troubleshooting
 
 - If login fails, rerun `nanobot channels login weixin --force`.
-- If a first private message returns a pairing code, that is expected. Approve
-  the code before testing normal agent replies.
-- If messages are denied without a pairing code, check gateway logs for whether
-  WeChat provided the context token required for nanobot to reply.
-- If polling disconnects, restart the gateway and check network reachability to
-  the upstream service.
+- If a first private message returns a pairing code, that is expected. Approve the code before testing normal agent replies.
+- If messages are denied without a pairing code, check gateway logs for whether WeChat provided the context token required for nanobot to reply.
+- If polling disconnects, restart the gateway and check network reachability to the upstream service.
 
 ## Next: memory, automations, MCP tools
 

@@ -12,9 +12,10 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
-from nanobot.command.builtin import cmd_stop
+from nanobot.command.builtin import cmd_compact, cmd_stop
 from nanobot.command.router import CommandContext
 from nanobot.providers.base import GenerationSettings, LLMResponse, ProviderConversationState
+from nanobot.runtime_context import public_history_message
 from nanobot.session.history_visibility import is_hidden_history_message
 
 
@@ -37,6 +38,7 @@ async def loop(tmp_path):
         context_window_tokens=128_000,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.commands.exact("/summarize", cmd_compact, session_queue=True)
     try:
         yield loop
     finally:
@@ -44,7 +46,7 @@ async def loop(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["/compact", " /COMPACT@nanobot "])
+@pytest.mark.parametrize("command", ["/compact", " /COMPACT@nanobot ", "/summarize"])
 async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) -> None:
     bus = loop.bus
     session = loop.sessions.get_or_create("cli:test")
@@ -139,11 +141,12 @@ async def test_compacted_session_waits_for_new_input_without_continuation(
         "content": loop.context.build_system_prompt(channel="cli", session_summary=expected_summary),
     }
     assert [message["role"] for message in sent] == ["system", "user"]
-    assert sent[1]["content"] == "hi"
+    assert sent[1]["content"].startswith("hi\n\n")
+    assert "File access: no workspace restriction." in sent[1]["content"]
 
     loop.sessions.invalidate(key)
     resumed = loop.sessions.get_or_create(key)
-    assert resumed.get_history() == [
+    assert resumed.get_history(include_runtime_context=False) == [
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "Hello!"},
     ]
@@ -189,10 +192,11 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
 
 
 @pytest.mark.asyncio
-async def test_compact_during_active_turn_waits_for_the_session_lock(loop) -> None:
+@pytest.mark.parametrize("command", ["/COMPACT@nanobot", "/summarize"])
+async def test_compact_during_active_turn_waits_for_the_session_lock(loop, command) -> None:
     key = "websocket:test"
     msg = InboundMessage(
-        channel="websocket", sender_id="user", chat_id="test", content="/COMPACT@nanobot",
+        channel="websocket", sender_id="user", chat_id="test", content=command,
     )
     lock = loop._get_session_lock(key)
     async with lock:
@@ -214,10 +218,11 @@ async def test_compact_during_active_turn_waits_for_the_session_lock(loop) -> No
 
 
 @pytest.mark.asyncio
-async def test_stop_completes_a_compact_command_waiting_for_the_session_lock(loop) -> None:
+@pytest.mark.parametrize("command", ["/compact", "/summarize"])
+async def test_stop_completes_a_compact_command_waiting_for_the_session_lock(loop, command) -> None:
     key = "websocket:test"
     msg = InboundMessage(
-        channel="websocket", sender_id="user", chat_id="test", content="/compact",
+        channel="websocket", sender_id="user", chat_id="test", content=command,
         metadata={"webui_turn_id": "queued-compact"},
     )
     completions = []
@@ -233,7 +238,8 @@ async def test_stop_completes_a_compact_command_waiting_for_the_session_lock(loo
 
 
 @pytest.mark.asyncio
-async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
+@pytest.mark.parametrize("command_text", ["/compact", "/summarize"])
+async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop, command_text) -> None:
     key = "cli:test"
     started = asyncio.Event()
     release = asyncio.Event()
@@ -265,7 +271,7 @@ async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
         loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="before compaction",
         ))
-        command = InboundMessage(channel="cli", sender_id="u", chat_id="test", content="/compact")
+        command = InboundMessage(channel="cli", sender_id="u", chat_id="test", content=command_text)
         await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
         loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="after compaction",
@@ -278,10 +284,10 @@ async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    assert [message["content"] for message in compacted_history if message["role"] == "user"] == [
+    assert [public_history_message(message)["content"] for message in compacted_history if message["role"] == "user"] == [
         "initial question", "before compaction",
     ]
-    assert all("/compact" != message.get("content") for request in requests for message in request)
+    assert all(command_text != message.get("content") for request in requests for message in request)
     assert "after compaction" in str(requests[-1])
     events = [loop.bus.outbound.get_nowait().event for _ in range(loop.bus.outbound_size)]
     assert [event.phase for event in events if isinstance(event, ContextCompactionEvent)] == [
@@ -290,7 +296,8 @@ async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
 
 
 @pytest.mark.asyncio
-async def test_stop_completes_compact_queued_behind_an_active_turn(loop) -> None:
+@pytest.mark.parametrize("command_text", ["/compact", "/summarize"])
+async def test_stop_completes_compact_queued_behind_an_active_turn(loop, command_text) -> None:
     key = "websocket:test"
     started = asyncio.Event()
 
@@ -307,7 +314,7 @@ async def test_stop_completes_compact_queued_behind_an_active_turn(loop) -> None
     task = next(iter(loop._active_tasks[key]))
     await asyncio.wait_for(started.wait(), timeout=5)
     command = InboundMessage(
-        channel="websocket", sender_id="u", chat_id="test", content="/compact",
+        channel="websocket", sender_id="u", chat_id="test", content=command_text,
         metadata={"webui_turn_id": "queued-compact"},
     )
     await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
@@ -321,7 +328,8 @@ async def test_stop_completes_compact_queued_behind_an_active_turn(loop) -> None
 
 
 @pytest.mark.asyncio
-async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
+@pytest.mark.parametrize("command", ["/compact", "/summarize"])
+async def test_stop_finishes_inflight_compaction_as_cancelled(loop, command) -> None:
     key = "websocket:test"
     session = loop.sessions.get_or_create(key)
     session.add_message("user", "important question")
@@ -337,7 +345,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
     msg = InboundMessage(
-        channel="websocket", sender_id="user", chat_id="test", content="/compact",
+        channel="websocket", sender_id="user", chat_id="test", content=command,
         metadata={"webui_turn_id": "compact-turn"},
     )
     loop._enqueue_session_message(msg)

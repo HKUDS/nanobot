@@ -652,11 +652,13 @@ def _should_retry_status(
     return status_code in LLMProvider._RETRYABLE_STATUS_CODES or status_code >= 500  # pyright: ignore[reportPrivateUsage]
 
 
-def get_xai_grok_model_catalog(proxy: str | None = None) -> OAuthModelCatalogSnapshot:
+def get_xai_grok_model_catalog(
+    proxy: str | None = None, *, refresh: bool = False,
+) -> OAuthModelCatalogSnapshot:
     token = get_xai_oauth_login_status()
     account_key = _catalog_account_key(getattr(token, "account_id", None))
     cache_key = f"{get_xai_oauth_storage_path()}\0{account_key}\0{proxy or ''}"
-    return _XAI_GROK_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy)
+    return _XAI_GROK_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy, refresh=refresh)
 
 
 def invalidate_xai_grok_model_catalog() -> None:

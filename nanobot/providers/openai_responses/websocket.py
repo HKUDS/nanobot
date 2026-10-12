@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import ssl
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, cast
 
@@ -20,6 +21,13 @@ from websockets.protocol import State
 from nanobot.providers.base import LLMProvider, LLMResponse, resolve_stream_idle_timeout_s
 from nanobot.providers.openai_responses.backend import ResponsesBackend
 from nanobot.providers.openai_responses.parsing import ResponsesStreamCapture
+
+_TRANSPORT_FAILURE_LIMIT = 3
+
+
+def _close_reason(reason: str) -> str:
+    # Close frames are untrusted and may echo request contents or credentials.
+    return reason if reason in {"", "keepalive ping timeout", "going away", "normal closure"} else "redacted"
 
 
 def _fingerprint(value: object) -> bytes:
@@ -106,6 +114,7 @@ class ResponsesWebSocketSession:
         self._prefix_length = 0
         self._response_id: str | None = None
         self._http_only = False
+        self._transport_failures = 0
 
     async def aclose(self) -> None:
         connection, self._connection = self._connection, None
@@ -136,6 +145,7 @@ class ResponsesWebSocketSession:
                 await self.aclose()
                 self._auth_fingerprint = auth_fingerprint
                 self._http_only = False
+                self._transport_failures = 0
             if self._http_only:
                 return None
             try:
@@ -202,15 +212,25 @@ class ResponsesWebSocketSession:
                         payload["previous_response_id"] = self._response_id
                     capture = ResponsesStreamCapture()
                     response_started = False
+                    payload_json = json.dumps(payload, ensure_ascii=False)
+                    request_bytes = len(payload_json.encode())
+                    started_at = time.monotonic()
+                    first_event_s: float | None = None
 
                     async def observe_event(event: dict[str, Any]) -> None:
-                        nonlocal response_started
+                        nonlocal response_started, first_event_s
+                        if first_event_s is None:
+                            first_event_s = time.monotonic() - started_at
+                            logger.info(
+                                "Responses WebSocket first event: request_bytes={} elapsed_s={:.3f}",
+                                request_bytes, first_event_s,
+                            )
                         event_type = event.get("type")
                         if isinstance(event_type, str) and event_type.startswith("response."):
                             response_started = True
 
                     try:
-                        await self._connection.send(json.dumps(payload, ensure_ascii=False))
+                        await self._connection.send(payload_json)
                         result = await ResponsesBackend.consume(
                             self._events(self._connection), provider=provider, body=body,
                             on_content_delta=on_content_delta,
@@ -227,7 +247,34 @@ class ResponsesWebSocketSession:
                             continue
                         raise
                     except (ConnectionClosed, OSError) as exc:
-                        raise ConnectionError("Responses WebSocket connection interrupted") from exc
+                        self._transport_failures += 1
+                        if self._transport_failures >= _TRANSPORT_FAILURE_LIMIT:
+                            self._http_only = True
+                        received = exc.rcvd if isinstance(exc, ConnectionClosed) else None
+                        sent = exc.sent if isinstance(exc, ConnectionClosed) else None
+                        direction = "unknown"
+                        if isinstance(exc, ConnectionClosed):
+                            if received is not None and (sent is None or exc.rcvd_then_sent):
+                                direction = "received"
+                            elif sent is not None:
+                                direction = "sent"
+                        logger.warning(
+                            "Responses WebSocket interrupted: request_bytes={} elapsed_s={:.3f} "
+                            "first_event_s={} type={} received_code={} received_reason={} "
+                            "sent_code={} sent_reason={} direction={} failures={} http_only={}",
+                            request_bytes, time.monotonic() - started_at, first_event_s,
+                            type(exc).__name__, received.code if received is not None else None,
+                            _close_reason(received.reason) if received is not None else None,
+                            sent.code if sent is not None else None,
+                            _close_reason(sent.reason) if sent is not None else None,
+                            direction, self._transport_failures, self._http_only,
+                        )
+                        # Let the owning retry policy decide whether to replay. In particular,
+                        # visible partial output and cancellation must not trigger an HTTP replay.
+                        if isinstance(exc, TimeoutError):
+                            raise
+                        raise ConnectionError("Responses WebSocket connection interrupted") from None
+                    self._transport_failures = 0
                     response_id = capture.response.get("id") if capture.response is not None else None
                     if result.provider_state is not None:
                         self._properties_fingerprint = properties_fingerprint
@@ -246,10 +293,7 @@ class ResponsesWebSocketSession:
 
     async def _events(self, connection: ClientConnection) -> AsyncIterator[dict[str, Any]]:
         while True:
-            try:
-                data = await asyncio.wait_for(connection.recv(), resolve_stream_idle_timeout_s())
-            except (ConnectionClosed, OSError) as exc:
-                raise ConnectionError("Responses WebSocket connection closed before completion") from exc
+            data = await asyncio.wait_for(connection.recv(), resolve_stream_idle_timeout_s())
             try:
                 raw: object = json.loads(data)
             except ValueError:

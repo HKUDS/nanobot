@@ -26,6 +26,7 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
 )
+from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.oauth_model_catalog import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
@@ -176,7 +177,7 @@ class OpenAICodexProvider(LLMProvider):
                 *,
                 emit_deltas: bool,
             ) -> LLMResponse:
-                wire_body = without_response_item_ids(request_body)
+                wire_body = await prepare_inline_images(without_response_item_ids(request_body))
                 if session_id:
                     websocket_result = await self._responses.websocket_request(
                         session_id, DEFAULT_CODEX_URL, headers, wire_body,
@@ -625,13 +626,15 @@ def _should_retry_status(
 
 def get_openai_codex_model_catalog(
     proxy: str | None = None,
+    *,
+    refresh: bool = False,
 ) -> OAuthModelCatalogSnapshot:
     storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
     token = storage.load()
     account_id = getattr(token, "account_id", None)
     account_key = _catalog_account_key(account_id)
     cache_key = f"{storage.get_token_path()}\0{account_key}\0{proxy or ''}"
-    return _OPENAI_CODEX_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy)
+    return _OPENAI_CODEX_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy, refresh=refresh)
 
 
 def invalidate_openai_codex_model_catalog() -> None:

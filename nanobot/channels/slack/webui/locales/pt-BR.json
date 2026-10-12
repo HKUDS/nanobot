@@ -15,7 +15,7 @@
         "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "Comportamento em grupos",
+        "label": "Regras de grupo",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
@@ -32,7 +32,7 @@
         "label": "Caminho do webhook"
       },
       "replyInThread": {
-        "label": "Responder no tópico",
+        "label": "Respostas na thread",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
@@ -45,14 +45,14 @@
         "label": "Emoji pronto"
       },
       "includeThreadContext": {
-        "label": "Incluir contexto do thread",
+        "label": "Contexto da thread",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "threadContextLimit": {
-        "label": "Limite de contexto do thread"
+        "label": "Limite de contexto"
       },
       "allowFrom": {
         "label": "Usuários permitidos"
@@ -61,7 +61,7 @@
         "label": "Canais permitidos"
       },
       "groupRequireMention": {
-        "label": "Exigir menções nos canais",
+        "label": "Exigir menção em canais",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
@@ -82,7 +82,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Usuários de mensagens diretas permitidos"
+        "label": "Usuários de DM permitidos"
       },
       "proxy": {
         "label": "Proxy de rede",

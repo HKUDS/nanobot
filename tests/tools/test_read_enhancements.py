@@ -554,7 +554,7 @@ class TestOfficeDocTruncation:
         assert "truncated" not in result
 
 
-class TestReadDescriptionUpdate:
+class TestReadFileDescription:
 
     def test_description_mentions_documents(self):
         tool = ReadFileTool()
