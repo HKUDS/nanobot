@@ -202,7 +202,6 @@ def workspaces_payload(
         ],
         "controls": {
             "can_change_project": can_change_project,
-            "can_use_full_access": True,
             "can_browse_directories": can_change_project,
             "can_resolve_project": can_change_project,
             "can_manage_favorites": can_change_project,

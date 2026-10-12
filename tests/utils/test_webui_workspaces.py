@@ -44,25 +44,6 @@ def test_workspace_payload_is_config_data_dir_scoped(tmp_path, monkeypatch) -> N
     assert payload["controls"]["can_change_project"] is True
 
 
-def test_workspace_payload_advertises_full_access(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
-    default = tmp_path / "default"
-    default.mkdir()
-
-    payload = workspaces_payload(
-        default_workspace=default,
-        default_restrict_to_workspace=False,
-        can_change_project=True,
-    )
-
-    assert payload["default_scope"]["project_path"] == str(default.resolve())
-    assert payload["controls"]["can_change_project"] is True
-    assert payload["controls"]["can_use_full_access"] is True
-
-
 def test_workspace_payload_hides_project_selection_when_unavailable(
     tmp_path,
     monkeypatch,
@@ -78,7 +59,6 @@ def test_workspace_payload_hides_project_selection_when_unavailable(
     )
 
     assert payload["controls"]["can_change_project"] is False
-    assert payload["controls"]["can_use_full_access"] is True
 
 
 def test_workspace_payload_uses_webui_default_access_mode(tmp_path, monkeypatch) -> None:

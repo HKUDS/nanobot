@@ -3677,7 +3677,6 @@ def test_workspace_payload_allows_access_selection_for_local_and_remote_clients(
     assert response.status_code == 200
     controls = json.loads(response.body.decode())["controls"]
     assert controls["can_change_project"] is True
-    assert controls["can_use_full_access"] is True
     assert controls["can_browse_directories"] is True
     assert controls["can_resolve_project"] is True
     assert controls["can_manage_favorites"] is True

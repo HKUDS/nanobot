@@ -1077,7 +1077,7 @@ describe("App layout", () => {
         schema_version: 1,
         default_access_mode: "full",
         default_scope: { ...projectScope, project_path: "/tmp/workspace", project_name: "workspace" },
-        controls: { can_change_project: true, can_use_full_access: true },
+        controls: { can_change_project: true },
       },
     });
     window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
@@ -1108,7 +1108,7 @@ describe("App layout", () => {
           access_mode: "full",
           restrict_to_workspace: false,
         },
-        controls: { can_change_project: true, can_use_full_access: true },
+        controls: { can_change_project: true },
       },
     });
     render(<App />);
@@ -1162,7 +1162,7 @@ describe("App layout", () => {
           access_mode: "restricted",
           restrict_to_workspace: true,
         },
-        controls: { can_change_project: true, can_use_full_access: true, can_browse_directories: true, can_resolve_project: true },
+        controls: { can_change_project: true, can_browse_directories: true, can_resolve_project: true },
       },
       [directoryUrl("C:\\workspace")]: directory("C:\\workspace"),
       [directoryUrl("C:\\workspace\\")]: directory("C:\\workspace"),

@@ -421,11 +421,10 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
     const trimmed = path.trim();
     if (!base || !onChange) return;
     if (!trimmed || !isAbsoluteWorkspacePath(trimmed)) { setPathError(t("workspace.dialog.absolutePathRequired")); return; }
-    const accessMode = controls?.can_use_full_access === false && !sameWorkspacePath(trimmed, base.project_path) ? "restricted" : base.access_mode;
-    onChange({ ...base, project_path: trimmed, project_name: name || projectNameFromPath(trimmed), access_mode: accessMode, restrict_to_workspace: accessMode === "restricted" });
+    onChange({ ...base, project_path: trimmed, project_name: name || projectNameFromPath(trimmed) });
     setPathError(null);
     setOpen(false);
-  }, [controls?.can_use_full_access, defaultScope, onChange, scope, t]);
+  }, [defaultScope, onChange, scope, t]);
 
   const chooseProject = useCallback(async (path: string, name?: string) => {
     const session = pickerSession.current;
@@ -683,13 +682,11 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
 export function WorkspaceAccessToggle({
   scope,
   disabled,
-  canUseFullAccess,
   isHero,
   onChange,
 }: {
   scope: WorkspaceScopePayload;
   disabled?: boolean;
-  canUseFullAccess: boolean;
   isHero: boolean;
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
@@ -712,7 +709,7 @@ export function WorkspaceAccessToggle({
             variant={null}
             aria-label={accessAriaLabel}
             aria-pressed={isFull}
-            disabled={disabled || !onChange || (!isFull && !canUseFullAccess)}
+            disabled={disabled || !onChange}
             onClick={() => onChange?.(scopeWithAccessMode(scope, isFull ? "restricted" : "full"))}
             className={cn(
               "settings-hover thread-composer-access touch-target min-w-0 max-w-[min(12.5rem,42vw)] whitespace-nowrap rounded-control border border-transparent font-semibold shadow-none",

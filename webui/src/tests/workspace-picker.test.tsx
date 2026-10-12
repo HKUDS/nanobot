@@ -13,7 +13,7 @@ const catalog: WorkspacesPayload = {
   default_scope: scope,
   recent_projects: [{ name: "alpha", path: "/srv/alpha" }, { name: "beta", path: "/srv/beta" }],
   host: { name: "dev-server", platform: "Linux" },
-  controls: { can_change_project: true, can_use_full_access: false, can_browse_directories: true },
+  controls: { can_change_project: true, can_browse_directories: true },
 };
 const directory: WorkspaceDirectoriesPayload = {
   path: "/srv/workspace", parent: "/srv", entries: [{ name: "alpha", path: "/srv/workspace/alpha" }],
@@ -419,7 +419,7 @@ describe("Workspace project picker", () => {
     const onChange = vi.fn();
     const onBrowse = vi.fn();
     const onResolve = vi.fn();
-    render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={{ can_change_project: true, can_use_full_access: false }} onBrowseDirectories={onBrowse} onResolveProject={onResolve} onChange={onChange} />);
+    render(<WorkspaceProjectPicker isHero scope={scope} defaultScope={scope} controls={{ can_change_project: true }} onBrowseDirectories={onBrowse} onResolveProject={onResolve} onChange={onChange} />);
     await user.click(screen.getByRole("button", { name: "Switch directory" }));
     expect(screen.queryByRole("option", { name: "Browse folders…" })).not.toBeInTheDocument();
     await user.type(screen.getByRole("combobox"), "relative-path");

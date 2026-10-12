@@ -2386,7 +2386,6 @@ export function ThreadComposer({
     <WorkspaceAccessToggle
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
-      canUseFullAccess={workspaceControls?.can_use_full_access !== false}
       isHero={isHero}
       onChange={onWorkspaceScopeChange}
     />
