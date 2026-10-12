@@ -17,9 +17,10 @@ Use the WebUI when you want a local AI agent interface that is easier to operate
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
+nanobot webui
 ```
+
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
 
 The published wheel already includes the WebUI bundle. You only need the `webui/` source directory when changing the frontend.
 

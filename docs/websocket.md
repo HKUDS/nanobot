@@ -16,6 +16,8 @@ Nanobot can act as a WebSocket server, allowing external clients (web apps, CLIs
 
 ### 1. Configure
 
+For normal browser setup, run `nanobot webui`; the launcher prepares the local channel and opens the WebUI. Configure models in **Settings → Models**. The listener and protocol fields below are for custom clients and deployments and have no graphical editor.
+
 The WebSocket channel is enabled by default. Add only the fields you want to override under `channels.websocket`:
 
 ```json

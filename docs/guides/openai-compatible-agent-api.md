@@ -18,9 +18,10 @@ Use this when an existing client, another language, or a separate process alread
 ```bash
 python -m pip install nanobot-ai
 nanobot plugins enable api
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
+nanobot webui
 ```
+
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
 
 ## Minimal working example
 

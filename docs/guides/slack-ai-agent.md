@@ -23,10 +23,17 @@ nanobot agent -m "Hello!"
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+
 ## Enable the Slack channel
+
+Create a Slack app with Socket Mode, a bot token, an app-level token with `connections:write`, and the required event subscriptions. In **Channels → Slack**, enter those tokens, enable the channel, and save. For pairing, expand **Advanced**, set the DM policy to **Allowlist**, and leave its allowlist empty; follow any restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Install the optional channel dependency:
 
@@ -55,6 +62,8 @@ Merge this snippet into `~/.nanobot/config.json`:
 ```
 
 Slack DMs are open by default. Setting `dm.policy` to `"allowlist"` with no `dm.allowFrom` entries makes new DM senders receive a pairing code. Approve the code before using the bot normally.
+
+</details>
 
 ## Run nanobot gateway
 

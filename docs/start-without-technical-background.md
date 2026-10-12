@@ -116,13 +116,13 @@ Do not configure every feature immediately. Choose one next goal:
 | Goal | What to do |
 |---|---|
 | Change the AI model | Open **Settings → Models** |
-| Add a provider credential | Open **Settings → Models → Manage providers** |
-| Connect Telegram, Discord, Slack, Feishu, WeChat, or another chat app | Open **Settings → Channels**, choose the platform, and follow its connection steps |
+| Add a provider credential | Open **Settings → Models → Provider → Add provider** |
+| Connect Telegram, Discord, Slack, Feishu, WeChat, or another chat app | Open **Channels**, choose the platform, and follow its connection steps |
 | Add a tool integration | Open **Apps** and choose an App or MCP integration |
 | Schedule a reminder or recurring task | Ask nanobot in the target chat, then manage it in **Automations** |
 | Work with project files | Start a new chat, choose the project workspace, and review the access setting before sending the task |
 
-Repository docs show the current development version. If your stable package does not yet show **Settings → Channels**, use the [Chat Apps guide](./chat-apps.md) or update to a release that includes it.
+Repository docs show the current development version. If your stable package does not yet show **Channels**, use the [Chat Apps guide](./chat-apps.md) or update to a release that includes it.
 
 Some runtime changes ask you to restart nanobot. Use the restart action shown by the WebUI, or return to the terminal, press `Ctrl+C`, and run `nanobot webui` again.
 

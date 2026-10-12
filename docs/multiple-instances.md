@@ -9,7 +9,7 @@ nanobot --home ~/.nanobot-work onboard
 nanobot --home ~/.nanobot-work webui --port 8766 --gateway-port 18791
 ```
 
-Configure this instance's models and channels in WebUI Settings or `~/.nanobot-work/config.json`. Onboarding saves its default workspace as `~/.nanobot-work/workspace`.
+Configure this instance's models in **Settings → Models** and chat apps through **Channels** in the sidebar. Onboarding saves its default workspace as `~/.nanobot-work/workspace`. Use the collapsed examples in the [configuration reference](./configuration.md) for deployment-managed JSON.
 
 Use the same home for other commands:
 

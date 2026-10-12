@@ -16,9 +16,10 @@ Configure web search when the agent needs current information, public web resear
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
+nanobot webui
 ```
+
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
 
 Web tools are enabled by default. Configure them only when you want a specific provider, API key, proxy, fetch behavior, or SSRF allowlist.
 
@@ -27,10 +28,13 @@ Web tools are enabled by default. Configure them only when you want a specific p
 For local interactive setup:
 
 1. Run `nanobot webui`.
-2. Open **Settings → Web**.
+2. Open **Settings → Capabilities → Web access**.
 3. Enable web search, choose a provider, and enter its API key if required.
 4. Save and restart when prompted.
 5. Ask a question that requires current information and inspect the cited sources.
+
+<details>
+<summary>Manual configuration</summary>
 
 For manual or deployment-managed config, use the default search provider:
 
@@ -63,6 +67,8 @@ Or use an API-backed provider:
 ```
 
 Ask a question that requires current information and inspect the tool activity in the WebUI or logs.
+
+</details>
 
 ## Production notes
 

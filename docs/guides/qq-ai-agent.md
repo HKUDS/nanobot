@@ -24,10 +24,17 @@ nanobot agent -m "Hello!"
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+
 ## Enable the QQ channel
+
+Create a QQ bot application, copy its AppID and AppSecret, and add your account to the sandbox members. In **Channels → QQ**, enter those credentials, enable the channel, and save. Follow any installation or restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Install the optional channel dependency:
 
@@ -51,6 +58,8 @@ In the QQ Open Platform, create a bot application and copy the AppID and AppSecr
 ```
 
 Omitting `allowFrom` enables pairing-only mode. A new private sender should get a pairing code before normal agent access.
+
+</details>
 
 ## Run nanobot gateway
 

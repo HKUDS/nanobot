@@ -24,10 +24,17 @@ nanobot agent -m "Hello!"
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+
 ## Enable the Mattermost channel
+
+Prepare the Mattermost bot token and team ID. In **Channels → Mattermost**, enter the server URL, token, and team ID. Use **Advanced** for group and thread policies; for DM pairing, choose **Allowlist** with an empty DM allowlist. Enable the channel, save, and follow any restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Merge this snippet into `~/.nanobot/config.json`:
 
@@ -55,6 +62,8 @@ Merge this snippet into `~/.nanobot/config.json`:
 When `groupPolicy` is `"allowlist"`, `groupAllowFrom` remains the outer channel boundary for root posts and thread replies. A thread policy cannot open a channel that is not on that allowlist.
 
 Mattermost DMs are open by default. Setting `dm.policy` to `"allowlist"` with no `dm.allowFrom` entries makes new DM senders receive a pairing code. Approve the code before using the bot normally.
+
+</details>
 
 ## Run nanobot gateway
 

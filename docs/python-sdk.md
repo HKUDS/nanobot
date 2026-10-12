@@ -260,7 +260,7 @@ result = await bot.run("Think deeply about this bug", model_preset="reasoning")
 
 `model` and `model_preset` are mutually exclusive.
 
-For first setup, prefer named presets in `config.json`. Mixing an API key from one provider with a model ID from another is the most common first-run failure. For the exact difference between `provider`, `model`, `apiKey`, and `apiBase`, see [Providers: Provider, Model, API Key, and Base URL](providers.md#provider-model-api-key-and-base-url). If a run fails before the SDK does anything interesting, confirm the same provider and model work with `nanobot agent -m "Hello!"` first.
+For first setup, create named presets in **Settings → Models**; the SDK reads those saved presets from `config.json`. Mixing an API key from one provider with a model ID from another is the most common first-run failure. For the exact difference between `provider`, `model`, `apiKey`, and `apiBase`, see [Providers: Provider, Model, API Key, and Base URL](providers.md#provider-model-api-key-and-base-url). If a run fails before the SDK does anything interesting, confirm the same provider and model work with `nanobot agent -m "Hello!"` first.
 
 ### Isolate conversations with `session_key`
 

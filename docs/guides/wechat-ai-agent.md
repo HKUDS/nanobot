@@ -23,10 +23,17 @@ nanobot agent -m "Hello!"
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+
 ## Enable the WeChat channel
+
+Open **Channels → WeChat (Weixin)**, install support if prompted, and follow the QR connection flow using your WeChat account. Enable the channel, save, and follow any restart prompt. New private senders receive a pairing code until approved.
+
+<details>
+<summary>Manual configuration</summary>
 
 Install the optional channel dependency:
 
@@ -55,6 +62,8 @@ nanobot channels login weixin
 ```
 
 Use `--force` if you need to discard saved login state and authenticate again.
+
+</details>
 
 ## Run nanobot gateway
 

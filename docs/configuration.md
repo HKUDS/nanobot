@@ -4,9 +4,13 @@ Config file: `~/.nanobot/config.json`
 
 This is the full reference. If this is your first install, start with [`quick-start.md`](./quick-start.md). If you are trying to choose a model or fix provider/model matching, use [`providers.md`](./providers.md) first and come back here for exact fields and advanced options.
 
-For normal local use, prefer the WebUI before editing JSON: **Settings → Models** manages model choices and provider credentials, **Settings → Channels** guides chat-platform setup, other Settings pages cover built-in capabilities, and **Apps** manages CLI App and MCP integrations. Edit `config.json` directly when you need an advanced field, automate deployment, or intentionally manage configuration as code.
+For normal local use, prefer the WebUI before editing JSON: **Settings → Models** manages model choices and provider credentials, **Channels** guides chat-platform setup, other Settings pages cover built-in capabilities, and **Apps** manages CLI App and MCP integrations. Use direct configuration for fields without a graphical control; expand the manual alternatives for headless deployments or configuration managed as code.
 
-The JSON examples below are usually partial snippets to merge into your existing config, not full replacement files. For the mental model behind config, workspace, gateway, channels, sessions, tools, and memory, see [`concepts.md`](./concepts.md).
+Use the graphical steps for settings exposed in the WebUI. Their JSON alternatives
+are collapsed under **Manual configuration**. Settings without a graphical control
+retain direct configuration instructions. JSON examples are usually partial snippets
+to merge into your existing config, not full replacement files. For the mental model
+behind config, workspace, gateway, channels, sessions, tools, and memory, see [`concepts.md`](./concepts.md).
 
 The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`. snake_case keys are also accepted for compatibility, but the docs prefer camelCase because that is what nanobot writes back to disk.
 
@@ -244,21 +248,23 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 
 ## Providers
 
+Open **Settings → Models → New preset → Provider**. Select an existing connection or choose **Add provider**, enter its credentials and endpoint, and save. Connection-specific fields are under **Advanced options**.
+
 > [!TIP]
-> - **Voice transcription**: Voice messages and WebUI microphone input use the shared top-level `transcription` settings. The default `transcription.provider` value is `"groq"`; set it to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, `"xiaomi_mimo"` for Xiaomi MiMo ASR, or `"assemblyai"` for AssemblyAI. API keys still live in the matching `providers.<provider>` config.
+> - **Voice transcription**: Choose Groq, OpenAI, OpenRouter, Xiaomi MiMo, StepFun, AssemblyAI, or SiliconFlow in **Settings → Capabilities → Transcription**. Voice messages and WebUI microphone input share these settings; Groq is the runtime default. Configure the matching provider credential in **Settings → Models**.
 > - **MiniMax Coding Plan**: Exclusive discount links for the nanobot community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
-> - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
+> - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), open the minimax connection in **Settings → Models** and set its base URL to `https://api.minimaxi.com/v1`.
 > - **MiniMax thinking mode**: `providers.minimaxAnthropic` is the config block for `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so nanobot keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
 > - **Kimi Coding Plan**: Use `providers.kimiCoding` with `provider: "kimi_coding"` for Kimi's dedicated Anthropic Messages API endpoint. The endpoint requires a Claude-compatible `User-Agent`; nanobot sends `claude-code/0.1.0` by default, and you can override it with `extraHeaders.User-Agent` if your account requires a different value.
 > - **VolcEngine / BytePlus Coding Plan**: Subscription endpoints are configured through dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan`, separate from the pay-per-use `volcengine` / `byteplus` providers.
 > - **OpenCode Zen / Go**: `providers.opencode` (canonical Zen), the legacy-compatible `providers.opencodeZen`, and `providers.opencodeGo` use the same `OPENCODE_API_KEY`, but route to different OpenCode gateways. These providers use OpenCode's OpenAI-compatible `chat/completions` endpoints; choose model IDs from that endpoint family.
-> - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
-> - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
-> - **ModelScope**: If you're using ModelScope's OpenAI-compatible endpoint, set `"apiBase": "https://api-inference.modelscope.cn/v1"` in your modelscope provider config.
-> - **StepFun Step Plan**: If you're on StepFun's Step Plan subscription, set `"apiBase": "https://api.stepfun.ai/step_plan/v1"` in your stepfun provider config. Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and `step-router-v1`.
-> - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), set `"apiBase": "https://api.stepfun.com/v1"` in your stepfun provider config.
-> - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
-> - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, set `"apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"` in your xiaomi_mimo provider config.
+> - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, open the zhipu connection in **Settings → Models** and set its base URL to `https://open.bigmodel.cn/api/coding/paas/v4`.
+> - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, open the dashscope connection in **Settings → Models** and set its base URL to `https://dashscope.aliyuncs.com/compatible-mode/v1`.
+> - **ModelScope**: If you're using ModelScope's OpenAI-compatible endpoint, open the modelscope connection in **Settings → Models** and set its base URL to `https://api-inference.modelscope.cn/v1`.
+> - **StepFun Step Plan**: If you're on StepFun's Step Plan subscription, open the stepfun connection in **Settings → Models** and set its base URL to `https://api.stepfun.ai/step_plan/v1`. Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and `step-router-v1`.
+> - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), open the stepfun connection in **Settings → Models** and set its base URL to `https://api.stepfun.com/v1`.
+> - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. In the preset's **Advanced options**, set reasoning effort to `none` to disable it, or `low` / `medium` / `high` to keep it on. Omitting the field preserves the provider's per-model default.
+> - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, open the xiaomi_mimo connection in **Settings → Models** and set its base URL to `https://token-plan-sgp.xiaomimimo.com/v1`.
 > - **Custom providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. Declare accepted protocols with `providers.<name>.api`; custom connections can use Chat Completions, Responses, or Anthropic Messages. See [custom connection APIs](#custom-connection-apis).
 > - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers, Anthropic Messages, `openai_codex`, and `xai_grok`. Native `bedrock`, `azure_openai`, and `github_copilot` backends reject `proxy`.
 
@@ -1314,11 +1320,16 @@ Contributor notes for adding new providers live in [`development.md`](./developm
 
 ## Model Presets
 
+Open **Settings → Models → New preset**, give the preset a unique name, select its provider and model, and save. Use **Advanced options** for generation settings and request API selection. Select the saved preset in the chat composer.
+
 Model presets let you name a complete model configuration and select one per session with `/model <preset>`. They are the recommended way to configure models because the same names can be reused for new-session defaults, chat-command switching, and fallback chains.
 
 For browser setup, follow [Configure Your Model](./quick-start.md#2-configure-your-model). The WebUI accepts token values such as `32k` or `1m`; JSON configuration uses integer token counts.
 
 Existing configs do not need to change. Direct `agents.defaults.model`, `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and `reasoningEffort` fields still define the implicit `default` preset. For new configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -1355,6 +1366,8 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
 }
 ```
 
+</details>
+
 `modelPresets` is a top-level object. Each key (`fast`, `deep`, `coding`, etc.) is the preset's one canonical name: it is shown in the interface, passed to `/model <name>`, and referenced by defaults, fallbacks, sessions, and Dream. New and renamed presets must be unique ignoring case. Existing keys accepted by earlier releases remain loadable so upgrades do not break startup. Each preset supports:
 
 Older configs may still contain a `label` inside a preset. It is accepted when loading for compatibility but ignored; the object key remains the canonical name.
@@ -1377,6 +1390,9 @@ Set `agents.defaults.modelPreset` to choose the preset followed by sessions that
 
 Custom providers use Chat Completions by default. If your service requires another protocol, open its WebUI connection editor and expand **Advanced options**. Use **Supported APIs** to select the protocols the service accepts and **Default API** to choose the default for Auto presets. Hover, focus, or tap a setting label for help. Existing connections without a declaration retain their previous behavior until you change these controls.
 
+<details>
+<summary>Manual configuration</summary>
+
 In `config.json`, set `providers.<name>.api` for the built-in `custom` provider or a named custom provider:
 
 ```json
@@ -1393,6 +1409,8 @@ In `config.json`, set `providers.<name>.api` for the built-in `custom` provider 
   }
 }
 ```
+
+</details>
 
 `supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Auto presets inherit this default; explicit presets can only use protocols in the connection's list. Before removing a protocol used by an explicit preset, update that preset first.
 
@@ -1411,6 +1429,9 @@ Leave API selection on **Auto** unless your service requires a specific protocol
 **Auto (Responses)**, for example, shows the default API for the current provider, model, and reasoning settings. Auto uses a configured connection default when present. Otherwise, custom providers use Chat Completions, built-in providers use their known model defaults, and GitHub Copilot uses available account model information. Auto does not test whether a third-party service supports an API. If no preview is available, the label shows **Auto**.
 
 Selecting Responses also offers **Try Chat Completions if Responses is unsupported**, off by default. Enable it only if the service supports the same model through both APIs. The Auto label shows the default preference; permitted Chat fallback can still change the API used for a request.
+
+<details>
+<summary>Manual configuration</summary>
 
 To configure presets in `config.json`:
 
@@ -1438,6 +1459,8 @@ To configure presets in `config.json`:
 }
 ```
 
+</details>
+
 `supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Omit `api` or set it to `null` for Auto. An explicit preset declaration overrides the OpenAI connection default; for custom connections, it must stay within the connection's supported APIs.
 
 A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Other errors do not trigger this API fallback. Provider-hosted search uses Responses when the preset allows it.
@@ -1450,6 +1473,8 @@ OpenAI Codex, xAI Grok subscriptions, and Azure OpenAI use Responses; Anthropic 
 
 ### Model Fallbacks
 
+In **Settings → Models**, create the primary and backup presets, then use **Enable preset** and arrange their order. The first enabled preset is primary; later entries are tried as fallbacks. Save and test each preset before relying on the chain.
+
 `agents.defaults.fallbackModels` defines an ordered failover chain for the active model configuration. The primary model is still selected by `agents.defaults.modelPreset` or, in older configs, by the implicit `default` preset from direct `agents.defaults.*` fields.
 
 Each fallback candidate can be either:
@@ -1458,6 +1483,9 @@ Each fallback candidate can be either:
 - An inline fallback object with at least `provider` and `model`. Optional `maxTokens`, `contextWindowTokens`, and `temperature` fields inherit from the active primary config when omitted. `reasoningEffort` does not inherit; omit it to leave reasoning off for that fallback, or set it explicitly for models that support reasoning.
 
 Preset fallback chain:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -1492,9 +1520,14 @@ Preset fallback chain:
 }
 ```
 
+</details>
+
 String entries are preset names, not raw model names. In the example above, `"deep"` means `modelPresets.deep`; nanobot will not interpret it as a provider model ID. Changing a preset updates both `/model <preset>` switching and any fallback chain that references it.
 
 Inline fallback object:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -1522,6 +1555,8 @@ Inline fallback object:
 }
 ```
 
+</details>
+
 Use inline objects only when a fallback is not worth naming as a reusable preset. `fallbackModels` belongs under `agents.defaults`, not inside individual `modelPresets` entries.
 
 Failover normally runs when the primary provider returns a fallbackable model/provider error before any answer text has been streamed. Stream-stall timeouts are the recovery exception: if the provider already emitted partial answer text and then stalls, nanobot closes the current stream segment and retries/fails over in a new segment. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, authentication/permission failures such as invalid or expired credentials, and quota/balance exhaustion. It does not run for malformed requests, content filtering/refusals, or context-length/message-format errors.
@@ -1530,7 +1565,12 @@ If fallback candidates use smaller `contextWindowTokens` values, nanobot builds 
 
 ## Transcription Settings
 
+Open **Settings → Capabilities → Transcription**, enable it, select a provider and model, and set the language or recording limits under **Advanced options** when needed. Add missing provider credentials through **Settings → Models**. Save and follow any restart prompt.
+
 Audio transcription is a shared capability used by chat-channel voice messages and by WebUI microphone input. Chat-channel voice messages are transcribed automatically before they enter the agent. WebUI microphone input is transcribed into the composer first, so you can edit the text before sending.
+
+<details>
+<summary>Manual configuration</summary>
 
 Configure transcription under the top-level `transcription` section:
 
@@ -1547,11 +1587,13 @@ Configure transcription under the top-level `transcription` section:
 }
 ```
 
+</details>
+
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `enabled` | `true` | Enables audio transcription for both chat-channel voice messages and WebUI microphone input. |
-| `provider` | `"groq"` | Transcription backend: `"groq"`, `"openai"`, `"openrouter"`, `"xiaomi_mimo"`, `"stepfun"`, or `"assemblyai"`. |
-| `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq, `whisper-1` for OpenAI, `openai/whisper-1` for OpenRouter, `mimo-v2.5-asr` for Xiaomi MiMo ASR, `stepaudio-2.5-asr` for StepFun ASR, and `universal-3-pro,universal-2` for AssemblyAI. OpenRouter accepts only speech-to-text models on its transcription endpoint, such as `nvidia/parakeet-tdt-0.6b-v3`, `openai/whisper-1`, or `openai/gpt-4o-transcribe`; chat LLMs are rejected there. AssemblyAI accepts a comma-separated model fallback list. |
+| `provider` | `"groq"` | Transcription backend: `"groq"`, `"openai"`, `"openrouter"`, `"xiaomi_mimo"`, `"stepfun"`, `"assemblyai"`, or `"siliconflow"`. |
+| `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq, `whisper-1` for OpenAI, `openai/whisper-1` for OpenRouter, `mimo-v2.5-asr` for Xiaomi MiMo ASR, `stepaudio-2.5-asr` for StepFun ASR, `universal-3-pro,universal-2` for AssemblyAI, and `FunAudioLLM/SenseVoiceSmall` for SiliconFlow. OpenRouter accepts only speech-to-text models on its transcription endpoint, such as `nvidia/parakeet-tdt-0.6b-v3`, `openai/whisper-1`, or `openai/gpt-4o-transcribe`; chat LLMs are rejected there. AssemblyAI accepts a comma-separated model fallback list. |
 | `language` | `null` | Optional ISO-639 language hint, e.g. `"en"`, `"zh"`, `"ko"`, or `"ja"`. |
 | `maxDurationSec` | `120` | Maximum WebUI recording duration. |
 | `maxUploadMb` | `25` | Maximum WebUI audio upload size. |
@@ -1565,6 +1607,9 @@ Provider and language resolution is intentionally ordered for backwards compatib
 The legacy `channels.*` transcription fields existed before transcription became a shared capability across chat channels and WebUI microphone input. They are still read so older `config.json` files keep working, but they are no longer the preferred configuration surface. If both old and new fields are present, the top-level `transcription` values are the source of truth.
 
 Transcription credentials are intentionally not stored in `transcription`. Put the API key and optional endpoint in the matching provider config:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -1581,13 +1626,20 @@ Transcription credentials are intentionally not stored in `transcription`. Put t
 }
 ```
 
+</details>
+
 Selecting a transcription provider does not configure credentials by itself. For example, the effective provider may default to Groq for compatibility, but transcription is only usable when `providers.groq.apiKey` or the matching environment-backed config is available. The Settings UI writes only the top-level `transcription` fields.
 
 If you are adding a new transcription provider, see [`development.md`](./development.md#adding-a-transcription-provider).
 
 ## Channel Settings
 
-Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:
+Open **Channels** in the sidebar, select the chat platform, and follow its credential or QR setup. Channel-specific options are in its **Advanced** section. Global channel output settings without a graphical control remain documented directly below.
+
+Global settings apply to all channels and have no graphical controls. Configure them under the `channels` section in `~/.nanobot/config.json`:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -1601,6 +1653,8 @@ Global settings that apply to all channels. Configure under the `channels` secti
   }
 }
 ```
+
+</details>
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -1681,9 +1735,14 @@ When ripgrep (`rg`) is installed, nanobot automatically uses it in place of the 
 
 ## Web Tools
 
-nanobot incorporates basic tools for accessing the web. These include searching via APIs, and fetching arbitrary web pages in Markdown format. They are enabled by default, and can be configured in `~/.nanobot/config.json` under `tools.web`.
+Open **Settings → Capabilities → Web access** to enable or disable web tools and configure search and fetch. Use **Configure → Advanced options** for the web proxy and User-Agent, and **Settings → Advanced** for the SSRF whitelist. Follow any restart prompt.
 
-If you want to disable them, which removes both `web_search` and `web_fetch` from the tool list sent to the LLM, set `tools.web.enable` to `false`:
+nanobot includes web search and web fetch tools. They are enabled by default. The collapsed examples below show the equivalent `tools.web` configuration.
+
+Turn off **Web access** in **Settings → Capabilities** to remove both `web_search` and `web_fetch` from the tool list sent to the model. The manual equivalent is:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -1695,7 +1754,12 @@ If you want to disable them, which removes both `web_search` and `web_fetch` fro
 }
 ```
 
+</details>
+
 nanobot uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP connections. By default it blocks loopback, RFC1918/private ranges, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints. If you need to allow trusted private ranges, explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -1704,6 +1768,8 @@ nanobot uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP conne
   }
 }
 ```
+
+</details>
 
 Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.168.1.50/32`). The whitelist is global for the shared SSRF guard; it is not limited to one tool or one MCP server.
 
@@ -1718,9 +1784,14 @@ nanobot when WebUI requests it. You can configure the proxy before enabling web 
 
 > [!TIP]
 > Use `proxy` in `tools.web` to route web requests through a proxy:
+> <details>
+> <summary>Manual configuration</summary>
+>
 > ```json
 > { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
 > ```
+>
+> </details>
 > `web_fetch` applies DNS pinning for direct connections. When an explicit `tools.web.proxy` or a process-wide proxy environment variable applies to the target URL, nanobot still validates the requested URL locally, but DNS resolution for the outbound fetch happens at the proxy; configure only trusted proxies. URLs excluded by `NO_PROXY` keep the DNS-pinned direct path unless `tools.web.proxy` is configured.
 
 ### `tools.web`
@@ -1733,7 +1804,9 @@ nanobot when WebUI requests it. You can configure the proxy before enabling web 
 
 ### Web Search
 
-nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
+In **Settings → Capabilities → Web access**, choose the search provider, enter its key or base URL when required, and set the result limit. Save and ask a question requiring current information.
+
+nanobot supports multiple web search providers. Select one in the WebUI as described above; the collapsed examples show the equivalent `tools.web.search` configuration.
 
 By default, web search uses `duckduckgo`, and it works out of the box without an API key.
 
@@ -1751,6 +1824,9 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `duckduckgo` (default) | — | — | Yes |
 
 **Brave:**
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1764,7 +1840,12 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 }
 ```
 
+</details>
+
 **Tavily:**
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1778,7 +1859,12 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 }
 ```
 
+</details>
+
 **Jina** (free tier with 10M tokens):
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1792,7 +1878,12 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 }
 ```
 
+</details>
+
 **Kagi:**
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1806,7 +1897,12 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 }
 ```
 
+</details>
+
 **Olostep:**
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1820,9 +1916,14 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 }
 ```
 
+</details>
+
 You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in config.
 
 **Bocha** (AI-optimized search, free tier available):
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1836,9 +1937,14 @@ You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in c
 }
 ```
 
+</details>
+
 Create your API key at [open.bochaai.com](https://open.bochaai.com). Bocha returns structured results optimized for AI consumption, with optional summaries. You can set `BOCHA_API_KEY` in the environment instead of storing it in config.
 
 **Volcengine Search:**
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1852,9 +1958,14 @@ Create your API key at [open.bochaai.com](https://open.bochaai.com). Bocha retur
 }
 ```
 
+</details>
+
 You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-search skill. Create the key in the [Volcengine web search console](https://console.volcengine.com/search-infinity/web-search), then copy it from [API keys](https://console.volcengine.com/search-infinity/api-key). Volcengine Ark keys are separate and do not work for this search provider.
 
 **Keenable** (works without an API key on the free tier):
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1867,9 +1978,14 @@ You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-
 }
 ```
 
+</details>
+
 Keenable search works out of the box with no account, via its token-less public endpoint (free tier, limited to 1,000 requests/hour). Set `apiKey` (or `KEENABLE_API_KEY`) from [keenable.ai](https://keenable.ai) to remove the hourly limit.
 
 **Serper** (Google Search API):
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1883,9 +1999,14 @@ Keenable search works out of the box with no account, via its token-less public 
 }
 ```
 
+</details>
+
 Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_KEY` in the environment instead of storing it in config.
 
 **SearXNG** (self-hosted, no API key needed):
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1899,7 +2020,12 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 }
 ```
 
+</details>
+
 **DuckDuckGo** (zero config):
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1912,7 +2038,12 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 }
 ```
 
+</details>
+
 **AnySearch** (key-optional, anonymous quota):
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -1924,6 +2055,8 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
   }
 }
 ```
+
+</details>
 
 AnySearch works out of the box with no key, via its anonymous quota (lower rate limits). Set `apiKey` (or `ANYSEARCH_API_KEY`) from [anysearch.com](https://anysearch.com/console/api-keys) to lift rate limits. It also offers vertical-domain search and full-page URL content extraction.
 
@@ -1938,18 +2071,28 @@ AnySearch works out of the box with no key, via its anonymous quota (lower rate 
 
 ### Web Fetch
 
+In **Settings → Capabilities → Web access**, expand the fetch options and choose whether to use Jina Reader. Save the change; use **Configure → Advanced options** in the same Web access card for network proxy settings.
+
 > [!TIP]
 > If you are having issues with JS proof-of-work or Cloudflare captchas, set a random user agent and disable Jina Reader:
+> <details>
+> <summary>Manual configuration</summary>
+>
 > ```json
 > { "tools": { "web": { "userAgent": "Not-A-Browser", "fetch": { "useJinaReader": false } } } }
 > ```
+>
+> </details>
 
 nanobot by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
 
 > [!NOTE]
 > Using the remote reader means the fetched URL itself is disclosed to the third-party service. URLs that visibly carry credentials (userinfo, signed-URL or token-style query parameters) are detected and fetched locally instead, but secrets embedded in a URL's *path* (for example bot-token or webhook-style URLs) cannot be reliably detected. Set `useJinaReader: false` if fetched URLs must never leave the machine.
 
-If you want to always use the local conversion, you can force it using:
+To always use local conversion, turn off **Jina Reader** in the Web access settings. The manual equivalent is:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -1962,6 +2105,8 @@ If you want to always use the local conversion, you can force it using:
   }
 }
 ```
+
+</details>
 
 #### `tools.web.fetch`
 
@@ -1977,12 +2122,17 @@ See [Image Generation](./image-generation.md) for WebUI usage, provider examples
 
 ## MCP (Model Context Protocol)
 
+Open **Apps → MCP**, choose a preset or **Add MCP server**, and enter the stdio command or HTTP/SSE endpoint. Configure authentication and enabled tools in the server editor, save, and follow any connection or restart prompt.
+
 > [!TIP]
 > The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
 
 nanobot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
 
-Add MCP servers to your `config.json`:
+For headless or deployment-managed setup, expand the manual configuration below:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2003,6 +2153,8 @@ Add MCP servers to your `config.json`:
 }
 ```
 
+</details>
+
 MCP servers can run locally over stdio or connect remotely over HTTP:
 
 | Connection | Config | Example |
@@ -2011,6 +2163,9 @@ MCP servers can run locally over stdio or connect remotely over HTTP:
 | **Streamable HTTP / SSE** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/mcp`) |
 
 Remote HTTP servers may use browser OAuth instead of static headers. In the WebUI, open **Apps → MCP → Add MCP server**, choose **Custom**, select HTTP or SSE, and choose **OAuth** under **Authentication**. Save the server, then choose **Connect**. For manual configuration, add `auth: "oauth"` and open **Apps → MCP** to connect. Known presets such as Xmind, Notion, and Linear add the config automatically on first click.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2026,6 +2181,8 @@ Remote HTTP servers may use browser OAuth instead of static headers. In the WebU
 }
 ```
 
+</details>
+
 nanobot opens the server's authorization page and handles the callback through the gateway. The tools become available immediately when hot reload succeeds; otherwise the WebUI asks for a restart. OAuth tokens and dynamic client registration data are stored in the nanobot data directory under `auth/mcp.json`; they are not written to `config.json`. Removing the MCP server from Apps also removes its saved OAuth credentials. Normal gateway startup never opens a browser or registers a new OAuth client when credentials are missing—interactive authorization starts only after a user clicks **Connect**.
 
 For a remotely accessed WebUI, HTTPS is recommended. Configure `channels.websocket.publicWsUrl` with the browser-facing `wss://` endpoint so nanobot can register the matching HTTPS callback and finish automatically. A loopback WebUI may use HTTP. When a remote WebUI is served over plain HTTP, nanobot instead registers a localhost callback and asks you to paste the complete callback URL from the browser address bar after authorization.
@@ -2034,6 +2191,9 @@ For a remotely accessed WebUI, HTTPS is recommended. Configure `channels.websock
 > HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request—including OAuth metadata, client registration, token exchange, and redirects—is validated again. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
 
 Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2048,7 +2208,12 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 }
 ```
 
+</details>
+
 Use `enabledTools` to register only a subset of tools from an MCP server:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2064,6 +2229,8 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 }
 ```
 
+</details>
+
 `enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped nanobot tool name (for example `mcp_filesystem_write_file`).
 
 - Omit `enabledTools`, or set it to `["*"]`, to register all capabilities (tools, resources, and prompts).
@@ -2076,6 +2243,8 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 
 ## Security
+
+Open **Settings → Advanced** for workspace restriction, shell sandbox settings, SSRF exceptions, and remote package installation. Choose the narrowest access needed and follow any restart prompt. Use **Channels** for each chat platform's access controls.
 
 > [!TIP]
 > For production deployments, set both `"restrictToWorkspace": true` and `"tools.exec.sandbox"` (`"bwrap"` on Linux, `"seatbelt"` on macOS) in your config. `restrictToWorkspace` enables nanobot's application-level workspace guards; `tools.exec.sandbox` provides process-level isolation for shell commands.
@@ -2144,6 +2313,9 @@ Pairing only works in **DMs** — unapproved users in group chats are silently i
 
 By default, if you don't set `allowFrom`, pairing-capable channels can issue a pairing code when an unapproved user DMs the bot. This means you can skip `allowFrom` entirely and manage access through pairing:
 
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "channels": {
@@ -2154,7 +2326,12 @@ By default, if you don't set `allowFrom`, pairing-capable channels can issue a p
 }
 ```
 
+</details>
+
 Slack and Mattermost DMs are open by default. To use pairing there, set the channel's `dm.policy` to `"allowlist"` and leave `dm.allowFrom` empty until you approve users:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2167,7 +2344,12 @@ Slack and Mattermost DMs are open by default. To use pairing there, set the chan
 }
 ```
 
+</details>
+
 If you prefer to allow everyone without approval:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2179,6 +2361,8 @@ If you prefer to allow everyone without approval:
   }
 }
 ```
+
+</details>
 
 ### Managing access
 
@@ -2202,6 +2386,8 @@ nanobot agent -m "/pairing approve ABCD-EFGH"
 
 ## Gateway Heartbeat
 
+The WebUI has no control for heartbeat registration or its interval. Configure these fields directly in `config.json` and restart the gateway.
+
 The gateway can run a protected heartbeat cron job that periodically checks `HEARTBEAT.md` in the active workspace. This is enabled by default when you run `nanobot gateway`.
 
 ```json
@@ -2209,8 +2395,7 @@ The gateway can run a protected heartbeat cron job that periodically checks `HEA
   "gateway": {
     "heartbeat": {
       "enabled": true,
-      "intervalS": 1800,
-      "keepRecentMessages": 8
+      "intervalS": 1800
     }
   }
 }
@@ -2226,7 +2411,6 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 |--------|---------|-------------|
 | `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
-| `gateway.heartbeat.keepRecentMessages` | `8` | Number of recent heartbeat-session messages to retain after each run. |
 | `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
 
 ### Custom heartbeat evaluator prompt
@@ -2236,7 +2420,12 @@ The notification gate runs on a built-in system prompt. Advanced users can overr
 
 ## Subagent Concurrency
 
+Open **Settings → Advanced** and change **Concurrent subagents** under **Run limits**. Follow any restart prompt.
+
 By default, nanobot allows four subagents to run at the same time. Additional subagents wait for capacity instead of being rejected. Lower the limit if a local model server cannot hold multiple KV caches, or raise it when the provider can handle more parallel work:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2248,6 +2437,8 @@ By default, nanobot allows four subagents to run at the same time. Additional su
 }
 ```
 
+</details>
+
 The deprecated `agents.defaults.failOnToolError` field is silently ignored when present in older configs.
 
 | Option | Default | Description |
@@ -2256,6 +2447,8 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 
 
 ## Auto Compact
+
+The WebUI has no control for the idle-compaction threshold or scan interval. Configure these fields directly in `config.json`; use `/compact` for an immediate compaction.
 
 When a session is idle for longer than a configured threshold, nanobot summarizes its conversation context. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. The original conversation remains in your saved chat history, but even its most recent messages are no longer included verbatim in the model's context after idle compaction.
 
@@ -2290,21 +2483,31 @@ Use `/compact` in chat to compact the current session without waiting for the id
 
 ## Timezone
 
+Open **Settings → System → Timezone**. Keep **System timezone** on to follow the host, or turn it off and choose a fixed IANA timezone. Follow any restart prompt.
+
 Time is context. Context should be precise.
 
-By default, nanobot uses `UTC` for runtime time context. If you want the agent to think in your local time, set `agents.defaults.timezone` to a valid [IANA timezone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones):
+New configurations use `agents.defaults.timezoneMode: "auto"`: nanobot detects the host's IANA timezone when loading the config and falls back to `UTC` if detection fails. To use a fixed timezone, set `timezoneMode` to `"manual"` and `timezone` to a valid [IANA timezone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones):
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
   "agents": {
     "defaults": {
+      "timezoneMode": "manual",
       "timezone": "Asia/Shanghai"
     }
   }
 }
 ```
 
-This affects runtime time strings shown to the model, such as runtime context. It also becomes the default timezone for cron schedules when a cron expression omits `tz`, and for one-shot `at` times when the ISO datetime has no explicit offset.
+</details>
+
+In `"auto"` mode, the detected timezone overrides the stored `timezone` value. Older configs with an explicit `timezone` but no `timezoneMode` are treated as `"manual"`, preserving their configured timezone.
+
+The effective timezone affects runtime time strings shown to the model, such as runtime context. It also becomes the default timezone for cron schedules when a cron expression omits `tz`, and for one-shot `at` times when the ISO datetime has no explicit offset.
 
 Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/London`, `Europe/Berlin`, `Asia/Tokyo`, `Asia/Shanghai`, `Asia/Singapore`, `Australia/Sydney`.
 
@@ -2312,7 +2515,12 @@ Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/Londo
 
 ## Unified Session
 
+Open **Settings → System** and change **Shared sessions**. Enable it only for a single-user setup where conversations should share context. Follow any restart prompt.
+
 By default, each channel × chat ID combination gets its own session. If you use nanobot across multiple channels (e.g. Telegram + Discord + CLI) and want them to share the same conversation, enable `unifiedSession`:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2323,6 +2531,8 @@ By default, each channel × chat ID combination gets its own session. If you use
   }
 }
 ```
+
+</details>
 
 When enabled, all incoming messages — regardless of which channel they arrive on — are routed into a single shared session. Switching from Telegram to Discord (or any other channel) continues the same conversation seamlessly.
 
@@ -2338,7 +2548,12 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 
 ## Disabled Skills
 
+Open **Skills** in the sidebar, find the installed skill, and turn its switch off or on. This controls whether the agent can load it without deleting its files.
+
 nanobot ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2349,6 +2564,8 @@ nanobot ships with built-in skills, and your workspace can also define custom sk
   }
 }
 ```
+
+</details>
 
 Disabled skills are excluded from the main agent's skill summary, from always-on skill injection, and from subagent skill summaries. This is useful when some bundled skills are unnecessary for your deployment or should not be exposed to end users.
 
@@ -2368,9 +2585,14 @@ CLI Apps use the same skills-only package layout while their installer manages e
 
 ## Tool Hint Max Length
 
+Open **Settings → Advanced** and change **Summary length** under **Run limits**. Follow any restart prompt.
+
 Tool hints are the short progress messages shown when the agent calls tools (e.g. `$ cd …/project && npm test`). By default, these are truncated at 40 characters, which can make long commands hard to read.
 
 Set `agents.defaults.toolHintMaxLength` to control the truncation threshold:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -2381,6 +2603,8 @@ Set `agents.defaults.toolHintMaxLength` to control the truncation threshold:
   }
 }
 ```
+
+</details>
 
 | Option | Default | Description |
 |--------|---------|-------------|

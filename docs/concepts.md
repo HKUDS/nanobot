@@ -84,6 +84,8 @@ The WebUI launcher is the normal browser entry point. Underneath, the gateway ke
 
 ## Provider and Model Selection
 
+Choose and configure the primary model in **Settings → Models**, then select its preset in the chat composer. The config-file example below is an alternative for deployment-managed settings.
+
 The active model should normally come from a named `modelPresets` entry selected by `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and `agents.defaults.model` still form the implicit `default` preset for older or minimal configs. The active provider is resolved in this order:
 
 1. If the active preset provider or implicit default provider is not `"auto"`, nanobot uses that provider.
@@ -91,6 +93,9 @@ The active model should normally come from a named `modelPresets` entry selected
 3. OAuth providers such as OpenAI Codex and GitHub Copilot require explicit login and explicit provider/model selection inside the active preset.
 
 Pin the provider inside the preset when setting up for the first time. It is easier to debug:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -107,6 +112,8 @@ Pin the provider inside the preset when setting up for the first time. It is eas
   }
 }
 ```
+
+</details>
 
 See [`providers.md`](./providers.md) for practical examples and [`configuration.md#providers`](./configuration.md#providers) for the full provider reference.
 

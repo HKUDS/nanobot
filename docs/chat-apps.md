@@ -30,14 +30,14 @@ If that fails, fix installation, config, provider, or model setup first with [`q
 For normal local setup, let the WebUI write and validate the channel config:
 
 1. Run `nanobot webui`.
-2. Open **Settings → Channels**.
+2. Open **Channels**.
 3. Search for the platform and open its setup panel.
 4. Follow the credential fields or QR flow. The screen tells you which platform-side token, permission, account, or URL it needs.
 5. Let nanobot install the optional channel support when prompted.
 6. Restart from the WebUI if it reports that a restart is required.
 7. Send a private test message. If the channel returns a pairing code, approve the pending request in the WebUI and send the message again.
 
-If your installed stable release does not show **Settings → Channels**, continue with the [manual setup pattern](#manual-setup-pattern) below or install current source.
+If your installed stable release does not show **Channels**, continue with the [manual setup pattern](#manual-setup-pattern) below or install current source.
 
 Optional package installation is available to a same-machine WebUI by default. Remote browser clients cannot change the Python environment unless an administrator explicitly enables that capability. Run `nanobot plugins enable <channel>` locally when the guided install is unavailable.
 
@@ -53,6 +53,9 @@ The sections below explain what each chat platform requires and provide manual c
 > Replace `<channel>` with names such as `telegram`, `slack`, `feishu`, `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`. To turn a channel off later, run `nanobot plugins disable <channel>`. nanobot keeps the saved settings, but stops loading that channel after the next restart.
 
 ## Manual Setup Pattern
+
+<details>
+<summary>Manual configuration</summary>
 
 Most examples below are snippets to merge into `~/.nanobot/config.json`. When a snippet includes `allowFrom`, it is showing a static allowlist. For pairing-based access on supported channels, omit `allowFrom`; Slack and Mattermost also need `dm.policy` set to `"allowlist"` for DMs to issue pairing codes.
 
@@ -100,6 +103,8 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Signal** | signal-cli daemon + phone number |
 | **Linear** | Private OAuth app + public HTTPS callback and webhook URLs |
 
+</details>
+
 <details id="linear">
 <summary><b>Linear</b></summary>
 
@@ -107,7 +112,7 @@ Linear is a native Agent channel rather than a comment bot. A user starts a task
 
 The native Agent API is webhook-based. Linear must reach a public HTTPS URL. An HTTPS tunnel can forward requests to nanobot's local listener without a public IP; a publicly reachable server can use a reverse proxy. Use a fixed hostname for ongoing use. Temporary tunnels also work for testing, but a hostname change requires updating nanobot's public URL and the app's callback and webhook URLs.
 
-The recommended setup is **Settings → Channels → Linear**. Enter the public URL and wait for automatic saving, select **Create prefilled Linear app**, create the app, then copy its Client ID, Client Secret, and Webhook Signing Secret back into nanobot. Leave each secret field to save it. Once the settings are saved, choose **Connect Linear**. OAuth requests only `read`, `write`, and `app:mentionable`; it deliberately does not request `app:assignable` so a new task must begin with an @mention.
+The recommended setup is **Channels → Linear**. Enter the public URL and wait for automatic saving, select **Create prefilled Linear app**, create the app, then copy its Client ID, Client Secret, and Webhook Signing Secret back into nanobot. Leave each secret field to save it. Once the settings are saved, choose **Connect Linear**. OAuth requests only `read`, `write`, and `app:mentionable`; it deliberately does not request `app:assignable` so a new task must begin with an @mention.
 
 See the [native Linear agent guide](./guides/linear-agent.md) for the complete setup, tunnel examples, security model, and troubleshooting.
 
@@ -119,7 +124,7 @@ See the [native Linear agent guide](./guides/linear-agent.md) for the complete s
 **Recommended WebUI setup**
 
 1. Create a bot with `@BotFather` and copy its token.
-2. Run `nanobot webui`, then open **Settings → Channels → Telegram**.
+2. Run `nanobot webui`, then open **Channels → Telegram**.
 3. Paste the token. If the gateway cannot reach Telegram directly, expand **Advanced** and add an HTTP or SOCKS proxy.
 4. Save and enable Telegram, then send the bot a direct message.
 

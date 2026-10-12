@@ -16,9 +16,10 @@ Use MCP when the capability you need already exists as an MCP server, or when yo
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
+nanobot webui
 ```
+
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
 
 Install the MCP server runtime separately. Many examples use `npx`, `uvx`, or a remote HTTP endpoint.
 
@@ -31,6 +32,9 @@ For local interactive setup:
 3. Limit the enabled tools when the server exposes more than the task needs.
 4. Save and restart when prompted.
 5. Mention the connected MCP server with `@` in the next message and ask for a small test action.
+
+<details>
+<summary>Manual configuration</summary>
 
 For manual or deployment-managed config, add this to `~/.nanobot/config.json`:
 
@@ -49,6 +53,8 @@ For manual or deployment-managed config, add this to `~/.nanobot/config.json`:
 ```
 
 Restart nanobot and ask a question that requires the MCP tool.
+
+</details>
 
 ## Production notes
 

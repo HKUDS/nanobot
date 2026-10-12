@@ -24,10 +24,17 @@ nanobot agent -m "Hello!"
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+
 ## Enable the Feishu channel
+
+Open **Channels → Feishu** and follow the QR connection flow. Install support if prompted, then open the authorization link or scan the code. If using an existing app, enter its App ID and App Secret in the setup panel. Enable the channel, save, and follow any restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Install the optional channel dependency:
 
@@ -65,6 +72,8 @@ If QR login is unavailable, create a Feishu/Lark app manually and merge this sha
 Omitting `allowFrom` enables pairing-only mode. A new user should DM the bot, get a pairing code, and be approved before using the bot normally.
 
 For manual apps, enable the Bot capability, receive-message events, and Long Connection mode. If your app cannot get the `cardkit:card:write` permission, set `"streaming": false`.
+
+</details>
 
 ## Run nanobot gateway
 

@@ -144,6 +144,11 @@ Ollama reuses the existing model layers. The new tag adds a small template and m
 
 ## Select the derived model in nanobot
 
+Open **Settings → Models → New preset**, select your Ollama connection, enter the derived model name, and save. Select that preset in the composer for the cache check.
+
+<details>
+<summary>Manual configuration</summary>
+
 Merge this preset into `~/.nanobot/config.json` and select it:
 
 ```json
@@ -169,6 +174,8 @@ Merge this preset into `~/.nanobot/config.json` and select it:
   }
 }
 ```
+
+</details>
 
 Verify the selected model and repeat the two-turn check:
 

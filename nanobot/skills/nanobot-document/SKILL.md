@@ -39,8 +39,10 @@ Links that leave `references/` point to repository files, not bundled skill reso
 ## Explain and diagnose
 
 - Reply in the user's language and adapt the steps to their operating system and
-  interface. Prefer the documented WebUI flow for ordinary setup; preserve CLI
-  instructions for headless or terminal workflows.
+  interface. Give the documented graphical setup steps first when the setting is
+  available in the WebUI. Treat manual configuration inside collapsed documentation
+  sections as an alternative for headless or explicitly requested config-file work.
+  Give direct config-file instructions when the setting has no graphical control.
 - Ground commands, configuration keys, defaults, and prerequisites in the pages you
   actually read. Distinguish documented behavior from your diagnosis of the user's
   environment. Ask for the missing version, error, or setup detail when it changes

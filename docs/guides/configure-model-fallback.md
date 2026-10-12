@@ -16,13 +16,19 @@ Use fallback when you want better reliability across rate limits, provider outag
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
+nanobot webui
 ```
+
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
 
 Verify each provider works before adding it as a fallback.
 
 ## Minimal working example
+
+In **Settings → Models**, create the primary and backup presets, then use **Enable preset** and arrange their order. The first enabled preset is primary; later entries are tried as fallbacks. Save and test each preset before relying on the chain.
+
+<details>
+<summary>Manual configuration</summary>
 
 Merge this shape into `~/.nanobot/config.json` and replace provider/model names with ones you control:
 
@@ -54,6 +60,8 @@ Merge this shape into `~/.nanobot/config.json` and replace provider/model names 
 ```
 
 String entries in `fallbackModels` are preset names, not raw model IDs. Replace the placeholder model IDs with currently supported model IDs from your provider. The [Provider Cookbook](../provider-cookbook.md) has concrete recipes for common providers.
+
+</details>
 
 ## Production notes
 

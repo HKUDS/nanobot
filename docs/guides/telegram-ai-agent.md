@@ -24,8 +24,10 @@ nanobot agent -m "Hello!"
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
+
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
 
 ## Connect Telegram in the WebUI
 
@@ -35,7 +37,7 @@ Start the WebUI:
 nanobot webui
 ```
 
-Open **Settings → Channels → Telegram**:
+Open **Channels → Telegram**:
 
 1. If Telegram support is not installed, turn on its switch and confirm the installation.
 2. Paste the token from BotFather.
@@ -47,6 +49,9 @@ The configuration badge appears as soon as a bot token is saved. A connection ch
 Saved tokens and proxy URLs are masked. A proxy entered here is used both for the connection check and for normal Telegram traffic.
 
 ## Manual setup
+
+<details>
+<summary>Manual configuration</summary>
 
 For a headless installation, install Telegram support:
 
@@ -73,6 +78,8 @@ Omit `proxy` when the gateway can reach Telegram directly.
 Omitting `allowFrom` enables pairing-only mode. The first DM from a new user gets a pairing code instead of agent access.
 
 Telegram uses long polling by default. Webhook mode is available for public HTTPS deployments; start with long polling for the first test.
+
+</details>
 
 ## Run nanobot gateway
 

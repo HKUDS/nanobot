@@ -14,7 +14,12 @@ For setup help, see [`quick-start.md`](./quick-start.md), [`providers.md`](./pro
 
 ## Authentication
 
+For graphical setup, open **Settings → System**, find the API service, enter its host, port, and API key, and start it. Set a key before binding to a network interface. The config-file alternative is collapsed below.
+
 Local-only `127.0.0.1` usage does not require an API key. If you bind the API server to all interfaces with `api.host: "0.0.0.0"` or `"::"`, nanobot requires `api.apiKey`; otherwise startup fails to avoid exposing an unauthenticated agent endpoint on the network.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -25,6 +30,8 @@ Local-only `127.0.0.1` usage does not require an API key. If you bind the API se
   }
 }
 ```
+
+</details>
 
 When `api.apiKey` is set, send it as a Bearer token on API routes. The health endpoint remains unauthenticated so local probes and load balancers can still check process health.
 

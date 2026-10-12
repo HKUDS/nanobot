@@ -17,11 +17,17 @@ Use this before exposing nanobot to teammates, chat apps, public networks, broad
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
+nanobot webui
 ```
 
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+
 ## Minimal working example
+
+Open **Settings → Advanced**. Enable workspace restriction, then choose the shell sandbox supported by your host (`bwrap` on Linux or `seatbelt` on macOS). Disable shell execution when the agent does not need it. Follow any restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Start with workspace restriction:
 
@@ -38,6 +44,8 @@ Start with workspace restriction:
 ```
 
 `bwrap` is Linux-only and requires bubblewrap. On macOS or Windows, keep `restrictToWorkspace` enabled and review shell access carefully.
+
+</details>
 
 ## Production notes
 

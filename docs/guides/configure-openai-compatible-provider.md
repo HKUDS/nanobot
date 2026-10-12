@@ -16,8 +16,10 @@ Use this for local or hosted services that expose OpenAI-compatible endpoints, i
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
+
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
 
 Verify the endpoint responds before debugging nanobot:
 
@@ -26,6 +28,14 @@ curl -sS https://api.example.com/v1/models
 ```
 
 ## Minimal working example
+
+1. Open **Settings → Models → New preset**.
+2. In **Provider**, choose **Add provider** and create a custom connection with your endpoint URL and credential.
+3. Select the model served by that endpoint, name the preset, and save.
+4. Select the preset in the chat composer and send `Hello!`.
+
+<details>
+<summary>Manual configuration</summary>
 
 Merge this into `~/.nanobot/config.json`:
 
@@ -53,6 +63,8 @@ Merge this into `~/.nanobot/config.json`:
   }
 }
 ```
+
+</details>
 
 Then run:
 

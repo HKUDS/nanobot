@@ -34,7 +34,10 @@ The browser signs in automatically using the generated credential in the launch 
 
 If no provider is configured, follow the **Next step** prompt to open **Settings → Models**. Errors for a configured provider appear with that prompt.
 
-Manual config still works. Same-machine localhost WebUI access can run without a browser password. Set `tokenIssueSecret` when you intentionally expose the WebUI beyond localhost or want a browser password:
+<details>
+<summary>Manual configuration for the local WebUI</summary>
+
+Manual config still works. Same-machine localhost WebUI access can run without a browser password. Set `tokenIssueSecret` when you intentionally expose the WebUI beyond localhost or want a browser password. These listener and authentication fields have no graphical editor:
 
 ```json
 {
@@ -49,6 +52,8 @@ Manual config still works. Same-machine localhost WebUI access can run without a
 }
 ```
 
+</details>
+
 The WebUI is served by the WebSocket channel on port `8765` by default. The gateway health endpoint, `18790` by default, is not the browser UI.
 
 ## First 10 Minutes
@@ -58,7 +63,7 @@ Use the WebUI as the primary setup surface:
 1. Open **Settings → Models** and configure a provider, credential, and active model preset.
 2. Send `Hello!` in a new topic to prove the selected model works.
 3. Start a separate topic before project work, then choose the intended workspace and access mode.
-4. Add only one capability next: a chat channel in **Settings → Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
+4. Add only one capability next: a chat channel in **Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
 5. Restart when the WebUI shows a restart requirement, then test that capability with the smallest possible request.
 
 This path avoids hand-editing `config.json` for normal setup. Use the reference docs when you need an option the WebUI does not expose or when you manage config as code.
@@ -192,7 +197,7 @@ For image generation, configure an image provider first and then use the WebUI i
 
 ## Channels
 
-Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
+Open **Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
 
 - install missing optional channel support when the WebUI is running locally;
 - collect platform credentials while preserving previously saved values;
@@ -291,6 +296,9 @@ Plain HTTP is enough for basic WebUI access, but browsers expose microphone capt
 
 Remote WebUI clients with a valid token can view and use Apps and installed skills. Actions that install missing nanobot support packages or third-party marketplace skills are blocked by default. To let trusted remote administrators perform those installations through the WebUI, opt in explicitly:
 
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -298,6 +306,8 @@ Remote WebUI clients with a valid token can view and use Apps and installed skil
   }
 }
 ```
+
+</details>
 
 Use this only for a private deployment where every authenticated WebUI user is trusted to change nanobot's Python environment and install workspace skill instructions or scripts. If you publish the WebUI through Nginx, Caddy, Cloudflare Tunnel, or a similar service, treat it as remote access and leave package and skill installs disabled unless that is intentional.
 

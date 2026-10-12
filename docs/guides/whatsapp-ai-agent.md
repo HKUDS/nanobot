@@ -24,10 +24,17 @@ nanobot agent -m "Hello!"
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+
 ## Enable the WhatsApp channel
+
+Open **Channels → WhatsApp**, install support if prompted, and follow the QR connection flow. Scan the code from **WhatsApp → Settings → Linked Devices**. Enable the channel and save; choose mention-only group replies under **Advanced** for a first deployment. Follow any restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Install the optional channel dependency:
 
@@ -57,6 +64,8 @@ Merge this snippet into `~/.nanobot/config.json`:
 ```
 
 Omitting `allowFrom` enables pairing-only mode for private chats. `groupPolicy` defaults to `"open"` in the channel, but `"mention"` is safer for a first deployment.
+
+</details>
 
 ## Run nanobot gateway
 

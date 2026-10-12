@@ -4,6 +4,10 @@ Use these docs to get a working agent first, then open a task guide only when yo
 
 Repository docs follow the current source tree and can be newer than the latest package release. For published release docs, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
 
+Use the graphical setup steps first when the WebUI exposes the setting. Expand
+**Manual configuration** for headless deployments or configuration managed as code.
+Settings without a graphical control keep their direct configuration instructions.
+
 ## Start Here
 
 | Your situation | Read this | You are done when... |
@@ -19,7 +23,7 @@ The recommended first-run path is:
 3. Configure a provider and model in **Settings → Models**.
 4. Send `Hello!` before configuring anything else.
 
-Most people do not need to edit JSON for the first run. The WebUI handles the initial provider, model, and local browser settings. SSH, headless, existing-config, and older-release installs retain `nanobot onboard --wizard` as a terminal fallback. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for Agent Plugins, CLI Apps, and MCP integrations.
+Most people do not need to edit JSON for the first run. The WebUI handles the initial provider, model, and local browser settings. SSH, headless, existing-config, and older-release installs retain `nanobot onboard --wizard` as a terminal fallback. After the WebUI opens, use **Settings** for models and built-in capabilities, **Channels** for chat apps, and **Apps** for Agent Plugins, CLI Apps, and MCP integrations.
 
 ## Add One Capability
 

@@ -17,9 +17,10 @@ Use this path when you want local or server-side ownership of the agent process,
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
+nanobot webui
 ```
+
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
 
 Complete the CLI check before deploying the gateway. A deployment problem is much easier to debug after the provider and model are known to work.
 
@@ -37,7 +38,7 @@ For the browser surface, use the WebUI launcher instead. It can start and manage
 nanobot webui
 ```
 
-Or connect a channel in `~/.nanobot/config.json`, then keep the same gateway process running for messages.
+Or open **Channels** in the WebUI sidebar, complete the platform setup, and keep the same gateway process running for messages.
 
 ## Production notes
 

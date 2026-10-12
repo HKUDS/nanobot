@@ -14,7 +14,7 @@ Start with [Install and Quick Start](../quick-start.md) and get one reply before
 
 ## Connect a Chat App
 
-Use **Settings → Channels** in the WebUI for guided setup. These guides explain the account, bot, token, permission, and test-message steps on each platform.
+Use **Channels** in the WebUI for guided setup. These guides explain the account, bot, token, permission, and test-message steps on each platform.
 
 | Goal | Guide |
 |---|---|

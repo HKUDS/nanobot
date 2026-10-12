@@ -35,7 +35,7 @@ Automatic compaction does not post lifecycle notices to built-in chat channels b
 
 This file is:
 
-- append-only
+- appended to as conversations are compacted
 - cursor-based
 - optimized for machine consumption first, human inspection second
 
@@ -44,6 +44,11 @@ Each line is a JSON object:
 ```json
 {"cursor": 42, "timestamp": "2026-04-03 00:02", "content": "- User prefers dark mode\n- Decided to use PostgreSQL"}
 ```
+
+After scheduled or manual Dream runs, nanobot can prune the oldest entries already
+processed by Dream and atomically rewrite the file. The default retention target
+is 1000 entries; entries Dream has not processed are retained even when this exceeds
+the target. The journal is therefore not a permanent archive of every summary.
 
 It is not the final memory. It is the material from which final memory is shaped.
 
@@ -76,7 +81,7 @@ workspace/
 │   └── dream.md         # Optional instructions for how Dream organizes memory
 └── memory/
     ├── MEMORY.md        # Project facts, decisions, and durable context
-    ├── history.jsonl    # Append-only history summaries
+    ├── history.jsonl    # History summaries with bounded retention after Dream
     ├── .cursor          # Consolidator write cursor
     └── .dream_cursor    # Dream consumption cursor
 ```
@@ -184,6 +189,8 @@ To return to nanobot's default behavior, delete `prompts/dream.md` or leave it e
 Each workspace has its own guide. Changing this file does not affect other nanobot workspaces.
 
 ## Configuration
+
+Enable or disable Dream through **Settings → Capabilities → Memory consolidation**. Its frequency, cron override, and model override have no graphical controls; configure those fields directly below.
 
 Dream is configured under `agents.defaults.dream`:
 

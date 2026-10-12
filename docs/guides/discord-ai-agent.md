@@ -24,10 +24,17 @@ nanobot agent -m "Hello!"
 
 ```bash
 python -m pip install nanobot-ai
-nanobot onboard --wizard
+nanobot webui
 ```
 
+Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+
 ## Enable the Discord channel
+
+Create a Discord application and bot, enable **Message Content Intent**, and invite it with permission to read history and send messages. In **Channels → Discord**, enter the bot token, enable the channel, and save. Use **Advanced** for allowed channels and reply behavior; follow any restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Install the optional channel dependency:
 
@@ -59,6 +66,8 @@ Omitting `allowFrom` enables pairing-only mode. A new user should DM the bot fir
 Invite the bot with permissions to read history and send messages.
 
 Set `replyToMessage` to `true` to make responses use Discord's native reply UI. It defaults to `false`, preserving the existing behavior.
+
+</details>
 
 ## Run nanobot gateway
 
