@@ -1,6 +1,6 @@
 ---
 name: nanobot-document
-description: "Explain how to use, configure, and troubleshoot nanobot using its bundled documentation. Use for nanobot setup, models, WebUI, chat apps, tools, memory, and deployment questions; also applies to 如何使用 nanobot、配置 nanobot、nanobot 排错."
+description: "Explain how to use, configure, and troubleshoot nanobot using its bundled documentation. Use for nanobot setup, models, WebUI, chat apps, tools, memory, and deployment questions."
 ---
 
 # nanobot Documentation
@@ -15,15 +15,16 @@ location in the skills summary, rather than from the user's project directory.
 It is inside the built-in skills read root; no additional filesystem permission is needed.
 
 Start with [the documentation index](references/README.md) when the topic is unclear.
-For common questions, read the relevant page directly:
+For a clear question, start with the smallest relevant guide or reference section:
 
 | Question | Read |
 |---|---|
 | First setup | [Quick start](references/quick-start.md), or [beginner walkthrough](references/start-without-technical-background.md) |
 | Browser workbench and settings | [WebUI](references/webui.md) |
-| Provider, model, or authentication | [Provider cookbook](references/provider-cookbook.md) and [providers](references/providers.md) |
+| Provider setup or authentication steps | Matching recipe in [Provider cookbook](references/provider-cookbook.md) |
+| Provider/model matching or selection behavior | Relevant section in [Providers](references/providers.md) |
 | Exact configuration field or default | [Configuration](references/configuration.md) |
-| Telegram, Discord, WeChat, or another chat app | [Chat apps](references/chat-apps.md) |
+| Connect a specific chat app | Matching platform guide from [Task guides](references/guides/README.md); use [Chat apps](references/chat-apps.md) for details the guide does not cover |
 | CLI flags or slash commands | [CLI reference](references/cli-reference.md) or [chat commands](references/chat-commands.md) |
 | MCP, search, or another integration | [Task guides](references/guides/README.md) |
 | Scheduled tasks or triggers | [Automations](references/automations.md) |
@@ -31,9 +32,18 @@ For common questions, read the relevant page directly:
 | Hosting or separate instances | [Deployment](references/deployment.md) or [multiple instances](references/multiple-instances.md) |
 | Errors or unexpected behavior | [Troubleshooting](references/troubleshooting.md) |
 
-Use `grep` with `glob="*.md"` and `output_mode="files_with_matches"` on the resolved
-references directory to locate other topics or an exact error. Read only the relevant
-pages or sections with `read_file`; follow links within `references/` as needed.
+If the file is unknown, use `grep` with `glob="*.md"` and
+`output_mode="files_with_matches"` on the resolved references directory, or use
+`list_dir` to discover files and subdirectories.
+
+Within a long reference, use `grep` with `output_mode="content"` to locate the
+relevant heading, configuration key, or error. Then use `read_file` with `offset`
+and `limit` to read that section, including its prerequisites and limitations.
+Short task guides can be read in full. Collapsed HTML sections still appear in
+raw Markdown; they do not reduce how much text a tool read returns.
+
+Stop reading once the documentation supports the requested answer or next
+diagnostic step. Follow links or expand the search only to resolve a remaining gap.
 Links that leave `references/` point to repository files, not bundled skill resources.
 
 ## Explain and diagnose
