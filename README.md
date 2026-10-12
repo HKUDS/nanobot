@@ -72,49 +72,34 @@ nanobot is a self-hosted personal AI agent runtime. It can:
 
 ## 📦 Install
 
-> [!IMPORTANT]
-> If you want the newest features and experiments, install from source.
->
-> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
-
-Pick **one** install method:
-
-| Track | Install with | Update with | What runs |
-|---|---|---|---|
-| Stable | installer, `uv`, or pip | the same package tool | one released Python/WebUI/TUI version |
-| Current source | editable Git checkout | `git pull --ff-only` + editable dependency sync | Python, WebUI, and TUI from that checkout |
-
-Prerequisites: Python 3.11 or newer. Git and [Bun](https://bun.sh/) are only needed for a source install. Published packages include the WebUI, and supported platform wheels also include the native TUI. A source-distribution install can fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
+Requires **Python 3.11 or newer**. Choose one installation method. The recommended installer uses an isolated Python environment and installs the stable release from PyPI.
 
 If terminals, API keys, or config files are new to you, use the guided zero-background walkthrough in [Start Without Technical Background](./docs/start-without-technical-background.md) instead of this compact README path.
 
-**One-command setup**
+**Recommended: one-command setup**
 
-macOS / Linux:
+<details>
+<summary>macOS / Linux</summary>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
 ```
 
-Windows PowerShell:
+</details>
+
+<details>
+<summary>Windows PowerShell</summary>
 
 ```powershell
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. SSH, headless, existing-config, and older-release paths keep the terminal setup wizard. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. It also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
+</details>
 
-To preview the plan without changing your environment, pass `--dry-run`.
+On a fresh local desktop, the installer opens the WebUI for model setup. Then continue with [Quick Start](#-quick-start). Keep the exact nanobot command printed by the installer if `nanobot` is not on `PATH`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
-```
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dry-run
-```
-
-If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
+<details>
+<summary>Other package managers: uv or pip</summary>
 
 **Install with `uv`**
 
@@ -130,11 +115,12 @@ python -m pip install nanobot-ai
 
 If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or install inside a virtual environment.
 
-Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2. Pip selects the matching wheel; opening the TUI does not need a separate GitHub download or Bun installation. A source-distribution install on a supported target can use the matching checksummed GitHub release archive. On other platforms, use `nanobot --classic` or the WebUI.
+</details>
 
-**Install from source**
+<details>
+<summary>Install from source for the latest development features</summary>
 
-Clone the repository and install it in editable mode. Bun is required because the source checkout runs the matching TUI directly instead of downloading an older release binary.
+Clone the repository and install it in editable mode. A source install requires Git and [Bun](https://bun.sh/); Bun runs the matching TUI directly from the checkout instead of downloading an older release binary.
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -150,6 +136,51 @@ python -m pip install -e .
 
 After that, the normal commands are identical to a stable install. `nanobot` runs the TUI from this checkout, and `nanobot webui` rebuilds stale frontend assets automatically. A later `git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun `python -m pip install -e .` when Python dependencies change. Contributors should also read [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
+</details>
+
+<details>
+<summary>Installer behavior, preview, and script review</summary>
+
+The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. SSH, headless, existing-config, and older-release paths keep the terminal setup wizard. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. It also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
+
+To preview the plan without changing your environment, pass `--dry-run`.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dry-run
+```
+
+If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
+
+</details>
+
+<details>
+<summary>Platform support, bundled UIs, and release tracks</summary>
+
+Published packages include the WebUI, and supported platform wheels also include the native TUI. A source-distribution install can fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
+
+Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2. Pip selects the matching wheel; opening the TUI does not need a separate GitHub download or Bun installation. A source-distribution install on a supported target can use the matching checksummed GitHub release archive. On other platforms, use `nanobot --classic` or the WebUI.
+
+> [!IMPORTANT]
+> If you want the newest features and experiments, install from source.
+>
+> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+
+Pick **one** install method:
+
+| Track | Install with | Update with | What runs |
+|---|---|---|---|
+| Stable | installer, `uv`, or pip | the same package tool | one released Python/WebUI/TUI version |
+| Current source | editable Git checkout | `git pull --ff-only` + editable dependency sync | Python, WebUI, and TUI from that checkout |
+
+</details>
+
+<details>
+<summary>Verify the installation or locate the nanobot command</summary>
+
 Verify the install:
 
 ```bash
@@ -157,6 +188,8 @@ nanobot --version
 ```
 
 If `nanobot` is not on `PATH`, invoke it through the method that installed it: reuse the recommended installer's command, use `uv tool run --from nanobot-ai nanobot ...` or `pipx run --spec nanobot-ai nanobot ...`, or use the Python executable from the environment where pip installed the package.
+
+</details>
 
 ## 🚀 Quick Start
 
