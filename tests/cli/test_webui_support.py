@@ -54,6 +54,7 @@ def test_unix_browser_reports_delayed_launcher_failure_without_raw_output(monkey
     monkeypatch.setattr(webui_support.sys, "platform", "linux")
     monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     monkeypatch.delenv("BROWSER", raising=False)
+    monkeypatch.setattr(webbrowser, "_tryorder", ["nanobot-test-browser"])
     monkeypatch.setattr(webui_support.webbrowser, "get", lambda _choice=None: browser)
 
     assert not webui_support._open_webui_browser(
@@ -90,10 +91,51 @@ def test_unix_browser_preserves_custom_commands_and_candidate_order(monkeypatch,
     assert result.read_text(encoding="utf-8") == url
 
 
+@pytest.mark.parametrize("failure", ["missing", "exits"])
+def test_unix_browser_falls_back_to_platform_browser(monkeypatch, tmp_path, capfd, failure) -> None:
+    launcher = tmp_path / "browser.py"
+    received = tmp_path / "received.txt"
+    launcher.write_text(
+        "import pathlib, sys\n"
+        "if sys.argv[1] == 'fail':\n"
+        "    print(sys.argv[-1], file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+        "pathlib.Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    selected = (
+        "unavailable-nanobot-test-browser" if failure == "missing"
+        else shlex.join([sys.executable, str(launcher), "fail", "%s"])
+    )
+    fallback = webbrowser.BackgroundBrowser([sys.executable, str(launcher), str(received), "%s"])
+    register_standard = webbrowser.register_standard_browsers
+
+    def register_browsers():
+        register_standard()
+        webbrowser.register("nanobot-test-platform-browser", None, fallback)
+
+    monkeypatch.setenv("BROWSER", selected)
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+    monkeypatch.setenv("DISPLAY", "")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "")
+    monkeypatch.setenv("TERM", "")
+    monkeypatch.setattr(webbrowser, "_tryorder", None)
+    monkeypatch.setattr(webbrowser, "_browsers", {})
+    monkeypatch.setattr(webbrowser, "register_standard_browsers", register_browsers)
+    monkeypatch.setattr(webui_support.sys, "platform", "linux")
+    url = "http://127.0.0.1:8765/#/?bootstrapSecret=private-test-credential"
+
+    assert webui_support._launch_browser(url)
+    assert received.read_text(encoding="utf-8") == url
+    captured = capfd.readouterr()
+    assert "private-test-credential" not in captured.out + captured.err
+
+
 def test_unix_browser_keeps_native_controller_new_tab_behavior(monkeypatch) -> None:
     opened = []
     controller = SimpleNamespace(open=lambda url, **options: opened.append((url, options)) or True)
     monkeypatch.delenv("BROWSER", raising=False)
+    monkeypatch.setattr(webbrowser, "_tryorder", ["nanobot-test-browser"])
     monkeypatch.setattr(webui_support.webbrowser, "get", lambda _choice=None: controller)
 
     assert webui_support._launch_unix_browser("http://127.0.0.1:8765/")

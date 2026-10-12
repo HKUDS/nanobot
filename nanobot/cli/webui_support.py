@@ -90,12 +90,15 @@ def _use_wsl_browser() -> bool:
 
 def _launch_unix_browser(url: str) -> bool:
     """Launch the selected Unix browser without exposing launcher diagnostics."""
-    choices = [choice for choice in os.environ.get("BROWSER", "").split(os.pathsep) if choice]
-    for choice in choices or [None]:
-        try:
-            browser = webbrowser.get(choice)
-        except webbrowser.Error:
-            continue
+    try:
+        webbrowser.get()
+    except webbrowser.Error:
+        return False
+    # get() initializes the stdlib's BROWSER-first ordering. Its public API
+    # exposes only the first controller, so read the complete registered order.
+    choices: list[str] = getattr(webbrowser, "_tryorder")
+    for choice in choices:
+        browser = webbrowser.get(choice)
         if isinstance(browser, webbrowser.GenericBrowser):
             # gio, xdg-open, and BROWSER command templates inherit this class.
             # BackgroundBrowser.open only polls once and inherits our stderr.
