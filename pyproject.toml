@@ -94,6 +94,7 @@ olostep = [
     "olostep>=0.1.0; python_version < '3.14'",
 ]
 dev = [
+    "hatchling",
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
     "aiohttp>=3.9.0,<4.0.0",
@@ -154,6 +155,7 @@ exclude = ["nanobot/channels/*/tests/**"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+    "docs/**/*.md",
     "nanobot/",
     "nanobot/web/dist/",
     "hatch_build.py",
@@ -162,7 +164,7 @@ include = [
     "THIRD_PARTY_NOTICES.md",
     "pyproject.toml",
 ]
-exclude = ["nanobot/channels/*/tests/**"]
+exclude = ["nanobot/channels/*/tests/**", "docs/plans/**", "docs/superpowers/**"]
 
 [tool.ruff]
 line-length = 100
