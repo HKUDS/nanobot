@@ -3,7 +3,7 @@ import { Download, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { ChannelFeatureAction } from "@/channel-plugins/types";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import {
   ChannelLogo,
   ChannelStatusBadge,

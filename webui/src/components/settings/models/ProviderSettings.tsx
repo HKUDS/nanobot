@@ -20,7 +20,7 @@ import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { ProviderSearchList } from "@/components/settings/models/ProviderSearchList";
 export { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { CapabilityInstallNotice } from "@/components/settings/shared/SettingsControls";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
 import { Button } from "@/components/ui/button";

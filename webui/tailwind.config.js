@@ -8,6 +8,7 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{ts,tsx}",
+    ...(process.env.NODE_ENV === "production" ? ["!./src/dev/**"] : []),
     "../nanobot/channels/*/webui/**/*.{ts,tsx}",
     "./node_modules/streamdown/dist/*.js",
   ],

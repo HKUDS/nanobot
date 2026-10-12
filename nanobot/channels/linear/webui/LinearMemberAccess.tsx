@@ -3,7 +3,7 @@ import { Check, ChevronDown, Info, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { SETTINGS_SEARCH_INPUT_CLASS, SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Button } from "@/components/ui/button";

@@ -3,7 +3,7 @@ import type { HTMLAttributes, ReactElement } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ChevronRight, FolderSearch, History, Search, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { Button } from "@/components/ui/button";
 import { floatingItemClassName, floatingItemFocusClassName } from "@/components/ui/floating-surface";
 import { HoverHint } from "@/components/ui/tooltip";

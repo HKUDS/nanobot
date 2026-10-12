@@ -4,7 +4,7 @@ import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticM
 import { useModelPresetDrag } from "@/components/settings/models/useModelPresetDrag";
 import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {

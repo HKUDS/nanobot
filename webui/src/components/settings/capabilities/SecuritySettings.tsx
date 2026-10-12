@@ -8,7 +8,7 @@ import {
   SettingsRow,
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type {
   NetworkSafetySettingsUpdate,

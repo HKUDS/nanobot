@@ -3,7 +3,7 @@ import { ChevronDown, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelUiPresentation } from "@/channel-plugins/registry";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import type { ChannelConfigField } from "@/channel-plugins/catalog";
 import {
   CredentialForm,

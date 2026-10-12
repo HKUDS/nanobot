@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle, RestartRequiredNotice, RestartSettingsFooter } from "@/components/settings/shared/SettingsControls";
 import { ProviderPicker } from "@/components/settings/shared/ModelControls";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";

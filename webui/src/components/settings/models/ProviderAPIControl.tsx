@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 
 import { MODEL_REQUEST_APIS, REQUEST_API_LABELS } from "@/components/settings/models/modelAPI";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ModelAPIConfig, ModelRequestAPI } from "@/lib/types";

@@ -24,7 +24,7 @@ import type {
   ChannelFeatureAction,
   ChannelPluginConnectFlowProps,
 } from "@/channel-plugins/types";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import {
   type ChannelProviderPreset,

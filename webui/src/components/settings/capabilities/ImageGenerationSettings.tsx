@@ -15,7 +15,7 @@ import {
   SettingsSectionTitle,
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { Button } from "@/components/ui/button";
 import type { ImageGenerationSettingsUpdate, SettingsPayload } from "@/lib/types";
 
