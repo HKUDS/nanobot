@@ -114,9 +114,21 @@ nanobot
 
 In interactive mode, `Enter` sends and `Shift+Enter` inserts a newline (`Ctrl+J` is the universal fallback). While nanobot is working, `Enter` sends immediately, `Tab` waits until the current response is finished, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) edits the latest waiting message. Exit with `exit`, `/exit`, `:q`, or `Ctrl+D`.
 
-## Choose One Next Step
+## Continue with nanobot
 
-After the first reply works, add one capability and test again:
+After the first reply works, describe one next goal in the same chat. With the built-in `nanobot-document` skill, nanobot can consult documentation bundled with your installation to explain features, guide configuration, and troubleshoot. Include where you are using nanobot and what already works, for example:
+
+- "I am already using the WebUI. Help me connect Telegram and allow only my account."
+- "Explain what is shared when I start a new topic or choose a different project."
+- "A second model preset returns an authentication error. Help me find which setting to check."
+
+To explicitly request the documentation skill, send:
+
+```text
+$nanobot-document Explain how sessions, workspaces, and memory relate in this installation.
+```
+
+This requires a model that supports tools and an enabled `nanobot-document` skill under **Skills → Installed**. Enter credentials in the relevant settings forms when needed. If your installed release does not include the skill, or you prefer to read the steps yourself, choose a guide below. Add one capability and test it before moving on:
 
 | Goal | Recommended path |
 |---|---|

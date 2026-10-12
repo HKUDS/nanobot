@@ -122,7 +122,9 @@ The first-run address is local to your computer. It is not automatically availab
 
 ## 6. Add One Thing at a Time
 
-Do not configure every feature immediately. Choose one next goal:
+Choose one next goal and ask nanobot in your current chat. For example: "I am already using the WebUI. Help me connect Telegram and allow only my account." When the built-in `nanobot-document` skill is available and enabled, nanobot can use its bundled documentation to guide you. See [Continue with nanobot](./quick-start.md#continue-with-nanobot) for how to request the skill directly.
+
+You can also follow the steps yourself using the controls and guides below. Add one capability and test it before moving on:
 
 | Goal | What to do |
 |---|---|
