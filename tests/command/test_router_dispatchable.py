@@ -11,7 +11,7 @@ from nanobot.command.builtin import (
     builtin_command_starts_agent_turn,
     register_builtin_commands,
 )
-from nanobot.command.router import CommandContext, CommandHandled, CommandRouter
+from nanobot.command.router import CommandContext, CommandRouter
 
 
 def test_command_context_requires_loop_as_keyword_dependency() -> None:
@@ -175,26 +175,8 @@ class TestMidTurnCommandDispatchedDirectly:
             msg=MagicMock(channel="test", chat_id="c1", metadata={}),
             session=None, key="test:c1", raw="/test hello world", loop=MagicMock(),
         )
-        result = await custom.dispatch(ctx)
+        await custom.dispatch(ctx)
         assert captured_args == ["hello world"]
-        assert isinstance(result, CommandHandled)
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("priority", [False, True])
-    async def test_matched_command_without_reply_is_handled(
-        self, priority: bool, fake_loop: MagicMock, fake_msg: MagicMock,
-    ) -> None:
-        custom = CommandRouter()
-        register = custom.priority if priority else custom.exact
-        register("/silent", AsyncMock(return_value=None))
-        ctx = CommandContext(
-            msg=fake_msg, session=None, key="test:chat1", raw="/silent", loop=fake_loop,
-        )
-
-        dispatch = custom.dispatch_priority if priority else custom.dispatch
-        result = await dispatch(ctx)
-
-        assert isinstance(result, CommandHandled)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("content", [

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeAlias
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
@@ -14,13 +14,6 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session
     from nanobot.utils.llm_runtime import LLMRuntime
 
-
-@dataclass(frozen=True, slots=True)
-class CommandHandled:
-    """A matched command completed without a text reply."""
-
-
-CommandResult: TypeAlias = InboundMessage | OutboundMessage | CommandHandled | None
 Handler = Callable[["CommandContext"], Awaitable["InboundMessage | OutboundMessage | None"]]
 _BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
@@ -78,12 +71,17 @@ class CommandRouter:
         self._priority: dict[str, Handler] = {}
         self._exact: dict[str, Handler] = {}
         self._prefix: list[tuple[str, Handler]] = []
+        self._session_commands: set[str] = set()
 
     def priority(self, cmd: str, handler: Handler) -> None:
         self._priority[cmd] = handler
 
-    def exact(self, cmd: str, handler: Handler) -> None:
+    def exact(self, cmd: str, handler: Handler, *, session_queue: bool = False) -> None:
         self._exact[cmd] = handler
+        if session_queue:
+            self._session_commands.add(cmd)
+        else:
+            self._session_commands.discard(cmd)
 
     def prefix(self, pfx: str, handler: Handler) -> None:
         self._prefix.append((pfx, handler))
@@ -91,6 +89,11 @@ class CommandRouter:
 
     def is_priority(self, text: str) -> bool:
         return normalize_command_text(text).lower() in self._priority
+
+    def requires_session_queue(self, text: str) -> bool:
+        """Whether an exact command must run on the session worker."""
+        cmd = normalize_command_text(text).lower()
+        return cmd in self._session_commands and cmd not in self._priority
 
     def command_name(self, text: str) -> str | None:
         """Return the registered command name, or None for ordinary chat text.
@@ -118,16 +121,15 @@ class CommandRouter:
                 return True
         return self.command_name(text) is not None
 
-    async def dispatch_priority(self, ctx: CommandContext) -> CommandResult:
+    async def dispatch_priority(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
         ctx.raw = normalize_command_text(ctx.raw)
         handler = self._priority.get(ctx.raw.lower())
         if handler:
-            result = await handler(ctx)
-            return result if result is not None else CommandHandled()
+            return await handler(ctx)
         return None
 
-    async def dispatch(self, ctx: CommandContext) -> CommandResult:
+    async def dispatch(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
         """Try exact and prefix handlers, then validate registered commands."""
         if ctx.msg.metadata.get("original_command"):
             return None
@@ -135,14 +137,12 @@ class CommandRouter:
         cmd = ctx.raw.lower()
 
         if handler := self._exact.get(cmd):
-            result = await handler(ctx)
-            return result if result is not None else CommandHandled()
+            return await handler(ctx)
 
         for pfx, handler in self._prefix:
             if cmd.startswith(pfx):
                 ctx.args = ctx.raw[len(pfx):]
-                result = await handler(ctx)
-                return result if result is not None else CommandHandled()
+                return await handler(ctx)
 
         return self._invalid_command_response(ctx)
 

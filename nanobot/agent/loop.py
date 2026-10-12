@@ -51,14 +51,8 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.command import (
-    CommandContext,
-    CommandHandled,
-    CommandResult,
-    CommandRouter,
-    register_builtin_commands,
-)
-from nanobot.command.router import command_text, normalize_command_text
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
+from nanobot.command.router import command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
@@ -788,11 +782,10 @@ class AgentLoop:
         msg: InboundMessage,
         key: str,
         raw: str,
-        dispatch_fn: Callable[[CommandContext], Awaitable[CommandResult]],
+        dispatch_fn: Callable[[CommandContext], Awaitable[InboundMessage | OutboundMessage | None]],
     ) -> None:
         """Dispatch a command directly from the run() loop and publish the result."""
-        if normalize_command_text(raw).lower() == "/compact":
-            # Compaction must wait for the active turn to commit its session.
+        if self.commands.requires_session_queue(raw):
             self._enqueue_session_message(msg)
             return
 
@@ -807,14 +800,10 @@ class AgentLoop:
                 ),
             )
             result = await dispatch_fn(ctx)
-            if isinstance(result, CommandHandled):
-                return
             if isinstance(result, InboundMessage):
                 self._enqueue_session_message(result)
-            elif result:
+            elif result is not None:
                 await self.bus.publish_outbound(result)
-            else:
-                logger.warning("Command '{}' matched but dispatch returned None", raw)
 
         # A shell command may run for up to the configured exec timeout. Keep
         # the inbound consumer responsive when it runs beside an active turn.
@@ -1540,7 +1529,7 @@ class AgentLoop:
                 coordinator.complete(msg, error=error)
             if (
                 msg.channel != "system"
-                and normalize_command_text(msg.content).lower() == "/compact"
+                and self.commands.requires_session_queue(command_text(msg))
             ):
                 delivery = self.turn_delivery_factory.unrouted(msg, session_key)
                 await delivery.complete(None, publish_completion=True)
@@ -1654,7 +1643,7 @@ class AgentLoop:
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await delivery.idle()
         except asyncio.CancelledError:
-            if not completion_published and normalize_command_text(msg.content).lower() == "/compact":
+            if not completion_published and self.commands.requires_session_queue(command_text(msg)):
                 await delivery.complete(None, publish_completion=True)
             raise
         finally:
@@ -2042,13 +2031,13 @@ class AgentLoop:
             is_user_turn=is_user_turn,
             turn_scopes=ctx.turn_scopes,
         )
+        command_matched = self.commands.command_name(raw) is not None
         result = await self.commands.dispatch(cmd_ctx)
         if isinstance(result, InboundMessage):
             ctx.msg = result
             result = None
+            command_matched = False
         ctx.turn_scopes.append(GoalInputScope(ctx.msg))
-        if isinstance(result, CommandHandled):
-            return True
         if result is not None:
             ctx.outbound = result
             # Shortcut commands skip BUILD and SAVE, so we must persist the
@@ -2073,7 +2062,7 @@ class AgentLoop:
                         attributes=ctx.attributes,
                     )
             return True
-        return False
+        return command_matched
 
     async def _build_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
