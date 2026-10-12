@@ -10,18 +10,6 @@ from nanobot.channels.websocket import runtime
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _RUNTIME_PATH = _REPOSITORY_ROOT / "nanobot" / "channels" / "websocket" / "runtime.py"
 _SESSION_IDENTITY_PATH = _REPOSITORY_ROOT / "nanobot" / "webui" / "session_identity.py"
-_FORBIDDEN_RUNTIME_IMPORTS = (
-    "nanobot.bus.outbound_events",
-    "nanobot.command",
-    "nanobot.runtime_context",
-    "nanobot.security.workspace_access",
-    "nanobot.session.goal_state",
-    "nanobot.webui.cli_apps_api",
-    "nanobot.webui.forking",
-    "nanobot.webui.mcp_presets_api",
-    "nanobot.webui.sidebar_state",
-    "nanobot.webui.transcription_ws",
-)
 
 
 def _channel_method(name: str) -> ast.AsyncFunctionDef:
@@ -48,21 +36,6 @@ def _statements_without_docstring(node: ast.AsyncFunctionDef) -> list[ast.stmt]:
     ):
         body.pop(0)
     return body
-
-
-def test_websocket_runtime_does_not_import_application_command_trees() -> None:
-    tree = ast.parse(_RUNTIME_PATH.read_text(encoding="utf-8"))
-    imported = {
-        node.module
-        for node in tree.body
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    }
-    violations = sorted(
-        module
-        for module in imported
-        if module.startswith(_FORBIDDEN_RUNTIME_IMPORTS)
-    )
-    assert violations == []
 
 
 def test_business_entrypoints_are_thin_transport_delegations() -> None:

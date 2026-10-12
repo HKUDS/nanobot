@@ -172,6 +172,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Check Python import boundaries
+        if: matrix.coverage
+        run: python -m scripts.check_import_boundaries
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
@@ -195,7 +199,7 @@ jobs:
       # later uv run sync pruning the packages installed by the previous step.
       - name: Lint with ruff
         if: matrix.coverage
-        run: uv run --no-sync ruff check nanobot tests conftest.py
+        run: uv run --no-sync ruff check nanobot tests conftest.py scripts/check_import_boundaries.py
 
       - name: Type check with BasedPyright (strict)
         if: matrix.coverage
