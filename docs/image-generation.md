@@ -98,7 +98,7 @@ Use a model that supports image generation and image editing if you want referen
 
 ### OpenAI Codex
 
-Log in with `nanobot provider login openai-codex`, then select **OpenAI Codex** and `gpt-image-2` under **Settings → Image**. Image generation uses the Codex subscription OAuth token; an OpenAI API key is not required.
+Log in with `nanobot provider login openai-codex`, then select **OpenAI Codex** and `gpt-image-2` under **Settings → Image**. Image generation uses your Codex subscription.
 
 For manual configuration:
 
@@ -114,9 +114,7 @@ For manual configuration:
 }
 ```
 
-Codex supports generation and reference-image edits through its standalone Images API. Existing image configurations that use a text model such as `gpt-5.4` must change `tools.imageGeneration.model` to `gpt-image-2`. This setting is separate from the chat model preset.
-
-The default base URL is `https://chatgpt.com/backend-api`. A custom `providers.openaiCodex.apiBase` may include the `/codex` suffix. Image requests reuse `providers.openaiCodex.proxy`, `extraHeaders`, and `extraBody`; for example, set `extraBody.quality` to `"low"` or `extraBody.background` to `"transparent"`.
+Use Codex to generate images from text or edit existing images with reference images.
 
 ### Custom (OpenAI-compatible)
 
