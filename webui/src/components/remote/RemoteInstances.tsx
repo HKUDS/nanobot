@@ -1,39 +1,16 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Loader2, PlugZap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { groupRemoteProfiles, isCompatibilityError, needsRemoteSetup, type RemoteDirectory } from "@/lib/remote-instances";
+import { groupRemoteProfiles, isCompatibilityError, needsRemoteSetup } from "@/lib/remote-instances";
 import { HostCompatibilityDialog } from "./HostCompatibilityDialog";
 import { RemoteConnectionsPage } from "./RemoteConnectionsPage";
-import type { HostAnchor } from "./host-bridge";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { useHostSessions } from "./useHostSessions";
 import { HostNavigationContext, HostSwitcher, RemoteHostMenu, type HostPicker } from "./HostSwitcher";
 import { useSidebarHostBridge } from "./useSidebarHostBridge";
 import { readPairReturn, subscribePairReturn } from "@/lib/remote-pair-return";
-import type { HostConnectionState } from "./HostConnectionStatus";
-
-const RemoteContext = createContext<{
-  available: boolean;
-  localActive: boolean;
-  activeHostId: string | null;
-  hostStates: Record<string, HostConnectionState>;
-  managing: boolean;
-  embeddedManagement?: boolean;
-  reportManagementSurface?: (rect: HostAnchor, theme: "light" | "dark") => void;
-  closeManagement: () => void;
-  selectLocal: () => void;
-  openHostIds: string[];
-  directory: RemoteDirectory | null;
-  directoryError: boolean;
-  refresh: () => Promise<RemoteDirectory>;
-  rename: (id: string, name: string) => Promise<void>;
-  connect: (id: string, stillWanted?: () => boolean) => Promise<void>;
-  disconnect: (id: string) => Promise<void>;
-  remove: (id: string) => Promise<void>;
-  cancel: () => void;
-} | null>(null);
-export function useRemoteConnections() { return useContext(RemoteContext); }
+import { RemoteContext, type HostConnectionState } from "./remote-context";
 
 /** Keep host views alive; navigation belongs in each view's sidebar, not a second header. */
 export function RemoteInstances({ children }: { children: ReactNode }) {

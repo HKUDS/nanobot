@@ -7,6 +7,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
+from nanobot.channels.notification_routes import channel_turn_route
 from nanobot.events import RetryStatusEvent
 from nanobot.providers.base import LLMProvider, ProviderCallContext
 from nanobot.session.keys import HEARTBEAT_SESSION_KEY
@@ -22,7 +23,7 @@ from nanobot.webui.metadata import (
 @pytest.mark.parametrize("legacy_route", [False, True])
 @pytest.mark.parametrize("key", [HEARTBEAT_SESSION_KEY, "dream:20260602-155256"])
 async def test_internal_compaction_never_reaches_its_result_destination(channel, legacy_route, key):
-    factory = TurnDeliveryFactory(MessageBus())
+    factory = TurnDeliveryFactory(MessageBus(), route_policy=channel_turn_route)
     msg = InboundMessage(channel=channel, sender_id="user", chat_id="chat", content="check")
     delivery = factory.create(msg, key)
     metadata = {"_compaction_route": {"channel": channel, "chat_id": "chat"}} if legacy_route else {}
@@ -62,7 +63,7 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
 async def test_session_route_delivers_automatic_and_manual_compaction(
     key, channel, chat_id, metadata, unified,
 ) -> None:
-    factory = TurnDeliveryFactory(MessageBus())
+    factory = TurnDeliveryFactory(MessageBus(), route_policy=channel_turn_route)
     automatic = ContextCompactionEvent(compaction_id="auto-1", phase="started")
     notified = ContextCompactionEvent(
         compaction_id="notified-1", phase="started", notify=True,
@@ -92,7 +93,7 @@ async def test_session_route_delivers_automatic_and_manual_compaction(
 
 
 async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() -> None:
-    factory = TurnDeliveryFactory(MessageBus())
+    factory = TurnDeliveryFactory(MessageBus(), route_policy=channel_turn_route)
     key = "unified:default"
     session_metadata = {}
     original = InboundMessage(
@@ -117,7 +118,7 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
 
 
 async def test_automatic_compaction_reaches_legacy_websocket_session() -> None:
-    factory = TurnDeliveryFactory(MessageBus())
+    factory = TurnDeliveryFactory(MessageBus(), route_policy=channel_turn_route)
     event = ContextCompactionEvent(compaction_id="compact-1", phase="succeeded")
     sink = factory.session_events("websocket:chat", {})
     assert sink.publish is not None
@@ -135,7 +136,7 @@ async def test_retry_event_uses_scoped_channel_delivery() -> None:
         content="hello",
         metadata={WEBUI_TURN_METADATA_KEY: "turn-1"},
     )
-    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery = TurnDeliveryFactory(bus, route_policy=channel_turn_route).create(msg, msg.session_key)
 
     await delivery.events.emit(RetryStatusEvent(
         state="waiting",
@@ -164,7 +165,7 @@ async def test_delivery_maps_model_error_to_failed_turn_completion() -> None:
         chat_id="chat-a",
         content="hello",
     )
-    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery = TurnDeliveryFactory(bus, route_policy=channel_turn_route).create(msg, msg.session_key)
     delivery.record_stop_reason("error", failure_error_kind="billing")
 
     await delivery.complete(
@@ -192,7 +193,7 @@ async def test_delivery_keeps_model_error_message_for_ordinary_channels() -> Non
         chat_id="chat-a",
         content="hello",
     )
-    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery = TurnDeliveryFactory(bus, route_policy=channel_turn_route).create(msg, msg.session_key)
     delivery.record_stop_reason("error")
     response = OutboundMessage(
         channel="telegram",
@@ -207,7 +208,7 @@ async def test_delivery_keeps_model_error_message_for_ordinary_channels() -> Non
 
 @pytest.mark.parametrize("channel", ["telegram", "cli", "websocket"])
 async def test_background_retry_status_is_quiet(channel) -> None:
-    factory = TurnDeliveryFactory(MessageBus())
+    factory = TurnDeliveryFactory(MessageBus(), route_policy=channel_turn_route)
     delivery = factory.create(InboundMessage(
         channel="system", sender_id="job", chat_id=f"{channel}:chat", content="",
     ), f"{channel}:chat")
@@ -220,7 +221,7 @@ async def test_retry_completion_is_isolated_between_turns_in_one_session() -> No
     bus = MessageBus()
     seen: list[TurnCompleted] = []
     bus.subscribe(seen.append, TurnCompleted)
-    factory = TurnDeliveryFactory(bus)
+    factory = TurnDeliveryFactory(bus, route_policy=channel_turn_route)
     deliveries = [factory.create(InboundMessage(
         channel="websocket", sender_id="user", chat_id="chat", content="",
         metadata={WEBUI_TURN_METADATA_KEY: turn},
@@ -249,7 +250,7 @@ async def test_next_model_request_clears_exhaustion_within_the_same_turn() -> No
     completed: list[TurnCompleted] = []
     bus.subscribe(completed.append, TurnCompleted)
     msg = InboundMessage(channel="websocket", sender_id="user", chat_id="chat", content="")
-    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery = TurnDeliveryFactory(bus, route_policy=channel_turn_route).create(msg, msg.session_key)
     await delivery.events.emit(RetryStatusEvent("exhausted", 4, 4, "connection"))
     with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
         response = await Provider(provider_name="test").chat_stream_with_retry(

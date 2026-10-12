@@ -21,11 +21,11 @@ from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import (
     PENDING_FOLLOWUPS_KEY,
-    RecoveryCoordinator,
     pending_followups,
     record_pending_followup,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+from nanobot.webui.recovery import RecoveryCoordinator
 
 
 @pytest.fixture

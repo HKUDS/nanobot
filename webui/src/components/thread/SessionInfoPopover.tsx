@@ -25,7 +25,7 @@ import { useSessionAutomationJobs } from "@/hooks/useSessionAutomationJobs";
 import { currentLocale } from "@/i18n";
 import { runAutomationAction, updateAutomation } from "@/lib/api";
 import type { WebUIMutationTransport } from "@/lib/api";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format-time";
 import type {
   AutomationUpdatePayload,
   SessionAutomationJob,

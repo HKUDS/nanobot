@@ -7,45 +7,21 @@ import shutil
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
-
+from nanobot.agent.skill_metadata import (
+    BUILTIN_SKILLS_DIR as BUILTIN_SKILLS_DIR,
+)
+from nanobot.agent.skill_metadata import (
+    SKILL_FRONTMATTER as _STRIP_SKILL_FRONTMATTER,
+)
+from nanobot.agent.skill_metadata import (
+    parse_skill_metadata as parse_skill_metadata,
+)
+from nanobot.agent.skill_metadata import (
+    valid_skill_metadata as valid_skill_metadata,
+)
 from nanobot.runtime_context import RuntimeContextBlock
 
-# Default builtin skills directory (relative to this file)
-BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
-
-# Opening ---, YAML body (group 1), closing --- on its own line; supports CRLF.
-_STRIP_SKILL_FRONTMATTER = re.compile(
-    r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?",
-    re.DOTALL,
-)
-_SKILL_NAME = re.compile(r"^(?!.*--)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
-
-
-def parse_skill_metadata(content: str) -> dict[str, object] | None:
-    """Parse a skill document's YAML frontmatter."""
-    if not (match := _STRIP_SKILL_FRONTMATTER.match(content)):
-        return None
-    try:
-        parsed = yaml.safe_load(match.group(1))
-    except yaml.YAMLError:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    return {str(key): value for key, value in cast(dict[object, object], parsed).items()}
-
-
-def valid_skill_metadata(metadata: dict[str, object], name: str) -> bool:
-    """Return whether metadata satisfies the Agent Skills identity contract."""
-    description = metadata.get("description")
-    return (
-        metadata.get("name") == name
-        and len(name) <= 64
-        and _SKILL_NAME.fullmatch(name) is not None
-        and isinstance(description, str)
-        and 1 <= len(description.strip()) <= 1024
-    )
 
 
 class SkillsLoader:

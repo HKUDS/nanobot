@@ -19,12 +19,13 @@ import { InlineImageProvider, useInlineImages } from "@/components/InlineImageCo
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
 import { HoverHint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { formatMessageEndTime } from "@/lib/format";
+import { formatMessageEndTime } from "@/lib/format-time";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
 import { sessionHandleColor } from "@/lib/session-handle";
@@ -700,35 +701,6 @@ function ThinkingState() {
       <StreamingLabelSheen active>
         {t("message.reasoningStreaming", { defaultValue: "Thinking…" })}
       </StreamingLabelSheen>
-    </span>
-  );
-}
-
-/** L→R sheen on the glyphs themselves; inactive labels stay solid muted text. */
-export function StreamingLabelSheen({
-  children,
-  active,
-  className,
-}: {
-  children: ReactNode;
-  active: boolean;
-  className?: string;
-}) {
-  const sheenText =
-    typeof children === "string" || typeof children === "number"
-      ? String(children)
-      : undefined;
-  return (
-    <span className={cn("block min-w-0 overflow-hidden py-px", className)}>
-      <span
-        data-sheen-text={active ? sheenText : undefined}
-        className={cn(
-          "block w-fit max-w-full truncate pr-0.5 font-medium leading-normal",
-          active ? "streaming-text-sheen after:pr-0.5" : "text-muted-foreground",
-        )}
-      >
-        {children}
-      </span>
     </span>
   );
 }

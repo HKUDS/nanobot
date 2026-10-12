@@ -14,13 +14,12 @@ from nanobot.session.recovery import (
     PENDING_USER_TURN_KEY,
     RECOVERY_METADATA_KEY,
     RUNTIME_CHECKPOINT_KEY,
-    RecoveryActionError,
-    RecoveryCoordinator,
     acknowledge_pending_followups,
     pending_followups,
     record_pending_followup,
 )
 from nanobot.webui import session_list_index, transcript
+from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 
 
 def _persist(manager: SessionManager, session: Session) -> None:

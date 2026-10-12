@@ -41,7 +41,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { displayTitle } from "@/lib/chat-groups";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { fmtDateTime, relativeTime } from "@/lib/format";
+import { fmtDateTime, relativeTime } from "@/lib/format-time";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import type {
   AutomationsPayload,

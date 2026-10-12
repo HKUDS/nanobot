@@ -15,7 +15,6 @@ from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
 import httpx
 from loguru import logger
-from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext, tool_log_content_allowed
@@ -25,7 +24,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config_base import Base
+from nanobot.config.tool_schemas import WebFetchConfig, WebSearchConfig, WebToolsConfig
 from nanobot.utils.helpers import build_image_content_blocks
 
 # Shared constants
@@ -58,29 +57,6 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
     {"name": "anysearch", "label": "AnySearch", "credential": "optional_api_key"},
 )
-
-
-class WebSearchConfig(Base):
-    """Web search configuration."""
-    provider: str = "duckduckgo"
-    api_key: str = ""
-    base_url: str = ""
-    max_results: int = 5
-    timeout: int = 30
-
-
-class WebFetchConfig(Base):
-    """Web fetch tool configuration."""
-    use_jina_reader: bool = True
-
-
-class WebToolsConfig(Base):
-    """Web tools configuration."""
-    enable: bool = True
-    proxy: str | None = None
-    user_agent: str | None = None
-    search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 def _strip_tags(text: str) -> str:

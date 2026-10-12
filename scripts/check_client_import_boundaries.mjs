@@ -123,6 +123,14 @@ export function findViolations(compiler, root, file, source, options, project) {
     if (within(relative, "webui/src/lib") && WEBUI_VIEWS.some((prefix) => targetPath !== null && within(targetPath, prefix))) {
       rules.push("webui-lib");
     }
+    const comparableTarget = process.platform === "win32" ? targetPath?.toLowerCase() : targetPath;
+    if (within(relative, "webui/src/lib")
+      && /^webui\/src\/i18n(?:\/index(?:\.[cm]?[jt]sx?)?)?$/.test(comparableTarget ?? "")) {
+      rules.push("webui-lib-bootstrap");
+    }
+    if (within(relative, "webui/src/lib/format.ts") && ["i18next", "react-i18next"].includes(specifier)) {
+      rules.push("pure-format-utils");
+    }
     if (CHANNEL_CONTRACTS.includes(relative) && WEBUI_VIEWS.some((prefix) => targetPath !== null && within(targetPath, prefix))) {
       rules.push("channel-ui-contracts");
     }
@@ -193,6 +201,74 @@ function productionSources(directory) {
   return files;
 }
 
+export function findRuntimeCycles(compiler, root, project, files, options) {
+  files = files.filter((file) => !/\.d\.[cm]?ts$/.test(file));
+  const key = (file) => process.platform === "win32" ? path.resolve(file).toLowerCase() : path.resolve(file);
+  const sources = new Map(files.map((file) => [key(file), file]));
+  const graph = new Map(files.map((file) => [key(file), new Set()]));
+
+  for (const file of files) {
+    // TypeScript's emitter removes type-only dependencies, including value-spelled type imports.
+    const { outputText } = compiler.transpileModule(readFileSync(file, "utf8"), {
+      fileName: file,
+      compilerOptions: { ...options, noEmit: false, module: compiler.ModuleKind.ESNext },
+    });
+    const tree = compiler.createSourceFile(file, outputText, compiler.ScriptTarget.Latest, true);
+    const outgoing = graph.get(key(file));
+    function add(specifier) {
+      if (specifier === null) return;
+      const resolved = compiler.resolveModuleName(specifier, file, options, compiler.sys).resolvedModule;
+      if (resolved && sources.has(key(resolved.resolvedFileName))) outgoing.add(key(resolved.resolvedFileName));
+    }
+    function visit(node, deferred = false) {
+      if (compiler.isImportDeclaration(node) || compiler.isExportDeclaration(node)) {
+        add(stringValue(compiler, node.moduleSpecifier));
+      } else if (!deferred && compiler.isCallExpression(node) && node.arguments.length
+        && compiler.isIdentifier(node.expression) && node.expression.text === "require") {
+        add(stringValue(compiler, node.arguments[0]));
+      } else if (compiler.isCallExpression(node) && node.arguments.length > 1
+        && compiler.isPropertyAccessExpression(node.expression) && node.expression.name.text === "glob"
+        && compiler.isMetaProperty(node.expression.expression)
+        && node.expression.expression.keywordToken === compiler.SyntaxKind.ImportKeyword) {
+        const settings = node.arguments[1];
+        const eager = compiler.isObjectLiteralExpression(settings) && settings.properties.some((property) =>
+          compiler.isPropertyAssignment(property)
+          && (compiler.isIdentifier(property.name) ? property.name.text : stringValue(compiler, property.name)) === "eager"
+          && property.initializer.kind === compiler.SyntaxKind.TrueKeyword);
+        if (eager) {
+          for (const target of globTargets(compiler, node.arguments[0], root, file, options, project)) {
+            const resolved = key(path.join(root, target));
+            if (sources.has(resolved)) outgoing.add(resolved);
+          }
+        }
+      }
+      compiler.forEachChild(node, (child) => visit(child, deferred || compiler.isFunctionLike(node)));
+    }
+    visit(tree);
+  }
+
+  const visited = new Set();
+  const active = new Map();
+  const stack = [];
+  const violations = [];
+  function visit(file) {
+    if (active.has(file)) {
+      const cycle = [...stack.slice(active.get(file)), file].map((node) => sourcePath(root, sources.get(node)));
+      violations.push(`${cycle[0]}: [client-runtime-cycle] eager dependencies form a cycle: ${cycle.join(" -> ")}`);
+      return;
+    }
+    if (visited.has(file)) return;
+    active.set(file, stack.length);
+    stack.push(file);
+    for (const target of [...graph.get(file)].sort()) visit(target);
+    stack.pop();
+    active.delete(file);
+    visited.add(file);
+  }
+  for (const file of [...graph.keys()].sort()) visit(file);
+  return violations;
+}
+
 export function checkRepository(compiler, root, project) {
   const options = projectOptions(compiler, root, project);
   const files = [
@@ -210,6 +286,7 @@ export function checkRepository(compiler, root, project) {
   const violations = files.sort().flatMap((file) => findViolations(
     compiler, root, file, readFileSync(file, "utf8"), options, project,
   ));
+  violations.push(...findRuntimeCycles(compiler, root, project, files, options));
   return { checked: files.length, violations };
 }
 

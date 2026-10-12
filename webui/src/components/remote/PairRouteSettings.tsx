@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useClient } from "@/providers/ClientProvider";
 import { remoteAction } from "@/lib/remote-instances";
-import { useRemoteConnections } from "./RemoteInstances";
+import { useRemoteConnections } from "./remote-context";
 
 /** An explicit escape hatch for a VPN/bound-interface route, not a new SSH form. */
 export function PairRouteSettings({ id, onSaved, showHint = true }: { id: string; onSaved?: () => void; showHint?: boolean }) {

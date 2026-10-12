@@ -63,7 +63,7 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
 def _isolate_llm_usage_stores(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[None]:
-    from nanobot import llm_usage
+    import nanobot.llm_usage.service as llm_usage
 
     stores: dict[Path, llm_usage.LLMUsageStore] = {}
     monkeypatch.setattr(llm_usage, "_STORES", stores)

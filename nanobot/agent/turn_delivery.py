@@ -19,7 +19,6 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventPublisher
-from nanobot.channels.notification_routes import notification_metadata
 from nanobot.events import (
     AgentEvent,
     ContextCompactionEvent,
@@ -49,6 +48,8 @@ class TurnRoute:
     publish_lifecycle: bool = False
     # Public turn identity supplied by the owning channel adapter.
     turn_id: str | None = None
+    # The owning adapter selects durable address fields for later notifications.
+    notification_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
@@ -105,7 +106,7 @@ class TurnDeliveryFactory:
         *,
         enable_stream: bool = False,
     ) -> TurnDelivery:
-        route = self._default_route(msg, session_key)
+        route = self._default_route(msg)
         if self.route_policy is not None:
             route = self.route_policy(msg, session_key, route)
             if not isinstance(cast(object, route), TurnRoute):
@@ -168,7 +169,7 @@ class TurnDeliveryFactory:
         return _bind_events(self.bus, TurnRoute(channel, chat_id, metadata), session_key)
 
     @staticmethod
-    def _default_route(msg: InboundMessage, session_key: str) -> TurnRoute:
+    def _default_route(msg: InboundMessage) -> TurnRoute:
         if msg.channel != "system":
             return TurnRoute(
                 channel=msg.channel,
@@ -181,12 +182,6 @@ class TurnDeliveryFactory:
             msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
         )
         metadata: dict[str, Any] = {}
-        if (
-            channel == "slack"
-            and session_key.startswith("slack:")
-            and session_key.count(":") >= 2
-        ):
-            metadata["slack"] = {"thread_ts": session_key.split(":", 2)[2]}
         if origin_message_id := msg.metadata.get("origin_message_id"):
             metadata["origin_message_id"] = origin_message_id
         return TurnRoute(channel=channel, chat_id=chat_id, metadata=metadata)
@@ -246,7 +241,7 @@ class TurnDelivery:
         session_metadata["_compaction_route"] = {
             "channel": self.route.channel,
             "chat_id": self.route.chat_id,
-            "metadata": notification_metadata(self.route.channel, self.route.metadata),
+            "metadata": deepcopy(self.route.notification_metadata),
         }
 
     async def started(self) -> None:

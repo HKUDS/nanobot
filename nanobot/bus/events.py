@@ -18,6 +18,9 @@ INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 INBOUND_META_USER_SHELL = "_user_shell"
 RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
+# Transport-provided turn correlation; the persisted spelling is retained for clients.
+INBOUND_META_TURN_ID = "webui_turn_id"
+
 
 @dataclass
 class InboundMessage:

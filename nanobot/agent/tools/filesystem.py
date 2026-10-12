@@ -19,16 +19,10 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config_base import Base
+from nanobot.config.tool_schemas import FileToolsConfig
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
-
-
-class FileToolsConfig(Base):
-    """Filesystem tools configuration."""
-
-    enable: bool = True  # built-in file tools on by default
 
 
 class _FsTool(Tool):
@@ -82,7 +76,7 @@ class _FsTool(Tool):
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 
         agent_workspace = Path(ctx.workspace)
         resolved_agent_workspace = agent_workspace.expanduser().resolve(strict=False)
@@ -233,7 +227,7 @@ def _is_blocked_device(path: str | Path) -> bool:
 
 def _builtin_skill_read_path(path: str) -> Path | None:
     """Map workspace-relative skills/<name>/... reads onto bundled skills."""
-    from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+    from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 
     requested = Path(path)
     if requested.is_absolute():

@@ -51,7 +51,8 @@ import {
   SIDEBAR_SELECTION_ITEM_CLASS,
   SidebarSelectionHighlight,
 } from "@/components/SidebarSelectionHighlight";
-import { relativeTime, visibleSessionPreview } from "@/lib/format";
+import { visibleSessionPreview } from "@/lib/format";
+import { relativeTime } from "@/lib/format-time";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
   displayTitle,

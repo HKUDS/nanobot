@@ -27,7 +27,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
 )
 from nanobot.providers.images import prepare_inline_images
-from nanobot.providers.oauth_model_catalog import (
+from nanobot.providers.oauth_catalog_cache import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,

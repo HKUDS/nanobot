@@ -35,7 +35,6 @@ from nanobot.providers.factory import ProviderSnapshot, make_provider, provider_
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 from nanobot.providers.unconfigured_provider import UnconfiguredProvider
-from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.webui.dev import WebUIDevError
 from nanobot.webui.metadata import (
     WEBUI_MESSAGE_SOURCE_METADATA_KEY,
@@ -287,6 +286,9 @@ def test_commit_dream_changes_commits_real_edits(tmp_path) -> None:
 @pytest.fixture
 def mock_paths():
     """Mock config/workspace paths for test isolation."""
+    from importlib import import_module
+
+    import_module("nanobot.channels.validation")
     with patch("nanobot.config.loader.get_config_path") as mock_cp, \
          patch("nanobot.config.loader.save_config") as mock_sc, \
          patch("nanobot.config.loader.load_config") as mock_lc, \
@@ -2041,6 +2043,11 @@ def _patch_cli_command_runtime(
     cron_service=None,
     get_cron_dir=None,
 ) -> None:
+    from importlib import import_module
+
+    # Load adapter contracts before replacing runtime factories for this invocation.
+    import_module("nanobot.session.webui_turns")
+    import_module("nanobot.channels.validation")
     provider_factory = make_provider or (lambda _config: _fake_provider())
 
     monkeypatch.setattr(
@@ -3591,8 +3598,23 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     assert isinstance(turn_delivery_factory, TurnDeliveryFactory)
     assert turn_delivery_factory.bus is bus
     assert seen["cron_reconciliation"] == ["remove:dream", "remove:heartbeat", "status"]
-    assert isinstance(turn_delivery_factory.route_policy, WebuiTurnRoutePolicy)
-    assert turn_delivery_factory.route_policy.sessions is agent.sessions
+    websocket_delivery = turn_delivery_factory.create(
+        InboundMessage(
+            channel="websocket", sender_id="user", chat_id="chat", content="Hello",
+            metadata={"webui": True, "webui_turn_id": "turn-1"},
+        ),
+        "websocket:chat",
+    )
+    assert websocket_delivery.route.turn_id == "turn-1"
+    assert websocket_delivery.route.metadata["_websocket_turn_owner"]
+    slack_delivery = turn_delivery_factory.create(
+        InboundMessage(
+            channel="system", sender_id="subagent", chat_id="slack:C1", content="Done",
+        ),
+        "slack:C1:1234.5678",
+    )
+    assert slack_delivery.route.metadata["slack"] == {"thread_ts": "1234.5678"}
+    assert slack_delivery.route.notification_metadata == {"slack": {"thread_ts": "1234.5678"}}
 
 
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(

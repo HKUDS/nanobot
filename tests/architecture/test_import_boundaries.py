@@ -88,7 +88,11 @@ def test_core_boundary_includes_type_dependencies(source: str) -> None:
     ("module", "rule"),
     [
         ("nanobot.session.manager", "session-storage"),
+        ("nanobot.session.recovery", "session-storage"),
         ("nanobot.security.workspace_policy", "security-primitives"),
+        ("nanobot.agent.turn_delivery", "core-execution"),
+        ("nanobot.config.tool_schemas", "configuration-contracts"),
+        ("nanobot.utils.file_io", "shared-primitives"),
     ],
 )
 def test_storage_and_security_do_not_depend_on_adapters(module: str, rule: str) -> None:
@@ -167,6 +171,19 @@ def test_existing_runtime_and_composition_dependencies_remain_allowed(
         (
             "nanobot/agent/tools/shell.py", "from ...config.schema import Base as ConfigBase",
             "tool-config-base", "nanobot.config.schema.Base", 1,
+        ),
+        (
+            "nanobot/channels/telegram/runtime.py", "from nanobot.config.schema import Base",
+            "tool-config-base", "nanobot.config.schema.Base", 1,
+        ),
+        (
+            "nanobot/config/tool_schemas.py", "from nanobot.agent.tools.shell import ExecTool",
+            "configuration-contracts", "nanobot.agent.tools.shell.ExecTool", 1,
+        ),
+        (
+            "nanobot/providers/oauth_catalog_cache.py",
+            "from nanobot.providers import openai_codex_provider",
+            "oauth-catalog-cache", "nanobot.providers.openai_codex_provider", 1,
         ),
     ],
 )

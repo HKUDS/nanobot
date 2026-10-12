@@ -19,16 +19,10 @@ from nanobot.agent.tools.runtime_control import (
     RuntimeControl,
     RuntimeSnapshot,
 )
-from nanobot.config_base import Base
+from nanobot.config.tool_schemas import MyToolConfig
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import ToolContext
-
-
-class MyToolConfig(Base):
-    """Self-inspection tool configuration."""
-    enable: bool = True
-    allow_set: bool = False
 
 
 def _is_string_mapping(value: object) -> TypeGuard[Mapping[str, object]]:

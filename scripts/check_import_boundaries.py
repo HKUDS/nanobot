@@ -43,12 +43,13 @@ _ADAPTERS = (
 IMPORT_RULES = (
     ImportRule(
         "core-execution",
-        ("nanobot.agent.loop", "nanobot.agent.runner"),
+        ("nanobot.agent.loop", "nanobot.agent.runner", "nanobot.agent.turn_delivery"),
         _ADAPTERS,
     ),
     ImportRule(
         "session-storage",
-        ("nanobot.session.manager", "nanobot.session.history", "nanobot.session.summary"),
+        ("nanobot.session.manager", "nanobot.session.history", "nanobot.session.summary",
+         "nanobot.session.recovery"),
         (*_ADAPTERS, "nanobot.agent"),
     ),
     ImportRule(
@@ -75,8 +76,25 @@ IMPORT_RULES = (
     ),
     ImportRule(
         "tool-config-base",
-        ("nanobot.agent.tools",),
+        ("nanobot.agent.tools", "nanobot.channels"),
         ("nanobot.config.schema.Base",),
+    ),
+    ImportRule(
+        "configuration-contracts",
+        ("nanobot.config", "nanobot.config_base"),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.apps", "nanobot.session"),
+    ),
+    ImportRule(
+        "shared-primitives",
+        ("nanobot.utils.file_io", "nanobot.agent.skill_metadata", "nanobot.providers.generation",
+         "nanobot.llm_usage.types", "nanobot.session.automation_spec"),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.apps", "nanobot.session", "nanobot.config"),
+    ),
+    ImportRule(
+        "oauth-catalog-cache",
+        ("nanobot.providers.oauth_catalog_cache",),
+        ("nanobot.providers.oauth_model_catalog", "nanobot.providers.openai_codex_provider",
+         "nanobot.providers.github_copilot_provider", "nanobot.providers.xai_grok_provider"),
     ),
 )
 

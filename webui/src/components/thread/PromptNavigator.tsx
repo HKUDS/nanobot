@@ -16,7 +16,7 @@ import {
   type PromptAnchor,
   userPromptAnchors,
 } from "@/components/thread/promptNavigation";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format-time";
 import type { UIMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 

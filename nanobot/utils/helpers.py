@@ -8,7 +8,6 @@ import json
 import os
 import re
 import shutil
-import stat
 import time
 import uuid
 from collections.abc import Iterable
@@ -19,6 +18,8 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from loguru import logger
 
+from nanobot.utils.file_io import ensure_dir as ensure_dir
+from nanobot.utils.file_io import write_text_atomic as _write_text_atomic
 from nanobot.utils.token_encoding import get_token_encoding as _get_token_encoding
 
 if TYPE_CHECKING:
@@ -351,12 +352,6 @@ def build_image_content_blocks(
     ]
 
 
-def ensure_dir(path: Path) -> Path:
-    """Ensure directory exists, return it."""
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()
@@ -595,30 +590,6 @@ def _fsync_directory_after_replace(directory: Path) -> None:
                     raise
         finally:
             os.close(fd)
-
-
-def _write_text_atomic(path: Path, content: str) -> None:
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    existing_mode: int | None = None
-    with suppress(OSError):
-        existing_mode = stat.S_IMODE(path.stat().st_mode)
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            if existing_mode is not None:
-                os.chmod(tmp, existing_mode)
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
-        with suppress(OSError, NotImplementedError):
-            dfd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
 
 
 def maybe_persist_tool_result(

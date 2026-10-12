@@ -6,8 +6,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
-
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import RequestContext, ToolContext
 from nanobot.agent.tools.schema import (
@@ -19,18 +17,9 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.apps.cli.utils import runtime_lines_for_request
-from nanobot.config_base import Base
+from nanobot.config.tool_schemas import CliAppsToolConfig
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.security.workspace_access import current_tool_workspace
-
-
-class CliAppsToolConfig(Base):
-    """CLI Apps tool configuration."""
-
-    enable: bool = True
-    install_timeout: int = Field(default=300, ge=1, le=3600)
-    run_timeout: int = Field(default=60, ge=1, le=600)
-    catalog_ttl_seconds: int = Field(default=3600, ge=60, le=86_400)
 
 
 @tool_parameters(

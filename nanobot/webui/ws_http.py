@@ -34,7 +34,6 @@ from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.security.workspace_access import WorkspaceScope, WorkspaceScopeError
 from nanobot.session.manager import SessionManager
-from nanobot.session.recovery import RecoveryActionError
 from nanobot.session.session_handles import (
     SessionHandleResolver,
 )
@@ -95,6 +94,7 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.recovery import RecoveryActionError
 from nanobot.webui.session_automations import (
     all_automations_payload,
     serialize_automation_jobs,

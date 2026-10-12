@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
-import { StreamingLabelSheen } from "@/components/MessageBubble";
+import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";

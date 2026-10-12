@@ -12,6 +12,7 @@ from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
     GoalStatusEvent,
@@ -21,6 +22,7 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.notification_routes import channel_turn_route
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
@@ -124,7 +126,11 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    bus = MessageBus()
+    loop = AgentLoop(
+        bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+        turn_delivery_factory=TurnDeliveryFactory(bus, route_policy=channel_turn_route),
+    )
     WebuiTurnCoordinator(
         bus=loop.bus,
         sessions=loop.sessions,

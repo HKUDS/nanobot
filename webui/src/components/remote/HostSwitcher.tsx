@@ -9,7 +9,8 @@ import { useClient } from "@/providers/ClientProvider";
 import { cn } from "@/lib/utils";
 import type { ConnectionStatus } from "@/lib/types";
 import type { HostAnchor, EmbeddedHost } from "./host-bridge";
-import { HostConnectionStatus, type HostConnectionState } from "./HostConnectionStatus";
+import { HostConnectionStatus } from "./HostConnectionStatus";
+import type { HostConnectionState } from "./remote-context";
 
 export interface HostPicker {
   kind: "shell";

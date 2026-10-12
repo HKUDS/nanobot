@@ -31,6 +31,7 @@ dependencies = [
     "websockets>=15.0,<17.0",
     "httpx[socks]>=0.28.0,<1.0.0",
     "aiohttp>=3.14.3,<4.0.0",
+    "yarl>=1.17.0,<2.0.0",
     "cryptography>=46.0.0",
     "ddgs>=9.5.5,<10.0.0",
     "oauth-cli-kit>=0.1.6,<1.0.0",
@@ -74,6 +75,7 @@ azure = [
 ]
 bedrock = [
     "boto3>=1.43.0",
+    "botocore>=1.43.0,<2.0.0",
 ]
 documents = [
     # Compatibility extra: document readers are bundled since v0.2.3.

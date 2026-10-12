@@ -20,7 +20,7 @@ from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot.providers.base import LLMResponse, ProviderCallContext
 from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
-from nanobot.providers.oauth_model_catalog import (
+from nanobot.providers.oauth_catalog_cache import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,

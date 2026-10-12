@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.registry import ToolRegistry
@@ -18,7 +17,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.config.paths import get_media_dir
-from nanobot.config_base import Base
+from nanobot.config.tool_schemas import ImageGenerationToolConfig
 from nanobot.providers.image_generation import (
     ImageGenerationError,
     ImageGenerationProvider,
@@ -37,19 +36,6 @@ from nanobot.utils.helpers import detect_image_mime
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import ToolContext
     from nanobot.config.schema import Config, ProviderConfig
-
-
-class ImageGenerationToolConfig(Base):
-    """Image generation tool configuration."""
-    enabled: bool = False
-    provider: str = "openrouter"
-    model: str = "openai/gpt-5.4-image-2"
-    default_aspect_ratio: str = "1:1"
-    default_image_size: str = "1K"
-    max_images_per_turn: int = Field(default=4, ge=1, le=8)
-    save_dir: str = "generated"
-    extra_headers: dict[str, str] | None = Field(default=None, repr=False)
-    extra_body: dict[str, Any] | None = Field(default=None, repr=False)
 
 
 @tool_parameters(

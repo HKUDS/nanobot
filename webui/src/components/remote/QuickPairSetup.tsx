@@ -12,7 +12,7 @@ import { CodeBlock } from "@/components/CodeBlock";
 import { remoteAction } from "@/lib/remote-instances";
 import { pairingReturnOrigin, type PairReturn } from "@/lib/remote-pair-return";
 import type { ConnectionStatus } from "@/lib/types";
-import { useRemoteConnections } from "./RemoteInstances";
+import { useRemoteConnections } from "./remote-context";
 import { PairRouteSettings } from "./PairRouteSettings";
 import "./remote-layout.css";
 
