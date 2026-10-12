@@ -446,19 +446,6 @@ class GatewayHTTPHandler:
         """
         return True
 
-    def workspace_full_access_available(
-        self,
-        connection: Any,
-        headers: Any | None = None,
-    ) -> bool:
-        """Allow authenticated WebUI clients to select the chat access mode.
-
-        Authentication is enforced by the HTTP route or WebSocket handshake.
-        Browser location does not change the permissions of that authenticated
-        user; restricting a chat must not prevent switching it back to Full Access.
-        """
-        return True
-
     # -- Token management ---------------------------------------------------
 
     def check_api_token(self, request: WsRequest) -> bool:
@@ -1672,10 +1659,7 @@ class GatewayHTTPHandler:
         return _http_json_response(
             self.workspaces.payload(
                 can_change_project=self.workspace_project_selection_available(connection),
-                can_use_full_access=self.workspace_full_access_available(
-                    connection,
-                    request.headers,
-                ),
+                can_use_full_access=True,
             )
         )
 

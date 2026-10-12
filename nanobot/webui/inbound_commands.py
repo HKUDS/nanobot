@@ -164,9 +164,6 @@ class WebUICommandRouter:
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
         return self._http_router.workspace_project_selection_available(connection)
 
-    def workspace_full_access_available(self, connection: ServerConnection) -> bool:
-        return self._http_router.workspace_full_access_available(connection)
-
     async def send_webui_protocol_error(
         self,
         connection: ServerConnection,
@@ -310,7 +307,7 @@ class WebUICommandRouter:
                 lambda: self._workspaces.scope_for_new_chat(
                     envelope,
                     can_change_project=self.workspace_project_selection_available(connection),
-                    can_use_full_access=self.workspace_full_access_available(connection),
+                    can_use_full_access=True,
                 ),
             )
             if scope is None:
@@ -451,7 +448,7 @@ class WebUICommandRouter:
                     chat_id=chat_id,
                     chat_running=websocket_turn_wall_started_at(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
-                    can_use_full_access=self.workspace_full_access_available(connection),
+                    can_use_full_access=True,
                 ),
                 chat_id=chat_id,
             )
@@ -630,7 +627,7 @@ class WebUICommandRouter:
                     chat_id=chat_id,
                     chat_running=websocket_turn_wall_started_at(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
-                    can_use_full_access=self.workspace_full_access_available(connection),
+                    can_use_full_access=True,
                 )
             ),
             chat_id=chat_id,
