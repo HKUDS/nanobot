@@ -1,0 +1,19 @@
+{
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790
+  },
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8765,
+      "tokenIssueSecret": "${NANOBOT_WEB_TOKEN}",
+      "websocketRequiresToken": true
+    }
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "api_key": "${NANOBOT_API_KEY}"
+  }
+}

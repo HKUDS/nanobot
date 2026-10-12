@@ -131,6 +131,21 @@ NANOBOT_CHANNELS=telegram,slack docker compose build
 
 The image keeps nanobot in a virtual environment owned by its built-in non-root runtime user (UID 1000). If an enabled channel was not preinstalled, gateway startup can therefore install its manifest-declared dependencies. Rebuilding with `NANOBOT_CHANNELS` keeps that installation reproducible instead of relying on the container's writable layer. If you override the container with a different `--user`, bake every enabled channel into the image because that UID is not guaranteed write access to the virtual environment.
 
+The first `docker compose up` bootstraps `~/.nanobot/config.json` with container-appropriate binds and generated secrets: the WebUI password (`NANOBOT_WEB_TOKEN`) and the OpenAI-compatible API key (`NANOBOT_API_KEY`). Export either variable before `up` to pin your own; otherwise the entrypoint generates one and prints it to the container log. An existing `config.json` is left untouched. Add provider keys afterwards in the WebUI settings or with `onboard`:
+
+```bash
+docker compose up -d nanobot-gateway                      # first boot writes ~/.nanobot/config.json
+docker compose logs nanobot-gateway                       # shows the generated WebUI password and API key
+```
+
+The `nanobot-api` service (OpenAI-compatible endpoint on `127.0.0.1:8900`) needs a configured provider before it can serve, so it is opt-in via the `api` profile:
+
+```bash
+docker compose --profile api up -d                        # also start the API once a provider is configured
+```
+
+For a fully pre-configured setup, keep using first-time onboarding:
+
 ```bash
 docker compose run --rm nanobot-cli status
 docker compose run --rm nanobot-cli agent -m "Hello!"
