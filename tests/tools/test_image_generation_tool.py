@@ -140,7 +140,7 @@ def test_image_generation_tool_passes_provider_proxy_to_client(
         config=ImageGenerationToolConfig(
             enabled=True,
             provider="openai_codex",
-            model="openai-codex/gpt-5.4",
+            model="openai-codex/gpt-image-2",
         ),
         provider_configs={"openai_codex": ProviderConfig(proxy=proxy)},
     )

@@ -1371,13 +1371,13 @@ class CustomImageGenerationClient(ImageGenerationProvider):
 class CodexImageGenerationClient(ImageGenerationProvider):
     """OpenAI image generation via Codex subscription OAuth.
 
-    Uses the Codex Responses API with the ``image_generation`` tool
-    (the same mechanism ChatGPT uses internally).  No API key required —
-    the Codex OAuth token from ``oauth_cli_kit`` is used instead.
+    Uses the standalone Codex Images API, matching the official Codex
+    image-generation extension. The Codex OAuth token from ``oauth_cli_kit``
+    authenticates requests without an API key.
     """
 
     provider_name = "openai_codex"
-    model_options = ("gpt-5.4",)
+    model_options = ("gpt-image-2",)
     missing_key_message = (
         "Codex OAuth token is unavailable. "
         "Log in with Codex subscription first."
@@ -1417,63 +1417,56 @@ class CodexImageGenerationClient(ImageGenerationProvider):
         if not token or not token.access:
             raise ImageGenerationError(self.missing_key_message)
 
-        logger.info(
-            "Using Codex OAuth token for image generation (account: {})",
-            token.account_id,
-        )
-
-        if reference_images:
-            logger.warning(
-                "Codex image generation does not support reference images; "
-                "ignoring {} reference image(s)",
-                len(reference_images),
-            )
-
         headers: dict[str, str] = {
             "Authorization": f"Bearer {token.access}",
             "chatgpt-account-id": str(token.account_id),
-            "OpenAI-Beta": "responses=experimental",
             "originator": "nanobot",
             "User-Agent": "nanobot (python)",
             "Content-Type": "application/json",
             **self.extra_headers,
         }
-
+        clean_model = self._codex_model(model)
         body: dict[str, Any] = {
-            "model": self._codex_model(model),
-            "instructions": "Generate an image based on the user's request.",
-            "input": [{"role": "user", "content": prompt}],
-            "tools": [{"type": "image_generation"}],
-            "tool_choice": "auto",
-            "stream": True,
-            "store": False,
+            "model": clean_model,
+            "prompt": prompt,
+            "background": "opaque",
+            "quality": "auto",
+            "size": (
+                _openai_size(clean_model, aspect_ratio, image_size)
+                if aspect_ratio or image_size else "auto"
+            ),
         }
         body.update(self.extra_body)
+        body = {key: value for key, value in body.items() if value is not None}
+        endpoint = "generations"
+        if reference_images:
+            endpoint = "edits"
+            body["images"] = [
+                {"image_url": image_path_to_data_url(path)} for path in reference_images
+            ]
 
-        logger.info("Codex Responses API request: POST {}/codex/responses body={}",
-                       self.api_base, {k: v for k, v in body.items() if k != "input"})
-
+        base = self.api_base
+        if not base.endswith("/codex"):
+            base = f"{base}/codex"
         response = await self._http_post(
-            f"{self.api_base}/codex/responses",
+            f"{base}/images/{endpoint}",
             headers=headers,
             body=body,
         )
-
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             detail = response.text[:1000]
-            logger.error("Codex Responses API error ({}): {}", response.status_code, detail)
             raise ImageGenerationError(
                 f"Codex image generation failed (HTTP {response.status_code}): {detail}"
             ) from exc
 
-        images, content_text = await _parse_codex_sse_images(response)
-
-        raw = {"status": "completed"}
-        self._require_images(images, raw)
-
-        return GeneratedImageResponse(images=images, content=content_text, raw=raw)
+        payload = _as_json_object(response.json())
+        if payload is None:
+            raise ImageGenerationError("Codex image generation returned an invalid JSON response")
+        images = await _openai_images_from_payload(payload, proxy=self.proxy)
+        self._require_images(images, payload)
+        return GeneratedImageResponse(images=images, content="", raw=payload)
 
 
 def _openai_size(
@@ -1570,93 +1563,6 @@ async def _openai_images_from_payload(
         if isinstance(url, str) and url:
             images.append(await _download_image_data_url(url, proxy=proxy))
     return images
-
-
-async def _parse_codex_sse_images(
-    response: httpx.Response,
-) -> tuple[list[str], str]:
-    """Parse a Codex Responses API SSE stream for image generation output.
-
-    Returns ``(images, content_text)``.
-    """
-    import json as _json
-
-    images: list[str] = []
-    text_parts: list[str] = []
-
-    buffer: list[str] = []
-    async for line_bytes in response.aiter_lines():
-        line = line_bytes.strip()
-        if line == "":
-            if buffer:
-                data_lines: list[str] = []
-                for bl in buffer:
-                    if bl.startswith("data:"):
-                        data_lines.append(bl[5:].strip())
-                buffer.clear()
-                if data_lines:
-                    raw = "".join(data_lines)
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        event = _as_json_object(_json.loads(raw))
-                    except Exception:
-                        continue
-                    if event is None:
-                        continue
-                    ev_type = event.get("type", "")
-                    if ev_type in ("error", "response.failed"):
-                        logger.error("Codex SSE failure: {}", raw[:2000])
-                    _collect_images_from_sse_event(event, images)
-                    _collect_text_from_sse_event(event, text_parts)
-                    if ev_type == "response.completed":
-                        break
-            continue
-        buffer.append(line)
-
-    # flush remaining
-    if buffer:
-        data_lines = [bl[5:].strip() for bl in buffer if bl.startswith("data:")]
-        raw = "".join(data_lines)
-        if raw and raw != "[DONE]":
-            try:
-                event = _as_json_object(_json.loads(raw))
-            except Exception:
-                pass
-            else:
-                if event is not None:
-                    _collect_images_from_sse_event(event, images)
-                    _collect_text_from_sse_event(event, text_parts)
-
-    return images, "".join(text_parts).strip()
-
-
-def _collect_images_from_sse_event(event: dict[str, Any], images: list[str]) -> None:
-    if event.get("type") != "response.output_item.done":
-        return
-    item = _as_json_object(event.get("item")) or {}
-    if item.get("type") != "image_generation_call":
-        return
-    result = item.get("result")
-    if isinstance(result, str):
-        if result.startswith("data:image/"):
-            images.append(result)
-        else:
-            images.append(_b64_image_data_url(result))
-    elif (result_object := _as_json_object(result)) is not None:
-        image_url = result_object.get("image_url") or result_object.get("image") or ""
-        if isinstance(image_url, str):
-            if image_url.startswith("data:image/"):
-                images.append(image_url)
-            else:
-                images.append(_b64_image_data_url(image_url))
-
-
-def _collect_text_from_sse_event(event: dict[str, Any], text_parts: list[str]) -> None:
-    if event.get("type") == "response.output_text.delta":
-        delta = event.get("delta")
-        if isinstance(delta, str) and delta:
-            text_parts.append(delta)
 
 
 # ---------------------------------------------------------------------------
