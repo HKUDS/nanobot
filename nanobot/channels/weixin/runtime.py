@@ -2129,12 +2129,8 @@ class WeixinChannel(BaseChannel):
         remaining reply. The manager skips the final ``StreamedResponseEvent``
         to avoid duplicate delivery. Reasoning deltas are dropped.
         """
-        meta = metadata or {}
-        if meta.get("_reasoning_delta") or meta.get("_reasoning"):
-            return
-        is_end = stream_end or bool(meta.get("_stream_end"))
         buffer_key = stream_id or chat_id
-        if is_end and merge_next:
+        if stream_end and merge_next:
             if delta:
                 self._stream_buffers.setdefault(buffer_key, []).append(delta)
             return
@@ -2143,7 +2139,7 @@ class WeixinChannel(BaseChannel):
         # folded into `full` below instead of appended here, so a send retry
         # recomputes the same `full` from an unchanged buffer rather than
         # double-counting that delta.
-        if delta and not is_end:
+        if delta and not stream_end:
             previous_parts = list(self._stream_buffers.get(buffer_key, []))
             self._stream_buffers.setdefault(buffer_key, []).append(delta)
             try:
@@ -2151,7 +2147,7 @@ class WeixinChannel(BaseChannel):
             except Exception:
                 self._stream_buffers[buffer_key] = previous_parts
                 raise
-        if not is_end:
+        if not stream_end:
             return
         full = ("".join(self._stream_buffers.get(buffer_key, [])) + (delta or "")).strip()
         if full:
