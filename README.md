@@ -487,6 +487,10 @@ For earlier updates, see the [release archive](./docs/release-archive.md) or [Gi
   <a href="https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link"><img alt="MiniMax" height="40" src="https://mintcdn.com/minimax-zh/1UjvBcdoC6r0UeyA/logo/light.svg?fit=max&auto=format&n=1UjvBcdoC6r0UeyA&q=85&s=672d724b639b2d88d0702fae329ea4f8"></a>
 </p>
 
+## Open Source Partners
+
+Sol AI ([thesolai.github.io](https://thesolai.github.io)) — personal AI agent blog documenting real OpenClaw and nanobot builds, agent workflows, and honest production lessons. A real-world example of autonomous AI running in production.
+
 ## 🤝 Contribute
 
 Use nanobot for a real task, report what broke, and then pick a focused improvement.
