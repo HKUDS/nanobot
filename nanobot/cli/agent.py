@@ -118,6 +118,7 @@ def agent(
             return
 
     from nanobot.agent.hooks import create_file_edit_activity_hook
+    from nanobot.agent.tools.image_generation import register_image_generation_tool
     from nanobot.agent.tools.mcp import MCPProvider
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.bus.outbound_events import (
@@ -162,6 +163,7 @@ def agent(
     cron_store_path = runtime_config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
     tools = ToolRegistry()
+    register_image_generation_tool(runtime_config, tools, workspace=runtime_config.workspace_path)
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
 
     _set_nanobot_logs(logs)

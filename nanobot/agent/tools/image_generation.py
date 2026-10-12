@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from pydantic import Field
@@ -17,13 +16,6 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.bus.events import (
-    INBOUND_META_RUNTIME_CONTROL,
-    RUNTIME_CONTROL_ACK,
-    RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD,
-    InboundMessage,
-)
-from nanobot.bus.queue import MessageBus
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.providers.image_generation import (
@@ -43,7 +35,7 @@ from nanobot.utils.helpers import detect_image_mime
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import ToolContext
-    from nanobot.config.schema import ProviderConfig
+    from nanobot.config.schema import Config, ProviderConfig
 
 
 class ImageGenerationToolConfig(Base):
@@ -92,7 +84,7 @@ class ImageGenerationTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.config.image_generation.enabled
+        return ctx.providers_config is not None and ctx.config.image_generation.enabled
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -224,17 +216,38 @@ class ImageGenerationTool(Tool):
             return ToolResult.error(f"Error: {exc}")
 
 
+def register_image_generation_tool(
+    config: Config,
+    registry: ToolRegistry,
+    *,
+    workspace: Path,
+) -> None:
+    """Assemble the configured tool in the application's shared registry."""
+    from nanobot.agent.tools.context import ToolContext
+
+    ctx = ToolContext(
+        config=config.tools,
+        workspace=str(workspace),
+        providers_config=config.providers,
+    )
+    if ImageGenerationTool.enabled(ctx):
+        registry.register(ImageGenerationTool.create(ctx))
+    else:
+        registry.unregister("generate_image")
+
+
 async def reload_image_generation_tool(
-    workspace: str | Path,
+    *,
+    config_path: Path,
+    workspace: Path,
     registry: ToolRegistry,
 ) -> dict[str, Any]:
-    """Apply the persisted image configuration to the running agent."""
+    """Refresh the application's image tool from its persisted config."""
     try:
         from nanobot.config.loader import load_config, resolve_config_env_vars
 
-        config = resolve_config_env_vars(load_config())
-        tool_config = config.tools.image_generation
-        provider_configs = image_gen_provider_configs(config.providers)
+        config = resolve_config_env_vars(load_config(config_path), config_path=config_path)
+        register_image_generation_tool(config, registry, workspace=workspace)
     except Exception as exc:
         logger.warning("Image generation hot reload could not read config: {}", exc)
         return {
@@ -244,21 +257,7 @@ async def reload_image_generation_tool(
             "error": str(exc),
         }
 
-    next_tool = (
-        ImageGenerationTool(  # pyright: ignore[reportAbstractUsage]
-            workspace=workspace,
-            config=tool_config,
-            provider_configs=provider_configs,
-        )
-        if tool_config.enabled
-        else None
-    )
-
-    if next_tool is not None:
-        registry.register(next_tool)
-    else:
-        registry.unregister("generate_image")
-
+    tool_config = config.tools.image_generation
     logger.info(
         "Image generation config reloaded: enabled={} provider={} model={}",
         tool_config.enabled,
@@ -273,66 +272,3 @@ async def reload_image_generation_tool(
         "model": tool_config.model,
         "requires_restart": False,
     }
-
-
-async def request_image_generation_reload(
-    bus: MessageBus,
-    *,
-    timeout: float = 5.0,
-) -> dict[str, Any]:
-    """Ask the running agent loop to refresh its image generation tool."""
-    loop = asyncio.get_running_loop()
-    ack: asyncio.Future[dict[str, Any]] = loop.create_future()
-    await bus.publish_inbound(
-        InboundMessage(
-            channel="system",
-            sender_id="webui-settings",
-            chat_id="runtime",
-            content=RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD,
-            metadata={
-                INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD,
-                RUNTIME_CONTROL_ACK: ack,
-            },
-        )
-    )
-    try:
-        result = await asyncio.wait_for(ack, timeout=timeout)
-    except asyncio.TimeoutError:
-        return {
-            "ok": False,
-            "message": "Image generation hot reload timed out.",
-            "requires_restart": True,
-        }
-    if not isinstance(cast(object, result), dict):
-        return {
-            "ok": False,
-            "message": "Image generation hot reload returned an unexpected response.",
-            "requires_restart": True,
-        }
-    return result
-
-
-async def handle_runtime_control(
-    msg: InboundMessage,
-    workspace: str | Path,
-    registry: ToolRegistry,
-) -> bool:
-    """Handle an in-process image generation reload request."""
-    metadata = msg.metadata
-    if metadata.get(INBOUND_META_RUNTIME_CONTROL) != RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD:
-        return False
-
-    ack = metadata.get(RUNTIME_CONTROL_ACK)
-    try:
-        result = await reload_image_generation_tool(workspace, registry)
-    except Exception as exc:
-        logger.exception("Image generation hot reload failed")
-        result = {
-            "ok": False,
-            "message": "Image generation hot reload failed.",
-            "requires_restart": True,
-            "error": str(exc),
-        }
-    if isinstance(ack, asyncio.Future) and not ack.done():
-        cast(asyncio.Future[Any], ack).set_result(result)
-    return True

@@ -376,6 +376,7 @@ class GatewayHTTPHandler:
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
         recovery_action: (
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
@@ -434,6 +435,7 @@ class GatewayHTTPHandler:
             channel_runtime_status=channel_runtime_status,
             mcp_runtime_status=mcp_runtime_status,
             mcp_reload=mcp_reload,
+            image_generation_reload=image_generation_reload,
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 

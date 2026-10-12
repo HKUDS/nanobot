@@ -25,7 +25,6 @@ from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver, TranscriptInput
-from nanobot.agent.control import handle_runtime_control
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.goal_permission import GoalInputScope
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
@@ -45,7 +44,13 @@ from nanobot.agent.turn_delivery import (
 )
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
+from nanobot.bus.events import (
+    INBOUND_META_RUNTIME_CONTROL,
+    INBOUND_META_USER_SHELL,
+    RUNTIME_CONTROL_SESSION_DISCARD,
+    InboundMessage,
+    OutboundMessage,
+)
 from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -111,7 +116,6 @@ if TYPE_CHECKING:
     from nanobot.config.schema import (
         ChannelsConfig,
         Config,
-        ProvidersConfig,
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
@@ -282,7 +286,6 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
-        providers_config: ProvidersConfig | None = None,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
         model_presets: dict[str, ModelPresetConfig] | None = None,
@@ -439,10 +442,7 @@ class AgentLoop:
         self._next_idle_compact_check_at = time.monotonic()
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
-        self._register_default_tools(
-            providers_config=providers_config,
-            provider_snapshot_loader=provider_snapshot_loader,
-        )
+        self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -503,7 +503,6 @@ class AgentLoop:
             session_ttl_minutes=defaults.session_ttl_minutes,
             idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
             tools_config=config.tools,
-            providers_config=config.providers,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
             dream_model_preset=defaults.dream.model_override,
@@ -612,7 +611,6 @@ class AgentLoop:
     def _register_default_tools(
         self,
         *,
-        providers_config: ProvidersConfig | None,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None,
     ) -> None:
         """Register the default set of tools via plugin loader."""
@@ -630,7 +628,6 @@ class AgentLoop:
             exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
-            providers_config=providers_config,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_control=runtime_control,
@@ -1366,12 +1363,8 @@ class AgentLoop:
 
                 raw = command_text(msg)
                 effective_key = self._effective_session_key(msg)
-                if await handle_runtime_control(
-                    msg,
-                    workspace=self.workspace,
-                    tools=self.tools,
-                    discard_session=self.discard_session,
-                ):
+                if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
+                    await self.discard_session(msg.session_key)
                     continue
                 if (
                     msg.require_existing_session

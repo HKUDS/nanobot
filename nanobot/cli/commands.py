@@ -369,6 +369,7 @@ def serve(
         console.print("[red]aiohttp is required. Install with: nanobot plugins enable api[/red]")
         raise typer.Exit(1)
 
+    from nanobot.agent.tools.image_generation import register_image_generation_tool
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import SessionManager
@@ -390,6 +391,7 @@ def serve(
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
     tools = ToolRegistry()
+    register_image_generation_tool(runtime_config, tools, workspace=runtime_config.workspace_path)
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
     try:
         agent_loop = AgentLoop.from_config(

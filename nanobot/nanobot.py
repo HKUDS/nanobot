@@ -10,6 +10,7 @@ from typing import Any
 from nanobot.agent.hook import AgentHook, SDKCaptureHook
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.image_generation import register_image_generation_tool
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import Config
@@ -131,6 +132,7 @@ class Nanobot:
             config.agents.defaults.model_preset = model_preset
 
         tools = ToolRegistry()
+        register_image_generation_tool(config, tools, workspace=config.workspace_path)
         mcp_provider = MCPProvider.from_config(config, tools)
         loop = AgentLoop.from_config(
             config,

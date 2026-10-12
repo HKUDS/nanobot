@@ -133,6 +133,7 @@ def _thread_conversation_events(body: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _ch(bus: Any, **kw: Any) -> WebSocketChannel:
+    image_generation_reload = kw.pop("image_generation_reload", None)
     cfg: dict[str, Any] = {
         "enabled": True,
         "allowFrom": ["*"],
@@ -153,6 +154,7 @@ def _ch(bus: Any, **kw: Any) -> WebSocketChannel:
         runtime_model_name=None,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
+        image_generation_reload=image_generation_reload,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -4262,12 +4264,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
             "requires_restart": False,
         }
     )
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.request_image_generation_reload",
-        image_reload,
-    )
-
-    channel = _ch(bus, port=port)
+    channel = _ch(bus, port=port, image_generation_reload=image_reload)
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
 
     server_task = asyncio.create_task(channel.start())
@@ -4645,29 +4642,32 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
 
 @pytest.mark.asyncio
 async def test_image_settings_hot_reload_without_restart(
-    bus: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.image_generation import (
+        ImageGenerationTool,
+        reload_image_generation_tool,
+    )
+
     port = 29935
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.openrouter.api_key = "image-key"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    image_reload = AsyncMock(
-        return_value={
-            "ok": True,
-            "message": "Image generation settings applied.",
-            "requires_restart": False,
-        }
-    )
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.request_image_generation_reload",
-        image_reload,
-    )
+    runtime_bus = MessageBus()
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    agent = AgentLoop(bus=runtime_bus, provider=provider, workspace=tmp_path)
 
-    channel = _ch(bus, port=port)
+    async def image_reload() -> dict[str, Any]:
+        return await reload_image_generation_tool(
+            config_path=config_path, workspace=agent.workspace, registry=agent.tools,
+        )
+
+    channel = _ch(runtime_bus, port=port, image_generation_reload=image_reload)
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
@@ -4687,19 +4687,36 @@ async def test_image_settings_hot_reload_without_restart(
         assert response.status_code == 200
         assert response.json()["requires_restart"] is False
         assert response.json()["restart_required_sections"] == []
-        image_reload.assert_awaited_once_with(bus)
+        tool = agent.tools.get("generate_image")
+        assert isinstance(tool, ImageGenerationTool)
+        assert tool.config.model == "openai/gpt-image-1"
+        assert tool.provider_configs["openrouter"].api_key == "image-key"
+        assert agent.tools.has("read_file")
+        assert runtime_bus.inbound_size == 0
+
+        disabled = await _webui_mutate(
+            webui_client,
+            "settings.image_generation.update",
+            {"enabled": False},
+        )
+        assert disabled.status_code == 200
+        assert disabled.json()["requires_restart"] is False
+        assert not agent.tools.has("generate_image")
     finally:
         if webui_client is not None:
             await webui_client.close()
         await channel.stop()
         await server_task
+        await agent.aclose()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("runtime_available", [True, False])
 async def test_image_settings_fall_back_to_restart_when_hot_reload_fails(
     bus: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    runtime_available: bool,
 ) -> None:
     port = 29936
     config_path = tmp_path / "config.json"
@@ -4707,18 +4724,15 @@ async def test_image_settings_fall_back_to_restart_when_hot_reload_fails(
     config.providers.openrouter.api_key = "image-key"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.request_image_generation_reload",
-        AsyncMock(
-            return_value={
-                "ok": False,
-                "message": "Image generation hot reload timed out.",
-                "requires_restart": True,
-            }
-        ),
+    image_reload = AsyncMock(
+        return_value={
+            "ok": False,
+            "message": "Image generation hot reload timed out.",
+            "requires_restart": True,
+        }
     )
 
-    channel = _ch(bus, port=port)
+    channel = _ch(bus, port=port, image_generation_reload=image_reload if runtime_available else None)
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)

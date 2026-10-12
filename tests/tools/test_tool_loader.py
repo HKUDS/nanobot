@@ -175,6 +175,23 @@ def test_loader_wires_shared_exec_session_manager(tmp_path):
     assert "write_stdin" not in definition_names
 
 
+def test_loader_preserves_caller_supplied_tool(tmp_path):
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.config.schema import ToolsConfig
+
+    tool = ReadFileTool(workspace=tmp_path / "custom-root")
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    registered = ToolLoader(test_classes=[ReadFileTool]).load(
+        ToolContext(config=ToolsConfig(), workspace=str(tmp_path)), registry,
+    )
+
+    assert registry.get("read_file") is tool
+    assert "read_file" not in registered
+
+
 # --- Task 4: _FsTool.create() ---
 
 
@@ -344,9 +361,10 @@ def test_image_gen_tool_config_cls():
 
 def test_image_gen_tool_enabled():
     from nanobot.agent.tools.image_generation import ImageGenerationTool
+    from nanobot.config.schema import ProvidersConfig
     mock_config = MagicMock()
     mock_config.image_generation.enabled = True
-    ctx = ToolContext(config=mock_config, workspace="/tmp")
+    ctx = ToolContext(config=mock_config, workspace="/tmp", providers_config=ProvidersConfig())
     assert ImageGenerationTool.enabled(ctx) is True
     mock_config.image_generation.enabled = False
     assert ImageGenerationTool.enabled(ctx) is False
