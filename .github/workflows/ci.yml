@@ -447,7 +447,7 @@ jobs:
           done
           INNER
           OUTER
-          docker compose -f docker-compose.yml -f docker-compose.bwrap.yml --profile cli \
+          docker compose -f docker-compose.yml -f docker-compose.bwrap.yml --profile cli --profile api \
             config --format json > "${RUNNER_TEMP}/bwrap-compose.json"
           python - <<'PY'
           import json
