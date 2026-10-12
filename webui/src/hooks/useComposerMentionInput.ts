@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent, RefObject } from "react";
 
-import type { CapabilityMentionSegment } from "@/components/CliAppMentionText";
-import { composerCompositionSegments, composerMentionText, editComposerMentionText, mentionTextOffset } from "@/lib/composer-mention-text";
+import { composerCompositionSegments, composerMentionText, editComposerMentionText, mentionTextOffset, type CapabilityMentionSegment } from "@/lib/composer-mention-text";
 
 type Snapshot = { value: string; start: number; end: number };
 const HISTORY_LIMIT = 100;

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import type { ChannelConfigField } from "@/components/settings/channels/catalog";
+import type { ChannelConfigField } from "@/channel-plugins/catalog";
 import { cn } from "@/lib/utils";
 
 function channelFieldValue(field: ChannelConfigField, values: Record<string, string>): string {

@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" --max-warnings 0"
+    "check:imports": "bun ../scripts/check_client_import_boundaries.mjs --project webui",
+    "test:imports": "bun test ../scripts/check_client_import_boundaries.test.mjs",
+    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" \"scripts/check_client_import_boundaries*.mjs\" --max-warnings 0"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.4",

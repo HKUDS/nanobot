@@ -104,6 +104,10 @@ jobs:
                   python_required=true
                   docker_required=true
                   ;;
+                scripts/check_client_import_boundaries.*)
+                  webui_required=true
+                  tui_required=true
+                  ;;
                 tests/*|conftest.py|uv.lock|scripts/*)
                   python_required=true
                   ;;
@@ -294,6 +298,14 @@ jobs:
         working-directory: webui
         run: bun install --frozen-lockfile
 
+      - name: Check WebUI import boundaries
+        working-directory: webui
+        run: bun run check:imports
+
+      - name: Test client import checker with WebUI dependencies
+        working-directory: webui
+        run: bun run test:imports
+
       - name: Lint WebUI
         working-directory: webui
         run: bun run lint
@@ -334,6 +346,14 @@ jobs:
       - name: Install TUI dependencies
         working-directory: tui
         run: bun install --frozen-lockfile
+
+      - name: Check TUI import boundaries
+        working-directory: tui
+        run: bun run check:imports
+
+      - name: Test client import checker with TUI dependencies
+        working-directory: tui
+        run: bun run test:imports
 
       - name: Check TUI
         working-directory: tui

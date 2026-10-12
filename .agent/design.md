@@ -22,7 +22,19 @@ Run `python -m scripts.check_import_boundaries` from the repository root. The Py
 
 Static imports, including relative and function-local imports, are checked together with literal `import_module` calls and absolute `__import__` module arguments. Import aliases are recognized; relative `import_module` names require a literal package or `__package__`. Imports under `TYPE_CHECKING` are checked. The WebSocket transport may import `nanobot.bus.outbound_events.ProgressEvent` only under a recognized `TYPE_CHECKING` guard.
 
-These rules do not assign whole directories to layers. `session/webui_turns.py` owns WebUI coordination, and `cli/gateway_runtime.py` assembles runtime and adapters. Computed import strings, plugin entry points, re-export origins, transitive dependencies, and module-attribute access are outside this source check. Execution, state ownership, and security behavior still require behavioral verification.
+Client rules live in `scripts/check_client_import_boundaries.mjs`. Run `bun run check:imports` and `bun run test:imports` from `webui/` or `tui/`; each project's CI runs both commands with its own TypeScript dependency. The WebUI scan includes channel-owned frontend modules, and both scans include `packages/client-events/`.
+
+| Client rule | Protected sources | Boundary |
+| --- | --- | --- |
+| `shared-client-contracts` | `packages/client-events/` | Local imports stay within the shared directory; React, Radix, Lucide, and OpenTUI dependencies are forbidden. |
+| `tui-client` | `tui/src/client/` | No imports from TUI app, view, rendering, composer, or menu implementations, or those UI packages. |
+| `webui-lib` | `webui/src/lib/` | No imports from WebUI components, hooks, or providers. |
+| `channel-ui-contracts` | `channel-plugins/types.ts`, `channel-plugins/catalog.ts` | No imports from those WebUI implementation layers. React component types are part of the contribution interface. |
+| `client-app-isolation` | WebUI, channel-owned UI, and TUI source modules | WebUI and channel UI do not import TUI implementations; TUI does not import WebUI or channel UI implementations. |
+
+The client checker parses imports, type imports, re-exports, import-type expressions, literal dynamic imports, and literal `require` calls with the TypeScript AST. It normalizes relative paths and configured TypeScript path aliases, and expands literal Vite `import.meta.glob` patterns, including exclusions. Channel UI and locale registries may compose the channel-owned modules through those globs. Test files and test directories are excluded from production scans.
+
+These rules protect direct imports by responsibility. `session/webui_turns.py` owns WebUI coordination, and `cli/gateway_runtime.py` assembles runtime and adapters. Computed import strings, plugin entry points, re-export origins, transitive dependencies, and module-attribute access are outside these source checks. They do not establish a complete module DAG. Execution, state ownership, and security behavior still require behavioral verification.
 
 ## Prefer duplication over premature abstraction
 

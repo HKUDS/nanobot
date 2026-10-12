@@ -43,8 +43,8 @@ import {
   cliAppInitials,
   mcpPresetInitials,
   splitCapabilityMentionSegments,
-  type CapabilityMentionSegment,
 } from "@/components/CliAppMentionText";
+import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   ArrowUp,

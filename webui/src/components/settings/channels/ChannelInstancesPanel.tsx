@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { ToggleButton } from "@/components/settings/ToggleButton";
-import type { ChannelConfigField } from "@/components/settings/channels/catalog";
+import type { ChannelConfigField } from "@/channel-plugins/catalog";
 import {
   CredentialForm,
   channelValuesForSave,
