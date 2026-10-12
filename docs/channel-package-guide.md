@@ -1,8 +1,6 @@
 # Channel Package Guide
 
-Use this guide to add a self-contained channel package to the nanobot repository. A channel is part of nanobot when its package lives at `nanobot/channels/<channel>/`; there is no separate external channel-plugin path.
-
-> **Breaking change:** nanobot no longer discovers the `nanobot.channels` Python entry-point group. Move an entry-point implementation into `nanobot/channels/<channel>/` with a package-owned manifest, runtime, tests, and optional WebUI contribution.
+Use this guide to add a self-contained channel package to the nanobot repository. Each channel lives at `nanobot/channels/<channel>/` and owns its manifest, runtime, tests, and optional WebUI contribution.
 
 ## How It Works
 
