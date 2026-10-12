@@ -40,7 +40,7 @@ This page is the complete configuration reference. For task-oriented setup, use 
 | Keep secrets out of `config.json` | [Environment Variables for Secrets](#environment-variables-for-secrets) |
 | Tune process-level behavior with env vars | [Runtime Environment Variables](#runtime-environment-variables) |
 | Trace model calls | [Langfuse Observability](#langfuse-observability) |
-| Configure credentials and endpoints | [Providers](#providers) |
+| Connect a provider and choose a model | [Providers](#providers) |
 | Name and switch model choices | [Model Presets](#model-presets) |
 | Add fallback chains | [Model Fallbacks](#model-fallbacks) |
 | Configure voice transcription | [Transcription Settings](#transcription-settings) |
@@ -59,7 +59,7 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 
 | Task | First keys to check | Verify with | Deep dive |
 |---|---|---|---|
-| Make the first model reply work | `providers.<name>.apiKey`, optional `providers.<name>.apiBase`, `modelPresets.<preset>`, `agents.defaults.modelPreset` | `nanobot status`, then `nanobot agent -m "Hello!"` | [Providers](#providers), [Model Presets](#model-presets) |
+| Make the first model reply work | Choose a provider and model in **Settings → Models**; add its API key or complete sign-in, keeping the default connection settings | Send `Hello!` in chat | [Providers](#providers), [Model Presets](#model-presets) |
 | Add fallback models | `modelPresets.<fallback>`, `agents.defaults.fallbackModels` | `nanobot status`, then a normal agent run | [Model Fallbacks](#model-fallbacks) |
 | Keep secrets out of the config file | `${ENV_VAR}` placeholders inside any string value | Start nanobot from the same environment that sets the variable | [Environment Variables for Secrets](#environment-variables-for-secrets) |
 | Open the bundled WebUI | `channels.websocket.enabled`, optional `channels.websocket.port`, `channels.websocket.tokenIssueSecret` | `nanobot webui` | [Channel Settings](#channel-settings), [WebSocket docs](./websocket.md) |
@@ -248,7 +248,33 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 
 ## Providers
 
-Open **Settings → Models → New preset → Provider**. Select an existing connection or choose **Add provider**, enter its credentials and endpoint, and save. Connection-specific fields are under **Advanced options**.
+For a normal first setup:
+
+1. Open **Settings → Models → New preset**.
+2. Choose your provider from **Provider**. If you need a new connection, choose **Add provider** and select the matching built-in provider.
+3. Enter its API key or complete its sign-in flow. Keep the default connection settings.
+4. Choose a model available to your account, save the preset, and select it in chat.
+5. Send `Hello!` before changing advanced options.
+
+Built-in hosted providers use their default service endpoints. You normally do not
+need to find or enter a Base URL, choose a request API, or configure a proxy. The
+endpoint field can stay at its supplied default. Some providers, such as Azure,
+need an account-specific resource address; enter it when the setup form requires it.
+
+For a company gateway, a custom service, or a local model server at a different
+address, expand the connection notes below. Ollama and LM Studio also have local
+defaults; change them only if your server runs elsewhere.
+
+<details>
+<summary>Custom endpoints and provider-specific options</summary>
+
+A Base URL is the service address nanobot sends model requests to. Change it only
+when your service supplies a different endpoint, such as a company proxy, a regional
+service, or a subscription-specific endpoint. Prefer a dedicated built-in provider
+when one matches your subscription. For an unlisted service, create a custom
+connection and enter its address and any required credential; choose the request API
+under **Advanced options** only when that service requires it. See
+[custom connection APIs](#custom-connection-apis) for protocol details.
 
 > [!TIP]
 > - **Voice transcription**: Choose Groq, OpenAI, OpenRouter, Xiaomi MiMo, StepFun, AssemblyAI, or SiliconFlow in **Settings → Capabilities → Transcription**. Voice messages and WebUI microphone input share these settings; Groq is the runtime default. Configure the matching provider credential in **Settings → Models**.
@@ -259,14 +285,16 @@ Open **Settings → Models → New preset → Provider**. Select an existing con
 > - **VolcEngine / BytePlus Coding Plan**: Subscription endpoints are configured through dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan`, separate from the pay-per-use `volcengine` / `byteplus` providers.
 > - **OpenCode Zen / Go**: `providers.opencode` (canonical Zen), the legacy-compatible `providers.opencodeZen`, and `providers.opencodeGo` use the same `OPENCODE_API_KEY`, but route to different OpenCode gateways. These providers use OpenCode's OpenAI-compatible `chat/completions` endpoints; choose model IDs from that endpoint family.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, open the zhipu connection in **Settings → Models** and set its base URL to `https://open.bigmodel.cn/api/coding/paas/v4`.
-> - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, open the dashscope connection in **Settings → Models** and set its base URL to `https://dashscope.aliyuncs.com/compatible-mode/v1`.
-> - **ModelScope**: If you're using ModelScope's OpenAI-compatible endpoint, open the modelscope connection in **Settings → Models** and set its base URL to `https://api-inference.modelscope.cn/v1`.
+> - **Alibaba Cloud BaiLian**: The built-in `dashscope` provider already defaults to `https://dashscope.aliyuncs.com/compatible-mode/v1`; no endpoint override is needed for that service.
+> - **ModelScope**: The built-in `modelscope` provider already defaults to `https://api-inference.modelscope.cn/v1`; no endpoint override is needed for that service.
 > - **StepFun Step Plan**: If you're on StepFun's Step Plan subscription, open the stepfun connection in **Settings → Models** and set its base URL to `https://api.stepfun.ai/step_plan/v1`. Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and `step-router-v1`.
-> - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), open the stepfun connection in **Settings → Models** and set its base URL to `https://api.stepfun.com/v1`.
+> - **Step Fun (Mainland China)**: The built-in `stepfun` provider already defaults to `https://api.stepfun.com/v1`; no endpoint override is needed for that service.
 > - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. In the preset's **Advanced options**, set reasoning effort to `none` to disable it, or `low` / `medium` / `high` to keep it on. Omitting the field preserves the provider's per-model default.
 > - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, open the xiaomi_mimo connection in **Settings → Models** and set its base URL to `https://token-plan-sgp.xiaomimimo.com/v1`.
 > - **Custom providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. Declare accepted protocols with `providers.<name>.api`; custom connections can use Chat Completions, Responses, or Anthropic Messages. See [custom connection APIs](#custom-connection-apis).
 > - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers, Anthropic Messages, `openai_codex`, and `xai_grok`. Native `bedrock`, `azure_openai`, and `github_copilot` backends reject `proxy`.
+
+</details>
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
