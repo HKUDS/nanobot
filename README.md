@@ -165,6 +165,7 @@ Published packages include the WebUI, and supported platform wheels also include
 Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2. Pip selects the matching wheel; opening the TUI does not need a separate GitHub download or Bun installation. A source-distribution install on a supported target can use the matching checksummed GitHub release archive. On other platforms, use `nanobot --classic` or the WebUI.
 
 > [!IMPORTANT]
+>
 > If you want the newest features and experiments, install from source.
 >
 > If you want the most stable day-to-day experience, install from PyPI or with `uv`.
