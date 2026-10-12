@@ -307,7 +307,6 @@ class WebUICommandRouter:
                 lambda: self._workspaces.scope_for_new_chat(
                     envelope,
                     can_change_project=self.workspace_project_selection_available(connection),
-                    can_use_full_access=True,
                 ),
             )
             if scope is None:
@@ -448,7 +447,6 @@ class WebUICommandRouter:
                     chat_id=chat_id,
                     chat_running=websocket_turn_wall_started_at(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
-                    can_use_full_access=True,
                 ),
                 chat_id=chat_id,
             )
@@ -627,7 +625,6 @@ class WebUICommandRouter:
                     chat_id=chat_id,
                     chat_running=websocket_turn_wall_started_at(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
-                    can_use_full_access=True,
                 )
             ),
             chat_id=chat_id,

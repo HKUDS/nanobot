@@ -3653,18 +3653,17 @@ async def test_recovery_mutation_uses_authenticated_websocket_action(bus: MagicM
 
 
 @pytest.mark.parametrize(
-    ("connection", "headers", "can_use_full_access"),
+    ("connection", "headers"),
     [
-        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, True),
-        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, True),
-        (_LOCAL, {"Host": "127.0.0.1:8765"}, True),
+        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}),
+        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}),
+        (_LOCAL, {"Host": "127.0.0.1:8765"}),
     ],
 )
-def test_workspace_payload_separates_remote_project_selection_from_full_access(
+def test_workspace_payload_allows_access_selection_for_local_and_remote_clients(
     bus: MagicMock,
     connection: _FakeConn,
     headers: dict[str, str],
-    can_use_full_access: bool,
 ) -> None:
     channel = _ch(bus)
     token = channel.gateway.tokens.issue_api_token(300)
@@ -3678,7 +3677,7 @@ def test_workspace_payload_separates_remote_project_selection_from_full_access(
     assert response.status_code == 200
     controls = json.loads(response.body.decode())["controls"]
     assert controls["can_change_project"] is True
-    assert controls["can_use_full_access"] is can_use_full_access
+    assert controls["can_use_full_access"] is True
     assert controls["can_browse_directories"] is True
     assert controls["can_resolve_project"] is True
     assert controls["can_manage_favorites"] is True
@@ -4175,11 +4174,11 @@ async def test_project_selection_remembers_resolved_path_without_changing_access
     assert response.status_code == 200
     assert response.json() == {"name": "project", "path": str(project)}
     assert channel.gateway.workspaces.default_scope() == scope
-    payload = channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)
+    payload = channel.gateway.workspaces.payload(can_change_project=True)
     assert payload["recent_projects"] == [{"name": "project", "path": str(project)}]
     rejected = await _webui_mutate(channel, "workspace.resolve_project", {"path": str(tmp_path / "missing")}, connection=connection)
     assert rejected.status_code == 400
-    assert channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)["recent_projects"] == payload["recent_projects"]
+    assert channel.gateway.workspaces.payload(can_change_project=True)["recent_projects"] == payload["recent_projects"]
 
 
 @pytest.mark.asyncio
@@ -4193,7 +4192,7 @@ async def test_project_favorites_mutation_persists_without_selecting_project(
     response = await _webui_mutate(channel, "workspace.favorite", {"path": str(project), "pinned": True}, connection=connection)
     assert response.status_code == 200
     assert response.json() == {"favorite_projects": [{"name": "pinned", "path": str(project)}]}
-    payload = channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)
+    payload = channel.gateway.workspaces.payload(can_change_project=True)
     assert payload["favorite_projects"] == response.json()["favorite_projects"]
     assert payload["recent_projects"] == []
     assert payload["default_scope"]["project_path"] == str(tmp_path)

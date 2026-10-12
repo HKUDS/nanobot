@@ -1659,7 +1659,6 @@ class GatewayHTTPHandler:
         return _http_json_response(
             self.workspaces.payload(
                 can_change_project=self.workspace_project_selection_available(connection),
-                can_use_full_access=True,
             )
         )
 
