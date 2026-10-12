@@ -12,14 +12,9 @@ nanobot can connect MCP servers and expose their tools to the agent alongside bu
 
 Use MCP when a tool already exists as an MCP server, when another application publishes an MCP adapter, or when you want a clean boundary between nanobot and external tool logic.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot webui
-```
-
-Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Install the MCP server's own runtime separately. For example, many local MCP servers use `npx` or `uvx`.
 
@@ -66,7 +61,7 @@ Restart nanobot, then ask a question that needs the MCP tool.
 
 ## Troubleshooting
 
-- Start `nanobot gateway --verbose` and check MCP startup logs.
+- Check MCP startup logs on the running gateway; use `--verbose` when restarting it for diagnosis.
 - Confirm the MCP command works by itself before debugging nanobot.
 - If an HTTP MCP server is blocked, review the SSRF whitelist and use a narrow host CIDR.
 

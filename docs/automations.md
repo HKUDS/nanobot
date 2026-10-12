@@ -18,7 +18,7 @@ The two user-created automation types are scheduled automations and local trigge
 
 ## Before You Create One
 
-Keep `nanobot gateway` running. The gateway owns background delivery for chat apps, WebUI topics, scheduled automations, local triggers, heartbeat, and Dream jobs.
+Keep the gateway running. Your WebUI or TUI already uses one; you do not need a second gateway. To keep it alive after closing interactive launchers, run `nanobot gateway --background` with the same instance selectors, or use `/detach` in the TUI. The gateway owns background delivery for chat apps, WebUI topics, scheduled automations, local triggers, heartbeat, and Dream jobs.
 
 Use the same workspace and config for the gateway and any process that sends local trigger messages. If you run multiple nanobot instances, pass the matching `--config` or `--workspace` option to `nanobot trigger`.
 
@@ -133,11 +133,21 @@ This changes the whole task chat, not a separate forwarding address. Explicit `m
 
 Chat changes store a binding version and the session used by each previous run. Existing jobs do not need a manual migration when upgrading. Older nanobot versions can discard these new fields when they write the cron store. After a chat change, that can make old run results unavailable in the WebUI and remove protection against stale CLI updates.
 
-Before trying this feature, stop the gateway and other cron writers, then back up the complete cron directory in the active instance's data directory. For a downgrade after changing a chat, stop those processes again and restore that coherent pre-change cron backup. This also restores the old schedules and task settings; later changes are not included. Chat messages are not moved or deleted.
+Before trying this feature, stop the gateway and other cron writers, then back up the complete `cron/` directory in the configured agent workspace (`~/.nanobot/workspace/cron/` by default), including `jobs.json` and `runs/`. For a downgrade after changing a chat, stop those processes again and restore that coherent pre-change cron backup. This also restores the old schedules and task settings; later changes are not included. Chat messages are not moved or deleted.
 
 ## Delivery and Reliability
 
-Automation delivery is workspace-local. Scheduled jobs and local trigger deliveries use the same workspace as the gateway.
+Automation storage and queue delivery belong to the gateway's configured agent workspace. Scheduled and triggered turns linked to WebUI/TUI chats use the chat's saved project context and access mode; chat-app turns use the gateway's configured workspace. The selected project can differ from the agent workspace that stores jobs, memory, and queues. Starting the TUI inside a project selects that project for the chat but does not by itself create a separate gateway instance. Select the matching configured agent workspace when invoking `nanobot trigger --workspace`, not merely the project directory. See [Multiple Instances](multiple-instances.md) when these need to be separate.
+
+Schedules do not replay missed occurrences after a gateway restart:
+
+| Schedule | Behavior after restart |
+|---|---|
+| One-time (`at`) | A time already in the past has no next run and is not automatically executed. Review the task and run it manually or create a replacement. |
+| Interval (`every`) | The next run is one full interval after restart; missed intervals are not replayed. |
+| Cron expression | The next matching time after restart is used; missed matches are not replayed. |
+
+Intervals are also recalculated after a run finishes, so a long-running task can shift its next interval. Use a cron expression for wall-clock scheduling, and keep the host awake and gateway running when timing matters. These rules concern scheduled jobs; queued local trigger messages have the separate recovery behavior below.
 
 Local trigger messages are written to a durable queue. If the gateway is not running yet, the message waits in that workspace. If the linked topic is already running a turn, the trigger waits until the session becomes idle instead of being injected into the active turn.
 

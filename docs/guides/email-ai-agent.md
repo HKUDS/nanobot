@@ -11,23 +11,20 @@ This guide turns nanobot into an email AI agent that polls IMAP for accepted mes
 
 ## Prerequisites
 
-- A working local nanobot reply:
-
-```bash
-nanobot agent -m "Hello!"
-```
+- A normal reply in your existing nanobot WebUI or CLI. If you have not reached that point, complete [Quick Start](../quick-start.md) first.
 
 - A mailbox for the bot.
 - IMAP and SMTP access. For Gmail, use an app password rather than your account password.
 
-## Install nanobot
+## Continue from your running instance
 
-```bash
-python -m pip install nanobot-ai
-nanobot webui
-```
+If you are already chatting in the WebUI, keep it open and continue below. It has
+already started the gateway. To reopen it later, use the same installation's
+`nanobot webui` command; there is no need to install nanobot again.
 
-Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+For terminal or server setup, use the manual configuration section below. Reuse
+the config/home and executable from your working instance. Docker users should
+use the [container commands](../deployment.md#docker-compose).
 
 ## Enable the Email channel
 
@@ -63,12 +60,16 @@ Merge this snippet into `~/.nanobot/config.json` and replace the addresses and p
 
 </details>
 
-## Run nanobot gateway
+## Apply the settings
 
-```bash
-nanobot channels status
-nanobot gateway
-```
+In the WebUI, follow any restart prompt and keep the launcher running for the first
+test. You do not need to start another gateway. For unattended operation afterward,
+use [background or service mode](../cli-reference.md#gateway).
+
+For manual config changes, restart the existing gateway through its owning terminal,
+`nanobot gateway restart` for background mode, or its service/container supervisor.
+If none is running, start `nanobot gateway` and leave it running. Run diagnostic CLI
+commands in a separate terminal using the same installation and config.
 
 ## Test a message
 

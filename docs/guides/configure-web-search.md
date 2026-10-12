@@ -12,14 +12,9 @@ nanobot includes built-in web search and web fetch tools. Search uses DuckDuckGo
 
 Configure web search when the agent needs current information, public web research, source discovery, or page fetching during a task.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot webui
-```
-
-Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Web tools are enabled by default. Configure them only when you want a specific provider, API key, proxy, fetch behavior, or SSRF allowlist.
 

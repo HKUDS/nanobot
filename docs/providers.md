@@ -25,7 +25,7 @@ The docs show concrete provider names so the JSON is copyable, not because nanob
 | A company proxy or regional endpoint | The matching provider block plus `apiBase` if the proxy gives you a URL. |
 | A local OpenAI-compatible server | A local provider block such as `ollama`, `vllm`, `lmStudio`, or `custom`, usually with `apiBase`. |
 | An OAuth-based account | Choose the provider in **Settings → Models**, complete its sign-in flow, and select it explicitly in a preset. |
-| No provider yet | Pick one outside nanobot based on account access, pricing, regional availability, privacy requirements, and the model IDs you need. Then come back with its key and model ID. |
+| No provider yet | Follow [Prepare your model details](./start-without-technical-background.md#2-prepare-your-model-details) for an API account example, or the [Ollama recipe](./provider-cookbook.md#recipe-ollama-local-model) for local models. Check account access, pricing, regional availability, and privacy requirements before choosing. |
 
 ## Minimal Shape
 
@@ -504,7 +504,7 @@ Use the image model's exact ModelScope ID without a leading `modelscope/`; the i
 
 ### Ollama
 
-Start Ollama separately, then point nanobot at the OpenAI-compatible endpoint.
+Prepare Ollama using the [local model recipe](./provider-cookbook.md#recipe-ollama-local-model), then point nanobot at its OpenAI-compatible endpoint.
 
 <details>
 <summary>Manual configuration</summary>

@@ -45,6 +45,8 @@
 | Open the bundled browser UI | [WebUI](#-webui) |
 | Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, Linear, or another channel | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
+| Develop the browser UI | [WebUI development](./webui/README.md) |
+| Integrate from Python or HTTP | [Python SDK](./docs/python-sdk.md) or [Agent API](./docs/openai-api.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
 | Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md) |
 
@@ -180,7 +182,7 @@ Any normal reply means the provider, model, workspace, and browser gateway are w
 nanobot gateway --background
 ```
 
-This is the only command that promotes the shared gateway to persistent background mode. It leaves channels and automations running after every local TUI and WebUI launcher exits. Complete first-time model setup with `nanobot webui` before switching to background mode; open the same localhost WebUI again afterward.
+This shell command starts or promotes the shared gateway to persistent background mode. From inside the TUI, `/detach` promotes the gateway and closes that client. It leaves channels and automations running after every local TUI and WebUI launcher exits. Complete first-time model setup with `nanobot webui` before switching to background mode; open the same localhost WebUI again afterward.
 
 ```bash
 nanobot gateway status

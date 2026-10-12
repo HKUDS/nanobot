@@ -128,7 +128,10 @@ function Get-NanobotCommand {
     switch ($script:NanobotRunner) {
         "uv" { return "uv tool run --from $InstallTarget nanobot" }
         "pipx" { return "pipx run --spec $InstallTarget nanobot" }
-        "python" { return "$script:NanobotPython -m nanobot" }
+        "python" {
+            $QuotedPython = "'" + $script:NanobotPython.Replace("'", "''") + "'"
+            return "& $QuotedPython -m nanobot"
+        }
         default { return "nanobot" }
     }
 }

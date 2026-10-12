@@ -57,14 +57,14 @@ The sections below explain what each chat platform requires and provide manual c
 <details>
 <summary>Manual configuration</summary>
 
-Most examples below are snippets to merge into `~/.nanobot/config.json`. When a snippet includes `allowFrom`, it is showing a static allowlist. For pairing-based access on supported channels, omit `allowFrom`; Slack and Mattermost also need `dm.policy` set to `"allowlist"` for DMs to issue pairing codes.
+Most examples below are snippets to merge into `~/.nanobot/config.json`. When a snippet includes `allowFrom`, it is showing a static allowlist. For pairing-based access on channels with a common sender allowlist, omit `allowFrom`. Slack and Mattermost instead use `dm.policy: "allowlist"` with an empty `dm.allowFrom` for DM pairing; their group policies are independent of DM approval.
 
 Every chat app uses the same shape:
 
 1. Create or prepare the bot/account in the chat platform.
 2. Copy the token, secret, QR login state, webhook URL, or account ID that platform gives you.
 3. Merge that platform's JSON snippet into `~/.nanobot/config.json`.
-4. Prefer pairing for DM-capable channels: omit `allowFrom`, let the first DM receive a pairing code, then approve it with `/pairing approve <code>`.
+4. For DM pairing, use the channel-specific policy described above, let the first DM receive a pairing code, then approve it with `/pairing approve <code>`.
 5. For channels without pairing, such as Email, keep access narrow with `allowFrom` or the platform-specific allow list.
 6. Check that nanobot can see the configured channel:
 
@@ -723,7 +723,10 @@ nanobot plugins enable slack
       "enabled": true,
       "botToken": "xoxb-...",
       "appToken": "xapp-...",
-      "allowFrom": ["YOUR_SLACK_USER_ID"],
+      "dm": {
+        "policy": "allowlist",
+        "allowFrom": ["YOUR_SLACK_USER_ID"]
+      },
       "groupPolicy": "mention"
     }
   }
@@ -736,7 +739,7 @@ nanobot plugins enable slack
 nanobot gateway
 ```
 
-DM the bot directly or @mention it in a channel — it should respond!
+The listed Slack user can DM the bot directly. Other DM senders receive a pairing code. Group access is independent: with `groupPolicy: "mention"`, any member can invoke the bot by mentioning it in a channel it can see. For DM-only access, set `groupPolicy` to `"allowlist"` and leave `groupAllowFrom` empty.
 
 > [!TIP]
 > - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels via `groupAllowFrom`).

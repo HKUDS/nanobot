@@ -13,14 +13,9 @@ nanobot can run as a self-hosted chatbot or AI agent in Telegram, Discord, Slack
 
 Use chat apps when the agent should live where users already communicate: private DMs, team channels, group chats, email threads, or bot workspaces.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot webui
-```
-
-Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Send `Hello!` in the WebUI before adding a channel. Then choose one platform guide for the bot/account prerequisites:
 
@@ -79,7 +74,7 @@ Use the full [Chat Apps reference](../chat-apps.md) when you manage `config.json
 
 - If `nanobot channels status` does not show the channel, the config key or optional dependency is likely missing.
 - If the first DM returns a pairing code, approve the pending request in the WebUI or use `/pairing approve <code>` from an authorized chat.
-- If messages do not arrive, run `nanobot gateway --verbose` and compare platform credentials, event permissions, and allow lists.
+- If messages do not arrive, inspect the running gateway logs and compare platform credentials, event permissions, and allow lists. Use `--verbose` when restarting that gateway for diagnosis.
 - If group replies are unexpected, review that channel's group policy.
 
 ## Related nanobot docs

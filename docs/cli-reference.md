@@ -151,7 +151,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
-`--dev` is a foreground source-checkout workflow. Persistent gateway lifecycle is deliberately owned only by `nanobot gateway --background`; `nanobot webui --background` prints migration guidance instead of silently changing process ownership. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it.
+`--dev` is a foreground source-checkout workflow. For shell-based lifecycle management, use `nanobot gateway --background` (or `/detach` from an interactive TUI); `nanobot webui --background` prints migration guidance instead of silently changing process ownership. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it.
 
 ## Gateway
 

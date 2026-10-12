@@ -1799,7 +1799,7 @@ nanobot uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP conne
 
 </details>
 
-Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.168.1.50/32`). The whitelist is global for the shared SSRF guard; it is not limited to one tool or one MCP server.
+Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.168.1.50/32`). The whitelist is global for the shared SSRF guard; it is not limited to one tool or one MCP server. This guard does not filter network traffic from shell commands or stdio MCP processes. The shell sandboxes also allow network access; use host or container egress controls when you need to prevent outbound connections.
 
 HTTP/SSE MCP connections use the same process-wide proxy environment behavior as `web_fetch`: proxied targets use the configured proxy, and URLs excluded by `NO_PROXY` remain DNS-pinned direct connections.
 
@@ -2295,7 +2295,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.sandboxRwBinds` | `[]` | Extra absolute paths to expose read-write inside the exec sandbox (`--bind-try` for `"bwrap"`, an SBPL `file-read* file-write*` rule for `"seatbelt"`), for trusted tool caches or scratch directories. Use sparingly: paths listed here are intentionally writable by shell commands inside the sandbox. Paths equal to or containing the active workspace are ignored. |
 | `tools.webuiAllowRemotePackageInstall` | `false` | When `false`, the WebUI can install missing optional packages only from a browser opened on the same machine as nanobot. Set to `true` only when a trusted remote admin is allowed to install Python packages into this nanobot environment. |
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
-| `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
+| `channels.*.allowFrom` | omitted | For channels using the common sender allowlist, omit to require pairing, set `["*"]` to allow everyone, or list specific user IDs. Slack and Mattermost instead use `dm.policy` / `dm.allowFrom` for DMs and default to open DMs; review their group policy separately. See [Pairing](#pairing). |
 
 Each new user request includes the current project and file-access restriction in model-only
 context. This uses the same policy resolver as the tools, including restrictions from
@@ -2335,11 +2335,11 @@ Pairing lets users get access to the bot through a simple code exchange — no c
 
 4. The user can now chat with the bot normally.
 
-Pairing only works in **DMs** — unapproved users in group chats are silently ignored.
+Pairing codes are issued only in **DMs**. Channels using the common sender allowlist, such as Telegram and Discord, also reject unapproved group senders unless a configured allowlist already permits them. Slack and Mattermost authorize groups independently of DM approval: `groupPolicy: "mention"` allows channel members to invoke the bot by mentioning it. Use `groupPolicy: "allowlist"` with an empty `groupAllowFrom` for DM-only access, or list only the intended channel IDs. Approval of one DM user does not restrict those groups to that user.
 
 ### Pairing-only mode
 
-By default, if you don't set `allowFrom`, pairing-capable channels can issue a pairing code when an unapproved user DMs the bot. This means you can skip `allowFrom` entirely and manage access through pairing:
+For channels using the common sender allowlist, such as Telegram and Discord, omitting `allowFrom` requires approval and lets an unapproved user request a pairing code by DM. Slack and Mattermost are exceptions: their DMs default to open access, as described below. For Telegram, you can omit `allowFrom` and manage access through pairing:
 
 <details>
 <summary>Manual configuration</summary>

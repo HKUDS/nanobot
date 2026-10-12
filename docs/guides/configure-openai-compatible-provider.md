@@ -12,14 +12,9 @@ nanobot can call OpenAI-compatible model providers by configuring an `apiBase`, 
 
 Use this for local or hosted services that expose OpenAI-compatible endpoints, including internal gateways, local model servers, and provider proxies that are not already named in nanobot.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot webui
-```
-
-Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Verify the endpoint responds before debugging nanobot:
 
@@ -66,11 +61,7 @@ Merge this into `~/.nanobot/config.json`:
 
 </details>
 
-Then run:
-
-```bash
-nanobot agent -m "Hello!"
-```
+Verify in the WebUI with the new preset selected. For the manual snippet above, which sets the global default, you can instead run `nanobot agent -m "Hello!"` from the same instance. A different CLI session does not inherit a WebUI topic's model selection.
 
 ## Production notes
 

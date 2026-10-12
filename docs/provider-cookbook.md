@@ -435,14 +435,21 @@ These custom names define direct connections: `apiBase` is required and `apiKey`
 
 ## Recipe: Ollama Local Model
 
-After starting Ollama and pulling a model, open **Settings → Models → New preset**, select or add an Ollama connection at `http://localhost:11434/v1`, choose the pulled model, and save. Select the preset in chat.
+Follow the server preparation below, then open **Settings → Models → New preset**, select or add an Ollama connection at `http://localhost:11434/v1`, choose the downloaded model, and save. Select the preset in chat. If nanobot runs in a container or on another computer, `localhost` refers to that host; use an address reachable from nanobot.
 
-This recipe applies when Ollama is already installed and the model has been pulled locally.
+If Ollama is not installed, follow its [official quickstart](https://docs.ollama.com/quickstart)
+([Linux setup](https://docs.ollama.com/linux)). Keep the Ollama app or service running.
+If no service is running, start `ollama serve` in a terminal and leave it open; do
+not start a second server when the app or system service already owns the port.
+In a separate terminal, download a model and confirm it is listed:
 
 ```bash
-ollama serve
 ollama pull llama3.2
+ollama list
 ```
+
+Use that exact model name in nanobot. Downloading requires internet access and disk
+space; model inference then runs on the machine hosting Ollama.
 
 <details>
 <summary>Manual configuration</summary>
@@ -477,8 +484,11 @@ Verify:
 
 ```bash
 curl -sS http://localhost:11434/v1/models
-nanobot agent -m "Hello!"
 ```
+
+Send `Hello!` in the WebUI with the local preset selected. A CLI test uses its own session/default selection; to make the local preset the global primary, enable it and move it first in **Settings → Models**.
+
+Local inference does not disable network tools. For local-only document work, turn off **Web access**, avoid cloud fallbacks and remote integrations, and review shell access. Shell commands can still use the network even with a sandbox; a strict offline policy needs host/container network controls. See [local tool security](./guides/secure-local-ai-agent.md).
 
 If you see `connection refused`, Ollama is not running or `apiBase` points to the wrong port. If every response is slow, try a smaller local model or lower `contextWindowTokens`.
 

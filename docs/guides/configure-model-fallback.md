@@ -12,14 +12,9 @@ Model fallback lets nanobot try a primary model first, then fall back to one or 
 
 Use fallback when you want better reliability across rate limits, provider outages, local model downtime, or cost-sensitive routing.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot webui
-```
-
-Use **Settings → Models** to configure your model in the browser. Send `Hello!` once the model setup in this guide is complete.
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Verify each provider works before adding it as a fallback.
 

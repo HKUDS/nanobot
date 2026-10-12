@@ -2,6 +2,10 @@
 
 Use a separate home directory for each instance. Place `--home` before the subcommand; without it, nanobot uses `~/.nanobot`.
 
+Use this for separate clients, users, or personal/work agents that need independent configuration and long-term memory. A new topic or a different project folder inside one instance does not provide that separation.
+
+Separate homes and workspaces separate stored application data; they do not create an operating-system security boundary. Processes running as the same OS user may still access each other's files through unrestricted tools. For mutually untrusted users, use separate OS accounts or containers with separate mounts and credentials, and configure [tool restrictions](./configuration.md#security) for each instance.
+
 ## Quick Start
 
 ```bash
