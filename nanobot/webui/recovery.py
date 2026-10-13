@@ -543,4 +543,3 @@ class RecoveryCoordinator:
             if route and route[0] == "websocket":
                 return route
         return None
-
