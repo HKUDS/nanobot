@@ -423,6 +423,9 @@ jobs:
       - name: Build image with default channel dependencies
         run: docker build -t nanobot:test .
 
+      - name: Verify first-boot WebUI and optional API
+        run: python scripts/docker_compose_smoke.py --image nanobot:test
+
       - name: Verify Docker Compose startup and privilege boundary
         env:
           HOME: ${{ runner.temp }}

@@ -54,11 +54,6 @@ RUN for channel in $(printf '%s' "$NANOBOT_CHANNELS" | tr ',' ' '); do \
 # won't shadow it. Only used when RENDER=true; ignored by local runs.
 COPY render-config.json ./
 
-# Local Docker deploy template (see docker-compose.yml): container-appropriate
-# binds with the WebUI token and API key baked in by the entrypoint at first
-# boot. Same /app location so a mounted data dir can't shadow it.
-COPY docker-config.json ./
-
 # Create the non-root user and hand ownership of the writable virtualenv to it.
 RUN useradd -m -u 1000 -s /bin/bash nanobot && \
     mkdir -p /home/nanobot/.nanobot && \
