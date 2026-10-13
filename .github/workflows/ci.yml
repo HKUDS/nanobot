@@ -166,7 +166,8 @@ jobs:
             coverage: false
             # Real PowerShell, browser-handoff, and process-tree tests run
             # serially so xdist workers do not compete for native processes.
-            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py"
+            # Bound concurrent threaded storage work on the Windows runner.
+            pytest_args: "-n 2 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py"
 
     steps:
       - uses: actions/checkout@v4
