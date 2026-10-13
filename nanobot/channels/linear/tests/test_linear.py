@@ -8,6 +8,7 @@ import json
 import socket
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -28,7 +29,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.linear import client as linear_client
 from nanobot.channels.linear import connect as linear_connect
 from nanobot.channels.linear import runtime as linear_runtime
-from nanobot.channels.linear.client import LinearApiError, LinearClient
+from nanobot.channels.linear.client import LinearApiError, LinearClient, LinearMember
 from nanobot.channels.linear.config import LinearConfig, validate_public_base_url
 from nanobot.channels.linear.oauth import OAUTH_FLOWS, authorization_url
 from nanobot.channels.linear.runtime import LinearChannel
@@ -278,6 +279,8 @@ def test_oauth_callback_does_not_report_cancelled_authorization_as_connected(
         assert response.status == 200
         assert b"Authorization not completed" in body
         assert b"Linear connected" not in body
+        assert b"Existing workspace connections are unchanged" in body
+        assert b"leave Linear disconnected" not in body
         assert flow.error == "access_denied"
     finally:
         OAUTH_FLOWS.remove(flow)
@@ -384,6 +387,8 @@ async def test_disconnect_keeps_local_installation_when_revocation_fails(
     state = LinearStateStore(tmp_path / "linear.sqlite3")
     installation = _installation()
     state.save_installation(installation)
+    state.set_member_access(installation.oauth_client_id, installation.organization_id,
+                            "user-1", allowed=True)
     monkeypatch.setattr(linear_connect, "_load_linear_config", _config)
     monkeypatch.setattr(linear_connect, "LinearStateStore", lambda: state)
     client = SimpleNamespace(
@@ -399,6 +404,7 @@ async def test_disconnect_keeps_local_installation_when_revocation_fails(
         )
 
     assert state.installation("org-1") == installation
+    assert state.member_access(installation.oauth_client_id, "org-1", "user-1") is True
     client.close.assert_awaited_once()
 
 
@@ -660,6 +666,11 @@ class _FakeLinearClient:
         self.activities: list[dict[str, Any]] = []
         self.downloads: list[str] = []
 
+    async def list_members(
+        self, _organization_id: str, *, user_id: str | None = None,
+    ) -> list[LinearMember]:
+        return [{"id": user_id or "user-1", "name": "Member", "teams": ["Team"]}]
+
     async def create_activity(
         self,
         organization_id: str,
@@ -787,10 +798,12 @@ async def test_followups_only_repeat_issue_context_when_it_changes(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("notify", [False, True])
 @pytest.mark.parametrize("idle", [True, False])
 @pytest.mark.parametrize("phase", ["succeeded", "failed", "cancelled"])
 async def test_compaction_restores_issue_context_on_next_message(
     tmp_path: Path, idle: bool, phase: Literal["succeeded", "failed", "cancelled"],
+    notify: bool,
 ) -> None:
     channel, _ = _runtime(tmp_path)
     payload = _agent_webhook()
@@ -804,7 +817,7 @@ async def test_compaction_restores_issue_context_on_next_message(
     await channel.send(outbound_message_for_event(
         channel="linear", chat_id=inbound.chat_id,
         metadata={} if idle else inbound.metadata,
-        event=ContextCompactionEvent(compaction_id="compact", phase=phase),
+        event=ContextCompactionEvent(compaction_id="compact", phase=phase, notify=notify),
     ))
     for delivery, include_context in (("after", phase == "succeeded"), ("again", False)):
         await channel._process_webhook(delivery, followup)  # pyright: ignore[reportPrivateUsage]
@@ -976,7 +989,6 @@ async def test_inbound_attachments_enforce_the_count_limit(
 @pytest.mark.asyncio
 async def test_prompted_stop_signal_becomes_priority_stop_command(tmp_path: Path) -> None:
     channel, client = _runtime(tmp_path)
-    channel.config.allow_from = []
     await channel._process_webhook(  # pyright: ignore[reportPrivateUsage]
         "delivery-2",
         _agent_webhook(action="prompted", signal="stop"),
@@ -1201,7 +1213,9 @@ async def test_compaction_uses_temporary_progress_and_a_persistent_outcome(
             channel="linear",
             chat_id="session-1",
             metadata=metadata,
-            event=ContextCompactionEvent(compaction_id="compaction-1", phase="started"),
+            event=ContextCompactionEvent(
+                compaction_id="compaction-1", phase="started", notify=True,
+            ),
         ))
         assert client.activities[0]["content"] == {
             "type": "thought", "body": "Compressing context\u2026",
@@ -1212,7 +1226,7 @@ async def test_compaction_uses_temporary_progress_and_a_persistent_outcome(
         channel="linear",
         chat_id="session-1",
         metadata=metadata,
-        event=ContextCompactionEvent(compaction_id="compaction-1", phase=phase),
+        event=ContextCompactionEvent(compaction_id="compaction-1", phase=phase, notify=True),
     )
     await channel.send(outcome)
     assert client.activities[-1]["content"] == {"type": "thought", "body": outcome.content}
@@ -1253,6 +1267,66 @@ def test_revocation_removes_workspace_installation(tmp_path: Path) -> None:
             "type": "OAuthApp",
             "action": "revoked",
             "organizationId": "org-1",
+            "createdAt": datetime.now(timezone.utc).isoformat(),
         }
     )
     assert channel._state.installation("org-1") is None  # pyright: ignore[reportPrivateUsage]
+
+
+def test_delayed_revocation_does_not_remove_new_authorization(tmp_path: Path) -> None:
+    channel, _ = _runtime(tmp_path)
+    state = channel._state  # pyright: ignore[reportPrivateUsage]
+    state.delete_installation("org-1")
+    revoked_at = datetime.now(timezone.utc).isoformat()
+    state.enqueue_webhook("old-revocation", {
+        "type": "OAuthApp", "action": "revoked", "organizationId": "org-1",
+        "oauthClientId": "client-id", "createdAt": revoked_at,
+        "webhookTimestamp": int(time.time() * 1000),
+    })
+    state.save_installation(replace(_installation(), access_token="new-access"))
+    state.set_member_access("client-id", "org-1", "user-1", allowed=False)
+    # The channel was stopped during removal, so the old notice is consumed
+    # only after the user has authorized and enabled the channel again.
+    event = state.claim_webhooks()[0]
+    channel._process_lifecycle_event(event.payload)  # pyright: ignore[reportPrivateUsage]
+    current = state.installation("org-1")
+    assert current is not None
+    assert current.access_token == "new-access"
+    assert state.member_access("client-id", "org-1", "user-1") is False
+
+
+@pytest.mark.parametrize("reauthorize", [False, True])
+def test_revocation_boundary_changes_only_for_new_grants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reauthorize: bool,
+) -> None:
+    store = LinearStateStore(tmp_path / "state.sqlite3")
+    monkeypatch.setattr(time, "time", lambda: 1000.0)
+    store.save_installation(_installation())
+    store.set_member_access("client-id", "org-1", "user-1", allowed=False)
+    monkeypatch.setattr(time, "time", lambda: 3000.0)
+    store.save_installation(
+        replace(_installation(), access_token="renewed"), reauthorize=reauthorize,
+    )
+    removed = store.delete_installation("org-1", oauth_client_id="client-id", revoked_at=2000)
+    assert removed is not reauthorize
+    assert (store.installation("org-1") is not None) is reauthorize
+    assert store.member_access("client-id", "org-1", "user-1") is (False if reauthorize else None)
+
+
+def test_revocation_cannot_remove_a_different_app(tmp_path: Path) -> None:
+    store = LinearStateStore(tmp_path / "state.sqlite3")
+    store.save_installation(_installation())
+    assert not store.delete_installation(
+        "org-1", oauth_client_id="other-app", revoked_at=time.time() + 10,
+    )
+    assert store.installation("org-1") is not None
+
+
+@pytest.mark.parametrize("created_at", [None, "invalid", "2026-09-26T11:00:00"])
+def test_malformed_revocation_does_not_remove_authorization(tmp_path: Path, created_at: str | None) -> None:
+    channel, _ = _runtime(tmp_path)
+    with pytest.raises(linear_runtime.LinearPayloadError, match="createdAt"):
+        channel._process_lifecycle_event({  # pyright: ignore[reportPrivateUsage]
+            "action": "revoked", "organizationId": "org-1", "createdAt": created_at,
+        })
+    assert channel._state.installation("org-1") is not None  # pyright: ignore[reportPrivateUsage]

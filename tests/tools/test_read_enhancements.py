@@ -23,13 +23,6 @@ def _document_source(text: str) -> DocumentLineSource:
     return DocumentLineSource(lines)
 
 
-@pytest.fixture(autouse=True)
-def _clear_file_state():
-    file_state.clear()
-    yield
-    file_state.clear()
-
-
 # ---------------------------------------------------------------------------
 # Description fix
 # ---------------------------------------------------------------------------
@@ -561,7 +554,7 @@ class TestOfficeDocTruncation:
         assert "truncated" not in result
 
 
-class TestReadDescriptionUpdate:
+class TestReadFileDescription:
 
     def test_description_mentions_documents(self):
         tool = ReadFileTool()

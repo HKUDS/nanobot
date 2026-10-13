@@ -13,7 +13,7 @@ from typing import cast
 from loguru import logger
 from pydantic import ValidationError
 
-from nanobot.agent.skills import parse_skill_metadata, valid_skill_metadata
+from nanobot.agent.skill_metadata import parse_skill_metadata, valid_skill_metadata
 from nanobot.config.loader import get_config_path
 from nanobot.config.schema import MCPServerConfig
 

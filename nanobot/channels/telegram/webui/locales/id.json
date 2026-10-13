@@ -12,13 +12,13 @@
         "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "* atau ID pengguna Telegram"
       },
       "groupPolicy": {
-        "label": "Perilaku grup",
+        "label": "Aturan grup",
         "choices": {
-          "mention": "Hanya saat disebut",
+          "mention": "Hanya mention",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
@@ -54,7 +54,7 @@
         }
       },
       "inlineKeyboards": {
-        "label": "Keyboard sebaris",
+        "label": "Tombol pesan",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
@@ -68,7 +68,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "Interval pembaruan aliran"
+        "label": "Interval pembaruan (detik)"
       },
       "webhookUrl": {
         "label": "URL kait web"
@@ -86,7 +86,7 @@
         "label": "Token rahasia webhook"
       },
       "webhookMaxConnections": {
-        "label": "Koneksi webhook maksimum"
+        "label": "Batas koneksi Webhook"
       }
     }
   }

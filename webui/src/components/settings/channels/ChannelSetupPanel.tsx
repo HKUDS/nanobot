@@ -29,7 +29,7 @@ import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import {
   type ChannelProviderPreset,
   type ChannelSetupPresentation,
-} from "@/components/settings/channels/catalog";
+} from "@/channel-plugins/catalog";
 import {
   ChannelFieldGroups,
   channelRequirementErrors,

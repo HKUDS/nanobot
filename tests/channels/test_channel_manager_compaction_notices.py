@@ -1,11 +1,4 @@
-"""Context-compaction lifecycle notices are delivered regardless of ``send_progress``.
-
-Compaction changes the context of every later turn, so both the start and
-the outcome of a compaction are information for the user, not progress
-chatter: a channel with ``send_progress`` off still receives them. Reducing
-the noise (one message updated in place) is the adapter's job; see the
-Discord channel (#5719).
-"""
+"""Channel transports decide whether to render compaction lifecycle events."""
 
 from __future__ import annotations
 
@@ -40,6 +33,10 @@ class _MockChannel(BaseChannel):
         pass
 
     async def send(self, msg):
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         return await self._send_mock(msg)
 
 
@@ -71,12 +68,18 @@ def _sent_contents(manager: ChannelManager) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_compaction_lifecycle_is_delivered_with_progress_off(manager: ChannelManager) -> None:
+async def test_channel_receives_automatic_compaction_but_does_not_render_it(
+    manager: ChannelManager,
+) -> None:
     manager.channels["mock"].send_progress = False
     for event in (
         ProgressEvent(content="ordinary progress"),
-        ContextCompactionEvent(compaction_id="c1", phase="started"),
-        ContextCompactionEvent(compaction_id="c1", phase="succeeded"),
+        ContextCompactionEvent(compaction_id="auto", phase="started"),
+        ContextCompactionEvent(compaction_id="auto", phase="succeeded"),
+        ContextCompactionEvent(compaction_id="auto-failed", phase="failed"),
+        ContextCompactionEvent(compaction_id="auto-cancelled", phase="cancelled"),
+        ContextCompactionEvent(compaction_id="c1", phase="started", notify=True),
+        ContextCompactionEvent(compaction_id="c1", phase="succeeded", notify=True),
     ):
         await manager.bus.publish_outbound(
             outbound_message_for_event(channel="mock", chat_id="chat", event=event)
@@ -86,4 +89,38 @@ async def test_compaction_lifecycle_is_delivered_with_progress_off(manager: Chan
 
     contents = _sent_contents(manager)
     assert "ordinary progress" not in contents
-    assert len(contents) == 2
+    assert contents == ["Compressing context…", "Context compacted."]
+
+
+@pytest.mark.parametrize("global_value", [False, True])
+@pytest.mark.parametrize("override", [None, False, True])
+@pytest.mark.parametrize("key", ["show_compaction_notices", "showCompactionNotices"])
+async def test_global_notice_policy_and_channel_override(manager, global_value, override, key):
+    manager.config.channels.show_compaction_notices = global_value
+    section = {} if override is None else {key: override}
+    channel = manager._build_channel("mock", _MockChannel, section)
+    assert channel.show_compaction_notices is (global_value if override is None else override)
+    channel.send_progress = False  # Ordinary progress and compaction are independent policies.
+    manager.channels["mock"] = channel
+
+    for phase in ("started", "succeeded", "failed", "cancelled"):
+        for notify in (False, True):
+            await channel.send(outbound_message_for_event(
+                channel="mock", chat_id="chat",
+                event=ContextCompactionEvent("compact", phase, notify=notify),
+            ))
+
+    assert channel._send_mock.await_count == (8 if channel.show_compaction_notices else 4)
+
+
+def test_global_notice_config_round_trip_and_rebuild(manager):
+    assert Config().channels.show_compaction_notices is False
+    manager.config = Config.model_validate({"channels": {"showCompactionNotices": True}})
+    manager.config = Config.model_validate_json(manager.config.model_dump_json(by_alias=True))
+    assert manager._build_channel("mock", _MockChannel, {}).show_compaction_notices is True
+    # Rebuilding an adapter after a config change must resolve the new default.
+    manager.config.channels.show_compaction_notices = False
+    assert manager._build_channel("mock", _MockChannel, {}).show_compaction_notices is False
+    assert manager._build_channel(
+        "mock", _MockChannel, {"showCompactionNotices": True},
+    ).show_compaction_notices

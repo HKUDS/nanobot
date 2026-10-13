@@ -2637,9 +2637,12 @@ def test_optional_dependency_metadata_for_enable():
     required = data["project"]["dependencies"]
 
     assert "boto3>=1.43.0" not in data["project"]["dependencies"]
-    assert deps["bedrock"] == ["boto3>=1.43.0"]
+    assert deps["bedrock"] == ["boto3>=1.43.0", "botocore>=1.43.0,<2.0.0"]
+    # The built-in remote WebUI proxy now needs aiohttp even without channels.
+    # Keep the historical API extra installable for existing deployment commands.
+    assert "aiohttp>=3.14.3,<4.0.0" in required
+    assert deps["api"] == ["aiohttp>=3.9.0,<4.0.0"]
     for dep_name in (
-        "aiohttp",
         "dingtalk-stream",
         "lark-oapi",
         "msgpack",
@@ -2726,6 +2729,8 @@ def test_optional_dependency_metadata_for_enable():
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
             "neonize>=0.4.3.post0,<0.5.0",
+            "python-magic>=0.4.27; sys_platform != 'win32'",
+            "python-magic-bin>=0.4.14; sys_platform == 'win32'",
             "segno>=1.6.1,<2.0.0",
         ),
     }

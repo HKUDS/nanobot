@@ -46,6 +46,15 @@ export function FeishuAssistantsPanel({
             onFeaturesUpdate={onFeaturesUpdate}
           />
         ),
+        footer: instances.some((instance) => instance.configured) ? (
+          <FeishuConnectFlow
+            key={instances.map((instance) => instance.id).join(",")}
+            token={token}
+            mode="create"
+            idleLabel={tx("custom.addAssistant", "Add another assistant")}
+            onFeaturesUpdate={onFeaturesUpdate}
+          />
+        ) : null,
       }}
     />
   );

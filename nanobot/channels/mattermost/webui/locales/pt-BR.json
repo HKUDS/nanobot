@@ -16,7 +16,7 @@
         "placeholder": "ID de equipe opcional"
       },
       "groupPolicy": {
-        "label": "Comportamento em canais",
+        "label": "Regras do canal",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
@@ -24,7 +24,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "Comportamento em threads",
+        "label": "Regras da thread",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens (sem menção)",
@@ -36,7 +36,7 @@
         "placeholder": "IDs de usuário separados por vírgulas"
       },
       "allowFromMatchMode": {
-        "label": "Correspondência de usuário",
+        "label": "Correspondência de usuários",
         "choices": {
           "email": "E-mail",
           "id": "ID do usuário",
@@ -47,21 +47,21 @@
         "label": "Canais permitidos"
       },
       "replyInThread": {
-        "label": "Responder no tópico",
+        "label": "Respostas na thread",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "includeThreadContext": {
-        "label": "Incluir contexto do thread",
+        "label": "Contexto da thread",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "threadContextLimit": {
-        "label": "Limite de contexto do thread"
+        "label": "Limite de contexto"
       },
       "streaming": {
         "label": "Transmissão",
@@ -84,7 +84,7 @@
         }
       },
       "sendToolHints": {
-        "label": "Envie dicas de ferramentas",
+        "label": "Dicas de ferramentas",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
@@ -105,7 +105,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Usuários de mensagens diretas permitidos"
+        "label": "Usuários de DM permitidos"
       }
     }
   }

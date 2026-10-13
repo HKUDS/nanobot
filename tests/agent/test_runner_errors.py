@@ -3,6 +3,8 @@ session message isolation, and tool result preservation."""
 
 from __future__ import annotations
 
+import json
+import socket
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,6 +14,8 @@ from agent.runner_helpers import make_run_spec
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools import ToolResult
 from nanobot.agent.tools.execution import execute_tool_calls
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.web import WebFetchTool
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -235,6 +239,76 @@ async def test_runner_returns_structured_tool_error_to_model_for_recovery():
     assert result.tool_events == [
         {"name": "read_file", "status": "error", "detail": "Error: File not found: x"}
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url,ssrf", [
+    pytest.param("not-a-url", False, id="invalid-url"),
+    pytest.param("http://127.0.0.1/admin", True, id="blocked-loopback"),
+])
+async def test_runner_recognizes_web_fetch_errors(monkeypatch, url, ssrf):
+    from nanobot.agent.runner import AgentRunner
+
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
+    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", MagicMock(
+        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))],
+    ))
+    http_client = MagicMock(side_effect=AssertionError("Rejected URLs must not reach HTTP"))
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", http_client)
+    tools = ToolRegistry()
+    tools.register(WebFetchTool())
+    hook = AgentHook()
+    error_hook = AsyncMock()
+    success_hook = AsyncMock()
+    monkeypatch.setattr(hook, "on_execute_tool_error", error_hook)
+    monkeypatch.setattr(hook, "after_execute_tool", success_hook)
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="fetching", tool_calls=[
+            ToolCallRequest(id="fetch_1", name="web_fetch", arguments={"url": url}),
+        ]),
+        LLMResponse(content="Unable to fetch this URL."),
+    ])
+
+    result = await AgentRunner().run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": f"Read {url}"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "Unable to fetch this URL."
+    assert len(result.tool_events) == 1
+    assert result.tool_events[0]["status"] == "error"
+    assert result.tools_used == []
+    error_hook.assert_awaited_once()
+    success_hook.assert_not_awaited()
+    http_client.assert_not_called()
+    raw_error = error_hook.await_args.args[-1]
+    assert isinstance(raw_error, ToolResult) and raw_error.is_error
+    raw_payload = json.loads(raw_error)
+    assert raw_payload["url"] == url
+    assert raw_payload["error"].startswith("URL validation failed:")
+
+    assert provider.chat_stream_with_retry.await_count == 2
+    next_request = provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
+    tool_message = next(message for message in next_request if message.get("role") == "tool")
+    assert tool_message["tool_call_id"] == "fetch_1"
+    content = tool_message["content"]
+    assert content.startswith(str(raw_error) + "\n\n")
+    assert json.JSONDecoder().raw_decode(content)[0] == raw_payload
+    retry_hint = "[Analyze the error above and try a different approach.]"
+    if ssrf:
+        assert result.tool_events[0]["detail"].startswith("ssrf_violation:")
+        assert "non-bypassable security boundary" in content
+        assert "Do not retry" in content
+        assert "tools.ssrfWhitelist" in content
+        assert retry_hint not in content
+    else:
+        assert content.count(retry_hint) == 1
 
 
 @pytest.mark.asyncio

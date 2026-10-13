@@ -146,6 +146,7 @@ function fakeClient() {
         return () => set!.delete(h);
       },
       sendMessage: vi.fn(),
+      sendAttachments: vi.fn().mockResolvedValue(undefined),
       requestMutation,
       finishRunLocally: vi.fn(),
       newChat: vi.fn(),
@@ -2721,7 +2722,7 @@ describe("useNanobotStream", () => {
 
     expect(result.current.messages[0].media).toEqual([attachment.preview]);
     expect(result.current.messages[0].images).toBeUndefined();
-    expect(fake.client.sendMessage).toHaveBeenCalledWith(
+    expect(fake.client.sendAttachments).toHaveBeenCalledWith(
       "chat-file-send",
       "summarize",
       [attachment.media],
@@ -2787,44 +2788,25 @@ describe("useNanobotStream", () => {
     ]);
   });
 
-  it("keeps assistant html media as a file attachment", () => {
+  it.each([
+    { name: "index.html", kind: "file", url: "/api/media/sig/html" },
+    { name: "growth.svg", kind: "image", url: "/api/media/sig/svg" },
+  ])("classifies assistant $name media as $kind", ({ name, kind, url }) => {
     const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-html-media", EMPTY_MESSAGES), {
+    const { result } = renderHook(() => useNanobotStream("chat-media", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
     });
 
     act(() => {
-      fake.emit("chat-html-media", {
+      fake.emit("chat-media", {
         event: "message",
-        chat_id: "chat-html-media",
-        text: "file ready",
-        media_urls: [{ url: "/api/media/sig/html", name: "index.html" }],
+        chat_id: "chat-media",
+        text: "media ready",
+        media_urls: [{ url, name }],
       });
     });
 
-    expect(result.current.messages[0].media).toEqual([
-      { kind: "file", url: "/api/media/sig/html", name: "index.html" },
-    ]);
-  });
-
-  it("infers assistant svg media as an image attachment", () => {
-    const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-svg-media", EMPTY_MESSAGES), {
-      wrapper: wrap(fake.client),
-    });
-
-    act(() => {
-      fake.emit("chat-svg-media", {
-        event: "message",
-        chat_id: "chat-svg-media",
-        text: "chart ready",
-        media_urls: [{ url: "/api/media/sig/svg", name: "growth.svg" }],
-      });
-    });
-
-    expect(result.current.messages[0].media).toEqual([
-      { kind: "image", url: "/api/media/sig/svg", name: "growth.svg" },
-    ]);
+    expect(result.current.messages[0].media).toEqual([{ kind, url, name }]);
   });
 
   it("corrects explicit image media when the name is a non-image file", () => {

@@ -4,11 +4,17 @@ import { expect, it } from "vitest";
 
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 
-it("shows the reasoning preview in the shared tooltip on hover and keyboard focus", async () => {
+it("shows clipped reasoning in the shared tooltip on hover and keyboard focus", async () => {
   const user = userEvent.setup();
   const text = 'The user is saying "hi" again. I should respond in Chinese, concisely and in a friendly manner.';
   const { container } = render(<ReasoningRow text={text} streaming={false} />);
   const line = screen.getByTestId("activity-line");
+
+  const clippedLabel = line.querySelector(".truncate") as HTMLElement;
+  Object.defineProperties(clippedLabel, {
+    clientWidth: { value: 100 },
+    scrollWidth: { value: 200 },
+  });
 
   expect(container.querySelector("[title]")).toBeNull();
   await user.hover(line);

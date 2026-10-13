@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
@@ -20,32 +19,10 @@ from nanobot.agent.tools.runtime_control import (
     RuntimeControl,
     RuntimeSnapshot,
 )
-from nanobot.config_base import Base
+from nanobot.agent.tools.self_config import MyToolConfig
 
 if TYPE_CHECKING:
-    from nanobot.agent.subagent import SubagentStatus
     from nanobot.agent.tools.context import ToolContext
-
-
-class MyToolConfig(Base):
-    """Self-inspection tool configuration."""
-    enable: bool = True
-    allow_set: bool = False
-
-
-def _is_subagent_status(value: object) -> TypeGuard[SubagentStatus]:
-    from nanobot.agent.subagent import SubagentStatus
-
-    return isinstance(value, SubagentStatus)
-
-
-def _is_subagent_status_snapshot(value: object) -> TypeGuard[Mapping[str, object]]:
-    if not isinstance(value, Mapping):
-        return False
-    return all(
-        field in value
-        for field in ("task_id", "label", "task_description", "started_at", "phase")
-    )
 
 
 def _is_string_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
@@ -83,7 +60,7 @@ class MyTool(Tool):
         # Config management
         "_runtime_vars",
         # Subsystems
-        "runner", "sessions", "consolidator",
+        "runner", "sessions", "consolidator", "subagents",
         "dream", "auto_compact", "context", "commands",
         # Sensitive runtime state (credentials, message routing, task tracking)
         "_pending_queues",
@@ -94,7 +71,6 @@ class MyTool(Tool):
     })
 
     READ_ONLY = frozenset({
-        "subagents",  # observable but replacing it would break the system
         "tool_names",
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
@@ -160,6 +136,10 @@ class MyTool(Tool):
             "Scratchpad keys persist across turns but not restarts.\n"
             "Current routing metadata is available read-only via request.channel, "
             "request.chat_id, and request.sender_id.\n"
+            "For path access, check workspace_sandbox for the current project and "
+            "workspace restriction. Check exec_config for shell sandbox settings and extra binds. "
+            "Shell binds do not grant file-tool access. OS permissions still apply.\n"
+            "workspace is the legacy agent-directory display, not the current project or an access grant.\n"
             "Use model_preset for session-scoped model or context changes; direct "
             "model/context_window_tokens writes are disabled during active sessions.\n"
             "Note: web_config and exec_config are readable but read-only.\n"
@@ -224,7 +204,7 @@ class MyTool(Tool):
         for part in parts:
             if part in self._DENIED_ATTRS or part.startswith("__"):
                 return None, f"'{part}' is not accessible"
-            if part in self.BLOCKED:
+            if part in self.BLOCKED and path != "workspace_sandbox.restrict_to_workspace":
                 return None, f"'{part}' is not accessible"
             if part.lower() in self._SENSITIVE_NAMES:
                 return None, f"'{part}' is not accessible"
@@ -248,88 +228,7 @@ class MyTool(Tool):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_status(
-        st: "SubagentStatus | Mapping[str, object]",
-        indent: str = "  ",
-    ) -> str:
-        if isinstance(st, Mapping):
-            started_at = st.get("started_at", time.monotonic())
-            raw_events = st.get("tool_events", [])
-            phase = st.get("phase", "unknown")
-            iteration = st.get("iteration", 0)
-            usage = st.get("usage", {})
-            error = st.get("error")
-            stop_reason = st.get("stop_reason")
-        else:
-            started_at = st.started_at
-            raw_events = st.tool_events
-            phase = st.phase
-            iteration = st.iteration
-            usage = st.usage
-            error = st.error
-            stop_reason = st.stop_reason
-        elapsed = time.monotonic() - (
-            float(started_at) if isinstance(started_at, (int, float)) else time.monotonic()
-        )
-        tool_events = cast(list[object], raw_events) if isinstance(raw_events, list) else []
-        tool_summaries: list[str] = []
-        for raw_event in tool_events[-5:]:
-            if not isinstance(raw_event, Mapping):
-                continue
-            event = cast(Mapping[str, object], raw_event)
-            tool_summaries.append(
-                f"{event.get('name', '?')}({event.get('status', '?')})"
-            )
-        tool_summary = ", ".join(tool_summaries) or "none"
-        lines = [
-            f"{indent}phase: {phase}, iteration: {iteration}, elapsed: {elapsed:.1f}s",
-            f"{indent}tools: {tool_summary}",
-            f"{indent}usage: {usage or 'n/a'}",
-        ]
-        if error:
-            lines.append(f"{indent}error: {error}")
-        if stop_reason:
-            lines.append(f"{indent}stop_reason: {stop_reason}")
-        return "\n".join(lines)
-
-    @staticmethod
     def _format_value(val: Any, key: str = "") -> str:
-        if _is_subagent_status(val):
-            header = f"Subagent [{val.task_id}] '{val.label}'"
-            detail = MyTool._format_status(val, "  ")
-            return f"{header}\n  task: {val.task_description}\n{detail}"
-        if _is_subagent_status_snapshot(val):
-            header = f"Subagent [{val['task_id']}] '{val['label']}'"
-            detail = MyTool._format_status(val, "  ")
-            return f"{header}\n  task: {val['task_description']}\n{detail}"
-        if isinstance(val, Mapping):
-            mapping = cast(Mapping[object, object], val)
-        else:
-            mapping = None
-        if mapping and set(mapping) == {"_task_statuses"}:
-            task_statuses = mapping["_task_statuses"]
-            if isinstance(task_statuses, Mapping):
-                return MyTool._format_value(task_statuses, key)
-        if (
-            mapping
-            and (
-                _is_subagent_status(next(iter(mapping.values())))
-                or _is_subagent_status_snapshot(next(iter(mapping.values())))
-            )
-        ):
-            prefix = f"{key}: " if key else ""
-            lines = [f"{prefix}{len(mapping)} subagent(s):"]
-            for tid, st in mapping.items():
-                if _is_subagent_status(st):
-                    detail = MyTool._format_status(st, "    ")
-                    label = st.label
-                elif _is_subagent_status_snapshot(st):
-                    detail = MyTool._format_status(st, "    ")
-                    label = st.get("label", "?")
-                else:
-                    continue
-                lines.append(f"  [{tid}] '{label}'\n{detail}")
-            return "\n".join(lines)
         # Scalar types — repr is fine
         if isinstance(val, (str, int, float, bool, type(None))):
             r = repr(val)
@@ -337,6 +236,8 @@ class MyTool(Tool):
         # Mapping — small: show content; large: show keys for dot-path navigation
         if isinstance(val, Mapping):
             value_mapping = cast(Mapping[object, object], val)
+            if key == "workspace_sandbox":
+                return f"{key}: {dict(value_mapping)!r}"
             ks = list(value_mapping.keys())
             if not ks:
                 return f"{key}: {{}}" if key else "{}"
@@ -443,11 +344,11 @@ class MyTool(Tool):
         ))
         for k in (
             "workspace",
+            "workspace_sandbox",
             "provider_retry_mode",
             "max_tool_result_chars",
             "web_config",
             "exec_config",
-            "subagents",
         ):
             parts.append(self._format_value(values[k], k))
         if snapshot.scratchpad:

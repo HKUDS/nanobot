@@ -2,7 +2,7 @@ import asyncio
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -2431,6 +2431,33 @@ async def test_forward_command_pairs_unauthorized_private_user(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("separator", [" ", "\t", "\n", "\r\n", "  \n"])
+@pytest.mark.parametrize("suffix", ["", "@nanobot_test"])
+async def test_forward_command_preserves_whitespace_and_argument_mentions(separator, suffix) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    arguments = "contact@example.org\nkeep the second line"
+    text = f"/dream_prompt{suffix}{separator}{arguments}"
+    await channel._forward_command(_make_telegram_update(text=text), None)
+
+    assert handled[0]["content"] == f"/dream-prompt{separator}{arguments}"
+
+
+@pytest.mark.parametrize("text", ["/goal@nanobot_test\nfirst\nsecond", "/dream_prompt first\nsecond"])
+def test_bus_command_regex_accepts_multiline_arguments(text) -> None:
+    assert TelegramChannel.TELEGRAM_BUS_SLASH_COMMAND_RE.fullmatch(text)
+
+
+@pytest.mark.asyncio
 async def test_forward_command_preserves_dream_log_args_and_strips_bot_suffix() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
@@ -2960,6 +2987,40 @@ def test_markdown_to_html_mixed_formatting() -> None:
     assert "<b>bold text</b>" in result
 
 
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        (
+            "[init](https://github.com/o/r/blob/main/pkg/__init__.py)",
+            '<a href="https://github.com/o/r/blob/main/pkg/__init__.py">init</a>',
+        ),
+        (
+            "see [css](https://example.com/_static_/a.css) ok",
+            'see <a href="https://example.com/_static_/a.css">css</a> ok',
+        ),
+        (
+            "[x](https://example.com/a**b**c~~d~~)",
+            '<a href="https://example.com/a**b**c~~d~~">x</a>',
+        ),
+    ],
+)
+def test_markdown_to_html_link_urls_are_not_formatted(markdown: str, expected: str) -> None:
+    """Inline-formatting passes must not inject tags into href attributes."""
+    assert _markdown_to_telegram_html(markdown) == expected
+
+
+def test_markdown_to_html_link_url_quotes_are_escaped() -> None:
+    result = _markdown_to_telegram_html('[q](https://example.com/?q="x"&y=1)')
+
+    assert result == '<a href="https://example.com/?q=&quot;x&quot;&amp;y=1">q</a>'
+
+
+def test_markdown_to_html_link_text_keeps_formatting() -> None:
+    result = _markdown_to_telegram_html("[**bold** _it_](https://example.com/a_b_c)")
+
+    assert result == '<a href="https://example.com/a_b_c"><b>bold</b> <i>it</i></a>'
+
+
 # ---------------------------------------------------------------------------
 # _strip_md_block tests
 # ---------------------------------------------------------------------------
@@ -3267,7 +3328,7 @@ def _compaction_message(phase: str, compaction_id: str = "c1") -> OutboundMessag
             "failed": "Unable to compact context.",
             "cancelled": "Context compaction cancelled.",
         }[phase],
-        event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase),
+        event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase, notify=True),
     )
 
 
@@ -3295,6 +3356,29 @@ async def test_compaction_terminal_phase_edits_started_notice_in_place() -> None
         chat_id=999, message_id=77, text="Context compacted.",
     )
     assert ("999", "c1") not in channel._compaction_notices
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["started", "succeeded", "failed", "cancelled"])
+async def test_automatic_compaction_is_received_but_not_sent(phase) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.send_message = AsyncMock()
+    channel._stop_typing = Mock()
+    channel._remove_reaction = AsyncMock()
+
+    await channel.send(OutboundMessage(
+        channel="telegram", chat_id="999", content="Compressing context…",
+        metadata={"message_id": "42"},
+        event=ContextCompactionEvent(compaction_id="c1", phase=phase),
+    ))
+
+    channel._app.bot.send_message.assert_not_awaited()
+    channel._stop_typing.assert_not_called()
+    channel._remove_reaction.assert_not_awaited()
 
 
 @pytest.mark.asyncio

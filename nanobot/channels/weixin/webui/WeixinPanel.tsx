@@ -7,7 +7,7 @@ import { channelLocaleMessages } from "@/channel-plugins/locale-registry";
 import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
 import {
   type ChannelConfigField,
-} from "@/components/settings/channels/catalog";
+} from "@/channel-plugins/catalog";
 import {
   CredentialForm,
   channelValuesForSave,

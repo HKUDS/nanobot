@@ -13,7 +13,7 @@ import string
 import threading
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from loguru import logger
 
@@ -139,6 +139,26 @@ def generate_code(
         _save(data)
         logger.info("Generated pairing code {} for {}@{}", code, sender_id, channel)
         return code
+
+
+def record_delivery(code: str, status: Literal["sending", "sent", "failed"]) -> None:
+    """Record a reply outcome without changing approval or reviving a stale request.
+
+    Once a code has been sent, a failed concurrent retry must not hide it.
+    Delivery bookkeeping is best-effort: a store error must not mask the actual
+    transport result or reset any approvals.
+    """
+    try:
+        with _LOCK:
+            data = _load()
+            _gc_pending(data)
+            info = data["pending"].get(code)
+            if info is None or info.get("delivery_status") == "sent":
+                return
+            info["delivery_status"] = status
+            _save(data)
+    except OSError:
+        logger.warning("Could not persist pairing reply delivery status")
 
 
 def approve_code(code: str) -> tuple[str, str] | None:

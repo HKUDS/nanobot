@@ -125,17 +125,6 @@ class WorkspaceScopeResolver:
             self.default_restrict_to_workspace,
         )
 
-    def for_message(
-        self,
-        msg: Any,
-        session_metadata: Any,
-    ) -> WorkspaceScope:
-        return self.for_turn(
-            channel=getattr(msg, "channel", None),
-            message_metadata=getattr(msg, "metadata", None),
-            session_metadata=session_metadata,
-        )
-
     def for_turn(
         self,
         *,
@@ -359,10 +348,11 @@ def current_tool_workspace(
     *,
     restrict_to_workspace: bool = False,
     sandbox_restricts_workspace: bool = False,
+    scope: WorkspaceScope | None = None,
 ) -> ToolWorkspace:
-    """Return the workspace/access policy for the current tool call."""
+    """Resolve tool policy from an explicit request scope or the bound call scope."""
 
-    scope = current_workspace_scope()
+    scope = scope if scope is not None else current_workspace_scope()
     project_path = (
         scope.project_path
         if scope is not None

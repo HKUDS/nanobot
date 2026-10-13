@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from nanobot.session.automation_turns import (
+from nanobot.session.automation_spec import (
     AutomationTurnSpec,
     automation_trigger,
 )

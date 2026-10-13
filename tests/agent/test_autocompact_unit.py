@@ -58,45 +58,20 @@ def _add_turns(session: Session, turns: int, *, prefix: str = "msg") -> None:
         session.add_message("assistant", f"{prefix} assistant {i}")
 
 
-# ---------------------------------------------------------------------------
-# __init__
-# ---------------------------------------------------------------------------
+def test_default_ttl_disables_idle_compaction():
+    sessions = MagicMock(spec=SessionManager)
+    sessions.list_sessions.return_value = [
+        {"key": "cli:idle", "updated_at": datetime.now() - timedelta(days=365)},
+    ]
+    sessions.get_or_create.return_value = _make_session(
+        key="cli:idle", messages=[{"role": "user", "content": "pending"}],
+    )
+    ac = AutoCompact(sessions=sessions, consolidator=MagicMock())
+    schedule = MagicMock(side_effect=lambda pending: pending.close())
 
+    ac.check_expired(schedule, _runtime)
 
-class TestInit:
-    """Test AutoCompact.__init__ stores constructor arguments correctly."""
-
-    def test_stores_ttl(self):
-        """_ttl should match session_ttl_minutes argument."""
-        ac = _make_autocompact(ttl=30)
-        assert ac._ttl == 30
-
-    def test_default_ttl_is_zero(self):
-        """Default TTL should be 0."""
-        ac = _make_autocompact(ttl=0)
-        assert ac._ttl == 0
-
-    def test_archiving_set_is_empty(self):
-        """_archiving should start as an empty set."""
-        ac = _make_autocompact()
-        assert ac._archiving == set()
-
-    def test_summaries_dict_is_empty(self):
-        """_summaries should start as an empty dict."""
-        ac = _make_autocompact()
-        assert ac._summaries == {}
-
-    def test_stores_sessions_reference(self):
-        """sessions attribute should reference the passed SessionManager."""
-        mock_sm = MagicMock(spec=SessionManager)
-        ac = _make_autocompact(sessions=mock_sm)
-        assert ac.sessions is mock_sm
-
-    def test_stores_consolidator_reference(self):
-        """consolidator attribute should reference the passed Consolidator."""
-        mock_c = MagicMock()
-        ac = _make_autocompact(consolidator=mock_c)
-        assert ac.consolidator is mock_c
+    assert schedule.call_count == 0
 
 
 # ---------------------------------------------------------------------------

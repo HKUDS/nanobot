@@ -24,6 +24,32 @@ function feature(overrides: Partial<NanobotFeatureInfo>): NanobotFeatureInfo {
 }
 
 describe("channelSetup", () => {
+  it("offers a localized inherited option without changing ordinary booleans", () => {
+    const setup = channelSetup(feature({ setup: { fields: [
+      {
+        key: "channels.plugin-chat.showCompactionNotices",
+        field: "showCompactionNotices",
+        kind: "bool",
+        choices: [],
+        required: false,
+        inheritable: true,
+      },
+      {
+        key: "channels.plugin-chat.sendProgress",
+        field: "sendProgress",
+        kind: "bool",
+        choices: [],
+        required: false,
+      },
+    ] } }), "zh-CN");
+    expect(setup.fields?.[0]?.options).toEqual([
+      { value: "", label: "默认" },
+      { value: "true", label: "True" },
+      { value: "false", label: "False" },
+    ]);
+    expect(setup.fields?.[1]?.options?.map((option) => option.value)).toEqual(["true", "false"]);
+  });
+
   it("builds editable fields for a plugin-owned backend contract", () => {
     const setup = channelSetup(feature({
       setup: {
@@ -106,7 +132,7 @@ describe("channelSetup", () => {
     expect(setup.fields).toEqual([
       expect.objectContaining({
         key: "channels.discord.groupPolicy",
-        label: "Group behavior",
+        label: "Group rules",
         defaultValue: "open",
         options: [{ value: "open", label: "All messages" }],
       }),
@@ -124,7 +150,7 @@ describe("channelSetup", () => {
     expect(setup.officialLabel).toBe("打开钉钉开发者后台");
     expect(setup.fields).toContainEqual(expect.objectContaining({
       key: "channels.dingtalk.allowFrom",
-      label: "允许的用户",
+      label: "允许用户",
     }));
   });
 

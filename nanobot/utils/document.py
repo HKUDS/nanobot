@@ -253,6 +253,8 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
         try:
             for sheet_name in workbook.sheetnames:
                 worksheet = workbook[sheet_name]
+                # Producer-supplied dimensions can omit cells that are present in the XML.
+                worksheet.reset_dimensions()
                 wrote_header = False
                 for row_index, row in enumerate(worksheet.iter_rows(values_only=True), 1):
                     row_text = "\t".join(
@@ -572,9 +574,8 @@ def _collect_pptx_shape_text(shape: Any, out: list[str]) -> None:
     if getattr(shape, "has_table", False):
         for row in shape.table.rows:
             cells = [cell.text.strip() for cell in row.cells]
-            line = "\t".join(cell for cell in cells if cell)
-            if line:
-                out.append(line)
+            if any(cells):
+                out.append("\t".join(cells))
         return
 
     text = getattr(shape, "text", "")

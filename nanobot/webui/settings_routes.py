@@ -11,7 +11,6 @@ from typing import Any, cast
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.agent.tools.image_generation import request_image_generation_reload
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 from nanobot.api.runtime import ApiRuntime, api_runtime_paths
 from nanobot.bus.queue import MessageBus
@@ -44,6 +43,7 @@ from nanobot.webui.settings_api import (
     login_oauth_provider,
     logout_oauth_provider,
     migrate_model_configurations,
+    model_api_resolution_payload,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
@@ -72,6 +72,7 @@ _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
 _CHANNEL_CONNECT_ACTIONS = frozenset({"start", "poll", "cancel"})
 _MCP_OAUTH_CALLBACK_URL_MAX_BYTES = 8 * 1024
 _MCP_RELOAD_TIMEOUT_SECONDS = 15.0
+_IMAGE_GENERATION_RELOAD_TIMEOUT_SECONDS = 5.0
 _query_first = contracts.query_first
 
 
@@ -112,6 +113,7 @@ _MODEL_ROUTES = {
     "/api/settings/provider/update": "provider-update",
     "/api/settings/provider/create": "provider-create",
     "/api/settings/provider-models": "provider-models",
+    "/api/settings/model-api": "model-api",
     "/api/settings/provider/oauth-login": "oauth-login",
     "/api/settings/provider/oauth-login/complete": "oauth-complete",
     "/api/settings/provider/oauth-logout": "oauth-logout",
@@ -231,6 +233,7 @@ class WebUISettingsRouter:
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         mcp_oauth_redirect_uri: Callable[[WsRequest], str] | None = None,
     ) -> None:
         self.settings = settings
@@ -246,6 +249,7 @@ class WebUISettingsRouter:
         self._channel_runtime_status = channel_runtime_status
         self._mcp_runtime_status = mcp_runtime_status
         self._mcp_reload = mcp_reload
+        self._image_generation_reload = image_generation_reload
         self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
         self._mcp_oauth = McpOAuthManager()
         self._restart_sections: set[str] = set()
@@ -484,6 +488,7 @@ class WebUISettingsRouter:
             update_provider=update_provider_settings,
             create_provider=create_provider_settings,
             provider_models=provider_models_payload,
+            model_api=model_api_resolution_payload,
             oauth_login=login_oauth_provider,
             oauth_complete=complete_oauth_provider,
             oauth_logout=logout_oauth_provider,
@@ -501,7 +506,7 @@ class WebUISettingsRouter:
             update_network=update_network_safety_settings,
             nanobot_features_action=nanobot_features_action,
             api_runtime=self._api_runtime,
-            reload_image=lambda: request_image_generation_reload(self.bus),
+            reload_image=self._reload_image_generation_runtime,
         )
 
     def _system_operations(self) -> system_domain.SystemSettingsOperations:
@@ -531,8 +536,35 @@ class WebUISettingsRouter:
     ) -> tuple[dict[str, Any], bool]:
         return await self._capabilities.apply_image_runtime_change(
             payload,
-            lambda: request_image_generation_reload(self.bus),
+            self._reload_image_generation_runtime,
         )
+
+    async def _reload_image_generation_runtime(self) -> dict[str, Any]:
+        if self._image_generation_reload is None:
+            return {
+                "ok": False,
+                "message": "Image generation runtime reload is unavailable. Restart nanobot to apply changes.",
+                "requires_restart": True,
+            }
+        try:
+            return await asyncio.wait_for(
+                self._image_generation_reload(),
+                timeout=_IMAGE_GENERATION_RELOAD_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return {
+                "ok": False,
+                "message": "Image generation hot reload timed out.",
+                "requires_restart": True,
+            }
+        except Exception as exc:
+            self.logger.exception("Image generation hot reload failed")
+            return {
+                "ok": False,
+                "message": "Image generation hot reload failed.",
+                "requires_restart": True,
+                "error": str(exc),
+            }
 
     async def _reload_mcp_runtime(self) -> dict[str, Any]:
         if self._mcp_reload is None:
@@ -582,40 +614,6 @@ class WebUISettingsRouter:
                 load_channel_plugin=load_channel_plugin,
             )
         )
-
-    _coerce_channel_value = staticmethod(system_domain.coerce_channel_value)
-    _assign_channel_config_value = staticmethod(
-        system_domain.assign_channel_config_value
-    )
-
-    def _nanobot_features_payload(self) -> dict[str, Any]:
-        return nanobot_features_payload(config_path=self.settings.config.path)
-
-    def _nanobot_features_action(
-        self,
-        action: str,
-        query: QueryParams,
-        *,
-        allow_install: bool = True,
-    ) -> dict[str, Any]:
-        return self.settings.mutate(
-            nanobot_features_action,
-            action,
-            query,
-            allow_install=allow_install,
-        )
-
-    def _allow_feature_package_install(
-        self,
-        connection: Any,
-        request: WsRequest,
-    ) -> bool:
-        domain_request = self._domain_request(
-            connection,
-            request,
-            needs_local_browser=True,
-        )
-        return self._system.allow_feature_package_install(domain_request)
 
     async def _handle_mcp_oauth_start(self, request: WsRequest) -> Response:
         if not self._authorized(request):

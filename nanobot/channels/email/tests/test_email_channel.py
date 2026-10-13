@@ -69,6 +69,31 @@ def test_email_only_enables_final_reply_delivery() -> None:
     assert type(channel).send_reasoning_delta is BaseChannel.send_reasoning_delta
 
 
+@pytest.mark.parametrize("multipart", [False, True])
+@pytest.mark.parametrize("subtype", ["plain", "html"])
+def test_fetch_unknown_charset_falls_back_to_utf8(monkeypatch, multipart, subtype) -> None:
+    msg = EmailMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = "Charset fallback"
+    body = "Hello 世界" if subtype == "plain" else "<p>Hello 世界</p>"
+    msg.set_content(body, subtype=subtype, charset="utf-8")
+    msg.set_param("charset", "unknown-charset", header="Content-Type")
+    if multipart:
+        msg.add_attachment(b"attachment", maintype="application", subtype="octet-stream")
+    fake = _make_fake_imap(msg.as_bytes(), uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items, skipped_uids = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert "Hello 世界" in items[0]["content"]
+    assert "<p>" not in items[0]["content"]
+    assert skipped_uids == set()
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+
+
 def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     raw = _make_raw_email(subject="Invoice", body="Please pay")
 
@@ -1111,43 +1136,34 @@ def test_email_with_partial_auth_rejected(monkeypatch) -> None:
     assert len(items) == 0, "Email with dkim=fail should be rejected"
 
 
-def test_forged_authentication_results_cannot_override_trusted_failure(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "subject, forged_auth_results",
+    [
+        pytest.param(
+            "Forged authentication",
+            "mx.attacker.example; spf=pass smtp.mailfrom=owner@example.com; dkim=pass header.d=example.com",
+            id="forged_authentication_results_cannot_override_trusted_failure",
+        ),
+        pytest.param(
+            "Forged trusted producer",
+            "mx.receiver.example; spf=pass smtp.mailfrom=owner@example.com; dkim=pass header.d=example.com",
+            id="duplicate_header_with_trusted_id_is_rejected",
+        ),
+    ],
+)
+def test_forged_authentication_results_cannot_override_trusted_failure(
+    monkeypatch,
+    subject,
+    forged_auth_results,
+) -> None:
     raw = _make_raw_email(
         from_addr="owner@example.com",
-        subject="Forged authentication",
+        subject=subject,
         body="Malicious payload",
         auth_results=[
             "mx.receiver.example; spf=fail smtp.mailfrom=attacker.example; "
             "dkim=fail header.d=attacker.example",
-            "mx.attacker.example; spf=pass smtp.mailfrom=owner@example.com; "
-            "dkim=pass header.d=example.com",
-        ],
-    )
-    fake = _make_fake_imap(raw)
-    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
-
-    cfg = _make_config(
-        allow_from=["owner@example.com"],
-        verify_dkim=True,
-        verify_spf=True,
-        trusted_authserv_ids=["mx.receiver.example"],
-    )
-    channel = EmailChannel(cfg, MessageBus())
-    items, _ = channel._fetch_new_messages()
-
-    assert items == []
-
-
-def test_duplicate_header_with_trusted_id_is_rejected(monkeypatch) -> None:
-    raw = _make_raw_email(
-        from_addr="owner@example.com",
-        subject="Forged trusted producer",
-        body="Malicious payload",
-        auth_results=[
-            "mx.receiver.example; spf=fail smtp.mailfrom=attacker.example; "
-            "dkim=fail header.d=attacker.example",
-            "mx.receiver.example; spf=pass smtp.mailfrom=owner@example.com; "
-            "dkim=pass header.d=example.com",
+            forged_auth_results,
         ],
     )
     fake = _make_fake_imap(raw)

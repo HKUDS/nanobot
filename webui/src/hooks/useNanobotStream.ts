@@ -23,6 +23,7 @@ import type {
 } from "@/lib/thread-event-projection";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { readLocalPreferences } from "@/lib/local-preferences";
+import { playTurnCompleteSound } from "@/lib/notification-sound";
 import type {
   InboundEvent,
   OutboundCliAppMention,
@@ -77,6 +78,7 @@ export interface SendOptions {
 }
 
 export interface SubmittedTurn {
+  delivery?: Promise<void>;
   turnId: string;
   userMessageId: string;
   sideChannel: boolean;
@@ -812,6 +814,7 @@ export function useNanobotStream(
               ? ev.failure_message || "This turn failed and has ended."
             : t("recovery.completed", { defaultValue: "Task completed" }),
         );
+        playTurnCompleteSound();
         onTurnEnd?.();
         return;
       }
@@ -991,8 +994,14 @@ export function useNanobotStream(
       delete clientOptions.sideChannel;
       delete clientOptions.finalizeActiveTurn;
       delete clientOptions.continueActiveTurn;
-      client.sendMessage(chatId, outboundContent, wireMedia, clientOptions);
-      return { turnId, userMessageId, sideChannel };
+      const delivery = wireMedia?.length
+        ? client.sendAttachments(chatId, outboundContent, wireMedia, clientOptions)
+        : undefined;
+      if (!delivery) client.sendMessage(chatId, outboundContent, undefined, clientOptions);
+      // Every caller may keep this promise to retain its draft until accepted.
+      // Also observe it here for queued/landing sends without an active composer.
+      void delivery?.catch(() => {});
+      return { turnId, userMessageId, sideChannel, delivery };
     },
     [chatId, clearActivitySegment, client, flushPendingStreamEvents, setMessages],
   );

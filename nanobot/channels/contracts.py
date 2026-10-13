@@ -118,6 +118,8 @@ class ChannelFieldSpec:
     default: Any = None
     writable: bool = True
     snapshot: bool = True
+    # An omitted/null override inherits host policy instead of materializing a default.
+    inheritable: bool = False
 
     @property
     def route_type(self) -> RouteFieldType:
@@ -210,6 +212,8 @@ class ChannelSetupSpec:
             }
             if field.default is not None:
                 public_field["default_value"] = stringify_channel_value(field.default)
+            if field.inheritable:
+                public_field["inheritable"] = True
             fields.append(public_field)
         payload: dict[str, Any] = {
             "fields": fields,
@@ -283,6 +287,8 @@ def channel_default_config(plugin: ChannelPlugin) -> dict[str, Any]:
     defaults: dict[str, Any] = {"enabled": plugin.default_enabled}
     if plugin.setup is not None:
         for name, field in plugin.setup.fields.items():
+            if field.inheritable:
+                continue
             value: Any = field.default
             if value is None:
                 fallback_defaults: dict[str, Any] = {

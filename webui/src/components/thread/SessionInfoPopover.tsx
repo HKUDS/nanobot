@@ -25,7 +25,7 @@ import { useSessionAutomationJobs } from "@/hooks/useSessionAutomationJobs";
 import { currentLocale } from "@/i18n";
 import { runAutomationAction, updateAutomation } from "@/lib/api";
 import type { WebUIMutationTransport } from "@/lib/api";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format-time";
 import type {
   AutomationUpdatePayload,
   SessionAutomationJob,
@@ -146,8 +146,8 @@ export function SessionInfoPopover({ client, sessionKey, token, title }: Session
             size="icon"
             aria-label={t("thread.header.sessionInfo")}
             className={cn(
-              "host-no-drag h-8 w-8 rounded-full text-muted-foreground/85",
-              "hover:bg-accent/40 hover:text-foreground",
+              "host-no-drag h-8 w-8 rounded-control text-muted-foreground/85",
+              "hover:text-foreground",
             )}
           >
             <CalendarClock className="h-4 w-4 stroke-[1.75]" />

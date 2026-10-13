@@ -1,22 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { AlertCircle, ChevronRight, Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
-import { splitFilePath } from "@/components/FileReferenceChip";
+import { ImageLightbox } from "@/components/ImageLightbox";
+import { fileKindForPath, splitFilePath } from "@/components/FileReferenceChip";
 import { ApiError, fetchFilePreview } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 interface FilePreviewPanelProps {
   sessionKey: string;
   path: string;
   token: string;
-  desktopWidth?: number;
-  isClosing?: boolean;
-  onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onClose: () => void;
+  loadPreview?: (path: string) => Promise<FilePreviewPayload>;
+  initialPreview?: FilePreviewPayload;
 }
 
 type PreviewState =
@@ -28,28 +25,32 @@ export function FilePreviewPanel({
   sessionKey,
   path,
   token,
-  desktopWidth = 544,
-  isClosing = false,
-  onResizeStart,
-  onClose,
+  loadPreview,
+  initialPreview,
 }: FilePreviewPanelProps) {
   const { t } = useTranslation();
-  const [state, setState] = useState<PreviewState>({ status: "loading" });
-  const [entered, setEntered] = useState(false);
+  const [state, setState] = useState<PreviewState>(() => initialPreview
+    ? { status: "ready", payload: initialPreview } : { status: "loading" });
+  const [imageOpen, setImageOpen] = useState(false);
+  // Cache aging must not restart an already open preview on unrelated rerenders.
+  const initialPreviewRef = useRef(initialPreview);
+  initialPreviewRef.current = initialPreview;
+  // Credential renewal is not a new file selection. Read the current token only
+  // when a session/path/loader change actually starts another request.
   const tokenRef = useRef(token);
   tokenRef.current = token;
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setEntered(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
-    setState({ status: "loading" });
-    fetchFilePreview(tokenRef.current, sessionKey, path)
+    setImageOpen(false);
+    const cached = initialPreviewRef.current;
+    setState(previous => cached
+      ? (previous.status === "ready" && previous.payload === cached ? previous : { status: "ready", payload: cached })
+      : (previous.status === "loading" ? previous : { status: "loading" }));
+    (loadPreview?.(path) ?? fetchFilePreview(tokenRef.current, sessionKey, path))
       .then((payload) => {
-        if (!cancelled) setState({ status: "ready", payload });
+        if (!cancelled) setState(previous => previous.status === "ready" && previous.payload === payload
+          ? previous : { status: "ready", payload });
       })
       .catch((error: unknown) => {
         if (!cancelled) setState({ status: "error", error });
@@ -57,35 +58,11 @@ export function FilePreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [path, sessionKey]);
+  }, [path, sessionKey, loadPreview]);
 
   const displayPath = state.status === "ready" ? state.payload.display_path : path;
-  const previewPath = state.status === "ready" ? state.payload.path : displayPath;
-  const normalizedPreviewPath = previewPath.replace(/\\/g, "/");
-  const hasRootPrefix = normalizedPreviewPath.startsWith("/");
   const { name } = splitFilePath(displayPath);
   const fileName = name || displayPath;
-  const pathParts = useMemo(
-    () => normalizedPreviewPath.split("/").filter(Boolean),
-    [normalizedPreviewPath],
-  );
-  const directoryParts = useMemo(
-    () => (pathParts.length > 1 ? pathParts.slice(0, -1) : []),
-    [pathParts],
-  );
-  const breadcrumbParts = useMemo(
-    () => (directoryParts.length > 0 ? [...directoryParts, fileName] : [fileName]),
-    [directoryParts, fileName],
-  );
-  const compactBreadcrumbParts = useMemo(
-    () => (breadcrumbParts.length > 3 ? breadcrumbParts.slice(-3) : breadcrumbParts),
-    [breadcrumbParts],
-  );
-  const hasCompactPrefix = breadcrumbParts.length > compactBreadcrumbParts.length;
-  const breadcrumbTitle = `${hasRootPrefix ? "/" : ""}${[
-    ...directoryParts,
-    fileName,
-  ].join("/")}`;
   const errorMessage = state.status === "error"
     ? (state.error instanceof ApiError
       ? (state.error.status === 404 && /API route not found/i.test(state.error.message)
@@ -97,126 +74,18 @@ export function FilePreviewPanel({
     : null;
 
   return (
-    <aside
-      aria-label={t("filePreview.aria", { defaultValue: "File preview" })}
-      style={{
-        "--file-preview-width": `${desktopWidth}px`,
-        "--file-preview-slot-width": !entered || isClosing ? "0px" : `${desktopWidth}px`,
-      } as CSSProperties}
-      className={cn(
-        "absolute inset-y-0 right-0 z-30 w-[min(100vw,var(--file-preview-slot-width))] overflow-hidden",
-        "transition-[width] duration-300 ease-out will-change-[width]",
-        "md:relative md:z-auto md:w-[var(--file-preview-slot-width)] md:min-w-0 md:shrink-0",
-        isClosing && "pointer-events-none",
-      )}
-      data-testid="file-preview-panel"
-      data-file-preview-panel
-    >
-      <div
-        className={cn(
-          "absolute inset-y-0 right-0 flex w-[min(100vw,var(--file-preview-width))] flex-col overflow-hidden pb-[env(safe-area-inset-bottom)] md:w-[var(--file-preview-width)] md:pb-0",
-          "border-l border-border/70 bg-background shadow-2xl md:shadow-none",
-          "transition-[opacity,transform] duration-300 ease-out will-change-transform",
-          !entered || isClosing ? "translate-x-full opacity-0" : "translate-x-0 opacity-100",
-          "motion-reduce:translate-x-0",
-        )}
-      >
-        {onResizeStart ? (
-          <button
-            type="button"
-            aria-label={t("filePreview.resize", { defaultValue: "Resize file preview" })}
-            className={cn(
-              "group absolute inset-y-0 left-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize touch-none md:flex",
-              "items-stretch justify-center focus-visible:outline-none",
-            )}
-            onPointerDown={onResizeStart}
-          >
-            <span
-              aria-hidden
-              className={cn(
-                "h-full w-px bg-foreground/25 opacity-0 transition-opacity",
-                "group-hover:opacity-100 group-focus-visible:bg-ring group-focus-visible:opacity-100",
-              )}
-            />
-          </button>
-        ) : null}
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div
-            className="flex h-11 shrink-0 items-center gap-2 border-b border-border/60 px-3"
-            title={previewPath}
-          >
-            <nav
-              aria-label={t("filePreview.breadcrumb", { defaultValue: "File path" })}
-              className="flex min-w-0 flex-1 items-center overflow-hidden text-sm leading-5"
-              title={breadcrumbTitle}
-              data-testid="file-preview-breadcrumb"
-            >
-              {hasCompactPrefix ? (
-                <>
-                  <span className="shrink-0 text-muted-foreground/55">...</span>
-                  <ChevronRight
-                    className="mx-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/35"
-                    aria-hidden
-                  />
-                </>
-              ) : hasRootPrefix ? (
-                <>
-                  <span className="shrink-0 text-muted-foreground/55">/</span>
-                  <ChevronRight
-                    className="mx-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/35"
-                    aria-hidden
-                  />
-                </>
-              ) : null}
-              {compactBreadcrumbParts.map((part, index) => {
-                const isLast = index === compactBreadcrumbParts.length - 1;
-                return (
-                  <span
-                    key={`${part}-${index}`}
-                    className="flex min-w-0 items-center overflow-hidden"
-                  >
-                    {index > 0 ? (
-                      <ChevronRight
-                        className="mx-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/35"
-                        aria-hidden
-                      />
-                    ) : null}
-                    <span
-                      className={cn(
-                        "min-w-0 truncate rounded-mark px-1 py-0.5",
-                        isLast
-                          ? "font-medium text-foreground"
-                          : "max-w-[26vw] shrink text-muted-foreground/78",
-                      )}
-                      data-testid={isLast ? "file-preview-title" : undefined}
-                    >
-                      {part}
-                    </span>
-                  </span>
-                );
-              })}
-            </nav>
-            <button
-              type="button"
-              onClick={onClose}
-              className={cn(
-                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
-                "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              )}
-              title={t("filePreview.close", { defaultValue: "Close file preview" })}
-              aria-label={t("filePreview.close", { defaultValue: "Close file preview" })}
-              data-testid="file-preview-close"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-auto">
+    <section aria-label={t("filePreview.aria")} data-testid="file-preview-panel" className="flex min-h-0 flex-1 flex-col">
+          <div data-file-preview-scroll tabIndex={0}
+            className="min-h-0 flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
             {state.status === "loading" ? (
-              <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                {t("filePreview.loading", { defaultValue: "Loading preview..." })}
+              <div role="status" aria-label={t("filePreview.loading", { defaultValue: "Loading preview..." })}
+                className="flex h-full flex-col justify-center gap-3 p-6" aria-busy="true">
+                <span className="sr-only">{t("filePreview.loading", { defaultValue: "Loading preview..." })}</span>
+                <div aria-hidden className="mx-auto w-full max-w-sm space-y-3 animate-pulse [animation-duration:900ms] motion-reduce:animate-none">
+                  {fileKindForPath(path) === "image" ? <div className="aspect-[8/5] rounded-compact bg-muted/40" />
+                    : <>{["w-2/3", "w-full", "w-5/6", "w-3/4"].map((width) =>
+                      <div key={width} className={`h-1.5 rounded-full bg-muted/40 ${width}`} />)}</>}
+                </div>
               </div>
             ) : state.status === "error" ? (
               <div className="flex h-full items-center justify-center px-8 text-center text-sm text-muted-foreground">
@@ -227,6 +96,20 @@ export function FilePreviewPanel({
                   />
                   <p>{errorMessage}</p>
                 </div>
+              </div>
+            ) : state.payload.kind === "image" ? (
+              <div className="flex min-h-full items-center justify-center p-4">
+                <button type="button" aria-label={`${t("lightbox.open")}: ${fileName}`} onClick={() => setImageOpen(true)}
+                  className="flex max-h-full max-w-full cursor-zoom-in items-center justify-center rounded-compact focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <img
+                  src={state.payload.data_url}
+                  alt={fileName}
+                  className="max-h-full max-w-full object-contain"
+                  onError={() => setState({ status: "error", error: new Error("Invalid image") })}
+                  />
+                </button>
+                <ImageLightbox images={[{ url: state.payload.data_url, name: fileName }]} index={imageOpen ? 0 : null}
+                  onIndexChange={() => {}} onOpenChange={setImageOpen} />
               </div>
             ) : (
               <div className="min-h-full">
@@ -244,13 +127,12 @@ export function FilePreviewPanel({
                   highlight
                   showLineNumbers
                   wrapLongLines={false}
+                  viewportHighlight
                   className="min-h-full"
                 />
               </div>
             )}
           </div>
-        </div>
-      </div>
-    </aside>
+    </section>
   );
 }

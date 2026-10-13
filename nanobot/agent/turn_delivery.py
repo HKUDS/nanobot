@@ -19,7 +19,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventPublisher
-from nanobot.channels.notification_routes import notification_metadata
+from nanobot.channels.notification_routes import notification_metadata, system_reply_metadata
 from nanobot.events import (
     AgentEvent,
     ContextCompactionEvent,
@@ -47,6 +47,8 @@ class TurnRoute:
     chat_id: str
     metadata: dict[str, Any] = field(default_factory=dict)
     publish_lifecycle: bool = False
+    # Public turn identity supplied by the owning channel adapter.
+    turn_id: str | None = None
 
 
 TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
@@ -178,13 +180,7 @@ class TurnDeliveryFactory:
         channel, chat_id = (
             msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
         )
-        metadata: dict[str, Any] = {}
-        if (
-            channel == "slack"
-            and session_key.startswith("slack:")
-            and session_key.count(":") >= 2
-        ):
-            metadata["slack"] = {"thread_ts": session_key.split(":", 2)[2]}
+        metadata = system_reply_metadata(channel, session_key)
         if origin_message_id := msg.metadata.get("origin_message_id"):
             metadata["origin_message_id"] = origin_message_id
         return TurnRoute(channel=channel, chat_id=chat_id, metadata=metadata)

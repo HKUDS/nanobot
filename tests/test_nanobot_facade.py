@@ -118,6 +118,34 @@ def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
     assert bot._mcp_provider._registry is bot._loop.tools
 
 
+@pytest.mark.parametrize("provider_name", ["openrouter", "SenseNova"])
+def test_from_config_uses_instance_image_settings(tmp_path, monkeypatch, provider_name):
+    from nanobot.agent.tools.image_generation import ImageGenerationTool
+
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "default.json")
+    config_path = _write_config(
+        tmp_path,
+        {
+            "providers": {
+                "openrouter": {"apiKey": "sk-test-key"},
+                "SenseNova": {"apiKey": "named-image-key", "apiBase": "https://images.test/v1"},
+            },
+            "tools": {"imageGeneration": {
+                "enabled": True, "model": "instance-image-model", "provider": provider_name,
+            }},
+        },
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    tool = bot._loop.tools.get("generate_image")
+    assert isinstance(tool, ImageGenerationTool)
+    assert tool.config.model == "instance-image-model"
+    client = tool._provider_client()
+    assert client is not None
+    assert client.api_key == ("sk-test-key" if provider_name == "openrouter" else "named-image-key")
+
+
 def test_from_config_accepts_default_model_override(tmp_path):
     config_path = _write_config(tmp_path)
 
@@ -696,6 +724,7 @@ async def test_run_forwards_non_default_runtime_options(tmp_path):
         media=["/tmp/image.png"],
         ephemeral=True,
         _run_extra_hooks_for_ephemeral=True,
+        _session_policy=ANY,
         hooks=ANY,
     )
 

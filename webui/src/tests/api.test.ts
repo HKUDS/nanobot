@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  changeAutomationChat,
   cancelMcpOAuth,
   configureChannel,
   completeMcpOAuth,
@@ -13,6 +14,7 @@ import {
   fetchFilePreview,
   fetchFilePreviewAvailability,
   fetchAutomations,
+  fetchAutomationChats,
   fetchAutomationRunResult,
   fetchApiService,
   fetchCliApps,
@@ -52,7 +54,6 @@ import {
   pollChannelConnect,
   startChannelConnect,
   updateAutomation,
-  updateSidebarState,
   updateImageGenerationSettings,
   updateModelCallOrder,
   updateModelConfiguration,
@@ -376,6 +377,20 @@ describe("webui API helpers", () => {
       "/api/webui/automations/result?id=task%2Fid&run_at_ms=1234&kind=cron",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it("reads chat choices over HTTP and commits the opaque choice over WebSocket", async () => {
+    const controller = new AbortController();
+    await fetchAutomationChats("tok", "task/id", controller.signal);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/chats?id=task%2Fid",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
+    );
+    vi.mocked(fetch).mockClear();
+    const values = { target_id: "opaque-id", revision: "reviewed-version", message: "Reviewed prompt" };
+    await changeAutomationChat(mutationTransport, "task/id", values);
+    expect(requestMutation).toHaveBeenCalledWith("automation.change_chat", { id: "task/id", values }, 20_000);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("validates channel settings with form values", async () => {
@@ -1158,7 +1173,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("reads and writes persisted sidebar state", async () => {
+  it("reads persisted sidebar state", async () => {
     const state = {
       schema_version: 1,
       pinned_keys: ["websocket:chat-1"],
@@ -1189,13 +1204,6 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
-
-    await updateSidebarState(mutationTransport, state);
-    expect(requestMutation).toHaveBeenCalledWith(
-      "sidebar.update",
-      { state },
-      20_000,
-    );
   });
 
   it("fetches workspace project state", async () => {
@@ -1210,7 +1218,6 @@ describe("webui API helpers", () => {
       },
       controls: {
         can_change_project: true,
-        can_use_full_access: true,
       },
     };
     vi.mocked(fetch).mockResolvedValueOnce({

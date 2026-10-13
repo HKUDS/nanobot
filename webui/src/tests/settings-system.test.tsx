@@ -136,7 +136,8 @@ describe("Settings system domains", () => {
 
     expect(await screen.findByText("Computer Use")).toBeInTheDocument();
     expect(screen.getByText("Plugins")).toBeInTheDocument();
-    expect(screen.getByText(/Control the desktop.*screen-recording, accessibility/)).toBeInTheDocument();
+    expect(screen.getByText(/Control the desktop/)).toBeInTheDocument();
+    expect(screen.getByText("screen-recording, accessibility")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Enable" }));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
@@ -307,7 +308,7 @@ describe("Settings system domains", () => {
     const input = screen.getByRole("textbox", { name: "Describe an automation" });
     expect(input).toHaveAttribute(
       "placeholder",
-      "What would you like nanobot to automate?",
+      "What should nanobot automate?",
     );
     fireEvent.change(input, { target: { value: "Summarize updates every weekday at 9" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));

@@ -14,7 +14,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "允许 nanobot 读取和发送邮件",
+        "label": "邮件读写",
         "choices": {
           "true": "已授权",
           "false": "未授权"
@@ -57,11 +57,11 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "收件检查间隔（秒）",
+        "label": "收件间隔（秒）",
         "placeholder": "30"
       },
       "allowFrom": {
-        "label": "允许的发件人",
+        "label": "允许邮箱",
         "placeholder": "邮箱地址，用逗号分隔"
       },
       "verifyDkim": {
@@ -124,41 +124,41 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "移至邮箱"
+        "label": "目标邮箱"
       },
       "postActionExpunge": {
-        "label": "永久执行操作",
+        "label": "永久清除",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "忽略未处理邮件",
+        "label": "跳过处置",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "maxBodyChars": {
-        "label": "正文长度上限"
+        "label": "正文上限（字符）"
       },
       "subjectPrefix": {
-        "label": "回复主题前缀"
+        "label": "主题前缀"
       },
       "allowedAttachmentTypes": {
-        "label": "允许的附件类型"
+        "label": "附件类型"
       },
       "maxAttachmentSize": {
-        "label": "附件大小上限"
+        "label": "单件上限（字节）"
       },
       "maxAttachmentsPerEmail": {
-        "label": "附件数量上限"
+        "label": "数量上限"
       },
       "trustedAuthservIds": {
         "label": "可信邮件认证服务",
         "placeholder": "mx.google.com，用逗号分隔",
-        "help": "接收邮件服务添加的准确 authserv-id。启用 SPF 或 DKIM 验证时必填。"
+        "help": "填写可信的 authserv-id\n\n接收邮件服务添加的准确 authserv-id。启用 SPF 或 DKIM 验证时必填。"
       }
     }
   },

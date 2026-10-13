@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event, Lock
 
@@ -579,26 +580,63 @@ def test_manifest_repair_is_single_flight(tmp_path, monkeypatch) -> None:
     manifest = webui_transcript_segments_dir(key) / "manifest.json"
     manifest.write_text("{not json", encoding="utf-8")
     original = transcript_module._rebuild_segment_manifest
+    original_read_text = Path.read_text
+    original_replace = transcript_module.os.replace
+    manifest_lock = transcript_module._manifest_rebuild_lock(key)
     rebuild_started = Event()
-    release_rebuild = Event()
+    second_attempt = Event()
+    manifest_open = Event()
+    release_read = Event()
     calls = 0
     calls_lock = Lock()
+
+    @contextmanager
+    def track_lock(_session_key):
+        if rebuild_started.is_set():
+            second_attempt.set()
+        with manifest_lock:
+            yield
+
+    def hold_manifest_read(path, *args, **kwargs):
+        if path != manifest or not rebuild_started.is_set() or release_read.is_set():
+            return original_read_text(path, *args, **kwargs)
+        with path.open(encoding="utf-8") as handle:
+            manifest_open.set()
+            second_attempt.set()
+            try:
+                assert release_read.wait(5)
+                return handle.read()
+            finally:
+                manifest_open.clear()
+
+    def replace_manifest(source, destination):
+        if destination != manifest:
+            return original_replace(source, destination)
+        try:
+            # Windows cannot replace a file held open by a concurrent reader.
+            if manifest_open.is_set():
+                raise PermissionError("manifest is open for reading")
+            return original_replace(source, destination)
+        finally:
+            release_read.set()
 
     def slow_rebuild(*args, **kwargs):
         nonlocal calls
         with calls_lock:
             calls += 1
         rebuild_started.set()
-        assert release_rebuild.wait(2)
+        assert second_attempt.wait(5)
         return original(*args, **kwargs)
 
+    monkeypatch.setattr(transcript_module, "_manifest_rebuild_lock", track_lock)
+    monkeypatch.setattr(Path, "read_text", hold_manifest_read)
+    monkeypatch.setattr(transcript_module.os, "replace", replace_manifest)
     monkeypatch.setattr(transcript_module, "_rebuild_segment_manifest", slow_rebuild)
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(transcript_module._read_segment_manifest_entries, key)
-        assert rebuild_started.wait(2)
+        assert rebuild_started.wait(5)
         second = executor.submit(transcript_module._read_segment_manifest_entries, key)
-        release_rebuild.set()
-        assert first.result(timeout=2) == second.result(timeout=2)
+        assert first.result(timeout=5) == second.result(timeout=5)
 
     assert calls == 1
 

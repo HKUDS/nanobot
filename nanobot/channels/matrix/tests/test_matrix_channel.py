@@ -1220,6 +1220,7 @@ async def test_on_message_sets_thread_metadata_when_threaded_event() -> None:
     assert metadata["thread_root_event_id"] == "$root1"
     assert metadata["thread_reply_to_event_id"] == "$reply1"
     assert metadata["event_id"] == "$reply1"
+    assert metadata["message_id"] == "$reply1"
     assert handled[0]["session_key"] == "matrix:!room:matrix.org:thread:$root1"
 
 
@@ -1676,6 +1677,124 @@ async def test_send_adds_thread_relates_to_for_thread_metadata() -> None:
             chat_id="!room:matrix.org",
             content="Hi",
             metadata=metadata,
+        )
+    )
+
+    content = client.room_send_calls[0]["content"]
+    assert content["m.relates_to"] == {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_on_message_sets_message_id_for_room_level_event() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    handled: list[dict[str, object]] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room", member_count=3)
+    event = SimpleNamespace(
+        sender="@alice:matrix.org",
+        body="Hello",
+        event_id="$room1",
+        source={"content": {}},
+    )
+
+    await channel._on_message(room, event)
+
+    assert len(handled) == 1
+    metadata = handled[0]["metadata"]
+    assert metadata["event_id"] == "$room1"
+    assert metadata["message_id"] == "$room1"
+    assert "thread_root_event_id" not in metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata", [
+    {"message_id": "$user1", "event_id": "$user1"},
+    {"event_id": "$user1"},
+    {"message_id": "$user1", "event_id": "$older"},
+])
+async def test_send_adds_in_reply_to_for_room_level_message_id(metadata) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:matrix.org",
+            content="Hi",
+            metadata=metadata,
+        )
+    )
+
+    content = client.room_send_calls[0]["content"]
+    assert content["m.relates_to"] == {"m.in_reply_to": {"event_id": "$user1"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata", [{}, {"message_id": ""}, {"event_id": 123}])
+async def test_send_without_valid_reply_target_stays_top_level(metadata) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(OutboundMessage(
+        channel="matrix", chat_id="!room:matrix.org", content="Hi", metadata=metadata,
+    ))
+
+    assert "m.relates_to" not in client.room_send_calls[0]["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encrypted", [False, True])
+async def test_send_room_reply_attachment_keeps_source_event(tmp_path, encrypted) -> None:
+    channel = MatrixChannel(_make_config(e2ee_enabled=encrypted), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    client.rooms["!room:matrix.org"] = SimpleNamespace(encrypted=encrypted)
+    channel.client = client
+    file_path = tmp_path / "result.txt"
+    file_path.write_text("result", encoding="utf-8")
+
+    await channel.send(OutboundMessage(
+        channel="matrix", chat_id="!room:matrix.org", content="Result",
+        media=[str(file_path)], metadata={"message_id": "$user"},
+    ))
+
+    assert client.upload_calls[0]["encrypt"] is encrypted
+    assert len(client.room_send_calls) == 2
+    for call in client.room_send_calls:
+        assert call["content"]["m.relates_to"] == {"m.in_reply_to": {"event_id": "$user"}}
+
+
+@pytest.mark.asyncio
+async def test_send_prefers_thread_relation_over_plain_reply() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:matrix.org",
+            content="Hi",
+            metadata={
+                "message_id": "$user1",
+                "event_id": "$user1",
+                "thread_root_event_id": "$root1",
+                "thread_reply_to_event_id": "$reply1",
+            },
         )
     )
 
@@ -2474,6 +2593,67 @@ async def test_send_delta_threaded_edit_keeps_replace_and_thread_relation(monkey
         "m.in_reply_to": {"event_id": "$reply1"},
         "is_falling_back": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_send_delta_room_reply_edits_the_bot_event(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "$bot"
+    times = iter([100.0, 102.0])
+    monkeypatch.setattr(channel, "monotonic_time", lambda: next(times))
+    metadata = {"message_id": "$user", "event_id": "$user"}
+
+    await channel.send_delta("!source:example.org", "Hello", metadata)
+    await channel.send_delta("!source:example.org", " world", metadata)
+    await channel.send_delta("!source:example.org", "", metadata, stream_end=True)
+
+    assert len(client.room_send_calls) == 3
+    assert client.room_send_calls[0]["content"]["m.relates_to"] == {
+        "m.in_reply_to": {"event_id": "$user"},
+    }
+    for call in client.room_send_calls[1:]:
+        assert call["content"]["m.relates_to"] == {
+            "rel_type": "m.replace", "event_id": "$bot",
+        }
+        assert call["content"]["m.new_content"]["body"] == "Hello world"
+        assert call["content"]["m.new_content"]["m.relates_to"] == {
+            "m.in_reply_to": {"event_id": "$user"},
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["!source:example.org", "!other:example.org"])
+@pytest.mark.parametrize("use_request_context", [False, True])
+async def test_message_tool_scopes_reply_to_source_room(tmp_path, target, use_request_context) -> None:
+    from contextlib import nullcontext
+
+    from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.agent.tools.message import MessageTool
+
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    tool = MessageTool(
+        channel.send, default_channel="matrix", default_chat_id="!source:example.org",
+        default_message_id="$user", workspace=tmp_path,
+    )
+    tool._fallback_metadata = {"message_id": "$user", "event_id": "$user"}
+
+    context = RequestContext(
+        channel="matrix", chat_id="!source:example.org", message_id="$user",
+        metadata={"message_id": "$user", "event_id": "$user"},
+    )
+    with request_context(context) if use_request_context else nullcontext():
+        await tool.execute("Result", channel="matrix", chat_id=target)
+
+    assert client.room_send_calls[-1]["room_id"] == target
+    content = client.room_send_calls[-1]["content"]
+    if target == "!source:example.org":
+        assert content["m.relates_to"] == {"m.in_reply_to": {"event_id": "$user"}}
+    else:
+        assert "m.relates_to" not in content
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ __all__ = [
     "_print_model_setup_steps",
     "_print_runtime_config_validation_error",
     "_provider_setup_error",
+    "_validate_session_storage",
 ]
 
 console = Console()
@@ -130,7 +131,33 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     loaded = _load_config_for_cli(config_path, resolve_env=True)
     if workspace:
         loaded.agents.defaults.workspace = workspace
+    _validate_session_storage(loaded, workspace_override=workspace)
     return loaded
+
+
+def _validate_session_storage(config: Config, *, workspace_override: str | None = None) -> None:
+    """Reject overlapping session storage before startup creates workspace files."""
+    from nanobot.config.loader import get_config_path
+
+    config_path = get_config_path().expanduser().resolve(strict=False)
+    data_dir = config.runtime_data_dir or config_path.parent
+    sessions = (data_dir / "sessions").resolve(strict=False)
+    workspace = config.workspace_path.resolve(strict=False)
+    if not sessions.is_relative_to(workspace):
+        return
+
+    source = "--workspace" if workspace_override else "agents.defaults.workspace"
+    console.print(Text("Cannot start: chat history must be outside the workspace.", style="red"))
+    console.print()
+    console.print(Text(f"Workspace ({source}): {workspace}"))
+    console.print(Text(f"Chat history: {sessions}"))
+    console.print()
+    console.print("To fix, keep the workspace in place:")
+    console.print("  1. Stop the instance and back up its files.")
+    console.print("  2. Move config.json and its runtime data outside the workspace.")
+    console.print("  3. Restart with --config pointing to the moved config file.")
+    console.print("Migration help: docs/troubleshooting.md")
+    raise typer.Exit(1)
 
 
 def _load_inspection_config(

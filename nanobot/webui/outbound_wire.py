@@ -103,8 +103,14 @@ class ContextCompactionWirePayload(_ChatWirePayload):
     phase: Literal["started", "succeeded", "failed", "cancelled"]
 
 
+class SubagentTaskWirePayload(_ChatWirePayload):
+    event: Literal["subagent_task"]
+    task: dict[str, object]
+
+
 WebUIWirePayload: TypeAlias = (
     RetryStatusWirePayload | ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
+    | SubagentTaskWirePayload
 )
 WebUIWirePersistence: TypeAlias = Literal[
     "transient",

@@ -24,7 +24,7 @@
         "placeholder": "ID panel, pisahkan dengan koma"
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "ID pengguna, pisahkan dengan koma"
       },
       "socketUrl": {
@@ -44,7 +44,7 @@
         "label": "Sambungkan kembali penundaan"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "Penundaan penyambungan kembali maksimum"
+        "label": "Batas jeda koneksi ulang (ms)"
       },
       "socketConnectTimeoutMs": {
         "label": "Batas waktu koneksi habis"
@@ -56,16 +56,16 @@
         "label": "Waktu tunggu tonton habis"
       },
       "watchLimit": {
-        "label": "Perhatikan ukuran batch"
+        "label": "Ukuran batch"
       },
       "retryDelayMs": {
         "label": "Coba lagi penundaan"
       },
       "maxRetryAttempts": {
-        "label": "Percobaan ulang maksimum"
+        "label": "Batas percobaan ulang"
       },
       "mention_requireInGroups": {
-        "label": "Memerlukan penyebutan dalam kelompok",
+        "label": "Wajib mention di grup",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
@@ -75,7 +75,7 @@
         "label": "Aturan grup (JSON)"
       },
       "replyDelayMode": {
-        "label": "Mode penundaan balasan"
+        "label": "Mode jeda balasan"
       },
       "replyDelayMs": {
         "label": "Keterlambatan balasan"

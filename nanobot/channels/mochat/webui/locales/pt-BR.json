@@ -44,7 +44,7 @@
         "label": "Atraso na reconexão"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "Atraso máximo de reconexão"
+        "label": "Limite de atraso de reconexão (ms)"
       },
       "socketConnectTimeoutMs": {
         "label": "Tempo limite de conexão"
@@ -56,16 +56,16 @@
         "label": "Tempo limite de exibição"
       },
       "watchLimit": {
-        "label": "Observe o tamanho do lote"
+        "label": "Tamanho do lote"
       },
       "retryDelayMs": {
         "label": "Atraso na nova tentativa"
       },
       "maxRetryAttempts": {
-        "label": "Máximo de tentativas"
+        "label": "Limite de tentativas"
       },
       "mention_requireInGroups": {
-        "label": "Exigir menções em grupos",
+        "label": "Exigir menção em grupos",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
@@ -75,7 +75,7 @@
         "label": "Regras de grupo (JSON)"
       },
       "replyDelayMode": {
-        "label": "Modo de atraso de resposta"
+        "label": "Modo de atraso"
       },
       "replyDelayMs": {
         "label": "Atraso na resposta"

@@ -7,11 +7,14 @@ import type {
   PendingRestartSections,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
+import { modelAPISelection } from "@/components/settings/models/modelAPI";
+import type { RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
   providerFormFromRow,
+  providerJsonValue,
   type CustomProviderDraft,
-} from "@/components/settings/models/ProviderSettings";
+} from "@/components/settings/models/providerForm";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
 import {
@@ -89,7 +92,6 @@ export function useModelSettingsActions({
     return () => { oauthMounted.current = false; };
   }, []);
   const {
-    expandedProvider,
     form,
     modelCallOrder,
     modelCallOrderSaving,
@@ -106,7 +108,6 @@ export function useModelSettingsActions({
     providerSaving,
     saving,
     setEditingProviderKeys,
-    setExpandedProvider,
     setForm,
     setModelCallOrder,
     setModelCallOrderSaving,
@@ -121,7 +122,7 @@ export function useModelSettingsActions({
     setProviderOAuthDialogError,
     setProviderOAuthFlow,
     setProviderOAuthResponse,
-    setProviderSaving,
+    setProviderOperation,
     setSaving,
     setVisibleProviderKeys,
     visibleProviderKeys,
@@ -159,7 +160,11 @@ export function useModelSettingsActions({
       !settings ||
       saving ||
       modelCallOrderSaving ||
-      modelConfigurationSaving
+      modelConfigurationSaving ||
+      !Number.isSafeInteger(form.maxTokens) ||
+      form.maxTokens <= 0 ||
+      !Number.isSafeInteger(form.contextWindowTokens) ||
+      form.contextWindowTokens <= 0
     ) {
       return;
     }
@@ -173,7 +178,6 @@ export function useModelSettingsActions({
         !provider ||
         !model ||
         form.maxTokens <= 0 ||
-        form.contextWindowTokens <= 0 ||
         form.temperature < 0 ||
         form.temperature > 2
       ) {
@@ -194,6 +198,12 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          api: form.api ?? undefined,
+          ...(settings.model_request_overrides_supported ? {
+            extraHeaders: form.extraHeaders,
+            extraQuery: form.extraQuery,
+            extraBody: form.extraBody,
+          } : {}),
         });
         const createdPreset = payload.created_model_preset;
         const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
@@ -256,6 +266,13 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
+          ? form.api : undefined,
+        ...(settings.model_request_overrides_supported ? {
+          extraHeaders: form.extraHeaders !== providerJsonValue(selectedPreset.extra_headers) ? form.extraHeaders : undefined,
+          extraQuery: form.extraQuery !== providerJsonValue(selectedPreset.extra_query) ? form.extraQuery : undefined,
+          extraBody: form.extraBody !== providerJsonValue(selectedPreset.extra_body) ? form.extraBody : undefined,
+        } : {}),
       });
       applyPayload(payload);
       setForm(agentDraftFromPayload(payload, nextName));
@@ -265,6 +282,21 @@ export function useModelSettingsActions({
       setError(null);
     } catch (err) {
       handlePresetSaveError(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveModelRequestSettings = async (values: Partial<RequestParameterDraft>) => {
+    setSaving(true);
+    try {
+      const payload = await updateModelConfiguration(client, {
+        name: modelPresetEditingName,
+        ...values,
+      });
+      applyPayload(payload);
+      setForm(agentDraftFromPayload(payload, modelPresetEditingName));
+      setError(null);
     } finally {
       setSaving(false);
     }
@@ -289,6 +321,10 @@ export function useModelSettingsActions({
       modelPreset: "",
       provider,
       model: "",
+      api: null,
+      extraHeaders: "",
+      extraQuery: "",
+      extraBody: "",
       maxTokens: primaryPreset?.max_tokens ?? settings.agent.max_tokens,
       contextWindowTokens: normalizeContextWindowTokens(
         primaryPreset?.context_window_tokens ?? settings.agent.context_window_tokens,
@@ -361,7 +397,7 @@ export function useModelSettingsActions({
       modelCallOrderSaving ||
       modelConfigurationSaving
     ) {
-      return;
+      return false;
     }
     setSaving(true);
     try {
@@ -369,41 +405,42 @@ export function useModelSettingsActions({
       applyPayload(payload);
       setModelPresetPendingDelete(null);
       setError(null);
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const saveProvider = async (providerName: string) => {
-    if (providerSaving) return;
+  const saveProvider = async (providerName: string): Promise<boolean> => {
+    if (providerSaving) return false;
     const provider = settings?.providers.find((item) => item.name === providerName);
-    if (!provider) return;
+    if (!provider) return false;
     const isOauthProvider = provider.auth_type === "oauth";
     const providerForm = providerForms[providerName] ?? providerFormFromRow(provider);
     const apiKey = providerForm.apiKey.trim();
-    const apiKeyRequired = provider.api_key_required ?? true;
-    if (!isOauthProvider && !provider.configured && apiKeyRequired && !apiKey) {
+    if (!isOauthProvider && !provider.configured && (provider.api_key_required ?? true) && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
-      return;
+      return false;
     }
-    setProviderSaving(providerName);
+    setProviderOperation({ provider: providerName, action: "save" });
     try {
       const supportName = providerName === "bedrock"
         ? "bedrock"
         : providerName === "azure_openai"
           ? "azure"
           : null;
-      if (supportName && !(await installCapabilities([supportName]))) return;
+      if (supportName && !(await installCapabilities([supportName]))) return false;
       const update: ProviderSettingsUpdate = { provider: providerName };
       if (!isOauthProvider) {
         update.apiKey = apiKey || undefined;
         update.apiBase = providerForm.apiBase.trim();
         if (provider.is_custom) update.displayName = providerForm.displayName.trim();
+        if (provider.provider_api_configurable) update.api = providerForm.api;
       }
       for (const field of provider.advanced_fields ?? []) {
-        if (field === "api_type") update.apiType = providerForm.apiType;
         if (field === "proxy") update.proxy = providerForm.proxy.trim();
         if (field === "extra_headers") {
           update.extraHeaders = providerForm.extraHeaders.trim();
@@ -417,58 +454,51 @@ export function useModelSettingsActions({
         if (field === "profile") update.profile = providerForm.profile.trim();
       }
       const payload = await updateProviderSettings(client, update);
-      applyPayload(payload);
+      applyPayload(payload, { preserveAgentForm: true });
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
       await maybeRestartHostEngine(payload);
-      setProviderForms((prev) => ({
-        ...prev,
-        [providerName]: {
-          ...providerForm,
-          displayName: providerForm.displayName.trim(),
-          apiKey: "",
-          apiBase: providerForm.apiBase.trim(),
-          proxy: providerForm.proxy.trim(),
-          thinkingStyle: providerForm.thinkingStyle.trim(),
-          region: providerForm.region.trim(),
-          profile: providerForm.profile.trim(),
-        },
-      }));
+      setProviderForms((prev) => {
+        const next = { ...prev };
+        delete next[providerName];
+        return next;
+      });
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
       setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-      if (!isOauthProvider) setExpandedProvider(null);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setProviderSaving(null);
-    }
-  };
-
-  const createCustomProvider = async (draft: CustomProviderDraft): Promise<boolean> => {
-    if (providerSaving) return false;
-    setProviderSaving(CUSTOM_PROVIDER_CREATION_KEY);
-    try {
-      const payload = await createProviderSettings(client, {
-        name: draft.name.trim(),
-        apiKey: draft.apiKey.trim() || undefined,
-        apiBase: draft.apiBase.trim(),
-        proxy: draft.proxy.trim(),
-        extraHeaders: draft.extraHeaders.trim(),
-        extraBody: draft.extraBody.trim(),
-        extraQuery: draft.extraQuery.trim(),
-        thinkingStyle: draft.thinkingStyle.trim(),
-      });
-      applyPayload(payload);
-      setExpandedProvider(null);
       setError(null);
       return true;
     } catch (err) {
       setError((err as Error).message);
       return false;
     } finally {
-      setProviderSaving(null);
+      setProviderOperation(null);
+    }
+  };
+
+  const createCustomProvider = async (draft: CustomProviderDraft): Promise<SettingsPayload | null> => {
+    if (providerSaving) return null;
+    setProviderOperation({ provider: CUSTOM_PROVIDER_CREATION_KEY, action: "create" });
+    try {
+      const payload = await createProviderSettings(client, {
+        name: draft.name.trim(),
+        apiKey: draft.apiKey.trim() || undefined,
+        apiBase: draft.apiBase.trim(),
+        ...(settings?.provider_api_configuration_supported ? { api: draft.api } : {}),
+        proxy: draft.proxy.trim(),
+        extraHeaders: draft.extraHeaders.trim(),
+        extraBody: draft.extraBody.trim(),
+        extraQuery: draft.extraQuery.trim(),
+        thinkingStyle: draft.thinkingStyle.trim(),
+      });
+      applyPayload(payload, { preserveAgentForm: true });
+      setError(null);
+      return payload;
+    } catch (err) {
+      setError((err as Error).message);
+      return null;
+    } finally {
+      setProviderOperation(null);
     }
   };
 
@@ -487,7 +517,7 @@ export function useModelSettingsActions({
         popup = null;
       }
     }
-    setProviderSaving(providerName);
+    setProviderOperation({ provider: providerName, action });
     try {
       const payload =
         action === "login"
@@ -516,13 +546,13 @@ export function useModelSettingsActions({
       }
       popup?.close();
       closeProviderOAuthFlow(false);
-      applyPayload(payload, { preserveAgentForm: action === "login" });
+      applyPayload(payload, { preserveAgentForm: true });
       setError(null);
     } catch (err) {
       popup?.close();
       setError((err as Error).message);
     } finally {
-      setProviderSaving(null);
+      setProviderOperation(null);
     }
   };
 
@@ -564,30 +594,21 @@ export function useModelSettingsActions({
     setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
   }, [settings]);
 
-  const handleToggleProvider = useCallback((providerName: string) => {
-    if (expandedProvider) resetProviderDraft(expandedProvider);
-    setExpandedProvider(expandedProvider === providerName ? null : providerName);
-  }, [expandedProvider, resetProviderDraft]);
-
   const toggleProviderKeyVisibility = (providerName: string) => {
     const isVisible = visibleProviderKeys[providerName];
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: !isVisible }));
   };
 
   const toggleProviderKeyEditing = (providerName: string) => {
+    const provider = settings?.providers.find((row) => row.name === providerName);
+    if (!provider) return;
     setEditingProviderKeys((prev) => {
       const nextEditing = !prev[providerName];
       if (!nextEditing) {
         setProviderForms((forms) => ({
           ...forms,
           [providerName]: {
-            ...(forms[providerName] ?? providerFormFromRow(
-              settings?.providers.find((provider) => provider.name === providerName) ?? {
-                name: providerName,
-                label: providerName,
-                configured: false,
-              },
-            )),
+            ...(forms[providerName] ?? providerFormFromRow(provider)),
             apiKey: "",
           },
         }));
@@ -605,10 +626,10 @@ export function useModelSettingsActions({
     createCustomProvider,
     handleDeleteModelConfiguration,
     handleMigrateModelConfigurations,
-    handleToggleProvider,
     resetProviderDraft,
     runProviderOAuth,
     saveModelSettings,
+    saveModelRequestSettings,
     saveProvider,
     toggleProviderKeyEditing,
     toggleProviderKeyVisibility,

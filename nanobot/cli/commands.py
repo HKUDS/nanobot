@@ -97,6 +97,11 @@ app = typer.Typer(
 
 console = Console()
 
+# Server-console pairing stays outside the agent/gateway lifecycle.
+from nanobot.cli.remote import app as remote_app  # noqa: E402
+
+app.add_typer(remote_app, name="remote")
+
 def version_callback(value: bool):
     if value:
         console.print(f"{__logo__} nanobot v{__version__}")
@@ -106,11 +111,21 @@ def version_callback(value: bool):
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
+    home: Path | None = typer.Option(
+        None, "--home", help="Instance root directory",
+        file_okay=False,
+    ),
     version: bool = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
     """nanobot - Personal AI Assistant."""
+    if home is not None:
+        from nanobot.config.home import get_selected_home_path, set_home_path
+
+        previous_home = get_selected_home_path()
+        set_home_path(home)
+        ctx.call_on_close(lambda: set_home_path(previous_home))
     # Editable/source installs can retain an older generated console script that
     # imports this Typer app directly instead of ``nanobot.cli.entry``. Keep the
     # role identity correct until that launcher is regenerated.
@@ -347,20 +362,20 @@ def serve(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the OpenAI-compatible API server (/v1/chat/completions)."""
+    runtime_config = _load_runtime_config(config, workspace)
     try:
         from aiohttp import web  # noqa: F401
     except ImportError:
         console.print("[red]aiohttp is required. Install with: nanobot plugins enable api[/red]")
         raise typer.Exit(1)
 
+    from nanobot.agent.tools.image_generation import register_image_generation_tool
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
     _set_nanobot_logs(verbose)
 
-    runtime_config = _load_runtime_config(config, workspace)
     api_cfg = runtime_config.api
     host = host if host is not None else api_cfg.host
     port = port if port is not None else api_cfg.port
@@ -376,12 +391,12 @@ def serve(
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
     tools = ToolRegistry()
+    register_image_generation_tool(runtime_config, tools, workspace=runtime_config.workspace_path)
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
             session_manager=session_manager,
-            image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
         )

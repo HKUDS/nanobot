@@ -60,6 +60,14 @@ from nanobot.utils.runtime import (
     is_blank_text,
 )
 
+
+def _raise_if_cancelling() -> None:
+    """Do not resume model work when a dependency suppresses cancellation."""
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        raise asyncio.CancelledError
+
+
 ContinuationCallback = Callable[[], str | None]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[[], Awaitable[Iterable[Any] | None]]
@@ -430,6 +438,9 @@ class AgentRunner:
                 await hook.on_stream_end(segment_context, resuming=True)
 
         for iteration in range(spec.max_iterations):
+            # A resumed iteration must not inherit a previous iteration's failure.
+            stop_reason = "completed"
+            error = None
             # The session inbox cuts a finite snapshot before every model call.
             # This includes follow-ups that arrived before the first request and
             # messages received while the previous request or tools were running.
@@ -684,10 +695,7 @@ class AgentRunner:
             # Check for mid-turn injections BEFORE signaling stream end.
             # If injections are found we keep the stream alive (resuming=True)
             # so streaming channels don't prematurely finalize the card.
-            can_make_followup_request = (
-                iteration + 1 < spec.max_iterations
-                or spec.finalize_on_max_iterations
-            )
+            can_make_followup_request = iteration + 1 < spec.max_iterations
             should_continue, injection_cycles = await self._try_drain_injections(
                 spec, messages, assistant_message, injection_cycles,
                 conversation_state=conversation_state,
@@ -794,22 +802,8 @@ class AgentRunner:
         else:
             stop_reason = "max_iterations"
             terminal_content = None
+            await end_length_segment(interrupted=False)
             if spec.finalize_on_max_iterations:
-                # The no-tools finalization is a real model boundary, so include
-                # exactly the inputs waiting before that request. Without this
-                # request, leave them in the session inbox for its worker.
-                drained_after_max_iterations, injection_cycles = (
-                    await self._try_drain_injections(
-                        spec,
-                        messages,
-                        None,
-                        injection_cycles,
-                        phase="before max-iterations finalization",
-                    )
-                )
-                if drained_after_max_iterations:
-                    had_injections = True
-                await end_length_segment(interrupted=drained_after_max_iterations)
                 terminal_content, usage = await self._try_finalize_after_max_iterations(
                     spec,
                     hook,
@@ -818,8 +812,6 @@ class AgentRunner:
                     request_state=request_state,
                     round_usages=round_usages,
                 )
-            else:
-                await end_length_segment(interrupted=False)
             if terminal_content is None:
                 terminal_content = self._max_iterations_fallback(spec)
             if length_recovery_parts:
@@ -879,6 +871,7 @@ class AgentRunner:
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
     ) -> tuple[LLMResponse, LLMUsage]:
+        _raise_if_cancelling()
         tool_definitions = spec.tools.get_definitions()
         messages, provider_context = await self.context_governor.prepare_request(
             request_state,
@@ -892,6 +885,7 @@ class AgentRunner:
             messages,
             tools=tool_definitions,
         )
+        _raise_if_cancelling()
         wants_streaming = hook.wants_streaming()
         provider_context = replace(
             provider_context or ProviderCallContext(),
@@ -1009,6 +1003,7 @@ class AgentRunner:
         request_started_at = time.perf_counter()
         try:
             response = await coro
+            _raise_if_cancelling()
         except asyncio.CancelledError:
             _pause_generation()
             await _close_native_reasoning()
@@ -1230,6 +1225,7 @@ class AgentRunner:
         request_state: ModelRequestState,
         transcript: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
+        _raise_if_cancelling()
         messages, provider_context = await self.context_governor.prepare_request(
             request_state,
             messages,
@@ -1241,6 +1237,7 @@ class AgentRunner:
             messages,
             tools=None,
         )
+        _raise_if_cancelling()
         response = await spec.runtime.provider.chat_stream_with_retry(
             **kwargs,
             provider_context=replace(
@@ -1248,11 +1245,13 @@ class AgentRunner:
                 response_preset=spec.runtime.model_preset or "",
             ),
         )
+        _raise_if_cancelling()
         await self.context_governor.summarize_provider_compaction(
             request_state,
             response,
             current_request_boundary=(len(transcript) if transcript is not None else None),
         )
+        _raise_if_cancelling()
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
 

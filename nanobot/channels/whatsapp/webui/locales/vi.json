@@ -9,7 +9,7 @@
         "placeholder": "Số điện thoại hoặc ID WhatsApp"
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Quy tắc nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",

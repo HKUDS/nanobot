@@ -15,7 +15,6 @@ from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
 import httpx
 from loguru import logger
-from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext, tool_log_content_allowed
@@ -25,7 +24,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config_base import Base
+from nanobot.agent.tools.web_config import WebFetchConfig, WebSearchConfig, WebToolsConfig
 from nanobot.utils.helpers import build_image_content_blocks
 
 # Shared constants
@@ -58,29 +57,6 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
     {"name": "anysearch", "label": "AnySearch", "credential": "optional_api_key"},
 )
-
-
-class WebSearchConfig(Base):
-    """Web search configuration."""
-    provider: str = "duckduckgo"
-    api_key: str = ""
-    base_url: str = ""
-    max_results: int = 5
-    timeout: int = 30
-
-
-class WebFetchConfig(Base):
-    """Web fetch tool configuration."""
-    use_jina_reader: bool = True
-
-
-class WebToolsConfig(Base):
-    """Web tools configuration."""
-    enable: bool = True
-    proxy: str | None = None
-    user_agent: str | None = None
-    search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 def _strip_tags(text: str) -> str:
@@ -1023,8 +999,7 @@ class WebSearchTool(Tool):
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
-            # Note: duckduckgo_search is synchronous and does its own requests
-            # We run it in a thread to avoid blocking the loop
+            # DDGS.text performs synchronous requests; run it in a thread to avoid blocking the loop.
             from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
 
             ddgs_type = cast(Any, DDGS)
@@ -1166,7 +1141,7 @@ class WebFetchTool(Tool):
         max_chars = cast(int, kwargs.pop("maxChars", max_chars) or self.max_chars)
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
-            return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
+            return ToolResult.error(json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False))
 
         # Detect and fetch images directly to avoid Jina's textual image captioning.
         # This local preflight also proves that no credential-bearing URL occurs
@@ -1184,9 +1159,9 @@ class WebFetchTool(Tool):
                     )
                 )
                 if redirect_error:
-                    return json.dumps({"error": redirect_error, "url": url}, ensure_ascii=False)
+                    return ToolResult.error(json.dumps({"error": redirect_error, "url": url}, ensure_ascii=False))
                 if r is None:
-                    return json.dumps({"error": "Fetch failed", "url": url}, ensure_ascii=False)
+                    return ToolResult.error(json.dumps({"error": "Fetch failed", "url": url}, ensure_ascii=False))
                 jina_remote_safe = not chain_carries_credentials
 
                 try:
@@ -1201,7 +1176,7 @@ class WebFetchTool(Tool):
         except Exception as e:
             unsafe_error = _unsafe_url_request_error(e)
             if unsafe_error is not None:
-                return json.dumps({"error": f"URL validation failed: {unsafe_error}", "url": url}, ensure_ascii=False)
+                return ToolResult.error(json.dumps({"error": f"URL validation failed: {unsafe_error}", "url": url}, ensure_ascii=False))
             logger.debug(
                 "Pre-fetch image detection failed for {} ({})",
                 _redact_url_for_log(url),
@@ -1277,9 +1252,9 @@ class WebFetchTool(Tool):
                     headers={"User-Agent": self.user_agent},
                 )
                 if redirect_error:
-                    return json.dumps({"error": redirect_error, "url": url}, ensure_ascii=False)
+                    return ToolResult.error(json.dumps({"error": redirect_error, "url": url}, ensure_ascii=False))
                 if r is None:
-                    return json.dumps({"error": "Fetch failed", "url": url}, ensure_ascii=False)
+                    return ToolResult.error(json.dumps({"error": "Fetch failed", "url": url}, ensure_ascii=False))
                 r.raise_for_status()
 
             ctype = r.headers.get("content-type", "")
@@ -1318,14 +1293,14 @@ class WebFetchTool(Tool):
                 _redact_url_for_log(url),
                 type(e).__name__,
             )
-            return json.dumps({"error": f"Proxy error: {e}", "url": url}, ensure_ascii=False)
+            return ToolResult.error(json.dumps({"error": f"Proxy error: {e}", "url": url}, ensure_ascii=False))
         except Exception as e:
             logger.warning(
                 "WebFetch error for {} ({})",
                 _redact_url_for_log(url),
                 type(e).__name__,
             )
-            return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
+            return ToolResult.error(json.dumps({"error": str(e), "url": url}, ensure_ascii=False))
 
     def _extract_readable_html(self, html_content: str, extract_mode: str) -> str:
         from readability import Document  # pyright: ignore[reportMissingTypeStubs]

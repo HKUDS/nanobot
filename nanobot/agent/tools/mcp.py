@@ -52,6 +52,10 @@ _TRANSIENT_EXC_NAMES: frozenset[str] = frozenset((
 
 _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yarn", "bunx"))
 
+# Mirror the MCP SDK's httpx defaults (MCP_DEFAULT_TIMEOUT / MCP_DEFAULT_SSE_READ_TIMEOUT).
+_HTTP_TIMEOUT = 30.0
+_HTTP_READ_TIMEOUT = 300.0
+
 # Characters allowed in tool names by model providers (Anthropic, OpenAI, etc.).
 # Replace anything outside [a-zA-Z0-9_-] with underscore and collapse runs.
 _SANITIZE_RE = re.compile(r"_+")
@@ -1011,7 +1015,7 @@ async def connect_mcp_servers(
     entered the MCP SDK contexts alive so reconnect and shutdown can close
     AnyIO cancel scopes from their owning task.
     """
-    from mcp import ClientSession, StdioServerParameters
+    from mcp import ClientSession, StdioServerParameters, types
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
@@ -1120,7 +1124,13 @@ async def connect_mcp_servers(
                     "headers": cfg.headers or None,
                     "event_hooks": {"request": [_validate_mcp_request_url]},
                     "follow_redirects": True,
-                    "timeout": httpx.Timeout(30.0, connect=10.0),
+                    # Read must outlast the tool call itself; otherwise a slow tool
+                    # fails with ReadTimeout before tool_timeout is reached.
+                    "timeout": httpx.Timeout(
+                        _HTTP_TIMEOUT,
+                        connect=10.0,
+                        read=max(_HTTP_READ_TIMEOUT, cfg.tool_timeout),
+                    ),
                     **_pinned_transport_kwargs(),
                 }
                 if oauth_auth is not None:
@@ -1139,14 +1149,25 @@ async def connect_mcp_servers(
             session = await server_stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
 
-            tools = await session.list_tools()
+            # Finish discovery before registering tools so a failed page leaves no partial set.
+            page = await session.list_tools()
+            tool_defs = list(page.tools)
+            seen_cursors: set[str] = set()
+            while page.nextCursor is not None:
+                cursor = page.nextCursor
+                if cursor in seen_cursors:
+                    raise ValueError("MCP tools/list returned a repeated pagination cursor")
+                seen_cursors.add(cursor)
+                page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
+                tool_defs.extend(page.tools)
+
             enabled_tools = set(cfg.enabled_tools)
             allow_all_tools = "*" in enabled_tools
             registered_count = 0
             matched_enabled_tools: set[str] = set()
-            available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
-            for tool_def in tools.tools:
+            available_raw_names = [tool_def.name for tool_def in tool_defs]
+            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tool_defs]
+            for tool_def in tool_defs:
                 wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                 if (
                     not allow_all_tools

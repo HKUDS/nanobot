@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger as default_logger
 
+from nanobot.agent.subagent import SubagentControlError
 from nanobot.providers.base import LLMUsage
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
+
+if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
 
 
 class SessionMetadataReader(Protocol):
@@ -20,16 +24,27 @@ class SessionMetadataReader(Protocol):
 
 
 class WebUISessionProjection:
-    """Project persisted session metadata into stable WebUI protocol fields."""
+    """Project session metadata and owned child observations for WebUI clients."""
 
     def __init__(
         self,
         sessions: SessionMetadataReader | None,
         *,
+        subagent_manager: SubagentManager | None = None,
         log: Any = default_logger,
     ) -> None:
         self._sessions = sessions
+        self._subagents = subagent_manager
         self._log = log
+
+    def subagent_task(self, session_key: str, task_id: str) -> dict[str, object] | None:
+        """Read the current public snapshot only while the parent still owns it."""
+        if self._subagents is None:
+            return None
+        try:
+            return self._subagents.check(task_id, session_key).as_dict()
+        except SubagentControlError:
+            return None
 
     def attach_fields(self, session_key: str) -> dict[str, Any]:
         """Return the session runtime facts sent with an attach handshake."""

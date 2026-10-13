@@ -1,8 +1,6 @@
-"""Shared helpers for decoding ``data:...;base64,...`` URLs to disk.
+"""Data-URL persistence for API uploads and audio transcription.
 
-Historically lived in ``nanobot.api.server``; now shared by the WebSocket
-channel so the ``api`` + ``websocket`` ingress paths apply the same parsing,
-size guard, and filesystem layout.
+Binary WebUI uploads share the media filename layout through ``media_destination``.
 """
 
 from __future__ import annotations
@@ -84,10 +82,15 @@ def save_base64_data_url(
     limit = DEFAULT_MAX_BYTES if max_bytes is None else max_bytes
     if len(raw) > limit:
         raise FileSizeExceeded(f"File exceeds {limit // (1024 * 1024)}MB limit")
+    dest = media_destination(media_dir, mime_type, filename=filename)
+    dest.write_bytes(raw)
+    return str(dest)
+
+
+def media_destination(media_dir: Path, mime_type: str, *, filename: str | None = None) -> Path:
+    """Choose the shared media layout for binary and data-URL ingress."""
     ext = _MIME_EXTENSION_OVERRIDES.get(mime_type) or mimetypes.guess_extension(mime_type) or ".bin"
     base = safe_filename(filename or "")
     stem = Path(base).stem[:80] if base else ""
     saved_name = f"{uuid.uuid4().hex[:12]}_{stem}{ext}" if stem else f"{uuid.uuid4().hex[:12]}{ext}"
-    dest = media_dir / safe_filename(saved_name)
-    dest.write_bytes(raw)
-    return str(dest)
+    return media_dir / safe_filename(saved_name)

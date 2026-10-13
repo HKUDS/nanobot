@@ -1,4 +1,10 @@
 import {
+  CompletedTaskIcon,
+  WebSearchIcon,
+  McpIcon,
+  ToolRunIcon,
+} from "@/components/icons/product-icons";
+import {
   Fragment,
   memo,
   useCallback,
@@ -8,16 +14,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  CheckCircle2,
-  Clock3,
-  Layers,
-  Search,
-  Server,
-  Terminal,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+import { Clock3, Layers, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText } from "@/components/MarkdownText";
@@ -26,6 +23,7 @@ import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { coalesceActivityMessages } from "@/components/thread/activity/activity-message-model";
 import {
   compactActivityPath,
+  formatActivityTarget,
   redactShellCommand,
 } from "@/components/thread/activity/activity-text";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
@@ -42,7 +40,6 @@ import { ThinkingReasoningShell } from "@/components/thread/activity/ThinkingRea
 import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
 import {
   describeTraceLine,
-  type TraceDescription,
 } from "@/components/thread/activity/trace-activity-model";
 import { WebSearchRun } from "@/components/thread/activity/WebSearchRun";
 import { webSearchRunsByTraceLine } from "@/components/thread/activity/web-search-model";
@@ -51,6 +48,7 @@ import {
   isReasoningOnlyAssistant,
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
@@ -178,7 +176,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
     [messages, props.isTurnStreaming],
   );
-  if (props.expanded !== undefined || displayMode === "summary" || !editsByMessage.size) {
+  if (displayMode === "summary" || !editsByMessage.size) {
     return <FoldedAgentActivity {...props} />;
   }
 
@@ -191,6 +189,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     items.push(
       <FoldedAgentActivity
         {...props}
+        detailsId={undefined}
         key={pending[0]?.id ?? "tail-status"}
         messages={pending}
         isTurnStreaming={last && props.isTurnStreaming}
@@ -224,7 +223,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
   }
   flush(true);
   return (
-    <div className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
+    <div id={props.detailsId} className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
       {items}
     </div>
   );
@@ -248,7 +247,7 @@ function FoldedAgentActivity({
   detailsId,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
-  const fileEditDisplayMode = useFileEditDisplayMode();
+  const { activityMode, fileEditDisplayMode } = useLocalPreferences();
   const pageVisible = usePageVisibility();
   const threadVisible = useThreadVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
@@ -286,12 +285,15 @@ function FoldedAgentActivity({
   const [now, setNow] = useState(() => Date.now());
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
-  /** Live work stays open; completed work briefly shows the done state, then tucks away. */
+  /** Auto follows execution; expanded keeps details open unless manually collapsed. */
   const outerExpanded = expanded ?? (
     userToggledOuter
       ? outerOpenLocal
-      : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming)
+      : activityMode === "expanded" || isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming)
   );
+  useEffect(() => {
+    setUserToggledOuter(false);
+  }, [activityMode]);
   const deferredTraceRefs = useMemo(
     () => Array.from(new Set(
       messages
@@ -344,14 +346,14 @@ function FoldedAgentActivity({
   const activityLabel = retryStatus?.state === "exhausted"
     ? t("message.retryExhausted", {
         error: retryError,
-        defaultValue: "{{error}} · ending turn",
+        defaultValue: "{{error}}. Ending turn.",
       })
     : retryStatus?.state === "waiting"
       ? t("message.retryWaiting", {
           error: retryError,
           seconds: retrySeconds,
           attempt: retryAttempt,
-          defaultValue: "{{error}} · retrying in {{seconds}}s · attempt {{attempt}}",
+          defaultValue: "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
         })
       : isTurnStreaming
     ? t("message.activityWorkingFor", {
@@ -798,15 +800,16 @@ function ActivityTraceRow({
   active: boolean;
   state?: GenericToolState;
 }) {
+  const { t } = useTranslation();
   const status = state?.status ?? (active ? "running" : "done");
-  const trace = describeTraceLine(line, status, state?.result);
+  const trace = describeTraceLine(line, status, t, state?.result);
   const rowActive = status === "running" && active;
   const Icon = trace.icon === "clock" ? Clock3 : (trace.kind === "search"
-    ? Search
+    ? WebSearchIcon
     : trace.kind === "done"
-      ? CheckCircle2
+      ? CompletedTaskIcon
       : trace.kind === "tool"
-        ? Wrench
+        ? ToolRunIcon
         : Layers);
   if (trace.url && trace.host) {
     return (
@@ -822,10 +825,12 @@ function ActivityTraceRow({
   }
   return (
     <ActivityStep
-      marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={rowActive} />}
+      icon={Icon}
       active={rowActive && trace.kind !== "done"}
       tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
-      label={[trace.label, trace.detail].filter(Boolean).join(" ")}
+      label={trace.kind === "search" ? trace.label : formatActivityTarget(t, trace.label, trace.detail)}
+      detail={trace.kind === "search" ? trace.detail : trace.aside}
+      detailClassName={trace.kind === "search" ? "whitespace-pre-line" : undefined}
     />
   );
 }
@@ -872,30 +877,6 @@ function toolProgressError(error: unknown): string | undefined {
     }
   }
   return undefined;
-}
-
-function TraceIconMark({
-  trace,
-  fallbackIcon: FallbackIcon,
-  active,
-}: {
-  trace: TraceDescription;
-  fallbackIcon: LucideIcon;
-  active: boolean;
-}) {
-  return (
-    <FallbackIcon
-      className={cn(
-        "h-3.5 w-3.5 shrink-0",
-        trace.kind === "done"
-          ? "text-emerald-500/75"
-          : active
-            ? "text-muted-foreground/75"
-            : "text-muted-foreground/45",
-      )}
-      aria-hidden
-    />
-  );
 }
 
 const CLI_RUN_TOOL_NAMES = new Set(["run_cli_app", "cli_anything_run"]);
@@ -1264,6 +1245,7 @@ function CliRunGroup({
 }
 
 function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
+  const { t } = useTranslation();
   const args = compactActivityPath(redactShellCommand(formatCliArgs(run)));
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
@@ -1271,14 +1253,18 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const displayName = app?.display_name || titleFromPresetName(run.name);
-  const action = failed ? "Could not use" : rowActive ? "Using" : "Used";
-  const label = `${action} ${displayName}${args ? ` · ${args}` : ""}`;
+  const label = t(
+    `message.${failed ? "cliActivityFailedOne" : rowActive ? "cliActivityRunningOne" : "cliActivityRanOne"}`,
+    { name: displayName },
+  );
 
   return (
     <ActivityStep
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
+      detail={args}
+      detailClassName="font-mono text-[12px]"
       marker={(
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
@@ -1339,6 +1325,7 @@ function McpRunGroup({
 }
 
 function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo }) {
+  const { t } = useTranslation();
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
@@ -1349,14 +1336,16 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
     run.toolName,
     run.args,
     failed ? "error" : rowActive ? "running" : "done",
+    t,
   );
-  const label = `${activity.action}${activity.target ? ` ${activity.target}` : ""} · ${displayName}`;
+  const label = formatActivityTarget(t, activity.action, activity.target ?? "");
 
   return (
     <ActivityStep
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
+      detail={displayName}
       marker={(
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
@@ -1384,7 +1373,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
           ) : preset ? (
             mcpPresetInitials(preset).slice(0, 2)
           ) : (
-            <Server className="h-3 w-3" aria-hidden />
+            <McpIcon className="h-3 w-3" aria-hidden />
           )}
         </span>
       )}

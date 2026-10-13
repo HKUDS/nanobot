@@ -20,6 +20,7 @@ from nanobot.bus.outbound_events import (
     TurnModelUpdatedEvent,
     UserInputEvent,
 )
+from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.session.webui_turns import clear_websocket_turn_if_current
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
@@ -157,6 +158,7 @@ class WebUIOutboundProjector:
                 SessionUpdatedEvent,
                 GoalStatusEvent,
                 GoalStateSyncEvent,
+                SubagentTaskChanged,
                 ContextCompactionEvent,
             )
             log = (
@@ -243,6 +245,16 @@ class WebUIOutboundProjector:
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
             await self._transport.send_session_updated(msg.chat_id, scope=session_update_scope)
+            return
+        if isinstance(event, SubagentTaskChanged):
+            if conns:
+                task = self._session_projection.subagent_task(webui_session_key(msg.chat_id), event.task_id)
+                if task is not None:
+                    await self._transport.send_payload(
+                        msg.chat_id,
+                        {"event": "subagent_task", "chat_id": msg.chat_id, "task": task},
+                        persistence="transient",
+                    )
             return
         if isinstance(event, SessionUpdatedEvent):
             if conns:

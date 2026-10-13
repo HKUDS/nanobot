@@ -19,7 +19,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_runtime_subdir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
+from nanobot.events import ContextCompactionEvent
 
 try:
     import socketio
@@ -350,6 +351,10 @@ class MochatChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send outbound message to session or panel."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         if not self.config.claw_token:
             self.logger.warning("claw_token missing, skip send")
             return

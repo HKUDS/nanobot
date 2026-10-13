@@ -164,6 +164,7 @@ async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monke
             "name": "read_file",
             "description": "Read a file",
             "parameters": {"type": "object"},
+            "strict": False,
         },
         {"type": "x_search"},
     ]
@@ -242,6 +243,7 @@ async def test_explicit_parameterized_x_search_is_preserved_without_catalog_look
             "name": "read_file",
             "description": "Read a file",
             "parameters": {"type": "object"},
+            "strict": False,
         },
         hosted_tool,
         {"type": "code_interpreter", "container": "auto"},
@@ -288,6 +290,7 @@ async def test_explicit_empty_tools_disables_catalog_lookup_and_hosted_tool(monk
             "name": "read_file",
             "description": "Read a file",
             "parameters": {"type": "object"},
+            "strict": False,
         }
     ]
     assert "max_turns" not in bodies[0]
@@ -327,6 +330,7 @@ async def test_provider_keeps_local_x_search_when_model_does_not_support_hosted_
             "name": "x_search",
             "description": "A local search fallback",
             "parameters": {"type": "object"},
+            "strict": False,
         }
     ]
     assert "max_turns" not in bodies[0]
