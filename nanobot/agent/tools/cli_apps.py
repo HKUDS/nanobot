@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
 from nanobot.agent.tools.context import RequestContext, ToolContext
 from nanobot.agent.tools.schema import (
     ArraySchema,
@@ -17,7 +18,6 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.apps.cli.utils import runtime_lines_for_request
-from nanobot.config.tool_schemas import CliAppsToolConfig
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.security.workspace_access import current_tool_workspace
 

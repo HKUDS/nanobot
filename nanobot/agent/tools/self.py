@@ -19,7 +19,7 @@ from nanobot.agent.tools.runtime_control import (
     RuntimeControl,
     RuntimeSnapshot,
 )
-from nanobot.config.tool_schemas import MyToolConfig
+from nanobot.agent.tools.self_config import MyToolConfig
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import ToolContext

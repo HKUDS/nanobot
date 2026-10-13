@@ -23,6 +23,7 @@ class ImportRule:
     sources: tuple[str, ...]
     forbidden: tuple[str, ...]
     type_only_allowed: tuple[str, ...] = ()
+    allowed_targets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,15 @@ _ADAPTERS = (
     "nanobot.cli",
     "nanobot.gateway",
     "nanobot.webui",
+)
+
+_TOOL_CONFIG_MODULES = (
+    "nanobot.agent.tools.cli_apps_config",
+    "nanobot.agent.tools.filesystem_config",
+    "nanobot.agent.tools.image_generation_config",
+    "nanobot.agent.tools.self_config",
+    "nanobot.agent.tools.shell_config",
+    "nanobot.agent.tools.web_config",
 )
 
 IMPORT_RULES = (
@@ -83,6 +93,13 @@ IMPORT_RULES = (
         "configuration-contracts",
         ("nanobot.config", "nanobot.config_base"),
         (*_ADAPTERS, "nanobot.agent", "nanobot.apps", "nanobot.session"),
+        allowed_targets=_TOOL_CONFIG_MODULES,
+    ),
+    ImportRule(
+        "tool-configuration-contracts",
+        _TOOL_CONFIG_MODULES,
+        (*_ADAPTERS, "nanobot.agent", "nanobot.apps", "nanobot.session", "nanobot.config"),
+        allowed_targets=_TOOL_CONFIG_MODULES,
     ),
     ImportRule(
         "shared-primitives",
@@ -211,6 +228,8 @@ def find_violations(
             continue
         for edge in collector.edges:
             if edge.type_only and edge.target in rule.type_only_allowed:
+                continue
+            if any(_within(edge.target, prefix) for prefix in rule.allowed_targets):
                 continue
             if any(_within(edge.target, prefix) for prefix in rule.forbidden):
                 violations.append(Violation(rule.name, edge.target, edge.line))

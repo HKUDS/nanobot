@@ -7,23 +7,21 @@ from typing import Any, ClassVar, Literal, cast
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
+from nanobot.agent.tools.filesystem_config import FileToolsConfig
+from nanobot.agent.tools.image_generation_config import ImageGenerationToolConfig
+from nanobot.agent.tools.self_config import MyToolConfig
+from nanobot.agent.tools.shell_config import ExecToolConfig
+from nanobot.agent.tools.web_config import (
+    WebFetchConfig as WebFetchConfig,
+)
+from nanobot.agent.tools.web_config import (
+    WebSearchConfig as WebSearchConfig,
+)
+from nanobot.agent.tools.web_config import WebToolsConfig
 from nanobot.config.home import get_default_workspace
 from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
-from nanobot.config.tool_schemas import (
-    CliAppsToolConfig,
-    ExecToolConfig,
-    FileToolsConfig,
-    ImageGenerationToolConfig,
-    MyToolConfig,
-    WebToolsConfig,
-)
-from nanobot.config.tool_schemas import (
-    WebFetchConfig as WebFetchConfig,
-)
-from nanobot.config.tool_schemas import (
-    WebSearchConfig as WebSearchConfig,
-)
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
 from nanobot.providers.generation import GenerationSettings
@@ -427,7 +425,7 @@ class MCPServerConfig(Base):
 
 
 class ToolsConfig(Base):
-    """Root tool settings with independently importable configuration DTOs."""
+    """Root settings assembled from tool-owned configuration models."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)

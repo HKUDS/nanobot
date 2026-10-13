@@ -91,7 +91,8 @@ def test_core_boundary_includes_type_dependencies(source: str) -> None:
         ("nanobot.session.recovery", "session-storage"),
         ("nanobot.security.workspace_policy", "security-primitives"),
         ("nanobot.agent.turn_delivery", "core-execution"),
-        ("nanobot.config.tool_schemas", "configuration-contracts"),
+        ("nanobot.config.schema", "configuration-contracts"),
+        ("nanobot.agent.tools.cli_apps_config", "tool-configuration-contracts"),
         ("nanobot.utils.file_io", "shared-primitives"),
     ],
 )
@@ -132,6 +133,18 @@ def test_tool_configs_import_the_shared_base_directly(source: str) -> None:
     ) == []
 
 
+def test_configuration_imports_the_six_tool_owned_config_contracts() -> None:
+    source = (
+        "from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig\n"
+        "from nanobot.agent.tools.filesystem_config import FileToolsConfig\n"
+        "from nanobot.agent.tools.image_generation_config import ImageGenerationToolConfig\n"
+        "from nanobot.agent.tools.self_config import MyToolConfig\n"
+        "from nanobot.agent.tools.shell_config import ExecToolConfig\n"
+        "from nanobot.agent.tools.web_config import WebToolsConfig\n"
+    )
+    assert find_violations(source, "nanobot.config.schema") == []
+
+
 @pytest.mark.parametrize(
     ("module", "source"),
     [
@@ -140,6 +153,7 @@ def test_tool_configs_import_the_shared_base_directly(source: str) -> None:
         ("nanobot.session.webui_turns", "from nanobot.webui import transcript"),
         ("nanobot.cli.gateway_runtime", "from nanobot.agent.loop import AgentLoop"),
         ("nanobot.channels.websocket.runtime", "from nanobot.webui import inbound_commands"),
+        ("nanobot.agent.tools.cli_apps_config", "from nanobot.config_base import Base"),
     ],
 )
 def test_existing_runtime_and_composition_dependencies_remain_allowed(
@@ -186,8 +200,16 @@ def test_existing_runtime_and_composition_dependencies_remain_allowed(
             "tool-config-base", "nanobot.config.schema.Base", 1,
         ),
         (
-            "nanobot/config/tool_schemas.py", "from nanobot.agent.tools.shell import ExecTool",
+            "nanobot/config/schema.py", "from nanobot.agent.tools.shell import ExecTool",
             "configuration-contracts", "nanobot.agent.tools.shell.ExecTool", 1,
+        ),
+        (
+            "nanobot/agent/tools/cli_apps_config.py", "from .cli_apps import CliAppsTool",
+            "tool-configuration-contracts", "nanobot.agent.tools.cli_apps.CliAppsTool", 1,
+        ),
+        (
+            "nanobot/agent/tools/web_config.py", "from nanobot.config.schema import Config",
+            "tool-configuration-contracts", "nanobot.config.schema.Config", 1,
         ),
         (
             "nanobot/providers/oauth_catalog_cache.py",
@@ -213,3 +235,22 @@ def test_cli_rejects_a_violation_and_reports_its_source_location(
 
     assert result.returncode == 1
     assert result.stderr.strip() == f"{relative}:{line}: [{rule}] must not import {target}"
+
+
+def test_cli_accepts_a_tool_owned_config_import(tmp_path: Path) -> None:
+    path = tmp_path / "nanobot/config/schema.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.check_import_boundaries", "--root", str(tmp_path)],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

@@ -8,6 +8,8 @@ New capabilities should be added via `channels/`, `tools/`, skills, or MCP serve
 
 Runtime state fan-out follows the same boundary. `MessageBus.publish` awaits local subscribers for turn/run/model/goal state changes; `MessageBus.publish_event` queues routed channel delivery without waiting for network sends. Both carry `AgentEvent` values. Runner hooks publish typed output through the turn's scoped `EventSink`; direct-call callbacks are adapted at the execution boundary. WebUI/WebSocket wire details, title refreshes, and goal-state sync belong in `nanobot.session.webui_turns.WebuiTurnCoordinator` or the relevant channel adapter.
 
+Tools and channels own their configuration, metadata, and activation behavior. Tool configuration models live beside their implementations in `agent/tools/*_config.py`; channel descriptors and configuration stay in their channel packages. The root configuration schema assembles these contracts without importing their runtime implementations. Tool classes expose their configuration through `config_key` and `config_cls()`.
+
 ## Executable import boundaries
 
 Run `python -m scripts.check_import_boundaries` from the repository root. The Python CI job runs this command on the coverage matrix entry. Rules live in `scripts/check_import_boundaries.py` and protect direct imports by module responsibility:
@@ -19,7 +21,8 @@ Run `python -m scripts.check_import_boundaries` from the repository root. The Py
 | `security-primitives` | `security/` | No imports from those adapters, `agent/`, or `session/`. |
 | `websocket-transport` | `channels/websocket/runtime.py` | Application command, mutation, and projection dependencies listed in the rule stay behind the owning coordinators. |
 | `tool-config-base` | `agent/tools/`, `channels/` | Direct imports of `Base` use `nanobot.config_base`, not the aggregate `config.schema`. |
-| `configuration-contracts` | `config/`, `config_base.py` | No imports from adapters, agent execution, apps, or sessions. Tool DTOs live in `config/tool_schemas.py`. |
+| `configuration-contracts` | `config/`, `config_base.py` | No imports from adapters, agent execution, apps, or sessions. The six tool-owned `*_config` modules listed in the rule are allowed for root configuration composition. |
+| `tool-configuration-contracts` | Tool-owned `agent/tools/*_config.py` modules listed in the rule | No imports from runtime implementations, adapters, apps, sessions, or aggregate configuration. Shared tool configuration and `config_base` remain allowed. |
 | `shared-primitives` | File I/O, skill metadata, generation settings, usage types, automation specs | No imports from adapters, agent execution, apps, sessions, or aggregate configuration. |
 | `oauth-catalog-cache` | `providers/oauth_catalog_cache.py` | No imports from the provider dispatcher or concrete OAuth providers. |
 
@@ -57,4 +60,4 @@ Every new cast must be supported by a boundary check or an invariant established
 
 ## Explicit over magical
 
-Configuration belongs in `config/` Pydantic models, with the aggregate schema in `config/schema.py` and tool contracts in `config/tool_schemas.py`. Provider auto-detection must remain traceable from the factory to the concrete provider class.
+The aggregate configuration schema lives in `config/schema.py`; tools and channels own their configuration contracts. These contracts must load without their runtime implementations. Provider auto-detection must remain traceable from the factory to the concrete provider class.

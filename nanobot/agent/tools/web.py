@@ -24,7 +24,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config.tool_schemas import WebFetchConfig, WebSearchConfig, WebToolsConfig
+from nanobot.agent.tools.web_config import WebFetchConfig, WebSearchConfig, WebToolsConfig
 from nanobot.utils.helpers import build_image_content_blocks
 
 # Shared constants
