@@ -1,7 +1,8 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { CapabilityMentionToken, type CapabilityMentionSegment } from "@/components/CliAppMentionText";
+import { CapabilityMentionToken } from "@/components/CliAppMentionText";
+import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { FileActions } from "@/components/FileActions";
 import { InlineTokenHighlight, INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
@@ -14,7 +15,8 @@ import { UserMessageText } from "@/components/UserMessageText";
 import { WebLink } from "@/components/WebLink";
 import * as ProductIcons from "@/components/icons/product-icons";
 import { HostCompatibilityDialog } from "@/components/remote/HostCompatibilityDialog";
-import { HostConnectionStatus, type HostConnectionState } from "@/components/remote/HostConnectionStatus";
+import { HostConnectionStatus } from "@/components/remote/HostConnectionStatus";
+import type { HostConnectionState } from "@/components/remote/remote-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";

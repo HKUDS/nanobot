@@ -69,9 +69,10 @@ export function componentInventory(repo: string): ComponentSource[] {
     visit(source);
   }
 
-  return [...sources].filter(([file]) => file.endsWith(".tsx")
-    && (file.startsWith(path.join(frontend, "components") + path.sep)
-      || channelRoots.some((root) => file.startsWith(root + path.sep))))
+  return [...sources].filter(([file]) =>
+    (file.endsWith(".tsx") && file.startsWith(path.join(frontend, "components") + path.sep))
+    || channelRoots.some((root) => file.startsWith(root + path.sep)
+      && (file.endsWith(".tsx") || file === path.join(root, "index.ts"))))
     .map(([file, source]) => {
       const names = new Set<string>();
       for (const statement of source.statements) {
@@ -99,7 +100,7 @@ export function componentInventory(repo: string): ComponentSource[] {
       const id = relative(file);
       return {
         path: id,
-        name: path.basename(file, ".tsx"),
+        name: path.basename(file).replace(/\.tsx?$/, ""),
         group: groupFor(id),
         exports: [...names].sort(),
         usedBy: [...(usedBy.get(file) ?? [])].sort(),

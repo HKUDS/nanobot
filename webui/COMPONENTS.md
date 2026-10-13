@@ -25,6 +25,10 @@ Feature screens that own gateway requests, session state, or host connections ar
 
 Runtime adapters and presentation views have separate responsibilities. Adapters subscribe to clients, load data, enforce browser restrictions, and perform service actions. Their views receive display data and operation callbacks. Production screens and gallery examples mount the same views, including host menus, pairing, file/web previews, session tasks, automation results, version information, and notification preferences. Connected source entries link to the corresponding view examples.
 
+Every channel registration has a preview. Channels with shared configuration forms use their production setup view; Linear, Feishu, Weixin, and WhatsApp use their channel-owned views, including authorization, verification, assistant management, and connection reset. The source inventory includes channel `webui/index.ts` registrations as well as `.tsx` components. Connected adapters link to the views they own.
+
+Channel fixture fields, defaults, and requirements come from the Python channel setup contracts. Regenerate `src/dev/gallery/channel-fixtures.ts` with `python webui/src/dev/gallery/generate_channel_fixtures.py` from the repository root after changing those contracts; add `--check` to verify the snapshot. This developer command loads channel descriptors without starting a gateway. Running the gallery uses the committed snapshot and requires no Python process.
+
 ## Where components belong
 
 | Location | Ownership | Examples |

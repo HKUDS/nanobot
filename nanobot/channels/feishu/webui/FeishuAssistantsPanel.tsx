@@ -1,14 +1,6 @@
-import { useTranslation } from "react-i18next";
-
-import {
-  channelTranslator,
-} from "@/channel-plugins/i18n";
 import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
 import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
-import type {
-  NanobotChannelInstanceInfo,
-  NanobotFeatureInfo,
-} from "@/lib/types";
+import { FeishuAssistantsPanelView } from "./FeishuAssistantsPanelView";
 import { FeishuConnectFlow } from "./FeishuConnectFlow";
 
 export function FeishuAssistantsPanel({
@@ -17,60 +9,17 @@ export function FeishuAssistantsPanel({
   showBrandLogos,
   onFeaturesUpdate,
 }: ChannelPluginPanelProps) {
-  const { t } = useTranslation();
-  const tx = channelTranslator(t, "feishu");
-  const instances = feature.instances?.length
-    ? feature.instances
-    : [defaultFeishuInstance(feature)];
-
-  return (
-    <ChannelInstancesPanel
-      feature={feature}
-      showBrandLogos={showBrandLogos}
-      instances={instances}
-      onFeaturesUpdate={onFeaturesUpdate}
-      customization={{
-        toggleAriaLabel: (instance) => tx("custom.toggleAssistant", "{{name}} assistant", {
-          name: instanceDisplayName(instance),
-        }),
-        configuredLabel: tx("custom.configured", "Connected"),
-        needsSetupLabel: tx("custom.needsSetup", "Needs authorization"),
-        renderInstanceSummary: () => null,
-        renderInstanceAction: (instance) => instance.configured ? null : (
-          <FeishuConnectFlow
-            key={instance.id}
-            token={token}
-            instanceId={instance.id}
-            mode="replace"
-            idleLabel={t("settings.channels.connect", { defaultValue: "Connect" })}
-            onFeaturesUpdate={onFeaturesUpdate}
-          />
-        ),
-        footer: instances.some((instance) => instance.configured) ? (
-          <FeishuConnectFlow
-            key={instances.map((instance) => instance.id).join(",")}
-            token={token}
-            mode="create"
-            idleLabel={tx("custom.addAssistant", "Add another assistant")}
-            onFeaturesUpdate={onFeaturesUpdate}
-          />
-        ) : null,
-      }}
-    />
-  );
-}
-
-function defaultFeishuInstance(feature: NanobotFeatureInfo): NanobotChannelInstanceInfo {
-  return {
-    id: "default",
-    name: "nanobot",
-    enabled: feature.enabled,
-    configured: Boolean(feature.configured),
-    config_values: feature.config_values ?? {},
-    configured_fields: feature.configured_fields ?? [],
-  };
-}
-
-function instanceDisplayName(instance: NanobotChannelInstanceInfo): string {
-  return instance.display_name?.trim() || instance.name.trim() || instance.id;
+  return <ChannelInstancesPanel
+    feature={feature}
+    showBrandLogos={showBrandLogos}
+    onFeaturesUpdate={onFeaturesUpdate}
+    renderView={(props) => <FeishuAssistantsPanelView
+      {...props}
+      renderConnectFlow={(options) => <FeishuConnectFlow
+        {...options}
+        token={token}
+        onFeaturesUpdate={onFeaturesUpdate}
+      />}
+    />}
+  />;
 }

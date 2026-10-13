@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Gallery, examples } from "@/dev/gallery/Gallery";
 import { componentInventory } from "@/dev/gallery/inventory-plugin";
 import { foundationPath } from "@/dev/gallery/inventory";
+import { registeredChannelUiContributions } from "@/channel-plugins/registry";
 
 const inventory = componentInventory(resolve(cwd(), ".."));
 
@@ -24,7 +25,7 @@ it("indexes shared component exports and their application and channel consumers
   expect(toggle?.exports).toContain("ToggleButton");
   expect(toggle?.usedBy).toEqual(expect.arrayContaining([
     "webui/src/components/thread/WorkspaceControls.tsx",
-    "nanobot/channels/linear/webui/LinearMemberAccess.tsx",
+    "nanobot/channels/linear/webui/LinearMemberAccessView.tsx",
   ]));
   expect(inventory.find((item) => item.path === "nanobot/channels/linear/webui/LinearMemberAccess.tsx")?.group)
     .toBe("Channels / linear");
@@ -59,6 +60,19 @@ it("lets the developer retry a failed inventory request", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the inventory");
   await userEvent.click(screen.getByRole("button", { name: "Refresh inventory" }));
   expect(await screen.findByRole("heading", { name: "Button · 按钮" })).toBeVisible();
+});
+
+it("covers every registered channel and its presentation components", () => {
+  const previewed = new Set(examples.flatMap((example) => example.files));
+  for (const { channel, webui } of registeredChannelUiContributions()) {
+    const entry = `nanobot/channels/${channel}/${webui}`;
+    expect(inventory.find((source) => source.path === entry)?.exports).toContain("default");
+    expect(previewed.has(entry), `Missing channel entry preview: ${channel}`).toBe(true);
+  }
+  for (const source of inventory.filter((item) => item.path.startsWith("nanobot/channels/"))) {
+    const hasView = inventory.some((view) => previewed.has(view.path) && view.usedBy.includes(source.path));
+    expect(previewed.has(source.path) || hasView, `Missing channel component preview: ${source.path}`).toBe(true);
+  }
 });
 
 it("starts with working previews and lets the developer inspect source-only modules", async () => {
@@ -158,6 +172,29 @@ it("uses the real provider manager and saves a new provider entirely in preview 
   await userEvent.keyboard("{Escape}{Escape}");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(preview.getByRole("button", { name: "Manage providers" })).toHaveFocus();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
+});
+
+it("renders a registered channel's real secret fields and enable action without a gateway", async () => {
+  const source = "nanobot/channels/telegram/webui/index.ts";
+  window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
+  vi.stubGlobal("fetch", fetch);
+  render(<Gallery />);
+  await screen.findByRole("heading", { name: "Telegram · 频道配置" });
+  const preview = within(screen.getByRole("region", { name: "Component preview" }));
+  const token = preview.getByLabelText("Bot token", { selector: "input" });
+  expect(token).toHaveAttribute("type", "password");
+  await userEvent.click(preview.getByRole("switch", { name: "Enable channel", exact: true }));
+  expect(token).toHaveAttribute("aria-invalid", "true");
+  expect(preview.getByRole("switch", { name: "Enable channel", exact: true })).not.toBeChecked();
+  await userEvent.type(token, "gallery-example-token");
+  await userEvent.click(preview.getByRole("switch", { name: "Enable channel", exact: true }));
+  expect(preview.getByRole("switch", { name: "Enable channel", exact: true })).toBeChecked();
+  await userEvent.click(preview.getByRole("button", { name: "Advanced", exact: true }));
+  expect(preview.getByRole("group", { name: "Connection mode" })).toBeVisible();
+  expect(preview.getByRole("radio", { name: "Long polling" })).toBeChecked();
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
 });
