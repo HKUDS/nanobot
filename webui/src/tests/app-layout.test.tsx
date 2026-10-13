@@ -2562,7 +2562,7 @@ describe("App layout", () => {
     );
   }, 15_000);
 
-  it("applies legacy persisted sidebar workspace state from the gateway", async () => {
+  it("applies persisted sidebar workspace state from the gateway", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -2590,8 +2590,6 @@ describe("App layout", () => {
       collapsed_groups: {},
       view: {
         density: "comfortable",
-        show_previews: true,
-        show_timestamps: true,
         show_archived: false,
         sort: "updated_desc",
       },
