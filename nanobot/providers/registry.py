@@ -290,6 +290,20 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="edenai",
         default_api_base="https://api.edenai.run/v3",
     ),
+    # Standard Compute: OpenAI-compatible gateway. "standardcompute" routes each
+    # request across the models enabled in the account; exact ids such as
+    # "anthropic/claude-sonnet-5.5" pin one model and are sent unchanged.
+    ProviderSpec(
+        name="standardcompute",
+        keywords=("standardcompute",),
+        env_key="STANDARDCOMPUTE_API_KEY",
+        request_apis=("chat_completions",),
+        display_name="Standard Compute",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="stdcmpt",
+        default_api_base="https://api.stdcmpt.com/v1",
+    ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
     # models.dev/OpenCode use provider id "opencode" and model ids like
     # "opencode/<model>"; send the bare model upstream.
