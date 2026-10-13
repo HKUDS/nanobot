@@ -5695,12 +5695,14 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "updated_at": "2026-05-19T10:01:00Z",
         },
     ]
-    monkeypatch.setattr(ws_http_module, "list_webui_sessions", lambda _session_manager: sessions)
+    session_manager.state.query_metadata = AsyncMock(side_effect=lambda project: project([]))
+    monkeypatch.setattr(ws_http_module, "list_webui_sessions", lambda _session_manager, _stored: sessions)
     handle = session_handle_for_name("websocket:chat-1", "luma")
     monkeypatch.setattr(
         ws_http_module,
         "SessionHandleResolver",
         lambda _session_manager: SimpleNamespace(
+            handles_from_metadata=MagicMock(return_value={handle.session_key: handle}),
             alist_all_by_key=AsyncMock(
                 return_value={handle.session_key: handle}
             )

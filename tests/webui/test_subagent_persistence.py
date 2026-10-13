@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import textwrap
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote
@@ -675,7 +676,97 @@ async def test_task_progress_does_not_rewrite_parent_history_or_invalidate_check
 
 
 @pytest.mark.asyncio
-async def test_temporary_parent_never_persists_task_content(tmp_path):
+async def test_task_control_and_panel_do_not_read_parent_or_child_history(tmp_path, monkeypatch):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    parent = sessions.get_or_create("websocket:parent")
+    parent.add_message("user", "Inspect configuration.")
+    sessions.save(parent)
+    await sessions.state.read(parent.key)
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Verified"))
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    try:
+        assert await manager.run_inline("check", session_key=parent.key, runtime=runtime) == "Verified"
+        status, = manager.statuses_for_session(parent.key).values()
+
+        def history_unavailable(*_args, **_kwargs):
+            pytest.fail("task ownership and status reads must not request conversation history")
+
+        def all_sessions_unavailable(*_args, **_kwargs):
+            pytest.fail("task panels must query their own child metadata directly")
+
+        monkeypatch.setattr(sessions, "get_cached", history_unavailable)
+        monkeypatch.setattr(sessions._store, "list_metadata", all_sessions_unavailable)
+        assert manager.sessions.exists(parent.key)
+        assert manager.sessions.contains(status.task_id, parent.key)
+        assert not manager.sessions.contains(status.task_id, "websocket:other")
+        metadata = sessions.get_cached_metadata(SubagentSessions.key(status.task_id))
+        assert metadata[TASK_METADATA_KEY]["state"] == "done"
+        assert metadata[TASK_METADATA_KEY]["revision"] == status.revision
+        assert manager.check(status.task_id, parent.key).result == "Verified"
+        response = await gateway.http.dispatch(
+            connection, Request("/api/sessions/websocket%3Aparent/subagents", headers),
+        )
+        assert response.status_code == 200
+        assert [task["task_id"] for task in json.loads(response.body)["tasks"]] == [status.task_id]
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_task_panel_reads_storage_off_loop_and_keeps_newer_completion(tmp_path, monkeypatch):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    runner_entered, finish_task = asyncio.Event(), asyncio.Event()
+    history_entered = asyncio.Event()
+    release_history = threading.Event()
+    loop = asyncio.get_running_loop()
+    owner_thread = threading.get_ident()
+    original_load = manager.sessions.load
+    request_task = None
+
+    async def run(_spec):
+        runner_entered.set()
+        await finish_task.wait()
+        return AgentRunResult(messages=[], final_content="Verified")
+
+    def paused_history(owner):
+        assert threading.get_ident() != owner_thread, "task panel storage reads must leave the event loop"
+        loop.call_soon_threadsafe(history_entered.set)
+        assert release_history.wait(5), "task panel history read was not released"
+        return original_load(owner)
+
+    manager.runner.run = run
+    try:
+        await manager.spawn("check", session_key="websocket:parent", runtime=runtime)
+        await asyncio.wait_for(runner_entered.wait(), 5)
+        task_id, = manager.statuses_for_session("websocket:parent")
+        previous_revision = manager.check(task_id, "websocket:parent").revision
+        execution = manager._running_tasks[task_id]
+        monkeypatch.setattr(manager.sessions, "load", paused_history)
+        request_task = asyncio.create_task(gateway.http.dispatch(
+            connection, Request("/api/sessions/websocket%3Aparent/subagents", headers),
+        ))
+        await asyncio.wait_for(history_entered.wait(), 5)
+        finish_task.set()
+        await asyncio.wait_for(execution, 5)
+        release_history.set()
+
+        response = await asyncio.wait_for(request_task, 5)
+        assert response.status_code == 200
+        task, = json.loads(response.body)["tasks"]
+        assert task["task_id"] == task_id and task["state"] == "done"
+        assert task["revision"] > previous_revision
+    finally:
+        release_history.set()
+        finish_task.set()
+        if request_task is not None:
+            request_task.cancel()
+            await asyncio.gather(request_task, return_exceptions=True)
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_temporary_parent_never_persists_task_content(tmp_path, monkeypatch):
     manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
     parent = await sessions.state.register_transient("websocket:temporary")
     async def run(_spec):
@@ -691,6 +782,14 @@ async def test_temporary_parent_never_persists_task_content(tmp_path):
         child = sessions.get_cached(SubagentSessions.key(task_id))
         assert child is not None and not child.policy.persist
         assert sessions.read_session_file(child.key) is None
+
+        def history_unavailable(*_args, **_kwargs):
+            pytest.fail("temporary task control must not request conversation history")
+
+        monkeypatch.setattr(sessions, "get_cached", history_unavailable)
+        assert sessions.get_cached_metadata(child.key)[TASK_METADATA_KEY]["state"] == "done"
+        assert manager.check(task_id, parent.key).result == "Private findings"
+        assert len(manager.statuses_for_session(parent.key)) == 1
         reopened, _, _ = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
         assert reopened.statuses_for_session(parent.key) == {}
         await reopened.close()

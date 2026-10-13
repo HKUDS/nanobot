@@ -11,6 +11,8 @@ import json
 import os
 import re
 import secrets
+import stat
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -57,44 +59,55 @@ _TRANSCRIPT_SEGMENTS_SUFFIX = ".segments"
 _TRANSCRIPT_NON_ANSWER_KINDS = {"progress", "reasoning", "tool_hint"}
 
 
-def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
+@dataclass
+class _WebuiFiles:
+    signature: dict[str, int] = field(default_factory=lambda: {
+        _WEBUI_ACTIVITY_MTIME_NS: 0, _WEBUI_ACTIVITY_SIZE: 0, _WEBUI_ACTIVITY_FILES: 0,
+    })
+    records: list[tuple[Path, float]] = field(default_factory=list)
+
+
+def list_webui_sessions(
+    session_manager: SessionManager,
+    stored_sessions: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
-    rows, changed = _reconcile_index(session_manager)
+    webui_dir = get_webui_dir()
+    rows, changed = _reconcile_index(session_manager, stored_sessions, webui_dir)
     if changed:
         try:
             _write_index_rows(session_manager.sessions_dir, [row for row in rows if row.get(_ROW_SOURCE_FIELD) == _TRANSCRIPT_SOURCE])
         except Exception as e:
             logger.debug("Failed to write WebUI transcript list cache: {}", e)
-    sessions = [
-        _public_row(session_manager.sessions_dir, get_webui_dir(), row)
-        for row in rows
-    ]
-    sessions = [
-        row for row in sessions if session_manager.types.public_history(
-            (session_manager.read_session_metadata(row["key"]) or {}).get("metadata", {})
-        )
-    ]
+    sessions = [_public_row(session_manager.sessions_dir, webui_dir, row) for row in rows]
     return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
 
 
-def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, Any]], bool]:
-    existing_rows = _read_index_rows(session_manager.sessions_dir)
-    existing_by_source = {
-        (row.get(_ROW_SOURCE_FIELD), row.get("file")): row
-        for row in existing_rows or []
-        if isinstance(row.get(_ROW_SOURCE_FIELD), str)
-        and isinstance(row.get("file"), str)
-    }
-    webui_dir = get_webui_dir()
-    stored = session_manager.list_session_metadata()
+def _reconcile_index(
+    session_manager: SessionManager,
+    stored_sessions: list[dict[str, Any]] | None,
+    webui_dir: Path,
+) -> tuple[list[dict[str, Any]], bool]:
+    files_by_stem = _read_webui_files(webui_dir)
+    activity_by_stem: dict[str, dict[str, int]] = {}
+    for stem, files in files_by_stem.items():
+        identity = os.path.normcase(stem)
+        previous = activity_by_stem.get(identity)
+        activity_by_stem[identity] = files.signature if previous is None else {
+            _WEBUI_ACTIVITY_MTIME_NS: max(previous[_WEBUI_ACTIVITY_MTIME_NS], files.signature[_WEBUI_ACTIVITY_MTIME_NS]),
+            _WEBUI_ACTIVITY_SIZE: previous[_WEBUI_ACTIVITY_SIZE] + files.signature[_WEBUI_ACTIVITY_SIZE],
+            _WEBUI_ACTIVITY_FILES: previous[_WEBUI_ACTIVITY_FILES] + files.signature[_WEBUI_ACTIVITY_FILES],
+        }
+    stored = session_manager.list_session_metadata() if stored_sessions is None else stored_sessions
     session_keys = {row["key"] for row in stored}
-    session_keys_by_stem = {SessionManager.safe_key(key): key for key in session_keys if is_webui_session_key(key)}
+    session_stems = {os.path.normcase(SessionManager.safe_key(key)) for key in session_keys if is_webui_session_key(key)}
     rows: list[dict[str, Any]] = []
-    changed = existing_rows is None
-    expected_sources: set[tuple[str, str]] = set()
     for row in stored:
         metadata = row["metadata"]
-        activity = _webui_activity_updated_at(_webui_activity_signature(row["key"], webui_dir))
+        if not session_manager.types.public_history(metadata):
+            continue
+        signature = activity_by_stem.get(os.path.normcase(SessionManager.safe_key(row["key"])))
+        activity = _webui_activity_updated_at(signature) if signature is not None else None
         rows.append({
             "key": row["key"], "created_at": row["created_at"],
             "updated_at": _visible_activity_updated_at(row["updated_at"], row["visible_updated_at"], activity),
@@ -105,9 +118,25 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
             _ROW_SOURCE_FIELD: _SESSION_SOURCE, "file": "sessions.sqlite3",
         })
 
-    for stem, paths in _webui_transcript_sources(webui_dir).items():
-        if stem in session_keys_by_stem:
-            continue
+    transcripts = [
+        (stem, files) for stem, files in sorted(files_by_stem.items())
+        if stem.startswith(_WEBUI_SESSION_STEM_PREFIX) and files.records
+        and os.path.normcase(stem) not in session_stems
+    ]
+    if not transcripts:
+        return rows, False
+    # Only transcript-only sessions use the file cache; SQLite rows are fresh.
+    existing_rows = _read_index_rows(session_manager.sessions_dir)
+    existing_by_source = {
+        (row.get(_ROW_SOURCE_FIELD), row.get("file")): row
+        for row in existing_rows or []
+        if isinstance(row.get(_ROW_SOURCE_FIELD), str)
+        and isinstance(row.get("file"), str)
+    }
+    changed = existing_rows is None
+    expected_sources: set[tuple[str, str]] = set()
+    for stem, files in transcripts:
+        files.signature = activity_by_stem[os.path.normcase(stem)]
         identity = (_TRANSCRIPT_SOURCE, stem)
         row = existing_by_source.get(identity)
         cached_key = row.get("key") if row is not None else None
@@ -119,14 +148,14 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
         if key is not None and row is not None and _indexed_transcript_row_matches(
             row,
             key,
-            webui_dir,
+            files.signature,
         ):
             rows.append(row)
             expected_sources.add(identity)
             continue
 
         changed = True
-        scanned = _scan_transcript_row(key, stem, paths, webui_dir)
+        scanned = _scan_transcript_row(key, stem, files, webui_dir)
         scanned_key = scanned.get("key") if scanned is not None else None
         if scanned is not None and scanned_key not in session_keys:
             rows.append(scanned)
@@ -182,7 +211,7 @@ def _write_index_rows(sessions_dir: Path, rows: list[dict[str, Any]]) -> None:
 def _indexed_transcript_row_matches(
     row: dict[str, Any],
     session_key: str,
-    webui_dir: Path,
+    signature: dict[str, int],
 ) -> bool:
     if not all(isinstance(row.get(key), str) for key in ("key", "created_at", "updated_at")):
         return False
@@ -194,7 +223,6 @@ def _indexed_transcript_row_matches(
         return False
     if not isinstance(row.get(_WORKSPACE_SCOPE_PRESENT_FIELD), bool):
         return False
-    signature = _webui_activity_signature(session_key, webui_dir)
     return (
         row.get(_WEBUI_ACTIVITY_MTIME_NS) == signature[_WEBUI_ACTIVITY_MTIME_NS]
         and row.get(_WEBUI_ACTIVITY_SIZE) == signature[_WEBUI_ACTIVITY_SIZE]
@@ -268,48 +296,42 @@ def _indexed_workspace_scope_fields(metadata: object) -> dict[str, object]:
 
 
 
-def _webui_transcript_record_paths(stem: str, webui_dir: Path) -> tuple[Path, ...]:
-    paths: list[Path] = []
-    segments_dir = webui_dir / f"{stem}{_TRANSCRIPT_SEGMENTS_SUFFIX}"
-    if segments_dir.is_dir() and not segments_dir.is_symlink():
+def _read_webui_files(webui_dir: Path) -> dict[str, _WebuiFiles]:
+    """Discover present display files once per request, including all segment activity."""
+    files_by_stem: dict[str, _WebuiFiles] = {}
+
+    def add_file(stem: str, entry: os.DirEntry[str]) -> None:
         try:
-            paths.extend(
-                sorted(
-                    path
-                    for path in segments_dir.glob("*.jsonl")
-                    if path.is_file() and not path.is_symlink()
-                )
-            )
+            info = entry.stat(follow_symlinks=False)
         except OSError:
-            pass
-    active = webui_dir / f"{stem}.jsonl"
-    if active.is_file() and not active.is_symlink():
-        paths.append(active)
-    return tuple(paths)
+            return
+        if not stat.S_ISREG(info.st_mode):
+            return
+        files = files_by_stem.setdefault(stem, _WebuiFiles())
+        signature = files.signature
+        signature[_WEBUI_ACTIVITY_MTIME_NS] = max(signature[_WEBUI_ACTIVITY_MTIME_NS], info.st_mtime_ns)
+        signature[_WEBUI_ACTIVITY_SIZE] += info.st_size
+        signature[_WEBUI_ACTIVITY_FILES] += 1
+        if os.path.normcase(entry.name).endswith(".jsonl"):
+            files.records.append((Path(entry.path), info.st_mtime))
 
-
-def _webui_transcript_sources(webui_dir: Path) -> dict[str, tuple[Path, ...]]:
-    stems: set[str] = set()
     try:
-        entries = tuple(webui_dir.iterdir())
+        with os.scandir(webui_dir) as entries:
+            for entry in entries:
+                name = os.path.normcase(entry.name)
+                if name.endswith(_TRANSCRIPT_SEGMENTS_SUFFIX) and entry.is_dir(follow_symlinks=False):
+                    stem = entry.name[:-len(_TRANSCRIPT_SEGMENTS_SUFFIX)]
+                    try:
+                        with os.scandir(entry.path) as segments:
+                            for segment in segments:
+                                add_file(stem, segment)
+                    except OSError:
+                        pass
+                elif name.endswith((".jsonl", ".json")):
+                    add_file(entry.name.rsplit(".", 1)[0], entry)
     except OSError:
-        return {}
-    for path in entries:
-        if path.is_symlink():
-            continue
-        if path.is_file() and path.suffix == ".jsonl":
-            stem = path.stem
-        elif path.is_dir() and path.name.endswith(_TRANSCRIPT_SEGMENTS_SUFFIX):
-            stem = path.name.removesuffix(_TRANSCRIPT_SEGMENTS_SUFFIX)
-        else:
-            continue
-        if stem.startswith(_WEBUI_SESSION_STEM_PREFIX):
-            stems.add(stem)
-    return {
-        stem: paths
-        for stem in sorted(stems)
-        if (paths := _webui_transcript_record_paths(stem, webui_dir))
-    }
+        pass
+    return files_by_stem
 
 
 def _transcript_record(line: str) -> dict[str, Any] | None:
@@ -325,48 +347,6 @@ def _valid_transcript_session_key(key: str, stem: str) -> bool:
     if chat_id is None:
         return False
     return _WEBUI_CHAT_ID_RE.fullmatch(chat_id) is not None and SessionManager.safe_key(key) == stem
-
-
-def _webui_activity_paths(session_key: str, webui_dir: Path) -> list[Path]:
-    stem = SessionManager.safe_key(session_key)
-    paths = [
-        webui_dir / f"{stem}.jsonl",
-        webui_dir / f"{stem}.json",
-    ]
-    segments_dir = webui_dir / f"{stem}{_TRANSCRIPT_SEGMENTS_SUFFIX}"
-    if segments_dir.is_dir() and not segments_dir.is_symlink():
-        try:
-            paths.extend(
-                sorted(
-                    path
-                    for path in segments_dir.iterdir()
-                    if path.is_file() and not path.is_symlink()
-                )
-            )
-        except OSError:
-            pass
-    return paths
-
-
-def _webui_activity_signature(session_key: str, webui_dir: Path) -> dict[str, int]:
-    latest_mtime_ns = 0
-    total_size = 0
-    file_count = 0
-    for path in _webui_activity_paths(session_key, webui_dir):
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        if not path.is_file():
-            continue
-        file_count += 1
-        latest_mtime_ns = max(latest_mtime_ns, stat.st_mtime_ns)
-        total_size += stat.st_size
-    return {
-        _WEBUI_ACTIVITY_MTIME_NS: latest_mtime_ns,
-        _WEBUI_ACTIVITY_SIZE: total_size,
-        _WEBUI_ACTIVITY_FILES: file_count,
-    }
 
 
 def _webui_activity_updated_at(signature: dict[str, int]) -> str | None:
@@ -436,13 +416,10 @@ def _transcript_created_at(record: dict[str, Any]) -> str | None:
 def _scan_transcript_row(
     session_key: str | None,
     stem: str,
-    paths: tuple[Path, ...],
+    files: _WebuiFiles,
     webui_dir: Path,
 ) -> dict[str, Any] | None:
-    path_key = session_key or webui_session_key(
-        stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX)
-    )
-    signature = _webui_activity_signature(path_key, webui_dir)
+    signature = files.signature
     activity_updated_at = _webui_activity_updated_at(signature)
     if activity_updated_at is None:
         return None
@@ -453,6 +430,7 @@ def _scan_transcript_row(
     saw_record = False
     scanned_records = 0
     scanned_chars = 0
+    paths = [path for path, _ in sorted(files.records, key=lambda item: (item[0].parent == webui_dir, item[0]))]
     for path in paths:
         try:
             with open(path, encoding="utf-8") as handle:
@@ -499,7 +477,7 @@ def _scan_transcript_row(
 
     if created_at is None:
         try:
-            earliest_mtime = min(path.stat().st_mtime for path in paths)
+            earliest_mtime = min(mtime for _, mtime in files.records)
             created_at = datetime.fromtimestamp(earliest_mtime).isoformat()
         except (OSError, OverflowError, ValueError):
             created_at = activity_updated_at

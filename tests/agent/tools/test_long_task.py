@@ -100,6 +100,36 @@ async def test_create_goal_records_goal_metadata(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_goal_context_and_mutations_only_read_session_metadata(tmp_path, monkeypatch):
+    sm = SessionManager(tmp_path)
+    stored = sm.get_or_create("websocket:c1")
+    stored.add_message("user", "Keep the previous conversation.")
+    stored.add_message("assistant", "Previous answer.")
+    sm.save(stored)
+    create, update, ctx = _tools(sm)
+
+    def history_unavailable(*_args, **_kwargs):
+        pytest.fail("goal metadata operations must not request conversation history")
+
+    monkeypatch.setattr(sm.state, "get", history_unavailable)
+    monkeypatch.setattr(sm.state, "read", history_unavailable)
+    ordinary = _request_context(metadata={}, original_user_text="Continue.")
+    try:
+        assert await create.runtime_context_provider()(ordinary) is None
+        assert "Goal recorded" in await _execute(create, ctx, objective="Preserve history")
+        context = await create.runtime_context_provider()(ordinary)
+        assert context is not None and "Preserve history" in context.content
+        assert "marked complete" in await _execute(update, ordinary, action="complete")
+        assert await create.runtime_context_provider()(ordinary) is None
+
+        reopened = SessionManager(tmp_path).get_or_create(stored.key)
+        assert reopened.messages == stored.messages
+        assert reopened.metadata[GOAL_STATE_KEY]["status"] == "completed"
+    finally:
+        await sm.state.aclose()
+
+
+@pytest.mark.asyncio
 async def test_create_goal_rejects_without_explicit_goal_permission(tmp_path):
     sm = SessionManager(tmp_path)
     create, _update, ctx = _tools(sm)

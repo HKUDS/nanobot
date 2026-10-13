@@ -430,21 +430,44 @@ class SubagentManager:
             **deepcopy(self._terminal_statuses),
         }
 
+    def _runtime_statuses_for_session(self, session_key: str) -> dict[str, SubagentStatus]:
+        return {
+            **{tid: record.snapshot() for tid, record in self._tasks.items()
+               if record.status.owner == session_key and record.status.finished_at is None},
+            **{tid: deepcopy(status) for tid, status in self._terminal_statuses.items()
+               if status.owner == session_key},
+        }
+
+    def _merge_session_statuses(
+        self, session_key: str, runtime: Mapping[str, SubagentStatus], *, include_history: bool,
+    ) -> Mapping[str, SubagentStatus]:
+        if self.sessions is not None and not self.sessions.exists(session_key):
+            return {}
+        statuses = self.sessions.load(session_key) if include_history and self.sessions is not None else {}
+        for task_id, status in runtime.items():
+            if self.sessions is not None and not self.sessions.contains(task_id, session_key):
+                continue
+            persisted = statuses.get(task_id)
+            if persisted is None or status.revision >= persisted.revision:
+                statuses[task_id] = status
+        return statuses
+
     def statuses_for_session(
         self, session_key: str | None, *, include_history: bool = True,
     ) -> Mapping[str, SubagentStatus]:
         """Return only tasks owned by the given session, never a global fallback."""
-        if not session_key or (self.sessions is not None and not self.sessions.exists(session_key)):
+        if not session_key:
             return {}
-        return {
-            **(self.sessions.load(session_key) if include_history and self.sessions is not None else {}),
-            **{tid: record.snapshot() for tid, record in self._tasks.items()
-               if record.status.owner == session_key and record.status.finished_at is None
-               and (self.sessions is None or self.sessions.contains(tid, session_key))},
-            **{tid: deepcopy(status) for tid, status in self._terminal_statuses.items()
-               if status.owner == session_key
-               and (self.sessions is None or self.sessions.contains(tid, session_key))},
-        }
+        return self._merge_session_statuses(
+            session_key, self._runtime_statuses_for_session(session_key), include_history=include_history,
+        )
+
+    async def read_statuses_for_session(self, session_key: str) -> Mapping[str, SubagentStatus]:
+        """Capture runtime observations on the owner loop; read stored metadata on a worker."""
+        runtime = self._runtime_statuses_for_session(session_key)
+        return await asyncio.to_thread(
+            self._merge_session_statuses, session_key, runtime, include_history=True,
+        )
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         """Update the deprecated runtime source used by legacy ``spawn`` calls."""

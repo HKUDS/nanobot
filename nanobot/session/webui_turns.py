@@ -492,8 +492,8 @@ class WebuiTurnRoutePolicy:
             )
             and route.channel == "websocket"
         ):
-            session = self.sessions.state.peek(session_key)
-            if session is not None and session.metadata.get(WEBUI_SESSION_METADATA_KEY) is True:
+            metadata_snapshot = self.sessions.state.peek_metadata(session_key)
+            if metadata_snapshot is not None and metadata_snapshot.get(WEBUI_SESSION_METADATA_KEY) is True:
                 metadata = dict(route.metadata)
                 turn_prefix = "session-input" if internal_user_input else "subagent"
                 metadata.update({

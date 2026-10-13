@@ -838,7 +838,7 @@ class GatewayHTTPHandler:
 
         m = re.fullmatch(r"/api/sessions/([^/]+)/subagents", got)
         if m:
-            return self._handle_subagents_get(request, m.group(1))
+            return await self._handle_subagents_get(request, m.group(1))
 
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
@@ -867,7 +867,7 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, str(exc))
         return _http_json_response(result)
 
-    def _handle_subagents_get(self, request: WsRequest, key: str) -> Response:
+    async def _handle_subagents_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         session_key = _decode_api_key(key)
@@ -878,7 +878,7 @@ class GatewayHTTPHandler:
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
         try:
-            statuses = self.subagent_manager.statuses_for_session(session_key)
+            statuses = await self.subagent_manager.read_statuses_for_session(session_key)
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response({
@@ -959,25 +959,47 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
-        handles = await SessionHandleResolver(
-            self.session_manager
-        ).alist_all_by_key()
-        payload = await asyncio.to_thread(self._sessions_list_payload, handles)
-        return _http_json_response(
-            payload,
-            accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
-        )
+        accept_encoding = _combined_list_header(request.headers, "Accept-Encoding")
+
+        def render(stored: list[dict[str, Any]]) -> Response | None:
+            payload = self._sessions_list_from_snapshot(stored)
+            if payload is None:
+                return None
+            return _http_json_response(payload, accept_encoding=accept_encoding)
+
+        response = await self.session_manager.state.query_metadata(render)
+        if response is None:
+            handles = await SessionHandleResolver(self.session_manager).alist_all_by_key()
+
+            def render_allocated(stored: list[dict[str, Any]]) -> Response:
+                return _http_json_response(
+                    self._sessions_list_payload(handles, stored), accept_encoding=accept_encoding,
+                )
+
+            response = await self.session_manager.state.query_metadata(render_allocated)
+        return response
+
+    def _sessions_list_from_snapshot(
+        self, stored_sessions: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        assert self.session_manager is not None
+        handles = SessionHandleResolver(self.session_manager).handles_from_metadata(stored_sessions)
+        if handles is None:
+            return None
+        return self._sessions_list_payload(handles, stored_sessions)
 
     def _sessions_list_payload(
         self,
         handles: dict[str, SessionHandle],
+        stored_sessions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         assert self.session_manager is not None
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
-        sessions = list_webui_sessions(self.session_manager)
+        sessions = list_webui_sessions(self.session_manager, stored_sessions)
         cleaned: list[dict[str, Any]] = []
         default_scope: WorkspaceScope | None = None
+        scopes: dict[str, WorkspaceScope] = {}
         for s in sessions:
             key = s.get("key")
             if not (isinstance(key, str) and is_webui_session_key(key)):
@@ -998,11 +1020,16 @@ class GatewayHTTPHandler:
             if default_scope is None:
                 default_scope = self.workspaces.default_scope()
             scope_present, raw_scope = indexed_workspace_scope(s)
-            scope = self.workspaces.scope_for_indexed_metadata(
-                raw_scope,
-                scope_present=scope_present,
-                default_scope=default_scope,
-            )
+            if scope_present:
+                scope_key = json.dumps(raw_scope, ensure_ascii=False, sort_keys=True)
+                scope = scopes.get(scope_key)
+                if scope is None:
+                    scope = self.workspaces.scope_for_indexed_metadata(
+                        raw_scope, scope_present=True, default_scope=default_scope,
+                    )
+                    scopes[scope_key] = scope
+            else:
+                scope = default_scope
             row["workspace_scope"] = scope.payload()
             handle = handles.get(key)
             if handle is not None:

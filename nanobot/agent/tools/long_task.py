@@ -69,7 +69,7 @@ class _GoalToolsMixin:
         key = request_ctx.session_key
         if not key:
             return None
-        return await self._sessions.state.get(key)
+        return await self._sessions.state.get_header(key)
 
     def _goal_mutation_allowed(self) -> bool:
         return current_request_context() is not None and goal_mutation_allowed()
@@ -185,11 +185,12 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     ) -> RuntimeContextBlock | None:
         if not request.session_key or not request.persist_session:
             return None
-        session = await self._sessions.state.read(request.session_key)
-        if session is None:
+        payload = await self._sessions.state.read_metadata(request.session_key)
+        if payload is None:
             return None
+        metadata = payload["metadata"]
         goal_start_requested = explicit_goal_requested(request.metadata)
-        goal_active = sustained_goal_active(session.metadata)
+        goal_active = sustained_goal_active(metadata)
         if not goal_start_requested and not goal_active:
             return None
 
@@ -199,7 +200,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             goal_start_requested=goal_start_requested,
             goal_active=goal_active,
         )
-        state = wrap_runtime_context_lines(goal_state_runtime_lines(session.metadata))
+        state = wrap_runtime_context_lines(goal_state_runtime_lines(metadata))
         content = "\n\n".join(part for part in (guidance, state) if part)
         return RuntimeContextBlock(source="goal", content=content)
 

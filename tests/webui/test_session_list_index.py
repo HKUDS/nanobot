@@ -18,6 +18,7 @@ from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.recovery import RECOVERY_METADATA_KEY
+from nanobot.session.types import SESSION_TYPE_KEY, SessionType
 
 
 @pytest.fixture(autouse=True)
@@ -39,11 +40,161 @@ def test_webui_session_list_reads_previews_without_loading_history(tmp_path, mon
         raise AssertionError("sidebar must not load conversation history or rewrite unchanged cache")
 
     monkeypatch.setattr(manager._store, "load", fail_load)
+    monkeypatch.setattr(manager, "read_session_metadata", fail_load)
+    monkeypatch.setattr(session_list_index, "_read_index_rows", fail_load)
     monkeypatch.setattr(session_list_index, "_write_index_rows", fail_load)
     rows = list_webui_sessions(manager)
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
     assert rows[0]["model_preset"] == "fast"
+
+
+def test_webui_session_list_private_rows_suppress_transcript_fallback(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    manager.types.register(SessionType("internal", needs_handle=False, public_history=False))
+    webui_dir = tmp_path / "webui"
+    private_key, transcript_key = "websocket:internal", "websocket:transcript-only"
+    for key in (private_key, transcript_key):
+        (webui_dir / f"{SessionManager.safe_key(key)}.jsonl").write_text(
+            json.dumps({"event": "user", "chat_id": key.removeprefix("websocket:"),
+                        "text": "transcript preview"}) + "\n",
+            encoding="utf-8",
+        )
+    assert {row["key"] for row in list_webui_sessions(manager)} == {private_key, transcript_key}
+
+    public = manager.get_or_create("websocket:public")
+    public.add_message("user", "public preview")
+    manager.save(public)
+    private = manager.get_or_create(private_key)
+    private.metadata[SESSION_TYPE_KEY] = "internal"
+    private.add_message("user", "private preview")
+    manager.save(private)
+    unknown = manager.get_or_create("websocket:unregistered")
+    unknown.metadata[SESSION_TYPE_KEY] = "unregistered"
+    manager.save(unknown)
+
+    def individual_metadata_unavailable(*_args, **_kwargs):
+        pytest.fail("sidebar visibility must use the existing metadata query snapshot")
+
+    monkeypatch.setattr(manager, "read_session_metadata", individual_metadata_unavailable)
+    rows = {row["key"]: row for row in list_webui_sessions(manager)}
+    assert set(rows) == {public.key, transcript_key}
+    assert rows[public.key]["preview"] == "public preview"
+    assert rows[transcript_key]["preview"] == "transcript preview"
+    assert {row["key"] for row in list_webui_sessions(manager)} == set(rows)
+
+
+def test_webui_session_list_scans_empty_display_directory_once_per_request(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    keys = {"websocket:first", "websocket:second", "websocket:third"}
+    for key in keys:
+        manager.save(manager.get_or_create(key))
+    list_webui_sessions(manager)
+    webui_dir = tmp_path / "webui"
+    original_stat, original_scandir = Path.stat, os.scandir
+    scans = []
+
+    def stored_files_only(path, *args, **kwargs):
+        assert path.parent != webui_dir, "sidebar must not probe absent per-session display files"
+        return original_stat(path, *args, **kwargs)
+
+    def scan(path):
+        scans.append(Path(path))
+        return original_scandir(path)
+
+    monkeypatch.setattr(Path, "stat", stored_files_only)
+    monkeypatch.setattr(session_list_index.os, "scandir", scan)
+    for _ in range(2):
+        assert {row["key"] for row in list_webui_sessions(manager)} == keys
+    assert scans == [webui_dir, webui_dir]
+
+
+def test_webui_session_list_snapshot_tracks_all_display_artifacts(tmp_path):
+    manager = SessionManager(tmp_path)
+    webui_dir = tmp_path / "webui"
+    key = "websocket:artifacts"
+    stem = SessionManager.safe_key(key)
+    segments = webui_dir / f"{stem}.segments"
+    segments.mkdir()
+    active = webui_dir / f"{stem}.jsonl"
+    active.write_text('{"event":"user","chat_id":"artifacts","text":"active question"}\n', encoding="utf-8")
+    segment = segments / "000001.jsonl"
+    segment.write_text('{"event":"user","chat_id":"artifacts","text":"older question"}\n', encoding="utf-8")
+    other_files = [webui_dir / f"{stem}.json", segments / "manifest.json",
+                   segments / "state.json", segments / "delivery.json"]
+    for path in other_files:
+        path.write_text("{}\n", encoding="utf-8")
+    all_files = [active, segment, *other_files]
+    base_ns = int(datetime(2026, 1, 1).timestamp() * 1_000_000_000)
+    for path in all_files:
+        os.utime(path, ns=(base_ns, base_ns))
+
+    row, = list_webui_sessions(manager)
+    assert row["preview"] == "older question"
+    cache = json.loads((manager.sessions_dir / ".webui_session_index.json").read_text(encoding="utf-8"))
+    cached, = cache["sessions"]
+    assert cached["webui_activity_files"] == len(all_files)
+    assert cached["webui_activity_size"] == sum(path.stat().st_size for path in all_files)
+    state_file = segments / "state.json"
+    state_file.write_text('{"active":true}\n', encoding="utf-8")
+    newer_ns = base_ns + 1_000_000_000
+    os.utime(state_file, ns=(newer_ns, newer_ns))
+    refreshed, = list_webui_sessions(manager)
+    assert refreshed["updated_at"] == datetime.fromtimestamp(newer_ns / 1_000_000_000).isoformat()
+    other_files[0].unlink()
+    other_files[-1].unlink()
+    list_webui_sessions(manager)
+    cached, = json.loads((manager.sessions_dir / ".webui_session_index.json").read_text(encoding="utf-8"))["sessions"]
+    assert cached["webui_activity_files"] == len(all_files) - 2
+    assert cached["webui_activity_size"] == sum(path.stat().st_size for path in all_files if path.exists())
+
+
+def test_webui_session_list_activity_uses_host_filename_case_semantics(tmp_path):
+    manager = SessionManager(tmp_path)
+    key = "websocket:MixedCase"
+    session = manager.get_or_create(key)
+    session.add_message("user", "stored question")
+    session.messages[0]["timestamp"] = "2026-01-01T00:00:00"
+    session.updated_at = datetime(2026, 1, 1)
+    manager.save(session)
+    path = tmp_path / "webui" / f"{SessionManager.safe_key(key).swapcase()}.jsonl"
+    path.write_text('{"event":"turn_end","chat_id":"MixedCase"}\n', encoding="utf-8")
+    activity = datetime(2026, 1, 2)
+    activity_ns = int(activity.timestamp() * 1_000_000_000)
+    os.utime(path, ns=(activity_ns, activity_ns))
+    row, = list_webui_sessions(manager)
+    assert row["updated_at"] == (activity.isoformat() if os.name == "nt" else "2026-01-01T00:00:00")
+
+
+def test_webui_session_list_keeps_transcript_only_key_case(tmp_path):
+    key = "websocket:MixedCase"
+    path = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
+    path.write_text('{"event":"user","chat_id":"MixedCase","text":"question"}\n', encoding="utf-8")
+    row, = list_webui_sessions(SessionManager(tmp_path))
+    assert row["key"] == key and row["preview"] == "question"
+
+
+def test_webui_session_list_rejects_display_file_and_segment_symlinks(tmp_path):
+    manager = SessionManager(tmp_path)
+    webui_dir = tmp_path / "webui"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "000000.jsonl"
+    target.write_text('{"event":"user","chat_id":"linked","text":"outside secret"}\n', encoding="utf-8")
+    safe_segments = webui_dir / "websocket_safe.segments"
+    safe_segments.mkdir()
+    (safe_segments / "000001.jsonl").write_text(
+        '{"event":"user","chat_id":"safe","text":"safe question"}\n', encoding="utf-8",
+    )
+    try:
+        (webui_dir / "websocket_linked.jsonl").symlink_to(target)
+        (webui_dir / "websocket_directory.segments").symlink_to(outside, target_is_directory=True)
+        (safe_segments / "000000.jsonl").symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    row, = list_webui_sessions(manager)
+    assert row["key"] == "websocket:safe" and row["preview"] == "safe question"
 
 
 
@@ -667,6 +818,64 @@ def test_webui_session_list_sorts_by_message_activity_not_maintenance_timestamp(
 
 def list_webui_sessions(manager: SessionManager) -> list[dict]:
     return session_list_index.list_webui_sessions(manager)
+
+
+async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.webui.gateway_services import build_gateway_services
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    manager = SessionManager(tmp_path / "workspace")
+    state = manager.state
+    key = "websocket:busy"
+    await state.get(key)
+    await state.update_metadata(key, {"title": "committed"})
+    gateway = build_gateway_services(
+        config=WebSocketConfig(), bus=MessageBus(), session_manager=manager,
+        static_dist_path=None, workspace_path=tmp_path / "workspace",
+        default_restrict_to_workspace=True, runtime_model_name=lambda: "test-model",
+        runtime_surface="gateway", runtime_capabilities_overrides=None,
+    )
+    token = gateway.tokens.issue_api_token(60)
+    connection = SimpleNamespace(remote_address=("127.0.0.1", 12345))
+    request = Request("/api/sessions", Headers({"Authorization": f"Bearer {token}"}))
+    started, release = threading.Event(), threading.Event()
+    original = manager._store.replace_metadata
+
+    def blocked(session_key, metadata, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return original(session_key, metadata, **kwargs)
+
+    try:
+        first = await gateway.http.dispatch(connection, request)
+        assert first.status_code == 200
+        first_row, = json.loads(first.body)["sessions"]
+        persisted = await state.read_metadata(key)
+        assert first_row["handle"]["name"] == persisted["metadata"]["session_handle"]
+        monkeypatch.setattr(manager._store, "replace_metadata", blocked)
+        write = asyncio.create_task(state.update_metadata(key, {"title": "next"}))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            response = await asyncio.wait_for(gateway.http.dispatch(connection, request), 0.5)
+            assert response.status_code == 200
+            row, = json.loads(response.body)["sessions"]
+            assert row["title"] == "committed"
+            assert row["handle"] == first_row["handle"]
+        finally:
+            release.set()
+            await write
+    finally:
+        release.set()
+        await state.aclose()
 
 
 def test_webui_session_list_fallback_time_when_missing(tmp_path: Path) -> None:
