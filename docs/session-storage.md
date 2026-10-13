@@ -27,6 +27,34 @@ checkpoint commands do not read the message table. Conflicting history
 replacements still fail, deleted generations reject late results, and failed
 transactions never publish a new cached view.
 
+## Schema evolution
+
+SQLite schema versions are independent of application release versions and the
+JSONL migration window. Startup reads `PRAGMA user_version` and applies each
+pending schema migration in order. Schema changes, version updates, and any
+initial JSONL import commit in one transaction; a failure rolls them back so
+startup can retry. An older binary rejects a database with a newer schema before
+changing its journal mode or writing session data. Downgrading requires restoring
+a compatible backup or exporting to a format the target release supports.
+
+Session metadata and message records retain their JSON fields through storage
+reads and writes. Add optional attributes there when they need no SQL index,
+relationship, or constraint, and define defaults for older records. Fields that
+need indexed queries or database constraints belong in columns or separate tables
+with a schema migration. Changing a JSON field's name, type, or meaning needs a
+record compatibility rule even when the SQL schema stays the same.
+
+Schema migrations are appended to `_SCHEMA_MIGRATIONS` in
+`nanobot/session/sqlite_store.py`; preserve previously released entries, including
+the initial v1 schema. Migration functions use the supplied connection without
+committing independently or calling `executescript`, which commits an existing
+transaction. Add optional columns with nullable values or defaults so
+existing rows and unchanged write paths remain valid. Every `INSERT` names its
+columns explicitly.
+Before releasing a migration, verify upgrading the previous schema preserves its
+session state, reopening does not repeat the migration, and a failed upgrade
+leaves the previous schema and data intact.
+
 ## JSONL migration window
 
 | Milestone | Version |

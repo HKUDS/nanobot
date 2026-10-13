@@ -23,7 +23,6 @@ from nanobot.session.manager import (
     metadata_title,
 )
 
-_SCHEMA_VERSION = 1
 _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
 _T = TypeVar("_T")
@@ -38,6 +37,45 @@ def _object(value: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("stored session record must be an object")
     return cast(dict[str, Any], parsed)
+
+
+def _create_schema_v1(db: sqlite3.Connection) -> None:
+    for statement in (
+        "CREATE TABLE IF NOT EXISTS storage_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        """CREATE TABLE IF NOT EXISTS sessions (
+            key TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            metadata TEXT NOT NULL, provider_state TEXT, last_archived INTEGER NOT NULL,
+            revision INTEGER NOT NULL, generation TEXT NOT NULL,
+            title TEXT NOT NULL, preview TEXT NOT NULL, visible_updated_at TEXT
+        )""",
+        """CREATE TABLE IF NOT EXISTS messages (
+            session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,
+            position INTEGER NOT NULL, record TEXT NOT NULL,
+            PRIMARY KEY (session_key, position)
+        )""",
+        """CREATE TABLE IF NOT EXISTS checkpoints (
+            session_key TEXT PRIMARY KEY REFERENCES sessions(key) ON DELETE CASCADE,
+            record TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS pending_inputs (
+            session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,
+            kind TEXT NOT NULL, position INTEGER NOT NULL, record TEXT NOT NULL,
+            PRIMARY KEY (session_key, kind, position)
+        )""",
+        "CREATE INDEX IF NOT EXISTS sessions_updated ON sessions(updated_at DESC)",
+    ):
+        db.execute(statement)
+
+
+# Entries upgrade version N to N+1. Preserve released entries and append upgrades.
+_SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_create_schema_v1,)
+
+
+def _schema_version(db: sqlite3.Connection) -> int:
+    version = int(db.execute("PRAGMA user_version").fetchone()[0])
+    if not 0 <= version <= len(_SCHEMA_MIGRATIONS):
+        raise RuntimeError(f"unsupported session database schema: {version}")
+    return version
 
 
 class SessionConflictError(RuntimeError):
@@ -94,46 +132,25 @@ class SqliteSessionStore:
             connection.close()
 
     def initialize(self, workspace: Path) -> None:
-        """Create the schema and import legacy sessions in one atomic transaction."""
+        """Upgrade the schema and import legacy sessions in one atomic transaction."""
         # WAL is persistent and must be enabled outside a transaction.
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
         connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         try:
+            # Reject newer databases before changing their persistent settings.
+            _schema_version(connection)
             connection.execute("PRAGMA journal_mode = WAL")
         finally:
             connection.close()
         with suppress(OSError):
             os.chmod(self.path, 0o600)
         with self.transaction() as db:
-            version = int(db.execute("PRAGMA user_version").fetchone()[0])
-            if version not in (0, _SCHEMA_VERSION):
-                raise RuntimeError(f"unsupported session database schema: {version}")
-            for statement in (
-                "CREATE TABLE IF NOT EXISTS storage_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
-                """CREATE TABLE IF NOT EXISTS sessions (
-                    key TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                    metadata TEXT NOT NULL, provider_state TEXT, last_archived INTEGER NOT NULL,
-                    revision INTEGER NOT NULL, generation TEXT NOT NULL,
-                    title TEXT NOT NULL, preview TEXT NOT NULL, visible_updated_at TEXT
-                )""",
-                """CREATE TABLE IF NOT EXISTS messages (
-                    session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,
-                    position INTEGER NOT NULL, record TEXT NOT NULL,
-                    PRIMARY KEY (session_key, position)
-                )""",
-                """CREATE TABLE IF NOT EXISTS checkpoints (
-                    session_key TEXT PRIMARY KEY REFERENCES sessions(key) ON DELETE CASCADE,
-                    record TEXT NOT NULL
-                )""",
-                """CREATE TABLE IF NOT EXISTS pending_inputs (
-                    session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,
-                    kind TEXT NOT NULL, position INTEGER NOT NULL, record TEXT NOT NULL,
-                    PRIMARY KEY (session_key, kind, position)
-                )""",
-                "CREATE INDEX IF NOT EXISTS sessions_updated ON sessions(updated_at DESC)",
-            ):
-                db.execute(statement)
+            # Recheck under the write lock in case another startup upgraded first.
+            version = _schema_version(db)
+            for target, migrate in enumerate(_SCHEMA_MIGRATIONS[version:], start=version + 1):
+                migrate(db)
+                db.execute(f"PRAGMA user_version = {target}")
             marker = db.execute(
                 "SELECT value FROM storage_meta WHERE key='jsonl_import'"
             ).fetchone()
@@ -141,13 +158,12 @@ class SqliteSessionStore:
                 from nanobot.session.jsonl_migration import migrate_jsonl
 
                 migrate_jsonl(self, workspace)
-                db.execute("INSERT INTO storage_meta VALUES ('jsonl_import', 'complete')")
+                db.execute("INSERT INTO storage_meta (key, value) VALUES ('jsonl_import', 'complete')")
             elif marker[0] != "complete":
                 raise RuntimeError(
                     f"invalid JSONL migration marker in {self.path}: {marker[0]!r}; "
                     "restore a valid database backup or repair the marker explicitly"
                 )
-            db.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def _metadata(self, db: sqlite3.Connection, key: str, raw: str) -> dict[str, Any]:
         metadata = _object(raw)
@@ -197,7 +213,7 @@ class SqliteSessionStore:
             db.execute("DELETE FROM checkpoints WHERE session_key=?", (key,))
         else:
             db.execute(
-                "INSERT INTO checkpoints VALUES (?, ?) ON CONFLICT(session_key) DO UPDATE SET record=excluded.record",
+                "INSERT INTO checkpoints (session_key, record) VALUES (?, ?) ON CONFLICT(session_key) DO UPDATE SET record=excluded.record",
                 (key, _encode(checkpoint)),
             )
         for kind in _INPUTS:
@@ -205,7 +221,7 @@ class SqliteSessionStore:
             if not isinstance(inputs, list):
                 raise ValueError(f"{kind} must be a list")
             db.execute("DELETE FROM pending_inputs WHERE session_key=? AND kind=?", (key, kind))
-            db.executemany("INSERT INTO pending_inputs VALUES (?, ?, ?, ?)", [
+            db.executemany("INSERT INTO pending_inputs (session_key, kind, position, record) VALUES (?, ?, ?, ?)", [
                 (key, kind, position, _encode(record))
                 for position, record in enumerate(cast(list[object], inputs))
             ])
@@ -245,7 +261,10 @@ class SqliteSessionStore:
                     raise SessionConflictError("session was deleted")
                 if message_start:
                     raise ValueError("a new session must include its full history")
-                db.execute("INSERT INTO sessions VALUES (?, ?, ?, '{}', NULL, 0, 0, ?, '', '', NULL)", (
+                db.execute("""INSERT INTO sessions (
+                    key, created_at, updated_at, metadata, provider_state, last_archived,
+                    revision, generation, title, preview, visible_updated_at
+                ) VALUES (?, ?, ?, '{}', NULL, 0, 0, ?, '', '', NULL)""", (
                     session.key, session.created_at.isoformat(), session.updated_at.isoformat(), session.generation,
                 ))
             elif row[0] != session.revision or row[1] != session.generation:
@@ -255,7 +274,7 @@ class SqliteSessionStore:
                 preview, last_visible, session.key,
             ))
             # Unchanged message rows do not generate writes. Appends only write the suffix.
-            db.executemany("""INSERT INTO messages VALUES (?, ?, ?)
+            db.executemany("""INSERT INTO messages (session_key, position, record) VALUES (?, ?, ?)
                 ON CONFLICT(session_key, position) DO UPDATE SET record=excluded.record
                 WHERE messages.record != excluded.record""", [
                     (session.key, position, record)
