@@ -279,8 +279,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
     if isinstance(agent_loop.provider, UnconfiguredProvider):
         return _error_json(
             503,
-            "Model is not configured. Open Settings → Models to configure a provider "
-            "and model, then restart the API server.",
+            "Model is not configured. Open Settings → Models to configure a provider and model, then restart the API server.",
             err_type="configuration_error",
         )
     timeout_s: float = request.app[_REQUEST_TIMEOUT_KEY]
