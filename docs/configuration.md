@@ -2162,6 +2162,35 @@ Restart nanobot after changing this section.
 
 Keep the key file private (for example `chmod 600`). It grants access to everything shared with the service account.
 
+## Google Sheets
+
+The `google_sheets` tool reads and updates spreadsheets shared with a Google service account. It can list the configured spreadsheets and their tabs, read a range, update a range and append rows. Only the configured spreadsheet IDs are reachable.
+
+Ranges must be bounded A1 ranges such as `Sheet1!A1:C20`; append also accepts `Sheet1!A:C`. Writes use Google's `USER_ENTERED` input mode, so numbers stay numbers and a value starting with `=` becomes a formula.
+
+Install the libraries with `nanobot plugins enable sheets` (it installs the same packages as `drive`), enable the Google Sheets API for the service account's project, share each spreadsheet with the key's `client_email`, then add the IDs from the sheet URLs (`/spreadsheets/d/<ID>`):
+
+```json
+{
+  "tools": {
+    "sheets": {
+      "enabled": true,
+      "spreadsheetIds": ["1AbCdEfGh..."]
+    }
+  }
+}
+```
+
+When `credentialsPath` is empty, Sheets uses the Drive key from `tools.drive.credentialsPath`, so one service account can serve both tools. Restart nanobot after changing this section.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `false` | Register the `google_sheets` tool |
+| `credentialsPath` | string | `""` | Service account JSON key. Falls back to the Drive key when empty |
+| `spreadsheetIds` | string[] | `[]` | Spreadsheets the agent may read and write. The tool stays off while this is empty |
+| `maxReadRows` | integer | `200` | Most rows a read or append can cover |
+| `maxWriteCells` | integer | `2000` | Most cells a read range or write can cover |
+
 ## MCP (Model Context Protocol)
 
 Open **Apps → MCP**, choose a preset or **Add MCP server**, and enter the stdio command or HTTP/SSE endpoint. Configure authentication and enabled tools in the server editor, save, and follow any connection or restart prompt.

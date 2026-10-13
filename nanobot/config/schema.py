@@ -12,6 +12,7 @@ from nanobot.agent.tools.drive_config import DriveToolConfig
 from nanobot.agent.tools.filesystem_config import FileToolsConfig
 from nanobot.agent.tools.image_generation_config import ImageGenerationToolConfig
 from nanobot.agent.tools.self_config import MyToolConfig
+from nanobot.agent.tools.sheets_config import SheetsToolConfig
 from nanobot.agent.tools.shell_config import ExecToolConfig
 from nanobot.agent.tools.web_config import (
     WebFetchConfig as WebFetchConfig,
@@ -437,6 +438,7 @@ class ToolsConfig(Base):
         default_factory=ImageGenerationToolConfig,
     )
     drive: DriveToolConfig = Field(default_factory=DriveToolConfig)
+    sheets: SheetsToolConfig = Field(default_factory=SheetsToolConfig)
     max_session_messages_per_minute: int = Field(default=6, ge=1)
     restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
     webui_allow_local_service_access: bool = Field(

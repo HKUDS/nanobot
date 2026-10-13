@@ -37,6 +37,7 @@ class RuntimeImportBlocker(importlib.abc.MetaPathFinder):
             'nanobot.agent.tools.image_generation_config',
             'nanobot.agent.tools.self_config',
             'nanobot.agent.tools.shell_config',
+            'nanobot.agent.tools.sheets_config',
             'nanobot.agent.tools.web_config',
         }
         if fullname in config_modules:
@@ -101,6 +102,7 @@ assert 'nanobot.agent.tools.shell' not in sys.modules
         ("image_generation", ("ImageGenerationToolConfig",)),
         ("self", ("MyToolConfig",)),
         ("shell", ("ExecToolConfig",)),
+        ("sheets", ("SheetsToolConfig",)),
         ("web", ("WebSearchConfig", "WebFetchConfig", "WebToolsConfig")),
     ],
 )
