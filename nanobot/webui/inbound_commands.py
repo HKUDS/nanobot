@@ -628,10 +628,10 @@ class WebUICommandRouter:
                     chat_id=chat_id,
                     chat_running=websocket_turn_wall_started_at(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
-                )
-            ),
-            chat_id=chat_id,
-            turn_id=turn_id,
+                ),
+                chat_id=chat_id,
+                turn_id=turn_id,
+            )
         )
         if scope is None:
             return

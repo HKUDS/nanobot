@@ -365,7 +365,7 @@ async def test_project_selection_can_remain_disabled_for_untrusted_connections(
         )
 
 
-def test_recent_projects_survive_controller_restart_without_changing_access(tmp_path, monkeypatch) -> None:
+async def test_recent_projects_survive_controller_restart_without_changing_access(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"
     project = tmp_path / "project"
@@ -374,12 +374,12 @@ def test_recent_projects_survive_controller_restart_without_changing_access(tmp_
     controller = WebUIWorkspaceController(
         session_manager=None, default_workspace=default, default_restrict_to_workspace=True,
     )
-    scope = controller.scope_for_new_chat(
+    scope = await controller.scope_for_new_chat(
         {WORKSPACE_SCOPE_METADATA_KEY: {"project_path": str(project), "access_mode": "restricted"}},
         can_change_project=True,
     )
-    controller.stage_scope("first", scope)
-    controller.stage_scope("second", scope)
+    await controller.stage_scope("first", scope)
+    await controller.stage_scope("second", scope)
     restarted = WebUIWorkspaceController(
         session_manager=None, default_workspace=default, default_restrict_to_workspace=True,
     )
