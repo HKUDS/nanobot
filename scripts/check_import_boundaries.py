@@ -170,6 +170,7 @@ class ImportCollector(ast.NodeVisitor):
             self._add(target, node.lineno)
 
     def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
         previous = self.type_only
         self.type_only = previous or _qualified_name(node.test) in self.type_guards
         for statement in node.body:

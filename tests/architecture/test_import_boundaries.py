@@ -156,6 +156,15 @@ def test_existing_runtime_and_composition_dependencies_remain_allowed(
             "core-execution", "nanobot.webui.metadata", 1,
         ),
         (
+            "nanobot/agent/loop.py",
+            "import importlib\nif importlib.import_module('nanobot.webui.metadata'):\n    pass",
+            "core-execution", "nanobot.webui.metadata", 2,
+        ),
+        (
+            "nanobot/agent/loop.py", "if __import__('nanobot.webui.metadata'):\n    pass",
+            "core-execution", "nanobot.webui.metadata", 1,
+        ),
+        (
             "nanobot/session/manager.py", "from nanobot.cli import gateway",
             "session-storage", "nanobot.cli.gateway", 1,
         ),
