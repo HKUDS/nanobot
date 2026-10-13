@@ -353,13 +353,3 @@ class SqliteSessionStore:
                      "preview": row["preview"], "visible_updated_at": row["visible_updated_at"],
                      "path": str(self.path), "metadata": _object(row["metadata"])}
                     for row in db.execute("SELECT key, created_at, updated_at, title, preview, visible_updated_at, metadata FROM sessions ORDER BY updated_at DESC")]
-
-    def snapshot_sessions(self) -> list[Session]:
-        """Return one consistent, detached snapshot for explicit export."""
-        with self.transaction(write=False):
-            sessions: list[Session] = []
-            for row in self.list_sessions():
-                session = self.load(row["key"])
-                assert session is not None
-                sessions.append(session)
-            return sessions

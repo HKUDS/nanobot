@@ -111,25 +111,12 @@ Status does not send a model request. On success, run the printed `nanobot agent
 
 Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved conversation, and `/context` explains the compacted summary and raw session suffix available to the next agent turn. `/branch` forks a saved conversation from a completed reply, and `/diff` opens the latest turn's file changes as a full-screen unified diff. `PageUp` loads older transcript pages when you reach the top. By default, each launch starts a new session using the launch directory as its workspace. `--session` selects a specific existing session, and `--workspace` overrides the launch directory. When the TUI exits, it prints a ready-to-run `nanobot agent --session ...` command for the current session.
 
-## Session Storage and Export
+## Session Storage
 
 Session state lives in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`,
 outside the agent-readable workspace. JSONL migration is available from 0.3.6
 through 0.4.x and is removed in **0.5.0**. Stop the old gateway before upgrading.
 See [Session storage](session-storage.md) for migration, failure recovery, and backup.
-
-Export portable conversation copies with:
-
-```bash
-nanobot sessions export-jsonl --config ./bot-a/config.json --workspace ./bot-a/workspace
-```
-
-SQLite remains authoritative after export. Each successful export synchronizes
-the destination to the current session set and removes stale session JSONL files.
-The files contain unredacted messages, metadata, pending/checkpoint state, and
-provider continuation data; protect them as sensitive data. They are not loaded
-again by an already migrated database, but a fresh database or older release can
-import them.
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. `/detach` promotes the shared gateway to persistent background mode before closing the TUI, so active agent work continues without a connected client. An explicit `nanobot gateway --background` starts or promotes the gateway the same way before opening a client. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 

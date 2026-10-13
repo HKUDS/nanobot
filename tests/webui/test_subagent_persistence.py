@@ -1,6 +1,7 @@
 """A restarted host replays task observations without recovering execution."""
 
 import asyncio
+import hashlib
 import json
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
+from nanobot.session.location import SessionLocation
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
@@ -697,28 +699,58 @@ async def test_temporary_parent_never_persists_task_content(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_child_sessions_use_common_restore_and_migration(tmp_path):
+async def test_child_sessions_migrate_from_legacy_jsonl_and_reopen(tmp_path):
     workspace, root = tmp_path / "agent", tmp_path / "sessions"
-    manager, sessions, runtime = manager_with_storage(workspace, root)
-    parent = sessions.get_or_create("websocket:parent")
-    parent.add_message("user", "Inspect config")
-    sessions.save(parent)
-    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Verified"))
-    try:
-        await manager.run_inline("inspect", session_key=parent.key, runtime=runtime)
-        task_id, = manager.statuses_for_session(parent.key)
-        child_key = SubagentSessions.key(task_id)
-        assert sessions.export_sessions_to_workspace() == 2
-        exports = list((workspace / "sessions").glob("*.jsonl"))
-        assert len(exports) == 2
-        fresh_root = tmp_path / "migrated"
-        reopened, migrated, _ = manager_with_storage(workspace, fresh_root)
-        assert migrated.child_session_keys(parent.key) == [child_key]
-        assert reopened.check(task_id, parent.key).result == "Verified"
-        assert len(list((workspace / "sessions").glob("*.jsonl"))) == 2
-        await reopened.close()
-    finally:
-        await manager.close()
+    parent_key, task_id = "websocket:parent", "legacy-inspection"
+    child_key = SubagentSessions.key(task_id)
+    task_metadata = {
+        "task_id": task_id, "owner": parent_key, "revision": 3,
+        "label": "inspect", "task_description": "inspect", "state": "done", "phase": "done",
+        "created_at": 1767225600.0, "completed_at": 1767225601.2, "elapsed_seconds": 1.2,
+        "origin_turn_id": "turn-1", "iteration": 1, "result": "Verified", "stop_reason": "stop",
+    }
+    fixtures = {
+        parent_key: [
+            {"_type": "metadata", "key": parent_key, "metadata": {"webui": True},
+             "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00",
+             "last_archived": 0},
+            {"role": "user", "content": "Inspect config"},
+        ],
+        child_key: [
+            {"_type": "metadata", "key": child_key,
+             "metadata": {SESSION_TYPE_KEY: SUBAGENT.name, PARENT_SESSION_KEY: parent_key,
+                          TASK_METADATA_KEY: task_metadata},
+             "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:01.200000",
+             "last_archived": 0},
+            {"role": "user", "content": "inspect"},
+            {"role": "assistant", "content": "Verified"},
+        ],
+    }
+    legacy = workspace / "sessions"
+    legacy.mkdir(parents=True)
+    for key, records in fixtures.items():
+        (legacy / f"{SessionLocation.storage_key(key)}.jsonl").write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8",
+        )
+    source_hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in legacy.glob("*.jsonl")}
+
+    for _ in range(2):
+        manager, sessions, _ = manager_with_storage(workspace, root)
+        try:
+            assert {row["key"] for row in sessions.list_sessions()} == set(fixtures)
+            assert sessions.child_session_keys(parent_key) == [child_key]
+            status = manager.check(task_id, parent_key)
+            assert status.state == "done" and status.result == "Verified"
+            assert status.origin_turn_id == "turn-1"
+            assert manager.get_running_count() == 0
+            for key, records in fixtures.items():
+                restored = sessions.read_session_file(key)
+                assert restored["metadata"] == records[0]["metadata"]
+                assert restored["messages"] == records[1:]
+            assert {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in legacy.glob("*.jsonl")} == source_hashes
+        finally:
+            await manager.close()
 
 
 @pytest.mark.asyncio

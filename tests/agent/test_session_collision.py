@@ -16,11 +16,3 @@ def test_colliding_display_names_roundtrip_independently(tmp_path):
         assert manager.read_session_file(key)["messages"][0]["content"] == key
     manager.delete_session(keys[0])
     assert manager.read_session_snapshot(keys[1]) is not None
-
-
-def test_export_names_are_collision_resistant(tmp_path):
-    manager = SessionManager(tmp_path)
-    for key in ("a:b", "a_b", "a:b:c"):
-        manager.save(Session(key=key))
-    assert manager.export_sessions_to_workspace() == 3
-    assert len(list((tmp_path / "sessions").glob("*.jsonl"))) == 3

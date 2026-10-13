@@ -375,35 +375,6 @@ def test_invalid_migration_marker_fails_closed(tmp_path):
         ).fetchone()[0] == 0
 
 
-def test_reexport_prunes_deleted_session_and_fresh_store_cannot_resurrect_it(tmp_path):
-    workspace = tmp_path / "workspace"
-    manager = SessionManager(workspace, sessions_root=tmp_path / "root-a")
-    deleted = manager.get_or_create("chat:deleted")
-    deleted.add_message("user", "deleted-secret")
-    manager.save(deleted)
-    kept = manager.get_or_create("chat:kept")
-    kept.add_message("user", "keep")
-    manager.save(kept)
-    assert manager.export_sessions_to_workspace() == 2
-    deleted_export = workspace / "sessions" / (
-        SessionLocation.storage_key("chat:deleted") + ".jsonl"
-    )
-    deleted_export.with_suffix(".checkpoint.json").write_text("{}", encoding="utf-8")
-
-    assert manager.delete_session("chat:deleted")
-    assert manager.export_sessions_to_workspace() == 1
-    assert not deleted_export.exists()
-    assert not deleted_export.with_suffix(".checkpoint.json").exists()
-    assert "deleted-secret" not in "".join(
-        path.read_text(encoding="utf-8")
-        for path in (workspace / "sessions").glob("*.jsonl")
-    )
-
-    restored = SessionManager(workspace, sessions_root=tmp_path / "root-b")
-    assert restored.read_session_snapshot("chat:kept") is not None
-    assert restored.read_session_snapshot("chat:deleted") is None
-
-
 async def test_missing_update_commands_do_not_create_sessions(tmp_path):
     manager = SessionManager(tmp_path)
     state = manager.state

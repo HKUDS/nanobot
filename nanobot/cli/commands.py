@@ -478,33 +478,6 @@ app.command(name="agent")(agent)
 
 
 # ============================================================================
-# Session Commands
-# ============================================================================
-
-
-sessions_app = typer.Typer(help="Manage persisted session history")
-app.add_typer(sessions_app, name="sessions")
-
-
-@sessions_app.command("export-jsonl")
-def sessions_export_jsonl(
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-) -> None:
-    """Synchronize a sensitive, unredacted JSONL snapshot into the workspace."""
-    from nanobot.session.manager import SessionManager
-
-    runtime_config = _load_runtime_config(config, workspace)
-    data_dir = runtime_config.runtime_data_dir
-    manager = SessionManager(
-        runtime_config.workspace_path,
-        sessions_root=data_dir / "sessions" if data_dir is not None else None,
-    )
-    count = manager.export_sessions_to_workspace()
-    console.print(f"Exported {count} session(s) to {escape(str(runtime_config.workspace_path / 'sessions'))}")
-
-
-# ============================================================================
 # Channel Commands
 # ============================================================================
 

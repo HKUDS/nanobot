@@ -556,12 +556,6 @@ class SessionManager:
 
         return self._store.run_write(delete)
 
-    def export_sessions_to_workspace(self) -> int:
-        """Export portable JSONL copies; SQLite remains authoritative."""
-        from nanobot.session.export import export_sessions
-
-        return export_sessions(self._store, self.workspace / "sessions")
-
     def fork_session_before_user_index(
         self, source_key: str, target_key: str, before_user_index: int,
     ) -> Session | None:

@@ -33,4 +33,4 @@ discard revokes their generation so late delivery cannot persist them.
 
 JSONL import is isolated in `jsonl_migration.py`, introduced in 0.3.6 and scheduled
 for removal in **0.5.0**. A durable completion marker prevents repeated import.
-See [Session storage](../docs/session-storage.md) for migration and export rules.
+See [Session storage](../docs/session-storage.md) for migration and backup rules.

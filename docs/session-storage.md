@@ -35,7 +35,7 @@ pending schema migration in order. Schema changes, version updates, and any
 initial JSONL import commit in one transaction; a failure rolls them back so
 startup can retry. An older binary rejects a database with a newer schema before
 changing its journal mode or writing session data. Downgrading requires restoring
-a compatible backup or exporting to a format the target release supports.
+a backup compatible with the target release.
 
 Session metadata and message records retain their JSON fields through storage
 reads and writes. Add optional attributes there when they need no SQL index,
@@ -80,27 +80,10 @@ migration. Retain the original files until the imported history has been checked
 Installations that still have only JSONL data must upgrade through a release in
 the migration window before using 0.5.0. The version gate in
 `tests/session/test_sqlite_storage.py` fails at 0.5.0 until the migration module,
-its initialization hook, and migration-only tests are removed. Namespace identity
-and JSONL export are independent of that retiring module.
+its initialization hook, and migration-only tests are removed. Workspace namespace
+identity is independent of that retiring module.
 
-## Export and backup
-
-`nanobot sessions export-jsonl --config PATH --workspace PATH` synchronizes a
-complete portable snapshot into `<workspace>/sessions/`. A successful repeat
-export replaces current session files and removes stale JSONL and checkpoint
-sidecars, so a previously deleted session is not restored by a new database or
-an older release. The directory is managed by this command, not an append-only
-archive. Exported files are not a second live store; editing them does not change
-SQLite state.
-
-An export is sensitive and is not redacted. It contains full messages, metadata,
-runtime checkpoints, pending inputs, and opaque provider continuation data,
-which may include prompts, tool output, or secrets. The destination is inside the
-agent-readable workspace and may also be visible to file tools, synchronization
-software, or version control. Keep it private (`0700` directory and `0600` files
-on Unix; restrictive ACLs on Windows), clean it up when no longer needed, and do
-not publish it as a transcript. A fresh database or a pre-SQLite release can
-import these files.
+## Backup
 
 For an exact backup containing every accepted session command, stop the gateway
 gracefully and let the owner drain first. For an online consistent snapshot of
@@ -108,7 +91,6 @@ already committed state, use SQLite's backup API or the SQLite CLI's `.backup`
 command. Copying only `sessions.sqlite3` while the gateway is running can omit
 committed records still held in its WAL file. Restore the database together with
 `<workspace>/.nanobot/workspace-id`; that marker selects its session namespace.
-JSONL export is a migration/portability format, not a complete instance backup.
 WebUI display transcripts, Memory and history files, media, configuration, cron
 and trigger definitions, and other runtime state remain separate and must be
 backed up independently.

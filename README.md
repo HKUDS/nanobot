@@ -77,7 +77,7 @@ You need **Python 3.11 or newer** and access to a [supported model provider or l
 
 Choose the **stable release** for everyday use or **current source** for development and the latest features. This README describes current source; [published documentation](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) covers the released version.
 
-New to terminals or model credentials? Follow [Start Without Technical Background](./docs/start-without-technical-background.md). Updating an existing instance? Back up its config directory and workspace, stop every old nanobot process using that workspace, then update and restart through the original launcher or service. See [session storage and version changes](./docs/cli-reference.md#session-storage-and-rollback).
+New to terminals or model credentials? Follow [Start Without Technical Background](./docs/start-without-technical-background.md). Updating an existing instance? Back up its config directory and workspace, stop every old nanobot process using that workspace, then update and restart through the original launcher or service. See [session storage and version changes](./docs/cli-reference.md#session-storage).
 
 **Stable release: automatic setup (recommended)**
 
