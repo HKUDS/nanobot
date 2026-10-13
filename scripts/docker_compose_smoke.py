@@ -75,7 +75,7 @@ def main() -> None:
                 service["environment"].update(
                     NANOBOT_WEB_TOKEN=secret, NANOBOT_API_KEY=secret,
                 )
-            compose_path.write_text(json.dumps(config))
+            compose_path.write_text(json.dumps(config), encoding="utf-8")
             try:
                 onboard = run("run", "--rm", "--no-deps", "-T", "nanobot-cli", "onboard")
                 assert "Overwrite?" not in onboard
@@ -92,7 +92,7 @@ def main() -> None:
                 wait_for(webui + "/")
                 assert set(run("ps", "--services").split()) == {"nanobot-gateway", "nanobot-api"}
                 path = data / "config.json"
-                saved = json.loads(path.read_text())
+                saved = json.loads(path.read_text(encoding="utf-8"))
                 password = saved["channels"]["websocket"]["tokenIssueSecret"]
                 api_key = saved["api"]["apiKey"]
                 logs = run("logs", "--no-color")
@@ -132,7 +132,7 @@ def main() -> None:
                     service["environment"].update(
                         NANOBOT_WEB_TOKEN="changed-env", NANOBOT_API_KEY="changed-env",
                     )
-                compose_path.write_text(json.dumps(config))
+                compose_path.write_text(json.dumps(config), encoding="utf-8")
                 run("up", "-d", "--force-recreate", "nanobot-gateway")
                 webui = endpoint("nanobot-gateway", 8765)
                 wait_for(webui + "/")
