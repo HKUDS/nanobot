@@ -8,43 +8,17 @@ New capabilities should be added via `channels/`, `tools/`, skills, or MCP serve
 
 Runtime state fan-out follows the same boundary. `MessageBus.publish` awaits local subscribers for turn/run/model/goal state changes; `MessageBus.publish_event` queues routed channel delivery without waiting for network sends. Both carry `AgentEvent` values. Runner hooks publish typed output through the turn's scoped `EventSink`; direct-call callbacks are adapted at the execution boundary. WebUI/WebSocket wire details, title refreshes, and goal-state sync belong in `nanobot.session.webui_turns.WebuiTurnCoordinator` or the relevant channel adapter.
 
-Tools and channels own their configuration, metadata, and activation behavior. Tool configuration models live beside their implementations in `agent/tools/*_config.py`; channel descriptors and configuration stay in their channel packages. The root configuration schema assembles these contracts without importing their runtime implementations. Tool classes expose their configuration through `config_key` and `config_cls()`.
+Tools and channels own their configuration, metadata, and activation behavior. Tool configuration models live beside their implementations in `agent/tools/*_config.py`; channel descriptors and configuration stay in their channel packages. The root schema in `config/schema.py` assembles these contracts without importing their runtime implementations. Tool classes expose their configuration through `config_key` and `config_cls()`.
+
+Generic recovery checkpoints belong in `session/recovery.py`; WebUI recovery and turn coordination belong in `webui/recovery.py` and `session/webui_turns.py`. Gateway startup composes WebUI and channel route policies, and channel adapters select durable notification addresses. Core turn delivery consumes these policy decisions without owning channel-specific routing.
 
 ## Executable import boundaries
 
-Run `python -m scripts.check_import_boundaries` from the repository root. The Python CI job runs this command on the coverage matrix entry. Rules live in `scripts/check_import_boundaries.py` and protect direct imports by module responsibility:
+Core execution, session storage, and security primitives stay independent of API, channel, CLI, and WebUI adapters. Shared client contracts stay independent of UI implementations, and client initialization dependencies must be acyclic.
 
-| Rule | Protected sources | Boundary |
-| --- | --- | --- |
-| `core-execution` | `agent/loop.py`, `agent/runner.py`, `agent/turn_delivery.py` | No imports from API, channel, CLI, gateway startup, or WebUI adapters. |
-| `session-storage` | `session/manager.py`, `session/history.py`, `session/summary.py`, `session/recovery.py` | No imports from those adapters or `agent/` modules. |
-| `security-primitives` | `security/` | No imports from those adapters, `agent/`, or `session/`. |
-| `websocket-transport` | `channels/websocket/runtime.py` | Application command, mutation, and projection dependencies listed in the rule stay behind the owning coordinators. |
-| `tool-config-base` | `agent/tools/`, `channels/` | Direct imports of `Base` use `nanobot.config_base`, not the aggregate `config.schema`. |
-| `configuration-contracts` | `config/`, `config_base.py` | No imports from adapters, agent execution, apps, or sessions. The six tool-owned `*_config` modules listed in the rule are allowed for root configuration composition. |
-| `tool-configuration-contracts` | Tool-owned `agent/tools/*_config.py` modules listed in the rule | No imports from runtime implementations, adapters, apps, sessions, or aggregate configuration. Shared tool configuration and `config_base` remain allowed. |
-| `shared-primitives` | File I/O, skill metadata, generation settings, usage types, automation specs | No imports from adapters, agent execution, apps, sessions, or aggregate configuration. |
-| `oauth-catalog-cache` | `providers/oauth_catalog_cache.py` | No imports from the provider dispatcher or concrete OAuth providers. |
+Python rules live in [scripts/check_import_boundaries.py](../scripts/check_import_boundaries.py); run `python -m scripts.check_import_boundaries` from the repository root. Client rules live in [scripts/check_client_import_boundaries.mjs](../scripts/check_client_import_boundaries.mjs); run `bun run check:imports` and `bun run test:imports` from `webui/` or `tui/` for that project. These scripts are the source of truth for checked modules, dependency rules, and exceptions.
 
-Static imports, including relative and function-local imports, are checked together with literal `import_module` calls and absolute `__import__` module arguments. Import aliases are recognized; relative `import_module` names require a literal package or `__package__`. Imports under `TYPE_CHECKING` are checked. The WebSocket transport may import `nanobot.bus.outbound_events.ProgressEvent` only under a recognized `TYPE_CHECKING` guard.
-
-Client rules live in `scripts/check_client_import_boundaries.mjs`. Run `bun run check:imports` and `bun run test:imports` from `webui/` or `tui/`; each project's CI runs both commands with its own TypeScript dependency. The WebUI scan includes channel-owned frontend modules, and both scans include `packages/client-events/`.
-
-| Client rule | Protected sources | Boundary |
-| --- | --- | --- |
-| `shared-client-contracts` | `packages/client-events/` | Local imports stay within the shared directory; React, Radix, Lucide, and OpenTUI dependencies are forbidden. |
-| `tui-client` | `tui/src/client/` | No imports from TUI app, view, rendering, composer, or menu implementations, or those UI packages. |
-| `webui-lib` | `webui/src/lib/` | No imports from WebUI components, hooks, or providers. |
-| `webui-lib-bootstrap` | `webui/src/lib/` | No imports from the application i18n initializer. Localized formatting uses `format-time.ts`; `format.ts` stays independent of i18n. |
-| `pure-format-utils` | `webui/src/lib/format.ts` | No imports from i18next or react-i18next. |
-| `channel-ui-contracts` | `channel-plugins/types.ts`, `channel-plugins/catalog.ts` | No imports from those WebUI implementation layers. React component types are part of the contribution interface. |
-| `client-app-isolation` | WebUI, channel-owned UI, and TUI source modules | WebUI and channel UI do not import TUI implementations; TUI does not import WebUI or channel UI implementations. |
-
-The client checker parses imports, type imports, re-exports, import-type expressions, literal dynamic imports, and literal `require` calls with the TypeScript AST. It normalizes relative paths and configured TypeScript path aliases, and expands literal Vite `import.meta.glob` patterns, including exclusions. Channel UI and locale registries may compose the channel-owned modules through those globs. Test files and test directories are excluded from production scans.
-
-`client-runtime-cycle` also rejects cycles through emitted static imports, re-exports, top-level literal `require` calls, and eager Vite globs. TypeScript emission removes type-only imports before this graph is checked. Declaration files, function-local `require` calls, deferred dynamic imports, and lazy globs do not create initialization edges.
-
-These rules protect direct imports by responsibility. Generic recovery checkpoints live in `session/recovery.py`; `webui/recovery.py` and `session/webui_turns.py` own WebUI recovery and turn coordination. `cli/gateway_runtime.py` assembles WebUI and channel route policies; adapters select the durable notification addresses stored by turn delivery. Computed import strings, plugin entry points, Python re-export origins, transitive dependencies, and module-attribute access are outside these source checks. They do not establish a complete module DAG. Execution, state ownership, and security behavior still require behavioral verification.
+The checks cover selected direct imports and client initialization dependencies. They do not establish a complete runtime dependency graph; execution, state ownership, and security contracts still require behavioral verification.
 
 ## Prefer duplication over premature abstraction
 
@@ -60,4 +34,4 @@ Every new cast must be supported by a boundary check or an invariant established
 
 ## Explicit over magical
 
-The aggregate configuration schema lives in `config/schema.py`; tools and channels own their configuration contracts. These contracts must load without their runtime implementations. Provider auto-detection must remain traceable from the factory to the concrete provider class.
+Provider auto-detection must remain traceable from the factory to the concrete provider class.
