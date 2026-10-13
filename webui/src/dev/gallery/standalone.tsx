@@ -60,7 +60,7 @@ function ChatsPreview() {
   return <><StatePicker label="会话列表状态" value={mode} options={["ready", "loading", "empty", "archived"]} onChange={setMode} />
     <div className="flex h-80 max-w-sm flex-col rounded-panel bg-sidebar p-2"><ChatList sessions={mode === "empty" ? [] : sessions}
       activeKey={active} onSelect={setActive} pinnedKeys={pinned} archivedKeys={archived} showArchived={mode === "archived"}
-      showPreviews showTimestamps loading={mode === "loading"}
+      loading={mode === "loading"}
       onTogglePin={(key) => setPinned(toggle(pinned, key))} onToggleArchive={(key) => setArchived(toggle(archived, key))}
       onRequestDelete={(key) => setSessions((items) => items.filter((item) => item.key !== key))}
       onRequestRename={(_, label) => setAction(`选择重命名：${label}`)} /></div>

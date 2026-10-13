@@ -523,8 +523,6 @@ export interface WorkbenchState {
 
 export interface SidebarViewState {
   density: SidebarDensity;
-  show_previews: boolean;
-  show_timestamps: boolean;
   show_archived: boolean;
   sort: SidebarSortMode;
 }

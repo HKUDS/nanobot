@@ -1185,8 +1185,6 @@ describe("webui API helpers", () => {
       collapsed_groups: {},
       view: {
         density: "compact" as const,
-        show_previews: false,
-        show_timestamps: false,
         show_archived: true,
         sort: "updated_desc" as const,
       },

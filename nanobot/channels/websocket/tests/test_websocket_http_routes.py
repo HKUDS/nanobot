@@ -2293,7 +2293,12 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
             "archived_keys": ["websocket:old"],
             "session_order": ["websocket:old", "websocket:sidebar"],
             "title_overrides": {"websocket:sidebar": "Pinned work"},
-            "view": {"density": "compact", "show_archived": True},
+            "view": {
+                "density": "compact",
+                "show_archived": True,
+                "show_previews": True,
+                "show_timestamps": True,
+            },
         }
         updated = await _webui_mutate(
             channel,

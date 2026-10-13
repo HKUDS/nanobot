@@ -946,7 +946,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showPreviews
       />,
     );
 
@@ -955,7 +954,7 @@ describe("ChatList", () => {
 
     expect(text.indexOf("Newest chat")).toBeLessThan(text.indexOf("Middle chat"));
     expect(text.indexOf("Middle chat")).toBeLessThan(text.indexOf("Older chat"));
-    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
+    expect(within(chatsSection).getByRole("button", { name: "Older chat" })).toBeInTheDocument();
   });
 
   it("shows a pin indicator for pinned chats", () => {
@@ -1032,7 +1031,6 @@ describe("ChatList", () => {
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
         sort="title_asc"
-        showTimestamps
         runningChatIds={["zeta"]}
       />,
     );
@@ -1092,7 +1090,6 @@ describe("ChatList", () => {
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
         defaultWorkspacePath="/Users/me/.nanobot/workspace"
-        showTimestamps
       />,
     );
 
@@ -1444,7 +1441,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 
@@ -1500,7 +1496,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 
@@ -1550,7 +1545,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 

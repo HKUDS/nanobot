@@ -1328,8 +1328,6 @@ describe("NanobotClient", () => {
       workbench: { version: 1, tabs: {} },
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "manual",
       },
@@ -1392,8 +1390,6 @@ describe("NanobotClient", () => {
       },
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "updated_desc",
       },
