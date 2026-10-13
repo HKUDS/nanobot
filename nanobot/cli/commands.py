@@ -393,9 +393,17 @@ def serve(
     tools = ToolRegistry()
     register_image_generation_tool(runtime_config, tools, workspace=runtime_config.workspace_path)
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
+    from nanobot.providers.factory import build_unconfigured_provider_snapshot
+
+    setup_error = _provider_setup_error(runtime_config)
+    unconfigured_provider = (
+        build_unconfigured_provider_snapshot(runtime_config, setup_error).provider
+        if setup_error else None
+    )
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
+            provider=unconfigured_provider,
             session_manager=session_manager,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,

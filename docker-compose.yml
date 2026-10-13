@@ -45,11 +45,6 @@ services:
   nanobot-api:
     container_name: nanobot-api
     <<: *common-config
-    # Optional: the OpenAI-compatible API needs a configured provider before it
-    # can serve, so it is not part of the default `docker compose up`. Start it
-    # with `docker compose --profile api up -d` once a provider is configured.
-    profiles:
-      - api
     command:
       ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
     restart: unless-stopped

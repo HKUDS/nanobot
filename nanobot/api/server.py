@@ -20,6 +20,7 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.config.paths import get_media_dir
 from nanobot.providers.base import LLMUsage
+from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.media_decode import (
     MAX_FILE_SIZE,
@@ -275,6 +276,13 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
     content_type = _as_str(cast(object, request.content_type or ""))
 
     agent_loop = request.app[_AGENT_LOOP_KEY]
+    if isinstance(agent_loop.provider, UnconfiguredProvider):
+        return _error_json(
+            503,
+            "Model is not configured. Open Settings → Models to configure a provider "
+            "and model, then restart the API server.",
+            err_type="configuration_error",
+        )
     timeout_s: float = request.app[_REQUEST_TIMEOUT_KEY]
     model_name: str = request.app[_MODEL_NAME_KEY]
 

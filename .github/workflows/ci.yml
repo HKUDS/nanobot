@@ -423,7 +423,7 @@ jobs:
       - name: Build image with default channel dependencies
         run: docker build -t nanobot:test .
 
-      - name: Verify first-boot WebUI and optional API
+      - name: Verify first-boot WebUI and API
         run: python scripts/docker_compose_smoke.py --image nanobot:test
 
       - name: Verify Docker Compose startup and privilege boundary
@@ -450,7 +450,7 @@ jobs:
           done
           INNER
           OUTER
-          docker compose -f docker-compose.yml -f docker-compose.bwrap.yml --profile cli --profile api \
+          docker compose -f docker-compose.yml -f docker-compose.bwrap.yml --profile cli \
             config --format json > "${RUNNER_TEMP}/bwrap-compose.json"
           python - <<'PY'
           import json

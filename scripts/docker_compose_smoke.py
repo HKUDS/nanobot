@@ -1,4 +1,4 @@
-"""Verify Compose first boot, WebUI authentication, restart, and optional API."""
+"""Verify Compose first boot, WebUI authentication, restart, and API readiness."""
 
 import argparse
 import json
@@ -11,10 +11,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-def request(url: str, secret: str = "") -> tuple[int, bytes]:
+def request(url: str, secret: str = "", body: dict[str, object] | None = None) -> tuple[int, bytes]:
     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    data = json.dumps(body).encode() if body is not None else None
     try:
-        with urlopen(Request(url, headers=headers), timeout=3) as response:
+        with urlopen(Request(url, data=data, headers=headers), timeout=3) as response:
             return response.status, response.read()
     except HTTPError as exc:
         return exc.code, exc.read()
@@ -27,7 +30,7 @@ def main() -> None:
     repo = Path(__file__).resolve().parents[1]
     config = json.loads(subprocess.check_output(
         ["docker", "compose", "-f", str(repo / "docker-compose.yml"),
-         "--profile", "cli", "--profile", "api", "config", "--format", "json"],
+         "--profile", "cli", "config", "--format", "json"],
         text=True,
     ))
     with tempfile.TemporaryDirectory(prefix="nanobot-compose-smoke-") as temporary:
@@ -74,16 +77,27 @@ def main() -> None:
                 )
             compose_path.write_text(json.dumps(config))
             try:
+                onboard = run("run", "--rm", "--no-deps", "-T", "nanobot-cli", "onboard")
+                assert "Overwrite?" not in onboard
+                assert "Created config" in onboard
+                subprocess.run([
+                    "docker", "run", "--rm", "--user", "1000:1000", "--entrypoint", "python",
+                    "-v", f"{data}:/home/nanobot/.nanobot", args.image,
+                    "-c", "from pathlib import Path; Path('/home/nanobot/.nanobot/config.json').unlink()",
+                ], check=True)
                 run("up", "-d")
                 health = endpoint("nanobot-gateway", 18790)
                 webui = endpoint("nanobot-gateway", 8765)
                 wait_for(health + "/health")
                 wait_for(webui + "/")
-                assert run("ps", "--services").split() == ["nanobot-gateway"]
+                assert set(run("ps", "--services").split()) == {"nanobot-gateway", "nanobot-api"}
                 path = data / "config.json"
                 saved = json.loads(path.read_text())
                 password = saved["channels"]["websocket"]["tokenIssueSecret"]
                 api_key = saved["api"]["apiKey"]
+                logs = run("logs", "--no-color")
+                assert logs.count("[entrypoint] initialized") == 1
+                assert password in logs and api_key in logs
                 if secret:
                     assert password == api_key == secret
                 else:
@@ -91,14 +105,28 @@ def main() -> None:
                 assert request(webui + "/webui/bootstrap", "wrong-password")[0] == 401
                 status, body = request(webui + "/webui/bootstrap", password)
                 assert status == 200 and json.loads(body)["token"]
-                print(f"PASS {label}: default gateway only, health, WebUI, password authentication")
+                api = endpoint("nanobot-api", 8900)
+                wait_for(api + "/health")
+                for stream in (False, True):
+                    status, body = request(api + "/v1/chat/completions", api_key, {
+                        "messages": [{"role": "user", "content": "hello"}], "stream": stream,
+                    })
+                    assert status == 503 and json.loads(body)["error"]["type"] == "configuration_error"
+                assert request(api + "/v1/models")[0] == 401
+                print(f"PASS {label}: both default services, authenticated WebUI, API model-setup errors")
 
                 # Configure a provider without making external model requests.
                 saved["providers"]["custom"] = {
                     "apiKey": "smoke-provider-key", "apiBase": "http://127.0.0.1:9/v1",
                 }
                 saved["agents"]["defaults"].update(provider="custom", model="smoke-model")
-                path.write_text(json.dumps(saved))
+                subprocess.run([
+                    *compose, "exec", "-T", "--user", "1000:1000", "nanobot-gateway", "python", "-c",
+                    "import json, sys; from pathlib import Path; "
+                    "from nanobot.config.schema import Config; from nanobot.config.loader import save_config; "
+                    "save_config(Config.model_validate(json.load(sys.stdin)), "
+                    "Path('/home/nanobot/.nanobot/config.json'))",
+                ], input=json.dumps(saved), text=True, check=True)
                 previous = path.read_bytes()
                 for service in config["services"].values():
                     service["environment"].update(
@@ -113,7 +141,7 @@ def main() -> None:
                 assert request(webui + "/webui/bootstrap", "changed-env")[0] == 401
                 print(f"PASS {label}: recreate preserves provider settings and credentials")
 
-                run("--profile", "api", "up", "-d")
+                run("up", "-d", "--force-recreate", "nanobot-api")
                 api = endpoint("nanobot-api", 8900)
                 deadline = time.monotonic() + 60
                 while True:
@@ -127,12 +155,12 @@ def main() -> None:
                         raise RuntimeError("Configured API did not start")
                     time.sleep(1)
                 assert request(api + "/v1/models")[0] == 401
-                print(f"PASS {label}: opt-in API starts and requires its persisted key")
+                print(f"PASS {label}: configured API starts and requires its persisted key")
             except Exception:
                 print(run("logs", "--no-color", "--tail", "80"), flush=True)
                 raise
             finally:
-                subprocess.run([*compose, "--profile", "api", "down", "--volumes"], check=True)
+                subprocess.run([*compose, "down", "--volumes"], check=True)
                 # The non-root container owns the bind mount on Linux.
                 if os.name != "nt":
                     subprocess.run([

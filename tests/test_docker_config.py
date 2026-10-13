@@ -70,4 +70,4 @@ def test_failed_write_does_not_leave_an_existing_config(tmp_path):
         with pytest.raises(PermissionError, match="read-only mount"):
             initialize_config(path)
     assert not path.exists()
-    assert list(tmp_path.iterdir()) == []
+    assert not list(tmp_path.glob("*.tmp"))

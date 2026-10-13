@@ -222,7 +222,7 @@ def make_provider(
 
 
 def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> ProviderSnapshot:
-    """Build a non-networking runtime so the WebUI can collect first-time setup."""
+    """Build a non-networking runtime while provider/model setup is incomplete."""
     from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 
     preset = config.resolve_preset()
