@@ -1163,10 +1163,13 @@ class WebFetchTool(Tool):
 
                 try:
                     ctype = r.headers.get("content-type", "")
-                    if ctype.startswith("image/"):
+                    # Media types are case-insensitive; parameter values retain their case.
+                    media_type, separator, parameters = ctype.partition(";")
+                    image_ctype = media_type.strip().lower() + separator + parameters
+                    if image_ctype.startswith("image/"):
                         r.raise_for_status()
                         raw = await r.aread()
-                        return build_image_content_blocks(raw, ctype, url, f"(Image fetched from: {url})")
+                        return build_image_content_blocks(raw, image_ctype, url, f"(Image fetched from: {url})")
                 finally:
                     if stream is not None:
                         await stream.__aexit__(None, None, None)
@@ -1255,8 +1258,11 @@ class WebFetchTool(Tool):
                 r.raise_for_status()
 
             ctype = r.headers.get("content-type", "")
-            if ctype.startswith("image/"):
-                return build_image_content_blocks(r.content, ctype, url, f"(Image fetched from: {url})")
+            # Media types are case-insensitive; parameter values retain their case.
+            media_type, separator, parameters = ctype.partition(";")
+            image_ctype = media_type.strip().lower() + separator + parameters
+            if image_ctype.startswith("image/"):
+                return build_image_content_blocks(r.content, image_ctype, url, f"(Image fetched from: {url})")
 
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
