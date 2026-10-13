@@ -47,9 +47,9 @@ def test_custom_secrets_survive_json_serialization(tmp_path, secret):
 def test_restart_preserves_user_settings_and_credentials(tmp_path):
     path = tmp_path / "config.json"
     assert _initialize(path, "original-web", "original-api").returncode == 0
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     data["providers"]["custom"] = {"apiKey": "provider-key", "apiBase": "http://model:8000/v1"}
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(data), encoding="utf-8")
     previous = path.read_bytes()
     result = _initialize(path, "replacement-web", "replacement-api")
     assert result.returncode == 0, result.stderr
