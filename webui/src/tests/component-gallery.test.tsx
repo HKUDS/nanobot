@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { cwd } from "node:process";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -59,4 +59,105 @@ it("lets the developer retry a failed inventory request", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the inventory");
   await userEvent.click(screen.getByRole("button", { name: "Refresh inventory" }));
   expect(await screen.findByRole("heading", { name: "Button · 按钮" })).toBeVisible();
+});
+
+it("starts with working previews and lets the developer inspect source-only modules", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => inventory }));
+  render(<Gallery />);
+  await screen.findByRole("heading", { name: "Button · 按钮" });
+  expect(screen.queryByRole("link", { name: /SettingsPage/ })).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "All source · 源码" }));
+  const sourceLink = screen.getByRole("link", { name: /SettingsPage Source only/ });
+  // happy-dom does not follow anchor navigation or emit the browser's hashchange.
+  act(() => {
+    window.location.hash = sourceLink.getAttribute("href")!;
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  expect(await screen.findByRole("heading", { name: "Source only · 暂无独立预览" })).toBeVisible();
+  expect(screen.getByRole("link", { name: /Settings composition/ })).toBeVisible();
+
+  await userEvent.click(screen.getByRole("button", { name: "Previews · 预览" }));
+  expect(await screen.findByRole("region", { name: "Component preview" })).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "Source only · 暂无独立预览" })).not.toBeInTheDocument();
+});
+
+it("opens bookmarked source entries and offers all source when a preview search has no match", async () => {
+  const source = "webui/src/components/settings/SettingsView.tsx";
+  window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => inventory }));
+  render(<Gallery />);
+  expect(await screen.findByRole("heading", { name: "SettingsView" })).toBeVisible();
+  expect(screen.getByRole("link", { name: /^SettingsView Source only/ })).toHaveAttribute("aria-current", "page");
+
+  await userEvent.click(screen.getByRole("button", { name: "Previews · 预览" }));
+  await userEvent.type(screen.getByRole("searchbox", { name: "Search components" }), source);
+  expect(screen.getByText("No matching previews.")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Search all source" }));
+  expect(screen.getByRole("link", { name: /^SettingsView Source only/ })).toBeVisible();
+});
+
+it("submits a message through the actual composer using only local preview state", async () => {
+  const source = "webui/src/components/thread/ThreadComposer.tsx";
+  window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
+  vi.stubGlobal("fetch", fetch);
+  render(<Gallery />);
+  const input = await screen.findByRole("textbox", { name: "示例消息" });
+  await userEvent.type(input, "Try the real composer{Enter}");
+  expect(await screen.findByText("提交内容：Try the real composer")).toBeVisible();
+  expect(input).toHaveValue("");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
+});
+
+it("edits a pairing route without mounting a client or making a gateway mutation", async () => {
+  const source = "webui/src/components/remote/PairRouteSettingsView.tsx";
+  window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
+  vi.stubGlobal("fetch", fetch);
+  render(<Gallery />);
+  await screen.findByRole("heading", { name: "PairRouteSettingsView · 配对路由" });
+  const preview = within(screen.getByRole("region", { name: "Component preview" }));
+  expect(preview.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await userEvent.click(preview.getByRole("combobox", { name: "Network route" }));
+  await userEvent.click(screen.getByRole("option", { name: "VPN 路由" }));
+  await userEvent.click(preview.getByRole("button", { name: "Save changes" }));
+  expect(preview.getByRole("status")).toHaveTextContent("Saved");
+  expect(preview.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
+});
+
+it("uses the real provider manager and saves a new provider entirely in preview state", async () => {
+  const source = "webui/src/components/settings/models/ProviderSettings.tsx";
+  window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
+  vi.stubGlobal("fetch", fetch);
+  render(<Gallery />);
+  await screen.findByRole("heading", { name: "ProvidersSettings · 管理提供商" });
+  const preview = within(screen.getByRole("region", { name: "Component preview" }));
+  await userEvent.click(preview.getByRole("button", { name: "Manage providers" }));
+  let dialog = within(screen.getByRole("dialog", { name: "Manage providers" }));
+  expect(dialog.getByRole("button", { name: "Anthropic", exact: true })).toBeVisible();
+  expect(dialog.getByTestId("provider-logo-anthropic")).toBeVisible();
+  expect(dialog.queryByRole("button", { name: "OpenAI", exact: true })).not.toBeInTheDocument();
+
+  await userEvent.click(dialog.getByRole("button", { name: "Add provider", exact: true }));
+  await userEvent.click(screen.getByRole("option", { name: "OpenAI", exact: true }));
+  dialog = within(screen.getByRole("dialog", { name: "OpenAI" }));
+  await userEvent.type(dialog.getByLabelText("API key", { selector: "input" }), "gallery-example-key");
+  const apiURL = dialog.getByLabelText("API URL");
+  await userEvent.clear(apiURL);
+  await userEvent.type(apiURL, "https://preview.example/v1");
+  await userEvent.click(dialog.getByRole("button", { name: "Add provider", exact: true }));
+
+  dialog = within(await screen.findByRole("dialog", { name: "Manage providers" }));
+  await userEvent.click(dialog.getByRole("button", { name: "OpenAI", exact: true }));
+  expect(screen.getByLabelText("API URL")).toHaveValue("https://preview.example/v1");
+  await userEvent.keyboard("{Escape}{Escape}");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(preview.getByRole("button", { name: "Manage providers" })).toHaveFocus();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
 });

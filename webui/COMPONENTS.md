@@ -11,13 +11,19 @@ bun run gallery
 
 Open `http://127.0.0.1:5173/gallery.html`. The gallery uses the existing Vite development server and the actual application components. It needs no gateway, model provider, or API key. If another Vite server occupies the default port, use `bun run gallery --port 5174`.
 
+The gallery opens in **Previews**, which lists components with working examples. **All source** includes the complete source inventory and marks entries as **Preview** or **Source only**. Source-only entries link to related previews when their direct imports or callers have examples. A bookmarked source-only entry opens the source index automatically.
+
 Search by module name, exported name, path, or the bilingual example title. Categories separate foundation controls, shared views, conversation, settings, hosts, workbench, icons, and channel-owned interfaces. Each entry shows its source, exports, and direct references. The selected entry is kept in the URL, so it can be bookmarked or reloaded.
 
 The inventory is read from the current checkout. **Refresh inventory** picks up added, removed, and changed source files. Counts are source-module counts: a module can export several components, and several modules can belong to one example family. Direct references include imports, literal dynamic imports, and re-exports, including type references; they exclude tests and the gallery. Indirect plugin registration is not a direct reference, so an empty reference list does not prove that a component is unused.
 
-All foundation controls have live examples. Shared examples cover Markdown, code, math, messages, media, thinking/tool activity, file edits, file references, and settings composition. Change state selectors to inspect streaming, completion, disabled, missing-media, or error states where applicable. Dialog and disclosure examples preserve local drafts; their actions affect only the preview. Use the header to change theme and the language of the product components. Gallery explanations and code examples are development documentation.
+All foundation controls have live examples. Shared examples cover Markdown, code, math, messages, media, thinking/tool activity, file edits, and file references. Settings examples include the provider management dialog with its search and configuration flow, model controls, capability forms, channel credentials, usage charts, and automation controls. Conversation examples include the composer, prompt navigation, activity and error states. Shell examples include conversation dialogs, mentions, host status, icons, and pane layouts. These examples mount the product components with local data and caller-owned actions.
+
+Change state selectors to inspect streaming, completion, disabled, missing-media, or error states where applicable. Dialog and disclosure examples preserve local drafts; their actions affect only the preview. Use the header to change theme and the language of the product components. Gallery explanations and code examples are development documentation.
 
 Feature screens that own gateway requests, session state, or host connections are indexed with their source and callers. Exercise their complete workflows in the running WebUI. The gallery does not emulate those services.
+
+Runtime adapters and presentation views have separate responsibilities. Adapters subscribe to clients, load data, enforce browser restrictions, and perform service actions. Their views receive display data and operation callbacks. Production screens and gallery examples mount the same views, including host menus, pairing, file/web previews, session tasks, automation results, version information, and notification preferences. Connected source entries link to the corresponding view examples.
 
 ## Where components belong
 
@@ -61,6 +67,6 @@ The caller decides how to persist `enabled`; the switch implements the interacti
 
 The development entry is `gallery.html`; its UI and examples live in `src/dev/gallery/`. The Vite `componentGallery` plugin serves the source inventory only during development. The normal production build starts at `index.html` and excludes the gallery entry, inventory endpoint, and source-view data.
 
-Add a foundation example to `foundations.tsx`, or a shared composition to `shared-views.tsx`. Each example names its real source modules, describes the useful options, and contains a small usage snippet. Mount the actual component and use local state for interactions. Combine related modules into one example rather than exposing every implementation detail as a separate control. A coverage test checks that every foundation module has an example and that all example source paths exist.
+Add examples to the appropriate feature file in `src/dev/gallery/`. Each example names the source modules it actually renders, describes the useful options, and contains a small usage snippet. Mount the actual component and use local state for interactions. Supply fixture data through the component's existing props. When a reusable interface owns client subscriptions or service requests, separate its presentation view from the owning adapter and use that view in production and the gallery. Combine related modules into one example rather than exposing every implementation detail as a separate control. A coverage test checks that every foundation module has an example and that all example source paths exist.
 
 Run the focused gallery and affected component tests, lint, and `bun run build`. The build type-checks the gallery source even though it does not bundle it. Inspect examples in light/dark themes and at narrow widths, exercise keyboard interaction, and verify the affected production screens through the gateway.

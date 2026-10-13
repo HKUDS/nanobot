@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { channelTranslator } from "@/channel-plugins/i18n";
 import { channelUiOwner, channelUiPresentation } from "@/channel-plugins/registry";
 import { AutomationCalendar } from "@/components/settings/system/AutomationCalendar";
+import { AutomationRunDialog } from "@/components/settings/system/AutomationRunDialog";
 import { AutomationChatBinding, type AutomationChatNames, type ChangeAutomationChat } from "@/components/settings/system/AutomationChatBinding";
 import { AutomationRunAtPicker, parseAutomationRunAt } from "@/components/settings/system/AutomationRunAtPicker";
 import {
@@ -349,7 +350,7 @@ export function AutomationsSettings({
             </section>
           ) : (
             <AutomationCalendar
-              token={token}
+              renderRunDialog={(props) => <AutomationRunDialog token={token} {...props} />}
               jobs={filtered}
               month={month}
               locale={locale}

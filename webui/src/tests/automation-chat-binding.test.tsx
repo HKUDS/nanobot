@@ -210,6 +210,23 @@ it("keeps the current chat visible when discovery fails and permits a retry", as
   expect(fetchAutomationChats).toHaveBeenCalledTimes(2);
 });
 
+it("aborts discovery for the previous task and ignores its delayed chat choices", async () => {
+  let first!: (value: AutomationChatsPayload) => void;
+  let second!: (value: AutomationChatsPayload) => void;
+  vi.mocked(fetchAutomationChats).mockImplementationOnce(() => new Promise(resolve => { first = resolve; }));
+  vi.mocked(fetchAutomationChats).mockImplementationOnce(() => new Promise(resolve => { second = resolve; }));
+  const { rerender } = render(<AutomationDetailDialog {...props} job={job} onChangeChat={vi.fn()} />);
+  const oldSignal = vi.mocked(fetchAutomationChats).mock.calls[0][2]!;
+  rerender(<AutomationDetailDialog {...props} job={{ ...job, id: "another-task", chat_binding_revision: "rev-next" }} onChangeChat={vi.fn()} />);
+  expect(oldSignal.aborted).toBe(true);
+  await act(async () => first({ ...choices, current: target }));
+  expect(screen.getByRole("combobox", { name: "Run in chat" })).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "Run in chat" })).not.toHaveTextContent("Product team");
+  await act(async () => second({ ...choices, current: target, revision: "rev-next" }));
+  expect(screen.getByRole("combobox", { name: "Run in chat" })).toHaveTextContent("Product team");
+  expect(screen.getByRole("combobox", { name: "Run in chat" })).toBeEnabled();
+});
+
 const webTarget = { ...target, channel: "websocket" };
 const namedSessions: ChatSummary[] = [source, webTarget].map((chat) => ({
   key: `websocket:${chat.id}`, channel: "websocket", chatId: chat.id,
