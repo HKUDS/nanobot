@@ -364,11 +364,9 @@ def _run_gateway(
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.model_presets import load_model_preset_catalog
     from nanobot.agent.tools.message import MessageTool
-    from nanobot.agent.turn_delivery import TurnDeliveryFactory, TurnRoute
-    from nanobot.bus.events import InboundMessage
+    from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.channels.notification_routes import channel_turn_route
     from nanobot.config.watcher import watch_config_file
     from nanobot.cron.bound_runner import run_bound_cron_job
     from nanobot.cron.service import CronJobSkippedError, CronService
@@ -475,13 +473,10 @@ def _run_gateway(
     cron = CronService(cron_store_path)
     trigger_store = LocalTriggerStore(config.workspace_path)
 
-    webui_route_policy = WebuiTurnRoutePolicy(session_manager)
-
-    def turn_route_policy(msg: InboundMessage, session_key: str, route: TurnRoute) -> TurnRoute:
-        routed = webui_route_policy(msg, session_key, route)
-        return channel_turn_route(msg, session_key, routed)
-
-    turn_delivery_factory = TurnDeliveryFactory(bus, route_policy=turn_route_policy)
+    turn_delivery_factory = TurnDeliveryFactory(
+        bus,
+        route_policy=WebuiTurnRoutePolicy(session_manager),
+    )
 
     tools = ToolRegistry()
     register_image_generation_tool(config, tools, workspace=config.workspace_path)

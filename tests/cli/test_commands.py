@@ -2048,6 +2048,7 @@ def _patch_cli_command_runtime(
     # Load adapter contracts before replacing runtime factories for this invocation.
     import_module("nanobot.session.webui_turns")
     import_module("nanobot.channels.validation")
+    import_module("nanobot.channels.websocket.runtime")
     provider_factory = make_provider or (lambda _config: _fake_provider())
 
     monkeypatch.setattr(
@@ -3614,7 +3615,11 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         "slack:C1:1234.5678",
     )
     assert slack_delivery.route.metadata["slack"] == {"thread_ts": "1234.5678"}
-    assert slack_delivery.route.notification_metadata == {"slack": {"thread_ts": "1234.5678"}}
+    session_metadata = {}
+    slack_delivery.remember_session_route(session_metadata)
+    assert session_metadata["_compaction_route"] == {
+        "channel": "slack", "chat_id": "C1", "metadata": {"slack": {"thread_ts": "1234.5678"}},
+    }
 
 
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(

@@ -55,6 +55,12 @@ IMPORT_RULES = (
         "core-execution",
         ("nanobot.agent.loop", "nanobot.agent.runner", "nanobot.agent.turn_delivery"),
         _ADAPTERS,
+        allowed_targets=("nanobot.channels.notification_routes",),
+    ),
+    ImportRule(
+        "channel-routing-contracts",
+        ("nanobot.channels.notification_routes",),
+        ("nanobot",),
     ),
     ImportRule(
         "session-storage",

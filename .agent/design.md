@@ -10,11 +10,11 @@ Runtime state fan-out follows the same boundary. `MessageBus.publish` awaits loc
 
 Tools and channels own their configuration, metadata, and activation behavior. Tool configuration models live beside their implementations in `agent/tools/*_config.py`; channel descriptors and configuration stay in their channel packages. The root schema in `config/schema.py` assembles these contracts without importing their runtime implementations. Tool classes expose their configuration through `config_key` and `config_cls()`.
 
-Generic recovery checkpoints belong in `session/recovery.py`; WebUI recovery and turn coordination belong in `webui/recovery.py` and `session/webui_turns.py`. Gateway startup composes WebUI and channel route policies, and channel adapters select durable notification addresses. Core turn delivery consumes these policy decisions without owning channel-specific routing.
+Generic recovery checkpoints belong in `session/recovery.py`; WebUI recovery and turn coordination belong in `webui/recovery.py` and `session/webui_turns.py`. Gateway startup supplies WebUI turn policy. Channels own the pure address contract in `channels/notification_routes.py`, which core turn delivery consumes for default replies and durable notifications without loading channel runtime implementations.
 
 ## Executable import boundaries
 
-Core execution, session storage, and security primitives stay independent of API, channel, CLI, and WebUI adapters. Shared client contracts stay independent of UI implementations, and client initialization dependencies must be acyclic.
+Core execution, session storage, and security primitives stay independent of API, channel, CLI, and WebUI adapter implementations. Core may consume channel-owned pure address contracts, which must stay independent of runtime implementations. Shared client contracts stay independent of UI implementations, and client initialization dependencies must be acyclic.
 
 Python rules live in [scripts/check_import_boundaries.py](../scripts/check_import_boundaries.py); run `python -m scripts.check_import_boundaries` from the repository root. Client rules live in [scripts/check_client_import_boundaries.mjs](../scripts/check_client_import_boundaries.mjs); run `bun run check:imports` and `bun run test:imports` from `webui/` or `tui/` for that project. These scripts are the source of truth for checked modules, dependency rules, and exceptions.
 

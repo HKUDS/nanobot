@@ -2,13 +2,7 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast
-
-from nanobot.bus.events import InboundMessage
-
-if TYPE_CHECKING:
-    from nanobot.agent.turn_delivery import TurnRoute
+from typing import Any, cast
 
 
 def notification_metadata(channel: str, source: Mapping[str, Any]) -> dict[str, Any]:
@@ -29,18 +23,12 @@ def notification_metadata(channel: str, source: Mapping[str, Any]) -> dict[str, 
     return deepcopy(metadata)
 
 
-def channel_turn_route(msg: InboundMessage, session_key: str, route: "TurnRoute") -> "TurnRoute":
-    """Retain adapter-owned thread addresses without persisting turn or sender data."""
-    metadata = deepcopy(route.metadata)
+def system_reply_metadata(channel: str, session_key: str) -> dict[str, Any]:
+    """Restore the thread address for an independently dispatched system reply."""
     if (
-        msg.channel == "system"
-        and route.channel == "slack"
+        channel == "slack"
         and session_key.startswith("slack:")
         and session_key.count(":") >= 2
     ):
-        metadata["slack"] = {"thread_ts": session_key.split(":", 2)[2]}
-    return replace(
-        route,
-        metadata=metadata,
-        notification_metadata=notification_metadata(route.channel, metadata),
-    )
+        return {"slack": {"thread_ts": session_key.split(":", 2)[2]}}
+    return {}

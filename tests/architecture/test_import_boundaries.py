@@ -91,6 +91,7 @@ def test_core_boundary_includes_type_dependencies(source: str) -> None:
         ("nanobot.session.recovery", "session-storage"),
         ("nanobot.security.workspace_policy", "security-primitives"),
         ("nanobot.agent.turn_delivery", "core-execution"),
+        ("nanobot.channels.notification_routes", "channel-routing-contracts"),
         ("nanobot.config.schema", "configuration-contracts"),
         ("nanobot.agent.tools.cli_apps_config", "tool-configuration-contracts"),
         ("nanobot.utils.file_io", "shared-primitives"),
@@ -154,6 +155,10 @@ def test_configuration_imports_the_six_tool_owned_config_contracts() -> None:
         ("nanobot.cli.gateway_runtime", "from nanobot.agent.loop import AgentLoop"),
         ("nanobot.channels.websocket.runtime", "from nanobot.webui import inbound_commands"),
         ("nanobot.agent.tools.cli_apps_config", "from nanobot.config_base import Base"),
+        (
+            "nanobot.agent.turn_delivery",
+            "from nanobot.channels.notification_routes import notification_metadata",
+        ),
     ],
 )
 def test_existing_runtime_and_composition_dependencies_remain_allowed(
@@ -181,6 +186,16 @@ def test_existing_runtime_and_composition_dependencies_remain_allowed(
         (
             "nanobot/session/manager.py", "from nanobot.cli import gateway",
             "session-storage", "nanobot.cli.gateway", 1,
+        ),
+        (
+            "nanobot/channels/notification_routes.py",
+            "from nanobot.channels.slack.runtime import SlackChannel",
+            "channel-routing-contracts", "nanobot.channels.slack.runtime.SlackChannel", 1,
+        ),
+        (
+            "nanobot/channels/notification_routes.py",
+            "from nanobot.agent.turn_delivery import TurnRoute",
+            "channel-routing-contracts", "nanobot.agent.turn_delivery.TurnRoute", 1,
         ),
         (
             "nanobot/security/__init__.py", "from ..cli import gateway",
