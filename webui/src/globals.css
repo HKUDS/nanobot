@@ -1431,28 +1431,9 @@
   }
   .settings-row:has(> .settings-control > [role="switch"]) > :first-child { grid-column: 1; }
   .settings-row:has(> .settings-control > [role="switch"]) > :nth-child(2) { grid-column: 2; }
-  .settings-disclosure > summary {
-    cursor: pointer;
-    padding: 12px var(--settings-inset, 16px);
-    border-radius: var(--radius-control, 12px);
-    font-size: 13px;
-    font-weight: 500;
-    line-height: 20px;
-    color: hsl(var(--muted-foreground));
-  }
-  .settings-disclosure > summary:hover { color: hsl(var(--foreground)); }
-  .settings-disclosure > summary:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
-  .settings-disclosure[open] > summary { margin-block-end: 8px; }
-
   .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
   .settings-list-row { min-block-size: 60px; border-radius: var(--radius-control); }
   .settings-list-row:focus-visible { outline: none; }
-  .sidebar-action-label:lang(zh) {
-    display: inline-block;
-    min-inline-size: var(--sidebar-label-width, 3em);
-    text-align: justify;
-    text-align-last: justify;
-  }
   .icon-action[aria-pressed="true"], .icon-action[data-state="open"] {
     color: hsl(var(--foreground));
   }

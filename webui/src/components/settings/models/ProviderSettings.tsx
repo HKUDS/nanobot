@@ -54,7 +54,6 @@ import {
   type ProviderAdvancedField,
   type ProviderForm,
 } from "@/components/settings/models/providerForm";
-export { CUSTOM_PROVIDER_CREATION_KEY, providerFormFromRow } from "@/components/settings/models/providerForm";
 export type { CustomProviderDraft, ProviderForm } from "@/components/settings/models/providerForm";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";

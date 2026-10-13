@@ -24,7 +24,6 @@ import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export { formatContextWindow, formatModelContextWindow } from "@/lib/model-context-format";
-export { PROVIDER_ICONS } from "@/lib/provider-icons";
 
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
