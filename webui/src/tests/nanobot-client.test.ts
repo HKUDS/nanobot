@@ -2448,6 +2448,7 @@ describe("binary attachment transport", () => {
       expect(request.method).toBe("POST");
       expect(request.headers.Authorization).toBe("Bearer upload-capability");
       expect(request.redirect).toBe("error");
+      expect(request.credentials).toBe("same-origin");
       expect(await request.body.text()).toBe(raw);
       const frame = socket.sent.find((value) => value.includes("opaque-ref"))!;
       expect(frame.length).toBeLessThan(1024);
