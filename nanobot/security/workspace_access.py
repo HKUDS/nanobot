@@ -163,6 +163,17 @@ def workspace_sandbox_status(
     """Return how workspace restriction is enforced in the current host."""
 
     workspace_root = str(Path(workspace).expanduser().resolve(strict=False))
+    return _workspace_sandbox_status(
+        restrict_to_workspace=restrict_to_workspace,
+        workspace_root=workspace_root,
+        environ=environ,
+    )
+
+
+def _workspace_sandbox_status(
+    *, restrict_to_workspace: bool, workspace_root: str,
+    environ: dict[str, str] | None = None,
+) -> WorkspaceSandboxStatus:
     provider = _env_system_provider(environ)
     if not restrict_to_workspace:
         return WorkspaceSandboxStatus(
@@ -215,9 +226,9 @@ def build_workspace_scope(
         project_path=root,
         access_mode=mode,
         restrict_to_workspace=restrict,
-        sandbox_status=workspace_sandbox_status(
+        sandbox_status=_workspace_sandbox_status(
             restrict_to_workspace=restrict,
-            workspace=root,
+            workspace_root=str(root),
         ),
         source_channel=source_channel,
     )

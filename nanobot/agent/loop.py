@@ -806,9 +806,10 @@ class AgentLoop:
         ]
         blocks = runtime_context_blocks_from_metadata(request.metadata)
         blocks.extend(await resolve_runtime_context(providers, request))
-        skill_context = await self.runner.prepare_prompt(
-            self.context.skills.build_explicit_skill_runtime_context,
-            request.original_user_text or "",
+        text = request.original_user_text or ""
+        skill_context = (
+            await self.runner.prepare_prompt(self.context.skills.build_explicit_skill_runtime_context, text)
+            if "$" in text else None
         )
         if skill_context is not None and skill_context not in blocks:
             blocks.append(skill_context)
@@ -986,7 +987,7 @@ class AgentLoop:
         session_key: str,
     ) -> EventSink:
         """Bind one idle compaction to its current user-facing destination."""
-        session = self.sessions.state.peek(session_key)
+        session = self.sessions.state.peek_header(session_key)
         if session is None:
             return NO_EVENTS
         return self.turn_delivery_factory.session_events(
@@ -1417,7 +1418,7 @@ class AgentLoop:
                     continue
                 if (
                     msg.require_existing_session
-                    and self.sessions.state.peek(effective_key) is None
+                    and self.sessions.state.peek_header(effective_key) is None
                 ):
                     continue
                 if msg.is_user_input:
@@ -1537,7 +1538,7 @@ class AgentLoop:
                     msg = deferred.pop(0)
                     if not deferred:
                         self._deferred_automation_turns.pop(session_key)
-                session = self.sessions.state.peek(session_key)
+                session = self.sessions.state.peek_header(session_key)
                 log_content = session is None or (
                     session.policy.persist and session.policy.log_content
                 )
@@ -1589,7 +1590,7 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         # The request context is reset before errors reach this boundary, and
         # discard may evict the session while a turn is still unwinding.
-        session = self.sessions.state.peek(session_key)
+        session = self.sessions.state.peek_header(session_key)
         log_content = session is None or (
             session.policy.persist and session.policy.log_content
         )
@@ -2155,14 +2156,8 @@ class AgentLoop:
             session = ctx.require_session()
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
-        # Capture replay inputs on the loop; the worker never sees the live Session/cache.
-        history_records = session.messages[session.last_archived:]
-        history_snapshot = Session(
-            key=session.key,
-            messages=await self.runner.copy_messages_on_loop(history_records),
-        )
         ctx.history = await self.runner.prepare_prompt(
-            history_snapshot.get_history, extend_to_user=is_subagent,
+            session.get_history, extend_to_user=is_subagent,
         )
         stored_state = session.provider_state
         subagent_followup_persisted = False
@@ -2682,7 +2677,7 @@ class AgentLoop:
                     return await self._process_message(msg, **kwargs)
                 finally:
                     if temporary_parent:
-                        parent = self.sessions.state.peek(session_key)
+                        parent = self.sessions.state.peek_header(session_key)
                         if parent is not None and not parent.policy.persist:
                             await self.sessions.state.delete(session_key, expected_generation=parent.generation)
         finally:

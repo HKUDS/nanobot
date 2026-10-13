@@ -158,28 +158,14 @@ class AgentRunner:
         self, operation: Callable[_PromptArgs, _PromptResult],
         *args: _PromptArgs.args, **kwargs: _PromptArgs.kwargs,
     ) -> _PromptResult:
-        """Share the bounded worker for read-only prompt preparation."""
+        """Share the bounded context worker for prompt filesystem preparation."""
         return await self.context_governor.prepare_in_background(operation, *args, **kwargs)
 
-    @staticmethod
-    async def copy_messages_on_loop(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Detach loop-owned records while yielding between bounded batches."""
-        copied: list[dict[str, Any]] = []
-        memo: dict[int, Any] = {id(messages): copied}
-        for start in range(0, len(messages), 64):
-            copied.extend(deepcopy(message, memo) for message in messages[start:start + 64])
-            await asyncio.sleep(0)
-        return copied
-
     async def _run_context_snapshot(
-        self, messages: list[dict[str, Any]],
+        self, hook: AgentHook, messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not messages:
+        if not messages or not hook.has_run_hooks():
             return []
-        task = asyncio.current_task()
-        if task is not None and task.cancelling():
-            # Cancellation cleanup must not queue behind its own unfinished worker.
-            return await self.copy_messages_on_loop(messages)
         return await self.prepare_prompt(deepcopy, messages)
 
     @staticmethod
@@ -321,7 +307,6 @@ class AgentRunner:
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
-        has_run_hooks = hook.has_run_hooks()
         messages: list[dict[str, Any]] = []
         context = AgentRunHookContext(messages=[])
         llm_usage_source_token = bind_llm_usage_source(
@@ -329,53 +314,40 @@ class AgentRunner:
         )
 
         try:
-            try:
-                try:
-                    messages, compaction = await self.prepare_prompt(self._initial_transcript_and_compaction, spec)
-                    context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
-                    await hook.before_run(context)
-                    result = await self._run_core(spec, hook, messages, compaction)
-                except Exception as exc:
-                    context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
-                    context.stop_reason = "error"
-                    context.error = f"Error: {type(exc).__name__}: {exc}"
-                    context.exception = exc
-                    await hook.on_error(context)
-                    raise
-                else:
-                    context.messages = await self._run_context_snapshot(result.messages) if has_run_hooks else []
-                    context.final_content = result.final_content
-                    context.tools_used = list(result.tools_used)
-                    context.usage = result.usage
-                    context.stop_reason = result.stop_reason
-                    context.error = result.error
-                    context.tool_events = deepcopy(result.tool_events)
-                    context.had_injections = result.had_injections
-                    context.exception = None
-                    if context.error is not None:
-                        await hook.on_error(context)
-                    await hook.after_run(context)
-                    return result
-            except asyncio.CancelledError as exc:
-                context.stop_reason = "cancelled"
-                context.error = None
-                context.exception = exc
-                raise
-            finally:
-                if has_run_hooks:
-                    try:
-                        if isinstance(context.exception, asyncio.CancelledError):
-                            context.messages = await self.copy_messages_on_loop(messages)
-                        else:
-                            context.messages = await self._run_context_snapshot(messages)
-                    except asyncio.CancelledError as exc:
-                        context.stop_reason = "cancelled"
-                        context.error = None
-                        context.exception = exc
-                        context.messages = await self.copy_messages_on_loop(messages)
-                        raise
+            messages, compaction = await self.prepare_prompt(self._initial_transcript_and_compaction, spec)
+            context.messages = await self._run_context_snapshot(hook, messages)
+            await hook.before_run(context)
+            result = await self._run_core(spec, hook, messages, compaction)
+        except asyncio.CancelledError as exc:
+            context.messages = await self._run_context_snapshot(hook, messages)
+            context.stop_reason = "cancelled"
+            context.error = None
+            context.exception = exc
+            raise
+        except Exception as exc:
+            context.messages = await self._run_context_snapshot(hook, messages)
+            context.stop_reason = "error"
+            context.error = f"Error: {type(exc).__name__}: {exc}"
+            context.exception = exc
+            await hook.on_error(context)
+            raise
+        else:
+            context.messages = await self._run_context_snapshot(hook, result.messages)
+            context.final_content = result.final_content
+            context.tools_used = list(result.tools_used)
+            context.usage = result.usage
+            context.stop_reason = result.stop_reason
+            context.error = result.error
+            context.tool_events = deepcopy(result.tool_events)
+            context.had_injections = result.had_injections
+            context.exception = None
+            if context.error is not None:
+                await hook.on_error(context)
+            await hook.after_run(context)
+            return result
         finally:
             try:
+                context.messages = await self._run_context_snapshot(hook, messages)
                 if context.exception is None:
                     await hook.on_finally(context)
                 else:

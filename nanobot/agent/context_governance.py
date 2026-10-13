@@ -71,6 +71,8 @@ BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
     "[Previous assistant message omitted.]",
 })
+_PreparationArgs = ParamSpec("_PreparationArgs")
+_PreparationResult = TypeVar("_PreparationResult")
 
 _PreparationArgs = ParamSpec("_PreparationArgs")
 _PreparationResult = TypeVar("_PreparationResult")
@@ -233,17 +235,6 @@ class ContextCompactionState:
         request_messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         return deepcopy(request_messages[len(self.accepted_messages):])
-
-    def accept_request(
-        self,
-        model_messages: list[dict[str, Any]],
-        *,
-        raw_boundary: int,
-    ) -> None:
-        """Advance H after the provider has received one request."""
-        self.accepted_messages = deepcopy(model_messages)
-        self.raw_accepted_boundary = raw_boundary
-
 
 @dataclass(slots=True)
 class ModelRequestState:
