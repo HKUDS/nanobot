@@ -263,7 +263,7 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
                     row_text = "\t".join(cells)
                     if not row_text.strip():
                         continue
-                    column_starts = []
+                    column_starts: list[int] = []
                     offset = 0
                     for cell in cells:
                         column_starts.append(offset)
