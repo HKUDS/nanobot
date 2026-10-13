@@ -12,6 +12,7 @@ import hmac
 import json as _json
 import time
 import uuid
+import weakref
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 
 from aiohttp import web
@@ -49,7 +50,7 @@ API_CHAT_ID = "default"
 _AGENT_LOOP_KEY = web.AppKey[Any]("agent_loop")
 _MODEL_NAME_KEY = web.AppKey[str]("model_name")
 _REQUEST_TIMEOUT_KEY = web.AppKey[float]("request_timeout")
-_SESSION_LOCKS_KEY = web.AppKey[dict[str, asyncio.Lock]]("session_locks")
+_SESSION_LOCKS_KEY = web.AppKey[weakref.WeakValueDictionary[str, asyncio.Lock]]("session_locks")
 _PREPARE_AGENT_KEY = web.AppKey[Callable[[], Awaitable[None]] | None]("prepare_agent")
 _REQUEST_ID_KEY = web.RequestKey[str]("request_id")
 
@@ -309,7 +310,8 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
-    session_locks: dict[str, asyncio.Lock] = request.app[_SESSION_LOCKS_KEY]
+    session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = request.app[_SESSION_LOCKS_KEY]
+    # Retain the lock while this request holds it or waits for it.
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
     logger.info(
@@ -466,7 +468,7 @@ def create_app(
     app[_AGENT_LOOP_KEY] = agent_loop
     app[_MODEL_NAME_KEY] = model_name
     app[_REQUEST_TIMEOUT_KEY] = request_timeout
-    app[_SESSION_LOCKS_KEY] = {}  # per-user locks, keyed by session_key
+    app[_SESSION_LOCKS_KEY] = weakref.WeakValueDictionary()
     app[_PREPARE_AGENT_KEY] = prepare_agent
 
     @web.middleware
