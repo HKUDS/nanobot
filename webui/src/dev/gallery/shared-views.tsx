@@ -3,6 +3,10 @@ import { Check, CircleAlert } from "lucide-react";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
+import { ImageLightbox } from "@/components/ImageLightbox";
+import { ZoomableImage } from "@/components/ZoomableImage";
+import { Button } from "@/components/ui/button";
+import sampleVideo from "./fixtures/sample.webm";
 import { ImageGallery } from "@/components/ImageGallery";
 import { MarkdownText } from "@/components/MarkdownText";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -82,14 +86,47 @@ function FilesPreview() {
     <p role="status" className="mt-4 text-xs text-muted-foreground">{opened ? `Selected file: ${opened}` : "Select a file reference to exercise its callback."}</p></>;
 }
 
-function MediaPreview() {
+// Inline SVG fixtures stay local to the developer gallery and need no network fetch.
+const mediaImages = ["#2563eb", "#0d9488", "#9333ea", "#ea580c", "#be123c", "#4f46e5"].map((color, index) => ({
+  name: `Study ${index + 1} · 色彩练习 ${index + 1}`,
+  url: `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640"><rect width="960" height="640" fill="${color}"/><path d="M0 480L240 160L480 480L720 160L960 480" fill="none" stroke="white" stroke-opacity=".35" stroke-width="32"/><circle cx="480" cy="320" r="120" fill="white" fill-opacity=".2"/><text x="480" y="355" text-anchor="middle" font-family="sans-serif" font-size="100" fill="white">${index + 1}</text></svg>`)}`,
+}));
+
+function ImageGalleryPreview() {
   return <div className="space-y-6">
-    <Sample label="Image gallery · 图片预览">
-      <ImageGallery size="compact" images={[{ url: "/brand/nanobot_icon_512.png", name: "Nanobot icon" }, { url: "/brand/nanobot_wordmark.svg", name: "Nanobot wordmark" }]} />
-    </Sample>
-    <Sample label="Unavailable media · 历史附件缺失">
-      <div className="flex flex-wrap gap-3"><AttachmentTile attachment={{ kind: "file", name: "report.txt" }} />
-        <AttachmentTile attachment={{ kind: "image", name: "missing-image.png" }} /></div>
+    <Sample label="Six images · 六张图片"><ImageGallery images={mediaImages} /></Sample>
+    <Sample label="Compact thumbnails · 紧凑缩略图"><ImageGallery images={mediaImages} size="compact" /></Sample>
+    <p className="text-sm text-muted-foreground">Select a thumbnail or +2 to view all six images. · 点击缩略图或 +2 查看全部六张图片。</p>
+  </div>;
+}
+
+function ImageLightboxPreview() {
+  const [index, setIndex] = useState<number | null>(null);
+  return <div className="space-y-4">
+    <Button variant="outline" onClick={() => setIndex(0)}>Open full-screen viewer · 打开全屏预览</Button>
+    <p className="text-sm text-muted-foreground">Use previous/next, ←/→ or Home/End; close with × or Escape. · 使用前后按钮、方向键或 Home/End 切图；点击 × 或按 Escape 关闭。</p>
+    <ImageLightbox images={mediaImages.slice(0, 3)} index={index} onIndexChange={setIndex}
+      onOpenChange={(open) => { if (!open) setIndex(null); }} />
+  </div>;
+}
+
+function ZoomableImagePreview() {
+  return <div className="space-y-4">
+    <p className="text-sm text-muted-foreground">Zoom with +/−, double-click, Ctrl+wheel or pinch. Drag or scroll to pan after zooming; click the percentage or press 0 to reset. · 使用 +/−、双击、Ctrl+滚轮或双指缩放；放大后拖动或滚动平移，点击百分比或按 0 复位。</p>
+    <div className="relative h-[28rem] overflow-hidden rounded-control bg-slate-950">
+      <ZoomableImage src={mediaImages[0].url} alt={mediaImages[0].name} />
+    </div>
+  </div>;
+}
+
+function AttachmentTilePreview() {
+  return <div className="space-y-6">
+    <Sample label="Image · 图片"><AttachmentTile attachment={{ kind: "image", ...mediaImages[1] }} variant="compact" /></Sample>
+    <Sample label="Playable video · 可播放视频"><AttachmentTile attachment={{ kind: "video", name: "sample.webm", url: sampleVideo }} /></Sample>
+    <Sample label="Download file · 下载文件"><AttachmentTile attachment={{ kind: "file", name: "report.txt", url: "data:text/plain;charset=utf-8,Gallery%20attachment%20example%0A" }} /></Sample>
+    <Sample label="Unavailable attachments (no URL) · 附件不可用（无 URL）">
+      <div className="flex flex-wrap gap-3">{(["image", "video", "file"] as const).map((kind) =>
+        <AttachmentTile key={kind} attachment={{ kind, name: `${kind}-unavailable` }} />)}</div>
     </Sample>
   </div>;
 }
@@ -132,9 +169,18 @@ export const sharedExamples: ComponentExample[] = [
   { title: "FileEditGroup · 文件修改", files: ["thread/activity/FileEditRow", "thread/activity/DiffPair", "thread/activity/DiffSyntaxHighlight"], Preview: FilesPreview,
     description: "File references, line-change counts and expandable diffs.", options: "edits contains display summaries; displayMode selects summary/diff/collapsed_diff; onOpenFilePreview is supplied by the screen.",
     code: '<FileEditGroup edits={edits} displayMode="diff" onOpenFilePreview={openFile} />' },
-  { title: "Media · 图片与附件", files: ["ImageGallery", "ImageLightbox", "ZoomableImage", "AttachmentTile"], Preview: MediaPreview,
-    description: "Image selection, zoom and navigation, plus unavailable attachment states.", options: "ImageGallery receives image URLs and names. AttachmentTile receives a media attachment; omit the URL for an unavailable file.",
-    code: '<ImageGallery images={[{ url: "/brand/nanobot_icon_512.png", name: "Nanobot" }]} />\n<AttachmentTile attachment={{ kind: "file", name: "report.txt" }} />' },
+  { title: "ImageGallery · 图片缩略图", files: ["ImageGallery"], Preview: ImageGalleryPreview,
+    description: "Multi-image layout, thumbnail selection and overflow. · 多图布局、缩略图选择与更多图片。", options: "images supplies URLs and names; size selects large or compact thumbnails, align controls alignment. Only four thumbnails are shown; the composed ImageLightbox includes all viewable images. · images 提供地址和名称，size 控制尺寸，align 控制对齐；最多显示四个缩略图，内置 ImageLightbox 可浏览全部有地址的图片。",
+    code: '<ImageGallery images={images} />\n<ImageGallery images={images} size="compact" />' },
+  { title: "ImageLightbox · 全屏预览", files: ["ImageLightbox"], Preview: ImageLightboxPreview,
+    description: "Controlled full-screen viewing and image navigation. · 受控全屏预览与多图切换。", options: "index is null when closed. The caller owns index and open callbacks; ImageLightbox composes ZoomableImage and resets the view on image changes. · index 为 null 时关闭；调用方管理索引与开关回调，ImageLightbox 内置 ZoomableImage，切图时重置缩放。",
+    code: '<ImageLightbox images={images} index={index} onIndexChange={setIndex}\n  onOpenChange={(open) => { if (!open) setIndex(null); }} />' },
+  { title: "ZoomableImage · 单图缩放", files: ["ZoomableImage"], Preview: ZoomableImagePreview,
+    description: "Single-image zoom, bounded panning and gestures. · 单图缩放、边界内平移与手势。", options: "src and alt supply one image. Place it in a positioned container with a defined height; remount when changing images. Focus the viewport for +, − and 0 keyboard controls. · src 和 alt 提供单张图片；容器须有定位和明确高度，换图时重新挂载。聚焦图片区域后可用 +、− 和 0 操作。",
+    code: '<div className="relative h-[28rem] bg-slate-950">\n  <ZoomableImage src={image.url} alt={image.name} />\n</div>' },
+  { title: "AttachmentTile · 附件", files: ["AttachmentTile"], Preview: AttachmentTilePreview,
+    description: "Image preview, video playback, file download and unavailable attachments. · 图片预览、视频播放、文件下载与不可用附件。", options: "attachment.kind selects image, video or file. Images open ImageLightbox, videos use native controls, files use download links. Missing URLs render unavailable tiles; failed image loads also render an unavailable tile. · attachment.kind 区分图片、视频与文件；图片打开 ImageLightbox，视频使用原生控件，文件提供下载链接。无地址或图片加载失败时显示不可用附件。",
+    code: '<AttachmentTile attachment={{ kind: "video", name: "sample.webm", url: sampleVideo }} />\n<AttachmentTile attachment={{ kind: "file", name: "report.txt", url: reportUrl }} />\n<AttachmentTile attachment={{ kind: "image", name: "unavailable.png" }} />' },
   { title: "FileReferenceChip · 文件引用", files: ["FileReferenceChip"], Preview: FileReferencePreview,
     description: "A file reference with a caller-owned open action.", options: "path supplies the label; onOpen supplies the action. The component does not decide workspace permissions.",
     code: '<FileReferenceChip path="src/app.tsx" onOpen={openFile} />' },
