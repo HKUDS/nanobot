@@ -164,9 +164,9 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Real PowerShell/process-tree tests run serially in a separate
-            # job. Keep them out of xdist so workers never share a console.
-            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py"
+            # Real PowerShell, browser-handoff, and process-tree tests run
+            # serially so xdist workers do not compete for native processes.
+            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -274,6 +274,7 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py
+          tests/cli/test_wsl_browser.py
           --durations=25 --durations-min=1.0
 
   webui:

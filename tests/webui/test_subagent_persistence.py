@@ -162,7 +162,8 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
     workspace.mkdir()
     (workspace / "example.txt").write_text("before\n", encoding="utf-8")
     manager, sessions, runtime = manager_with_storage(workspace, root)
-    entered, release = asyncio.Event(), asyncio.Event()
+    model_requests = asyncio.Queue()
+    release = asyncio.Event()
     responses = iter([
         LLMResponse(content="Read the file", tool_calls=[
             ToolCallRequest("read", "read_file", {"path": "example.txt"}),
@@ -181,9 +182,9 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
         for message in kwargs["messages"]:
             assert not ({"tool_events", "file_edit_events"} & message.keys())
         response = next(responses, None)
+        model_requests.put_nowait(None)
         if response is not None:
             return response
-        entered.set()
         await release.wait()
         return LLMResponse(content="Edited the file; the other file does not exist.")
 
@@ -191,8 +192,26 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
     gateway, connection, headers = gateway_for(manager, sessions, workspace)
     try:
         await manager.spawn("Edit and inspect files", session_key="websocket:parent", runtime=runtime)
-        await asyncio.wait_for(entered.wait(), 5)
         task_id, = manager.statuses_for_session("websocket:parent")
+        task = manager._running_tasks[task_id]
+        # Each tool's persisted activity completes before the next model request.
+        for _ in range(4):
+            request = asyncio.create_task(model_requests.get())
+            try:
+                done, _ = await asyncio.wait(
+                    (request, task), timeout=5, return_when=asyncio.FIRST_COMPLETED,
+                )
+                if task in done:
+                    result = task.result()
+                    status = manager.check(task_id, "websocket:parent")
+                    pytest.fail(
+                        "subagent ended before its activity was ready: "
+                        f"state={status.state}, error={status.error!r}, result={result!r}"
+                    )
+                assert request in done, "subagent made no progress to its next model request"
+            finally:
+                request.cancel()
+                await asyncio.gather(request, return_exceptions=True)
         path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
 
         async def assert_activity(gateway, connection, headers):
