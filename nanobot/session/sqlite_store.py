@@ -22,6 +22,7 @@ from nanobot.session.manager import (
     message_preview_text,
     metadata_title,
 )
+from nanobot.session.types import PARENT_SESSION_KEY
 
 _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
@@ -85,8 +86,9 @@ class SessionConflictError(RuntimeError):
 class SqliteSessionStore:
     """Synchronous repository; runtime callers use the session state's worker.
 
-    Nested repository operations share a transaction. Every outer repository
-    command closes its connection before returning to its caller.
+    Nested repository operations share a transaction. Runtime worker threads
+    retain their own connections until their state owner drains and closes;
+    administrative calls close each connection after their transaction.
     """
 
     def __init__(self, sessions_dir: Path) -> None:
@@ -103,6 +105,29 @@ class SqliteSessionStore:
         with self.transaction(write=False):
             return operation()
 
+    def _open_connection(self, *, worker: bool = False) -> sqlite3.Connection:
+        if self.path.is_symlink():
+            raise RuntimeError("session database must not be a symlink")
+        connection = sqlite3.connect(
+            self.path, timeout=5, isolation_level=None, check_same_thread=not worker,
+        )
+        connection.row_factory = sqlite3.Row
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA synchronous = FULL")
+        except BaseException:
+            connection.close()
+            raise
+        return connection
+
+    def worker_connection(self) -> sqlite3.Connection:
+        """Retain this worker's connection; its owner closes it after the worker exits."""
+        connection: sqlite3.Connection | None = getattr(self._local, "worker_connection", None)
+        if connection is None:
+            connection = self._open_connection(worker=True)
+            self._local.worker_connection = connection
+        return connection
+
     @contextmanager
     def transaction(self, *, write: bool = True) -> Generator[sqlite3.Connection, None, None]:
         current: sqlite3.Connection | None = getattr(self._local, "connection", None)
@@ -111,14 +136,10 @@ class SqliteSessionStore:
             return
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
-        connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        try:
-            connection.execute("PRAGMA foreign_keys = ON")
-            connection.execute("PRAGMA synchronous = FULL")
-        except BaseException:
-            connection.close()
-            raise
+        connection: sqlite3.Connection | None = getattr(self._local, "worker_connection", None)
+        owned = connection is None
+        if connection is None:
+            connection = self._open_connection()
         self._local.connection = connection
         try:
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
@@ -129,7 +150,8 @@ class SqliteSessionStore:
             raise
         finally:
             self._local.connection = None
-            connection.close()
+            if owned:
+                connection.close()
 
     def initialize(self, workspace: Path) -> None:
         """Upgrade the schema and import legacy sessions in one atomic transaction."""
@@ -140,6 +162,13 @@ class SqliteSessionStore:
         try:
             # Reject newer databases before changing their persistent settings.
             _schema_version(connection)
+            try:
+                connection.execute("SELECT json_extract('{}', '$'), json_type('{}')")
+            except sqlite3.OperationalError as exc:
+                raise RuntimeError(
+                    "session storage requires SQLite JSON support; use a Python build "
+                    "linked to SQLite with JSON enabled"
+                ) from exc
             connection.execute("PRAGMA journal_mode = WAL")
         finally:
             connection.close()
@@ -346,10 +375,47 @@ class SqliteSessionStore:
                                 title=row[3], preview=row[4], path=str(self.path))
                     for row in db.execute("SELECT key, created_at, updated_at, title, preview FROM sessions ORDER BY updated_at DESC")]
 
+    def child_session_keys(self, parent_key: str) -> list[str]:
+        """Find all persisted child kinds without decoding unrelated metadata."""
+        with self.transaction(write=False) as db:
+            return [row[0] for row in db.execute(
+                f"""SELECT key FROM sessions
+                    WHERE json_extract(metadata, '$.{PARENT_SESSION_KEY}')=?
+                    AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text'
+                    ORDER BY updated_at DESC""",
+                (parent_key,),
+            )]
+
+    def list_child_session_metadata(self, parent_key: str) -> list[SessionMetadataPayload]:
+        """Read child headers from one snapshot, excluding checkpoints and pending inputs."""
+        with self.transaction(write=False) as db:
+            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
+                     "metadata": _object(row[3])}
+                    for row in db.execute(
+                        f"""SELECT key, created_at, updated_at, metadata FROM sessions
+                            WHERE json_extract(metadata, '$.{PARENT_SESSION_KEY}')=?
+                            AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text'
+                            ORDER BY updated_at DESC""",
+                        (parent_key,),
+                    )]
+
     def list_metadata(self) -> list[dict[str, Any]]:
         with self.transaction(write=False) as db:
-            return [{"key": row["key"], "created_at": row["created_at"],
-                     "updated_at": row["updated_at"], "title": row["title"],
-                     "preview": row["preview"], "visible_updated_at": row["visible_updated_at"],
-                     "path": str(self.path), "metadata": _object(row["metadata"])}
-                    for row in db.execute("SELECT key, created_at, updated_at, title, preview, visible_updated_at, metadata FROM sessions ORDER BY updated_at DESC")]
+            # Fetch one value so a large list does not cross the Python/SQLite
+            # iterator boundary for every session while other workers are busy.
+            encoded = db.execute("""
+                SELECT json_group_array(json_object(
+                    'key', key, 'created_at', created_at, 'updated_at', updated_at,
+                    'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
+                    'metadata', metadata
+                )) FROM (
+                    SELECT key, created_at, updated_at, title, preview, visible_updated_at, metadata
+                    FROM sessions ORDER BY updated_at DESC
+                )
+            """).fetchone()[0]
+            # The SQL projection constructs this list and its dictionary fields.
+            rows = cast(list[dict[str, Any]], json.loads(encoded))
+            for row in rows:
+                row["path"] = str(self.path)
+                row["metadata"] = _object(row["metadata"])
+            return rows

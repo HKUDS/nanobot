@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import fields, replace
 from datetime import datetime
@@ -37,6 +39,9 @@ class SessionState:
     Operations load and change private state under the store transaction lock.
     Only detached reads leave this boundary. Model calls, tool execution, and
     event publication must happen outside these short operations.
+    One writer queues SQLite mutations before they can compete for its lock;
+    readers use separate worker connections. Ordered operations retain key and
+    barrier ordering; display snapshots can read already committed metadata.
     """
 
     def __init__(
@@ -64,9 +69,14 @@ class SessionState:
         self._key_tails: dict[str, asyncio.Task[Any]] = {}
         self._global_tail: asyncio.Task[Any] | None = None
         self._pending: set[asyncio.Task[Any]] = set()
+        self._connections: list[sqlite3.Connection] = []
         self._worker = ThreadPoolExecutor(
             max_workers=min(workers, capacity),
-            thread_name_prefix="session-store",
+            thread_name_prefix="session-read",
+        )
+        self._writer = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="session-write",
         )
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
@@ -88,16 +98,44 @@ class SessionState:
         elif self._loop is not loop:
             raise RuntimeError("session state belongs to a different event loop")
 
+    def _worker_operation(self, operation: Callable[[], _T]) -> _T:
+        connection = self._store.worker_connection()
+        with self._cache_lock:
+            if connection not in self._connections:
+                self._connections.append(connection)
+        return operation()
+
+    async def _run_operation(self, operation: Callable[[], _T], *, write: bool) -> _T:
+        return await asyncio.get_running_loop().run_in_executor(
+            self._writer if write else self._worker, self._worker_operation, operation,
+        )
+
     async def _execute(
         self,
         key: str | Sequence[str] | None,
         operation: Callable[[], _T],
         *,
         operation_name: str | None = None,
+        write: bool = True,
+    ) -> _T:
+        async def run() -> _T:
+            return await self._run_operation(operation, write=write)
+
+        return await self._submit(
+            key, run, operation_name=operation_name or getattr(operation, "__name__", "session operation"),
+        )
+
+    async def _submit(
+        self,
+        key: str | Sequence[str] | None,
+        operation: Callable[[], Awaitable[_T]],
+        *,
+        operation_name: str,
+        barrier: bool = True,
     ) -> _T:
         """Admit bounded work with FIFO key affinity or a global barrier."""
         self._bind_loop()
-        name = operation_name or getattr(operation, "__name__", "session operation")
+        name = operation_name
         if key is None:
             keys: tuple[str, ...] = ()
             session_label = "<all>"
@@ -121,7 +159,7 @@ class SessionState:
 
         self._admitted += 1
         if key is None:
-            predecessors = tuple(self._pending)
+            predecessors = tuple(self._pending) if barrier else ()
         else:
             ordered = [self._key_tails[item] for item in keys if item in self._key_tails]
             if self._global_tail is not None:
@@ -135,10 +173,7 @@ class SessionState:
                         *(asyncio.shield(predecessor) for predecessor in predecessors),
                         return_exceptions=True,
                     )
-                return await asyncio.get_running_loop().run_in_executor(
-                    self._worker,
-                    operation,
-                )
+                return await operation()
             finally:
                 self._admitted -= 1
                 for item in keys:
@@ -148,7 +183,7 @@ class SessionState:
                     self._global_tail = None
 
         task = asyncio.create_task(run())
-        if key is None:
+        if key is None and barrier:
             self._global_tail = task
         else:
             for item in keys:
@@ -167,7 +202,17 @@ class SessionState:
         async def close() -> None:
             if self._pending:
                 await asyncio.gather(*tuple(self._pending), return_exceptions=True)
-            await asyncio.to_thread(self._worker.shutdown, wait=True)
+
+            def shutdown() -> None:
+                self._worker.shutdown(wait=True)
+                self._writer.shutdown(wait=True)
+                # All SQL users have exited. Each owner closes only connections
+                # created by its own executor threads, never another owner's.
+                for connection in self._connections:
+                    connection.close()
+                self._connections.clear()
+
+            await asyncio.to_thread(shutdown)
 
         if self._close_task is None:
             self._close_task = asyncio.create_task(close())
@@ -302,7 +347,28 @@ class SessionState:
         """Return a detached committed view without storage I/O."""
         with self._cache_lock:
             session = self._transients.get(key) or self._snapshots.get(key)
-            return self._draft(session) if session is not None else None
+        # Published records are replaced, never mutated. Copying a stable view
+        # outside the lock lets narrow controls read while history is detached.
+        return self._draft(session) if session is not None else None
+
+    def peek_metadata(self, key: str) -> dict[str, Any] | None:
+        """Return detached committed metadata without copying conversation history."""
+        with self._cache_lock:
+            session = self._transients.get(key) or self._snapshots.get(key)
+        return deepcopy(session.metadata) if session is not None else None
+
+    def peek_header(self, key: str) -> Session | None:
+        """Read cached policy and metadata without detaching message history."""
+        with self._cache_lock:
+            session = self._transients.get(key) or self._snapshots.get(key)
+        if session is None:
+            return None
+        header = replace(
+            session, messages=[], metadata=deepcopy(session.metadata),
+            provider_state=None, _baseline=None,
+        )
+        header.last_archived = session.last_archived
+        return header
 
     async def set_policy(self, key: str, policy: SessionPolicy) -> None:
         """Configure runtime privacy and tools for an existing durable session."""
@@ -345,23 +411,53 @@ class SessionState:
                 return None
             self._publish(session)
             return self._draft(session)
-        return await self._execute(key, read)
+        return await self._execute(key, read, write=False)
 
     async def get(self, key: str) -> Session:
-        def get() -> Session:
-            def commit() -> Session:
-                session = self._load(key)
+        """Read an existing conversation; create missing state on the writer."""
+        return await self._get(key, history=True)
+
+    async def get_header(self, key: str) -> Session:
+        """Read or create a header for controls, without issuing a turn draft."""
+        return await self._get(key, history=False)
+
+    async def _get(self, key: str, *, history: bool) -> Session:
+        def view(session: Session) -> Session:
+            if history:
+                self._publish(session)
+                return self._draft(session)
+            header = replace(session, _baseline=None, messages=[], provider_state=None,
+                             metadata=deepcopy(session.metadata))
+            header.last_archived = session.last_archived
+            return header
+
+        def read() -> Session | None:
+            session = self._load(key, history=history)
+            return view(session) if session is not None else None
+
+        def create() -> Session:
+            def commit() -> tuple[Session, bool]:
+                session = self._load(key, history=history)
+                created = session is None
                 if session is None:
                     with self._cache_lock:
                         self._retired.discard(key)
                     session = Session(key=key)
                     self._commit(session)
-                return session
+                return session, created
 
-            session = self._store.run_write(commit)
-            self._publish(session)
-            return self._draft(session)
-        return await self._execute(key, get)
+            session, created = self._store.run_write(commit)
+            if created and not history:
+                self._publish(session)
+            return view(session)
+
+        async def get() -> Session:
+            session = await self._run_operation(read, write=False)
+            if session is None:
+                session = await self._run_operation(create, write=True)
+            return session
+
+        return await self._submit(key, get, operation_name="get" if history else "get_header")
 
     async def create_child(
         self, parent_key: str, key: str, *, metadata: Mapping[str, Any],
@@ -681,13 +777,38 @@ class SessionState:
                 if transient is not None:
                     return {"key": key, "metadata": deepcopy(transient.metadata)}
             return cast(dict[str, Any] | None, self._store.read_metadata(key))
-        return await self._execute(key, read)
+        return await self._execute(key, read, write=False)
 
     async def list_sessions(self) -> list[dict[str, Any]]:
         return await self._execute(
             None,
             lambda: cast(list[dict[str, Any]], self._store.list_sessions()),
             operation_name="list_sessions",
+            write=False,
+        )
+
+    async def list_metadata(self) -> list[dict[str, Any]]:
+        return await self.query_metadata(lambda rows: rows)
+
+    async def query_metadata(
+        self, project: Callable[[list[dict[str, Any]]], _T],
+    ) -> _T:
+        """Read one committed display snapshot without waiting for active turns.
+
+        Admission and shutdown still belong to this owner. Unlike an ordered
+        mutation or session read, a sidebar snapshot may precede pending writes.
+        Project detached rows on the reader after its SQL transaction closes.
+        """
+        context = copy_context()
+
+        def read() -> _T:
+            return context.run(project, self._store.list_metadata())
+
+        async def query() -> _T:
+            return await self._run_operation(read, write=False)
+
+        return await self._submit(
+            None, query, operation_name="query_metadata", barrier=False,
         )
 
     async def rename_model_preset(self, old_name: str, new_name: str) -> int:
@@ -722,7 +843,12 @@ class SessionState:
             allocate_session_handles,
         )
 
-        def ensure() -> dict[str, str]:
+        def read() -> tuple[dict[str, str], dict[str, str]]:
+            return self._store.run_read(
+                lambda: allocate_session_handles(self._store.list_metadata(), self._types),
+            )
+
+        def allocate() -> dict[str, str]:
             changed: list[str] = []
 
             def write() -> dict[str, str]:
@@ -741,7 +867,15 @@ class SessionState:
                     self._snapshots.pop(key, None)
             return names
 
-        return await self._execute(None, ensure, operation_name="ensure_session_handles")
+        async def ensure() -> dict[str, str]:
+            names, updates = await self._run_operation(read, write=False)
+            if updates:
+                # Another process may allocate or delete after our read snapshot.
+                # Recompute the full allocation under the cross-process write lock.
+                names = await self._run_operation(allocate, write=True)
+            return names
+
+        return await self._submit(None, ensure, operation_name="ensure_session_handles")
 
     async def prune_dream_sessions(self, *, keep: int = 10) -> int:
         """Delete older Dream conversations in one transaction on the owner worker."""

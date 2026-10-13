@@ -181,20 +181,25 @@ async def test_metadata_callback_result_is_detached(tmp_path, transient):
     await state.aclose()
 
 
-async def test_owner_closes_each_connection_on_its_worker_thread(tmp_path, monkeypatch):
+async def test_owner_reuses_worker_connections_and_closes_them_after_drain(tmp_path, monkeypatch):
     manager = SessionManager(tmp_path)
     connections = []
     closed = []
     original_connect = sqlite3.connect
 
     class TrackedConnection(sqlite3.Connection):
+        def execute(self, *args, **kwargs):
+            assert threading.get_ident() == self.owner_thread
+            return super().execute(*args, **kwargs)
+
         def close(self):
-            closed.append(threading.get_ident())
+            closed.append((id(self), threading.get_ident()))
             return super().close()
 
     def connect(*args, **kwargs):
         connection = original_connect(*args, **kwargs, factory=TrackedConnection)
-        connections.append(threading.get_ident())
+        connection.owner_thread = threading.get_ident()
+        connections.append((id(connection), threading.get_ident()))
         return connection
 
     monkeypatch.setattr(sqlite3, "connect", connect)
@@ -202,8 +207,10 @@ async def test_owner_closes_each_connection_on_its_worker_thread(tmp_path, monke
     await state.get("chat:a")
     await state.update_metadata("chat:a", {"title": "new"})
     await state.get("chat:a")
-    assert len(connections) == 3
-    assert all(thread_id != threading.get_ident() for thread_id in connections)
-    assert closed == connections
+    assert len(connections) == 2
+    assert all(thread_id != threading.get_ident() for _, thread_id in connections)
+    assert closed == []
     await asyncio.gather(state.aclose(), state.aclose())
-    assert closed == connections
+    assert {identifier for identifier, _ in closed} == {identifier for identifier, _ in connections}
+    assert len(closed) == len(connections)
+    assert all(thread_id != threading.get_ident() for _, thread_id in closed)

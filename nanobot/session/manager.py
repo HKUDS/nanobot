@@ -442,6 +442,10 @@ class SessionManager:
     def get_cached(self, key: str) -> Session | None:
         return self.state.peek(key)
 
+    def get_cached_metadata(self, key: str) -> dict[str, Any] | None:
+        """Return detached committed metadata without copying conversation history."""
+        return self._state.peek_metadata(key) if self._state is not None else None
+
     def set_delete_observer(self, observer: Callable[[str], None]) -> None:
         """Observe explicit session deletion for process-local state cleanup."""
         self._delete_observer = observer
@@ -487,8 +491,11 @@ class SessionManager:
 
     def child_session_keys(self, parent_key: str) -> list[str]:
         """Find persisted children through their declared parent."""
-        return [row["key"] for row in self._store.list_metadata()
-                if row["metadata"].get(PARENT_SESSION_KEY) == parent_key]
+        return self._store.child_session_keys(parent_key)
+
+    def list_child_session_metadata(self, parent_key: str) -> list[SessionMetadataPayload]:
+        """Read persisted child headers without transcripts, checkpoints, or pending inputs."""
+        return self._store.list_child_session_metadata(parent_key)
 
     def save(self, session: Session) -> None:
         """Commit an offline administrative snapshot, rejecting obsolete history."""

@@ -6,22 +6,31 @@ workspace identity remains in `<workspace>/.nanobot/workspace-id`.
 
 SQLite is the authoritative store for session metadata, ordered messages,
 provider continuation state, pending inputs, and runtime checkpoints. Runtime
-operations use a fixed-size worker pool, a bounded admission queue, per-session
-FIFO ordering, and short transactions. Unrelated sessions can progress in
-parallel; operations that inspect or change all sessions run as global barriers.
-A full queue rejects the new operation instead of accumulating waiters. Model
-requests, tools, and network delivery run outside transactions. All connections
+operations use a reader pool, one ordered writer, a bounded admission queue,
+per-session FIFO ordering, and short transactions. Reads of unrelated sessions
+can progress while writes queue; ordered operations across sessions run as
+global barriers. Sidebar metadata reads use a committed database snapshot and
+can finish before pending writes. A full queue rejects the new operation instead
+of accumulating waiters. Model requests, tools, and network delivery run outside
+transactions. All connections
 enable foreign keys and `synchronous=FULL`; the database uses WAL mode.
+
+The Python SQLite library must include [JSON support](https://www.sqlite.org/json1.html#compiling_in_json_support).
+Startup checks this capability before changing the database's journal settings.
+Parent-session queries filter the stored JSON metadata in SQLite without loading
+unrelated session headers or changing the schema.
 
 SDK session operations are asynchronous. Returned sessions are detached views
 of committed state. Editing a returned snapshot does not save it. Import,
 restore, reset, and deletion commit before returning. There is no `save=False`
 mode or shutdown flush of mutable cached sessions.
 
-Each worker command opens and closes its own SQLite connection on that worker
-thread. Before reusing cached history, the owner checks the session's revision
-and generation inside the transaction. Committed message records remain private
-to the owner; each new draft receives a detached history, while a commit copies
+Each runtime worker retains its own SQLite connection. Shutdown drains accepted
+operations and stops the workers before closing their connections. Offline
+repository calls close their connections after each transaction. Before reusing
+cached history, the owner checks the session's revision and generation inside
+the transaction. Committed message records remain private to the owner; each new
+draft receives a detached history, while a commit copies
 only changed records and writes the affected suffix. Metadata, follow-up, and
 checkpoint commands do not read the message table. Conflicting history
 replacements still fail, deleted generations reject late results, and failed

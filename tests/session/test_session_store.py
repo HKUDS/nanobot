@@ -1,8 +1,11 @@
 """Administrative SQLite repository operations."""
 
+from datetime import datetime
+
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 
 def test_manager_roundtrips_full_history_and_private_state(tmp_path):
@@ -49,3 +52,47 @@ def test_metadata_updates_do_not_replace_messages(tmp_path):
     assert not manager.update_session_metadata("cli:missing", {"title": "x"})
     assert manager.delete_session("cli:test")
     assert manager.read_session_file("cli:test") is None
+
+
+def test_child_headers_select_declared_children_and_preserve_descendant_deletion(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    parent = "chat:项目'\"\\root"
+    manager.save(Session(key=parent))
+    manager.save(Session(key="chat:unrelated", metadata={"title": "unrelated"}))
+    for key, kind, parent_key, second in (
+        ("subagent:first", "subagent", parent, 1),
+        ("extension:child", "extension", parent, 2),
+        ("extension:grandchild", "extension", "extension:child", 3),
+    ):
+        manager.save(Session(
+            key=key, updated_at=datetime(2026, 1, 1, 0, 0, second),
+            messages=[{"role": "user", "content": "private transcript"}],
+            metadata={
+                PARENT_SESSION_KEY: parent_key, SESSION_TYPE_KEY: kind,
+                "nested": {"value": key}, "runtime_checkpoint": {"step": 1},
+                "pending_user_followups": [{"id": "queued"}],
+            },
+        ))
+
+    def prohibit_full_listing():
+        raise AssertionError("child queries must not materialize unrelated session headers")
+
+    monkeypatch.setattr(manager._store, "list_metadata", prohibit_full_listing)
+    assert manager.child_session_keys(parent) == ["extension:child", "subagent:first"]
+    rows = manager.list_child_session_metadata(parent)
+    assert [row["key"] for row in rows] == ["extension:child", "subagent:first"]
+    assert rows[0]["updated_at"] == "2026-01-01T00:00:02"
+    assert rows[0]["metadata"] == {
+        PARENT_SESSION_KEY: parent, SESSION_TYPE_KEY: "extension",
+        "nested": {"value": "extension:child"},
+    }
+    rows[0]["metadata"]["nested"]["value"] = "detached edit"
+    assert manager.list_child_session_metadata(parent)[0]["metadata"]["nested"]["value"] == "extension:child"
+    assert manager.read_session_metadata("extension:child")["metadata"]["runtime_checkpoint"] == {"step": 1}
+
+    deleted = []
+    manager.set_delete_observer(deleted.append)
+    assert manager.delete_session(parent)
+    assert set(deleted) == {parent, "subagent:first", "extension:child", "extension:grandchild"}
+    assert [row["key"] for row in manager.list_sessions()] == ["chat:unrelated"]
+    assert manager.list_child_session_metadata(parent) == []

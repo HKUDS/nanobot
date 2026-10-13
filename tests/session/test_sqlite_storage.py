@@ -190,6 +190,55 @@ async def test_database_lock_does_not_block_event_loop(tmp_path):
         await state.aclose()
 
 
+async def test_existing_reads_do_not_wait_for_another_sessions_write_lock(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    await state.get("chat:write")
+    await state.get("chat:read")
+    await state.update_metadata("chat:read", {"title": "committed"})
+    ready, release = threading.Event(), threading.Event()
+
+    def hold():
+        with sqlite3.connect(manager._store.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            ready.set()
+            assert release.wait(5)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    await asyncio.to_thread(ready.wait, 2)
+    write = asyncio.create_task(state.update_metadata("chat:write", {"title": "waiting"}))
+    try:
+        await asyncio.sleep(0)
+        metadata = await asyncio.wait_for(state.read_metadata("chat:read"), timeout=2)
+        draft = await asyncio.wait_for(state.get("chat:read"), timeout=2)
+        header = await asyncio.wait_for(state.get_header("chat:read"), timeout=2)
+        assert metadata["metadata"]["title"] == draft.metadata["title"] == header.metadata["title"] == "committed"
+        assert not write.done()
+    finally:
+        release.set()
+        await write
+        thread.join()
+        await state.aclose()
+
+
+async def test_closing_one_owner_preserves_another_owners_connections(tmp_path):
+    from nanobot.session.state import SessionState
+
+    manager = SessionManager(tmp_path)
+    first = SessionState(manager._store)
+    second = SessionState(manager._store)
+    try:
+        await first.get("chat:first")
+        await second.get("chat:second")
+        await first.aclose()
+        await second.update_metadata("chat:second", {"title": "still open"})
+        assert (await second.get("chat:second")).metadata["title"] == "still open"
+    finally:
+        await first.aclose()
+        await second.aclose()
+
+
 async def test_cancellation_settles_accepted_write(tmp_path, monkeypatch):
     manager = SessionManager(tmp_path)
     state = manager.state

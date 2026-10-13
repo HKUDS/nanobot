@@ -1,7 +1,9 @@
+import asyncio
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 
 import pytest
 
@@ -219,3 +221,27 @@ def test_private_type_cannot_be_resolved_through_an_existing_handle(tmp_path: Pa
 
     reopened = SessionManager(tmp_path)
     assert SessionHandleResolver(reopened).list_all() == []
+
+
+async def test_runtime_existing_handles_do_not_wait_for_an_external_write_lock(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    await state.get("websocket:existing")
+    expected = await state.ensure_session_handles()
+    ready, release = Event(), Event()
+
+    def hold():
+        with sqlite3.connect(manager._store.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            ready.set()
+            assert release.wait(5)
+
+    thread = Thread(target=hold)
+    thread.start()
+    try:
+        assert await asyncio.to_thread(ready.wait, 2)
+        assert await asyncio.wait_for(state.ensure_session_handles(), timeout=2) == expected
+    finally:
+        release.set()
+        thread.join()
+        await state.aclose()

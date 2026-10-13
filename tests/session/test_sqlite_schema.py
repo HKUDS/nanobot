@@ -206,3 +206,31 @@ def test_future_schema_is_rejected_without_modifying_database(tmp_path):
     assert _database_snapshot(store.path) == before
     assert store.path.read_bytes() == before_bytes
     assert {path.name for path in tmp_path.iterdir()} == before_files
+
+
+def test_missing_sqlite_json_support_is_rejected_before_database_changes(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    store = SqliteSessionStore(tmp_path)
+    store.initialize(workspace)
+    store.save(_session())
+    with closing(sqlite3.connect(store.path)) as db:
+        db.execute("PRAGMA journal_mode = DELETE")
+    before = _database_snapshot(store.path)
+    before_bytes = store.path.read_bytes()
+    native_connect = sqlite3.connect
+
+    class WithoutJson(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if "json_extract(" in sql:
+                raise sqlite3.OperationalError("no such function: json_extract")
+            return super().execute(sql, parameters)
+
+    def connect(*args, **kwargs):
+        return native_connect(*args, factory=WithoutJson, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, "connect", connect)
+        with pytest.raises(RuntimeError, match="requires SQLite JSON support"):
+            store.initialize(workspace)
+    assert _database_snapshot(store.path) == before
+    assert store.path.read_bytes() == before_bytes
