@@ -383,10 +383,10 @@ async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: P
         ]),
         LLMResponse(content="done", tool_calls=[]),
     ])
-    session = loop.sessions.get_or_create("websocket:inspection")
-    session.metadata["workspace_scope"] = {
+    session = await loop.sessions.state.get("websocket:inspection")
+    await loop.sessions.state.update_metadata(session.key, {"workspace_scope": {
         "project_path": str(project), "access_mode": "restricted",
-    }
+    }})
 
     response = await loop.process_direct(
         "Check the current directory and read marker.txt",
@@ -475,9 +475,11 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
     provider = loop.provider
     provider.generation = GenerationSettings()
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
-    session = loop.sessions.get_or_create("websocket:scope-changes")
+    session = await loop.sessions.state.get("websocket:scope-changes")
     for root, mode in [(project, "restricted"), (project, "full"), (other, "restricted")]:
-        session.metadata["workspace_scope"] = {"project_path": str(root), "access_mode": mode}
+        await loop.sessions.state.update_metadata(session.key, {"workspace_scope": {
+            "project_path": str(root), "access_mode": mode,
+        }})
         await loop.process_direct(
             "Check access", channel="websocket", chat_id="scope-changes", session_key=session.key,
         )
@@ -497,9 +499,10 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
     assert {key: value for key, value in before.items() if key != "messages"} == {
         key: value for key, value in after.items() if key != "messages"
     }
-    assert all(message["content"] == "Check access" for message in session.get_history(
+    session = await loop.sessions.state.get(session.key)
+    assert [message["content"] for message in session.get_history(
         include_runtime_context=False,
-    ) if message["role"] == "user")
+    ) if message["role"] == "user"] == ["Check access"] * 3
 
 
 @pytest.mark.asyncio
@@ -515,12 +518,14 @@ async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) 
         ]),
         LLMResponse(content="done"),
     ])
-    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    session = await loop.sessions.state.get(UNIFIED_SESSION_KEY)
     session.metadata["workspace_scope"] = {"project_path": str(project), "access_mode": "restricted"}
+    session.add_message("user", "Start")
+    await loop.sessions.state.prepare_input(session)
     pending = asyncio.Queue()
     await pending.put(InboundMessage("telegram", "user", "chat", "Read marker.txt"))
     await loop._run_agent_loop(
-        TranscriptInput(history=[{"role": "user", "content": "Start"}], current_message=None),
+        TranscriptInput(history=session.get_history(), current_message=None),
         runtime=loop.llm_runtime(), session=session, pending_queue=pending,
         request_context=RequestContext("websocket", "chat", session_key=session.key),
     )
