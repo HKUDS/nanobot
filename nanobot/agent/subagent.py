@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast
 
 from loguru import logger
 
+from nanobot.agent.completion import CompletionVerdict, CompletionVerifier
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
@@ -517,7 +518,12 @@ class SubagentManager:
         temperature: float | None, workspace_scope: WorkspaceScope | None,
         runtime: LLMRuntime | None, *, announce: bool, origin_turn_id: str | None,
         session_policy: SessionPolicy | None,
+        acceptance_criteria: str | None = None,
     ) -> _SubagentTask:
+        if acceptance_criteria is not None:
+            if not acceptance_criteria.strip() or len(acceptance_criteria) > 4000:
+                raise SubagentControlError("acceptance_criteria must contain text and be at most 4000 characters")
+            acceptance_criteria = acceptance_criteria.strip()
         if runtime is None:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
@@ -536,6 +542,7 @@ class SubagentManager:
             owner=owner,
             origin_message_id=origin_message_id,
             origin_turn_id=origin_turn_id,
+            acceptance_criteria=acceptance_criteria,
         )
         if self.sessions is not None:
             child = self.sessions.create(status, policy=session_policy)
@@ -577,6 +584,7 @@ class SubagentManager:
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
         session_policy: SessionPolicy | None = None,
+        acceptance_criteria: str | None = None,
     ) -> str:
         """Start background work and route its terminal result to the parent."""
         try:
@@ -584,11 +592,12 @@ class SubagentManager:
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=True, origin_turn_id=origin_turn_id,
                 session_policy=session_policy,
+                acceptance_criteria=acceptance_criteria,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
         status = record.status
-        return f"Subagent [{status.label}] started (id: {status.task_id}). I'll notify you when it completes."
+        return f"Subagent [{status.label}] started (id: {status.task_id}). I'll notify you when it finishes."
 
     async def run_inline(
         self,
@@ -604,6 +613,7 @@ class SubagentManager:
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
         session_policy: SessionPolicy | None = None,
+        acceptance_criteria: str | None = None,
     ) -> str:
         """Wait for the same task lifecycle without a background notice."""
         try:
@@ -611,6 +621,7 @@ class SubagentManager:
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=False, origin_turn_id=origin_turn_id,
                 session_policy=session_policy,
+                acceptance_criteria=acceptance_criteria,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
@@ -626,12 +637,18 @@ class SubagentManager:
                 )
             await self._cancel_task(record, suppress_notice=True)
             raise
+        completion_note = (
+            f"{self._completion_note(record.status.completion)}\n\n"
+            if record.status.acceptance_criteria is not None else ""
+        )
         if record.status.state == "error":
             error = record.status.error or result
-            return ToolResult.error(error + (f"\nPartial result:\n{result}" if error != result else ""))
+            return ToolResult.error(
+                completion_note + error + (f"\nPartial result:\n{result}" if error != result else "")
+            )
         if record.status.state == "incomplete":
-            return ToolResult.error(f"Task incomplete ({record.status.stop_reason}).\n{result}")
-        return result
+            return ToolResult.error(completion_note + f"Task incomplete ({record.status.stop_reason}).\n{result}")
+        return completion_note + result
 
     def _task_done(self, record: _SubagentTask, task: asyncio.Task[str]) -> None:
         self._running_tasks.pop(record.status.task_id, None)
@@ -684,6 +701,8 @@ class SubagentManager:
                 "ok" if outcome.state == "done" else outcome.state, record.origin_message_id,
                 receipts=dict(status.receipts),
                 stop_reason=status.stop_reason, error=status.error, partial_result=status.partial,
+                completion=status.completion,
+                acceptance_criteria=status.acceptance_criteria,
             )
         if outcome.state == "cancelled":
             raise asyncio.CancelledError
@@ -712,7 +731,7 @@ class SubagentManager:
             cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
         # Construct from the agent workspace; the bound scope below supplies the project cwd.
         tools = self._build_tools(tools_config=cfg, exec_manager=record.exec_manager)
-        system_prompt = self._build_subagent_prompt(workspace=root)
+        system_prompt = self._build_subagent_prompt(workspace=root, acceptance_criteria=status.acceptance_criteria)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             *record.session.get_history(),
@@ -794,12 +813,20 @@ class SubagentManager:
                 consolidate_history=consolidate_history,
                 consolidate_provider_compaction=consolidate_provider_compaction,
                 events=events,
+                completion_verifier=(
+                    CompletionVerifier(
+                        runtime,
+                        f"Task:\n{status.task_description}\n\nAcceptance criteria:\n{status.acceptance_criteria}",
+                    )
+                    if status.acceptance_criteria is not None else None
+                ),
             ))
         finally:
             if token is not None:
                 reset_workspace_scope(token)
             reset_request_context(request_token)
         status.usage = result.usage
+        status.completion = result.completion
         if result.messages:
             record.session.messages = activity.transcript(result.messages)
         record.session.provider_state = result.provider_state
@@ -812,10 +839,26 @@ class SubagentManager:
         if result.stop_reason in {"error", "empty_final_response"}:
             final_result = result.error or "Error: subagent execution failed."
             return _SubagentOutcome("error", final_result, result.stop_reason, result.error)
-        if result.stop_reason == "max_iterations":
-            return _SubagentOutcome("incomplete", result.final_content or "Iteration limit reached.", result.stop_reason)
-        final_result = result.final_content or "Task completed but no final response was generated."
+        if result.stop_reason != "completed":
+            return _SubagentOutcome(
+                "incomplete", result.final_content or "Task stopped before producing a final response.",
+                result.stop_reason,
+            )
+        if status.acceptance_criteria is not None and (
+            result.completion is None or result.completion.status != "verified"
+        ):
+            return _SubagentOutcome(
+                "incomplete", result.final_content or "Task stopped without verified completion.",
+                result.completion.status if result.completion is not None else "unverified",
+            )
+        final_result = result.final_content or "Task finished without a final response."
         return _SubagentOutcome("done", final_result, result.stop_reason, result.error)
+
+    @staticmethod
+    def _completion_note(completion: CompletionVerdict | None) -> str:
+        if completion is None:
+            return "Completion review: not independently verified."
+        return "Completion review: " + json.dumps(completion.as_dict(), ensure_ascii=False)
 
     async def _announce_result(
         self,
@@ -831,10 +874,12 @@ class SubagentManager:
         stop_reason: str | None = None,
         error: str | None = None,
         partial_result: bool = False,
+        completion: CompletionVerdict | None = None,
+        acceptance_criteria: str | None = None,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = {
-            "ok": "completed successfully", "cancelled": "was cancelled",
+            "ok": "finished", "cancelled": "was cancelled",
             "incomplete": "stopped before completing the task",
         }.get(status, "failed")
 
@@ -847,6 +892,8 @@ class SubagentManager:
             stop_reason=stop_reason,
             error=error,
             partial_result=partial_result,
+            completion_note=self._completion_note(completion),
+            acceptance_criteria=acceptance_criteria,
         )
 
         # Inject as system message to trigger main agent.
@@ -865,6 +912,8 @@ class SubagentManager:
             "subagent_state": "done" if status == "ok" else status,
             "subagent_stop_reason": stop_reason,
             "subagent_partial": partial_result,
+            "subagent_completion": completion.as_dict() if completion is not None else None,
+            "subagent_acceptance_criteria": acceptance_criteria,
         }
         metadata["subagent_message_receipts"] = receipts or {}
         if receipts:
@@ -884,7 +933,9 @@ class SubagentManager:
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
 
-    def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
+    def _build_subagent_prompt(
+        self, workspace: Path | None = None, *, acceptance_criteria: str | None = None,
+    ) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.skills import SkillsLoader
 
@@ -905,6 +956,7 @@ class SubagentManager:
             agent_workspace=str(agent_workspace),
             history_log=history_log,
             skills_summary=skills_summary or "",
+            acceptance_criteria=acceptance_criteria,
         )
 
     async def cancel_by_session(self, session_key: str) -> int:

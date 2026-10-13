@@ -12,6 +12,12 @@ from typing import Any, cast
 
 from loguru import logger
 
+from nanobot.agent.completion import (
+    CompletionVerdict,
+    CompletionVerifier,
+    completion_evidence_scope,
+    current_completion_evidence,
+)
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.context_governance import (
     ContextCompactionState,
@@ -121,6 +127,7 @@ class AgentRunSpec:
     provider_state: ProviderConversationState | None = None
     llm_usage_source: LLMUsageSource | None = None
     events: EventSink = NO_EVENTS
+    completion_verifier: CompletionVerifier | None = None
 
 
 @dataclass(slots=True)
@@ -131,8 +138,8 @@ class AgentRunResult:
     messages: list[dict[str, Any]]
     tools_used: list[str] = field(default_factory=list)
     usage: LLMUsage | None = None
-    # One entry per runner-visible model round. Recovery dispatches needed to
-    # produce that round's response are folded into the same usage value.
+    # One entry per model round, including completion reviews. Recovery
+    # dispatches for a round are folded into the same usage value.
     round_usages: list[LLMUsage] = field(default_factory=list)
     stop_reason: str = "completed"
     error: str | None = None
@@ -144,6 +151,7 @@ class AgentRunResult:
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     summary_checkpoint: SessionSummaryCheckpoint | None = field(default=None, repr=False)
     provider_compaction_applied: bool = field(default=False, repr=False)
+    completion: CompletionVerdict | None = None
 
 
 class AgentRunner:
@@ -299,7 +307,10 @@ class AgentRunner:
 
         try:
             await hook.before_run(context)
-            result = await self._run_core(spec, hook, messages, compaction)
+            with completion_evidence_scope(messages) as evidence:
+                result = await self._run_core(spec, hook, messages, compaction)
+                result.usage = self._merge_usage(result.usage, evidence.usage)
+                result.round_usages.extend(evidence.round_usages)
         except asyncio.CancelledError as exc:
             context.messages = deepcopy(messages)
             context.stop_reason = "cancelled"
@@ -387,6 +398,9 @@ class AgentRunner:
         error: str | None = None
         failure_error_kind: str | None = None
         stop_reason = "completed"
+        completion: CompletionVerdict | None = None
+        evidence = current_completion_evidence()
+        assert evidence is not None
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
         # Per-turn throttle for repeated attempts against the same outside target.
@@ -536,6 +550,7 @@ class AgentRunner:
                     model_messages=messages_for_model,
                     compacted_tool_results=request_state.compacted_tool_results,
                 )
+                evidence.record_tool_results(response.tool_calls, new_events)
                 tool_events.extend(new_events)
                 tools_used.extend(
                     tool_call.name
@@ -584,6 +599,26 @@ class AgentRunner:
                 )
                 empty_content_retries = 0
                 length_recovery_parts.clear()
+                if evidence.verified_goal is not None:
+                    # The accepted recap is the final deliverable. Another model
+                    # round could mutate the work after its evidence was accepted.
+                    final_content, completion = evidence.verified_goal
+                    self._append_final_message(messages, final_content)
+                    await self._emit_checkpoint(spec, {
+                        "phase": "final_response",
+                        "iteration": iteration,
+                        "model": spec.runtime.model,
+                        "assistant_message": messages[-1],
+                        "completed_tool_results": [],
+                        "pending_tool_calls": [],
+                        "provider_state": conversation_state.checkpoint(messages),
+                    })
+                    context.final_content = final_content
+                    context.stop_reason = "completed"
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=False)
+                    await hook.after_iteration(context)
+                    break
                 await hook.after_iteration(context)
                 continue
 
@@ -714,6 +749,37 @@ class AgentRunner:
             if should_continue:
                 had_injections = True
 
+            if (
+                not should_continue
+                and spec.completion_verifier is not None
+                and response.finish_reason not in {"error", "length", "refusal", "content_filter"}
+                and not is_blank_text(clean)
+            ):
+                candidate = "".join(length_recovery_parts) + (clean or "")
+                completion = await spec.completion_verifier.verify(candidate, evidence.snapshot())
+                _raise_if_cancelling()
+                if completion.status == "needs_revision":
+                    if (
+                        can_make_followup_request
+                        and spec.completion_verifier.attempts < spec.completion_verifier.max_attempts
+                    ):
+                        if assistant_message is not None:
+                            messages.append(assistant_message)
+                        messages.append({
+                            "role": "user",
+                            "content": render_template(
+                                "agent/completion_feedback.md", reason=completion.reason, strip=True,
+                            ),
+                        })
+                        should_continue = True
+                    else:
+                        completion = replace(completion, status="exhausted")
+                if not should_continue and completion.status != "verified":
+                    stop_reason = f"completion_{completion.status}"
+                    clean = f"Completion was not verified: {completion.reason}"
+                    assistant_message = build_assistant_message(clean)
+                    length_recovery_parts.clear()
+
             if hook.wants_streaming():
                 await hook.on_stream_end(context, resuming=should_continue)
 
@@ -764,6 +830,9 @@ class AgentRunner:
                     length_recovery_parts.clear()
                     continue
                 break
+
+            if response.finish_reason in {"length", "refusal", "content_filter"}:
+                stop_reason = response.finish_reason
 
             messages.append(
                 assistant_message
@@ -824,6 +893,15 @@ class AgentRunner:
                 final_content = terminal_content
             self._append_final_message(messages, terminal_content)
 
+        if spec.completion_verifier is not None:
+            usage = self._merge_usage(usage, spec.completion_verifier.usage)
+            round_usages.extend(spec.completion_verifier.round_usages)
+            if completion is None or (completion.status == "needs_revision" and stop_reason == "max_iterations"):
+                completion = CompletionVerdict(
+                    status="exhausted" if stop_reason == "max_iterations" else "blocked",
+                    reason=f"Execution stopped before verification ({stop_reason}).",
+                )
+
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
@@ -839,6 +917,7 @@ class AgentRunner:
             provider_state=conversation_state.finish(messages),
             summary_checkpoint=request_state.compaction.summary_checkpoint,
             provider_compaction_applied=request_state.provider_compaction_applied,
+            completion=completion,
         )
 
     def _build_request_kwargs(

@@ -38,7 +38,7 @@ async def test_run_inline_returns_result_without_announcement(tmp_path):
     )
     manager.runner.run = AsyncMock(return_value=AgentRunResult(
         messages=[],
-        stop_reason="done",
+        stop_reason="completed",
         final_content="review result",
         error=None,
         tool_events=[],
@@ -116,7 +116,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
         assert exec_tool.allowed_env_keys == ["GOPATH", "JAVA_HOME"]
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content="done",
             error=None,
             tool_events=[],
@@ -158,7 +158,7 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
         assert spec.max_iterations == 37
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content="done",
             error=None,
             tool_events=[],
@@ -203,7 +203,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
         seen["runtime"] = spec.runtime
         return AgentRunResult(
             messages=[],
-            stop_reason="done", final_content="done", error=None, tool_events=[],
+            stop_reason="completed", final_content="done", error=None, tool_events=[],
         )
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
@@ -250,7 +250,7 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
             await release_second.wait()
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content="done",
             error=None,
             tool_events=[],
@@ -350,7 +350,7 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
             await release_second.wait()
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content="done",
             error=None,
             tool_events=[],
@@ -413,7 +413,7 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
         await release.wait()
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content=spec.initial_messages[-1]["content"],
             error=None,
             tool_events=[],
@@ -571,7 +571,7 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
         assert loop.subagents.max_iterations == 55
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content="done",
             error=None,
             tool_events=[],
@@ -612,7 +612,7 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
         terminal_injection_callback = spec.terminal_injection_callback
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content="done",
             error=None,
             tool_events=[],
@@ -662,7 +662,7 @@ async def test_terminal_drain_timeout(tmp_path):
         terminal_injection_callback = spec.terminal_injection_callback
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content="done",
             error=None,
             tool_events=[],
@@ -730,7 +730,7 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
         terminal_injection_callback = spec.terminal_injection_callback
         return AgentRunResult(
             messages=[],
-            stop_reason="done",
+            stop_reason="completed",
             final_content="done",
             error=None,
             tool_events=[],

@@ -467,7 +467,9 @@ class TestAnnounceResult:
             {"channel": "cli", "chat_id": "direct"}, "ok",
         )
 
-        assert "completed successfully" in published[0].content
+        assert "[Subagent 'label' finished]" in published[0].content
+        assert "not independently verified" in published[0].content
+        assert published[0].metadata["subagent_completion"] is None
 
     @pytest.mark.asyncio
     async def test_error_status_text(self, tmp_path):

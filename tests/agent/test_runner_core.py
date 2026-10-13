@@ -818,7 +818,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
     assert provider.chat_stream_with_retry.await_count == 1
     terminal_injection_callback.assert_not_awaited()
     assert result.final_content == "Request blocked by provider policy."
-    assert result.stop_reason == "completed"
+    assert result.stop_reason == finish_reason
 
 
 @pytest.mark.asyncio
