@@ -87,6 +87,8 @@ class LocatedDocumentLine:
     extracted_line: int
     locator: str
     searchable: bool = True
+    # XLSX cell offsets in text: a tab inside a cell is not a column separator.
+    column_starts: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,11 +259,15 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
                 worksheet.reset_dimensions()
                 wrote_header = False
                 for row_index, row in enumerate(worksheet.iter_rows(values_only=True), 1):
-                    row_text = "\t".join(
-                        str(cell) if cell is not None else "" for cell in row
-                    )
+                    cells = [str(cell) if cell is not None else "" for cell in row]
+                    row_text = "\t".join(cells)
                     if not row_text.strip():
                         continue
+                    column_starts = []
+                    offset = 0
+                    for cell in cells:
+                        column_starts.append(offset)
+                        offset += len(cell) + 1
                     if not wrote_header:
                         if wrote_document_content:
                             extracted_line += 1
@@ -282,6 +288,7 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
                         row_text,
                         extracted_line,
                         f"sheet={sheet_name!r},row={row_index}",
+                        column_starts=tuple(column_starts),
                     )
         finally:
             workbook.close()
