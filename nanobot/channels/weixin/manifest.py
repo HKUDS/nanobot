@@ -8,7 +8,8 @@ from nanobot.channels.weixin.validation import validate
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
-        "token": field("secret"),
+        # QR-managed credentials must not be exposed to generic WebUI autosave.
+        "token": field("secret", writable=False, snapshot=False),
         "allowFrom": field("list"),
         "baseUrl": field(default="https://ilinkai.weixin.qq.com"),
         "cdnBaseUrl": field(default="https://novac2c.cdn.weixin.qq.com/c2c"),

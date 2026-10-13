@@ -1,7 +1,9 @@
 import { AlertTriangle, X } from "lucide-react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { cn } from "@/lib/utils";
 import type { StreamError } from "@/lib/nanobot-client";
 
@@ -43,7 +45,7 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
         size="icon"
         onClick={onDismiss}
         aria-label={t("common.dismiss")}
-        className="h-6 w-6 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive"
+        className="h-6 w-6 shrink-0 text-destructive hover:text-destructive"
       >
         <X className="h-3.5 w-3.5" />
       </Button>
@@ -53,7 +55,7 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
 
 function resolveCopy(
   error: StreamError,
-  t: (key: string) => string,
+  t: TFunction,
 ): { title: string; body: string } {
   switch (error.kind) {
     case "message_too_big":
@@ -71,6 +73,8 @@ function resolveCopy(
         title: t("errors.turnRejected.title"),
         body: t("errors.turnRejected.body"),
       };
+    case "model_request_failed":
+      return resolveModelRequestFailureCopy(error, t);
     default: {
       // Exhaustiveness guard: if a new StreamError kind is added, TS will
       // complain here until we add a corresponding i18n branch.

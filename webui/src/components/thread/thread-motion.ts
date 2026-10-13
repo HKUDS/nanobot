@@ -147,10 +147,10 @@ function defaultScheduler(): ThreadMotionScheduler {
 }
 
 /**
- * Owns the policy that turns discrete layout events into automatic tail
- * pinning or explicit camera navigation. Callers only invalidate geometry;
- * one display frame coalesces those notifications and reads the authoritative
- * layout before applying either policy.
+ * Owns the policy that turns layout events into automatic tail pinning or
+ * explicit camera navigation. Discrete notifications are coalesced into one
+ * display frame. ResizeObserver deliveries reconcile immediately because they
+ * already carry the browser's authoritative layout and run before paint.
  */
 export class ThreadMotionCoordinator {
   private readonly camera: ThreadMotionCamera;
@@ -238,6 +238,15 @@ export class ThreadMotionCoordinator {
     this.geometryDirty = true;
     if (this.measurementFrameId !== null) return;
     this.measurementFrameId = this.scheduler.request(this.flushGeometry);
+  }
+
+  reconcileObservedGeometry(): void {
+    if (this.measurementFrameId !== null) {
+      this.scheduler.cancel(this.measurementFrameId);
+      this.measurementFrameId = null;
+    }
+    this.geometryDirty = true;
+    this.flushGeometry();
   }
 
   handleComposerInput(): void {

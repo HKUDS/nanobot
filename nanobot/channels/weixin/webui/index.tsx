@@ -1,7 +1,7 @@
 import { lazy } from "react";
 
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 import {
   WEIXIN_ADVANCED_FIELD_KEYS,
@@ -25,10 +25,10 @@ export default {
     wechat: {},
   },
   presentation: {
+    logoUrl: "https://weixin.qq.com/favicon.ico",
     displayName: "WeChat",
     initials: "WX",
     color: "#07C160",
-    logoUrl: "https://weixin.qq.com/favicon.ico",
     setup: {
       mode: "connect",
       command: "nanobot channels login weixin",

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=auto"
     />
     <meta name="color-scheme" content="light dark" />
     <meta
@@ -12,8 +12,12 @@
       content="nanobot web UI — chat with your nanobot workspace."
       data-i18n-meta="description"
     />
-    <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#161618" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      data-theme-color-light="#ffffff"
+      data-theme-color-dark="#303030"
+    />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -49,73 +53,84 @@
       }
 
       html.dark body {
-        background: #1a1a1a;
+        background: #303030;
         color: #fafafa;
       }
 
-      .boot-splash {
-        display: flex;
-        height: 100%;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .boot-splash-inner {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        color: rgba(255, 255, 255, 0.74);
-        font-size: 14px;
-      }
-
-      html:not(.dark) .boot-splash-inner {
-        color: rgba(10, 10, 10, 0.64);
-      }
-
-      .boot-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 9999px;
-        background: currentColor;
-        opacity: 0.75;
-        animation: boot-pulse 1s ease-in-out infinite;
-      }
-
-      @keyframes boot-pulse {
-        0%,
-        100% {
-          transform: scale(0.9);
-          opacity: 0.45;
-        }
-        50% {
-          transform: scale(1);
-          opacity: 0.85;
+      /* Work around iOS standalone's scroll-edge blur with a fixed color surface.
+         Keep this outside React's root for cold starts and route changes.
+         See docs/guides/ios-pwa-status-bar.md for the WebKit sampling contract. */
+      .pwa-status-bar-surface { display: none; }
+      @supports (-webkit-touch-callout: none) and (background-clip: text) {
+        @media (display-mode: standalone) {
+          .pwa-status-bar-surface {
+            display: block;
+            position: fixed;
+            inset: 0 0 auto;
+            height: 11px; /* Must exceed WebKit's 10px thin-border threshold. */
+            z-index: 100;
+            pointer-events: none;
+            background-color: inherit;
+            -webkit-background-clip: text;
+            background-clip: text; /* Empty text paints nothing over the controls. */
+          }
         }
       }
+
+      .startup-shell { position: relative; height: 100%; }
+      .startup-header { display: flex; justify-content: space-between; padding: 5px 13px; }
+      .startup-control-shadow {
+        width: 28px; height: 28px; border-radius: 8px; background: rgba(0,0,0,0.025);
+      }
+      .startup-composer {
+        position: absolute; inset-inline: 16px; bottom: max(24px, env(safe-area-inset-bottom));
+        box-sizing: border-box; max-width: 768px; margin-inline: auto;
+        height: 96px; border-radius: 24px; background: rgba(0,0,0,0.025);
+      }
+      .startup-status {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+      }
+      html.dark :is(.startup-control-shadow, .startup-composer) { background: rgba(255,255,255,0.035); }
     </style>
     <script>
       (function () {
         try {
-          var stored = localStorage.getItem("nanobot-webui.theme");
+          var stored = null;
+          try {
+            stored = localStorage.getItem("nanobot-webui.theme");
+          } catch {}
           var dark =
             stored === "dark" ||
-            (!stored &&
+            (stored !== "light" &&
               window.matchMedia &&
               window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) document.documentElement.classList.add("dark");
+          var themeColor = document.querySelector('meta[name="theme-color"]');
+          if (themeColor) {
+            var color = themeColor.getAttribute(
+              dark ? "data-theme-color-dark" : "data-theme-color-light"
+            );
+            if (color) themeColor.setAttribute("content", color);
+          }
         } catch {}
       })();
     </script>
     <title>nanobot</title>
   </head>
   <body class="bg-background text-foreground antialiased">
+    <div class="pwa-status-bar-surface" aria-hidden="true"></div>
     <div id="root">
-      <div class="boot-splash">
-        <div class="boot-splash-inner">
-          <span class="boot-dot" aria-hidden="true"></span>
+      <main class="startup-shell" aria-busy="true">
+        <div class="startup-header" aria-hidden="true">
+          <span class="startup-control-shadow"></span>
+          <span class="startup-control-shadow"></span>
+        </div>
+        <div class="startup-composer" aria-hidden="true"></div>
+        <div class="startup-status" role="status">
           <span data-boot-copy>Loading nanobot…</span>
         </div>
-      </div>
+      </main>
     </div>
     <script>
       (function () {

@@ -76,6 +76,18 @@ def test_inspect_webui_bundle_detects_channel_owned_ui_source(tmp_path: Path) ->
     assert status.newest_source == channel_ui
 
 
+def test_shared_notifications_make_existing_bundle_stale(tmp_path: Path) -> None:
+    source = tmp_path / "webui"
+    dist = tmp_path / "nanobot/web/dist"
+    shared = tmp_path / "packages/client-events/notifications.ts"
+    _touch(source / "package.json", mtime_ns=10)
+    _touch(dist / "index.html", mtime_ns=20)
+    _touch(shared, mtime_ns=30)
+    status = inspect_webui_bundle(source_dir=source, dist_dir=dist)
+    assert status.needs_build
+    assert status.newest_source == shared
+
+
 def test_channel_owned_ui_sources_are_included_in_distributions() -> None:
     project_root = Path(__file__).resolve().parents[2]
     pyproject = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))

@@ -13,7 +13,7 @@ import string
 import threading
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from loguru import logger
 
@@ -115,25 +115,50 @@ def generate_code(
     sender_id: str,
     ttl: int = _TTL_DEFAULT_S,
 ) -> str:
-    """Create a new pairing code for *sender_id* on *channel*.
+    """Return an active pairing code for *sender_id* on *channel*.
 
     Returns the code (e.g. ``"ABCD-EFGH"``).
     """
     with _LOCK:
         data = _load()
         _gc_pending(data)
+        sender = str(sender_id)
+        for code, info in data.get("pending", {}).items():
+            if info["channel"] == channel and str(info["sender_id"]) == sender:
+                return code
+
         raw = "".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LENGTH))
         code = f"{raw[:4]}-{raw[4:]}"
 
         data.setdefault("pending", {})[code] = {
             "channel": channel,
-            "sender_id": str(sender_id),
+            "sender_id": sender,
             "created_at": time.time(),
             "expires_at": time.time() + ttl,
         }
         _save(data)
         logger.info("Generated pairing code {} for {}@{}", code, sender_id, channel)
         return code
+
+
+def record_delivery(code: str, status: Literal["sending", "sent", "failed"]) -> None:
+    """Record a reply outcome without changing approval or reviving a stale request.
+
+    Once a code has been sent, a failed concurrent retry must not hide it.
+    Delivery bookkeeping is best-effort: a store error must not mask the actual
+    transport result or reset any approvals.
+    """
+    try:
+        with _LOCK:
+            data = _load()
+            _gc_pending(data)
+            info = data["pending"].get(code)
+            if info is None or info.get("delivery_status") == "sent":
+                return
+            info["delivery_status"] = status
+            _save(data)
+    except OSError:
+        logger.warning("Could not persist pairing reply delivery status")
 
 
 def approve_code(code: str) -> tuple[str, str] | None:
@@ -280,10 +305,11 @@ def get_approved(channel: str) -> list[str]:
 def format_pairing_reply(code: str) -> str:
     """Return the pairing-code message sent to unrecognised DM senders."""
     return (
-        "Hi there! This assistant only responds to approved users.\n\n"
+        "Hi! This is your private nanobot.\n\n"
         f"Your pairing code is: `{code}`\n\n"
-        "To get access, ask the owner to approve this request in the nanobot WebUI.\n"
-        f"If the WebUI is not available, the owner can also send `/pairing approve {code}`."
+        "Open the nanobot WebUI and enter this code to pair your chat account.\n"
+        f"Without the WebUI, approve it from an already paired chat with "
+        f"`/pairing approve {code}`."
     )
 
 

@@ -112,14 +112,49 @@ class TestEnforceRoleAlternation:
         assert result[1]["content"] is None
         assert result[2]["role"] == "tool"
 
-    def test_non_string_content_uses_latest(self):
+    def test_consecutive_user_messages_preserve_text_before_multimodal_content(self):
+        image = {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,aW1hZ2U="},
+        }
         msgs = [
-            {"role": "user", "content": [{"type": "text", "text": "A"}]},
-            {"role": "user", "content": "B"},
+            {"role": "user", "content": "Earlier unanswered question"},
+            {
+                "role": "user",
+                "content": [image, {"type": "text", "text": "The error is here"}],
+            },
         ]
         result = LLMProvider._enforce_role_alternation(msgs)
-        assert len(result) == 1
-        assert result[0]["content"] == "B"
+        assert result == [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Earlier unanswered question"},
+                image,
+                {"type": "text", "text": "The error is here"},
+            ],
+        }]
+
+    def test_consecutive_user_messages_preserve_multimodal_content_before_text(self):
+        image = {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,aW1hZ2U="},
+        }
+        msgs = [
+            {
+                "role": "user",
+                "content": [image, {"type": "text", "text": "First question"}],
+            },
+            {"role": "user", "content": "Follow-up detail"},
+        ]
+        result = LLMProvider._enforce_role_alternation(msgs)
+        assert result == [{
+            "role": "user",
+            "content": [
+                image,
+                {"type": "text", "text": "First question"},
+                {"type": "text", "text": "Follow-up detail"},
+            ],
+        }]
 
     def test_original_messages_not_mutated(self):
         msgs = [

@@ -9,6 +9,8 @@ import http
 import ipaddress
 import json
 import re
+import time
+from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
@@ -19,6 +21,17 @@ QueryParams = dict[str, list[str]]
 
 _JSON_GZIP_MIN_BYTES = 4 * 1024
 _JSON_GZIP_LEVEL = 5
+
+
+@dataclass(slots=True)
+class JSONResponseMetrics:
+    """Serialization timings and sizes for an HTTP JSON response."""
+
+    json_encode_ms: float = 0.0
+    gzip_ms: float = 0.0
+    uncompressed_bytes: int = 0
+    response_bytes: int = 0
+    gzip_enabled: bool = False
 
 
 def strip_trailing_slash(path: str) -> str:
@@ -101,8 +114,13 @@ def http_json_response(
     status: int = 200,
     accept_encoding: str | None = None,
     extra_headers: list[tuple[str, str]] | None = None,
+    metrics: JSONResponseMetrics | None = None,
 ) -> Response:
+    encode_started = time.perf_counter()
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    if metrics is not None:
+        metrics.json_encode_ms = (time.perf_counter() - encode_started) * 1000
+        metrics.uncompressed_bytes = len(body)
     headers = [
         ("Date", email.utils.formatdate(usegmt=True)),
         ("Connection", "close"),
@@ -111,11 +129,17 @@ def http_json_response(
     if accept_encoding is not None:
         headers.append(("Vary", "Accept-Encoding"))
         if len(body) >= _JSON_GZIP_MIN_BYTES and accepts_gzip(accept_encoding):
+            gzip_started = time.perf_counter()
             body = gzip.compress(body, compresslevel=_JSON_GZIP_LEVEL, mtime=0)
+            if metrics is not None:
+                metrics.gzip_ms = (time.perf_counter() - gzip_started) * 1000
+                metrics.gzip_enabled = True
             headers.append(("Content-Encoding", "gzip"))
     if extra_headers:
         headers.extend(extra_headers)
     headers.append(("Content-Length", str(len(body))))
+    if metrics is not None:
+        metrics.response_bytes = len(body)
     reason = http.HTTPStatus(status).phrase
     return Response(status, reason, Headers(headers), body)
 

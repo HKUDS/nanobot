@@ -1,21 +1,29 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  CheckCircle2,
-  Clock3,
-  Layers,
-  Search,
-  Server,
-  Terminal,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+  CompletedTaskIcon,
+  WebSearchIcon,
+  McpIcon,
+  ToolRunIcon,
+} from "@/components/icons/product-icons";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Clock3, Layers, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { MarkdownText } from "@/components/MarkdownText";
 import { cliAppInitials, mcpPresetInitials } from "@/components/CliAppMentionText";
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { coalesceActivityMessages } from "@/components/thread/activity/activity-message-model";
 import {
   compactActivityPath,
+  formatActivityTarget,
   redactShellCommand,
 } from "@/components/thread/activity/activity-text";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
@@ -32,7 +40,6 @@ import { ThinkingReasoningShell } from "@/components/thread/activity/ThinkingRea
 import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
 import {
   describeTraceLine,
-  type TraceDescription,
 } from "@/components/thread/activity/trace-activity-model";
 import { WebSearchRun } from "@/components/thread/activity/WebSearchRun";
 import { webSearchRunsByTraceLine } from "@/components/thread/activity/web-search-model";
@@ -41,20 +48,32 @@ import {
   isReasoningOnlyAssistant,
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useThreadVisibility } from "@/hooks/useThreadVisibility";
+import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
-import { usePageVisibility } from "@/hooks/usePageVisibility";
-import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  RetryStatus,
+  ToolProgressEvent,
+  UIFileEdit,
+  UIMessage,
+} from "@/lib/types";
 
-const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
+const EMPTY_CLI_APPS: CliAppInfo[] = [];
+const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
 
-export { isAgentActivityMember, isReasoningOnlyAssistant };
+export { isAgentActivityMember };
 
 interface ActivityCounts {
   reasoningSteps: number;
   toolCalls: number;
+  modelSegments: number;
   cliCount: number;
   mcpCount: number;
   fileCount: number;
@@ -91,14 +110,23 @@ function countActivity(
 ): ActivityCounts {
   let reasoningSteps = 0;
   let toolCalls = 0;
+  let modelSegments = 0;
   const cliCount = cliRuns.length;
   const mcpCount = mcpRuns.length;
   for (const m of messages) {
+    if (m.activityKind === "model") {
+      modelSegments += 1;
+      continue;
+    }
     if (isReasoningOnlyAssistant(m)) {
       reasoningSteps += 1;
       continue;
     }
     if (m.kind === "trace") {
+      if (m.traceDetail) {
+        toolCalls += m.traceDetail.traceCount;
+        continue;
+      }
       const lines = traceLines(m);
       for (const line of lines) {
         if (!isCliRunTraceLine(line) && !isMcpRunTraceLine(line)) {
@@ -110,6 +138,7 @@ function countActivity(
   return {
     reasoningSteps,
     toolCalls,
+    modelSegments,
     cliCount,
     mcpCount,
     fileCount: fileEdits.length,
@@ -125,32 +154,110 @@ interface AgentActivityClusterProps {
   turnLatencyMs?: number;
   /** User turn start timestamp for live activity before the first trace/reasoning row. */
   startedAtMs?: number;
+  retryStatus?: RetryStatus | null;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  traceDetailScope?: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
+  /** Optional controlled expansion state for a completed inline activity block. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  /** Render only the controlled details; another control owns the disclosure label. */
+  hideHeader?: boolean;
+  /** Stable id used by an external disclosure control. */
+  detailsId?: string;
 }
 
-/**
- * Outer fold wrapping interleaved reasoning-only assistant rows and tool-trace rows.
- * Fixed max height with inner scroll and a single flat list of activity rows.
- */
-export function AgentActivityCluster({
+export function AgentActivityCluster(props: AgentActivityClusterProps) {
+  const displayMode = useFileEditDisplayMode();
+  const messages = useMemo(() => coalesceActivityMessages(props.messages), [props.messages]);
+  const editsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
+    [messages, props.isTurnStreaming],
+  );
+  if (displayMode === "summary" || !editsByMessage.size) {
+    return <FoldedAgentActivity {...props} />;
+  }
+
+  // Diff rows break the fold so they stay visible in their original timeline position.
+  const items: ReactNode[] = [];
+  let pending: UIMessage[] = [];
+  const flush = (last: boolean) => {
+    // A live turn still needs its status header when the last row is a diff.
+    if (!pending.length && !(last && props.isTurnStreaming)) return;
+    items.push(
+      <FoldedAgentActivity
+        {...props}
+        detailsId={undefined}
+        key={pending[0]?.id ?? "tail-status"}
+        messages={pending}
+        isTurnStreaming={last && props.isTurnStreaming}
+        retryStatus={last ? props.retryStatus : null}
+        hasBodyBelow={false}
+      />,
+    );
+    pending = [];
+  };
+  for (const message of messages) {
+    const edits = editsByMessage.get(message.id);
+    if (message.fileEdits?.length) {
+      const traces = traceLines(message).filter((line) => !isFileEditTraceLine(line));
+      if (traces.some((line) => line.trim())) {
+        pending.push({ ...message, traces, content: traces.at(-1) ?? "", fileEdits: undefined });
+      }
+    } else {
+      pending.push(message);
+    }
+    if (edits?.length) {
+      flush(false);
+      items.push(
+        <FileEditGroup
+          key={`${message.id}:edits`}
+          edits={edits}
+          displayMode={displayMode}
+          onOpenFilePreview={props.onOpenFilePreview}
+        />,
+      );
+    }
+  }
+  flush(true);
+  return (
+    <div id={props.detailsId} className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
+      {items}
+    </div>
+  );
+}
+
+function FoldedAgentActivity({
   messages,
   isTurnStreaming,
   hasBodyBelow,
   turnLatencyMs,
   startedAtMs,
-  cliApps = [],
-  mcpPresets = [],
+  retryStatus = null,
+  cliApps = EMPTY_CLI_APPS,
+  mcpPresets = EMPTY_MCP_PRESETS,
+  traceDetailScope = null,
+  onLoadTraceDetails,
   onOpenFilePreview,
+  expanded,
+  onExpandedChange,
+  hideHeader = false,
+  detailsId,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
-  const fileEditDisplayMode = useFileEditDisplayMode();
+  const { activityMode, fileEditDisplayMode } = useLocalPreferences();
   const pageVisible = usePageVisibility();
+  const threadVisible = useThreadVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
-  const fileEdits = useMemo(
-    () => summarizeFileEdits(collectFileEdits(activityMessages), isTurnStreaming),
+  const fileEditsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(activityMessages, isTurnStreaming),
     [activityMessages, isTurnStreaming],
+  );
+  const fileEdits = useMemo(
+    () => [...fileEditsByMessage.values()].flat(),
+    [fileEditsByMessage],
   );
   const cliRuns = useMemo(() => collectCliRuns(activityMessages), [activityMessages]);
   const mcpRuns = useMemo(() => collectMcpRuns(activityMessages), [activityMessages]);
@@ -165,6 +272,7 @@ export function AgentActivityCluster({
   const {
     reasoningSteps,
     toolCalls,
+    modelSegments,
     cliCount,
     mcpCount,
     fileCount,
@@ -173,22 +281,44 @@ export function AgentActivityCluster({
   const [userToggledOuter, setUserToggledOuter] = useState(false);
   const [outerOpenLocal, setOuterOpenLocal] = useState(false);
   const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
+  const [failedTraceDetailKey, setFailedTraceDetailKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [activityScrollFade, setActivityScrollFade] = useState({ top: false, bottom: false });
-  const activityScrollRef = useRef<HTMLDivElement>(null);
-  const activityContentRef = useRef<HTMLDivElement>(null);
-  const autoFollowActivityRef = useRef(true);
-  const scrollFrameRef = useRef<number | null>(null);
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
-  /** Live work stays open; completed work briefly shows the done state, then tucks away. */
-  const outerExpanded = userToggledOuter
-    ? outerOpenLocal
-    : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
+  /** Auto follows execution; expanded keeps details open unless manually collapsed. */
+  const outerExpanded = expanded ?? (
+    userToggledOuter
+      ? outerOpenLocal
+      : activityMode === "expanded" || isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming)
+  );
+  useEffect(() => {
+    setUserToggledOuter(false);
+  }, [activityMode]);
+  const deferredTraceRefs = useMemo(
+    () => Array.from(new Set(
+      messages
+        .map((message) => message.traceDetail?.ref)
+        .filter((ref): ref is string => typeof ref === "string" && ref.length > 0),
+    )),
+    [messages],
+  );
+  const traceDetailKey = useMemo(
+    () => `${traceDetailScope ?? ""}\u0000${deferredTraceRefs.join("\u0000")}`,
+    [deferredTraceRefs, traceDetailScope],
+  );
+  const traceDetailLoadFailed = failedTraceDetailKey === traceDetailKey;
+  const requestTraceDetails = useCallback(async (refs: string[]) => {
+    if (!onLoadTraceDetails) return;
+    setFailedTraceDetailKey(null);
+    try {
+      await onLoadTraceDetails(refs);
+    } catch {
+      setFailedTraceDetailKey(`${traceDetailScope ?? ""}\u0000${refs.join("\u0000")}`);
+    }
+  }, [onLoadTraceDetails, traceDetailScope]);
 
-  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
+  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || modelSegments > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const hasOnlyFileActivity = fileCount > 0 && activityMessages.every(messageHasOnlyFileActivity);
-  const hasNonReasoningActivity = toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const durationMs = activityDurationMs(
     activityMessages,
     isTurnStreaming,
@@ -197,106 +327,68 @@ export function AgentActivityCluster({
     startedAtMs,
   );
   const activityDuration = formatActivityDuration(durationMs);
-  const thoughtLabel = hasNonReasoningActivity
-    ? isTurnStreaming
-      ? t("message.activityWorkingFor", {
-          duration: activityDuration,
-          defaultValue: "Working for {{duration}}",
+  const isCompletedDisclosure = !isTurnStreaming && expanded !== undefined;
+  const retryError = retryStatus?.error_kind === "connection"
+    ? t("message.retryConnection", { defaultValue: "Connection failed" })
+    : retryStatus?.error_kind === "timeout"
+      ? t("message.retryTimeout", { defaultValue: "Model timed out" })
+      : retryStatus?.error_kind === "rate_limit"
+        ? t("message.retryRateLimit", { defaultValue: "Rate limited" })
+        : retryStatus?.error_kind === "server"
+          ? t("message.retryServer", { defaultValue: "Model unavailable" })
+          : t("message.retryUnknown", { defaultValue: "Model request failed" });
+  const retryAttempt = retryStatus?.max_attempts
+    ? `${retryStatus.attempt}/${retryStatus.max_attempts}`
+    : String(retryStatus?.attempt ?? "");
+  const retrySeconds = retryStatus?.next_retry_at === undefined
+    ? 0
+    : Math.max(0, Math.ceil(retryStatus.next_retry_at - now / 1000));
+  const activityLabel = retryStatus?.state === "exhausted"
+    ? t("message.retryExhausted", {
+        error: retryError,
+        defaultValue: "{{error}}. Ending turn.",
+      })
+    : retryStatus?.state === "waiting"
+      ? t("message.retryWaiting", {
+          error: retryError,
+          seconds: retrySeconds,
+          attempt: retryAttempt,
+          defaultValue: "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
         })
-      : durationMs <= 0
-        ? t("message.activityWorked", { defaultValue: "Worked" })
+      : isTurnStreaming
+    ? t("message.activityWorkingFor", {
+        duration: activityDuration,
+        defaultValue: "Working for {{duration}}",
+      })
+    : durationMs <= 0
+      ? t("message.activityWorked", { defaultValue: "Worked" })
       : t("message.activityWorkedFor", {
           duration: activityDuration,
           defaultValue: "Worked for {{duration}}",
-        })
-    : isTurnStreaming
-      ? t("message.activityThinkingFor", {
-          duration: activityDuration,
-          defaultValue: "Thinking for {{duration}}",
-        })
-      : durationMs <= 0
-        ? t("message.activityThought", { defaultValue: "Thought" })
-      : t("message.activityThoughtFor", {
-          duration: activityDuration,
-          defaultValue: "Thought for {{duration}}",
         });
 
-  const cancelActivityScrollFrame = useCallback(() => {
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-  }, []);
-
-  const syncActivityScrollFade = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    const scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop));
-    const next = {
-      top: scrollTop > 1,
-      bottom: maxScrollTop - scrollTop > 1,
-    };
-    setActivityScrollFade((current) =>
-      current.top === next.top && current.bottom === next.bottom ? current : next,
-    );
-  }, []);
-
-  const scrollActivityToBottom = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    syncActivityScrollFade();
-  }, [syncActivityScrollFade]);
-
-  const scheduleActivityScrollToBottom = useCallback(() => {
-    cancelActivityScrollFrame();
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      scrollActivityToBottom();
-    });
-  }, [cancelActivityScrollFrame, scrollActivityToBottom]);
-
   const toggleOuter = () => {
-    const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
-    if (nextOpen) {
-      autoFollowActivityRef.current = true;
+    if (expanded !== undefined) {
+      onExpandedChange?.(!expanded);
+      return;
     }
+    const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
     setUserToggledOuter(true);
     setOuterOpenLocal(nextOpen);
   };
 
-  useLayoutEffect(() => {
-    if (!outerExpanded || !autoFollowActivityRef.current) return;
-    scheduleActivityScrollToBottom();
-  }, [outerExpanded, activityMessages, isTurnStreaming, scheduleActivityScrollToBottom]);
-
   useEffect(() => {
-    if (!outerExpanded) {
-      autoFollowActivityRef.current = true;
-      return;
+    if (outerExpanded && deferredTraceRefs.length > 0) {
+      void requestTraceDetails(deferredTraceRefs);
     }
-    const target = activityContentRef.current;
-    if (!target || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (autoFollowActivityRef.current) {
-        scheduleActivityScrollToBottom();
-      } else {
-        syncActivityScrollFade();
-      }
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [outerExpanded, scheduleActivityScrollToBottom, syncActivityScrollFade]);
-
-  useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
+  }, [deferredTraceRefs, outerExpanded, requestTraceDetails]);
 
   useEffect(() => {
-    if (!isTurnStreaming || !pageVisible) return undefined;
+    if (!isTurnStreaming || !pageVisible || !threadVisible) return undefined;
     setNow(Date.now());
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(interval);
-  }, [isTurnStreaming, pageVisible]);
+  }, [isTurnStreaming, pageVisible, threadVisible]);
 
   useEffect(() => {
     const wasStreaming = wasTurnStreamingRef.current;
@@ -311,17 +403,9 @@ export function AgentActivityCluster({
     return () => window.clearTimeout(timeout);
   }, [isTurnStreaming, userToggledOuter]);
 
-  const onActivityScroll = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    autoFollowActivityRef.current = distance < ACTIVITY_SCROLL_NEAR_BOTTOM_PX;
-    syncActivityScrollFade();
-  }, [syncActivityScrollFade]);
+  if (!hasVisibleActivity && !isTurnStreaming) return null;
 
-  if (!hasVisibleActivity) return null;
-
-  if (hasOnlyFileActivity) {
+  if (hasOnlyFileActivity && expanded === undefined) {
     return (
       <div className={cn("w-full", hasBodyBelow && "mb-2")}>
         <FileEditGroup
@@ -334,31 +418,39 @@ export function AgentActivityCluster({
   }
 
   return (
-    <div className={cn("w-full", hasBodyBelow && "mb-2")}>
+    <div className={cn("w-full", hasBodyBelow && expanded !== false && "mb-2")}>
       <ThinkingReasoningShell
         active={isTurnStreaming}
         expanded={outerExpanded}
-        label={thoughtLabel}
-        viewportRef={activityScrollRef}
-        contentRef={activityContentRef}
-        fadeTop={activityScrollFade.top}
-        fadeBottom={activityScrollFade.bottom}
+        contextual={isCompletedDisclosure}
+        showHeader={!hideHeader || outerExpanded}
+        collapseLabel={t("message.collapseActivity")}
+        contentId={detailsId}
+        label={activityLabel}
+        hasDetails={hasVisibleActivity}
         onToggle={toggleOuter}
-        onScroll={onActivityScroll}
       >
+        {traceDetailLoadFailed ? (
+          <div role="alert" className="flex items-center gap-2 py-1 text-[12px] text-destructive">
+            <span>{t("message.traceDetailsLoadFailed", { defaultValue: "Full activity details could not be loaded." })}</span>
+            <button
+              type="button"
+              className="shrink-0 rounded-sm font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => void requestTraceDetails(deferredTraceRefs)}
+            >
+              {t("message.retryTraceDetails", { defaultValue: "Retry" })}
+            </button>
+          </div>
+        ) : null}
         <ActivityMessageTimeline
           messages={activityMessages}
           active={isTurnStreaming}
           cliAppsByName={cliAppsByName}
           mcpPresetsByName={mcpPresetsByName}
+          fileEditsByMessage={fileEditsByMessage}
+          fileEditDisplayMode={fileEditDisplayMode}
+          onOpenFilePreview={onOpenFilePreview}
         />
-        {fileEdits.length ? (
-          <FileEditGroup
-            edits={fileEdits}
-            displayMode={fileEditDisplayMode}
-            onOpenFilePreview={onOpenFilePreview}
-          />
-        ) : null}
       </ThinkingReasoningShell>
     </div>
   );
@@ -382,7 +474,13 @@ function activityDurationMs(
   const timestamps = messages
     .map((message) => message.createdAt)
     .filter((value) => Number.isFinite(value));
-  if (!timestamps.length) return 0;
+  if (!timestamps.length) {
+    return active
+      && typeof activeStartedAtMs === "number"
+      && Number.isFinite(activeStartedAtMs)
+      ? Math.max(0, now - activeStartedAtMs)
+      : 0;
+  }
   const first = active && Number.isFinite(activeStartedAtMs)
     ? activeStartedAtMs!
     : Math.min(...timestamps);
@@ -392,7 +490,14 @@ function activityDurationMs(
   return Math.max(0, last - first);
 }
 
-function formatActivityDuration(ms: number): string {
+export function completedActivityDurationMs(
+  messages: UIMessage[],
+  completedLatencyMs?: number,
+): number {
+  return activityDurationMs(messages, false, 0, completedLatencyMs);
+}
+
+export function formatActivityDuration(ms: number): string {
   const seconds = ms > 0 && ms < 1000 ? 1 : Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -405,20 +510,37 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
-function ActivityMessageTimeline({
+const ActivityMessageTimeline = memo(function ActivityMessageTimeline({
   messages,
   active,
   cliAppsByName,
   mcpPresetsByName,
+  fileEditsByMessage,
+  fileEditDisplayMode,
+  onOpenFilePreview,
 }: {
   messages: UIMessage[];
   active: boolean;
   cliAppsByName: Map<string, CliAppInfo>;
   mcpPresetsByName: Map<string, McpPresetInfo>;
+  fileEditsByMessage: Map<string, FileEditSummary[]>;
+  fileEditDisplayMode: FileEditDisplayMode;
+  onOpenFilePreview?: (path: string) => void;
 }) {
   const items: ReactNode[] = [];
 
   messages.forEach((message, index) => {
+    if (message.activityKind === "model") {
+      items.push(
+        <ActivityModelMessage
+          key={message.id}
+          message={message}
+          active={active}
+          onOpenFilePreview={onOpenFilePreview}
+        />,
+      );
+      return;
+    }
     if (isReasoningOnlyAssistant(message)) {
       items.push(
         <ReasoningRow
@@ -430,18 +552,59 @@ function ActivityMessageTimeline({
       return;
     }
     if (message.kind === "trace") {
+      const fileEdits = fileEditsByMessage.get(message.id) ?? [];
       items.push(
-        <ActivityTraceTimeline
-          key={message.id}
-          message={message}
-          active={active && index === messages.length - 1}
-          cliAppsByName={cliAppsByName}
-          mcpPresetsByName={mcpPresetsByName}
-        />,
+        <Fragment key={message.id}>
+          <ActivityTraceTimeline
+            message={message}
+            active={active && index === messages.length - 1}
+            cliAppsByName={cliAppsByName}
+            mcpPresetsByName={mcpPresetsByName}
+          />
+          <FileEditGroup
+            edits={fileEdits}
+            displayMode={fileEditDisplayMode}
+            onOpenFilePreview={onOpenFilePreview}
+          />
+        </Fragment>,
       );
     }
   });
   return <>{items}</>;
+});
+
+/**
+ * Keep an intermediate assistant segment as normal Markdown. The activity
+ * surface owns ordering and lifecycle, not a reduced rendering mode: users
+ * should see the same prose, links, and code treatment before and after the
+ * surrounding turn is folded.
+ */
+function ActivityModelMessage({
+  message,
+  active,
+  onOpenFilePreview,
+}: {
+  message: UIMessage;
+  active: boolean;
+  onOpenFilePreview?: (path: string) => void;
+}) {
+  if (!message.content.trim()) return null;
+  return (
+    <div
+      data-testid="activity-model-message"
+      data-assistant-selectable={active && message.isStreaming ? undefined : "true"}
+      className="w-full min-w-0 py-1 text-[15px]"
+      style={{ lineHeight: "var(--cjk-line-height)" }}
+    >
+      <MarkdownText
+        streaming={active && !!message.isStreaming}
+        preserveStreamingLayout
+        onOpenFilePreview={onOpenFilePreview}
+      >
+        {message.content}
+      </MarkdownText>
+    </div>
+  );
 }
 
 function ActivityTraceList({
@@ -637,15 +800,16 @@ function ActivityTraceRow({
   active: boolean;
   state?: GenericToolState;
 }) {
+  const { t } = useTranslation();
   const status = state?.status ?? (active ? "running" : "done");
-  const trace = describeTraceLine(line, status, state?.result);
+  const trace = describeTraceLine(line, status, t, state?.result);
   const rowActive = status === "running" && active;
   const Icon = trace.icon === "clock" ? Clock3 : (trace.kind === "search"
-    ? Search
+    ? WebSearchIcon
     : trace.kind === "done"
-      ? CheckCircle2
+      ? CompletedTaskIcon
       : trace.kind === "tool"
-        ? Wrench
+        ? ToolRunIcon
         : Layers);
   if (trace.url && trace.host) {
     return (
@@ -661,10 +825,12 @@ function ActivityTraceRow({
   }
   return (
     <ActivityStep
-      marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={rowActive} />}
+      icon={Icon}
       active={rowActive && trace.kind !== "done"}
       tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
-      label={[trace.label, trace.detail].filter(Boolean).join(" ")}
+      label={trace.kind === "search" ? trace.label : formatActivityTarget(t, trace.label, trace.detail)}
+      detail={trace.kind === "search" ? trace.detail : trace.aside}
+      detailClassName={trace.kind === "search" ? "whitespace-pre-line" : undefined}
     />
   );
 }
@@ -711,30 +877,6 @@ function toolProgressError(error: unknown): string | undefined {
     }
   }
   return undefined;
-}
-
-function TraceIconMark({
-  trace,
-  fallbackIcon: FallbackIcon,
-  active,
-}: {
-  trace: TraceDescription;
-  fallbackIcon: LucideIcon;
-  active: boolean;
-}) {
-  return (
-    <FallbackIcon
-      className={cn(
-        "h-3.5 w-3.5 shrink-0",
-        trace.kind === "done"
-          ? "text-emerald-500/75"
-          : active
-            ? "text-muted-foreground/75"
-            : "text-muted-foreground/45",
-      )}
-      aria-hidden
-    />
-  );
 }
 
 const CLI_RUN_TOOL_NAMES = new Set(["run_cli_app", "cli_anything_run"]);
@@ -1010,16 +1152,6 @@ function fileEditCallKey(edit: UIFileEdit): string {
   return `${edit.tool}|${edit.path}`;
 }
 
-function collectFileEdits(messages: UIMessage[]): UIFileEdit[] {
-  const edits: UIFileEdit[] = [];
-  for (const message of messages) {
-    if (message.kind === "trace" && message.fileEdits?.length) {
-      edits.push(...message.fileEdits);
-    }
-  }
-  return edits;
-}
-
 function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
   const order: string[] = [];
   const byKey = new Map<string, UIFileEdit>();
@@ -1029,6 +1161,33 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
     byKey.set(key, edit);
   }
   return order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
+}
+
+/** Keep each edit at the point where its call first appeared. Later lifecycle
+ * events update that row in place instead of moving completed edits to the end. */
+function summarizeFileEditsByMessage(
+  messages: UIMessage[],
+  active: boolean,
+): Map<string, FileEditSummary[]> {
+  const messageByEdit = new Map<string, string>();
+  const edits: UIFileEdit[] = [];
+  for (const message of messages) {
+    for (const edit of message.fileEdits ?? []) {
+      const key = fileEditCallKey(edit);
+      if (!messageByEdit.has(key)) messageByEdit.set(key, message.id);
+      edits.push(edit);
+    }
+  }
+
+  const grouped = new Map<string, FileEditSummary[]>();
+  for (const edit of summarizeFileEdits(edits, active)) {
+    const messageId = messageByEdit.get(edit.key);
+    if (!messageId) continue;
+    const group = grouped.get(messageId) ?? [];
+    group.push(edit);
+    grouped.set(messageId, group);
+  }
+  return grouped;
 }
 
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {
@@ -1086,6 +1245,7 @@ function CliRunGroup({
 }
 
 function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
+  const { t } = useTranslation();
   const args = compactActivityPath(redactShellCommand(formatCliArgs(run)));
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
@@ -1093,19 +1253,23 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const displayName = app?.display_name || titleFromPresetName(run.name);
-  const action = failed ? "Could not use" : rowActive ? "Using" : "Used";
-  const label = `${action} ${displayName}${args ? ` · ${args}` : ""}`;
+  const label = t(
+    `message.${failed ? "cliActivityFailedOne" : rowActive ? "cliActivityRunningOne" : "cliActivityRanOne"}`,
+    { name: displayName },
+  );
 
   return (
     <ActivityStep
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
+      detail={args}
+      detailClassName="font-mono text-[12px]"
       marker={(
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
           style={{
@@ -1161,6 +1325,7 @@ function McpRunGroup({
 }
 
 function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo }) {
+  const { t } = useTranslation();
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
@@ -1171,19 +1336,21 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
     run.toolName,
     run.args,
     failed ? "error" : rowActive ? "running" : "done",
+    t,
   );
-  const label = `${activity.action}${activity.target ? ` ${activity.target}` : ""} · ${displayName}`;
+  const label = formatActivityTarget(t, activity.action, activity.target ?? "");
 
   return (
     <ActivityStep
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
+      detail={displayName}
       marker={(
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
           style={{
@@ -1206,7 +1373,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
           ) : preset ? (
             mcpPresetInitials(preset).slice(0, 2)
           ) : (
-            <Server className="h-3 w-3" aria-hidden />
+            <McpIcon className="h-3 w-3" aria-hidden />
           )}
         </span>
       )}

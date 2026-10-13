@@ -1,9 +1,12 @@
 import { useState, type ReactNode } from "react";
-import { FileIcon, ImageIcon, PlaySquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import type { UIMediaAttachment } from "@/lib/types";
+import { ImageThumbnail } from "@/components/ImageGallery";
+import { ImageLightbox } from "@/components/ImageLightbox";
+import { useRegisterInlineImage } from "@/components/InlineImageContext";
+import { FileReferenceIcon, fileKindForPath } from "@/components/FileReferenceChip";
 
 interface AttachmentTileProps {
   attachment: UIMediaAttachment;
@@ -14,41 +17,22 @@ interface AttachmentTileProps {
 
 export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
   const { t } = useTranslation();
-  const [failed, setFailed] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
+  const failed = !!attachment.url && failedUrl === attachment.url;
+  const [imageOpen, setImageOpen] = useState(false);
   const hasUrl = typeof attachment.url === "string" && attachment.url.length > 0;
   const label = attachmentLabel(attachment, t);
+  useRegisterInlineImage(inline && attachment.kind === "image" && hasUrl && !failed ? attachment.url : undefined);
 
   if (attachment.kind === "image" && hasUrl && !failed) {
     return (
-      <AttachmentFrame
-        attachment={attachment}
-        className={className}
-        inline={inline}
-        variant={variant}
-      >
-        <a
-          href={attachment.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="block bg-muted/20"
-          aria-label={attachment.name
-            ? t("message.openAttachment", { name: attachment.name })
-            : t("lightbox.open", { defaultValue: "Open image" })}
-        >
-          <img
-            src={attachment.url}
-            alt={attachment.name ?? ""}
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            onError={() => setFailed(true)}
-            className={cn(
-              "block h-auto max-w-full bg-background object-contain",
-              variant === "compact" ? "max-h-40" : "max-h-[34rem]",
-            )}
-          />
-        </a>
-      </AttachmentFrame>
+      <span className={cn("not-prose my-3 block max-w-full", className)}>
+        <ImageThumbnail key={attachment.url} image={attachment}
+          size={variant === "compact" ? "compact" : "large"}
+          onOpen={() => setImageOpen(true)} onError={() => setFailedUrl(attachment.url)} />
+        <ImageLightbox images={[attachment]} index={imageOpen ? 0 : null}
+          onIndexChange={() => {}} onOpenChange={setImageOpen} />
+      </span>
     );
   }
 
@@ -74,14 +58,12 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     );
   }
 
-  const Icon = attachment.kind === "video"
-    ? PlaySquare
-    : attachment.kind === "image"
-      ? ImageIcon
-      : FileIcon;
+  const fileKind = attachment.kind === "file"
+    ? fileKindForPath(attachment.name || attachment.url || "")
+    : attachment.kind;
   const body = (
     <>
-      <Icon className="h-4 w-4 flex-none" aria-hidden />
+      <FileReferenceIcon kind={fileKind} className="size-4" />
       <span className="min-w-0 truncate">{attachment.name ?? label}</span>
     </>
   );
@@ -94,7 +76,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         title={attachment.name ?? undefined}
         aria-label={label}
         className={cn(
-          "flex max-w-[18rem] items-center gap-2 rounded-[14px]",
+          "flex max-w-[18rem] items-center gap-2 rounded-control",
           "border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground",
           "transition-colors hover:bg-muted/55 hover:text-foreground",
           variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
@@ -109,7 +91,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
   return (
     <div
       className={cn(
-        "flex max-w-[18rem] items-center gap-2 rounded-[14px]",
+        "flex max-w-[18rem] items-center gap-2 rounded-control",
         "border border-border/60 bg-muted/35 px-3 py-2 text-xs text-muted-foreground",
         variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
         className,
@@ -139,7 +121,7 @@ function AttachmentFrame({
   variant?: "default" | "compact";
 }) {
   const frameClassName = cn(
-    "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-[14px]",
+    "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-control",
     "border border-border/60 bg-muted/40",
     attachment.kind === "image" && "bg-background/85",
     attachment.kind === "video" ? "w-[min(100%,32rem)]" : "",

@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.tools.filesystem import ListDirTool, WriteFileTool
+from nanobot.agent.tools.search import GrepTool
 
 
 def _write_skill(
@@ -298,7 +300,7 @@ def test_disabled_skills_excluded_from_build_skills_summary(tmp_path: Path) -> N
     assert "beta" in summary
 
 
-def test_build_skills_summary_groups_paths_by_root(tmp_path: Path) -> None:
+def test_build_skills_summary_keeps_builtin_root_absolute_in_agent_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace_skills = workspace / "skills"
     workspace_skills.mkdir(parents=True)
@@ -308,12 +310,63 @@ def test_build_skills_summary_groups_paths_by_root(tmp_path: Path) -> None:
 
     summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary()
 
-    assert summary.count(str(workspace_skills)) == 1
-    assert summary.count(str(builtin)) == 1
+    assert str(workspace_skills) not in summary
+    assert f"### Built-in skills (`{builtin.resolve()}`)" in summary
     assert str(workspace_path) not in summary
     assert str(builtin_path) not in summary
+    assert summary.count("(`skills`)") == 1
     assert "`alpha/SKILL.md`" in summary
     assert "`beta/SKILL.md`" in summary
+
+
+async def test_builtin_summary_root_supports_restricted_reference_search(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    builtin = tmp_path / "builtin"
+    _write_skill(builtin, "documentation", body="# Documentation")
+    references = builtin / "documentation" / "references"
+    references.mkdir()
+    guide = references / "usage.md"
+    guide.write_text("Choose a timezone", encoding="utf-8")
+    summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary()
+    heading = next(line for line in summary.splitlines() if line.startswith("### Built-in skills"))
+    reference_path = str(Path(heading.split("`")[1]) / "documentation" / "references")
+    options = {
+        "workspace": workspace,
+        "allowed_dir": workspace,
+        "restrict_to_workspace": True,
+        "extra_read_allowed_dirs": [builtin],
+    }
+
+    listing = await ListDirTool(**options).execute(path=reference_path)
+    matches = await GrepTool(**options).execute(
+        pattern="timezone", path=reference_path, glob="*.md", output_mode="files_with_matches",
+    )
+
+    assert "usage.md" in listing
+    assert "usage.md" in matches
+    rejected = await WriteFileTool(**options).execute(path=str(guide), content="replace")
+    assert rejected.is_error
+    assert guide.read_text(encoding="utf-8") == "Choose a timezone"
+
+
+def test_build_skills_summary_keeps_absolute_roots_for_selected_project(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace_skills = workspace / "skills"
+    workspace_skills.mkdir(parents=True)
+    _write_skill(workspace_skills, "alpha", body="# Alpha")
+    builtin = tmp_path / "builtin"
+    _write_skill(builtin, "beta", body="# Beta")
+    project = tmp_path / "project"
+    project.mkdir()
+
+    summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary(
+        workspace=project,
+    )
+
+    assert summary.count(str(workspace_skills.resolve())) == 1
+    assert summary.count(str(builtin.resolve())) == 1
+    assert str(project.resolve()) not in summary
 
 
 def test_bundled_update_setup_description_is_valid_yaml(tmp_path: Path) -> None:
@@ -330,8 +383,7 @@ def test_bundled_skills_use_agent_owned_paths(tmp_path: Path) -> None:
     update_setup = loader.load_skill("update-setup")
 
     assert memory is not None
-    assert "<history-log-path>" in memory
-    assert 'path="memory/history.jsonl"' not in memory
+    assert "`History log` path from the system prompt" in memory
     assert update_setup is not None
     assert "<agent-workspace>/skills/update/SKILL.md" in update_setup
     assert "Never substitute a project-relative" in update_setup
@@ -381,6 +433,36 @@ def test_explicit_skill_references_resolve_available_enabled_names_in_order(
     )
 
     assert invoked == ["alpha"]
+
+
+def test_multiple_explicit_skills_share_one_ordered_runtime_context(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(skills_root, "alpha", body="Alpha instructions")
+    _write_skill(skills_root, "beta", body="Beta instructions")
+    _write_skill(
+        skills_root,
+        "always",
+        metadata_json={"always": True},
+        body="Always instructions",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    context = loader.build_explicit_skill_runtime_context(
+        "Use $beta, then $alpha, $beta again, and $always."
+    )
+
+    assert context is not None
+    assert context.source == "explicit_skills"
+    assert context.content.count("### Skill: beta") == 1
+    assert context.content.count("### Skill: alpha") == 1
+    assert context.content.index("### Skill: beta") < context.content.index(
+        "### Skill: alpha"
+    )
+    assert "### Skill: always" not in context.content
 
 
 # -- multiline description tests (YAML folded > and literal |) -----------------

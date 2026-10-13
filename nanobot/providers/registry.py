@@ -17,15 +17,28 @@ from typing import Any
 
 from pydantic.alias_generators import to_snake
 
+from nanobot.providers.model_api import ModelAPICapabilities as ModelAPICapabilities
+from nanobot.providers.model_api import ProviderAPI as ProviderAPI
+from nanobot.providers.model_api import RequestAPI as RequestAPI
+from nanobot.providers.model_api import ResponsesCapabilities as ResponsesCapabilities
+from nanobot.providers.model_api import hosted_web_search_enabled as hosted_web_search_enabled
+from nanobot.providers.model_api import is_direct_openai_base as is_direct_openai_base
+from nanobot.providers.model_api import is_hosted_web_search_tool as is_hosted_web_search_tool
+from nanobot.providers.model_api import is_hosted_web_search_type as is_hosted_web_search_type
+
 
 @dataclass(frozen=True)
 class ProviderModelSpec:
-    """A curated model exposed by providers without a model-list endpoint."""
+    """Curated model metadata used for fixed catalogs or online fallback."""
 
     id: str
     label: str = ""
     description: str = ""
+    owned_by: str = ""
     context_window: int | None = None
+    reasoning_efforts: tuple[str, ...] = ()
+    supports_backend_search: bool = False
+    api: ModelAPICapabilities | None = None
 
 
 @dataclass(frozen=True)
@@ -41,8 +54,11 @@ class ProviderSpec:
     name: str  # config field name, e.g. "dashscope"
     keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
+    # Request formats available through this provider's adapters. Remote model
+    # support is separate: an adapter does not guarantee endpoint support.
+    request_apis: tuple[ProviderAPI, ...]
     display_name: str = ""  # shown in `nanobot status`
-    model_catalog: str = "auto"  # WebUI model-list source
+    model_catalog: str = "auto"  # WebUI model-list source, including builtin/hybrid
     builtin_models: tuple[ProviderModelSpec, ...] = ()
     settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
@@ -111,13 +127,8 @@ class ProviderSpec:
     # Substring match against the wire model name (lowercased).
     implicit_reasoning_models: tuple[str, ...] = ()
 
-    # Models that expose the OpenAI Responses wire format.  This is model-level
-    # because providers may add Responses support incrementally.
-    responses_models: tuple[str, ...] = ()
-
-    # Provider-hosted Responses tools sent unless extraBody.tools explicitly
-    # supplies the hosted-tool selection. Values are raw Responses tool types.
-    responses_default_tools: tuple[str, ...] = ()
+    # Capabilities for providers/models served through the shared Responses path.
+    responses: ResponsesCapabilities | None = None
 
     # When the model returns content as a list of {"type":"thinking",...} +
     # {"type":"text",...} blocks, extract the thinking text into
@@ -135,6 +146,56 @@ class ProviderSpec:
     def label(self) -> str:
         return self.display_name or self.name.title()
 
+    def request_model_name(self, model: str) -> str:
+        """Remove only the provider prefixes owned by this adapter."""
+        if "/" not in model:
+            return model
+        if self.strip_model_prefix:
+            return model.rsplit("/", 1)[-1]
+        prefix, routed_model = model.split("/", 1)
+        prefix_key = to_snake(prefix.replace("-", "_")).lower()
+        if any(
+            to_snake(value.replace("-", "_")).lower() == prefix_key
+            for value in self.strip_model_prefixes
+        ):
+            return routed_model
+        return model
+
+    def default_model_api(
+        self,
+        model: str,
+        reasoning_effort: str | None = None,
+        *,
+        api_base: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> ModelAPICapabilities:
+        """Resolve automatic API defaults without constructing or probing a client."""
+        if self.responses is None:
+            return ModelAPICapabilities()
+        return self.responses.default_model_api(
+            self.request_model_name(model), reasoning_effort,
+            api_base=api_base, default_api_base=self.default_api_base,
+            extra_body=extra_body,
+        )
+
+    @property
+    def model_api_configurable(self) -> bool:
+        return len(self.request_apis) > 1
+
+    @property
+    def provider_api_configurable(self) -> bool:
+        return self.name == "openai" or (
+            self.is_direct and self.backend == "openai_compat" and "anthropic_messages" in self.request_apis
+        )
+
+    def validate_model_api(self, api: ModelAPICapabilities) -> None:
+        unsupported = set(api.supported_apis).difference(self.request_apis)
+        if unsupported:
+            raise ValueError(
+                f"Provider '{self.label}' does not support {', '.join(sorted(unsupported))}. "
+                f"Available request APIs: {', '.join(self.request_apis)}."
+            )
+
 
 # ---------------------------------------------------------------------------
 # PROVIDERS — the registry. Order = priority. Copy any entry as template.
@@ -146,16 +207,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="custom",
         keywords=(),
         env_key="",
+        request_apis=("chat_completions", "responses", "anthropic_messages"),
         display_name="Custom",
         backend="openai_compat",
         is_direct=True,
     ),
 
-    # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
+    # === Azure OpenAI (native Responses, API-key or AAD authentication) ===
     ProviderSpec(
         name="azure_openai",
         keywords=("azure", "azure-openai"),
         env_key="",
+        request_apis=("responses",),
         display_name="Azure OpenAI",
         backend="azure_openai",
         is_direct=True,
@@ -179,6 +242,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             "zai.",
         ),
         env_key="AWS_BEARER_TOKEN_BEDROCK",
+        request_apis=("bedrock_converse",),
         display_name="AWS Bedrock",
         backend="bedrock",
         is_direct=True,
@@ -190,6 +254,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="openrouter",
         keywords=("openrouter",),
         env_key="OPENROUTER_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenRouter",
         backend="openai_compat",
         is_gateway=True,
@@ -199,12 +264,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
         gateway_reasoning_style="reasoning_effort",
     ),
+    # OrcaRouter: global gateway, keys start with "sk-orca-"
+    ProviderSpec(
+        name="orcarouter",
+        keywords=("orcarouter",),
+        env_key="ORCAROUTER_API_KEY",
+        request_apis=("chat_completions", "responses"),
+        display_name="OrcaRouter",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_key_prefix="sk-orca-",
+        detect_by_base_keyword="orcarouter",
+        default_api_base="https://api.orcarouter.ai/v1",
+    ),
     # Eden AI: OpenAI-compatible gateway. Models use the "provider/model"
     # naming scheme (e.g. "anthropic/claude-sonnet-4-5"); the full id is sent upstream.
     ProviderSpec(
         name="edenai",
         keywords=("edenai",),
         env_key="EDENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Eden AI",
         backend="openai_compat",
         is_gateway=True,
@@ -218,6 +297,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="opencode",
         keywords=("opencode/", "opencode", "opencode-zen", "opencode_zen"),
         env_key="OPENCODE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenCode Zen",
         backend="openai_compat",
         is_gateway=True,
@@ -230,6 +310,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="opencode_zen",
         keywords=("opencode/", "opencode_zen", "opencode-zen"),
         env_key="OPENCODE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenCode Zen",
         settings_alias_for="opencode",
         backend="openai_compat",
@@ -238,24 +319,30 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://opencode.ai/zen/v1",
         strip_model_prefixes=("opencode", "opencode_zen", "opencode-zen"),
     ),
-    # OpenCode Go: OpenAI-compatible chat-completions gateway for low-cost models.
+    # OpenCode Go: low-cost gateway with model-specific request API routing.
     # OpenCode's own config uses "opencode-go/<model>"; send the bare model upstream.
     ProviderSpec(
         name="opencode_go",
         keywords=("opencode-go", "opencode_go"),
         env_key="OPENCODE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenCode Go",
         backend="openai_compat",
         is_gateway=True,
         detect_by_base_keyword="opencode.ai/zen/go",
         default_api_base="https://opencode.ai/zen/go/v1",
         strip_model_prefixes=("opencode-go", "opencode_go"),
+        responses=ResponsesCapabilities(
+            models=("muse-spark-1.2-contributor", "muse-spark-1.3-contributor"),
+            allows_chat_fallback=False,
+        ),
     ),
     # Hugging Face Inference Providers: OpenAI-compatible router for chat models.
     ProviderSpec(
         name="huggingface",
         keywords=("huggingface", "hugging-face"),
         env_key="HF_TOKEN",
+        request_apis=("chat_completions", "responses"),
         display_name="Hugging Face",
         backend="openai_compat",
         is_gateway=True,
@@ -268,6 +355,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="skywork",
         keywords=("skywork", "skyclaw", "apifree"),
         env_key="SKYWORK_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Skywork",
         model_catalog="official",
         backend="openai_compat",
@@ -283,6 +371,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="aihubmix",
         keywords=("aihubmix",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="AiHubMix",
         backend="openai_compat",
         is_gateway=True,
@@ -295,6 +384,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="siliconflow",
         keywords=("siliconflow",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="SiliconFlow",
         backend="openai_compat",
         is_gateway=True,
@@ -307,6 +397,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="novita",
         keywords=("novita",),
         env_key="NOVITA_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Novita AI",
         backend="openai_compat",
         is_gateway=True,
@@ -319,6 +410,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="volcengine",
         keywords=("volcengine", "volces", "ark"),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="VolcEngine",
         backend="openai_compat",
         is_gateway=True,
@@ -333,6 +425,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="volcengine_coding_plan",
         keywords=("volcengine-plan",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="VolcEngine Coding Plan",
         backend="openai_compat",
         is_gateway=True,
@@ -347,6 +440,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="byteplus",
         keywords=("byteplus",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="BytePlus",
         backend="openai_compat",
         is_gateway=True,
@@ -361,6 +455,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="byteplus_coding_plan",
         keywords=("byteplus-plan",),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="BytePlus Coding Plan",
         backend="openai_compat",
         is_gateway=True,
@@ -376,6 +471,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="anthropic",
         keywords=("anthropic", "claude"),
         env_key="ANTHROPIC_API_KEY",
+        request_apis=("anthropic_messages",),
         display_name="Anthropic",
         backend="anthropic",
         supports_prompt_caching=True,
@@ -385,55 +481,75 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="openai",
         keywords=("openai", "gpt"),
         env_key="OPENAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenAI",
         backend="openai_compat",
         supports_max_completion_tokens=True,
+        responses=ResponsesCapabilities(
+            model_prefixes=("gpt-5", "gpt-6", "o1", "o3", "o4"),
+            route_reasoning=True,
+            requires_direct_openai_base=True,
+            reasoning_replay="encrypted",
+            supports_native_compaction=True,
+        ),
     ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
         name="openai_codex",
         keywords=("openai-codex",),
         env_key="",
+        request_apis=("responses",),
         display_name="OpenAI Codex",
-        model_catalog="builtin",
+        model_catalog="hybrid",
         builtin_models=(
             ProviderModelSpec(
                 id="openai-codex/gpt-5.6-sol",
                 label="GPT-5.6-Sol",
                 description="Latest frontier agentic coding model.",
-                context_window=372000,
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.6-terra",
                 label="GPT-5.6-Terra",
                 description="Balanced agentic coding model for everyday work.",
-                context_window=372000,
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.6-luna",
                 label="GPT-5.6-Luna",
                 description="Fast and affordable agentic coding model.",
-                context_window=372000,
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.5",
                 label="GPT-5.5",
                 description="Frontier model for complex coding, research, and real-world work.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.4",
                 label="GPT-5.4",
                 description="Strong model for everyday coding.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.4-mini",
                 label="GPT-5.4-Mini",
                 description="Small, fast, and cost-efficient model for simpler coding tasks.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.3-codex-spark",
                 label="GPT-5.3-Codex-Spark",
                 description="Ultra-fast coding model.",
+                context_window=128_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
             ),
         ),
         backend="openai_codex",
@@ -446,14 +562,21 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="xai_grok",
         keywords=("xai-grok", "xai_grok"),
         env_key="",
+        request_apis=("responses",),
         display_name="xAI Grok",
-        model_catalog="builtin",
+        model_catalog="hybrid",
         builtin_models=(
+            ProviderModelSpec(
+                id="xai-grok/grok-4.6",
+                label="Grok 4.6",
+                description="Grok via xAI subscription; X Search is enabled when supported.",
+                context_window=500_000,
+            ),
             ProviderModelSpec(
                 id="xai-grok/grok-4.5",
                 label="Grok 4.5",
                 description="Grok via xAI subscription; X Search is enabled when supported.",
-                context_window=500000,
+                context_window=500_000,
             ),
         ),
         backend="xai_grok",
@@ -465,30 +588,60 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="github_copilot",
         keywords=("github_copilot", "copilot"),
         env_key="",
+        request_apis=("chat_completions", "responses"),
         display_name="Github Copilot",
+        model_catalog="hybrid",
+        builtin_models=(
+            ProviderModelSpec(
+                id="github-copilot/gpt-5.4-mini",
+                label="GPT-5.4 Mini",
+                description="GitHub Copilot Responses model.",
+            ),
+            ProviderModelSpec(
+                id="github-copilot/gpt-4.1",
+                label="GPT-4.1",
+                description="GitHub Copilot chat model.",
+            ),
+        ),
         backend="github_copilot",
         default_api_base="https://api.githubcopilot.com",
         strip_model_prefix=True,
         is_oauth=True,
         supports_max_completion_tokens=True,
+        responses=ResponsesCapabilities(
+            model_prefixes=("gpt-5", "gpt-6", "o1", "o3", "o4"),
+            route_reasoning=True,
+            reasoning_replay="encrypted",
+            allows_chat_fallback=False,
+        ),
     ),
     # DeepSeek: OpenAI-compatible at api.deepseek.com
     ProviderSpec(
         name="deepseek",
         keywords=("deepseek",),
         env_key="DEEPSEEK_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="DeepSeek",
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
-        responses_models=("deepseek-v4-flash", "deepseek-v4-pro"),
-        responses_default_tools=("web_search",),
+        responses=ResponsesCapabilities(
+            models=(
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "deepseek-v4-flash-vision-exp",
+            ),
+            endpoint_models=(("https://api.deepseek.com", ("deepseek-flash",)),),
+            reasoning_replay="plaintext",
+            supports_hosted_web_search=False,
+        ),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(
         name="gemini",
         keywords=("gemini", "gemma"),
         env_key="GEMINI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Gemini",
         backend="openai_compat",
         default_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -498,6 +651,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="zhipu",
         keywords=("zhipu", "glm", "zai"),
         env_key="ZAI_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Zhipu AI",
         backend="openai_compat",
         env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
@@ -508,6 +662,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="dashscope",
         keywords=("qwen", "dashscope"),
         env_key="DASHSCOPE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="DashScope",
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -518,6 +673,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="modelscope",
         keywords=("modelscope",),
         env_key="MODELSCOPE_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="ModelScope",
         backend="openai_compat",
         is_gateway=True,
@@ -532,6 +688,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="moonshot",
         keywords=("moonshot", "kimi"),
         env_key="MOONSHOT_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Moonshot",
         backend="openai_compat",
         default_api_base="https://api.moonshot.ai/v1",
@@ -547,6 +704,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="kimi_coding",
         keywords=("kimi-coding", "kimi_coding", "kimi-for-coding"),
         env_key="KIMI_CODING_API_KEY",
+        request_apis=("anthropic_messages",),
         display_name="Kimi Coding",
         backend="anthropic",
         default_api_base="https://api.kimi.com/coding/v1",
@@ -557,6 +715,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="minimax",
         keywords=("minimax",),
         env_key="MINIMAX_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="MiniMax",
         backend="openai_compat",
         default_api_base="https://api.minimax.io/v1",
@@ -567,6 +726,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="minimax_anthropic",
         keywords=("minimax_anthropic",),
         env_key="MINIMAX_API_KEY",
+        request_apis=("anthropic_messages",),
         display_name="MiniMax (Anthropic)",
         backend="anthropic",
         default_api_base="https://api.minimax.io/anthropic",
@@ -582,6 +742,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="mistral",
         keywords=("mistral", "magistral", "ministral", "codestral", "devstral"),
         env_key="MISTRAL_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Mistral",
         backend="openai_compat",
         default_api_base="https://api.mistral.ai/v1",
@@ -601,6 +762,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="stepfun",
         keywords=("stepfun", "step"),
         env_key="STEPFUN_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Step Fun",
         backend="openai_compat",
         default_api_base="https://api.stepfun.com/v1",
@@ -613,6 +775,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="xiaomi_mimo",
         keywords=("xiaomi_mimo", "mimo"),
         env_key="XIAOMIMIMO_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Xiaomi MIMO",
         backend="openai_compat",
         default_api_base="https://api.xiaomimimo.com/v1",
@@ -623,6 +786,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="longcat",
         keywords=("longcat",),
         env_key="LONGCAT_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="LongCat",
         backend="openai_compat",
         default_api_base="https://api.longcat.chat/openai/v1",
@@ -632,6 +796,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="ant_ling",
         keywords=("ant_ling", "ant-ling", "ling-", "ring-"),
         env_key="ANT_LING_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Ant Ling",
         backend="openai_compat",
         detect_by_base_keyword="ant-ling.com",
@@ -643,6 +808,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="vllm",
         keywords=("vllm",),
         env_key="HOSTED_VLLM_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="vLLM",
         backend="openai_compat",
         is_local=True,
@@ -652,6 +818,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="ollama",
         keywords=("ollama", "nemotron"),
         env_key="OLLAMA_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Ollama",
         backend="openai_compat",
         is_local=True,
@@ -663,6 +830,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="lm_studio",
         keywords=("lm-studio", "lmstudio", "lm_studio"),
         env_key="LM_STUDIO_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="LM Studio",
         backend="openai_compat",
         is_local=True,
@@ -674,6 +842,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="atomic_chat",
         keywords=("atomic-chat", "atomic_chat", "atomicchat"),
         env_key="ATOMIC_CHAT_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Atomic Chat",
         backend="openai_compat",
         is_local=True,
@@ -685,6 +854,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="ovms",
         keywords=("openvino", "ovms"),
         env_key="",
+        request_apis=("chat_completions", "responses"),
         display_name="OpenVINO Model Server",
         backend="openai_compat",
         is_direct=True,
@@ -697,6 +867,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="nvidia",
         keywords=("nvidia", "nemotron", "nvapi"),
         env_key="NVIDIA_NIM_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="NVIDIA NIM",
         backend="openai_compat",
         is_gateway=False,
@@ -710,6 +881,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="groq",
         keywords=("groq",),
         env_key="GROQ_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Groq",
         backend="openai_compat",
         default_api_base="https://api.groq.com/openai/v1",
@@ -720,6 +892,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="assemblyai",
         keywords=("assemblyai",),
         env_key="ASSEMBLYAI_API_KEY",
+        request_apis=("transcription",),
         display_name="AssemblyAI",
         backend="openai_compat",
         default_api_base="https://api.assemblyai.com/v2",
@@ -730,6 +903,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="qianfan",
         keywords=("qianfan", "ernie"),
         env_key="QIANFAN_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Qianfan",
         backend="openai_compat",
         default_api_base="https://qianfan.baidubce.com/v2"
@@ -764,6 +938,7 @@ def create_dynamic_spec(
         name=normalized,
         keywords=(),
         env_key="",
+        request_apis=("chat_completions", "responses", "anthropic_messages"),
         display_name=display_name or name.replace("-", " ").replace("_", " ").title(),
         backend="openai_compat",
         is_direct=True,

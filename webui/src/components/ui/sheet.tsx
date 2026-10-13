@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 const Sheet = DialogPrimitive.Root;
+const SheetTrigger = DialogPrimitive.Trigger;
 const SheetPortal = DialogPrimitive.Portal;
 
 const SheetOverlay = React.forwardRef<
@@ -19,6 +20,7 @@ const SheetOverlay = React.forwardRef<
       "fixed inset-0 z-50 bg-black/40",
       "data-[state=open]:animate-in data-[state=closed]:animate-out",
       "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
       className,
     )}
     {...props}
@@ -27,7 +29,7 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-  "fixed z-50 flex flex-col gap-4 bg-background transition ease-in-out",
+  "fixed z-50 flex flex-col gap-4 bg-background outline-none transition ease-in-out",
   {
     variants: {
       side: {
@@ -60,6 +62,7 @@ interface SheetContentProps
     VariantProps<typeof sheetVariants> {
   closeButtonClassName?: string;
   showCloseButton?: boolean;
+  overlayClassName?: string;
 }
 
 const SheetContent = React.forwardRef<
@@ -72,6 +75,7 @@ const SheetContent = React.forwardRef<
     children,
     closeButtonClassName,
     showCloseButton = true,
+    overlayClassName,
     ...props
   },
   ref,
@@ -79,13 +83,14 @@ const SheetContent = React.forwardRef<
   const { t } = useTranslation();
   return (
     <SheetPortal>
-      <SheetOverlay />
+      <SheetOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
           sheetVariants({ side }),
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
-          "duration-300",
+          "duration-300 motion-reduce:transition-none",
+          "motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
           className,
         )}
         {...props}
@@ -94,7 +99,7 @@ const SheetContent = React.forwardRef<
         {showCloseButton ? (
           <DialogPrimitive.Close
             className={cn(
-              "absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity",
+              "absolute right-4 top-4 rounded-mark opacity-70 ring-offset-background transition-opacity",
               "hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
               "disabled:pointer-events-none",
               closeButtonClassName,
@@ -134,4 +139,4 @@ const SheetDescription = React.forwardRef<
 ));
 SheetDescription.displayName = DialogPrimitive.Description.displayName;
 
-export { Sheet, SheetContent, SheetDescription, SheetTitle };
+export { Sheet, SheetTrigger, SheetContent, SheetDescription, SheetTitle };

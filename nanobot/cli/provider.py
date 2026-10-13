@@ -29,7 +29,7 @@ _PROVIDER_DISPLAY: dict[str, str] = {
 
 _OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "openai_codex": "openai-codex/gpt-5.6-sol",
-    "xai_grok": "xai-grok/grok-4.5",
+    "xai_grok": "xai-grok/grok-4.6",
     "github_copilot": "github-copilot/gpt-5.4-mini",
 }
 
@@ -134,7 +134,10 @@ def _set_oauth_provider_as_main(
     config.agents.defaults.model_preset = None
     config.agents.defaults.provider = provider_name
     config.agents.defaults.model = selected_model
-    if provider_name == "xai_grok" and selected_model == "xai-grok/grok-4.5":
+    if provider_name == "xai_grok" and selected_model in {
+        "xai-grok/grok-4.5",
+        "xai-grok/grok-4.6",
+    }:
         config.agents.defaults.context_window_tokens = 500_000
     save_config(config, resolved_config_path)
 

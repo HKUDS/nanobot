@@ -1,17 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Check,
-  ExternalLink,
-  Loader2,
-  RotateCcw,
-  Search,
-  Server,
-  SlidersHorizontal,
-  Trash2,
-  X,
-} from "lucide-react";
+  AppActionsIcon,
+} from "@/components/icons/product-icons";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, ExternalLink, Loader2, RotateCcw, Search, Server, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,7 +13,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input, SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { McpPresetInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -153,7 +147,6 @@ export function McpManagementDialog({
         showCloseButton={false}
         className={cn(
           "flex h-[min(34rem,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-[42rem] flex-col gap-0 overflow-hidden p-0",
-          "rounded-[22px]",
         )}
       >
         <div className="flex shrink-0 items-center gap-3 border-b border-border/45 px-5 py-3.5 sm:px-6">
@@ -282,7 +275,7 @@ function OverviewPanel({
   const previewTools = (preset.tool_names ?? []).slice(0, 4);
   return (
     <div className="space-y-4">
-      <section className="rounded-[16px] border border-border/55 px-4 py-3.5">
+      <section className="rounded-floating border border-border/55 px-4 py-3.5">
         <h3 className="text-[13px] font-semibold text-foreground">
           {tx("settings.mcp.about", "About this MCP")}
         </h3>
@@ -314,7 +307,7 @@ function OverviewPanel({
       </dl>
 
       {previewTools.length ? (
-        <section className="rounded-[16px] bg-muted/45 p-4">
+        <section className="rounded-floating bg-muted/45 p-4">
           <h3 className="text-[13px] font-semibold text-foreground">
             {tx("settings.mcp.toolPreview", "Tools")}
           </h3>
@@ -371,49 +364,64 @@ function ToolsPanel({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  if (!toolNames.length && testBusy) {
+    return (
+      <SkeletonStatus label={tx("settings.mcp.loadingTools", "Loading tools…")} className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="h-10 min-w-0 rounded-full bg-muted-foreground/20 sm:flex-1" />
+          <div className="flex h-8 items-center justify-between gap-4 sm:justify-end">
+            <div className="mr-auto h-3 w-20 rounded bg-muted-foreground/20 sm:mr-1" />
+            <div className="h-3 w-6 rounded bg-muted-foreground/20" />
+            <div className="h-3 w-9 rounded bg-muted-foreground/20" />
+          </div>
+        </div>
+        <div className="overflow-hidden rounded-floating border border-border/55">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="flex min-h-11 items-center gap-3 border-b border-border/45 px-3.5 py-2.5 last:border-b-0">
+              <div className="h-5 w-5 shrink-0 rounded-compact bg-muted-foreground/20" />
+              <div className={cn("h-3.5 max-w-[70%] rounded bg-muted-foreground/20", index % 2 ? "w-40" : "w-52")} />
+            </div>
+          ))}
+        </div>
+      </SkeletonStatus>
+    );
+  }
+
   if (!toolNames.length) {
     return (
       <div
         className={cn(
-          "flex flex-col gap-3 rounded-[16px] border px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between",
+          "flex flex-col gap-3 rounded-floating border px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between",
           preset.error ? "border-destructive/25 bg-destructive/5" : "border-border/55 bg-muted/25",
         )}
       >
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-background text-muted-foreground">
-            {testBusy ? (
-              <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
-            ) : (
-              <SlidersHorizontal className="h-4 w-4" aria-hidden />
-            )}
+            <AppActionsIcon className="h-4 w-4" aria-hidden />
           </div>
           <p
             role={preset.error ? "alert" : undefined}
             className={cn("min-w-0 text-[14px] font-medium", preset.error ? "text-destructive" : "text-foreground")}
           >
-            {testBusy
-              ? tx("common.loading", "Loading…")
-              : preset.error || tx("settings.mcp.noToolsAvailable", "No tools available")}
+            {preset.error || tx("settings.mcp.noToolsAvailable", "No tools available")}
           </p>
         </div>
-        {!testBusy ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={configuredInstalled ? onTest : onOpenConnection}
-            className="h-9 shrink-0 rounded-full px-4 text-[13px] font-semibold"
-          >
-            {configuredInstalled ? (
-              <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            ) : (
-              <Server className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            )}
-            {configuredInstalled
-              ? tx("settings.mcp.reloadTools", "Reload tools")
-              : tx("settings.mcp.setup", "Connect")}
-          </Button>
-        ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={configuredInstalled ? onTest : onOpenConnection}
+          className="h-9 shrink-0 rounded-full px-4 text-[13px] font-semibold"
+        >
+          {configuredInstalled ? (
+            <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Server className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          )}
+          {configuredInstalled
+            ? tx("settings.mcp.reloadTools", "Reload tools")
+            : tx("settings.mcp.setup", "Connect")}
+        </Button>
       </div>
     );
   }
@@ -424,7 +432,7 @@ function ToolsPanel({
         <label className="relative min-w-0 flex-1">
           <span className="sr-only">{tx("settings.mcp.searchTools", "Search tools")}</span>
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input
+          <SearchInput
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder={tx("settings.mcp.searchToolsPlaceholder", "Search tools")}
@@ -444,13 +452,13 @@ function ToolsPanel({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-[16px] border border-border/55">
+      <div className="overflow-hidden rounded-floating border border-border/55">
         {filteredTools.length ? filteredTools.map((toolName) => {
           const selected = selectedTools.has(toolName);
           return (
             <label
               key={toolName}
-              className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-border/45 px-3.5 py-2.5 transition-colors last:border-b-0 hover:bg-muted/35 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring"
+              className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-border/45 px-3.5 py-2.5 transition-colors last:border-b-0 settings-hover has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring"
             >
               <span className="relative h-5 w-5 shrink-0">
                 <input
@@ -463,7 +471,7 @@ function ToolsPanel({
                 <span
                   aria-hidden
                   className={cn(
-                    "pointer-events-none absolute inset-0 grid place-items-center rounded-[7px] border transition-colors",
+                    "pointer-events-none absolute inset-0 grid place-items-center rounded-compact border transition-colors",
                     selected
                       ? "border-foreground bg-foreground text-background"
                       : "border-border bg-background text-transparent",
@@ -529,7 +537,7 @@ function ConnectionPanel({
         <h3 id={`mcp-connection-${preset.name}`} className="sr-only">
           {tx("settings.mcp.connectionDetails", "Connection details")}
         </h3>
-        <div className="rounded-[16px] bg-muted/40 px-4 py-3.5">
+        <div className="rounded-floating bg-muted/40 px-4 py-3.5">
           {preset.connection_summary ? (
             <div className="min-w-0">
               <p className="text-[12.5px] font-medium text-muted-foreground">{connectionLabel}</p>
@@ -543,7 +551,6 @@ function ConnectionPanel({
             preset.connection_summary && "mt-3 border-t border-border/45 pt-3",
           )}>
             <span>{formatTransport(preset.transport)}</span>
-            <span aria-hidden>·</span>
             <span>{authentication}</span>
             <div className="ml-auto flex items-center gap-1.5">
               {preset.docs_url ? (
@@ -580,7 +587,7 @@ function ConnectionPanel({
       </section>
 
       {preset.error ? (
-        <div role="alert" className="rounded-[14px] bg-destructive/10 px-3.5 py-3 text-[12.5px] leading-5 text-destructive">
+        <div role="alert" className="rounded-control bg-destructive/10 px-3.5 py-3 text-[12.5px] leading-5 text-destructive">
           {preset.error}
         </div>
       ) : null}
@@ -595,11 +602,11 @@ function ConnectionPanel({
               const inputId = `mcp-manage-${preset.name}-${field.name}`;
               return (
                 <label key={field.name} htmlFor={inputId} className="min-w-0">
-                  <span className="mb-1.5 flex items-center gap-1 text-[12.5px] font-medium text-muted-foreground">
+                  <span className="mb-1.5 flex items-center gap-2 text-[12.5px] font-medium text-muted-foreground">
                     {field.label}
                     {field.configured ? (
                       <span className="font-normal text-emerald-600 dark:text-emerald-300">
-                        · {tx("settings.mcp.configured", "configured")}
+                        {tx("settings.mcp.configured", "Configured")}
                       </span>
                     ) : null}
                   </span>
@@ -608,7 +615,7 @@ function ConnectionPanel({
                     type={field.secret ? "password" : "text"}
                     value={values[field.name] ?? ""}
                     onChange={(event) => onFieldChange(preset.name, field.name, event.target.value)}
-                    placeholder={field.configured ? tx("settings.mcp.keepExisting", "Leave blank to keep existing") : field.placeholder}
+                    placeholder={field.configured ? tx("settings.mcp.keepExisting", "Leave blank to keep the current value") : field.placeholder}
                     className="h-10 rounded-full bg-muted/35 text-[12.5px]"
                   />
                 </label>
@@ -661,7 +668,7 @@ function ConnectionPanel({
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-[14px] bg-muted/45 px-3.5 py-3">
+    <div className="min-w-0 rounded-control bg-muted/45 px-3.5 py-3">
       <dt className="text-[12px] font-medium text-muted-foreground">{label}</dt>
       <dd className="mt-1 truncate text-[14px] font-semibold text-foreground">{value}</dd>
     </div>

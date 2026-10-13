@@ -1,20 +1,25 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import {
+  ModelsIcon,
+  WebSearchIcon,
+  ImageGenerationIcon,
+  VoiceIcon,
+} from "@/components/icons/product-icons";
+import { useContext, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ArrowUpCircle,
-  Bot,
+  BookOpen,
+  MessageCircle,
   Check,
   ChevronRight,
   ExternalLink,
-  Globe2,
-  HardDrive,
-  ImageIcon,
+  Github,
   Loader2,
-  Mic,
-  Server,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { HostNavigationContext } from "@/components/remote/HostSwitcher";
+import { StarLink } from "@/components/StarPrompt";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
@@ -24,7 +29,7 @@ import {
   SettingsRow,
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
-import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
+import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -33,23 +38,19 @@ import { checkVersion } from "@/lib/api";
 import type {
   FileEditDisplayMode,
   LocalActivityMode,
-  LocalDensity,
   LocalPreferences,
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
 import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { shortWorkspacePath } from "@/lib/workspace";
 import { useClient } from "@/providers/ClientProvider";
 
 export function OverviewSettings({
   settings,
-  requiresRestart,
   onSelectSection,
   showBrandLogos,
 }: {
   settings: SettingsPayload;
-  requiresRestart: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
 }) {
@@ -58,7 +59,7 @@ export function OverviewSettings({
   const activePresetName = settings.agent.model_preset;
   const activePreset =
     activePresetName && activePresetName !== "default"
-      ? settings.model_presets.find((preset) => preset.name === activePresetName)?.label ??
+      ? settings.model_presets.find((preset) => preset.name === activePresetName)?.name ??
         activePresetName
       : null;
   const activeProvider = settings.agent.resolved_provider ?? settings.agent.provider;
@@ -68,76 +69,31 @@ export function OverviewSettings({
     ? settings.agent.model
     : tx("settings.values.notConfigured", "Not configured");
   const activeModelCaption = activeProviderConfigured
-    ? [activeProvider, activePreset].filter(Boolean).join(" · ")
+    ? [activeProvider, activePreset].filter(Boolean).join(" ")
     : activeProviderLabel || settings.agent.model
-      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" · ")
+      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" ")
       : tx("settings.byok.noConfiguredProviders", "No configured providers");
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const webSearchProvider =
-    settings.web_search.providers.find((provider) => provider.name === settings.web_search.provider) ??
-    settings.web_search.providers[0];
-  const webSearchProviderLabel = providerDisplayLabel(
-    settings.web_search.providers,
-    settings.web_search.provider,
-  );
-  const webSearchCredentialStatus =
-    webSearchProvider?.credential === "none"
-      ? tx("settings.byok.webSearch.noCredentialRequired", "No key required")
-      : webSearchProvider?.credential === "optional_api_key"
-        ? settings.web_search.api_key_hint
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.byok.webSearch.noCredentialRequired", "No key required")
-      : webSearchProvider?.credential === "base_url"
-        ? settings.web_search.base_url
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.values.notConfigured", "Not configured")
-        : settings.web_search.api_key_hint
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.values.notConfigured", "Not configured");
-  const webCaption = `${webSearchProviderLabel} · ${webSearchCredentialStatus}`;
   const imageStatus = settings.image_generation.enabled
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const imageCaption = `${providerDisplayLabel(settings.image_generation.providers, settings.image_generation.provider)} · ${
-    settings.image_generation.provider_configured
-      ? tx("settings.values.configured", "Configured")
-      : tx("settings.values.notConfigured", "Not configured")
-  }`;
   const transcription = settings.transcription ?? DEFAULT_TRANSCRIPTION_SETTINGS;
   const voiceStatus = transcription.enabled
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const voiceCaption = `${providerDisplayLabel(transcription.providers, transcription.provider)} · ${
-    transcription.provider_configured
-      ? tx("settings.values.configured", "Configured")
-      : tx("settings.values.notConfigured", "Not configured")
-  }`;
-  const isNativeHost = (settings.surface ?? settings.runtime_surface) === "native";
-  const workspaceCaption = shortWorkspacePath(settings.runtime.workspace_path);
-  const runtimeTitle = isNativeHost
-    ? tx("settings.rows.engine", "Engine")
-    : tx("settings.rows.gateway", "Gateway");
-  const runtimeValue = isNativeHost
-    ? tx("settings.values.privateEngine", "Private engine")
-    : `${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`;
-  const runtimeCaption = isNativeHost
-    ? tx("settings.values.unixSocket", "Unix socket")
-    : requiresRestart
-      ? tx("settings.values.restartPending", "Restart pending")
-      : tx("settings.values.ready", "Ready");
   return (
-    <div className="space-y-7">
-      <section className="rounded-[22px] bg-settings-surface px-4 py-4 sm:px-5">
-        <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
+    <div className="settings-stack">
+      <section className="rounded-panel bg-settings-surface p-6">
+        <TokenUsageCard usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
       <section>
         <SettingsSectionTitle>{tx("settings.sections.ai", "AI")}</SettingsSectionTitle>
         <SettingsGroup>
           <OverviewListRow
-            icon={Bot}
+            icon={ModelsIcon}
             valueLogoProvider={activeProvider}
             title={tx("settings.overview.model", "Current model")}
             value={activeModelValue}
@@ -152,66 +108,93 @@ export function OverviewSettings({
         <SettingsSectionTitle>{tx("settings.sections.capabilities", "Capabilities")}</SettingsSectionTitle>
         <SettingsGroup>
           <OverviewListRow
-            icon={Globe2}
+            icon={WebSearchIcon}
             valueLogoProvider={settings.web_search.provider}
             title={tx("settings.overview.webSearch", "Web search")}
             value={webStatus}
-            caption={webCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("browser")}
           />
           <OverviewListRow
-            icon={ImageIcon}
+            icon={ImageGenerationIcon}
             valueLogoProvider={settings.image_generation.provider}
             title={tx("settings.overview.imageGeneration", "Image generation")}
             value={imageStatus}
-            caption={imageCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("image")}
           />
           <OverviewListRow
-            icon={Mic}
+            icon={VoiceIcon}
             valueLogoProvider={transcription.provider}
             title={tx("settings.overview.voiceInput", "Voice input")}
             value={voiceStatus}
-            caption={voiceCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("voice")}
           />
         </SettingsGroup>
       </section>
 
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.system", "System")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <OverviewListRow
-            icon={Server}
-            title={runtimeTitle}
-            value={runtimeValue}
-            caption={runtimeCaption}
-            onClick={() => onSelectSection("runtime")}
-          />
-          <OverviewListRow
-            icon={HardDrive}
-            title={tx("settings.overview.workspace", "Workspace")}
-            value={tx("settings.values.defaultWorkspace", "Default workspace")}
-            caption={workspaceCaption}
-            onClick={() => onSelectSection("runtime")}
-          />
-        </SettingsGroup>
-      </section>
-
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.about", "About")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <VersionCheckRow currentVersion={settings.version?.current} />
-        </SettingsGroup>
-      </section>
     </div>
   );
 }
 
-function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
+type VersionInfoProps = { currentVersion?: string; currentCommit?: string | null };
+
+export function AboutSettings({ settings }: { settings: SettingsPayload }) {
+  const { t } = useTranslation();
+  const hostPicker = useContext(HostNavigationContext);
+  const currentVersion = settings.version?.current;
+  const currentCommit = settings.version?.commit;
+  const environment = settings.environment;
+  const reportIssueUrl = new URL("https://github.com/HKUDS/nanobot/issues/new");
+  reportIssueUrl.searchParams.set("template", "bug_report.yml");
+  const reportedVersion = [currentVersion, currentCommit && `(commit ${currentCommit})`]
+    .filter(Boolean).join(" ");
+  if (reportedVersion) reportIssueUrl.searchParams.set("version", reportedVersion);
+  reportIssueUrl.searchParams.set("channel", "WebSocket");
+  if (environment) {
+    reportIssueUrl.searchParams.set("python_version", environment.python_version);
+    const osName = environment.os === "Darwin" ? "macOS" : environment.os;
+    const osVersion = [osName, environment.os_version].filter(Boolean).join(" ");
+    reportIssueUrl.searchParams.set("os", environment.architecture
+      ? `${osVersion} (${environment.architecture})` : osVersion);
+  }
+  if (settings.agent.model) reportIssueUrl.searchParams.set("model", settings.agent.model);
+  const provider = settings.agent.resolved_provider || settings.agent.provider;
+  if (provider) reportIssueUrl.searchParams.set("llm_provider", provider);
+  reportIssueUrl.searchParams.set("browser", navigator.userAgent);
+  reportIssueUrl.searchParams.set("connection", hostPicker?.kind === "embedded"
+    ? "Remote host" : hostPicker ? "Local host" : "Direct WebUI");
+  const links = [
+    { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
+    { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
+    { key: "reportIssue", icon: MessageCircle, href: reportIssueUrl.href },
+  ];
+  return (
+    <div className="flex flex-1 flex-col gap-5">
+      <div className="flex flex-col items-center gap-4 py-6 text-center">
+        <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
+        <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
+        <VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit} />
+      </div>
+      <SettingsGroup>
+        {links.map(({ key, icon: Icon, href }) => (
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer"
+            className="settings-list-row flex select-none items-center gap-3 text-[14px] settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            <span className="flex-1">{t(`settings.about.${key}`)}</span>
+            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+          </a>
+        ))}
+      </SettingsGroup>
+      <div className="mt-auto pt-8 text-center">
+        <StarLink />
+      </div>
+    </div>
+  );
+}
+
+function VersionCheckRow({ currentVersion, currentCommit }: VersionInfoProps) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const { token } = useClient();
@@ -245,16 +228,27 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
   };
 
   return (
-    <div className="flex min-h-[62px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className="flex flex-col items-center gap-4">
       <div className="min-w-0">
-        <div className="text-[14px] font-medium leading-5 text-foreground">
+        <div className="sr-only">
           {tx("settings.about.version", "Version")}
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
           {currentVersion ? `v${currentVersion}` : "nanobot"}
+          {currentCommit && (
+            <>
+              <span aria-hidden> (</span>
+              <a href={`https://github.com/HKUDS/nanobot/commit/${currentCommit}`}
+                target="_blank" rel="noopener noreferrer" title={currentCommit}
+                className="font-mono hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {currentCommit.slice(0, 7)}
+              </a>
+              <span aria-hidden>)</span>
+            </>
+          )}
         </div>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
+      <div className="flex shrink-0 flex-col items-center gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -319,35 +313,24 @@ export function AppearanceSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
         <SettingsGroup>
           <SettingsRow title={t("settings.rows.theme")}>
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              className="inline-flex h-8 items-center rounded-full bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
-            >
-              <span
-                className={cn(
-                  "rounded-full px-3 py-1 transition-colors",
-                  theme === "light" &&
-                    "bg-background text-foreground ring-1 ring-inset ring-border/45",
-                )}
-              >
-                {t("settings.values.light")}
-              </span>
-              <span
-                className={cn(
-                  "rounded-full px-3 py-1 transition-colors",
-                  theme === "dark" &&
-                    "bg-background text-foreground ring-1 ring-inset ring-border/45",
-                )}
-              >
-                {t("settings.values.dark")}
-              </span>
-            </button>
+            <SegmentedControl
+              value={theme}
+              ariaLabel={t("settings.rows.theme")}
+              className="bg-muted p-0.5"
+              itemClassName="px-3"
+              options={[
+                { value: "light", label: t("settings.values.light") },
+                { value: "dark", label: t("settings.values.dark") },
+              ]}
+              onChange={(nextTheme) => {
+                if (nextTheme !== theme) onToggleTheme();
+              }}
+            />
           </SettingsRow>
 
           <SettingsRow title={t("settings.rows.language")}>
@@ -359,18 +342,6 @@ export function AppearanceSettings({
       <section>
         <SettingsSectionTitle>{tx("settings.sections.localPreferences", "Local preferences")}</SettingsSectionTitle>
         <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.density", "Density")}>
-            <SegmentedControl
-              value={localPrefs.density}
-              options={[
-                { value: "comfortable", label: tx("settings.values.comfortable", "Comfortable") },
-                { value: "compact", label: tx("settings.values.compact", "Compact") },
-              ]}
-              onChange={(density) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, density: density as LocalDensity }))
-              }
-            />
-          </SettingsRow>
           <SettingsRow title={tx("settings.rows.activityMode", "Activity detail")}>
             <SegmentedControl
               value={localPrefs.activityMode}
@@ -421,6 +392,54 @@ export function AppearanceSettings({
               label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.browserNotifications", "Task notifications")}
+            description={tx(
+              "settings.help.browserNotifications",
+              "Notify only when this page is in the background. Off by default.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.browserNotifications}
+              onChange={(enabled) => {
+                if (!enabled) {
+                  onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: false }));
+                  return;
+                }
+                if (typeof Notification === "undefined") return;
+                if (Notification.permission === "granted") {
+                  onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: true }));
+                  return;
+                }
+                void Notification.requestPermission().then((permission) => {
+                  if (permission === "granted") {
+                    onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: true }));
+                  }
+                });
+              }}
+              ariaLabel={tx("settings.rows.browserNotifications", "Task notifications")}
+              label={localPrefs.browserNotifications
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.notificationSound", "Completion sound")}
+            description={tx(
+              "settings.help.notificationSound",
+              "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.notificationSound}
+              onChange={(notificationSound) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, notificationSound }))}
+              ariaLabel={tx("settings.rows.notificationSound", "Completion sound")}
+              label={localPrefs.notificationSound
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
         </SettingsGroup>
       </section>
     </div>
@@ -433,7 +452,7 @@ function OverviewRowIcon({
   icon: LucideIcon;
 }) {
   return (
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[12px] bg-muted text-foreground/82 transition-colors group-hover:bg-muted/80 dark:bg-muted/70">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 transition-colors dark:bg-muted/70">
       <Icon className="h-4 w-4" aria-hidden />
     </span>
   );
@@ -447,7 +466,8 @@ function OverviewValueLogo({
   showBrandLogos: boolean;
 }) {
   const brand = provider ? providerBrand(provider) : null;
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
 
   if (!provider || !showBrandLogos || !brand) return null;
 
@@ -455,15 +475,33 @@ function OverviewValueLogo({
     return (
       <span
         data-testid={`overview-logo-${provider}`}
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background"
+        className={cn(
+          "grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md",
+          logoLoaded ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
+        )}
         aria-hidden
       >
+        <span
+          className={cn(
+            "col-start-1 row-start-1 grid h-full w-full place-items-center rounded-md text-[7.5px] font-semibold text-white",
+            logoLoaded ? "opacity-0" : "opacity-100",
+          )}
+          style={{ backgroundColor: brand.color }}
+        >
+          {brand.initials}
+        </span>
         <img
           src={logoUrl}
           alt=""
           decoding="async"
           loading="lazy"
-          className="h-3.5 w-3.5 object-contain"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          className={cn(
+            "col-start-1 row-start-1 object-contain",
+            isLogoTile ? "h-5 w-5" : "h-3.5 w-3.5",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />
@@ -496,7 +534,7 @@ function OverviewListRow({
   valueLogoProvider?: string | null;
   title: string;
   value: string;
-  caption: string;
+  caption?: string;
   showBrandLogos?: boolean;
   onClick: () => void;
 }) {
@@ -504,12 +542,12 @@ function OverviewListRow({
     <button
       type="button"
       onClick={onClick}
-      className="group flex min-h-[68px] w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
+      className="group flex min-h-[68px] w-full select-none items-center gap-3 px-4 py-3.5 text-left transition-colors settings-hover sm:px-5"
     >
       <OverviewRowIcon icon={Icon} />
       <span className="min-w-0 flex-1">
         <span className="block text-[14px] font-medium leading-5 text-foreground">{title}</span>
-        <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">{caption}</span>
+        {caption ? <span className="sr-only">{caption}</span> : null}
       </span>
       <span className="ml-auto flex min-w-0 max-w-[48%] items-center gap-2">
         <OverviewValueLogo provider={valueLogoProvider} showBrandLogos={showBrandLogos} />

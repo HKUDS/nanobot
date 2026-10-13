@@ -115,7 +115,7 @@ class GitStore:
                 author=b"nanobot <nanobot@dream>",
                 committer=b"nanobot <nanobot@dream>",
             )
-            logger.info("Git store initialized at {}", self._workspace)
+            logger.debug("Git store initialized at {}", self._workspace)
             return True
         except Exception as exc:
             raise GitStoreError(f"Git store init failed for {self._workspace}") from exc
@@ -133,12 +133,13 @@ class GitStore:
         try:
             from dulwich import porcelain
 
-            # .gitignore excludes everything except tracked files,
-            # so any staged/unstaged change must be in our files.
+            # Stage first so Dulwich refreshes the content hashes.  A status
+            # check can miss rapid same-size rewrites when the filesystem also
+            # preserves the file's mtime.
+            porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
             st = porcelain.status(str(self._workspace))
-            unstaged = cast(list[object], st.unstaged)
             staged = cast(dict[object, list[object]], st.staged)
-            if not unstaged and not any(staged.values()):
+            if not any(staged.values()):
                 return None
 
             message_value = cast(object, message)
@@ -147,7 +148,6 @@ class GitStore:
                 if isinstance(message_value, str)
                 else cast(bytes, message_value)
             )
-            porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
             sha_bytes = porcelain.commit(
                 str(self._workspace),
                 message=msg_bytes,

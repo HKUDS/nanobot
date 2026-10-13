@@ -7,11 +7,12 @@ from typing import Any, cast
 
 from loguru import logger
 
-from nanobot.providers.base import ProviderConversationState
+from nanobot.providers.base import LLMResponse, LLMUsage, ProviderConversationState
 from nanobot.providers.openai_responses.converters import convert_messages
 
 RESPONSES_STATE_KIND = "openai_responses"
 RESPONSES_STATE_VERSION = 1
+REPLAYABLE_FINISH_REASONS = frozenset({"stop", "tool_calls", "function_call"})
 _ITEMS_KEY = "items"
 _CONTEXT_TOKENS_KEY = "context_tokens"
 _COMPACTION_ITEM_TYPES = frozenset({
@@ -75,7 +76,8 @@ def prepare_responses_input(
         len(prior_items),
         len(state.pending_messages),
     )
-    return instructions, [*deepcopy(prior_items), *delta_items], True
+    replayed_items = _prepare_replayed_items(prior_items)
+    return instructions, [*replayed_items, *delta_items], True
 
 
 def build_responses_state(
@@ -84,7 +86,7 @@ def build_responses_state(
     model: str,
     input_items: list[dict[str, Any]],
     output_items: list[dict[str, Any]],
-    usage: dict[str, int] | None = None,
+    usage: LLMUsage | None = None,
 ) -> ProviderConversationState:
     """Create the canonical next state from request input and every output item."""
     unpruned_items = [*input_items, *output_items]
@@ -105,6 +107,51 @@ def build_responses_state(
         model=model,
         version=RESPONSES_STATE_VERSION,
         payload=payload,
+    )
+
+
+def attach_responses_state(
+    result: LLMResponse,
+    *,
+    provider: str,
+    model: str,
+    input_items: list[dict[str, Any]],
+    output_items: list[dict[str, Any]],
+) -> None:
+    """Advance replay and compaction state only after a completed usable response."""
+    if result.finish_reason not in REPLAYABLE_FINISH_REASONS:
+        return
+    result.provider_state = build_responses_state(
+        provider=provider, model=model, input_items=input_items,
+        output_items=output_items, usage=result.usage,
+    )
+    result.provider_compaction_state = build_responses_compaction_state(
+        provider=provider, model=model, output_items=output_items,
+    )
+    result.provider_compaction_applied = result.provider_compaction_state is not None
+    if result.provider_compaction_applied:
+        result.provider_compaction_scope = "current_request"
+
+
+def build_responses_compaction_state(
+    *,
+    provider: str,
+    model: str,
+    output_items: list[dict[str, Any]],
+) -> ProviderConversationState | None:
+    """Return the state at the latest native compaction output boundary."""
+    latest = None
+    for index, item in enumerate(output_items):
+        if item.get("type") in _COMPACTION_ITEM_TYPES:
+            latest = index
+    if latest is None:
+        return None
+    return ProviderConversationState(
+        kind=RESPONSES_STATE_KIND,
+        provider=provider,
+        model=model,
+        version=RESPONSES_STATE_VERSION,
+        payload={_ITEMS_KEY: [deepcopy(output_items[latest])]},
     )
 
 
@@ -178,16 +225,8 @@ def _prune_before_latest_output_compaction(
     return output_items[latest:]
 
 
-def _context_tokens_from_usage(usage: dict[str, int] | None) -> int:
-    if not usage:
-        return 0
-    prompt_tokens = usage.get("prompt_tokens", 0)
-    completion_tokens = usage.get("completion_tokens", 0)
-    total_tokens = usage.get("total_tokens", 0)
-    values = (prompt_tokens, completion_tokens, total_tokens)
-    if any(isinstance(value, bool) for value in values):
-        return 0
-    return max(0, total_tokens or prompt_tokens + completion_tokens)
+def _context_tokens_from_usage(usage: LLMUsage | None) -> int:
+    return usage.total_tokens if usage is not None else 0
 
 
 def _state_items(
@@ -202,3 +241,38 @@ def _state_items(
             return None
         items.append(cast(dict[str, Any], raw))
     return items
+
+
+def _prepare_replayed_items(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy provider state and remove output-only fields rejected on replay."""
+    replayed_items = deepcopy(items)
+    for item in replayed_items:
+        if item.get("type") == "reasoning":
+            item.pop("status", None)
+    return replayed_items
+
+
+def without_response_item_ids(
+    request_body: dict[str, Any],
+) -> dict[str, Any]:
+    """Strip output item IDs for endpoints that replay stateless input without IDs."""
+    if request_body.get("store") is True:
+        return request_body
+    raw_input = request_body.get("input")
+    if not isinstance(raw_input, list):
+        return request_body
+
+    input_items: list[object] = cast(list[object], raw_input)
+    sanitized_input: list[object] = []
+    for raw_item in input_items:
+        if not isinstance(raw_item, dict):
+            sanitized_input.append(raw_item)
+            continue
+        item = cast(dict[str, Any], raw_item)
+        sanitized_input.append({key: value for key, value in item.items() if key != "id"})
+
+    body = dict(request_body)
+    body["input"] = sanitized_input
+    return body

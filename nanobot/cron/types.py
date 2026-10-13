@@ -61,6 +61,7 @@ class CronPayload:
     origin_channel: str | None = None
     origin_chat_id: str | None = None
     origin_metadata: dict[str, Any] = field(default_factory=dict)
+    binding_version: int = 0
 
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronPayload:
@@ -79,7 +80,16 @@ class CronPayload:
             origin_metadata=dict(
                 get_camel_snake(data, "originMetadata", "origin_metadata", {}) or {}
             ),
+            binding_version=_store_int(get_camel_snake(data, "bindingVersion", "binding_version", 0)),
         )
+
+
+@dataclass
+class CronRunResult:
+    """Result and durable record identity returned by a cron executor."""
+
+    run_id: str
+    response: str
 
 
 @dataclass
@@ -89,14 +99,19 @@ class CronRunRecord:
     status: Literal["ok", "error", "skipped"]
     duration_ms: int = 0
     error: str | None = None
+    run_id: str | None = None
+    session_key: str | None = None
 
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronRunRecord:
+        run_id = get_camel_snake(data, "runId", "run_id")
         return cls(
             run_at_ms=_store_int(get_camel_snake(data, "runAtMs", "run_at_ms", 0)),
             status=data["status"],
             duration_ms=_store_int(get_camel_snake(data, "durationMs", "duration_ms", 0)),
             error=data.get("error"),
+            run_id=run_id if isinstance(run_id, str) else None,
+            session_key=get_camel_snake(data, "sessionKey", "session_key"),
         )
 
 

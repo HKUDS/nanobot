@@ -47,33 +47,29 @@ export function useLogoFallback(urls: readonly string[] | undefined) {
   const safeUrls = useMemo(() => logoUrlsFromKey(cacheKey), [cacheKey]);
   const [logoIndex, setLogoIndex] = useState(() => firstUsableLogoIndex(safeUrls));
   const logoUrl = logoIndex >= 0 ? safeUrls[logoIndex] : undefined;
-  const [logoLoaded, setLogoLoaded] = useState(
-    () => Boolean(logoUrl && loadedLogoUrls.has(logoUrl)),
-  );
+  const [loadedUrl, setLoadedUrl] = useState<string>();
+  const logoLoaded = Boolean(logoUrl && (loadedUrl === logoUrl || loadedLogoUrls.has(logoUrl)));
 
   useEffect(() => {
     setLogoIndex(firstUsableLogoIndex(safeUrls));
   }, [cacheKey, safeUrls]);
-
-  useEffect(() => {
-    setLogoLoaded(Boolean(logoUrl && loadedLogoUrls.has(logoUrl)));
-  }, [logoUrl]);
 
   const onLogoLoad = useCallback(() => {
     if (!logoUrl || logoIndex < 0) return;
     loadedLogoUrls.add(logoUrl);
     failedLogoUrls.delete(logoUrl);
     resolvedLogoIndexByKey.set(cacheKey, logoIndex);
-    setLogoLoaded(true);
+    setLoadedUrl(logoUrl);
   }, [cacheKey, logoIndex, logoUrl]);
 
   const onLogoError = useCallback(() => {
     if (!logoUrl || logoIndex < 0) return;
     failedLogoUrls.add(logoUrl);
+    loadedLogoUrls.delete(logoUrl);
     if (resolvedLogoIndexByKey.get(cacheKey) === logoIndex) {
       resolvedLogoIndexByKey.delete(cacheKey);
     }
-    setLogoLoaded(false);
+    setLoadedUrl(undefined);
     setLogoIndex(nextLogoIndex(safeUrls, logoIndex));
   }, [cacheKey, logoIndex, logoUrl, safeUrls]);
 

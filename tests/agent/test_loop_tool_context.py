@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -12,6 +13,7 @@ from nanobot.agent.tools.context import (
     current_request_context,
     reset_request_context,
 )
+from nanobot.agent.tools.image_generation import ImageGenerationTool, register_image_generation_tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -104,12 +106,34 @@ def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
     assert loop.tools.has("read_file")
 
 
+@pytest.mark.parametrize("provider_name", ["openrouter", "aihubmix"])
+def test_loop_uses_pre_registered_image_tool(
+    tmp_path: Path,
+    provider_name: str,
+) -> None:
+    config = _config_for_loop(tmp_path)
+    config.tools.image_generation.enabled = True
+    config.tools.image_generation.provider = provider_name
+    getattr(config.providers, provider_name).api_key = "configured-image-key"
+    registry = ToolRegistry()
+    register_image_generation_tool(config, registry, workspace=config.workspace_path)
+    configured_tool = registry.get("generate_image")
+    loop = AgentLoop.from_config(config, tool_registry=registry, provider=_provider_for_loop())
+
+    tool = registry.get("generate_image")
+    assert loop.tools is registry
+    assert isinstance(tool, ImageGenerationTool)
+    assert tool is configured_tool
+    assert tool.provider_configs[provider_name].api_key == "configured-image-key"
+    assert registry.has("read_file")
+
+
 @pytest.mark.asyncio
 async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> None:
     provider = MagicMock()
     calls = {"n": 0}
 
-    async def chat_with_retry(**_kwargs):
+    async def chat_stream_with_retry(**_kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             return LLMResponse(
@@ -118,7 +142,7 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
             )
         return LLMResponse(content="done", tool_calls=[])
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     provider.get_default_model.return_value = "test-model"
 
     loop = AgentLoop(
@@ -133,12 +157,15 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
     metadata = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=runtime,
-        channel="slack",
-        chat_id="C123",
-        metadata=metadata,
-        session_key="slack:C123:111.222",
+        request_context=RequestContext(
+            channel="slack",
+            chat_id="C123",
+            session_key="slack:C123:111.222",
+            runtime=runtime,
+            metadata=metadata,
+        ),
     )
 
     assert cron.contexts[-1] == {
@@ -231,12 +258,15 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
     try:
         with pytest.raises(RuntimeError, match="runner failed"):
             await loop._run_agent_loop(
-                [],
+                TranscriptInput(history=[], current_message=None),
                 runtime=runtime,
-                channel="slack",
-                chat_id="C123",
-                session_key="slack:C123:111.222",
-                original_user_text="  unchanged user text  ",
+                request_context=RequestContext(
+                    channel="slack",
+                    chat_id="C123",
+                    session_key="slack:C123:111.222",
+                    original_user_text="  unchanged user text  ",
+                    runtime=runtime,
+                ),
             )
         assert current_request_context() is outer
     finally:

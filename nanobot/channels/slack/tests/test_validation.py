@@ -34,6 +34,9 @@ def test_validate_channel_does_not_write_config(tmp_path, monkeypatch: pytest.Mo
     )
 
     assert result["status"] == "connected"
+    checks = {check["id"]: check for check in result["checks"]}
+    assert checks["app_token_prefix"]["action_url"] == "https://api.slack.com/apps"
+    assert "action_url" not in checks["bot_token_prefix"]
     saved = load_config(config_path)
     assert saved.channels.slack["appToken"] == "xapp-old"
     assert saved.channels.slack["botToken"] == "xoxb-old"

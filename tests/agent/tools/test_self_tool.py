@@ -15,6 +15,7 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.shell import ExecToolConfig
 from nanobot.agent.tools.web import WebSearchConfig, WebToolsConfig
 from nanobot.config.schema import ModelPresetConfig
+from nanobot.providers.base import LLMUsage
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,10 +32,6 @@ def _make_mock_loop(**overrides):
     loop._start_time = 1000.0
     loop.exec_config = ExecToolConfig()
     loop.channels_config = MagicMock()
-    loop._last_usage = {"prompt_tokens": 100, "completion_tokens": 50}
-    loop.last_usage = loop._last_usage
-    loop._current_iteration = 0
-    loop.current_iteration = loop._current_iteration
     loop.provider_retry_mode = "standard"
     loop.max_tool_result_chars = 16000
     loop.model_preset = None
@@ -43,6 +40,7 @@ def _make_mock_loop(**overrides):
     loop._unified_session = False
     loop._extra_hooks = []
     loop.set_runtime_model.side_effect = lambda value: setattr(loop, "model", value)
+    loop.set_runtime_max_iterations.side_effect = lambda value: setattr(loop, "max_iterations", value)
     loop.set_runtime_context_window.side_effect = lambda value: setattr(
         loop,
         "context_window_tokens",
@@ -62,10 +60,6 @@ def _make_mock_loop(**overrides):
 
     # SubagentManager mock
     loop.subagents = MagicMock()
-    loop.subagents._running_tasks = {"abc123": MagicMock(done=MagicMock(return_value=False))}
-    loop.subagents._task_statuses = {}
-    loop.subagents.runtime_statuses.side_effect = lambda: loop.subagents._task_statuses
-    loop.subagents.get_running_count = MagicMock(return_value=1)
 
     for k, v in overrides.items():
         setattr(loop, k, v)
@@ -111,8 +105,6 @@ class TestInspectSummary:
         assert "workspace" in result
         assert "provider_retry_mode" in result
         assert "max_tool_result_chars" in result
-        assert "_last_usage" in result
-        assert "_current_iteration" in result
 
 
 # ---------------------------------------------------------------------------
@@ -159,14 +151,6 @@ class TestInspectPathNavigation:
         tool = _make_tool(loop=loop)
         result = await tool.execute(action="check", key="web_config.enable")
         assert "True" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_dict_key_via_dotpath(self):
-        loop = _make_mock_loop()
-        loop._last_usage = {"prompt_tokens": 100, "completion_tokens": 50}
-        tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="_last_usage.prompt_tokens")
-        assert "100" in result
 
     @pytest.mark.asyncio
     async def test_inspect_blocked_in_path(self):
@@ -316,11 +300,11 @@ class TestModifyBlocked:
 # set — free tier (setattr priority)
 # ---------------------------------------------------------------------------
 
-class TestModifyFree:
+class TestRuntimeSettingsAndScratchpad:
 
     @pytest.mark.asyncio
-    async def test_modify_existing_attr_setattr(self):
-        """Modifying an existing loop attribute should use setattr."""
+    async def test_set_updates_runtime_setting(self):
+        """Set a runtime setting through the runtime-control capability."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="provider_retry_mode", value="persistent")
         assert "Set provider_retry_mode" in result
@@ -411,7 +395,7 @@ class TestModifyFree:
 # set — previously BLOCKED/READONLY now open
 # ---------------------------------------------------------------------------
 
-class TestModifyOpen:
+class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_tools_blocked(self):
@@ -423,11 +407,11 @@ class TestModifyOpen:
 
     @pytest.mark.asyncio
     async def test_modify_subagents_blocked(self):
-        """subagents is READ_ONLY — cannot be replaced."""
+        """Subagent control is outside the self-inspection capability."""
         tool = _make_tool()
         new_subagents = MagicMock()
         result = await tool.execute(action="set", key="subagents", value=new_subagents)
-        assert "read-only" in result
+        assert "protected" in result
 
     @pytest.mark.asyncio
     async def test_modify_runner_blocked(self):
@@ -494,24 +478,17 @@ class TestModifyOpen:
         assert tool._runtime_control.snapshot().workspace == "/new/path"
 
     @pytest.mark.asyncio
-    async def test_modify_pending_queues_blocked(self):
-        """_pending_queues controls message routing — must be blocked."""
+    @pytest.mark.parametrize(
+        "key",
+        [
+            pytest.param("_pending_queues", id="pending_queues_blocked"),
+            pytest.param("_session_locks", id="session_locks_blocked"),
+            pytest.param("_active_tasks", id="active_tasks_blocked"),
+        ],
+    )
+    async def test_modify_runtime_coordination_state_blocked(self, key):
         tool = _make_tool()
-        result = await tool.execute(action="set", key="_pending_queues", value={})
-        assert "protected" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_session_locks_blocked(self):
-        """_session_locks controls session isolation — must be blocked."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_session_locks", value={})
-        assert "protected" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_active_tasks_blocked(self):
-        """_active_tasks tracks running tasks — must be blocked."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_active_tasks", value={})
+        result = await tool.execute(action="set", key=key, value={})
         assert "protected" in result
 
     @pytest.mark.asyncio
@@ -603,78 +580,6 @@ class TestDeniedAttrs:
 
 
 # ---------------------------------------------------------------------------
-# SubagentStatus formatting
-# ---------------------------------------------------------------------------
-
-class TestSubagentStatusFormatting:
-
-    def test_format_single_status(self):
-        """_format_value should produce a rich multi-line display for a SubagentStatus."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="abc12345",
-            label="read logs and summarize",
-            task_description="Read the log files and produce a summary",
-            started_at=time.monotonic() - 12.4,
-            phase="awaiting_tools",
-            iteration=3,
-            tool_events=[
-                {"name": "read_file", "status": "ok", "detail": "read app.log"},
-                {"name": "grep", "status": "ok", "detail": "searched ERROR"},
-                {"name": "exec", "status": "error", "detail": "timeout"},
-            ],
-            usage={"prompt_tokens": 4500, "completion_tokens": 1200},
-        )
-        result = MyTool._format_value(status)
-        assert "abc12345" in result
-        assert "read logs and summarize" in result
-        assert "awaiting_tools" in result
-        assert "iteration: 3" in result
-        assert "read_file(ok)" in result
-        assert "exec(error)" in result
-        assert "4500" in result
-
-    def test_format_status_dict(self):
-        """_format_value should handle dict[str, SubagentStatus] with rich display."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        statuses = {
-            "abc12345": SubagentStatus(
-                task_id="abc12345",
-                label="task A",
-                task_description="Do task A",
-                started_at=time.monotonic() - 5.0,
-                phase="awaiting_tools",
-                iteration=1,
-            ),
-        }
-        result = MyTool._format_value(statuses)
-        assert "1 subagent(s)" in result
-        assert "abc12345" in result
-        assert "task A" in result
-
-    def test_format_empty_status_dict(self):
-        """Empty dict[str, SubagentStatus] should show 'no running subagents'."""
-        result = MyTool._format_value({})
-        assert "{}" in result
-
-    def test_format_status_with_error(self):
-        """Status with error should include the error message."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="err00001",
-            label="failing task",
-            task_description="A task that fails",
-            started_at=time.monotonic() - 1.0,
-            phase="error",
-            error="Connection refused",
-        )
-        result = MyTool._format_value(status)
-        assert "error: Connection refused" in result
-
-# ---------------------------------------------------------------------------
 # _SubagentHook after_iteration updates status
 # ---------------------------------------------------------------------------
 
@@ -692,20 +597,20 @@ class TestSubagentHookStatus:
             task_description="test",
             started_at=time.monotonic(),
         )
-        hook = _SubagentHook("test", status)
+        hook = _SubagentHook(status)
 
         context = AgentHookContext(
             iteration=5,
             messages=[],
             tool_events=[{"name": "read_file", "status": "ok", "detail": "ok"}],
-            usage={"prompt_tokens": 100, "completion_tokens": 50},
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=50),
         )
         await hook.after_iteration(context)
 
         assert status.iteration == 5
         assert len(status.tool_events) == 1
         assert status.tool_events[0]["name"] == "read_file"
-        assert status.usage == {"prompt_tokens": 100, "completion_tokens": 50}
+        assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
 
     @pytest.mark.asyncio
     async def test_after_iteration_with_error(self):
@@ -719,7 +624,7 @@ class TestSubagentHookStatus:
             task_description="test",
             started_at=time.monotonic(),
         )
-        hook = _SubagentHook("test", status)
+        hook = _SubagentHook(status)
 
         context = AgentHookContext(
             iteration=1,
@@ -736,7 +641,7 @@ class TestSubagentHookStatus:
         from nanobot.agent.hook import AgentHookContext
         from nanobot.agent.subagent import _SubagentHook
 
-        hook = _SubagentHook("test")
+        hook = _SubagentHook()
         context = AgentHookContext(iteration=1, messages=[])
         result = await hook.after_iteration(context)
 
@@ -796,59 +701,6 @@ class TestCheckpointCallback:
         await _on_checkpoint({"iteration": 1})
         assert status.phase == "initializing"
         assert status.iteration == 1
-
-
-# ---------------------------------------------------------------------------
-# check subagents._task_statuses via dot-path
-# NOTE: subagents is now BLOCKED for security, so these tests verify
-# that access is properly rejected.
-# ---------------------------------------------------------------------------
-
-class TestInspectTaskStatuses:
-
-    @pytest.mark.asyncio
-    async def test_inspect_task_statuses_accessible(self):
-        """subagents is READ_ONLY — check should show subagent statuses."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        loop = _make_mock_loop()
-        loop.subagents._task_statuses = {
-            "abc12345": SubagentStatus(
-                task_id="abc12345",
-                label="read logs",
-                task_description="Read the log files",
-                started_at=time.monotonic() - 8.0,
-                phase="awaiting_tools",
-                iteration=2,
-                tool_events=[{"name": "read_file", "status": "ok", "detail": "ok"}],
-                usage={"prompt_tokens": 500, "completion_tokens": 100},
-            ),
-        }
-        tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="subagents._task_statuses")
-        assert "abc12345" in result
-        assert "read logs" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_single_subagent_status_accessible(self):
-        """subagents._task_statuses.<id> should return individual SubagentStatus."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        loop = _make_mock_loop()
-        status = SubagentStatus(
-            task_id="xyz",
-            label="search code",
-            task_description="Search the codebase",
-            started_at=time.monotonic() - 3.0,
-            phase="done",
-            iteration=4,
-            stop_reason="completed",
-        )
-        loop.subagents._task_statuses = {"xyz": status}
-        tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="subagents._task_statuses.xyz")
-        assert "search code" in result
-        assert "completed" in result
 
 
 # ---------------------------------------------------------------------------
@@ -914,13 +766,6 @@ class TestScratchpadInspection:
         result = await tool.execute(action="check", key="task_meta")
         assert "step" in result
         assert "2" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_nonexistent_still_returns_not_found(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="never_set_key_xyz")
-        assert "not found" in result
-
 
 # ---------------------------------------------------------------------------
 # sensitive sub-field blocking (Fix #3: API key leak prevention)
@@ -1088,55 +933,6 @@ class TestSecurityAttributeProtection:
         result = await tool.execute(action="check", key="model_presets.fast.model")
 
         assert result == "model_presets.fast.model: 'fast-model'"
-
-
-# ---------------------------------------------------------------------------
-# current iteration count (Fix #2)
-# ---------------------------------------------------------------------------
-
-class TestCurrentIteration:
-
-    @pytest.mark.asyncio
-    async def test_inspect_current_iteration(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="_current_iteration")
-        assert "0" in result
-
-    @pytest.mark.asyncio
-    async def test_current_iteration_in_summary(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check")
-        assert "_current_iteration" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_current_iteration_blocked(self):
-        """_current_iteration is READ_ONLY — cannot be set manually."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_current_iteration", value=5)
-        assert "read-only" in result
-
-
-# ---------------------------------------------------------------------------
-# _last_usage in check summary (Fix #5)
-# ---------------------------------------------------------------------------
-
-class TestLastUsageInSummary:
-
-    @pytest.mark.asyncio
-    async def test_last_usage_shown_in_summary(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check")
-        assert "_last_usage" in result
-        assert "prompt_tokens" in result
-
-    @pytest.mark.asyncio
-    async def test_last_usage_not_shown_when_empty(self):
-        loop = _make_mock_loop()
-        loop._last_usage = {}
-        loop.last_usage = loop._last_usage
-        tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check")
-        assert "_last_usage" not in result
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Security Boundaries
 
-The agent operates with significant power (file system, shell, web). The following guards must not be bypassed when modifying related code.
+Consult this document when changing path access, outbound HTTP/MCP, or shell execution. The agent operates with filesystem, shell, and network access; preserve the guards below on every affected path.
 
 ## Workspace Restriction
 
@@ -24,6 +24,6 @@ HTTP/SSE MCP transports are part of this boundary: validate configured MCP URLs 
 
 ## Shell Sandbox
 
-`tools/sandbox.py` provides optional command wrapping. The only backend currently shipped is `bwrap` (bubblewrap), intended for containerized deployments. On Windows and bare-metal Linux without `bwrap`, commands run in the native shell with workspace restriction as an application-level guard only.
+`tools/sandbox.py` provides optional command wrapping: `bwrap` (bubblewrap) on Linux and `seatbelt` (`sandbox-exec`) on macOS. Seatbelt must not expose shared host temporary directories; scratch stays in the workspace. On Windows a configured backend warns and leaves only the application guard. On Unix a configured backend that cannot start must fail, not silently execute without isolation.
 
-**Rule**: If adding a new sandbox backend, implement `_wrap_<name>(command, workspace, cwd) -> str` and register it in `_BACKENDS`.
+**Rule**: If adding a sandbox backend, match the backend callable contract in `nanobot/agent/tools/sandbox.py` and register it in `_BACKENDS`. Preserve read/write root handling and the configured backend's failure behavior.

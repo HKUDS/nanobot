@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -13,17 +14,36 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import json_repair
 from loguru import logger
 
+from nanobot.events import (
+    NO_EVENTS,
+    EventSink,
+    ResponseSource,
+    ResponseSourceEvent,
+    RetryStatusEvent,
+    RetryWaitEvent,
+)
+from nanobot.llm_usage.types import LLMUsage as LLMUsage
+from nanobot.providers.generation import GenerationSettings as GenerationSettings
 from nanobot.utils.helpers import sanitize_surrogates_deep
+
+if TYPE_CHECKING:
+    from nanobot.llm_usage.models import LLMCallRecord
 
 STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 RETRY_AFTER_BUFFER = 1
+CONTEXT_SAFETY_BUFFER = 1024
+
+RetryEventCallback = Callable[[str], Awaitable[None]]
+LLMCallObserver = Callable[["LLMCallRecord"], None]
+ProviderCompactionScope = Literal["prior_context", "current_request"]
+RetryStatusCallback = Callable[[RetryStatusEvent], Awaitable[None]]
 
 
 def resolve_stream_idle_timeout_s(
@@ -245,10 +265,19 @@ class ProviderCallContext:
     The regular ``chat`` contract stays provider-agnostic. Responses-capable
     providers consume this context through the opt-in ``chat_with_context``
     hooks, while every other provider inherits the context-free delegation.
+    ``session_id`` gives providers a stable conversation-scoped routing key
+    without exposing that identity in the public message transcript.
     """
 
     conversation_state: ProviderConversationState | None = field(default=None, repr=False)
     context_window_tokens: int | None = None
+    session_id: str | None = field(default=None, repr=False)
+    events: EventSink = field(default=NO_EVENTS, repr=False, compare=False)
+    # None opts out (auxiliary calls); an empty name denotes an unnamed preset.
+    response_preset: str | None = None
+    response_is_fallback: bool = False
+    # A pre-request compactor must fit this budget before sending the pending input.
+    compaction_input_budget: int | None = None
 
 
 @dataclass
@@ -257,11 +286,33 @@ class LLMResponse:
     content: str | None
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     finish_reason: str = "stop"
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
+    # Locally measured streaming telemetry. ``generation_ms`` excludes time to
+    # first token and provider retry gaps; ``ttft_ms`` measures the first
+    # streamed reasoning/content delta from request start. They stay separate
+    # from provider usage because providers do not report these consistently.
+    generation_ms: int | None = None
+    ttft_ms: int | None = None
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    # True only when this response installed a new provider-native compaction
+    # boundary. Replaying an older compaction item does not set this flag.
+    provider_compaction_applied: bool = field(default=False, repr=False)
+    # State immediately after native compaction, before the normal response
+    # continues. An archive prompt can resume this state without replaying H.
+    provider_compaction_state: ProviderConversationState | None = field(
+        default=None,
+        repr=False,
+    )
+    # Which model input the native compaction state replaces. Providers that
+    # compact before attaching the current request delta report
+    # ``prior_context``; in-request compaction reports ``current_request``.
+    provider_compaction_scope: ProviderCompactionScope | None = field(
+        default=None,
+        repr=False,
+    )
     # Routing wrappers may preserve or discard an incoming provider-owned
     # continuation independently of the final fallback error's retry policy.
     preserve_provider_state_on_error: bool | None = field(default=None, repr=False)
@@ -287,22 +338,11 @@ class LLMResponse:
         return self.finish_reason in ("tool_calls", "function_call", "stop")
 
 
-@dataclass(frozen=True)
-class GenerationSettings:
-    """Default generation settings."""
-
-    temperature: float = 0.7
-    max_tokens: int = 4096
-    reasoning_effort: str | None = None
-
-
 _SYNTHETIC_USER_CONTENT = "(conversation continued)"
 
 
 class LLMProvider(ABC):
     """Base class for LLM providers."""
-
-    supports_progress_deltas = False
 
     _CHAT_RETRY_DELAYS = (1, 2, 4)
     _PERSISTENT_MAX_DELAY = 60
@@ -320,6 +360,7 @@ class LLMProvider(ABC):
         "timed out",
         "connection",
         "server error",
+        "server_error",
         "temporarily unavailable",
         "速率限制",
         "访问量过大",
@@ -332,6 +373,7 @@ class LLMProvider(ABC):
         "quota_exhausted",
         "billing_hard_limit_reached",
         "insufficient_balance",
+        "insufficient_credits",
         "credit_balance_too_low",
         "billing_not_active",
         "payment_required",
@@ -354,6 +396,8 @@ class LLMProvider(ABC):
         "billing not active",
         "insufficient balance",
         "insufficient_balance",
+        "insufficient credits",
+        "insufficient_credits",
         "credit balance too low",
         "payment required",
         "out of credits",
@@ -374,10 +418,109 @@ class LLMProvider(ABC):
 
     _SENTINEL = object()
 
-    def __init__(self, api_key: str | None = None, api_base: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        *,
+        provider_name: str,
+    ):
+        runtime_provider_name = cast(object, provider_name)
+        if not isinstance(runtime_provider_name, str) or not runtime_provider_name.strip():
+            raise ValueError("provider_name must be a non-empty configured identity")
         self.api_key = api_key
         self.api_base = api_base
+        self.provider_name = provider_name
         self.generation: GenerationSettings = GenerationSettings()
+        self._llm_call_observer: LLMCallObserver | None = None
+
+    def set_llm_call_observer(self, observer: LLMCallObserver | None) -> None:
+        """Attach a fail-open observer for each physical retry-managed call."""
+        self._llm_call_observer = observer
+
+    def _usage_for_call(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+    ) -> LLMUsage | None:
+        usage = response.usage
+        if usage is None or usage.total_tokens == 0:
+            if response.finish_reason in {"error", "cancelled"}:
+                return None
+            messages = kwargs.get("messages")
+            if not isinstance(messages, list):
+                return usage
+            tools_value = kwargs.get("tools")
+            tools = cast(list[dict[str, Any]], tools_value) if isinstance(tools_value, list) else None
+            model_value = kwargs.get("model")
+            model = model_value if isinstance(model_value, str) else self.get_default_model()
+            try:
+                from nanobot.utils.helpers import (
+                    build_assistant_message,
+                    estimate_message_tokens,
+                    estimate_prompt_tokens_chain,
+                )
+
+                input_tokens, _ = estimate_prompt_tokens_chain(
+                    self,
+                    model,
+                    cast(list[dict[str, Any]], messages),
+                    tools,
+                )
+                assistant_message = build_assistant_message(
+                    response.content or "",
+                    tool_calls=[call.to_openai_tool_call() for call in response.tool_calls],
+                    reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
+                )
+                usage = LLMUsage.estimated(
+                    input_tokens=max(0, input_tokens),
+                    output_tokens=max(0, estimate_message_tokens(assistant_message)),
+                )
+            except Exception:
+                logger.exception("failed to estimate usage for {}", self.provider_name)
+                return usage
+        return usage.with_timing(
+            generation_ms=response.generation_ms,
+            ttft_ms=response.ttft_ms,
+        )
+
+    def _observe_llm_call(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+        *,
+        started_at_ms: int,
+        started_at_ns: int,
+        stream: bool,
+    ) -> LLMResponse:
+        observer = self._llm_call_observer
+        if observer is None:
+            return response
+        usage = self._usage_for_call(response, kwargs)
+        if usage is not None:
+            response.usage = usage
+        model_value = kwargs.get("model")
+        model = model_value if isinstance(model_value, str) and model_value else self.get_default_model()
+        try:
+            from nanobot.llm_usage.context import current_llm_usage_source
+            from nanobot.llm_usage.models import LLMCallRecord
+
+            observer(LLMCallRecord(
+                started_at_ms=started_at_ms,
+                duration_ms=max(0, (time.monotonic_ns() - started_at_ns) // 1_000_000),
+                provider=self.provider_name,
+                model=model,
+                source=current_llm_usage_source(),
+                stream=stream,
+                finish_reason=response.finish_reason,
+                usage=usage,
+                error_status_code=response.error_status_code,
+                error_kind=response.error_kind,
+            ))
+        except Exception:
+            logger.exception("LLM call observer failed for {}", self.provider_name)
+        return response
 
     def can_resume_conversation_state(
         self,
@@ -389,6 +532,10 @@ class LLMProvider(ABC):
 
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Whether requests may include provider-native context compaction."""
+        return False
+
+    def supports_pre_request_compaction(self, model: str | None = None) -> bool:
+        """Whether the provider enforces compaction_input_budget before generation."""
         return False
 
     @staticmethod
@@ -527,6 +674,63 @@ class LLMProvider(ABC):
         """
         pass
 
+    @staticmethod
+    def _error_response_from_exception(exc: Exception) -> LLMResponse:
+        """Convert an unexpected exception while retaining retry metadata."""
+        error_names = tuple(cls.__name__.lower() for cls in type(exc).__mro__)
+        error_kind: str | None = None
+        error_should_retry: bool | None = None
+        if any("timeout" in name for name in error_names):
+            error_kind = "timeout"
+            error_should_retry = True
+        elif any(
+            token in name
+            for name in error_names
+            for token in ("connect", "connection", "network", "protocol", "transport")
+        ):
+            error_kind = "connection"
+            error_should_retry = True
+        elif any(
+            "ratelimit" in name or "throttl" in name
+            for name in error_names
+        ):
+            error_kind = "rate_limit"
+            error_should_retry = True
+        elif any(
+            "server" in name or "internal" in name
+            for name in error_names
+        ):
+            error_kind = "server_error"
+            error_should_retry = True
+        elif any(
+            token in name
+            for name in error_names
+            for token in ("auth", "credential", "permissiondenied", "unauthor")
+        ):
+            error_kind = "authentication"
+
+        response = getattr(exc, "response", None)
+        raw_status = getattr(exc, "status_code", None)
+        if raw_status is None and response is not None:
+            raw_status = getattr(response, "status_code", None)
+        try:
+            error_status_code = int(raw_status) if raw_status is not None else None
+        except (TypeError, ValueError):
+            error_status_code = None
+
+        raw_error_type = getattr(exc, "error_type", None)
+        raw_error_code = getattr(exc, "error_code", None)
+        detail = str(exc).strip() or type(exc).__name__
+        return LLMResponse(
+            content=f"Error calling LLM: {detail}",
+            finish_reason="error",
+            error_status_code=error_status_code,
+            error_kind=error_kind,
+            error_type=str(raw_error_type) if raw_error_type is not None else None,
+            error_code=str(raw_error_code) if raw_error_code is not None else None,
+            error_should_retry=error_should_retry,
+        )
+
     @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:
         err = (content or "").lower()
@@ -631,6 +835,20 @@ class LLMProvider(ABC):
         return True
 
     @staticmethod
+    def _content_as_blocks(content: Any) -> list[dict[str, Any]]:
+        """Convert message content to blocks so mixed user content can be merged."""
+        if isinstance(content, list):
+            return [
+                dict(cast(dict[str, Any], item))
+                if isinstance(item, dict)
+                else {"type": "text", "text": str(item)}
+                for item in cast(list[object], content)
+            ]
+        if content is None:
+            return []
+        return [{"type": "text", "text": str(content)}]
+
+    @staticmethod
     def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Merge consecutive same-role messages and drop trailing assistant messages.
 
@@ -664,6 +882,13 @@ class LLMProvider(ABC):
                 curr_content = msg.get("content") or ""
                 if isinstance(prev_content, str) and isinstance(curr_content, str):
                     prev["content"] = (prev_content + "\n\n" + curr_content).strip()
+                elif role == "user":
+                    combined = dict(msg)
+                    combined["content"] = [
+                        *LLMProvider._content_as_blocks(prev_content),
+                        *LLMProvider._content_as_blocks(curr_content),
+                    ]
+                    merged[-1] = combined
                 else:
                     merged[-1] = dict(msg)
             else:
@@ -688,9 +913,8 @@ class LLMProvider(ABC):
 
         # Safety net: ensure the first non-system message is not a bare
         # ``assistant`` message.  Providers like GLM reject system→assistant
-        # with error 1214.  This can happen when upstream truncation (e.g.
-        # _snip_history) drops the only user message.  Insert a synthetic
-        # user message to keep the sequence valid.
+        # with error 1214.  Insert a synthetic user message to keep the
+        # sequence valid when replayed history starts at an assistant turn.
         for i, msg in enumerate(merged):
             if msg.get("role") != "system":
                 if msg.get("role") == "assistant" and not msg.get("tool_calls"):
@@ -764,18 +988,39 @@ class LLMProvider(ABC):
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         """Call chat() and convert unexpected exceptions to error responses."""
+        started_at_ms = time.time_ns() // 1_000_000
+        started_at_ns = time.monotonic_ns()
         try:
             provider_context = kwargs.pop("provider_context", None)
             if isinstance(provider_context, ProviderCallContext):
-                return await self.chat_with_context(
+                response = await self.chat_with_context(
                     provider_context=provider_context,
                     **kwargs,
                 )
-            return await self.chat(**kwargs)
+            else:
+                response = await self.chat(**kwargs)
         except asyncio.CancelledError:
+            self._observe_llm_call(
+                LLMResponse(
+                    content=None,
+                    finish_reason="cancelled",
+                    error_kind="cancelled",
+                ),
+                kwargs,
+                started_at_ms=started_at_ms,
+                started_at_ns=started_at_ns,
+                stream=False,
+            )
             raise
         except Exception as exc:
-            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            response = self._error_response_from_exception(exc)
+        return self._observe_llm_call(
+            response,
+            kwargs,
+            started_at_ms=started_at_ms,
+            started_at_ns=started_at_ns,
+            stream=False,
+        )
 
     async def chat_stream(
         self,
@@ -803,14 +1048,17 @@ class LLMProvider(ABC):
         streaming should override this method.
         """
         _ = on_thinking_delta, on_tool_call_delta
-        response = await self.chat(
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
+        response = await asyncio.wait_for(
+            self.chat(
+                messages=messages,
+                tools=tools,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                tool_choice=tool_choice,
+            ),
+            timeout=resolve_stream_idle_timeout_s(),
         )
         if on_content_delta and response.content:
             await on_content_delta(response.content)
@@ -838,18 +1086,86 @@ class LLMProvider(ABC):
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
         """Call chat_stream() and convert unexpected exceptions to error responses."""
+        started_at_ms = time.time_ns() // 1_000_000
+        started_at_ns = time.monotonic_ns()
+        first_output_at_ns: int | None = None
+
+        def _mark_output(delta: str) -> None:
+            nonlocal first_output_at_ns
+            if delta and first_output_at_ns is None:
+                first_output_at_ns = time.monotonic_ns()
+
+        if self._llm_call_observer is not None:
+            content_callback = kwargs.get("on_content_delta")
+            if callable(content_callback):
+                typed_content_callback = cast(
+                    Callable[[str], Awaitable[None]],
+                    content_callback,
+                )
+
+                async def _timed_content_delta(delta: str) -> None:
+                    _mark_output(delta)
+                    await typed_content_callback(delta)
+
+                kwargs["on_content_delta"] = _timed_content_delta
+
+            thinking_callback = kwargs.get("on_thinking_delta")
+            if callable(thinking_callback):
+                typed_thinking_callback = cast(
+                    Callable[[str], Awaitable[None]],
+                    thinking_callback,
+                )
+
+                async def _timed_thinking_delta(delta: str) -> None:
+                    _mark_output(delta)
+                    await typed_thinking_callback(delta)
+
+                kwargs["on_thinking_delta"] = _timed_thinking_delta
+
+        def _attach_stream_timing(response: LLMResponse) -> LLMResponse:
+            if first_output_at_ns is None:
+                return response
+            finished_at_ns = time.monotonic_ns()
+            if response.ttft_ms is None:
+                response.ttft_ms = max(0, round((first_output_at_ns - started_at_ns) / 1_000_000))
+            if response.generation_ms is None:
+                response.generation_ms = max(
+                    1,
+                    round((finished_at_ns - first_output_at_ns) / 1_000_000),
+                )
+            return response
+
         try:
             provider_context = kwargs.pop("provider_context", None)
             if isinstance(provider_context, ProviderCallContext):
-                return await self.chat_stream_with_context(
+                response = await self.chat_stream_with_context(
                     provider_context=provider_context,
                     **kwargs,
                 )
-            return await self.chat_stream(**kwargs)
+            else:
+                response = await self.chat_stream(**kwargs)
         except asyncio.CancelledError:
+            self._observe_llm_call(
+                LLMResponse(
+                    content=None,
+                    finish_reason="cancelled",
+                    error_kind="cancelled",
+                ),
+                kwargs,
+                started_at_ms=started_at_ms,
+                started_at_ns=started_at_ns,
+                stream=True,
+            )
             raise
         except Exception as exc:
-            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            response = self._error_response_from_exception(exc)
+        return self._observe_llm_call(
+            _attach_stream_timing(response),
+            kwargs,
+            started_at_ms=started_at_ms,
+            started_at_ns=started_at_ns,
+            stream=True,
+        )
 
     async def chat_stream_with_retry(
         self,
@@ -865,8 +1181,10 @@ class LLMProvider(ABC):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
+        on_retry_status: RetryStatusCallback | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
@@ -903,12 +1221,17 @@ class LLMProvider(ABC):
             kw["provider_context"] = provider_context
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
-        return await self._run_with_retry(
-            self._safe_chat_stream,
+        on_retry_wait, on_retry_exhausted, on_retry_status = await self._retry_notifications(
+            provider_context, on_retry_wait, on_retry_exhausted, on_retry_status,
+        )
+        return await self._run_chat_with_retry(
             kw,
             messages,
+            stream=True,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+            on_retry_status=on_retry_status,
             should_retry_guard=lambda: not has_streamed_content,
             on_stream_recover=_recover_stream if on_stream_recover else None,
         )
@@ -923,8 +1246,10 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
+        on_retry_status: RetryStatusCallback | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -949,12 +1274,107 @@ class LLMProvider(ABC):
         )
         if provider_context is not None:
             kw["provider_context"] = provider_context
-        return await self._run_with_retry(
-            self._safe_chat,
+        on_retry_wait, on_retry_exhausted, on_retry_status = await self._retry_notifications(
+            provider_context, on_retry_wait, on_retry_exhausted, on_retry_status,
+        )
+        return await self._run_chat_with_retry(
             kw,
             messages,
+            stream=False,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+            on_retry_status=on_retry_status,
+        )
+
+    @staticmethod
+    async def _retry_notifications(
+        context: ProviderCallContext | None,
+        on_wait: RetryEventCallback | None,
+        on_exhausted: RetryEventCallback | None,
+        on_status: RetryStatusCallback | None,
+    ) -> tuple[RetryEventCallback | None, RetryEventCallback | None, RetryStatusCallback | None]:
+        """Adapt once at the retry-chain boundary, before candidate callbacks.
+
+        Explicit callbacks retain precedence. In particular a fallback candidate
+        exhaustion callback captures its result; it must not also notify the UI.
+        """
+        if on_wait is None and context is not None and context.events.publish is not None:
+            async def publish(content: str) -> None:
+                await context.events.emit(RetryWaitEvent(content))
+
+            on_wait = publish
+        if on_status is None and context is not None and context.events.accepts(RetryStatusEvent):
+            on_status = context.events.emit
+            # A turn may continue after an exhausted request; the new chain owns
+            # its own retry state, including when its first attempt is terminal.
+            await on_status(RetryStatusEvent("cleared", 1, None, "unknown"))
+        return on_wait, on_exhausted or on_wait, on_status
+
+    async def _run_chat_with_retry(
+        self,
+        kw: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        *,
+        stream: bool,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
+        on_retry_status: RetryStatusCallback | None,
+        should_retry_guard: Callable[[], bool] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Run one chat entry point through this provider's retry policy."""
+        call = self._safe_chat_stream if stream else self._safe_chat
+
+        async def attributed_call(**kwargs: Any) -> LLMResponse:
+            context = kwargs.get("provider_context")
+            if (
+                not isinstance(context, ProviderCallContext)
+                or context.response_preset is None
+                or not context.events.accepts(ResponseSourceEvent)
+            ):
+                return await call(**kwargs)
+            source = (
+                ResponseSource(
+                    provider=self.provider_name,
+                    model=kwargs.get("model") or self.get_default_model(),
+                    preset=context.response_preset,
+                    fallback=context.response_is_fallback,
+                )
+                if context.response_preset else None
+            )
+            await context.events.emit(ResponseSourceEvent(None))
+            delta_callback = kwargs.get("on_content_delta")
+            source_sent = False
+
+            async def attributed_delta(text: str) -> None:
+                nonlocal source_sent
+                if text and not source_sent:
+                    await context.events.emit(ResponseSourceEvent(source))
+                    source_sent = True
+                if delta_callback is not None:
+                    await delta_callback(text)
+
+            if delta_callback is not None:
+                kwargs["on_content_delta"] = attributed_delta
+            response = await call(**kwargs)
+            await context.events.emit(ResponseSourceEvent(
+                source if response.finish_reason != "error" and response.content else None,
+                content=response.content if response.finish_reason != "error" else None,
+            ))
+            return response
+
+        return await self._run_with_retry(
+            attributed_call,
+            kw,
+            original_messages,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+            on_retry_status=on_retry_status,
+            should_retry_guard=should_retry_guard,
+            on_stream_recover=on_stream_recover,
         )
 
     @classmethod
@@ -967,6 +1387,8 @@ class LLMProvider(ABC):
             r"retry[_-]?after[\"'\s:=]+(\d+(?:\.\d+)?)",
         )
         for idx, pattern in enumerate(patterns):
+            if idx == 1 and (compound := cls._extract_compound_try_again_in(text)) is not None:
+                return compound
             match = re.search(pattern, text)
             if not match:
                 continue
@@ -974,6 +1396,16 @@ class LLMProvider(ABC):
             unit = match.group(2) if idx < 3 else "s"
             return cls._to_retry_seconds(value, unit)
         return None
+
+    @classmethod
+    def _extract_compound_try_again_in(cls, text: str) -> float | None:
+        """Sum Go-style durations such as OpenAI's ``try again in 1m30s``."""
+        match = re.search(r"try again in\s+((?:\d+(?:\.\d+)?(?:ms|h|m|s))+)(?![a-z])", text)
+        if not match:
+            return None
+        unit_seconds = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+        parts = re.findall(r"(\d+(?:\.\d+)?)(ms|h|m|s)", match.group(1))
+        return max(0.1, sum(float(value) * unit_seconds[unit] for value, unit in parts))
 
     @classmethod
     def _to_retry_seconds(cls, value: float, unit: str | None = None) -> float:
@@ -1038,8 +1470,12 @@ class LLMProvider(ABC):
         *,
         attempt: int,
         persistent: bool,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        error_kind: str,
+        max_attempts: int | None,
+        on_retry_wait: RetryEventCallback | None = None,
+        on_retry_status: RetryStatusCallback | None = None,
     ) -> None:
+        next_retry_at = time.time() + max(0.0, delay)
         remaining = max(0.0, delay)
         while remaining > 0:
             if on_retry_wait:
@@ -1048,9 +1484,33 @@ class LLMProvider(ABC):
                     f"Model request failed, {kind} in {max(1, int(round(remaining)))}s "
                     f"(attempt {attempt})."
                 )
+            if on_retry_status:
+                await on_retry_status(
+                    RetryStatusEvent(
+                        state="waiting",
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        error_kind=error_kind,
+                        next_retry_at=next_retry_at,
+                    )
+                )
             chunk = min(remaining, self._RETRY_HEARTBEAT_CHUNK)
             await asyncio.sleep(chunk)
             remaining -= chunk
+
+    @classmethod
+    def public_error_kind(cls, response: LLMResponse) -> str:
+        """Return a stable public category without exposing provider details."""
+        if cls.is_arrearage_response(response):
+            return "billing"
+        kind = (response.error_kind or "").strip().lower()
+        if kind in {"connection", "timeout"}:
+            return kind
+        if response.error_status_code == 429:
+            return "rate_limit"
+        if response.error_status_code is not None and response.error_status_code >= 500:
+            return "server"
+        return "unknown"
 
     async def _run_with_retry(
         self,
@@ -1059,7 +1519,9 @@ class LLMProvider(ABC):
         original_messages: list[dict[str, Any]],
         *,
         retry_mode: str,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
+        on_retry_status: RetryStatusCallback | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
@@ -1069,10 +1531,26 @@ class LLMProvider(ABC):
         last_response: LLMResponse | None = None
         last_error_key: str | None = None
         identical_error_count = 0
+
+        async def _finish_retry_status(
+            state: Literal["recovered", "cleared"],
+            response: LLMResponse,
+        ) -> None:
+            if attempt > 1 and on_retry_status:
+                await on_retry_status(
+                    RetryStatusEvent(
+                        state=state,
+                        attempt=attempt,
+                        max_attempts=None if persistent else len(delays) + 1,
+                        error_kind=self.public_error_kind(response),
+                    )
+                )
+
         while True:
             attempt += 1
             response = await call(**kw)
             if response.finish_reason != "error":
+                await _finish_retry_status("recovered", response)
                 return response
             last_response = response
             if should_retry_guard is not None and not should_retry_guard():
@@ -1098,6 +1576,7 @@ class LLMProvider(ABC):
                     logger.warning(
                         "LLM stream failed after content was emitted; skipping retry"
                     )
+                    await _finish_retry_status("cleared", response)
                     return response
             error_key = ((response.content or "").strip().lower() or None)
             if error_key and error_key == last_error_key:
@@ -1123,6 +1602,10 @@ class LLMProvider(ABC):
                             context_window_tokens=(
                                 provider_context.context_window_tokens
                             ),
+                            session_id=provider_context.session_id,
+                            events=provider_context.events,
+                            response_preset=provider_context.response_preset,
+                            response_is_fallback=provider_context.response_is_fallback,
                         )
                 if stripped is not None or stripped_context is not None:
                     logger.warning(
@@ -1138,7 +1621,12 @@ class LLMProvider(ABC):
                     # subsequent iterations do not repeat the error-retry cycle.
                     if result.finish_reason != "error":
                         self._strip_image_content_inplace(original_messages)
+                    await _finish_retry_status(
+                        "recovered" if result.finish_reason != "error" else "cleared",
+                        result,
+                    )
                     return result
+                await _finish_retry_status("cleared", response)
                 return response
 
             if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:
@@ -1147,21 +1635,39 @@ class LLMProvider(ABC):
                     identical_error_count,
                     (response.content or "")[:120].lower(),
                 )
-                if on_retry_wait:
-                    await on_retry_wait(
+                if on_retry_exhausted:
+                    await on_retry_exhausted(
                         f"Persistent retry stopped after {identical_error_count} identical errors."
+                    )
+                if on_retry_status:
+                    await on_retry_status(
+                        RetryStatusEvent(
+                            state="exhausted",
+                            attempt=attempt,
+                            max_attempts=None,
+                            error_kind=self.public_error_kind(response),
+                        )
                     )
                 return response
 
             if not persistent and attempt > len(delays):
                 logger.warning(
-                    "LLM request failed after {} retries, giving up: {}",
+                    "LLM request failed after {} attempts, giving up: {}",
                     attempt,
                     (response.content or "")[:120].lower(),
                 )
-                if on_retry_wait:
-                    await on_retry_wait(
-                        f"Model request failed after {attempt} retries, giving up."
+                if on_retry_exhausted:
+                    await on_retry_exhausted(
+                        f"Model request failed after {attempt} attempts, giving up."
+                    )
+                if on_retry_status:
+                    await on_retry_status(
+                        RetryStatusEvent(
+                            state="exhausted",
+                            attempt=attempt,
+                            max_attempts=len(delays) + 1,
+                            error_kind=self.public_error_kind(response),
+                        )
                     )
                 break
 
@@ -1182,10 +1688,16 @@ class LLMProvider(ABC):
                 delay,
                 attempt=attempt,
                 persistent=persistent,
+                error_kind=self.public_error_kind(response),
+                max_attempts=None if persistent else len(delays) + 1,
                 on_retry_wait=on_retry_wait,
+                on_retry_status=on_retry_status,
             )
 
         return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]
+
+    async def aclose(self) -> None:
+        """Close provider-owned transports after their active requests have stopped."""
 
     @abstractmethod
     def get_default_model(self) -> str:

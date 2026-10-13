@@ -1,17 +1,8 @@
 {
-  "description": "Sử dụng nanobot từ các cuộc trò chuyện WeChat.",
-  "requirements": "Cài đặt kênh WeChat và gateway",
   "setup": {
     "primaryAction": "Kết nối WeChat",
     "docsLabel": "Mở hướng dẫn WeChat",
     "officialLabel": "Mở WeChat",
-    "tryIt": "Sau khi đăng nhập QR, gửi tin nhắn riêng đến tài khoản đã kết nối.",
-    "summary": "WeChat đăng nhập bằng mã QR và lưu trạng thái tài khoản cục bộ.",
-    "steps": [
-      "Nhấn Kết nối và quét QR bằng WeChat.",
-      "Giữ gateway cục bộ chạy khi WeChat nhận tin nhắn.",
-      "Gửi tin nhắn riêng thử để xác nhận kết nối."
-    ],
     "fields": {
       "allowFrom": {
         "label": "Người dùng được phép",
@@ -21,27 +12,54 @@
         "label": "Token",
         "placeholder": "Được lưu khi đăng nhập QR"
       },
-      "sendProgress": { "label": "Gửi tiến trình" },
-      "sendToolHints": { "label": "Gửi gợi ý công cụ" },
-      "streaming": { "label": "Sử dụng API phát trực tiếp" },
-      "replyProgressMessages": { "label": "Gửi tiến trình có cấu trúc" },
-      "replyProgressMaxMessages": { "label": "Giới hạn tiến trình có cấu trúc" },
-      "contextMessageBudget": { "label": "Ngân sách tin nhắn ngữ cảnh" },
-      "blockStreaming": { "label": "Gửi phản hồi theo khối" },
-      "blockStreamingMinChars": { "label": "Kích thước khối tối thiểu" },
-      "blockStreamingMaxMessages": { "label": "Giới hạn tin nhắn theo khối" },
-      "baseUrl": { "label": "URL API" },
-      "cdnBaseUrl": { "label": "URL CDN" },
-      "routeTag": { "label": "Thẻ định tuyến" },
-      "stateDir": { "label": "Thư mục trạng thái" },
-      "pollTimeout": { "label": "Thời gian chờ thăm dò" }
+      "sendProgress": {
+        "label": "Gửi tiến độ"
+      },
+      "sendToolHints": {
+        "label": "Gợi ý công cụ"
+      },
+      "streaming": {
+        "label": "Dùng API truyền theo luồng"
+      },
+      "replyProgressMessages": {
+        "label": "Tiến độ chi tiết"
+      },
+      "replyProgressMaxMessages": {
+        "label": "Giới hạn tin nhắn tiến độ"
+      },
+      "contextMessageBudget": {
+        "label": "Giới hạn tin nhắn ngữ cảnh"
+      },
+      "blockStreaming": {
+        "label": "Trả lời theo đoạn"
+      },
+      "blockStreamingMinChars": {
+        "label": "Độ dài đoạn tối thiểu (ký tự)"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "Giới hạn số đoạn"
+      },
+      "baseUrl": {
+        "label": "URL API"
+      },
+      "cdnBaseUrl": {
+        "label": "URL CDN"
+      },
+      "routeTag": {
+        "label": "Thẻ định tuyến"
+      },
+      "stateDir": {
+        "label": "Thư mục trạng thái"
+      },
+      "pollTimeout": {
+        "label": "Thời gian chờ thăm dò (giây)"
+      }
     }
   },
   "custom": {
     "qrAlt": "Mã QR đăng nhập WeChat",
     "scanTitle": "Quét bằng WeChat",
-    "scanDescription": "Quét bằng WeChat trên điện thoại. nanobot lưu trạng thái cục bộ sau khi đăng nhập.",
-    "waiting": "Đang chờ quét WeChat...",
+    "waiting": "Đang chờ bạn quét mã bằng WeChat…",
     "connected": "WeChat đã kết nối.",
     "stopped": "Đăng nhập WeChat đã dừng.",
     "connecting": "Đang kết nối...",

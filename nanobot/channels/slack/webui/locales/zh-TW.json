@@ -1,37 +1,92 @@
 {
-  "description": "在 Slack 工作區中使用 nanobot。",
-  "requirements": "Slack 應用程式權杖、機器人權杖和工作區安裝",
   "setup": {
     "docsLabel": "開啟 Slack 設定指南",
     "officialLabel": "開啟 Slack 應用程式後台",
-    "tryIt": "提及 Slack 應用程式，或向它傳送私訊。",
-    "summary": "Slack 預設使用 Socket Mode，因此同時需要應用程式層級權杖和機器人權杖。",
-    "steps": [
-      "使用提供的 manifest 建立 Slack 應用程式並啟用 Socket Mode。",
-      "將應用程式安裝到工作區，並複製應用程式權杖和機器人權杖。",
-      "儲存並啟用 Slack，然後提及應用程式或傳送私訊。"
-    ],
     "actions": {
-      "slack-manifest": "複製 manifest"
+      "slack-manifest": "複製應用程式資訊清單"
     },
     "fields": {
       "appToken": {
         "label": "應用程式權杖",
-        "placeholder": "xapp-...",
-        "help": "從 Slack Socket Mode 建立。"
+        "placeholder": "xapp-..."
       },
       "botToken": {
         "label": "機器人權杖",
-        "placeholder": "xoxb-...",
-        "help": "安裝 Slack 應用程式後使用機器人權杖。"
+        "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "群組行為",
+        "label": "群聊規則",
         "choices": {
-          "mention": "僅提及時",
-          "open": "所有訊息",
+          "mention": "提及回覆",
+          "open": "全部訊息",
           "allowlist": "允許清單"
         }
+      },
+      "mode": {
+        "label": "連接方式",
+        "choices": {
+          "socket": "Socket 模式"
+        }
+      },
+      "webhookPath": {
+        "label": "Webhook 路徑"
+      },
+      "replyInThread": {
+        "label": "話題回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "reactEmoji": {
+        "label": "已讀表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "includeThreadContext": {
+        "label": "話題上下文",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "threadContextLimit": {
+        "label": "上下文上限"
+      },
+      "allowFrom": {
+        "label": "允許使用者"
+      },
+      "groupAllowFrom": {
+        "label": "允許頻道"
+      },
+      "groupRequireMention": {
+        "label": "提及回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_enabled": {
+        "label": "啟用私聊",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_policy": {
+        "label": "私聊權限",
+        "choices": {
+          "allowlist": "白名單",
+          "open": "全部"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "私聊使用者"
+      },
+      "proxy": {
+        "label": "網路代理",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

@@ -2,9 +2,11 @@
 
 # pyright: reportIncompatibleMethodOverride=false
 
+from collections.abc import Awaitable, Callable, Generator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from pathlib import Path
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, cast
 
 from loguru import logger
 
@@ -15,6 +17,22 @@ from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameter
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
+
+_CURRENT_MESSAGE_SENDS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
+    "message_sends",
+    default=None,
+)
+
+
+@contextmanager
+def capture_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
+    """Record successful MessageTool targets within one agent run."""
+    sends: set[tuple[str, str]] = set()
+    token = _CURRENT_MESSAGE_SENDS.set(sends)
+    try:
+        yield sends
+    finally:
+        _CURRENT_MESSAGE_SENDS.reset(token)
 
 
 @tool_parameters(
@@ -68,7 +86,6 @@ class MessageTool(Tool):
         self._fallback_chat_id = default_chat_id
         self._fallback_message_id = default_message_id
         self._fallback_metadata: dict[str, Any] = {}
-        self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
         self._suppress_delivery_var: ContextVar[bool] = ContextVar(
             "message_suppress_delivery",
             default=False,
@@ -87,10 +104,6 @@ class MessageTool(Tool):
         """Set the callback for sending messages."""
         self._send_callback = callback
 
-    def start_turn(self) -> None:
-        """Reset per-turn send tracking."""
-        self._sent_in_turn = False
-
     def set_suppress_delivery(self, active: bool) -> Token[bool]:
         """Acknowledge but don't deliver tool sends (heartbeat internal check)."""
         return self._suppress_delivery_var.set(active)
@@ -100,14 +113,6 @@ class MessageTool(Tool):
         self._suppress_delivery_var.reset(token)
 
     @property
-    def _sent_in_turn(self) -> bool:
-        return self._sent_in_turn_var.get()
-
-    @_sent_in_turn.setter
-    def _sent_in_turn(self, value: bool) -> None:
-        self._sent_in_turn_var.set(value)
-
-    @property
     def name(self) -> str:
         return "message"
 
@@ -115,10 +120,10 @@ class MessageTool(Tool):
     def description(self) -> str:
         return (
             "Proactively send a message to a user/channel, optionally with file attachments. "
-            "Use this for reminders, cross-channel delivery, or explicit proactive sends. "
-            "Do not use this for the normal reply in the current chat: answer naturally instead. "
-            "If channel/chat_id would target the current runtime conversation, do not call this tool "
-            "unless the user explicitly asked you to proactively send an existing file attachment. "
+            "Use this for separate sends requested by the user or task, including sends to multiple chats. "
+            "For a normal reply, including a scheduled reminder or report, answer naturally instead: "
+            "nanobot delivers the final reply to the current chat. "
+            "Follow explicit task instructions that require this tool or name other recipients. "
             "When generate_image creates images in the current chat, use the message tool "
             "with the artifact paths in the media parameter to deliver the images to the user. "
             "For proactive attachment delivery, use the 'media' parameter with file paths. "
@@ -244,8 +249,9 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
-            if channel == default_channel and chat_id == default_chat_id:
-                self._sent_in_turn = True
+            sends = _CURRENT_MESSAGE_SENDS.get()
+            if sends is not None:
+                sends.add((channel, chat_id))
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = (
                 f" with {sum(len(row) for row in button_rows)} button(s)"

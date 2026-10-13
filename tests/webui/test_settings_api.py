@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import builtins
 import json
+import time
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
-from nanobot.providers.registry import find_by_name
+from nanobot.config.schema import Config, InlineFallbackConfig, ModelAPIConfig, ModelPresetConfig
+from nanobot.llm_usage import get_llm_usage_store
+from nanobot.llm_usage.models import LLMCallRecord
+from nanobot.providers.base import LLMUsage
+from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot
+from nanobot.providers.registry import ProviderModelSpec, find_by_name
+from nanobot.session.manager import SessionManager
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.webui.settings_api import (
     WebUISettingsError,
     _docs_version,
@@ -111,6 +118,26 @@ def test_settings_payload_exposes_edenai_provider(
     assert edenai["model_selectable"] is True
 
 
+def test_settings_payload_exposes_orcarouter_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.orcarouter.api_key = "sk-orca-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    orcarouter = next(row for row in payload["providers"] if row["name"] == "orcarouter")
+
+    assert orcarouter["label"] == "OrcaRouter"
+    assert orcarouter["configured"] is True
+    assert orcarouter["default_api_base"] == "https://api.orcarouter.ai/v1"
+    assert orcarouter["model_catalog"] == "catalog"
+    assert orcarouter["model_selectable"] is True
+
+
 def test_settings_payload_includes_relocated_capabilities(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -157,11 +184,13 @@ def test_update_api_settings_requires_key_for_network_access(
     with pytest.raises(WebUISettingsError, match="API key"):
         update_api_settings({"host": ["0.0.0.0"], "port": ["8900"]})
 
-    payload = update_api_settings({
-        "host": ["0.0.0.0"],
-        "port": ["9900"],
-        "api_key": ["secret-token"],
-    })
+    payload = update_api_settings(
+        {
+            "host": ["0.0.0.0"],
+            "port": ["9900"],
+            "api_key": ["secret-token"],
+        }
+    )
     saved = load_config(config_path)
     assert saved.api.host == "0.0.0.0"
     assert saved.api.port == 9900
@@ -216,7 +245,7 @@ def _dynamic_provider_config(
     return Config.model_validate(raw_config)
 
 
-def test_create_model_configuration_writes_label_without_changing_call_order(
+def test_create_model_configuration_accepts_legacy_label_without_changing_call_order(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -240,11 +269,10 @@ def test_create_model_configuration_writes_label_without_changing_call_order(
     assert payload["agent"]["model"] == "openai/gpt-4o"
     assert payload["created_model_preset"] == "fast-writing"
     rows = {row["name"]: row for row in payload["model_presets"]}
-    assert rows["fast-writing"]["label"] == "Fast writing"
+    assert rows["fast-writing"]["label"] == "fast-writing"
 
     saved = load_config(config_path)
     assert saved.agents.defaults.model_preset is None
-    assert saved.model_presets["fast-writing"].label == "Fast writing"
     assert saved.model_presets["fast-writing"].model == "openai/gpt-4.1-mini"
     assert saved.model_presets["fast-writing"].provider == "openai"
 
@@ -252,6 +280,67 @@ def test_create_model_configuration_writes_label_without_changing_call_order(
         create_model_configuration(
             {
                 "label": ["Fast writing"],
+                "provider": ["openai"],
+                "model": ["openai/gpt-4.1-mini"],
+            }
+        )
+    assert duplicate.value.status == 409
+
+
+def test_first_model_configuration_replaces_unused_schema_default(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = create_model_configuration(
+        {
+            "name": ["openai"],
+            "provider": ["openai"],
+            "model": ["openai/gpt-4.1"],
+        }
+    )
+
+    assert payload["model_call_order"] == ["openai"]
+    assert payload["model_call_order_editable"] is True
+    assert payload["agent"]["model_preset"] == "openai"
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset == "openai"
+    assert saved.agents.defaults.fallback_models == []
+    assert saved.model_presets["openai"].model == "openai/gpt-4.1"
+
+
+def test_create_model_configuration_preserves_canonical_name(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = create_model_configuration(
+        {
+            "name": ["Fast Writing"],
+            "provider": ["openai"],
+            "model": ["openai/gpt-4.1-mini"],
+        }
+    )
+
+    assert payload["created_model_preset"] == "Fast Writing"
+    rows = {row["name"]: row for row in payload["model_presets"]}
+    assert rows["Fast Writing"]["label"] == "Fast Writing"
+    assert "Fast Writing" in load_config(config_path).model_presets
+
+    with pytest.raises(WebUISettingsError) as duplicate:
+        create_model_configuration(
+            {
+                "name": ["fast writing"],
                 "provider": ["openai"],
                 "model": ["openai/gpt-4.1-mini"],
             }
@@ -275,7 +364,7 @@ def test_create_model_configuration_accepts_dynamic_custom_provider(
         }
     )
 
-    assert payload["agent"]["model_preset"] == "default"
+    assert payload["agent"]["model_preset"] == "tenant-model"
     assert payload["created_model_preset"] == "tenant-model"
     saved = load_config(config_path)
     assert saved.model_presets["tenant-model"].provider == DYNAMIC_PROVIDER_NAME
@@ -287,13 +376,15 @@ def test_create_model_configuration_rejects_dynamic_custom_provider_without_api_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate({
-        "providers": {
-            DYNAMIC_PROVIDER_NAME: {
-                "apiKey": "sk-test",
+    config = Config.model_validate(
+        {
+            "providers": {
+                DYNAMIC_PROVIDER_NAME: {
+                    "apiKey": "sk-test",
+                }
             }
         }
-    })
+    )
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -307,9 +398,19 @@ def test_create_model_configuration_rejects_dynamic_custom_provider_without_api_
         )
 
 
+@pytest.mark.parametrize(
+    "label, provider_name, model",
+    [
+        pytest.param("Deep", "openai", "openai/gpt-4.1", id="unconfigured_provider"),
+        pytest.param("Azure", "azure_openai", "my-deployment", id="azure_openai_without_base"),
+    ],
+)
 def test_create_model_configuration_rejects_unconfigured_provider(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    label,
+    provider_name,
+    model,
 ) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
@@ -318,9 +419,9 @@ def test_create_model_configuration_rejects_unconfigured_provider(
     with pytest.raises(WebUISettingsError, match="provider is not configured"):
         create_model_configuration(
             {
-                "label": ["Deep"],
-                "provider": ["openai"],
-                "model": ["openai/gpt-4.1"],
+                "label": [label],
+                "provider": [provider_name],
+                "model": [model],
             }
         )
 
@@ -333,7 +434,6 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     config = Config()
     config.providers.openai.api_key = "sk-test"
     config.model_presets["codex"] = ModelPresetConfig(
-        label="Old Codex",
         provider="openai",
         model="openai/gpt-4.1",
     )
@@ -362,9 +462,101 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     assert payload["agent"]["model"] == "anthropic/claude-opus-4-5"
     saved = load_config(config_path)
     assert saved.agents.defaults.model_preset is None
-    assert saved.model_presets["codex"].label == "Codex"
     assert saved.model_presets["codex"].provider == "openai_codex"
     assert saved.model_presets["codex"].model == "openai-codex/gpt-5.5"
+
+
+def test_update_model_configuration_renames_preset_and_config_references(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.model_presets = {
+        "openai": ModelPresetConfig(model="openai/gpt-4.1"),
+        "backup": ModelPresetConfig(model="anthropic/claude-sonnet-4"),
+    }
+    defaults = config.agents.defaults
+    defaults.model_preset = "openai"
+    defaults.fallback_models = ["backup", "openai"]
+    defaults.dream.model_override = "openai"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    session_manager = SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "sessions",
+    )
+    session = session_manager.get_or_create("websocket:selected")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+    session_manager.save(session)
+
+    payload = update_model_configuration(
+        {"name": ["openai"], "new_name": ["Codex"]},
+        rename_model_preset=session_manager.rename_model_preset,
+    )
+
+    assert payload["agent"]["model_preset"] == "Codex"
+    assert payload["model_call_order"] == ["Codex", "backup", "Codex"]
+    assert [row["name"] for row in payload["model_presets"]] == [
+        "default",
+        "Codex",
+        "backup",
+    ]
+    saved = load_config(config_path)
+    assert list(saved.model_presets) == ["Codex", "backup"]
+    assert saved.agents.defaults.model_preset == "Codex"
+    assert saved.agents.defaults.fallback_models == ["backup", "Codex"]
+    assert saved.agents.defaults.dream.model_override == "Codex"
+    persisted = SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "sessions",
+    ).get_or_create("websocket:selected")
+    assert persisted.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+
+
+def test_update_model_configuration_rejects_duplicate_rename(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.model_presets = {
+        "openai": ModelPresetConfig(model="openai/gpt-4.1"),
+        "Codex": ModelPresetConfig(model="openai/gpt-5.5"),
+    }
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError) as duplicate:
+        update_model_configuration({"name": ["openai"], "new_name": ["codex"]})
+
+    assert duplicate.value.status == 409
+    assert set(load_config(config_path).model_presets) == {"openai", "Codex"}
+
+
+def test_update_model_configuration_rolls_back_sessions_when_config_save_fails(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config(model_presets={"openai": ModelPresetConfig(model="openai/gpt-4.1")})
+    save_config(config, config_path)
+    calls: list[tuple[str, str]] = []
+
+    def fail_save(_config: Config, _path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("nanobot.webui.settings_api._save_settings_config", fail_save)
+
+    with pytest.raises(OSError, match="disk full"):
+        update_model_configuration(
+            {"name": ["openai"], "new_name": ["Codex"]},
+            config_path=config_path,
+            rename_model_preset=lambda old, new: calls.append((old, new)) or 1,
+        )
+
+    assert calls == [("openai", "Codex"), ("Codex", "openai")]
+    assert list(load_config(config_path).model_presets) == ["openai"]
 
 
 def test_settings_payload_exposes_named_model_call_order(
@@ -410,7 +602,7 @@ def test_update_model_call_order_sets_primary_and_fallbacks(
     assert saved.agents.defaults.fallback_models == ["primary"]
 
 
-def test_update_model_call_order_requires_named_primary(
+def test_update_model_call_order_activates_existing_named_preset(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -420,11 +612,36 @@ def test_update_model_call_order_requires_named_primary(
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
+    payload = update_model_call_order({"order": [json.dumps(["backup"])]})
+
+    assert payload["model_call_order"] == ["backup"]
+    assert payload["model_call_order_editable"] is True
+    assert load_config(config_path).agents.defaults.model_preset == "backup"
+
+
+def test_update_model_call_order_preserves_real_legacy_configuration(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    config.agents.defaults.model = "openai/gpt-4o"
+    config.agents.defaults.provider = "openai"
+    config.model_presets["backup"] = ModelPresetConfig(
+        model="openai/gpt-4.1-mini",
+        provider="openai",
+    )
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
     with pytest.raises(WebUISettingsError) as error:
         update_model_call_order({"order": [json.dumps(["backup"])]})
 
     assert error.value.status == 409
-    assert load_config(config_path).agents.defaults.model_preset is None
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset is None
+    assert saved.agents.defaults.model == "openai/gpt-4o"
 
 
 def test_migrate_model_configurations_preserves_legacy_chain(
@@ -449,6 +666,7 @@ def test_migrate_model_configurations_preserves_legacy_chain(
     legacy_payload = settings_payload()
     assert legacy_payload["model_call_order"] == []
     assert legacy_payload["model_call_order_editable"] is False
+    assert legacy_payload["model_configuration_migratable"] is True
 
     payload = migrate_model_configurations()
 
@@ -464,6 +682,27 @@ def test_migrate_model_configurations_preserves_legacy_chain(
     repeated = migrate_model_configurations()
     assert repeated["model_call_order"] == ["gpt-4o", "claude-sonnet-4"]
     assert set(load_config(config_path).model_presets) == {"gpt-4o", "claude-sonnet-4"}
+
+
+def test_schema_default_is_not_exposed_or_materialized_as_legacy_configuration(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    assert payload["model_configuration_migratable"] is False
+    assert payload["model_call_order_editable"] is False
+    with pytest.raises(WebUISettingsError) as error:
+        migrate_model_configurations()
+
+    assert error.value.status == 409
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset is None
+    assert saved.model_presets == {}
 
 
 def test_model_configuration_advanced_options_round_trip(
@@ -507,7 +746,107 @@ def test_model_configuration_advanced_options_round_trip(
     assert row["reasoning_effort"] is None
 
 
-def test_delete_model_configuration_requires_removing_it_from_call_order(
+@pytest.mark.parametrize("protocol", ["responses", "anthropic_messages"])
+def test_custom_preset_api_round_trip_and_reset(tmp_path, monkeypatch, protocol):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({"providers": {
+        "tenant": {"apiBase": "https://tenant.test/v1"},
+    }})
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    api = {"supported_apis": [protocol], "preferred_api": protocol}
+    created = create_model_configuration({
+        "name": ["reasoning"], "provider": ["tenant"], "model": ["gpt-6-luna"],
+        "api": [json.dumps(api)],
+    })
+    row = next(row for row in created["model_presets"] if row["name"] == "reasoning")
+    assert row["api"] == api
+    providers = {row["name"]: row for row in created["providers"]}
+    assert providers["tenant"]["model_api_configurable"] is True
+    assert providers["github_copilot"]["model_api_configurable"] is True
+    assert providers["anthropic"]["model_api_configurable"] is False
+    assert providers["tenant"]["request_apis"] == ["chat_completions", "responses", "anthropic_messages"]
+    assert providers["openai_codex"]["request_apis"] == ["responses"]
+    assert providers["anthropic"]["request_apis"] == ["anthropic_messages"]
+    assert providers["bedrock"]["request_apis"] == ["bedrock_converse"]
+    saved = load_config(config_path)
+    assert saved.model_presets["reasoning"].api.to_capabilities().preferred_api == protocol
+    assert json.loads(config_path.read_text(encoding="utf-8"))["modelPresets"]["reasoning"]["api"] == {
+        "supportedApis": [protocol], "preferredApi": protocol,
+    }
+
+    update_model_call_order({"order": [json.dumps(["reasoning"])]})
+    assert settings_payload()["agent"]["api"] == api
+    update_model_configuration({"name": ["reasoning"], "temperature": ["0.3"]})
+    assert settings_payload()["agent"]["api"] == api
+    reset = update_model_configuration({"name": ["reasoning"], "api": [""]})
+    assert next(row for row in reset["model_presets"] if row["name"] == "reasoning")["api"] is None
+    assert load_config(config_path).model_presets["reasoning"].api is None
+    update_model_configuration({"name": ["reasoning"], "api": [json.dumps(api)]})
+    update_model_configuration({"name": ["reasoning"], "model": ["another-model"]})
+    assert load_config(config_path).model_presets["reasoning"].api is None
+
+
+@pytest.mark.parametrize("provider,api,error", [
+    ("openai", {"supportedApis": ["chat_completions"], "preferredApi": "responses"}, "api must declare"),
+    ("anthropic", {"supportedApis": ["responses"]}, "does not support"),
+    ("openai", {"supportedApis": ["anthropic_messages"]}, "does not support"),
+    ("anthropic", {"supportedApis": ["anthropic_messages", "responses"]}, "api must declare"),
+])
+def test_create_preset_rejects_invalid_api_without_saving(tmp_path, monkeypatch, provider, api, error):
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "fixture"
+    config.providers.anthropic.api_key = "fixture"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    with pytest.raises(WebUISettingsError, match=error):
+        create_model_configuration({
+            "name": ["test"], "provider": [provider], "model": ["test-model"],
+            "api": [json.dumps(api)],
+        })
+    assert load_config(config_path).model_presets == {}
+
+
+def test_fixed_responses_provider_rejects_chat_without_saving(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "modelPresets": {"codex": {"provider": "openai_codex", "model": "gpt-6-astra"}},
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    with pytest.raises(WebUISettingsError, match="OpenAI Codex.*does not support chat_completions"):
+        update_model_configuration({
+            "name": ["codex"], "api": [json.dumps({"supportedApis": ["chat_completions"]})],
+        })
+    assert load_config(config_path).model_presets["codex"].api is None
+    update_model_configuration({
+        "name": ["codex"], "api": [json.dumps({"supportedApis": ["responses"]})],
+    })
+    assert load_config(config_path).model_presets["codex"].api.supported_apis == ("responses",)
+
+
+def test_legacy_migration_preserves_primary_and_fallback_apis(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({"providers": {
+        "tenant": {"apiBase": "https://tenant.test/v1"},
+    }})
+    defaults = config.agents.defaults
+    defaults.model = "tenant/reasoning"
+    defaults.provider = "tenant"
+    defaults.api = ModelAPIConfig(supported_apis=("responses",))
+    defaults.fallback_models = [InlineFallbackConfig(
+        provider="tenant", model="tenant/chat", api=ModelAPIConfig(supported_apis=("chat_completions",)),
+    )]
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    migrate_model_configurations()
+    saved = load_config(config_path)
+    assert saved.model_presets["reasoning"].api == defaults.api
+    assert saved.model_presets["chat"].api == defaults.fallback_models[0].api
+
+
+def test_delete_model_configuration_protects_primary_and_removes_fallback_references(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -518,6 +857,7 @@ def test_delete_model_configuration_requires_removing_it_from_call_order(
         "spare": ModelPresetConfig(model="openai/gpt-4.1-mini"),
     }
     config.agents.defaults.model_preset = "primary"
+    config.agents.defaults.fallback_models = ["spare", "primary", "spare"]
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -528,6 +868,7 @@ def test_delete_model_configuration_requires_removing_it_from_call_order(
     payload = delete_model_configuration({"name": ["spare"]})
     assert {row["name"] for row in payload["model_presets"]} == {"default", "primary"}
     assert "spare" not in load_config(config_path).model_presets
+    assert load_config(config_path).agents.defaults.fallback_models == ["primary"]
 
 
 def test_update_provider_settings_updates_dynamic_custom_provider(
@@ -700,7 +1041,7 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
     )
 
     saved = load_config(config_path)
-    assert saved.providers.openai.api_type == "responses"
+    assert saved.providers.openai.api.to_capabilities().preferred_api == "responses"
     assert saved.providers.openai.proxy == "http://127.0.0.1:7890"
     assert saved.providers.openai.extra_headers == {"X-Trace": "enabled"}
     assert saved.providers.openai.extra_body == {"service_tier": "priority"}
@@ -738,11 +1079,13 @@ def test_update_provider_settings_updates_and_clears_oauth_proxy(
         },
     )
 
-    payload = update_provider_settings({
-        "provider": [provider_name],
-        "proxy": [" http://127.0.0.1:7890 "],
-        "extraBody": [json.dumps({"tools": []})],
-    })
+    payload = update_provider_settings(
+        {
+            "provider": [provider_name],
+            "proxy": [" http://127.0.0.1:7890 "],
+            "extraBody": [json.dumps({"tools": []})],
+        }
+    )
 
     providers = {row["name"]: row for row in payload["providers"]}
     assert providers[provider_name]["proxy"] == "http://127.0.0.1:7890"
@@ -814,7 +1157,6 @@ def test_update_model_configuration_preserves_custom_context_windows(
     config_path = tmp_path / "config.json"
     config = Config()
     config.model_presets["codex"] = ModelPresetConfig(
-        label="Codex",
         provider="openai",
         model="openai/gpt-4.1",
     )
@@ -834,7 +1176,7 @@ def test_update_model_configuration_preserves_custom_context_windows(
     assert saved.model_presets["codex"].context_window_tokens == 128000
 
 
-def test_update_context_window_rejects_unknown_values(
+def test_update_context_window_persists_custom_value(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -842,11 +1184,9 @@ def test_update_context_window_rejects_unknown_values(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(
-        WebUISettingsError,
-        match="context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576",
-    ):
-        update_agent_settings({"context_window_tokens": ["128000"]})
+    payload = update_agent_settings({"context_window_tokens": ["128000"]})
+    assert payload["agent"]["context_window_tokens"] == 128000
+    assert load_config(config_path).agents.defaults.context_window_tokens == 128000
 
 
 def test_update_model_configuration_rejects_default_preset(
@@ -948,15 +1288,17 @@ def test_settings_payload_groups_opencode_compatibility_alias(tmp_path, monkeypa
 
 def test_settings_payload_keeps_configured_opencode_legacy_alias(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate({
-        "providers": {"opencodeZen": {"apiKey": "legacy-key"}},
-        "agents": {
-            "defaults": {
-                "provider": "opencode_zen",
-                "model": "opencode/deepseek-v4-pro",
-            }
-        },
-    })
+    config = Config.model_validate(
+        {
+            "providers": {"opencodeZen": {"apiKey": "legacy-key"}},
+            "agents": {
+                "defaults": {
+                    "provider": "opencode_zen",
+                    "model": "opencode/deepseek-v4-pro",
+                }
+            },
+        }
+    )
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -973,13 +1315,15 @@ def test_settings_payload_marks_dynamic_custom_provider_without_api_base_unconfi
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate({
-        "providers": {
-            DYNAMIC_PROVIDER_NAME: {
-                "apiKey": "sk-test",
+    config = Config.model_validate(
+        {
+            "providers": {
+                DYNAMIC_PROVIDER_NAME: {
+                    "apiKey": "sk-test",
+                }
             }
         }
-    })
+    )
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -1315,11 +1659,18 @@ def test_settings_payload_includes_token_usage_summary(
     config = Config()
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
-
-    from nanobot.webui.token_usage import record_token_usage
-
-    record_token_usage({"prompt_tokens": 10, "completion_tokens": 5})
+    get_llm_usage_store().record(
+        LLMCallRecord(
+            started_at_ms=int(time.time() * 1000),
+            duration_ms=1,
+            provider="openai",
+            model="gpt-5",
+            source="user",
+            stream=False,
+            finish_reason="stop",
+            usage=LLMUsage.reported(input_tokens=10, output_tokens=5),
+        )
+    )
 
     payload = settings_payload()
 
@@ -1340,11 +1691,18 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
     config = Config()
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
-
-    from nanobot.webui.token_usage import record_token_usage
-
-    record_token_usage({"prompt_tokens": 20, "completion_tokens": 2})
+    get_llm_usage_store().record(
+        LLMCallRecord(
+            started_at_ms=int(time.time() * 1000),
+            duration_ms=1,
+            provider="openai",
+            model="gpt-5",
+            source="user",
+            stream=False,
+            finish_reason="stop",
+            usage=LLMUsage.reported(input_tokens=20, output_tokens=2),
+        )
+    )
 
     payload = settings_usage_payload()
 
@@ -1622,14 +1980,31 @@ def test_openai_codex_remote_login_uses_headless_dependency_mode(
     assert captured["cancelled"] is True
 
 
-def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
+@pytest.mark.parametrize(
+    "module_name, provider",
+    [
+        pytest.param(
+            "nanobot.providers.openai_codex_oauth",
+            "openai-codex",
+            id="openai_codex_oauth_login_reports_missing_oauth_cli_kit",
+        ),
+        pytest.param(
+            "nanobot.providers.github_copilot_oauth",
+            "github-copilot",
+            id="github_copilot_oauth_login_reports_missing_oauth_cli_kit",
+        ),
+    ],
+)
+def test_oauth_login_reports_missing_oauth_cli_kit(
     monkeypatch: pytest.MonkeyPatch,
     oauth_flows: WebUIOAuthFlowRegistry,
+    module_name,
+    provider,
 ) -> None:
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
-        if name == "nanobot.providers.openai_codex_oauth":
+        if name == module_name:
             raise ImportError("missing")
         return real_import(name, *args, **kwargs)
 
@@ -1637,32 +2012,7 @@ def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
 
     with pytest.raises(WebUISettingsError) as exc:
         login_oauth_provider(
-            {"provider": ["openai-codex"]},
-            oauth_flows=oauth_flows,
-        )
-
-    assert str(exc.value) == (
-        "This nanobot installation is missing the required oauth-cli-kit package. "
-        "Reinstall or upgrade nanobot-ai using the same installation method."
-    )
-
-
-def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
-    monkeypatch: pytest.MonkeyPatch,
-    oauth_flows: WebUIOAuthFlowRegistry,
-) -> None:
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "nanobot.providers.github_copilot_provider":
-            raise ImportError("missing")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    with pytest.raises(WebUISettingsError) as exc:
-        login_oauth_provider(
-            {"provider": ["github-copilot"]},
+            {"provider": [provider]},
             oauth_flows=oauth_flows,
         )
 
@@ -1768,9 +2118,7 @@ def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
         )
 
     assert exc.value.status == 502
-    assert str(exc.value) == (
-        "xAI OAuth login failed: Could not reach xAI sign-in: ConnectError."
-    )
+    assert str(exc.value) == ("xAI OAuth login failed: Could not reach xAI sign-in: ConnectError.")
     assert exc.value.__cause__ is failure
 
 
@@ -1834,39 +2182,219 @@ def test_provider_models_payload_fetches_openai_compatible_models(
     assert payload["models"][1]["context_window"] == 65536
 
 
-def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
+def test_provider_models_payload_returns_online_openai_codex_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models.get_oauth_model_catalog",
+        lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
+            models=(
+                ProviderModelSpec(
+                    id="openai-codex/gpt-5.6-sol",
+                    label="GPT-5.6-Sol",
+                    description="Latest frontier agentic coding model.",
+                    owned_by="OpenAI Codex",
+                    context_window=272_000,
+                    reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
+                ),
+            ),
+            source="remote",
+            fetched_at=123,
+        ),
+    )
+
     payload = provider_models_payload({"provider": ["openai_codex"]})
 
     assert payload["status"] == "available"
-    assert payload["catalog_kind"] == "builtin"
-    assert payload["model_count"] == 7
+    assert payload["catalog_kind"] == "hybrid"
+    assert payload["source"] == "remote"
+    assert payload["model_count"] == 1
     assert payload["models"][0] == {
         "id": "openai-codex/gpt-5.6-sol",
         "label": "GPT-5.6-Sol",
         "description": "Latest frontier agentic coding model.",
         "owned_by": "OpenAI Codex",
-        "context_window": 372000,
+        "context_window": 272000,
+        "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "supports_backend_search": False,
     }
-    assert [model["id"] for model in payload["models"][:3]] == [
-        "openai-codex/gpt-5.6-sol",
-        "openai-codex/gpt-5.6-terra",
-        "openai-codex/gpt-5.6-luna",
-    ]
 
 
-def test_provider_models_payload_returns_xai_grok_model() -> None:
+@pytest.mark.parametrize("source", ["stale", "fallback"])
+@pytest.mark.parametrize("error_kind", ["auth_required", "unavailable"])
+def test_provider_models_payload_exposes_catalog_failure_with_usable_models(
+    monkeypatch, source, error_kind,
+):
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models.get_oauth_model_catalog",
+        lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
+            models=(ProviderModelSpec(id="openai-codex/offline-model"),),
+            source=source, fetched_at=123, error_kind=error_kind,
+        ),
+    )
+    payload = provider_models_payload({"provider": ["openai_codex"]})
+    assert payload["status"] == "available"
+    assert payload["source"] == source
+    assert payload["error_kind"] == error_kind
+    assert payload["models"][0]["id"] == "openai-codex/offline-model"
+
+
+def test_copilot_explicit_login_does_not_reuse_revoked_credentials(monkeypatch, oauth_flows):
+    from unittest.mock import Mock
+
+    from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
+
+    start = Mock()
+    invalidate = Mock()
+    monkeypatch.setattr(
+        "nanobot.providers.github_copilot_provider.get_github_copilot_login_status",
+        lambda: SimpleNamespace(access="revoked-token"),
+    )
+    monkeypatch.setattr(GitHubCopilotOAuthFlow, "start", start)
+    monkeypatch.setattr(GitHubCopilotOAuthFlow, "complete", lambda _: SimpleNamespace(access="new-token"))
+    monkeypatch.setattr("nanobot.webui.settings_models.invalidate_oauth_model_catalog", invalidate)
+    monkeypatch.setattr("nanobot.webui.settings_api.settings_payload", lambda **_: {"ready": True})
+    payload = login_oauth_provider({"provider": ["github-copilot"]}, oauth_flows=oauth_flows)
+    assert payload["status"] == "authorization_required"
+    assert payload["completion_input"] == "device_code"
+    start.assert_called_once()
+    invalidate.assert_not_called()
+    assert complete_oauth_provider(
+        {"provider": ["github-copilot"], "flow_id": [payload["flow_id"]]},
+        oauth_flows=oauth_flows,
+    ) == {"ready": True}
+    invalidate.assert_called_once_with("github_copilot")
+
+
+@pytest.mark.parametrize("provider", ["openai_codex", "xai_grok"])
+def test_oauth_completion_clears_same_account_catalog_failure(monkeypatch, oauth_flows, provider):
+    from nanobot.providers.oauth_model_catalog import OAuthModelCatalog
+
+    signed_in = [False]
+
+    def fetch(_proxy):
+        if not signed_in[0]:
+            request = httpx.Request("GET", "https://example.com/models")
+            raise httpx.HTTPStatusError("revoked", request=request, response=httpx.Response(401))
+        return (ProviderModelSpec(id="provider/new-model"),)
+
+    catalog = OAuthModelCatalog(fallback_models=(), fetch=fetch)
+    module = f"nanobot.providers.{provider}_provider"
+    monkeypatch.setattr(f"{module}._{provider.upper()}_MODEL_CATALOG", catalog)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models.get_oauth_model_catalog",
+        lambda *_args, **_kwargs: catalog.get(cache_key="same-account"),
+    )
+    monkeypatch.setattr("nanobot.webui.settings_api.settings_payload", lambda **_: {"ready": True})
+
+    class Flow:
+        expired = False
+
+        def cancel(self):
+            pass
+
+    def complete(*_args):
+        signed_in[0] = True
+        return SimpleNamespace(access="fixture")
+
+    owner = "openai_codex_oauth" if provider == "openai_codex" else "xai_oauth"
+    completion = "complete_openai_codex_oauth_login" if provider == "openai_codex" else "complete_xai_oauth_login"
+    monkeypatch.setattr(f"nanobot.providers.{owner}.{completion}", complete)
+    oauth_flows.register(provider, "flow-test", Flow())
+    before = provider_models_payload({"provider": [provider]})
+    assert before["error_kind"] == "auth_required"
+    assert complete_oauth_provider(
+        {"provider": [provider], "flow_id": ["flow-test"]},
+        "synthetic-callback", oauth_flows=oauth_flows,
+    ) == {"ready": True}
+    after = provider_models_payload({"provider": [provider]})
+    assert after["source"] == "remote"
+    assert after["error_kind"] is None
+    assert after["models"][0]["id"] == "provider/new-model"
+
+
+def test_provider_models_payload_returns_online_github_copilot_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models.get_oauth_model_catalog",
+        lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
+            models=(
+                ProviderModelSpec(
+                    id="github-copilot/claude-sonnet",
+                    label="Claude Sonnet",
+                    owned_by="GitHub Copilot",
+                    context_window=200_000,
+                ),
+            ),
+            source="remote",
+            fetched_at=123,
+        ),
+    )
+
+    payload = provider_models_payload({"provider": ["github_copilot"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "hybrid"
+    assert payload["source"] == "remote"
+    assert payload["models"][0]["id"] == "github-copilot/claude-sonnet"
+
+
+def test_provider_models_payload_returns_online_xai_grok_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models.get_oauth_model_catalog",
+        lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
+            models=(
+                ProviderModelSpec(
+                    id="xai-grok/grok-4.6",
+                    label="Grok 4.6",
+                    description="Latest frontier model",
+                    owned_by="xAI",
+                    context_window=500_000,
+                    reasoning_efforts=("xhigh", "high", "medium", "low"),
+                    supports_backend_search=True,
+                ),
+                ProviderModelSpec(
+                    id="xai-grok/grok-4.5",
+                    label="Grok 4.5",
+                    owned_by="xAI",
+                    context_window=500_000,
+                    reasoning_efforts=("high", "medium", "low"),
+                    supports_backend_search=True,
+                ),
+            ),
+            source="remote",
+            fetched_at=123,
+        ),
+    )
+
     payload = provider_models_payload({"provider": ["xai_grok"]})
 
     assert payload["status"] == "available"
-    assert payload["catalog_kind"] == "builtin"
+    assert payload["catalog_kind"] == "hybrid"
+    assert payload["source"] == "remote"
+    assert payload["fetched_at"] == 123
     assert payload["models"] == [
+        {
+            "id": "xai-grok/grok-4.6",
+            "label": "Grok 4.6",
+            "description": "Latest frontier model",
+            "owned_by": "xAI",
+            "context_window": 500000,
+            "reasoning_efforts": ["xhigh", "high", "medium", "low"],
+            "supports_backend_search": True,
+        },
         {
             "id": "xai-grok/grok-4.5",
             "label": "Grok 4.5",
-            "description": "Grok via xAI subscription; X Search is enabled when supported.",
-            "owned_by": "xAI Grok",
+            "description": None,
+            "owned_by": "xAI",
             "context_window": 500000,
-        }
+            "reasoning_efforts": ["high", "medium", "low"],
+            "supports_backend_search": True,
+        },
     ]
 
 
@@ -1958,11 +2486,50 @@ def test_provider_models_payload_requires_gateway_key(
     assert payload["models"] == []
 
 
+def test_provider_models_payload_fetches_orcarouter_catalog(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.orcarouter.api_key = "sk-orca-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.orcarouter.ai/v1/models"
+        assert kwargs["headers"]["Authorization"] == "Bearer sk-orca-test"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "orcarouter/auto", "owned_by": "orcarouter"},
+                    {"id": "anthropic/claude-sonnet-4.6", "owned_by": "anthropic"},
+                ]
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+
+    payload = provider_models_payload({"provider": ["orcarouter"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "catalog"
+    assert [model["id"] for model in payload["models"]] == [
+        "orcarouter/auto",
+        "anthropic/claude-sonnet-4.6",
+    ]
+
+
 def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
     assert _model_catalog_kind(find_by_name("skywork")) == "official"
     assert _model_catalog_kind(find_by_name("anthropic")) == "unsupported"
     assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
-    assert _model_catalog_kind(find_by_name("openai_codex")) == "builtin"
+    assert _model_catalog_kind(find_by_name("orcarouter")) == "catalog"
+    assert _model_catalog_kind(find_by_name("openai_codex")) == "hybrid"
+    assert _model_catalog_kind(find_by_name("xai_grok")) == "hybrid"
+    assert _model_catalog_kind(find_by_name("github_copilot")) == "hybrid"
 
 
 def test_create_model_configuration_accepts_configured_oauth_provider(
@@ -1990,7 +2557,7 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
         }
     )
 
-    assert payload["agent"]["model_preset"] == "default"
+    assert payload["agent"]["model_preset"] == "codex"
     assert payload["created_model_preset"] == "codex"
     saved = load_config(config_path)
     assert saved.model_presets["codex"].provider == "openai_codex"
@@ -2078,30 +2645,11 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
         }
     )
 
-    assert payload["agent"]["model_preset"] == "default"
+    assert payload["agent"]["model_preset"] == "azure-aad"
     assert payload["created_model_preset"] == "azure-aad"
     saved = load_config(config_path)
     assert saved.model_presets["azure-aad"].provider == "azure_openai"
     assert saved.model_presets["azure-aad"].model == "my-deployment"
-
-
-def test_create_model_configuration_rejects_azure_openai_without_base(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """azure_openai without api_base must still be rejected as not configured."""
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    with pytest.raises(WebUISettingsError, match="provider is not configured"):
-        create_model_configuration(
-            {
-                "label": ["Azure"],
-                "provider": ["azure_openai"],
-                "model": ["my-deployment"],
-            }
-        )
 
 
 def test_azure_openai_spec_no_longer_requires_api_key() -> None:
@@ -2111,3 +2659,98 @@ def test_azure_openai_spec_no_longer_requires_api_key() -> None:
     spec = find_by_name("azure_openai")
     assert spec is not None
     assert _provider_requires_api_key(spec) is False
+
+
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses", "anthropic_messages"])
+def test_custom_connection_api_create_edit_and_preset_ceiling(tmp_path, monkeypatch, protocol):
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    api = {"supported_apis": [protocol], "preferred_api": protocol}
+    payload = create_provider_settings({
+        "name": ["Protocol Gateway"], "apiBase": ["https://tenant.test/v1"],
+        "api": [json.dumps(api)],
+    })
+    key = payload["created_provider"]
+    row = next(row for row in payload["providers"] if row["name"] == key)
+    assert payload["provider_api_configuration_supported"] is True
+    assert row["api"] == api
+    assert row["request_apis"] == [protocol]
+    assert row["adapter_request_apis"] == ["chat_completions", "responses", "anthropic_messages"]
+    assert row["provider_api_configurable"] is True
+    assert row["model_api_configurable"] is False
+    assert load_config(config_path).providers.model_extra[key].api.to_capabilities().preferred_api == protocol
+    create_model_configuration({
+        "name": ["supported"], "provider": [key], "model": ["served-model"],
+        "api": [json.dumps(api)],
+    })
+    other = "responses" if protocol != "responses" else "anthropic_messages"
+    before = config_path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="does not accept request APIs"):
+        create_model_configuration({
+            "name": ["unsupported"], "provider": [key], "model": ["served-model"],
+            "api": [json.dumps({"supportedApis": [other]})],
+        })
+    with pytest.raises(WebUISettingsError, match="does not accept request APIs"):
+        update_provider_settings({
+            "provider": [key], "api": [json.dumps({"supportedApis": [other]})],
+        })
+    assert config_path.read_bytes() == before
+    expanded = {"supported_apis": [protocol, other], "preferred_api": other}
+    update_provider_settings({"provider": [key], "api": [json.dumps(expanded)]})
+    update_provider_settings({"provider": [key], "apiBase": ["https://changed.test/v1"]})
+    assert load_config(config_path).providers.model_extra[key].api.model_dump(mode="json") == expanded
+    update_provider_settings({"provider": [key], "api": ["null"]})
+    assert load_config(config_path).providers.model_extra[key].api is None
+
+
+@pytest.mark.parametrize("api", [
+    {"supportedApis": []},
+    {"supportedApis": ["responses"], "preferredApi": "anthropic_messages"},
+    {"supportedApis": ["unknown"]},
+])
+def test_custom_connection_invalid_api_is_not_saved(tmp_path, monkeypatch, api):
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    before = config_path.read_bytes()
+    with pytest.raises(WebUISettingsError):
+        create_provider_settings({
+            "name": ["Invalid"], "apiBase": ["https://tenant.test/v1"], "api": [json.dumps(api)],
+        })
+    assert config_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("target", ["default", "inline_fallback"])
+def test_custom_connection_cannot_remove_api_used_by_legacy_or_inline_model(tmp_path, monkeypatch, target):
+    config = Config.model_validate({"providers": {"tenant": {"apiBase": "https://tenant.test/v1"}}})
+    api = ModelAPIConfig(supported_apis=("anthropic_messages",))
+    if target == "default":
+        config.agents.defaults.provider = "tenant"
+        config.agents.defaults.model = "served-model"
+        config.agents.defaults.api = api
+    else:
+        config.agents.defaults.fallback_models = [InlineFallbackConfig(
+            provider="tenant", model="served-model", api=api,
+        )]
+    config_path = tmp_path / "config.json"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    before = config_path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="does not accept request APIs"):
+        update_provider_settings({
+            "provider": ["tenant"], "api": [json.dumps({"supportedApis": ["responses"]})],
+        })
+    assert config_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", ["apiType", "api_type"])
+def test_legacy_openai_settings_can_return_to_auto(monkeypatch, tmp_path, field):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({"providers": {"openai": {
+        "apiKey": "fixture", "api": {"supportedApis": ["responses"]},
+    }}})
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    update_provider_settings({"provider": ["openai"], field: ["auto"]})
+    assert load_config(config_path).providers.openai.api is None

@@ -32,6 +32,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
         assert providers.__all__ == [
             "LLMProvider",
             "LLMResponse",
+            "LLMUsage",
             "AnthropicProvider",
             "OpenAICompatProvider",
             "OpenAICodexProvider",
@@ -62,9 +63,3 @@ def test_explicit_provider_import_still_works(monkeypatch) -> None:
     finally:
         monkeypatch.undo()
         setattr(sys.modules["nanobot"], "providers", original_package)
-
-
-def test_openai_codex_supports_progress_deltas() -> None:
-    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-
-    assert OpenAICodexProvider.supports_progress_deltas is True

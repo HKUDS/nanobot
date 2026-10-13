@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from rich.console import Console
 from rich.markup import escape
@@ -41,7 +42,8 @@ from nanobot.channels.feishu.instances import (
 from nanobot.channels.feishu.websocket import get_feishu_ws_runner
 from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
-from nanobot.pairing import clear_channel
+from nanobot.events import ContextCompactionEvent
+from nanobot.pairing import PAIRING_CODE_META_KEY, clear_channel
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -546,8 +548,17 @@ def _begin_registration(domain: str = "feishu") -> _RegistrationStart:
     qr_url = res.get("verification_uri_complete", "")
     if not isinstance(qr_url, str) or not qr_url:
         raise RuntimeError("Feishu / Lark registration did not return a login URL")
+    # PersonalAgent codes use /page/cli. Rewrite only the known landing page,
+    # preserving opaque query values (including user_code) and the fragment.
+    parsed = urlsplit(qr_url)
+    if (
+        parsed.scheme == "https"
+        and parsed.netloc in {"open.feishu.cn", "open.larksuite.com"}
+        and parsed.path == "/page/launcher"
+    ):
+        qr_url = urlunsplit(parsed._replace(path="/page/cli"))
     interval = res.get("interval")
-    expire_in = res.get("expire_in")
+    expire_in = res.get("expires_in", res.get("expire_in"))
     return {
         "device_code": device_code,
         "qr_url": qr_url,
@@ -2430,7 +2441,13 @@ class FeishuChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         if not self._client:
+            if msg.metadata.get(PAIRING_CODE_META_KEY):
+                raise RuntimeError("Feishu client is not ready to send the pairing reply")
             self.logger.warning("client not initialized")
             return
 
@@ -2574,7 +2591,8 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                fmt = self._detect_msg_format(msg.content)
+                # Bootstrap authorization must not depend on rich-text/card permissions.
+                fmt = "text" if msg.metadata.get(PAIRING_CODE_META_KEY) else self._detect_msg_format(msg.content)
 
                 if fmt == "text":
                     # Short plain text – send as simple text message

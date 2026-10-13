@@ -1,17 +1,8 @@
 {
-  "description": "Use nanobot from Feishu chats and groups.",
-  "requirements": "Feishu app credentials, event subscription, gateway",
   "setup": {
     "primaryAction": "Connect with Feishu",
     "docsLabel": "Open Feishu setup",
     "officialLabel": "Open Feishu console",
-    "tryIt": "Send a DM or mention the Feishu assistant in a group.",
-    "summary": "Connect creates or links a Feishu app by QR code, then saves the app credentials for nanobot.",
-    "steps": [
-      "Click Connect and scan the QR code with Feishu or Lark on your phone.",
-      "Approve the app connection. nanobot saves the App ID and Secret automatically.",
-      "Send the bot a direct message or mention it in a Feishu group to test it."
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
@@ -19,8 +10,7 @@
       },
       "appSecret": {
         "label": "App Secret",
-        "placeholder": "Leave blank to keep current secret",
-        "help": "Paste a new App Secret only when rotating credentials."
+        "placeholder": "Leave blank to keep current secret"
       },
       "domain": {
         "label": "Region",
@@ -30,9 +20,9 @@
         }
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Group rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }
@@ -42,26 +32,51 @@
         "placeholder": "User IDs, comma separated"
       },
       "topicIsolation": {
-        "label": "Topic isolation",
+        "label": "Topic sessions",
         "choices": {
-          "true": "Separate session for each topic",
-          "false": "One shared session for the group"
+          "true": "Separate sessions",
+          "false": "Shared session"
+        }
+      },
+      "name": {
+        "label": "Account name"
+      },
+      "encryptKey": {
+        "label": "Encryption key"
+      },
+      "verificationToken": {
+        "label": "Verification token"
+      },
+      "reactEmoji": {
+        "label": "Read emoji"
+      },
+      "doneEmoji": {
+        "label": "Done emoji"
+      },
+      "toolHintPrefix": {
+        "label": "Hint prefix"
+      },
+      "replyToMessage": {
+        "label": "Reply to message",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
         }
       }
     }
   },
   "custom": {
+    "addAssistant": "Add another assistant",
     "toggleAssistant": "{{name}} assistant",
     "configured": "Connected",
     "needsSetup": "Needs authorization",
-    "noAppId": "No App ID",
-    "createAnother": "Create another assistant",
-    "createHint": "Create a separate Feishu bot for another team, space, or workflow.",
-    "createAssistant": "Create assistant",
-    "reconnect": "Reconnect",
-    "countNone": "No assistant connected",
-    "countOne": "1 assistant connected",
-    "countMany": "{{count}} assistants connected",
     "qrAlt": "Feishu connection QR code",
     "scanTitle": "Scan with Feishu",
     "scanDescription": "Use Feishu or Lark on your phone to scan this code. nanobot will finish setup automatically after authorization.",

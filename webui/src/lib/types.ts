@@ -1,8 +1,16 @@
-export type Role = "user" | "assistant" | "tool" | "system";
+import type { ContextCompaction, NotificationEvent, RecoveryState, RetryStatus as WireRetryStatus } from "../../../packages/client-events/notifications";
+export type { RecoveryState } from "../../../packages/client-events/notifications";
+
+type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
-export type MessageKind = "message" | "trace";
+type MessageKind = "message" | "trace" | "compaction";
+
+export interface UIContextCompaction extends ContextCompaction {
+  /** Live wire transitions announce; hydrated transcript rows stay silent. */
+  announce?: boolean;
+}
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
 export type MessageDeliveryStatus = "sending" | "accepted" | "failed";
@@ -37,12 +45,76 @@ export interface UIMediaAttachment {
   name?: string;
 }
 
-export interface UIMessageSource { kind: "cron" | "local_trigger" | "trigger" | string; label?: string; }
+interface UIMessageSource { kind: "cron" | "local_trigger" | "trigger" | string; label?: string; }
 
+interface TurnUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cached_tokens?: number;
+  cache_write_tokens?: number;
+  context_tokens?: number;
+  request_count?: number;
+  estimated_tokens?: number;
+  generation_ms?: number;
+  measured_completion_tokens?: number;
+  ttft_ms?: number;
+  timed_requests?: number;
+}
+
+export type RoundUsage = TurnUsage;
+
+export type SubagentTaskState = "queued" | "running" | "stopping" | "done" | "incomplete" | "error" | "cancelled" | "interrupted";
+
+export interface SubagentTaskSnapshot {
+  task_id: string;
+  revision?: number;
+  origin_message_id: string | null;
+  origin_turn_id: string | null;
+  created_at: number;
+  completed_at: number | null;
+  label: string;
+  task_description: string;
+  state: SubagentTaskState;
+  phase: string;
+  elapsed_seconds: number;
+  iteration: number;
+  tool_events: { name: string; status: string }[];
+  usage: Record<string, number | string | null> | null;
+  receipts: Record<string, "accepted" | "delivered" | "undelivered">;
+  result: string | null;
+  partial: boolean;
+  stop_reason: string | null;
+  error: string | null;
+}
+
+export interface SubagentTasksPayload {
+  tasks: SubagentTaskSnapshot[];
+}
+
+export interface ResponseSource {
+  provider: string;
+  model: string;
+  preset: string;
+  fallback?: boolean;
+}
+
+interface UITraceDetail {
+  ref: string;
+  bytes: number;
+  traceCount: number;
+}
+
+export interface RetryStatus extends WireRetryStatus {
+  next_retry_at?: number;
+  turn_id?: string;
+}
 export interface UIMessage {
   id: string;
   role: Role;
   content: string;
+  /** Invocation-time snapshots, never resolved from today's model presets. */
+  responseSources?: ResponseSource[];
   kind?: MessageKind;
   isStreaming?: boolean;
   createdAt: number;
@@ -52,10 +124,19 @@ export interface UIMessage {
   /** Structured tool events behind trace rows. Kept so activity cards can
    * distinguish running, completed, and failed tool phases. */
   toolEvents?: ToolProgressEvent[];
+  /** Oversized persisted trace content that can be fetched when activity is expanded. */
+  traceDetail?: UITraceDetail;
   /** Activity rows: explicit file edits emitted by edit tools. */
   fileEdits?: UIFileEdit[];
   /** Activity rows created during the same agent phase share one collapsible block. */
   activitySegmentId?: string;
+  /** Internal projection marker for assistant text emitted before a later tool.
+   * It is not a wire message and is rendered as a compact activity row. */
+  activityKind?: "model";
+  /** Context-compaction lifecycle rendered as a standalone channel notice. */
+  compaction?: UIContextCompaction;
+  /** Display-only localization marker for fixed /compact command replies. */
+  compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
@@ -77,8 +158,16 @@ export interface UIMessage {
   latencyMs?: number;
   /** Client epoch milliseconds when the definitive ``turn_end`` was received. */
   completedAt?: number;
+  /** Additive model usage for this turn; context_tokens is the final request only. */
+  usage?: TurnUsage;
+  /** Logical model rounds in display order; runner-level recovery calls are aggregated. */
+  roundUsages?: RoundUsage[];
+  /** Configured context-window capacity for the model used by this turn. */
+  contextWindowTokens?: number;
   /** Lightweight provenance for proactive assistant messages. */
   source?: UIMessageSource;
+  /** Structured provenance for a message delivered by another session. */
+  sessionMessage?: UISessionMessage;
   /** Stable protocol metadata for grouping all activity emitted by one user turn. */
   turnId?: string;
   turnPhase?: UITurnPhase;
@@ -110,6 +199,8 @@ export interface UIMcpPresetAttachment {
 }
 
 export interface SessionMention {
+  /** Stable public identity. Older transcript rows may not include it. */
+  id?: string;
   /** Text token inserted in the composer, without the leading @. */
   name: string;
   /** Stable persisted-session identifier used by read_session. */
@@ -117,7 +208,19 @@ export interface SessionMention {
   title: string;
 }
 
+/** Stable public handle returned by the session-list endpoint. */
+export interface SessionHandle {
+  id: string;
+  name: string;
+}
+
+interface UISessionMessage {
+  message_id: string;
+  session: SessionHandle;
+}
+
 export interface SessionAutomationJob {
+  chat_binding_revision?: string;
   id: string;
   name: string;
   enabled: boolean;
@@ -149,6 +252,7 @@ export interface SessionAutomationJob {
       status: "ok" | "error" | "skipped" | string;
       duration_ms?: number;
       error?: string | null;
+      webui_session_key?: string | null; // null: external chat; absent: older host.
     }>;
   };
   origin?: {
@@ -166,6 +270,13 @@ export interface SessionAutomationJob {
 
 export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
 export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
+export interface AutomationChat { id: string; title: string; channel: string; unavailable?: boolean; }
+export interface AutomationChatsPayload {
+  revision: string;
+  current: AutomationChat | null;
+  chats: AutomationChat[];
+}
+export interface AutomationChatUpdate { target_id: string; revision: string; message: string; }
 export interface AutomationUpdatePayload {
   name?: string;
   message?: string;
@@ -194,14 +305,14 @@ export interface SkillSummary {
   unavailable_reason?: string;
 }
 
-export interface SkillRequirements {
+interface SkillRequirements {
   bins: string[];
   env: string[];
   missing_bins: string[];
   missing_env: string[];
 }
 
-export interface SkillInstallOption {
+interface SkillInstallOption {
   id: string;
   kind: string;
   label: string;
@@ -271,7 +382,7 @@ export interface SkillInstallPayload extends SkillsPayload {
 }
 
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
-export interface AgentUIBlob {
+interface AgentUIBlob {
   kind: string;
   data?: unknown;
 }
@@ -279,8 +390,10 @@ export interface AgentUIBlob {
 /** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
 export interface GoalStateWsPayload {
   active: boolean;
+  status?: "active" | "blocked";
   ui_summary?: string;
   objective?: string;
+  recap?: string;
 }
 
 export interface ToolProgressEvent {
@@ -313,7 +426,7 @@ export interface UIFileEdit {
   deleted: number;
   approximate?: boolean;
   status: "editing" | "done" | "error";
-  operation?: "edit" | "delete" | string;
+  operation?: "create" | "edit" | "delete" | string;
   binary?: boolean;
   error?: string;
   pending?: boolean;
@@ -334,7 +447,11 @@ export interface ChatSummary {
   modelPreset?: string | null;
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
+  /** Durable recovery state that needs attention after an interrupted turn. */
+  recoveryState?: RecoveryState | null;
   workspaceScope?: WorkspaceScopePayload | null;
+  /** Stable, server-owned @handle for this session. */
+  handle?: SessionHandle | null;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";
@@ -356,14 +473,33 @@ export interface WorkspaceScopePayload {
   };
 }
 
+export interface ProjectDirectory {
+  name: string;
+  path: string;
+}
+
+export interface WorkspaceDirectoriesPayload {
+  partial?: boolean;
+  path: string;
+  parent: string | null;
+  entries: ProjectDirectory[];
+  truncated: boolean;
+  host: string;
+  platform: string;
+}
+
 export interface WorkspacesPayload {
   schema_version: number;
   default_access_mode: WebuiDefaultAccessMode;
   default_scope: WorkspaceScopePayload;
+  recent_projects?: ProjectDirectory[];
+  favorite_projects?: ProjectDirectory[];
+  host?: { name: string; platform: string };
   controls: {
     can_change_project: boolean;
-    can_use_full_access: boolean;
-    can_pick_folder?: boolean;
+    can_browse_directories?: boolean;
+    can_resolve_project?: boolean;
+    can_manage_favorites?: boolean;
   };
 }
 
@@ -408,6 +544,9 @@ export interface SidebarStatePayload {
 }
 
 export interface BootstrapResponse {
+  terminal?: {
+    webui?: { capabilities?: string[] };
+  };
   token?: string;
   api_token?: string;
   ws_path: string;
@@ -419,16 +558,16 @@ export interface BootstrapResponse {
   runtime_capabilities?: RuntimeCapabilities;
 }
 
-export interface WebUITransportLimits {
+interface WebUITransportLimits {
   max_frame_bytes: number;
   envelope_reserve_bytes: number;
 }
 
-export interface WebUIMessageLimits {
+interface WebUIMessageLimits {
   max_text_bytes: number;
 }
 
-export interface WebUIAttachmentLimits {
+interface WebUIAttachmentLimits {
   max_count: number;
   max_file_bytes: number;
   max_total_bytes: number;
@@ -441,8 +580,8 @@ export interface WebUIIngressLimits {
 }
 
 export type RuntimeSurface = "browser" | "native";
-export type RestartBehavior = "none" | "nextTurn" | "engineRestart" | "appRestart";
-export type SettingsApplyStatus =
+type RestartBehavior = "none" | "nextTurn" | "engineRestart" | "appRestart";
+type SettingsApplyStatus =
   | "idle"
   | "pending"
   | "applying"
@@ -451,17 +590,34 @@ export type SettingsApplyStatus =
 
 export interface RuntimeCapabilities {
   can_restart_engine: boolean;
-  can_pick_folder: boolean;
   can_open_logs: boolean;
   can_export_diagnostics: boolean;
 }
 
-export interface ProviderModelInfo {
+export type ModelRequestAPI = "chat_completions" | "responses" | "anthropic_messages";
+
+export interface ModelAPIConfig {
+  supported_apis: ModelRequestAPI[];
+  preferred_api?: ModelRequestAPI | null;
+}
+
+export type ProviderRequestAPI =
+  "chat_completions" | "responses" | "anthropic_messages" | "bedrock_converse" | "transcription";
+
+export interface AutomaticModelAPIPayload {
+  provider: string;
+  api: ProviderRequestAPI;
+}
+
+interface ProviderModelInfo {
   id: string;
   label?: string | null;
   description?: string | null;
   owned_by?: string | null;
   context_window?: number | null;
+  reasoning_efforts?: string[];
+  supports_backend_search?: boolean;
+  api?: ModelAPIConfig | null;
 }
 
 export interface ProviderModelsPayload {
@@ -473,7 +629,16 @@ export interface ProviderModelsPayload {
     | "not_configured"
     | "missing_api_base"
     | "error";
-  catalog_kind: "builtin" | "official" | "catalog" | "local" | "custom" | "unsupported";
+  catalog_kind:
+    | "builtin"
+    | "hybrid"
+    | "official"
+    | "catalog"
+    | "local"
+    | "custom"
+    | "unsupported";
+  source?: "remote" | "cache" | "stale" | "fallback";
+  error_kind?: "auth_required" | "unavailable" | null;
   models: ProviderModelInfo[];
   model_count: number;
   message?: string | null;
@@ -486,7 +651,8 @@ export interface ProviderOAuthAuthorizationRequired {
   flow_id: string;
   authorization_url: string;
   expires_in: number;
-  completion_input?: "authorization_code" | "callback_url";
+  completion_input?: "authorization_code" | "callback_url" | "device_code";
+  user_code?: string;
 }
 
 export interface ProviderOAuthPending {
@@ -498,7 +664,11 @@ export interface ProviderOAuthPending {
 export type ProviderOAuthLoginResult = SettingsPayload | ProviderOAuthAuthorizationRequired;
 export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPending;
 
+export type RuntimeConfigValue = string | number | boolean | string[] | null;
+
+
 export interface SettingsPayload {
+  runtime_config?: Record<string, RuntimeConfigValue>;
   surface?: RuntimeSurface;
   runtime_surface?: RuntimeSurface;
   runtime_capabilities?: RuntimeCapabilities;
@@ -517,12 +687,14 @@ export interface SettingsPayload {
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
+    api?: ModelAPIConfig | null;
     timezone: string;
     tool_hint_max_length: number;
   };
   model_presets: Array<{
     name: string;
-    label: string;
+    /** @deprecated Compatibility alias. New clients must use `name`. */
+    label?: string;
     active: boolean;
     is_default: boolean;
     model: string;
@@ -533,9 +705,19 @@ export interface SettingsPayload {
     temperature: number;
     reasoning_effort: string | null;
     reasoning_effort_values?: string[];
+    api?: ModelAPIConfig | null;
+    extra_headers?: Record<string, string> | null;
+    extra_query?: Record<string, string> | null;
+    extra_body?: Record<string, unknown> | null;
   }>;
   model_call_order: string[];
   model_call_order_editable: boolean;
+  /** Whether an actual legacy model configuration is available to convert. */
+  model_configuration_migratable?: boolean;
+  /** Host can resolve the default request API for an unsaved model configuration. */
+  model_api_resolution_supported?: boolean;
+  provider_api_configuration_supported?: boolean;
+  model_request_overrides_supported?: boolean;
   created_model_preset?: string;
   created_provider?: string;
   providers: Array<{
@@ -550,13 +732,17 @@ export interface SettingsPayload {
     default_api_base?: string | null;
     model_selectable?: boolean;
     model_catalog?: ProviderModelsPayload["catalog_kind"];
-    api_type?: "auto" | "chat_completions" | "responses";
+    model_api_configurable?: boolean;
+    /** Request formats allowed by this connection, or adapter formats when undeclared. */
+    request_apis?: ProviderRequestAPI[];
+    adapter_request_apis?: ProviderRequestAPI[];
+    provider_api_configurable?: boolean;
+    api?: ModelAPIConfig | null;
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
     oauth_login_supported?: boolean;
     proxy?: string | null;
     advanced_fields?: Array<
-      | "api_type"
       | "extra_headers"
       | "extra_body"
       | "extra_query"
@@ -616,6 +802,9 @@ export interface SettingsPayload {
     default_image_size: string;
     max_images_per_turn: number;
     save_dir: string;
+    request_overrides_supported?: boolean;
+    extra_headers?: Record<string, string> | null;
+    extra_body?: Record<string, unknown> | null;
     providers: Array<{
       name: string;
       label: string;
@@ -626,6 +815,7 @@ export interface SettingsPayload {
       default_api_base?: string | null;
       models?: string[];
       default_model?: string | null;
+      uses_images_api?: boolean;
     }>;
   };
   transcription?: {
@@ -653,7 +843,6 @@ export interface SettingsPayload {
     heartbeat: {
       enabled: boolean;
       interval_s: number;
-      keep_recent_messages: number;
     };
     dream: {
       schedule: string;
@@ -663,27 +852,47 @@ export interface SettingsPayload {
   usage?: {
     days: Array<{
       date: string;
-      prompt_tokens: number;
-      completion_tokens: number;
-      cached_tokens: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      cache_read_observed_input_tokens: number;
+      cache_write_observed_input_tokens: number;
       total_tokens: number;
-      provider_tokens?: number;
+      reported_tokens?: number;
       estimated_tokens?: number;
       requests: number;
-      provider_requests?: number;
+      reported_requests?: number;
       estimated_requests?: number;
+      successful_requests?: number;
+      failed_requests?: number;
+      generation_ms?: number;
+      measured_output_tokens?: number;
+      ttft_ms?: number;
+      timed_requests?: number;
+      duration_ms?: number;
       sources?: Record<
         "user" | "api" | "cron" | "dream" | "system" | string,
         {
-          prompt_tokens: number;
-          completion_tokens: number;
-          cached_tokens: number;
+          input_tokens: number;
+          output_tokens: number;
+          cache_read_tokens: number;
+          cache_write_tokens: number;
+          cache_read_observed_input_tokens: number;
+          cache_write_observed_input_tokens: number;
           total_tokens: number;
-          provider_tokens?: number;
+          reported_tokens?: number;
           estimated_tokens?: number;
           requests: number;
-          provider_requests?: number;
+          reported_requests?: number;
           estimated_requests?: number;
+          successful_requests?: number;
+          failed_requests?: number;
+          generation_ms?: number;
+          measured_output_tokens?: number;
+          ttft_ms?: number;
+          timed_requests?: number;
+          duration_ms?: number;
         }
       >;
     }>;
@@ -695,6 +904,41 @@ export interface SettingsPayload {
     longest_streak_days: number;
     active_days_30d: number;
     requests_30d: number;
+    failed_requests_30d?: number;
+    reported_tokens_30d?: number;
+    estimated_tokens_30d?: number;
+    cache_read_tokens_30d?: number;
+    cache_read_observed_input_tokens_30d?: number;
+    cache_read_rate_30d?: number | null;
+    providers_30d?: Array<{
+      provider: string;
+      model: string;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      cache_read_observed_input_tokens: number;
+      cache_write_observed_input_tokens: number;
+      total_tokens: number;
+      reported_tokens: number;
+      estimated_tokens: number;
+      requests: number;
+      successful_requests: number;
+      failed_requests: number;
+      reported_requests: number;
+      estimated_requests: number;
+      generation_ms: number;
+      measured_output_tokens: number;
+      ttft_ms: number;
+      timed_requests: number;
+      duration_ms: number;
+    }>;
+    model_days_30d?: Array<{
+      date: string;
+      provider: string;
+      model: string;
+      total_tokens: number;
+    }>;
     updated_at?: string | null;
   };
   advanced: {
@@ -723,6 +967,13 @@ export interface SettingsPayload {
   restart_required_sections?: Array<"runtime" | "browser" | "image">;
   version?: {
     current: string;
+    commit?: string | null;
+  };
+  environment?: {
+    python_version: string;
+    os: string;
+    os_version: string;
+    architecture: string;
   };
   docs?: {
     version: string;
@@ -746,12 +997,12 @@ export interface ApiServicePayload {
   last_action?: "started" | "stopped" | string;
 }
 
-export interface AppPackageRef {
+interface AppPackageRef {
   manager: string;
   name?: string;
 }
 
-export interface AppCapability {
+interface AppCapability {
   type: "cli" | "mcp" | "skill" | string;
   entry_point?: string;
   package?: AppPackageRef;
@@ -769,20 +1020,20 @@ export interface AppCapability {
   }>;
 }
 
-export interface AppPlan {
+interface AppPlan {
   supported: boolean;
   strategy?: string;
   managed_paths?: string[];
   verification?: string[];
 }
 
-export interface AppTrust {
+interface AppTrust {
   registry: string;
   level: string;
   review_status: string;
 }
 
-export interface AppManifest {
+interface AppManifest {
   schema: "agent-app.v1" | string;
   id: string;
   display_name: string;
@@ -850,8 +1101,9 @@ export interface NanobotFeatureInfo {
   configured_fields?: string[];
   setup?: ChannelSetupContract;
   instances?: NanobotChannelInstanceInfo[];
-  installed: boolean;
-  ready: boolean;
+    installed: boolean;
+    requires_dependencies?: boolean;
+    ready: boolean;
   status: "enabled" | "missing_dependency" | "not_enabled" | string;
   install_supported: boolean;
   requires_restart: boolean;
@@ -864,11 +1116,18 @@ export interface ChannelSetupContractField {
   choices: string[];
   required: boolean;
   default_value?: string;
+  inheritable?: boolean;
 }
 
 export interface ChannelSetupContract {
   fields: ChannelSetupContractField[];
+  requirements?: ChannelSetupContractRequirement[];
   official_url?: string;
+  verifies_connection?: boolean;
+}
+
+interface ChannelSetupContractRequirement {
+  alternatives: string[][];
 }
 
 export interface NanobotChannelInstanceInfo {
@@ -898,7 +1157,7 @@ export interface NanobotFeaturesPayload {
   };
 }
 
-export type ChannelSetupStatus =
+type ChannelSetupStatus =
   | "connected"
   | "configured"
   | "needs_setup"
@@ -906,9 +1165,9 @@ export type ChannelSetupStatus =
   | "unsupported"
   | string;
 
-export type ChannelValidationCheckStatus = "pass" | "warn" | "fail" | "skipped" | string;
+type ChannelValidationCheckStatus = "pass" | "warn" | "fail" | "skipped" | string;
 
-export interface ChannelValidationCheck {
+interface ChannelValidationCheck {
   id: string;
   label: string;
   status: ChannelValidationCheckStatus;
@@ -916,7 +1175,7 @@ export interface ChannelValidationCheck {
   action_url?: string;
 }
 
-export interface ChannelIdentity {
+interface ChannelIdentity {
   name?: string;
   workspace?: string;
   account?: string;
@@ -942,6 +1201,7 @@ export interface PairingRequestInfo {
   created_at_ms?: number | null;
   expires_at_ms?: number | null;
   expires_in_seconds?: number | null;
+  delivery_status?: "sending" | "sent" | "failed";
 }
 
 export interface PairingPayload {
@@ -956,7 +1216,7 @@ export interface PairingPayload {
   };
 }
 
-export interface McpPresetField {
+interface McpPresetField {
   name: string;
   label: string;
   secret: boolean;
@@ -996,7 +1256,7 @@ export interface McpPresetInfo {
   manifest?: AppManifest;
 }
 
-export type McpOAuthFlowStatus =
+type McpOAuthFlowStatus =
   | "starting"
   | "authorization_required"
   | "connecting"
@@ -1052,7 +1312,7 @@ export interface McpPresetsPayload {
   };
 }
 
-export type ChannelConnectStatus = "pending" | "succeeded" | "expired" | "cancelled" | "failed";
+type ChannelConnectStatus = "pending" | "succeeded" | "expired" | "cancelled" | "failed";
 
 export interface ChannelConnectPayload {
   session_id: string;
@@ -1060,11 +1320,8 @@ export interface ChannelConnectPayload {
   status: ChannelConnectStatus;
   message?: string;
   qr_url?: string;
-  domain?: string;
   interval_ms?: number;
   expires_at_ms?: number;
-  app_id?: string;
-  account?: string;
   nanobot_features?: NanobotFeaturesPayload;
 }
 
@@ -1075,35 +1332,33 @@ export interface ChannelConfigurePayload {
   nanobot_features?: NanobotFeaturesPayload;
 }
 
-export interface SettingsUpdate {
-  model?: string;
-  provider?: string;
-  modelPreset?: string | null;
-  contextWindowTokens?: number;
-  timezone?: string;
-  toolHintMaxLength?: number;
-}
-
 export interface ModelConfigurationCreate {
-  name?: string;
-  label: string;
+  name: string;
   provider: string;
   model: string;
   maxTokens?: number;
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  api?: ModelAPIConfig | null;
+  extraHeaders?: string;
+  extraQuery?: string;
+  extraBody?: string;
 }
 
 export interface ModelConfigurationUpdate {
   name: string;
-  label?: string;
+  newName?: string;
   provider?: string;
   model?: string;
   maxTokens?: number;
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  api?: ModelAPIConfig | null;
+  extraHeaders?: string;
+  extraQuery?: string;
+  extraBody?: string;
 }
 
 export interface ProviderSettingsUpdate {
@@ -1111,7 +1366,7 @@ export interface ProviderSettingsUpdate {
   displayName?: string;
   apiKey?: string;
   apiBase?: string;
-  apiType?: "auto" | "chat_completions" | "responses";
+  api?: ModelAPIConfig | null;
   proxy?: string;
   extraHeaders?: string;
   extraBody?: string;
@@ -1125,6 +1380,7 @@ export interface ProviderCreationUpdate {
   name: string;
   apiKey?: string;
   apiBase: string;
+  api?: ModelAPIConfig | null;
   proxy?: string;
   extraHeaders?: string;
   extraBody?: string;
@@ -1153,6 +1409,8 @@ export interface ImageGenerationSettingsUpdate {
   defaultAspectRatio: string;
   defaultImageSize: string;
   maxImagesPerTurn: number;
+  extraHeaders?: string;
+  extraBody?: string;
 }
 
 export interface TranscriptionSettingsUpdate {
@@ -1198,16 +1456,45 @@ export type ConnectionStatus =
   | "closed"
   | "error";
 
-export interface InboundTurnMetadata {
+interface InboundTurnMetadata {
   turn_id?: string;
   turn_phase?: UITurnPhase;
   turn_seq?: number;
 }
 
 export type InboundEvent =
-  | { event: "ready"; chat_id: string; client_id: string }
-  | { event: "attached"; chat_id: string; temporary?: boolean }
-  | { event: "message_accepted"; chat_id: string; turn_id: string }
+  | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
+  | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
+  | {
+      event: "attached";
+      chat_id: string;
+      temporary?: boolean;
+      recovery_state?: RecoveryState;
+      usage?: TurnUsage;
+    }
+  | {
+      event: "message_accepted";
+      chat_id: string;
+      turn_id: string;
+      starts_turn?: boolean;
+      active_turn_id?: string;
+      started_at?: number;
+    }
+  | {
+      event: "user_message";
+      chat_id: string;
+      text: string;
+      turn_id?: string;
+      active_turn_id?: string;
+      starts_turn: boolean;
+      started_at?: number;
+      created_at_ms?: number;
+      media_urls?: UIMediaAttachment[];
+      cli_apps?: UICliAppAttachment[];
+      mcp_presets?: UIMcpPresetAttachment[];
+      session_mentions?: SessionMention[];
+      provenance?: { session_message?: UISessionMessage };
+    }
   | ({
       event: "message";
       chat_id: string;
@@ -1216,6 +1503,8 @@ export type InboundEvent =
       media?: string[];
       media_urls?: Array<{ url: string; name?: string }>;
       tool_events?: ToolProgressEvent[];
+      /** Oversized persisted activity detail, fetched only when the trace is expanded. */
+      trace_detail?: UITraceDetail;
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress" | "reasoning";
@@ -1223,9 +1512,11 @@ export type InboundEvent =
       latency_ms?: number;
       /** Lightweight provenance for proactive assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
+  | (NotificationEvent & InboundTurnMetadata)
   | ({
       event: "file_edit";
       chat_id: string;
@@ -1238,6 +1529,7 @@ export type InboundEvent =
       stream_id?: string;
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
@@ -1246,6 +1538,7 @@ export type InboundEvent =
       text?: string;
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
       /** This answer segment ended, but the active agent turn will continue. */
       resuming?: boolean;
       /** The next answer segment continues this same assistant message. */
@@ -1261,6 +1554,8 @@ export type InboundEvent =
       event: "reasoning_end";
       chat_id: string;
       stream_id?: string;
+      /** Legacy persisted transcripts may carry the final reasoning text here. */
+      text?: string;
     } & InboundTurnMetadata)
   | {
       event: "runtime_model_updated";
@@ -1271,13 +1566,24 @@ export type InboundEvent =
       event: "turn_model_updated";
       chat_id: string;
       model_name: string;
+      model_preset?: string | null;
+      fallback?: boolean;
+      reauth_provider?: string;
     }
   | ({
       event: "turn_end";
       chat_id: string;
       latency_ms?: number;
+      usage?: TurnUsage;
+      round_usages?: RoundUsage[];
+      context_window_tokens?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
+      outcome?: "completed" | "failed" | "cancelled" | "interrupted";
+      failure_kind?: string;
+      failure_error_kind?: string;
+      failure_attempts?: number;
+      failure_message?: string;
     } & InboundTurnMetadata)
   | ({
       event: "goal_status";
@@ -1330,7 +1636,26 @@ export type InboundEvent =
       turn_id?: string;
     };
 
-/** Base64-encoded file attached to an outbound ``message`` envelope.
+type ThreadProjectionEventName =
+  | "user_message"
+  | "message"
+  | "file_edit"
+  | "delta"
+  | "stream_end"
+  | "reasoning_delta"
+  | "reasoning_end"
+  | "context_compaction"
+  | "turn_end";
+
+export type ThreadProjectionEvent = Extract<
+  InboundEvent,
+  { event: ThreadProjectionEventName }
+> & {
+  projection_id?: string;
+  created_at_ms?: number;
+};
+
+/** Local draft/preview data, converted to HTTP binary before sending a message.
  *
  * ``data_url`` must use a server-whitelisted image, video, or document MIME
  * type. SVG remains rejected on ingress to avoid an embedded-script XSS
@@ -1363,20 +1688,23 @@ export interface OutboundMcpPresetMention {
 }
 
 /** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
-export interface WebuiThreadPagePayload {
+interface WebuiThreadPagePayload {
   before_cursor?: string | null;
   has_more_before?: boolean;
-  loaded_message_count?: number;
-  total_known_message_count?: number;
   user_message_offset?: number;
+  loaded_event_count?: number;
 }
 
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;
-  messages: UIMessage[];
-  fork_boundary_message_count?: number;
+  /** Cheap server revision used for application-managed conditional revalidation. */
+  revision?: string;
+  /** Canonical transcript events projected by the same reducer as live events. */
+  events: ThreadProjectionEvent[];
+  projection: "events";
+  fork_boundary_event_index?: number;
   /** Turn ids backed by an explicit persisted ``turn_end`` event. */
   completed_turn_ids?: string[];
   has_pending_tool_calls?: boolean;
@@ -1386,15 +1714,27 @@ export interface WebuiThreadPersistedPayload {
   workspace_scope?: WorkspaceScopePayload;
 }
 
-export interface FilePreviewPayload {
+export interface WebuiThreadTraceDetailPayload {
+  message_id: string;
+  events: ThreadProjectionEvent[];
+}
+
+export interface FileReferenceMetadata {
+  path: string;
+  relative_path: string | null;
+}
+
+interface FilePreviewMetadata {
   path: string;
   display_path: string;
   project_path: string;
-  language: string;
-  content: string;
   size: number;
-  truncated: boolean;
 }
+
+export type FilePreviewPayload = FilePreviewMetadata & (
+  | { kind?: "text"; language: string; content: string; truncated: boolean }
+  | { kind: "image"; mime_type: string; data_url: string }
+);
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
@@ -1415,11 +1755,12 @@ export type Outbound =
       type: "message";
       chat_id: string;
       content: string;
-      media?: OutboundMedia[];
+      media?: import("../../../packages/client-events/attachments").AttachmentReference[];
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
       session_mentions?: SessionMention[];
       quoted_context?: string;
+      intent?: "create_automation";
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the

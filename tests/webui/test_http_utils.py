@@ -3,18 +3,28 @@
 import gzip
 import json
 
-from nanobot.webui.http_utils import http_json_response
+from nanobot.webui.http_utils import JSONResponseMetrics, http_json_response
 
 
 def test_http_json_response_compresses_large_payload_when_gzip_is_accepted() -> None:
     payload = {"message": "响应内容" * 2_000}
+    metrics = JSONResponseMetrics()
 
-    response = http_json_response(payload, accept_encoding="br, gzip; q=0.5")
+    response = http_json_response(
+        payload,
+        accept_encoding="br, gzip; q=0.5",
+        metrics=metrics,
+    )
 
     assert response.headers["Content-Encoding"] == "gzip"
     assert response.headers["Vary"] == "Accept-Encoding"
     assert int(response.headers["Content-Length"]) == len(response.body)
     assert json.loads(gzip.decompress(response.body)) == payload
+    assert metrics.gzip_enabled is True
+    assert metrics.gzip_ms >= 0
+    assert metrics.json_encode_ms >= 0
+    assert metrics.uncompressed_bytes == len(gzip.decompress(response.body))
+    assert metrics.response_bytes == len(response.body)
 
 
 def test_http_json_response_preserves_identity_when_gzip_is_rejected() -> None:

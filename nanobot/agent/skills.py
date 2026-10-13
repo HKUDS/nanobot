@@ -7,43 +7,21 @@ import shutil
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
-
-# Default builtin skills directory (relative to this file)
-BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
-
-# Opening ---, YAML body (group 1), closing --- on its own line; supports CRLF.
-_STRIP_SKILL_FRONTMATTER = re.compile(
-    r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?",
-    re.DOTALL,
+from nanobot.agent.skill_metadata import (
+    BUILTIN_SKILLS_DIR as BUILTIN_SKILLS_DIR,
 )
-_SKILL_NAME = re.compile(r"^(?!.*--)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+from nanobot.agent.skill_metadata import (
+    SKILL_FRONTMATTER as _STRIP_SKILL_FRONTMATTER,
+)
+from nanobot.agent.skill_metadata import (
+    parse_skill_metadata as parse_skill_metadata,
+)
+from nanobot.agent.skill_metadata import (
+    valid_skill_metadata as valid_skill_metadata,
+)
+from nanobot.runtime_context import RuntimeContextBlock
+
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
-
-
-def parse_skill_metadata(content: str) -> dict[str, object] | None:
-    """Parse a skill document's YAML frontmatter."""
-    if not (match := _STRIP_SKILL_FRONTMATTER.match(content)):
-        return None
-    try:
-        parsed = yaml.safe_load(match.group(1))
-    except yaml.YAMLError:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    return {str(key): value for key, value in cast(dict[object, object], parsed).items()}
-
-
-def valid_skill_metadata(metadata: dict[str, object], name: str) -> bool:
-    """Return whether metadata satisfies the Agent Skills identity contract."""
-    description = metadata.get("description")
-    return (
-        metadata.get("name") == name
-        and len(name) <= 64
-        and _SKILL_NAME.fullmatch(name) is not None
-        and isinstance(description, str)
-        and 1 <= len(description.strip()) <= 1024
-    )
 
 
 class SkillsLoader:
@@ -177,7 +155,34 @@ class SkillsLoader:
                 invoked.append(name)
         return invoked
 
-    def build_skills_summary(self, exclude: set[str] | None = None) -> str:
+    def build_explicit_skill_runtime_context(
+        self,
+        text: str,
+    ) -> RuntimeContextBlock | None:
+        """Load non-always skills explicitly invoked by the current message."""
+        skill_names = self.get_explicitly_invoked_skills(text)
+        if not skill_names:
+            return None
+        always_active = set(self.get_always_skills())
+        skill_names = [name for name in skill_names if name not in always_active]
+        content = self.load_skills_for_context(skill_names)
+        if not content:
+            return None
+        return RuntimeContextBlock(
+            source="explicit_skills",
+            content=(
+                "[Active Skills — instructions for this user turn]\n"
+                f"{content}\n"
+                "[/Active Skills]"
+            ),
+        )
+
+    def build_skills_summary(
+        self,
+        exclude: set[str] | None = None,
+        *,
+        workspace: Path | None = None,
+    ) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
 
@@ -186,6 +191,7 @@ class SkillsLoader:
 
         Args:
             exclude: Set of skill names to omit from the summary.
+            workspace: Effective project workspace used to choose safe display paths.
 
         Returns:
             Markdown-formatted skills summary.
@@ -194,6 +200,9 @@ class SkillsLoader:
         if not all_skills:
             return ""
 
+        agent_workspace = self.workspace.expanduser().resolve()
+        project_workspace = (workspace or self.workspace).expanduser().resolve()
+        use_relative_roots = project_workspace == agent_workspace
         sections: list[str] = []
         groups = (
             ("Workspace skills", "workspace", self.workspace_skills),
@@ -209,7 +218,14 @@ class SkillsLoader:
             if not entries:
                 continue
 
-            lines = [f"### {label} (`{root.expanduser().resolve()}`)"]
+            resolved_root = root.expanduser().resolve()
+            # Directory tools need the real built-in root; only read_file resolves
+            # workspace-relative skills/<name>/... aliases to bundled resources.
+            if use_relative_roots and source != "builtin":
+                display_root = Path("plugins" if source == "plugin" else "skills")
+            else:
+                display_root = resolved_root
+            lines = [f"### {label} (`{display_root}`)"]
             for entry in entries:
                 skill_name = entry["name"]
                 meta = self._get_skill_meta(skill_name)

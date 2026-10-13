@@ -9,10 +9,10 @@ import type { WebUIIngressLimits } from "@/lib/types";
  * - ``ready``     — ``dataUrl`` available; safe to submit
  * - ``error``     — validation / decode failure; chip shows inline error
  */
-export type AttachmentStatus = "encoding" | "ready" | "error";
+type AttachmentStatus = "encoding" | "ready" | "error";
 export type AttachmentKind = "image" | "file";
 
-export interface AttachedAttachment {
+interface AttachedAttachment {
   id: string;
   kind: AttachmentKind;
   file: File;
@@ -32,7 +32,7 @@ export interface AttachedAttachment {
 
 export type AttachedImage = AttachedAttachment;
 
-export interface RestoredReadyAttachment {
+interface RestoredReadyAttachment {
   dataUrl: string;
   name?: string;
   kind?: AttachmentKind;
@@ -45,18 +45,17 @@ export type RestoredReadyImage = RestoredReadyAttachment;
  * Callers localize these via the ``composer.imageRejected.*`` i18n table. */
 export type AttachmentError =
   | "unsupported_type"   // server whitelist excludes this MIME
-  | "empty_file"         // backend data-URL decoder rejects empty payloads
+  | "empty_file"         // attachments must contain bytes
   | "too_many_attachments" // per-message cap (4) reached before enqueue
   | "total_too_large"    // decoded attachments exceed the business-policy total
-  | "transport_too_large" // projected JSON frame exceeds the transport guard
   | "magic_mismatch"     // extension lies about the real content
   | "decode_failed"      // Worker couldn't decode / re-encode
   | "too_large"          // even after normalization we exceed the budget
   | "io";                // file read failed at the browser layer
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
-export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
-export const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
 
 /** MIME whitelist — mirrors the server's and the ``<input accept>`` attr. */
 const ACCEPTED_IMAGE_MIMES: ReadonlySet<string> = new Set([
@@ -108,33 +107,10 @@ function mimeForFile(file: File): string {
   return file.type;
 }
 
-function projectedDataUrlBytes(
-  file: File,
-  kind: AttachmentKind,
-  maxFileBytes: number,
-): number {
-  const prefixBytes = `data:${mimeForFile(file)};base64,`.length;
-  const decodedBytes = kind === "image" ? Math.min(file.size, maxFileBytes) : file.size;
-  return prefixBytes + 4 * Math.ceil(decodedBytes / 3);
-}
-
 function positiveLimit(value: number | null | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.floor(value)
     : fallback;
-}
-
-function attachmentPayloadBudget(limits: WebUIIngressLimits | null | undefined): number | null {
-  const maxFrameBytes = limits?.transport.max_frame_bytes;
-  if (typeof maxFrameBytes !== "number" || !Number.isFinite(maxFrameBytes)) {
-    return null;
-  }
-  return Math.max(
-    0,
-    Math.floor(maxFrameBytes)
-      - positiveLimit(limits?.message.max_text_bytes, 0)
-      - positiveLimit(limits?.transport.envelope_reserve_bytes, 0),
-  );
 }
 
 export function acceptedAttachmentKind(file: File): AttachmentKind | null {
@@ -297,14 +273,6 @@ export function useAttachedImages({
       const rejected: Array<{ file: File; reason: AttachmentError }> = [];
       const toAdd: AttachedAttachment[] = [];
       let slot = maxAttachments - imagesRef.current.length;
-      const payloadBudget = attachmentPayloadBudget(ingressLimits);
-      let projectedWireBytes = imagesRef.current.reduce(
-        (total, image) => total + (
-          image.dataUrl?.length
-          ?? projectedDataUrlBytes(image.file, image.kind, maxFileBytes)
-        ),
-        0,
-      );
       let projectedDecodedBytes = imagesRef.current.reduce(
         (total, image) => total + (
           image.encodedBytes
@@ -336,14 +304,8 @@ export function useAttachedImages({
           rejected.push({ file, reason: "total_too_large" });
           continue;
         }
-        const nextWireBytes = projectedDataUrlBytes(file, kind, maxFileBytes);
-        if (payloadBudget !== null && projectedWireBytes + nextWireBytes > payloadBudget) {
-          rejected.push({ file, reason: "transport_too_large" });
-          continue;
-        }
         slot -= 1;
         projectedDecodedBytes += nextDecodedBytes;
-        projectedWireBytes += nextWireBytes;
         toAdd.push({
           id: uuid(),
           kind,
@@ -393,7 +355,7 @@ export function useAttachedImages({
       }
       return { rejected };
     },
-    [ingressLimits, maxAttachments, maxFileBytes, maxTotalBytes, setEntry],
+    [maxAttachments, maxFileBytes, maxTotalBytes, setEntry],
   );
 
   const remove = useCallback((id: string) => {

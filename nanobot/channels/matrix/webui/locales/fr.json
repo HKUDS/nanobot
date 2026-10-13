@@ -1,19 +1,10 @@
 {
-  "description": "Utilisez nanobot depuis les salons Matrix.",
-  "requirements": "Serveur d’accueil, jeton de compte et accès aux salons",
   "setup": {
     "docsLabel": "Ouvrir le guide Matrix",
     "officialLabel": "Ouvrir la liste des clients Matrix",
-    "tryIt": "Invitez le compte Matrix dans un salon et envoyez un message test.",
-    "summary": "Matrix nécessite un compte sur un serveur d’accueil et une connexion par mot de passe ou jeton d’accès.",
-    "steps": [
-      "Créez ou choisissez un compte Matrix pour nanobot.",
-      "Saisissez le serveur, l’ID utilisateur et le mot de passe ou le jeton d’accès.",
-      "Enregistrez et activez Matrix, invitez le compte dans un salon et envoyez un message test."
-    ],
     "fields": {
       "homeserver": {
-        "label": "Serveur d’accueil",
+        "label": "Homeserver",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -22,26 +13,70 @@
       },
       "password": {
         "label": "Mot de passe",
-        "placeholder": "••••••",
-        "help": "Utilisez le mot de passe ou le jeton d’accès."
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "Jeton d’accès",
-        "placeholder": "Connexion facultative par jeton",
-        "help": "À privilégier si votre client Matrix expose un jeton d’accès."
+        "placeholder": "Saisir un jeton d’accès"
       },
       "deviceId": {
         "label": "ID de l’appareil",
-        "placeholder": "Requis avec un jeton d’accès",
-        "help": "Copiez l’ID d’appareil associé au jeton. Il n’est pas nécessaire avec un mot de passe."
+        "placeholder": "Requis avec un jeton d’accès"
       },
       "groupPolicy": {
-        "label": "Comportement en groupe",
+        "label": "Règles des groupes",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
           "allowlist": "Liste d’autorisation"
         }
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés"
+      },
+      "e2eeEnabled": {
+        "label": "Chiffrement de bout en bout",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "sasVerification": {
+        "label": "Vérification SAS",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Attente d’arrêt sync (secondes)"
+      },
+      "maxMediaBytes": {
+        "label": "Limite des médias (octets)"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Téléchargements simultanés"
+      },
+      "groupAllowFrom": {
+        "label": "Groupes autorisés"
+      },
+      "allowRoomMentions": {
+        "label": "Mentions de salon",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "streaming": {
+        "label": "Diffusion en continu",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "proxy": {
+        "label": "Proxy réseau",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

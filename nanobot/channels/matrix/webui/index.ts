@@ -1,22 +1,22 @@
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://matrix.org/favicon.ico",
     displayName: "Matrix",
     initials: "MX",
     color: "#0DBD8B",
-    logoUrl: "https://matrix.org/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("matrix"),
       fields: [
-        { key: "channels.matrix.homeserver" },
-        { key: "channels.matrix.userId" },
-        { key: "channels.matrix.password" },
-        { key: "channels.matrix.accessToken" },
-        { key: "channels.matrix.deviceId" },
-        { key: "channels.matrix.groupPolicy" },
+        { key: "channels.matrix.homeserver", section: "connection" },
+        { key: "channels.matrix.userId", section: "account" },
+        { key: "channels.matrix.password", section: "credentials" },
+        { key: "channels.matrix.accessToken", section: "credentials" },
+        { key: "channels.matrix.deviceId", section: "credentials" },
+        { key: "channels.matrix.groupPolicy", section: "behavior" },
       ],
     },
   },

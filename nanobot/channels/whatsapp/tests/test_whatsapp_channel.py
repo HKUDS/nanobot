@@ -128,6 +128,36 @@ def _patch_receipt_type(monkeypatch):
     return ReceiptType
 
 
+@pytest.mark.asyncio
+async def test_connect_client_normalizes_proxy_without_a_scheme(monkeypatch) -> None:
+    class ProxySettings:
+        def __init__(self, *, proxy_address: str) -> None:
+            self.proxy_address = proxy_address
+
+    monkeypatch.setitem(
+        sys.modules,
+        "neonize._binder",
+        SimpleNamespace(ProxySettings=ProxySettings),
+    )
+    channel = _make_channel({"proxy": "127.0.0.1:23458"})
+    client = SimpleNamespace(connect=AsyncMock(return_value=None))
+
+    await channel._connect_client(client)
+
+    settings = client.connect.await_args.args[0]
+    assert settings.proxy_address == "http://127.0.0.1:23458"
+
+
+@pytest.mark.asyncio
+async def test_connect_client_without_proxy_uses_default_connection() -> None:
+    channel = _make_channel({"proxy": ""})
+    client = SimpleNamespace(connect=AsyncMock(return_value=None))
+
+    await channel._connect_client(client)
+
+    client.connect.assert_awaited_once_with()
+
+
 class _FakeLoginClient:
     def __init__(self) -> None:
         self.handlers = {}
@@ -157,11 +187,9 @@ class _FailingConnectLoginClient(_FakeLoginClient):
         return asyncio.create_task(fail())
 
 
-def test_default_config_has_no_bridge_fields() -> None:
+def test_default_config_uses_native_database_path() -> None:
     config = WhatsAppChannel.default_config()
 
-    assert "bridgeUrl" not in config
-    assert "bridgeToken" not in config
     assert config["databasePath"] == ""
 
 
@@ -558,6 +586,40 @@ async def test_group_allow_from_does_not_allow_same_participant_in_other_group()
     )
 
     assert bus.inbound_size == 0
+
+
+@pytest.mark.asyncio
+async def test_message_before_startup_is_dropped_with_millisecond_timestamp() -> None:
+    bus = MessageBus()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    ch._started_at = 1_700_000_000.250
+    ch._send_read_receipt = AsyncMock()
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(message=_Proto(conversation="old message"), timestamp=1_700_000_000_249),
+    )
+
+    assert bus.inbound_size == 0
+    ch._send_read_receipt.assert_not_awaited()
+
+
+@pytest.mark.parametrize("timestamp", [1_700_000_000_251, 1_700_000_001_987])
+@pytest.mark.asyncio
+async def test_message_after_startup_has_timestamp_in_seconds(timestamp: int) -> None:
+    bus = MessageBus()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    ch._started_at = 1_700_000_000.250
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(message=_Proto(conversation="new message"), timestamp=timestamp),
+    )
+
+    assert bus.inbound_size == 1
+    msg = await bus.consume_inbound()
+    assert msg.content == "new message"
+    assert msg.metadata["timestamp"] == timestamp // 1000
 
 
 @pytest.mark.asyncio

@@ -22,7 +22,8 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
                 "App ID is saved, but it does not look like a standard Feishu App ID.",
             )
         )
-    status = "connected" if not missing else "needs_setup"
+    # Field presence is not evidence of a working event or reply connection.
+    status = "configured" if not missing else "needs_setup"
     identity = {
         "name": display_name or "Feishu assistant",
         "avatar_url": avatar_url or None,

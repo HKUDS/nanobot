@@ -1,7 +1,7 @@
 import { lazy } from "react";
 
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 const FeishuAssistantsPanel = lazy(() =>
   import("./FeishuAssistantsPanel").then(({ FeishuAssistantsPanel: component }) => ({
@@ -15,14 +15,14 @@ export default {
     lark: {
       displayName: "Lark",
       initials: "LK",
-      logoUrl: "https://www.larksuite.com/favicon.ico",
     },
   },
   presentation: {
+    logoUrl: "https://www.larksuite.com/favicon.ico",
+    logoLayout: "tile",
     displayName: "Feishu",
     initials: "FS",
     color: "#3370FF",
-    logoUrl: "https://www.feishu.cn/favicon.ico",
     setup: {
       mode: "connect",
       command: "nanobot channels login feishu",

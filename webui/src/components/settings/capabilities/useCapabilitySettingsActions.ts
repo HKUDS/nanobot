@@ -18,7 +18,10 @@ import {
   updateWebSearchSettings,
 } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
-import type { SettingsPayload, WebSearchSettingsUpdate } from "@/lib/types";
+import type { ImageGenerationSettingsUpdate, SettingsPayload, WebSearchSettingsUpdate } from "@/lib/types";
+import { imageGenerationFormFromPayload } from "@/components/settings/capabilities/ImageGenerationSettings";
+import { transcriptionFormFromPayload } from "@/components/settings/capabilities/TranscriptionSettings";
+import { networkSafetyFormFromPayload } from "@/components/settings/capabilities/SecuritySettings";
 
 interface CapabilitySettingsActionsOptions {
   state: CapabilitySettingsState;
@@ -28,7 +31,6 @@ interface CapabilitySettingsActionsOptions {
   applyPayload: ApplySettingsPayload;
   maybeRestartHostEngine: MaybeRestartHostEngine;
   setPendingRestartSections: Dispatch<SetStateAction<PendingRestartSections>>;
-  setError: Dispatch<SetStateAction<string | null>>;
   installCapabilities: (names: string[]) => Promise<boolean>;
   imageGenerationDirty: boolean;
   transcriptionDirty: boolean;
@@ -43,7 +45,6 @@ export function useCapabilitySettingsActions({
   applyPayload,
   maybeRestartHostEngine,
   setPendingRestartSections,
-  setError,
   installCapabilities,
   imageGenerationDirty,
   transcriptionDirty,
@@ -67,38 +68,58 @@ export function useCapabilitySettingsActions({
     webSearchKeyEditing,
     webSearchSaving,
   } = state;
+  const setError = (section: "image" | "voice" | "web" | "safety", message?: string) =>
+    state.setCapabilityErrors((prev) => ({ ...prev, [section]: message }));
 
-  const saveImageGenerationSettings = async () => {
-    if (!settings || !imageGenerationDirty || imageGenerationSaving) return;
+  const persistImageSettings = async (values: ImageGenerationSettingsUpdate) => {
+    setError("image");
     setImageGenerationSaving(true);
     try {
-      const payload = await updateImageGenerationSettings(client, imageGenerationForm);
-      applyPayload(payload);
-      if (payload.requires_restart) {
+      const payload = await updateImageGenerationSettings(client, values);
+      applyPayload(payload, { preserveCapabilityForms: true });
+      state.setImageGenerationForm(imageGenerationFormFromPayload(payload));
+      if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
       await maybeRestartHostEngine(payload);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
+      setError("image");
     } finally {
       setImageGenerationSaving(false);
     }
   };
 
+  const saveImageRequestSettings = (values: Pick<ImageGenerationSettingsUpdate, "extraHeaders" | "extraBody">) =>
+    persistImageSettings({ ...imageGenerationForm, ...values });
+
+  const saveImageGenerationSettings = async () => {
+    if (!settings || !imageGenerationDirty || imageGenerationSaving) return;
+    if (imageGenerationForm.enabled && !settings.image_generation.providers.find(
+      (provider) => provider.name === imageGenerationForm.provider,
+    )?.configured) return;
+    try {
+      await persistImageSettings(imageGenerationForm);
+    } catch (err) {
+      const message = (err as Error).message;
+      setError("image", message === "image generation provider is not configured"
+        ? t("settings.image.missingCredential") : message);
+    }
+  };
+
   const saveTranscriptionSettings = async () => {
     if (!settings || !transcriptionDirty || transcriptionSaving) return;
+    setError("voice");
     setTranscriptionSaving(true);
     try {
       const payload = await updateTranscriptionSettings(client, transcriptionForm);
-      applyPayload(payload);
-      if (payload.requires_restart) {
+      applyPayload(payload, { preserveCapabilityForms: true });
+      state.setTranscriptionForm(transcriptionFormFromPayload(payload));
+      if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
       await maybeRestartHostEngine(payload);
-      setError(null);
+      setError("voice");
     } catch (err) {
-      setError((err as Error).message);
+      setError("voice", (err as Error).message);
     } finally {
       setTranscriptionSaving(false);
     }
@@ -106,17 +127,19 @@ export function useCapabilitySettingsActions({
 
   const saveNetworkSafetySettings = async () => {
     if (!settings || !networkSafetyDirty || networkSafetySaving) return;
+    setError("safety");
     setNetworkSafetySaving(true);
     try {
       const payload = await updateNetworkSafetySettings(client, networkSafetyForm);
-      applyPayload(payload);
-      if (payload.requires_restart) {
+      applyPayload(payload, { preserveCapabilityForms: true });
+      state.setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+      if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
       await maybeRestartHostEngine(payload);
-      setError(null);
+      setError("safety");
     } catch (err) {
-      setError((err as Error).message);
+      setError("safety", (err as Error).message);
     } finally {
       setNetworkSafetySaving(false);
     }
@@ -134,14 +157,13 @@ export function useCapabilitySettingsActions({
       !!settings.web_search.api_key_hint;
 
     if (webSearchProviderRequiresApiKey(provider) && !apiKey && !hasExistingSecret) {
-      setError(t("settings.byok.webSearch.apiKeyRequired"));
       return;
     }
     if (provider.credential === "base_url" && !baseUrl) {
-      setError(t("settings.byok.webSearch.baseUrlRequired"));
       return;
     }
 
+    setError("web");
     setWebSearchSaving(true);
     try {
       if (provider.name === "olostep" && !(await installCapabilities(["olostep"]))) return;
@@ -162,8 +184,8 @@ export function useCapabilitySettingsActions({
       }
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
       const payload = await updateWebSearchSettings(client, update);
-      applyPayload(payload);
-      if (payload.requires_restart || webFetchRestartRequired) {
+      applyPayload(payload, { preserveCapabilityForms: true });
+      if (!payload.restart_required_sections && (payload.requires_restart || webFetchRestartRequired)) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
       await maybeRestartHostEngine(payload);
@@ -177,9 +199,9 @@ export function useCapabilitySettingsActions({
       }));
       setWebSearchKeyVisible(false);
       setWebSearchKeyEditing(false);
-      setError(null);
+      setError("web");
     } catch (err) {
-      setError((err as Error).message);
+      setError("web", (err as Error).message);
     } finally {
       setWebSearchSaving(false);
     }
@@ -217,6 +239,7 @@ export function useCapabilitySettingsActions({
     handleWebSearchProviderChange,
     resetWebSearchDraft,
     saveImageGenerationSettings,
+    saveImageRequestSettings,
     saveNetworkSafetySettings,
     saveTranscriptionSettings,
     saveWebSearch,

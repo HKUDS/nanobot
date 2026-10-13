@@ -21,12 +21,11 @@ def convert_messages(
 
     Returns ``(system_prompt, input_items)`` where *system_prompt* is extracted
     from any ``system`` role message and *input_items* is the Responses API
-    ``input`` array.
+    ``input`` array. Provider-generated item IDs are deliberately omitted:
+    Chat history may be replayed through a different provider connection.
     """
     system_prompt = ""
     input_items: list[dict[str, Any]] = []
-    used_item_ids: set[str] = set()
-
     for idx, msg in enumerate(messages):
         role = msg.get("role")
         content = msg.get("content")
@@ -48,22 +47,19 @@ def convert_messages(
                         "content": [{"type": "output_text", "text": reasoning}],
                     })
             if isinstance(content, str) and content:
-                message_id = _unique_item_id(f"msg_{idx}", used_item_ids)
                 input_items.append({
                     "type": "message", "role": "assistant",
                     "content": [{"type": "output_text", "text": content}],
-                    "status": "completed", "id": message_id,
+                    "status": "completed",
                 })
             for raw_tool_call in cast(list[object], msg.get("tool_calls", []) or []):
                 tool_call = _as_json_object(raw_tool_call)
                 if tool_call is None:
                     continue
                 fn = _as_json_object(tool_call.get("function")) or {}
-                call_id, item_id = split_tool_call_id(tool_call.get("id"))
-                response_item_id = _unique_item_id(item_id or f"fc_{idx}", used_item_ids)
+                call_id, _ = split_tool_call_id(tool_call.get("id"))
                 input_items.append({
                     "type": "function_call",
-                    "id": response_item_id,
                     "call_id": call_id or f"call_{idx}",
                     "name": fn.get("name"),
                     "arguments": tool_arguments_json_for_replay(fn.get("arguments")),
@@ -187,27 +183,16 @@ def convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not name:
             continue
         params: object = fn.get("parameters") or {}
+        strict = fn.get("strict")
         converted.append({
             "type": "function",
             "name": name,
             "description": fn.get("description") or "",
             "parameters": params if isinstance(params, dict) else {},
+            # Responses may make optional fields required when strict is omitted.
+            "strict": strict if isinstance(strict, bool) else False,
         })
     return converted
-
-
-def _unique_item_id(item_id: str, used: set[str]) -> str:
-    """Return a Responses input item id that is unique within one request."""
-    if item_id not in used:
-        used.add(item_id)
-        return item_id
-
-    suffix = 2
-    while f"{item_id}_{suffix}" in used:
-        suffix += 1
-    unique = f"{item_id}_{suffix}"
-    used.add(unique)
-    return unique
 
 
 def split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:

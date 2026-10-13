@@ -53,13 +53,31 @@ describe("workbench model", () => {
     state = renameWorkbenchTab(state, tabKey, "Research");
 
     expect(workbenchTab(state, tabKey)).toEqual({
-      explicit: false,
+      explicit: true,
       title: "Research",
       paneKeys: ["pane-a", "pane-b"],
       layoutPaneKeys: ["pane-a", "pane-b"],
       layout: "main-stack",
       splitRatios: [],
     });
+  });
+
+  it("preserves a named group when a pane is detached", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "pane-a", "pane-b");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    state = renameWorkbenchTab(state, tabKey, "Research");
+    state = detachWorkbenchPane(state, tabKey, "pane-b");
+
+    expect(workbenchTab(state, tabKey)).toEqual({
+      explicit: true,
+      title: "Research",
+      paneKeys: ["pane-a"],
+      layoutPaneKeys: ["pane-a"],
+      layout: "columns",
+      splitRatios: [],
+    });
+    expect(normalizeWorkbenchState(state)).toEqual(state);
+    expect(reconcileWorkbench(state, new Set(["pane-a"]))).toEqual(state);
   });
 
   it("detaches a pane without persisting its standalone projection", () => {
@@ -198,7 +216,7 @@ describe("workbench model", () => {
     );
 
     expect(workbenchTab(reconciled, "alpha")).toEqual({
-      explicit: false,
+      explicit: true,
       title: "Alpha",
       paneKeys: ["pane-a", "pane-b"],
       layoutPaneKeys: ["pane-a", "pane-b"],

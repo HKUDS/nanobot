@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.cli_apps import CliAppsTool
 from nanobot.agent.tools.context import RequestContext, ToolContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
@@ -15,12 +16,13 @@ from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGene
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
+    WorkspaceScopeResolver,
     bind_workspace_scope,
     default_workspace_scope,
     reset_workspace_scope,
@@ -99,6 +101,34 @@ def test_workspace_scope_accepts_home_relative_project_path(
 
     assert scope.project_path == project.resolve()
     assert scope.metadata()["project_path"] == str(project.resolve())
+
+
+@pytest.mark.parametrize("access_mode", ["restricted", "full"])
+def test_selected_websocket_project_is_visible_to_the_model(
+    tmp_path: Path,
+    access_mode: str,
+) -> None:
+    agent_home = tmp_path / "agent-home"
+    project = tmp_path / "project"
+    agent_home.mkdir()
+    project.mkdir()
+    resolver = WorkspaceScopeResolver(agent_home, default_restrict_to_workspace=False)
+
+    scope = resolver.for_turn(
+        channel="websocket",
+        message_metadata={
+            WORKSPACE_SCOPE_METADATA_KEY: {
+                "project_path": str(project),
+                "access_mode": access_mode,
+            }
+        },
+        session_metadata=None,
+    )
+    prompt = ContextBuilder(agent_home).build_system_prompt(workspace=scope.project_path)
+
+    assert prompt.index("# Tool Usage Notes") < prompt.index("# Current Project")
+    assert f"Working directory: {project.resolve()}" in prompt
+    assert "Use it as the default root for project files" in prompt
 
 
 def test_workspace_scope_metadata_falls_back_for_stale_session(tmp_path: Path) -> None:
@@ -282,6 +312,37 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(
 
     assert "Exit code: 0" in result
     assert (project / "scoped-marker.txt").read_text() == "ok"
+
+
+@pytest.mark.asyncio
+async def test_exec_tool_resolves_relative_working_dir_from_scope_project(
+    tmp_path: Path,
+    cmd_python: str,
+) -> None:
+    project = tmp_path / "project"
+    subdir = project / "subdir"
+    subdir.mkdir(parents=True)
+
+    tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=False, timeout=5)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "full"},
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=False,
+    )
+    token = bind_workspace_scope(scope)
+    try:
+        result = await tool.execute(
+            command=(
+                f'{cmd_python} -c "from pathlib import Path; '
+                "print(Path.cwd())\""
+            ),
+            working_dir="subdir",
+        )
+    finally:
+        reset_workspace_scope(token)
+
+    assert "Exit code: 0" in result
+    assert str(subdir.resolve()) in result
 
 
 @pytest.mark.asyncio
@@ -471,7 +532,7 @@ async def test_cli_app_scope_controls_working_dir(
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> None:
+async def test_subagent_tool_forwards_current_workspace_scope(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     scope = validate_workspace_scope_payload(
@@ -494,7 +555,7 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
             return "spawned"
 
     manager = Manager()
-    tool = SpawnTool(manager)  # type: ignore[arg-type]
+    tool = SubagentTool(manager)  # type: ignore[arg-type]
     token = bind_workspace_scope(scope)
     try:
         with request_context(RequestContext(
@@ -502,7 +563,7 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
             chat_id="chat",
             runtime=MagicMock(),
         )):
-            result = await tool.execute(task="inspect")
+            result = await tool.execute(action="create", task="inspect")
     finally:
         reset_workspace_scope(token)
 

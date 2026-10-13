@@ -4,9 +4,10 @@ export const WEIXIN_PRIMARY_FIELD_KEYS = [
   "channels.weixin.streaming",
 ] as const;
 
+export const WEIXIN_QR_TOKEN_FIELD_KEY = "channels.weixin.token";
+
 export const WEIXIN_ADVANCED_FIELD_KEYS = [
   "channels.weixin.allowFrom",
-  "channels.weixin.token",
   "channels.weixin.replyProgressMessages",
   "channels.weixin.replyProgressMaxMessages",
   "channels.weixin.contextMessageBudget",

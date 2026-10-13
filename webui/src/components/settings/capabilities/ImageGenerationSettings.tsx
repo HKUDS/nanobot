@@ -1,4 +1,8 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { ProviderParameterFields } from "@/components/settings/models/ProviderParameterFields";
+import { providerJsonValue } from "@/components/settings/models/providerForm";
+import type { Dispatch, SetStateAction, ReactNode } from "react";
+import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import { useTranslation } from "react-i18next";
 
 import { ModelIdPicker, ProviderPicker, optionRowsWithCurrent } from "@/components/settings/shared/ModelControls";
@@ -35,10 +39,17 @@ export function imageGenerationFormFromPayload(payload: SettingsPayload): ImageG
     defaultAspectRatio: payload.image_generation.default_aspect_ratio,
     defaultImageSize: payload.image_generation.default_image_size,
     maxImagesPerTurn: payload.image_generation.max_images_per_turn,
+    ...(payload.image_generation.request_overrides_supported ? {
+      extraHeaders: providerJsonValue(payload.image_generation.extra_headers),
+      extraBody: providerJsonValue(payload.image_generation.extra_body),
+    } : {}),
   };
 }
 
 export function ImageGenerationSettings({
+  embedded = false,
+  error,
+  children,
   token,
   settings,
   form,
@@ -46,12 +57,16 @@ export function ImageGenerationSettings({
   saving,
   onChangeForm,
   onSave,
+  onSaveRequestSettings,
   onOpenProviders,
   showBrandLogos,
   onRestart,
   isRestarting,
   requiresRestartPending,
 }: {
+  embedded?: boolean;
+  error?: string;
+  children?: ReactNode;
   token: string;
   settings: SettingsPayload;
   form: ImageGenerationSettingsUpdate;
@@ -59,6 +74,7 @@ export function ImageGenerationSettings({
   saving: boolean;
   onChangeForm: Dispatch<SetStateAction<ImageGenerationSettingsUpdate>>;
   onSave: () => void;
+  onSaveRequestSettings: (values: Pick<ImageGenerationSettingsUpdate, "extraHeaders" | "extraBody">) => Promise<void>;
   onOpenProviders: () => void;
   showBrandLogos: boolean;
   onRestart?: () => void;
@@ -68,10 +84,10 @@ export function ImageGenerationSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const selectedProvider =
-    settings.image_generation.providers.find((provider) => provider.name === form.provider) ??
-    settings.image_generation.providers[0];
+    settings.image_generation.providers.find((provider) => provider.name === form.provider);
   const providerConfigured = !!selectedProvider?.configured;
   const missingCredential = form.enabled && !providerConfigured;
+  useAutoSave(form, dirty, saving, onSave, !embedded && !missingCredential);
   const aspectOptions = optionRowsWithCurrent(
     IMAGE_ASPECT_RATIO_OPTIONS.map((value) => ({ name: value, label: value })),
     form.defaultAspectRatio,
@@ -86,14 +102,17 @@ export function ImageGenerationSettings({
       ...prev,
       provider,
       model: nextProvider?.default_model || nextProvider?.models?.[0] || prev.model,
+      ...(settings.image_generation.request_overrides_supported && provider !== prev.provider
+        ? { extraHeaders: "", extraBody: "" } : {}),
     }));
   };
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
-        <SettingsSectionTitle>{tx("settings.sections.imageGeneration", "Image generation")}</SettingsSectionTitle>
+        {!embedded ? <SettingsSectionTitle>{tx("settings.sections.imageGeneration", "Image generation")}</SettingsSectionTitle> : null}
         <SettingsGroup>
+          {!embedded ? (
           <SettingsRow title={tx("settings.rows.imageGeneration", "Image generation")}>
             <ToggleButton
               checked={form.enabled}
@@ -102,7 +121,10 @@ export function ImageGenerationSettings({
               label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.imageProvider", "Image provider")}>
+          ) : null}
+          {embedded || form.enabled ? <>
+          <SettingsRow title={tx("settings.rows.imageProvider", "Image provider")}
+            description={selectedProvider?.uses_images_api ? t("settings.image.imagesApiHint") : undefined}>
             <ProviderPicker
               providers={settings.image_generation.providers}
               value={form.provider}
@@ -128,17 +150,11 @@ export function ImageGenerationSettings({
               ) : null}
             </div>
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.imageProviderBase", "Provider base")}>
+          <SettingsRow title={tx("settings.rows.imageProviderBase", "Provider URL")}>
             <span className="max-w-[320px] truncate text-right text-[13px] text-muted-foreground">
               {selectedProvider?.api_base || selectedProvider?.default_api_base || selectedProvider?.name || tx("settings.values.notAvailable", "Not available")}
             </span>
           </SettingsRow>
-        </SettingsGroup>
-      </section>
-
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.imageDefaults", "Defaults")}</SettingsSectionTitle>
-        <SettingsGroup>
           <SettingsRow title={tx("settings.rows.imageModel", "Image model")}>
             <ModelIdPicker
               token={token}
@@ -159,7 +175,7 @@ export function ImageGenerationSettings({
               onChange={(model) => onChangeForm((prev) => ({ ...prev, model }))}
             />
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.defaultAspectRatio", "Default aspect")}>
+          <SettingsRow title={tx("settings.rows.defaultAspectRatio", "Default aspect ratio")}>
             <ProviderPicker
               providers={aspectOptions}
               value={form.defaultAspectRatio}
@@ -179,7 +195,19 @@ export function ImageGenerationSettings({
               }
             />
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.maxImagesPerTurn", "Max images per turn")}>
+          <SettingsAdvancedOptions>
+          {settings.image_generation.request_overrides_supported && (
+            <div className="settings-list-inset space-y-3 py-3">
+              <p className="text-[13px] text-muted-foreground">{t("settings.image.requestOverridesHint")}</p>
+              <ProviderParameterFields fields={["extra_headers", "extra_body"]}
+                inherit disabled={saving || dirty || missingCredential}
+                onSave={onSaveRequestSettings}
+                form={{ extraHeaders: form.extraHeaders ?? "", extraBody: form.extraBody ?? "", extraQuery: "" }}
+                onChange={(value) => onChangeForm((prev) => ({ ...prev, ...value }))}
+              />
+            </div>
+          )}
+          <SettingsRow title={tx("settings.rows.maxImagesPerTurn", "Max images per request")}>
             <NumberInput
               value={form.maxImagesPerTurn}
               min={1}
@@ -189,19 +217,26 @@ export function ImageGenerationSettings({
               }
             />
           </SettingsRow>
-          <ReadOnlyRow title={tx("settings.rows.imageSaveDir", "Save directory")} value={settings.image_generation.save_dir} />
+          {!settings.runtime_config ? (
+            <ReadOnlyRow title={tx("settings.rows.imageSaveDir", "Save directory")} value={settings.image_generation.save_dir} />
+          ) : null}
+          {children}
+          </SettingsAdvancedOptions>
+          </> : null}
           <RestartSettingsFooter
+            error={missingCredential || Boolean(error)}
+            autoSave
             dirty={dirty}
             saving={saving}
-            pendingRestart={requiresRestartPending}
+            pendingRestart={!embedded && requiresRestartPending}
             disabled={missingCredential}
             message={
               missingCredential
                 ? tx("settings.image.missingCredential", "Configure this provider before enabling image generation.")
-                : undefined
+                : error
             }
-            dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
-            pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}
+            dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart nanobot to apply them.")}
+            pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart to apply changes.")}
             onSave={onSave}
             onRestart={onRestart}
             isRestarting={isRestarting}

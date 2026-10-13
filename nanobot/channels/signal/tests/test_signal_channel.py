@@ -508,31 +508,24 @@ class TestIsAllowed:
         ch = _make_channel(dm_enabled=False, group_enabled=False)
         assert ch.is_allowed("+19995550001") is False
 
-    def test_allows_wildcard(self):
-        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["*"])
-        assert ch.is_allowed("+19995550001|some-uuid") is True
-
-    def test_allows_composite_sender_against_split_allowlist(self):
-        """Composite sender_id, single-id allow_from — must match either part."""
-        ch = _make_channel(
-            dm_policy="allowlist",
-            dm_allow_from=["+19995550001"],
-        )
-        assert ch.is_allowed("+19995550001|1872ba20-uuid") is True
+    @pytest.mark.parametrize(
+        "expected, sender_id, allowed_id",
+        [
+            pytest.param(True, "+19995550001|some-uuid", "*", id="wildcard"),
+            pytest.param(True, "+19995550001|1872ba20-uuid", "+19995550001", id="phone"),
+            pytest.param(True, "+19995550001|1872ba20-uuid", "1872ba20-uuid", id="uuid"),
+            pytest.param(False, "+19995550001|1872ba20-uuid", "+12223334444", id="unknown"),
+        ],
+    )
+    def test_allowlist_matches_sender_identifiers(self, expected, sender_id, allowed_id):
+        ch = _make_channel(dm_policy="allowlist", dm_allow_from=[allowed_id])
+        assert ch.is_allowed(sender_id) is expected
 
     def test_allows_composite_sender_against_composite_allowlist_entry(self):
         """Backward compat: pipe-joined composite allowlist entries still match."""
         composite = "+19995550001|1872ba20-uuid"
         ch = _make_channel(dm_policy="allowlist", dm_allow_from=[composite])
         assert ch.is_allowed(composite) is True
-
-    def test_allows_when_only_uuid_part_is_listed(self):
-        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["1872ba20-uuid"])
-        assert ch.is_allowed("+19995550001|1872ba20-uuid") is True
-
-    def test_denies_when_no_part_matches(self):
-        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["+12223334444"])
-        assert ch.is_allowed("+19995550001|1872ba20-uuid") is False
 
     def test_allowlist_union_includes_group_ids(self):
         """allow_from is the union of dm.allow_from and group.allow_from."""
@@ -791,6 +784,14 @@ class TestHandleDataMessageDM:
         assert len(handled) == 1
 
     @pytest.mark.asyncio
+    async def test_dm_allowlist_wildcard_preserves_content(self):
+        ch, handled = self._make_dm_channel(policy="allowlist", allow_from=["*"])
+        params = _dm_envelope(source_number="+19995550001", message="wildcard DM")
+        await ch._handle_receive_notification(params)
+        assert len(handled) == 1
+        assert handled[0]["content"] == "wildcard DM"
+
+    @pytest.mark.asyncio
     async def test_dm_allowlist_rejected_triggers_pairing(self):
         # Denied DM senders go through super()._handle_message which checks
         # is_allowed → sends pairing code via self.send().
@@ -1024,6 +1025,16 @@ class TestHandleDataMessageGroup:
         params = _group_envelope(group_id="grp==", message="hi")
         await ch._handle_receive_notification(params)
         assert len(handled) == 1
+
+    @pytest.mark.asyncio
+    async def test_group_allowlist_wildcard_preserves_content(self):
+        ch, handled = self._make_group_channel(
+            policy="allowlist", allow_from=["*"], require_mention=False
+        )
+        params = _group_envelope(group_id="grp==", source_name="Alice", message="wildcard group")
+        await ch._handle_receive_notification(params)
+        assert len(handled) == 1
+        assert "[Alice]: wildcard group" in handled[0]["content"]
 
     @pytest.mark.asyncio
     async def test_group_allowlist_rejected(self):
@@ -1488,6 +1499,15 @@ async def test_handle_notification_no_source_skipped() -> None:
 # ---------------------------------------------------------------------------
 # Config: allow_from property aggregation
 # ---------------------------------------------------------------------------
+
+
+def test_default_config_enables_private_dms_with_pairing() -> None:
+    config = SignalConfig(phone_number="+10000000000")
+
+    assert config.dm.enabled is True
+    assert config.dm.policy == "allowlist"
+    assert config.dm.allow_from == []
+    assert config.group.enabled is False
 
 
 def test_config_allow_from_aggregates_dm_and_group() -> None:

@@ -108,6 +108,18 @@ function BspWorkbenchHarness() {
 }
 
 describe("PaneWorkbench", () => {
+  it("keeps a single conversation's header inside that pane instead of above its previews", () => {
+    render(<PaneWorkbench panes={[{ key: "alpha", title: "Alpha" }]} activePaneKey="alpha"
+      layout="columns" chrome showLayoutControl={false} onActivatePane={vi.fn()} onAddPane={vi.fn()}
+      onLayoutChange={vi.fn()} onPaneOrderChange={vi.fn()}
+      renderPane={(_pane, context) => {
+        expect(context.headerPortalTarget).toBeUndefined();
+        return <div data-testid="local-toolbar">{context.headerActions}</div>;
+      }} />);
+    expect(screen.getByTestId("workbench-header-host")).toBeEmptyDOMElement();
+    expect(within(screen.getByTestId("local-toolbar")).getByRole("button", { name: "Add pane" })).toBeVisible();
+  });
+
   const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
   const originalAnimate = HTMLElement.prototype.animate;
   const animate = vi.fn(() => ({
@@ -296,8 +308,8 @@ describe("PaneWorkbench", () => {
     render(<WorkbenchHarness />);
 
     const header = screen.getByTestId("workbench-header-host");
-    expect(within(header).getAllByRole("button", { name: "Pane layout" })).toHaveLength(1);
-    fireEvent.pointerDown(within(header).getByRole("button", { name: "Pane layout" }), {
+    expect(within(header).getAllByRole("button", { name: "Layout" })).toHaveLength(1);
+    fireEvent.pointerDown(within(header).getByRole("button", { name: "Layout" }), {
       button: 0,
       ctrlKey: false,
     });
@@ -305,13 +317,58 @@ describe("PaneWorkbench", () => {
     expect(screen.getByTestId("pane-grid")).toHaveAttribute("data-layout", "rows");
     await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
 
-    fireEvent.pointerDown(within(header).getByRole("button", { name: "Pane layout" }), {
+    fireEvent.pointerDown(within(header).getByRole("button", { name: "Layout" }), {
       button: 0,
       ctrlKey: false,
     });
     fireEvent.click(screen.getByRole("menuitemradio", { name: "BSP" }));
     expect(screen.getByTestId("pane-grid")).toHaveAttribute("data-layout", "bsp");
     await waitFor(() => expect(animate).toHaveBeenCalledTimes(4));
+  });
+
+  it("keeps a retargeted pane surface in the same physical motion", async () => {
+    const common = {
+      layout: "columns" as const,
+      showLayoutControl: false,
+      onActivatePane: vi.fn(),
+      onAddPane: vi.fn(),
+      onLayoutChange: vi.fn(),
+      onPaneOrderChange: vi.fn(),
+      renderPane: (pane: { title: string }) => <span>{pane.title}</span>,
+    };
+    const { rerender } = render(
+      <PaneWorkbench
+        {...common}
+        panes={[
+          { key: "alpha", reactKey: "tab-root", title: "Alpha" },
+          { key: "beta", reactKey: "pane:beta", title: "Beta" },
+        ]}
+        activePaneKey="alpha"
+      />,
+    );
+    animate.mockClear();
+
+    rerender(
+      <PaneWorkbench
+        {...common}
+        panes={[
+          { key: "beta", reactKey: "pane:beta", title: "Beta" },
+          { key: "gamma", reactKey: "tab-root", title: "Gamma" },
+        ]}
+        activePaneKey="gamma"
+      />,
+    );
+
+    await waitFor(() => expect(animate).toHaveBeenCalledWith(
+      [
+        { transform: "translate(-500px, 0px) scale(1, 1)" },
+        { transform: "translate(0, 0) scale(1, 1)" },
+      ],
+      {
+        duration: 260,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+      },
+    ));
   });
 
   it("renders only the active pane and hides workbench controls on mobile", () => {
@@ -346,7 +403,7 @@ describe("PaneWorkbench", () => {
 
     expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
     expect(screen.getByTestId("workbench-pane-gamma")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Pane layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Layout" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
     expect(screen.queryByRole("separator")).not.toBeInTheDocument();
 
@@ -356,7 +413,7 @@ describe("PaneWorkbench", () => {
     expect(screen.queryByTestId("workbench-pane-gamma")).not.toBeInTheDocument();
   });
 
-  it("explains why the desktop add-pane control is disabled", () => {
+  it("explains why the desktop add-pane control is disabled", async () => {
     render(
       <PaneWorkbench
         panes={[{ key: "alpha", title: "Alpha" }]}
@@ -373,8 +430,11 @@ describe("PaneWorkbench", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Add pane" }))
-      .toHaveAttribute("title", "Maximum 4 panes");
+    const addPane = screen.getByRole("button", { name: "Add pane" });
+    expect(addPane).toBeDisabled();
+    expect(addPane).not.toHaveAttribute("title");
+    fireEvent.pointerMove(addPane.parentElement!, { pointerType: "mouse" });
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Maximum 4 panes");
   });
 
   it("fills the workbench through alternating binary splits", () => {

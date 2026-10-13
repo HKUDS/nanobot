@@ -1,5 +1,8 @@
 const CACHE_PREFIX = "nanobot-static-";
 const CACHE_NAME = `${CACHE_PREFIX}v2`;
+const ICON_CACHE_PREFIX = "nanobot-icons-";
+const ICON_CACHE_NAME = `${ICON_CACHE_PREFIX}v1`;
+const ICON_CACHE_LIMIT = 128;
 const ASSET_MANIFEST_PATH = "/asset-manifest.json";
 const PRECACHE = ["/", "/manifest.json", ASSET_MANIFEST_PATH];
 const NETWORK_FIRST_STATIC_PATHS = new Set([
@@ -17,6 +20,52 @@ const NETWORK_FIRST_STATIC_PATHS = new Set([
 function responseMayBeCached(response) {
   const cacheControl = response.headers?.get("Cache-Control") ?? "";
   return response.ok && !/(?:^|,)\s*(?:private|no-cache|no-store)\b/i.test(cacheControl);
+}
+
+function isPublicIconRequest(request, url) {
+  if (request.destination !== "image" || url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.toLowerCase();
+  if (path.endsWith("/favicon.ico")) return true;
+  if (host === "favicon.im") return true;
+  if (host === "icons.duckduckgo.com") return path.startsWith("/ip3/");
+  return (host === "google.com" || host === "www.google.com")
+    && path === "/s2/favicons";
+}
+
+function publicIconResponseMayBeCached(response) {
+  // Cross-origin <img> requests produce opaque responses, so their status and
+  // cache headers cannot be inspected. Only the public icon URLs above reach
+  // this path; regular remote images continue to use the browser directly.
+  return response.type === "opaque" || responseMayBeCached(response);
+}
+
+async function trimIconCache(cache) {
+  const keys = await cache.keys();
+  const overflow = keys.length - ICON_CACHE_LIMIT;
+  if (overflow <= 0) return;
+  await Promise.all(keys.slice(0, overflow).map((request) => cache.delete(request)));
+}
+
+async function cacheFirstPublicIcon(request) {
+  let cache;
+  try {
+    cache = await caches.open(ICON_CACHE_NAME);
+    const cached = await cache.match(request);
+    if (cached) return cached;
+  } catch {
+    return fetch(request);
+  }
+
+  const response = await fetch(request);
+  if (!publicIconResponseMayBeCached(response)) return response;
+  try {
+    await cache.put(request, response.clone());
+    await trimIconCache(cache);
+  } catch {
+    // Cache storage is optional; a successful network response still wins.
+  }
+  return response;
 }
 
 self.addEventListener("install", (event) => {
@@ -108,7 +157,10 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
+            .filter((k) =>
+              (k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
+              || (k.startsWith(ICON_CACHE_PREFIX) && k !== ICON_CACHE_NAME)
+            )
             .map((k) => caches.delete(k))
         )
       )
@@ -120,15 +172,19 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const { request } = event;
 
-  // Only handle same-origin GET requests. Requests are handed to fetch() as-is
-  // (never reconstructed), so their credentials mode is preserved and gateway
-  // auth cookies flow through on every path we touch. WebSocket upgrades are
-  // never dispatched to a service worker's fetch handler, so the WS endpoint
-  // cannot be cached. Unknown HTTP endpoints are passed through below.
+  // Requests are handed to fetch() as-is (never reconstructed), so their
+  // credentials mode is preserved and gateway auth cookies flow through on
+  // every path we touch. WebSocket upgrades are never dispatched to a service
+  // worker's fetch handler, so the WS endpoint cannot be cached.
   if (request.method !== "GET") return;
-  if (new URL(request.url).origin !== self.location.origin) return;
-
   const url = new URL(request.url);
+  if (url.origin !== self.location.origin) {
+    if (isPublicIconRequest(request, url)) {
+      event.respondWith(cacheFirstPublicIcon(request));
+    }
+    return;
+  }
+
   const path = url.pathname;
 
   // Static assets: cache-first. Only files under /assets/ carry content hashes

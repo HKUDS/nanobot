@@ -108,6 +108,91 @@ def test_save_store_failure_does_not_corrupt_existing_file(
     assert store_path.read_bytes() == original
 
 
+@pytest.mark.parametrize("operation", ["add", "update", "delete"])
+def test_action_log_survives_failed_store_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    writer, store_path = _seeded_store(tmp_path)
+    job = writer.list_jobs(include_disabled=True)[0]
+    if operation == "add":
+        writer.add_job(
+            name="New reminder",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            message="hello",
+            channel="cli",
+            to="test",
+        )
+    elif operation == "update":
+        writer.update_job(job.id, name="Updated reminder")
+    else:
+        assert writer.remove_job(job.id) == "removed"
+    expected = [(j.id, j.name) for j in writer.list_jobs(include_disabled=True)]
+    action_path = store_path.parent / "action.jsonl"
+    pending_actions = action_path.read_bytes()
+    original_store = store_path.read_bytes()
+    assert pending_actions
+
+    gateway = CronService(store_path)
+    gateway._running = True
+
+    def fail_write(path: Path, content: str) -> None:
+        raise OSError(errno.ENOSPC, "simulated disk full")
+
+    monkeypatch.setattr(gateway, "_atomic_write", fail_write)
+    with pytest.raises(OSError, match="simulated disk full"):
+        gateway._load_store()
+
+    assert store_path.read_bytes() == original_store
+    assert action_path.read_bytes() == pending_actions
+
+    # Recover from disk, without relying on the failed gateway's dirty snapshot.
+    restarted = CronService(store_path)
+    restarted._running = True
+    assert [(j.id, j.name) for j in restarted.list_jobs(include_disabled=True)] == expected
+    assert action_path.read_bytes() == b""
+    assert [(j.id, j.name) for j in CronService(store_path).list_jobs(include_disabled=True)] == expected
+
+
+def test_saved_actions_can_be_replayed_if_log_cleanup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer, store_path = _seeded_store(tmp_path)
+    job = writer.add_job(
+        name="New reminder",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        channel="cli",
+        to="test",
+    )
+    action_path = store_path.parent / "action.jsonl"
+    pending_actions = action_path.read_bytes()
+    real_write_text = Path.write_text
+
+    def fail_cleanup(path: Path, *args, **kwargs):
+        if path == action_path:
+            raise OSError("simulated action log cleanup failure")
+        return real_write_text(path, *args, **kwargs)
+
+    gateway = CronService(store_path)
+    gateway._running = True
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "write_text", fail_cleanup)
+        with pytest.raises(OSError, match="simulated action log cleanup failure"):
+            gateway._load_store()
+
+    saved_ids = [entry["id"] for entry in json.loads(store_path.read_text())["jobs"]]
+    assert saved_ids.count(job.id) == 1
+    assert action_path.read_bytes() == pending_actions
+
+    restarted = CronService(store_path)
+    restarted._running = True
+    assert {j.id for j in restarted.list_jobs(include_disabled=True)} == set(saved_ids)
+    assert action_path.read_bytes() == b""
+    persisted = CronService(store_path).list_jobs(include_disabled=True)
+    assert len(persisted) == len(saved_ids)
+    assert {j.id for j in persisted} == set(saved_ids)
+
+
 def test_atomic_write_ignores_unsupported_directory_fsync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,6 +296,7 @@ def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
         ("enable_job", lambda service: service.enable_job("missing", enabled=False)),
         ("update_job", lambda service: service.update_job("missing", name="new name")),
         ("register_system_job", lambda service: service.register_system_job(_system_job())),
+        ("remove_system_job", lambda service: service.remove_system_job("heartbeat")),
     ],
 )
 def test_public_apis_raise_clear_error_for_unavailable_corrupt_store(

@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.mattermost.manifest import SETUP_SPEC
 from nanobot.channels.mattermost.runtime import (
@@ -31,8 +32,6 @@ class _FakeHTTPClient:
         self.delete_calls: list[dict[str, Any]] = []
         self._get_responses: dict[str, Any] = {}
         self._post_responses: dict[str, Any] = {}
-        self._put_responses: dict[str, Any] = {}
-        self._delete_status: int | None = None
 
     def _req(self, method: str, path: str) -> httpx.Request:
         return httpx.Request(method, f"https://chat.example.com{path}")
@@ -45,12 +44,6 @@ class _FakeHTTPClient:
 
     def set_post_response(self, path: str, data: Any) -> None:
         self._post_responses[path] = data
-
-    def set_put_response(self, path: str, data: Any) -> None:
-        self._put_responses[path] = data
-
-    def set_delete_status(self, status: int) -> None:
-        self._delete_status = status
 
     async def get(self, path: str, **kwargs) -> httpx.Response:
         self.get_calls.append({"path": path, **kwargs})
@@ -71,13 +64,11 @@ class _FakeHTTPClient:
 
     async def put(self, path: str, *, json: dict[str, Any] | None = None, **kwargs) -> httpx.Response:
         self.put_calls.append({"path": path, "json": json})
-        data = self._put_responses.get(path, {"id": path.split("/")[-1]})
-        return self._resp(200, data, "PUT", path)
+        return self._resp(200, {"id": path.split("/")[-1]}, "PUT", path)
 
     async def delete(self, path: str, **kwargs) -> httpx.Response:
         self.delete_calls.append({"path": path})
-        status = self._delete_status if self._delete_status is not None else 200
-        return self._resp(status, {}, "DELETE", path)
+        return self._resp(200, {}, "DELETE", path)
 
     async def aclose(self) -> None:
         pass
@@ -119,7 +110,6 @@ def test_config_defaults():
     assert config.server_url == ""
     assert config.token == ""
     assert config.streaming is True
-    assert config.streaming_max_chars == 16000
     assert config.send_tool_hints is True
     assert config.dm.enabled is True
     assert config.dm.policy == "open"
@@ -150,7 +140,6 @@ def test_config_camelcase_aliases():
         "serverUrl": "https://mm.example.com",
         "token": "abc123",
         "allowFromMatchMode": "username",
-        "streamingMaxChars": 8000,
         "replyInThread": False,
         "sendToolHints": False,
     }
@@ -158,7 +147,6 @@ def test_config_camelcase_aliases():
     assert config.server_url == "https://mm.example.com"
     assert config.token == "abc123"
     assert config.allow_from_match_mode == "username"
-    assert config.streaming_max_chars == 8000
     assert config.reply_in_thread is False
     assert config.send_tool_hints is False
 
@@ -194,7 +182,6 @@ async def test_start_identifies_bot():
 
     assert channel._self_id == "botuserid123"
     assert channel._self_username == "nanobot"
-    assert channel._self_email == "bot@example.com"
     assert not start_task.done()
     user_me_calls = [c for c in fake.get_calls[calls_before:] if "/api/v4/users/me" in c["path"]]
     assert len(user_me_calls) == 1
@@ -464,6 +451,32 @@ async def test_posted_thread_event_uses_thread_policy():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("post_type", ["system_join_channel", "system_leave_channel"])
+async def test_posted_event_ignores_system_posts(post_type: str):
+    channel, _ = _make_channel({"groupPolicy": "open"})
+    channel._self_id = "bot_id"
+    with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
+        ws_msg = {
+            "event": "posted",
+            "data": {
+                "channel_type": "O",
+                "post": json.dumps({
+                    "id": "system_post_1",
+                    "user_id": "user_1",
+                    "channel_id": "channel_1",
+                    "message": "A user joined or left the channel.",
+                    "type": post_type,
+                }),
+            },
+            "broadcast": {},
+        }
+
+        await channel._handle_ws_message(ws_msg)
+
+    mock_handle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_group_policy_in_thread_allowlist():
     """Thread uses allowlist policy when configured."""
     channel, fake = _make_channel({
@@ -585,9 +598,21 @@ async def test_send_with_thread_root_id():
 
 
 @pytest.mark.asyncio
-async def test_send_reaction_on_completion():
+async def test_send_reactions_complete_after_final_reply():
     channel, fake = _make_channel()
     channel._self_id = "bot_id"
+    await channel.send(OutboundMessage(
+        channel="mattermost",
+        chat_id="chan_1",
+        content="working",
+        metadata={"message_id": "orig_post_1"},
+        event=ProgressEvent(content="working"),
+    ))
+    posts = [c for c in fake.post_calls if c["path"] == "/api/v4/posts"]
+    assert [c["json"]["message"] for c in posts] == ["working"]
+    assert fake.delete_calls == []
+    assert [c for c in fake.post_calls if c["path"] == "/api/v4/reactions"] == []
+
     msg = OutboundMessage(
         channel="mattermost",
         chat_id="chan_1",
@@ -598,6 +623,10 @@ async def test_send_reaction_on_completion():
     reactions = [c for c in fake.post_calls if c["path"] == "/api/v4/reactions"]
     assert len(reactions) == 1
     assert reactions[0]["json"]["emoji_name"] == "white_check_mark"
+    assert reactions[0]["json"]["post_id"] == "orig_post_1"
+    assert [c["path"] for c in fake.delete_calls] == [
+        "/api/v4/users/bot_id/posts/orig_post_1/reactions/eyes",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -606,12 +635,12 @@ async def test_send_reaction_on_completion():
 
 
 @pytest.mark.asyncio
-async def test_stream_first_delta_creates_post():
+async def test_stream_first_delta_buffers_content():
     channel, fake = _make_channel()
     channel._self_id = "bot_id"
     fake.set_post_response("/api/v4/posts", {"id": "stream_post_1"})
 
-    await channel.send_delta("chan_1", "Hello", {"_stream_id": "s1"})
+    await channel.send_delta("chan_1", "Hello", stream_id="s1")
     posts = [c for c in fake.post_calls if c["path"] == "/api/v4/posts"]
     assert len(posts) == 0
     assert channel._stream_buffers["s1"] == "Hello"
@@ -619,15 +648,15 @@ async def test_stream_first_delta_creates_post():
 
 
 @pytest.mark.asyncio
-async def test_stream_subsequent_delta_edits_post():
+async def test_stream_subsequent_delta_appends_content():
     channel, fake = _make_channel()
     channel._self_id = "bot_id"
     fake.set_post_response("/api/v4/posts", {"id": "stream_post_1"})
 
-    await channel.send_delta("chan_1", "Hello", {"_stream_id": "s1"})
+    await channel.send_delta("chan_1", "Hello", stream_id="s1")
     assert channel._stream_buffers["s1"] == "Hello"
 
-    await channel.send_delta("chan_1", " world", {"_stream_id": "s1"})
+    await channel.send_delta("chan_1", " world", stream_id="s1")
     edits = [c for c in fake.put_calls if c["path"] == "/api/v4/posts/stream_post_1"]
     assert len(edits) == 0
     assert channel._stream_buffers["s1"] == "Hello world"
@@ -639,21 +668,21 @@ async def test_stream_end_adds_done_emoji():
     channel._self_id = "bot_id"
     fake.set_post_response("/api/v4/posts", {"id": "stream_post_1"})
 
-    await channel.send_delta("chan_1", "Hello", {"_stream_id": "s1"})
-    await channel.send_delta("chan_1", "", {"_stream_id": "s1", "_stream_end": True})
+    await channel.send_delta("chan_1", "Hello", stream_id="s1")
+    await channel.send_delta("chan_1", "", stream_id="s1", stream_end=True)
     reactions = [c for c in fake.post_calls if c["path"] == "/api/v4/reactions" and c["json"]["emoji_name"] == "white_check_mark"]
     assert len(reactions) >= 1
     assert channel._stream_posts.get("s1") is None
 
 
 @pytest.mark.asyncio
-async def test_stream_chunk_boundary_finalizes_and_creates_new():
-    channel, fake = _make_channel({"streamingMaxChars": 10})
+async def test_stream_deltas_keep_combined_buffer():
+    channel, fake = _make_channel()
     channel._self_id = "bot_id"
     fake.set_post_response("/api/v4/posts", {"id": "post_1"})
 
-    await channel.send_delta("chan_1", "Hello ", {"_stream_id": "s1"})
-    await channel.send_delta("chan_1", "world", {"_stream_id": "s1"})
+    await channel.send_delta("chan_1", "Hello ", stream_id="s1")
+    await channel.send_delta("chan_1", "world", stream_id="s1")
 
     posts = [c for c in fake.post_calls if c["path"] == "/api/v4/posts"]
     assert len(posts) == 0

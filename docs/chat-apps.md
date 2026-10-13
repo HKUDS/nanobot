@@ -1,8 +1,6 @@
 # Chat Apps for Self-Hosted AI Agents
 
-Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, and
-other chat platforms. This page is the full chat-channel reference. If you want
-a focused setup path for one platform, start with a guide:
+Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, Linear, and other chat platforms. This page is the full chat-channel reference. If you want a focused setup path for one platform, start with a guide:
 
 | Platform | Guide |
 |---|---|
@@ -15,6 +13,7 @@ a focused setup path for one platform, start with a guide:
 | QQ | [Build a QQ AI Agent with nanobot](./guides/qq-ai-agent.md) |
 | Email | [Build an Email AI Agent with nanobot](./guides/email-ai-agent.md) |
 | Mattermost | [Build a Mattermost AI Agent with nanobot](./guides/mattermost-ai-agent.md) |
+| Linear | [Use nanobot as a native Linear agent](./guides/linear-agent.md) |
 
 Want to build your own channel? See the [Channel Package Guide](./channel-package-guide.md).
 
@@ -31,44 +30,41 @@ If that fails, fix installation, config, provider, or model setup first with [`q
 For normal local setup, let the WebUI write and validate the channel config:
 
 1. Run `nanobot webui`.
-2. Open **Settings → Channels**.
+2. Open **Channels**.
 3. Search for the platform and open its setup panel.
 4. Follow the credential fields or QR flow. The screen tells you which platform-side token, permission, account, or URL it needs.
 5. Let nanobot install the optional channel support when prompted.
 6. Restart from the WebUI if it reports that a restart is required.
 7. Send a private test message. If the channel returns a pairing code, approve the pending request in the WebUI and send the message again.
 
-If your installed stable release does not show **Settings → Channels**, continue with the [manual setup pattern](#manual-setup-pattern) below or install current source.
+If your installed stable release does not show **Channels**, continue with the [manual setup pattern](#manual-setup-pattern) below or install current source.
 
 Optional package installation is available to a same-machine WebUI by default. Remote browser clients cannot change the Python environment unless an administrator explicitly enables that capability. Run `nanobot plugins enable <channel>` locally when the guided install is unavailable.
 
 The sections below explain what each chat platform requires and provide manual config for deployments that manage `config.json` directly.
 
 > [!NOTE]
-> If you are upgrading from a version where chat app SDKs were installed by default,
-> enable the channel in the same Python environment so nanobot installs its
-> manifest-declared dependencies:
+> If you are upgrading from a version where chat app SDKs were installed by default, enable the channel in the same Python environment so nanobot installs its manifest-declared dependencies:
 >
 > ```bash
 > nanobot plugins enable <channel>
 > ```
 >
-> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`,
-> `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`.
-> To turn a channel off later, run `nanobot plugins disable <channel>`.
-> nanobot keeps the saved settings, but stops loading that channel after the
-> next restart.
+> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`, `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`. To turn a channel off later, run `nanobot plugins disable <channel>`. nanobot keeps the saved settings, but stops loading that channel after the next restart.
 
 ## Manual Setup Pattern
 
-Most examples below are snippets to merge into `~/.nanobot/config.json`. When a snippet includes `allowFrom`, it is showing a static allowlist. For pairing-based access on supported channels, omit `allowFrom`; Slack and Mattermost also need `dm.policy` set to `"allowlist"` for DMs to issue pairing codes.
+<details>
+<summary>Manual configuration</summary>
+
+Most examples below are snippets to merge into `~/.nanobot/config.json`. When a snippet includes `allowFrom`, it is showing a static allowlist. For pairing-based access on channels with a common sender allowlist, omit `allowFrom`. Slack and Mattermost instead use `dm.policy: "allowlist"` with an empty `dm.allowFrom` for DM pairing; their group policies are independent of DM approval.
 
 Every chat app uses the same shape:
 
 1. Create or prepare the bot/account in the chat platform.
 2. Copy the token, secret, QR login state, webhook URL, or account ID that platform gives you.
 3. Merge that platform's JSON snippet into `~/.nanobot/config.json`.
-4. Prefer pairing for DM-capable channels: omit `allowFrom`, let the first DM receive a pairing code, then approve it with `/pairing approve <code>`.
+4. For DM pairing, use the channel-specific policy described above, let the first DM receive a pairing code, then approve it with `/pairing approve <code>`.
 5. For channels without pairing, such as Email, keep access narrow with `allowFrom` or the platform-specific allow list.
 6. Check that nanobot can see the configured channel:
 
@@ -105,6 +101,22 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
 | **Signal** | signal-cli daemon + phone number |
+| **Linear** | Private OAuth app + public HTTPS callback and webhook URLs |
+
+</details>
+
+<details id="linear">
+<summary><b>Linear</b></summary>
+
+Linear is a native Agent channel rather than a comment bot. A user starts a task by explicitly mentioning the installed nanobot app in an issue. Follow-up prompts inside that Agent Session continue the same nanobot session without another mention. Ordinary issue comments do not invoke nanobot.
+
+The native Agent API is webhook-based. Linear must reach a public HTTPS URL. An HTTPS tunnel can forward requests to nanobot's local listener without a public IP; a publicly reachable server can use a reverse proxy. Use a fixed hostname for ongoing use. Temporary tunnels also work for testing, but a hostname change requires updating nanobot's public URL and the app's callback and webhook URLs.
+
+The recommended setup is **Channels → Linear**. Enter the public URL and wait for automatic saving, select **Create prefilled Linear app**, create the app, then copy its Client ID, Client Secret, and Webhook Signing Secret back into nanobot. Leave each secret field to save it. Once the settings are saved, choose **Connect Linear**. OAuth requests only `read`, `write`, and `app:mentionable`; it deliberately does not request `app:assignable` so a new task must begin with an @mention.
+
+See the [native Linear agent guide](./guides/linear-agent.md) for the complete setup, tunnel examples, security model, and troubleshooting.
+
+</details>
 
 <details>
 <summary><b>Telegram</b></summary>
@@ -112,17 +124,13 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 **Recommended WebUI setup**
 
 1. Create a bot with `@BotFather` and copy its token.
-2. Run `nanobot webui`, then open **Settings → Channels → Telegram**.
-3. Paste the token. If the gateway cannot reach Telegram directly, expand
-   **Advanced** and add an HTTP or SOCKS proxy.
+2. Run `nanobot webui`, then open **Channels → Telegram**.
+3. Paste the token. If the gateway cannot reach Telegram directly, expand **Advanced** and add an HTTP or SOCKS proxy.
 4. Save and enable Telegram, then send the bot a direct message.
 
-The configuration badge means nanobot found a saved token. The live connection
-check is separate, so a temporary Telegram or proxy outage does not make an
-existing configuration disappear. Saved tokens and proxy URLs remain masked.
+The configuration badge means nanobot found a saved token. The live connection check is separate, so a temporary Telegram or proxy outage does not make an existing configuration disappear. Saved tokens and proxy URLs remain masked.
 
-See the [step-by-step Telegram guide](./guides/telegram-ai-agent.md) for pairing
-and troubleshooting.
+See the [step-by-step Telegram guide](./guides/telegram-ai-agent.md) for pairing and troubleshooting.
 
 **Manual setup**
 
@@ -163,8 +171,7 @@ If the gateway cannot reach Telegram directly, add a proxy to the same section:
 }
 ```
 
-HTTP, HTTPS, SOCKS5, and SOCKS5H proxy URLs are accepted. Treat a proxy URL
-containing a username or password as a secret.
+HTTP, HTTPS, SOCKS5, and SOCKS5H proxy URLs are accepted. Treat a proxy URL containing a username or password as a secret.
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
 >
@@ -298,7 +305,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "allowFrom": ["YOUR_USER_ID"],
       "allowChannels": [],
       "groupPolicy": "mention",
-      "streaming": true
+      "streaming": true,
+      "replyToMessage": false
     }
   }
 }
@@ -306,11 +314,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 
 > `groupPolicy` controls how the bot responds in group channels:
 > - `"mention"` (default) — Only respond when @mentioned
-> - `"open"` — Respond to all messages
-> DMs always respond when the sender is in `allowFrom`.
-> - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session.
-> `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass. Discord threads under an allowed parent channel are also allowed; for Forum channels, allowing the parent Forum channel allows all threads/posts in that forum.
-> `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies.
+> - `"open"` — Respond to all messages DMs always respond when the sender is in `allowFrom`.
+> - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session. `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass. Discord threads under an allowed parent channel are also allowed; for Forum channels, allowing the parent Forum channel allows all threads/posts in that forum. `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies. `replyToMessage` defaults to `false`. Enable it to use Discord's native reply UI for responses.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
@@ -382,7 +387,7 @@ nanobot plugins enable matrix
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
-| `sasVerification` | Auto-complete SAS device verification requests from allowed users (default `false`). Useful for Element X, which does not expose manual trust for third-party devices. |
+| `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
 
 
@@ -425,9 +430,7 @@ nanobot channels login whatsapp
 }
 ```
 
-For groups, `allowFrom` can contain either a participant sender ID/LID or a
-group JID/bare group ID. A participant entry allows that sender wherever the bot
-can see them; a group entry allows replies in that group.
+For groups, `allowFrom` can contain either a participant sender ID/LID or a group JID/bare group ID. A participant entry allows that sender wherever the bot can see them; a group entry allows replies in that group.
 
 Optional session database path:
 
@@ -455,10 +458,7 @@ nanobot gateway
 
 **Optional: static LID mappings**
 
-Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobot
-learns LID to phone mappings at runtime when both identifiers are present, but you
-can also seed mappings up front so the phone number resolves from the
-very first message:
+Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobot learns LID to phone mappings at runtime when both identifiers are present, but you can also seed mappings up front so the phone number resolves from the very first message:
 
 ```json
 {
@@ -528,14 +528,7 @@ If QR login is unavailable for your account, use manual setup below.
 }
 ```
 
-> `streaming` defaults to `true`. Use `false` if your app does not have **`cardkit:card:write`** (see permissions above).
-> `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
-> `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all group messages). Private chats always respond.
-> `reactEmoji`: Emoji for "processing" status (default: `OnIt`). See [available emojis](https://open.larkoffice.com/document/server-docs/im-v1/message-reaction/emojis-introduce).
-> `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
-> `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`).
-> `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
+> `streaming` defaults to `true`. Use `false` if your app does not have **`cardkit:card:write`** (see permissions above). `encryptKey` and `verificationToken` are optional for Long Connection mode. `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users. `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all group messages). Private chats always respond. `reactEmoji`: Emoji for "processing" status (default: `OnIt`). See [available emojis](https://open.larkoffice.com/document/server-docs/im-v1/message-reaction/emojis-introduce). `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`. `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`). `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
 
 **3. Run**
 
@@ -730,7 +723,10 @@ nanobot plugins enable slack
       "enabled": true,
       "botToken": "xoxb-...",
       "appToken": "xapp-...",
-      "allowFrom": ["YOUR_SLACK_USER_ID"],
+      "dm": {
+        "policy": "allowlist",
+        "allowFrom": ["YOUR_SLACK_USER_ID"]
+      },
       "groupPolicy": "mention"
     }
   }
@@ -743,7 +739,7 @@ nanobot plugins enable slack
 nanobot gateway
 ```
 
-DM the bot directly or @mention it in a channel — it should respond!
+The listed Slack user can DM the bot directly. Other DM senders receive a pairing code. Group access is independent: with `groupPolicy: "mention"`, any member can invoke the bot by mentioning it in a channel it can see. For DM-only access, set `groupPolicy` to `"allowlist"` and leave `groupAllowFrom` empty.
 
 > [!TIP]
 > - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels via `groupAllowFrom`).
@@ -767,10 +763,10 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 
 > - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
 > - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
+> - `trustedAuthservIds`: Exact `authserv-id` values added by the receiving mail service. Required while `verifyDkim` or `verifySpf` is enabled. Gmail normally uses `mx.google.com`; inspect a received message's raw headers for other services. The service must prepend one consolidated result and remove inbound headers that claim the same identity; duplicate trusted results are rejected. Existing installations must follow the [v0.3.5 upgrade instructions](guides/email-ai-agent.md#upgrading-to-v035) before re-enabling verified email polling.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
-> - `postAction`: Optional post-processing for processed emails: `"delete"` or `"move"` (default `null`).
->   This runs only after an accepted email is successfully delivered to the AI pipeline.
+> - `postAction`: Optional post-processing for processed emails: `"delete"` or `"move"` (default `null`). This runs only after an accepted email is successfully delivered to the AI pipeline.
 > - `postActionMoveMailbox`: Destination mailbox used when `postAction` is `"move"` (for example `"Processed"` or `"[Gmail]/Trash"`).
 > - `postActionIgnoreSkipped`: If `true` (default), skipped emails are ignored for post-action and not moved/deleted.
 > - `postActionExpunge`: When `true`, the channel allows a full-mailbox `EXPUNGE` fallback if UID-scoped expunge is unavailable or fails (default `false`). Enable only on very old IMAP servers that lack modern UIDPLUS support. Note that this fallback will expunge **all** messages marked as deleted in the mailbox, including ones not handled by the agent. Leaving this off is safe for all modern IMAP servers.
@@ -794,6 +790,7 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
       "smtpPassword": "your-app-password",
       "fromAddress": "my-nanobot@gmail.com",
       "allowFrom": ["your-real-email@gmail.com"],
+      "trustedAuthservIds": ["mx.google.com"],
       "postAction": "move",
       "postActionMoveMailbox": "[Gmail]/Trash",
       "postActionIgnoreSkipped": true,
@@ -906,8 +903,7 @@ nanobot gateway
 <details>
 <summary><b>Microsoft Teams</b> (MVP — DM only)</summary>
 
-> Direct-message text in/out, tenant-aware OAuth, conversation reference persistence.
-> Uses a public HTTPS webhook — no WebSocket; you need a tunnel or reverse proxy.
+> Direct-message text in/out, tenant-aware OAuth, conversation reference persistence. Uses a public HTTPS webhook — no WebSocket; you need a tunnel or reverse proxy.
 
 **1. Enable Microsoft Teams support**
 
@@ -1022,7 +1018,6 @@ nanobot gateway
 ```
 
 > [!TIP]
-> The channel automatically reconnects to the signal-cli daemon with exponential backoff if the connection drops.
-> Markdown in bot replies is automatically converted to Signal text styles (bold, italic, code, etc.).
+> The channel automatically reconnects to the signal-cli daemon with exponential backoff if the connection drops. Markdown in bot replies is automatically converted to Signal text styles (bold, italic, code, etc.).
 
 </details>

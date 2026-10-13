@@ -42,6 +42,34 @@ async def test_webui_transcribe_audio_rejects_unconfigured_provider(
 
 
 @pytest.mark.asyncio
+async def test_webui_transcription_uses_explicit_gateway_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    default_path = tmp_path / "default.json"
+    gateway_path = tmp_path / "gateway.json"
+    default = Config()
+    default.transcription.provider = "groq"
+    default.providers.groq.api_key = "gsk-global"
+    gateway = Config()
+    gateway.transcription.provider = "groq"
+    save_config(default, default_path)
+    save_config(gateway, gateway_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", default_path)
+
+    event, payload = await webui_transcription_event(
+        {
+            "request_id": "voice-explicit",
+            "data_url": _audio_data_url(),
+        },
+        config_path=gateway_path,
+    )
+
+    assert event == "transcription_error"
+    assert payload["detail"] == "not_configured"
+
+
+@pytest.mark.asyncio
 async def test_webui_transcribe_audio_rejects_unsupported_mime(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

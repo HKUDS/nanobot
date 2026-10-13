@@ -29,7 +29,7 @@ def test_agent_loops_do_not_share_exec_session_managers(tmp_path):
     )
 
     exec_a = loop_a.tools.get("exec")
-    stdin_a = loop_a.tools.get("write_stdin")
+    stdin_a = loop_a.tools.get("exec_session")
     list_a = loop_a.tools.get("list_exec_sessions")
     exec_b = loop_b.tools.get("exec")
 

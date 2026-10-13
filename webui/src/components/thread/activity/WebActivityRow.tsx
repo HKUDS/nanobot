@@ -32,7 +32,7 @@ export function WebActivityRow({
           href={href}
           target="_blank"
           rel="noreferrer noopener"
-          aria-label={`${title} · ${displayUrl}`}
+          aria-label={`${title}, ${displayUrl}`}
           className="flex min-w-0 items-center gap-2 overflow-hidden text-foreground/82 hover:text-foreground"
         >
           <span className="min-w-0 truncate font-medium">{title}</span>
@@ -61,7 +61,7 @@ function WebFavicon({ host, active }: { host: string; active: boolean }) {
     <img
       src={logoUrl}
       alt=""
-      className={`h-4 w-4 shrink-0 rounded-[3px] object-contain${active ? " animate-pulse" : ""}`}
+      className={`h-4 w-4 shrink-0 rounded-mark object-contain${active ? " animate-pulse" : ""}`}
       decoding="async"
       loading="lazy"
       referrerPolicy="no-referrer"

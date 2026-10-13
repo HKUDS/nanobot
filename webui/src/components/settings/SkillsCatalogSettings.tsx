@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
   Check,
@@ -25,17 +25,25 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Disclosure } from "@/components/ui/disclosure";
+import { ExpandableText } from "@/components/ui/expandable-text";
+import { SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
+import { ToggleButton } from "@/components/settings/ToggleButton";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
-import { notifySkillsChanged } from "@/lib/skill-events";
+import { notifySkillsChanged, requestSkillsRefresh } from "@/lib/skill-events";
 import type { SkillDetail, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
+export function SkillsCatalogSettings({ skills, loading = false, error = false }: {
+  skills: SkillSummary[];
+  loading?: boolean;
+  error?: boolean;
+}) {
   const { t } = useTranslation();
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const [view, setView] = useState<"installed" | "discover">("installed");
@@ -77,7 +85,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const disabledCount = skills.filter((skill) => skill.enabled === false).length;
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <SegmentedControl
         value={view}
         mode="tabs"
@@ -98,14 +106,14 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
       />
 
       {view === "installed" ? (
-        <section className="overflow-hidden rounded-[22px] bg-settings-surface">
+        <section className="overflow-hidden rounded-panel bg-settings-surface">
           <div className="flex flex-col gap-3 px-4 pb-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full sm:max-w-[320px]">
               <Search
                 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden
               />
-              <Input
+              <SearchInput
                 value={installedQuery}
                 onChange={(event) => setInstalledQuery(event.target.value)}
                 placeholder={t("settings.skills.searchInstalled", {
@@ -114,7 +122,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                 aria-label={t("settings.skills.searchInstalled", {
                   defaultValue: "Search installed skills",
                 })}
-                className="h-9 rounded-[11px] bg-background pl-9 text-[13px]"
+                className="h-9 bg-background pl-9 text-[13px]"
               />
             </div>
             <SegmentedControl
@@ -137,22 +145,31 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                 value,
                 label: (
                   <>
-                    {label} <span className="ml-0.5 tabular-nums opacity-65">{count}</span>
+                    {label} <span className="ml-0.5 tabular-nums opacity-65">{loading || error ? "—" : count}</span>
                   </>
                 ),
               }))}
               onChange={setInstalledFilter}
             />
           </div>
-          {groupedSkills.length ? (
+          {loading ? (
+            <CatalogSkeleton label={t("settings.skills.loading")} layout="skills" />
+          ) : error ? (
+            <div className="space-y-3 px-4 py-8 text-center text-sm">
+              <p role="alert" className="text-destructive">{t("settings.skills.catalogLoadFailed")}</p>
+              <Button type="button" variant="outline" size="sm" onClick={requestSkillsRefresh}>
+                {t("settings.skills.retry")}
+              </Button>
+            </div>
+          ) : groupedSkills.length ? (
             <div className="space-y-5 px-3 pb-3 pt-2 sm:px-4">
               {groupedSkills.map((group) => (
                 <section key={group.key} className="space-y-1">
                   <div className="flex items-center gap-2 px-2 py-1.5">
-                    <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    <h2 className="text-[13px] font-medium leading-5 text-muted-foreground">
                       {group.label}
                     </h2>
-                    <span className="text-[11px] tabular-nums text-muted-foreground/60">
+                    <span className="text-[12px] leading-5 tabular-nums text-muted-foreground/60">
                       {group.skills.length}
                     </span>
                   </div>
@@ -170,9 +187,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
             </div>
           ) : (
             <div className="px-3 py-12 text-center text-sm text-muted-foreground">
-              {t("settings.skills.noMatching", {
-                defaultValue: "No matching skills.",
-              })}
+              {t(skills.length ? "settings.skills.noMatching" : "settings.skills.empty")}
             </div>
           )}
         </section>
@@ -220,9 +235,9 @@ function SkillCatalogRow({
       })}
       onClick={() => onSelect(skill)}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-2 py-3 text-left",
+        "group flex w-full min-w-0 items-center gap-3 rounded-control px-2 py-3 text-left",
         "transition-colors duration-150",
-        "hover:bg-muted/70",
+        "settings-hover",
         "focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         !enabled && "opacity-60",
       )}
@@ -279,6 +294,7 @@ function SkillDetailSheet({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const descriptionId = useId();
 
   useEffect(() => {
     if (!open || !skill) return;
@@ -368,7 +384,7 @@ function SkillDetailSheet({
           side="right"
           closeButtonClassName={cn(
             "right-2 top-2 inline-flex h-10 w-10 items-center justify-center rounded-full opacity-100",
-            "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+            "text-muted-foreground transition-colors settings-hover hover:text-foreground",
             "sm:right-3 sm:top-3",
           )}
           className={cn(
@@ -407,18 +423,21 @@ function SkillDetailSheet({
                     {statusLabel}
                   </Pill>
                 </div>
-                <p
-                  className={cn(
-                    "mt-3 text-[13px] leading-5 text-muted-foreground",
-                    descriptionExpandable && !descriptionExpanded && "line-clamp-5",
-                  )}
-                >
-                  {activeSkill.description}
-                </p>
+                <div className="mt-3">
+                  <ExpandableText
+                    id={descriptionId}
+                    expanded={descriptionExpanded || !descriptionExpandable}
+                    lines={5}
+                    className="text-[13px] leading-5 text-muted-foreground"
+                  >
+                    {activeSkill.description}
+                  </ExpandableText>
+                </div>
                 {descriptionExpandable ? (
                   <button
                     type="button"
                     aria-expanded={descriptionExpanded}
+                    aria-controls={descriptionId}
                     onClick={() => setDescriptionExpanded((value) => !value)}
                     className="mt-1.5 min-h-8 rounded-full text-[12px] font-medium text-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
@@ -436,20 +455,18 @@ function SkillDetailSheet({
                 {t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })}
               </div>
             ) : loadFailed ? (
-              <div className="mt-8 rounded-[16px] bg-destructive/10 px-3 py-3 text-sm text-destructive">
+              <div className="mt-8 rounded-floating bg-destructive/10 px-3 py-3 text-sm text-destructive">
                 {t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
               </div>
             ) : (
               <div className="mt-6 space-y-5">
-                <div className="flex min-h-16 items-start justify-between gap-3 border-y border-border/45 px-1 py-3.5">
+                <div className="flex min-h-16 items-center justify-between gap-3 border-y border-border/45 px-1 py-3.5">
                   <p className="text-[13px] font-medium text-foreground">
                     {t("settings.skills.enabledControl", { defaultValue: "Use this skill" })}
                   </p>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={enabled}
-                    aria-label={
+                  <ToggleButton
+                    checked={enabled}
+                    label={
                       enabled
                         ? t("settings.skills.disableSkill", {
                             name: activeSkill.name,
@@ -461,30 +478,12 @@ function SkillDetailSheet({
                           })
                     }
                     disabled={actionBusy}
-                    onClick={() => void toggleEnabled()}
-                    className={cn(
-                      "relative -mr-1 h-10 w-14 shrink-0 rounded-full",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                      "disabled:cursor-wait disabled:opacity-60",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "absolute left-1.5 top-2 h-6 w-11 rounded-full transition-colors",
-                        enabled ? "bg-foreground" : "bg-muted-foreground/30",
-                      )}
-                    />
-                    <span
-                      className={cn(
-                        "absolute left-2 top-2.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
-                        enabled ? "translate-x-5" : "translate-x-0",
-                      )}
-                    />
-                  </button>
+                    onChange={() => void toggleEnabled()}
+                  />
                 </div>
 
                 {actionError ? (
-                  <div className="rounded-[14px] bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
+                  <div className="rounded-control bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
                     {actionError}
                   </div>
                 ) : null}
@@ -533,7 +532,7 @@ function SkillDetailSheet({
       </Sheet>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent className="rounded-[20px]">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
               {t("settings.skills.deleteConfirmTitle", {
@@ -570,20 +569,23 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
   const content =
     markdown ||
     t("settings.skills.rawInstructionsEmpty", {
-      defaultValue: "No raw instructions.",
+      defaultValue: "No skill file content available.",
     });
 
   return (
-    <details className="group rounded-[18px] border border-border/45 bg-muted/20 px-3 py-3">
-      <summary className="flex min-h-11 cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
+    <Disclosure
+      className="rounded-floating border border-border/45 bg-muted/20 px-3 py-3"
+      summaryClassName="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-sm text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      summary={<>
         <span>
           {t("settings.skills.instructionsTitle", { defaultValue: "Skill instructions" })}
         </span>
         <code className="font-mono text-[10px] font-normal text-muted-foreground">
           SKILL.md
         </code>
-      </summary>
-      <div className="mt-3 overflow-hidden rounded-[14px] border border-border/35 bg-background/70">
+      </>}
+    >
+      <div className="mt-3 overflow-hidden rounded-control border border-border/35 bg-background/70">
         <pre
           className={cn(
             "max-h-[min(42vh,32rem)] overflow-auto overscroll-contain px-3.5 py-3 pr-4",
@@ -596,7 +598,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
           {content}
         </pre>
       </div>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -625,7 +627,7 @@ function RequirementsSection({
   };
 
   return (
-    <section className="rounded-[18px] border border-amber-500/20 bg-amber-500/[0.06] p-4">
+    <section className="rounded-floating border border-amber-500/20 bg-amber-500/[0.06] p-4">
       <div className="flex items-start gap-2.5">
         <CircleAlert
           className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300"
@@ -648,7 +650,7 @@ function RequirementsSection({
         {installOptions.map((option) => (
           <div
             key={`${option.id}:${option.command}`}
-            className="flex min-w-0 items-center gap-2 rounded-[12px] bg-background/80 px-3 py-2"
+            className="flex min-w-0 items-center gap-2 rounded-control bg-background/80 px-3 py-2"
           >
             <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-foreground/80">
@@ -661,7 +663,7 @@ function RequirementsSection({
               })}
               title={option.label}
               onClick={() => void copyCommand(option.command)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground sm:h-7 sm:w-7"
             >
               {copiedCommand === option.command ? (
                 <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
@@ -675,14 +677,14 @@ function RequirementsSection({
         {!installOptions.length && missing_bins.length ? (
           <SetupRequirement
             icon={<Terminal className="h-3.5 w-3.5" aria-hidden />}
-            label={t("settings.skills.missingCommands", { defaultValue: "Missing CLI" })}
+            label={t("settings.skills.missingCommands", { defaultValue: "Missing command-line tools" })}
             items={missing_bins}
           />
         ) : null}
         {missing_env.length ? (
           <SetupRequirement
             icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />}
-            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing ENV" })}
+            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing environment variables" })}
             items={missing_env}
           />
         ) : null}

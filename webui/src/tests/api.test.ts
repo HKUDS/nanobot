@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  changeAutomationChat,
   cancelMcpOAuth,
   configureChannel,
   completeMcpOAuth,
@@ -13,6 +14,8 @@ import {
   fetchFilePreview,
   fetchFilePreviewAvailability,
   fetchAutomations,
+  fetchAutomationChats,
+  fetchAutomationRunResult,
   fetchApiService,
   fetchCliApps,
   fetchInstalledCliApps,
@@ -28,6 +31,7 @@ import {
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
+  fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
   importMcpConfig,
   installMarketplaceSkill,
@@ -50,14 +54,12 @@ import {
   pollChannelConnect,
   startChannelConnect,
   updateAutomation,
-  updateSidebarState,
   updateImageGenerationSettings,
   updateModelCallOrder,
   updateModelConfiguration,
   updateMcpServerTools,
   updateNetworkSafetySettings,
   updateProviderSettings,
-  updateSettings,
   updateSkillEnabled,
   updateWebSearchSettings,
   validateChannel,
@@ -80,7 +82,11 @@ describe("webui API helpers", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ deleted: true, key: "websocket:chat-1", messages: [] }),
+        json: async () => ({
+          schemaVersion: 3,
+          projection: "events",
+          events: [],
+        }),
       }),
     );
   });
@@ -114,6 +120,173 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("revalidates a cached WebUI thread and reuses it on 304", async () => {
+    const cached = {
+      schemaVersion: 3,
+      revision: "rev-1",
+      projection: "events" as const,
+      events: [],
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 304,
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1", {
+      revision: cached.revision,
+      cached,
+    })).resolves.toBe(cached);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "If-None-Match": '"rev-1"',
+        },
+        cache: "no-store",
+      }),
+    );
+  });
+
+  it("rejects malformed canonical thread events at the HTTP boundary", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{ event: "file_edit", chat_id: "chat-1", edits: [{ tool: "edit_file" }] }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread projection event: file_edit",
+    );
+  });
+
+  it.each([
+    null,
+    "backup",
+    [null],
+    [{ provider: "xai", model: "grok" }],
+    [{ provider: "xai", model: "grok", preset: "backup", fallback: "true" }],
+  ])("rejects malformed response sources: %j", async (response_sources) => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{ event: "message", chat_id: "chat-1", text: "Reply", response_sources }],
+      }),
+    } as Response);
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread event metadata",
+    );
+  });
+
+  it.each([
+    undefined,
+    [],
+    [{ provider: "xai", model: "grok", preset: "snapshot", fallback: true }],
+    [{ provider: "xai", model: "grok", preset: "legacy snapshot" }],
+  ])("accepts optional recorded response sources: %j", async (response_sources) => {
+    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", response_sources };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ schemaVersion: 3, projection: "events", events: [event] }),
+    } as Response);
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({ events: [event] });
+  });
+
+  it("rejects legacy message-projected thread payloads", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ schemaVersion: 3, messages: [] }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread events",
+    );
+  });
+
+  it("accepts validated deferred trace metadata on canonical thread events", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{
+          event: "message",
+          chat_id: "chat-1",
+          text: "exec(…)",
+          kind: "progress",
+          trace_detail: {
+            ref: "2.history-aaaaaaaaaaaaaaaaaaaa",
+            bytes: 40_000,
+            traceCount: 1,
+          },
+        }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({
+      events: [{ trace_detail: { bytes: 40_000, traceCount: 1 } }],
+    });
+  });
+
+  it("rejects malformed deferred trace metadata at the HTTP boundary", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{
+          event: "message",
+          chat_id: "chat-1",
+          text: "exec(…)",
+          kind: "progress",
+          trace_detail: { ref: "bad", bytes: "many", traceCount: 1 },
+        }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread projection event: message",
+    );
+  });
+
+  it("fetches deferred trace details with encoded session and ref", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        message_id: "history-aaaaaaaaaaaaaaaaaaaa",
+        events: [],
+      }),
+    } as Response);
+
+    await fetchWebuiThreadTraceDetail(
+      "tok",
+      "websocket:chat-1",
+      "9.history-aaaaaaaaaaaaaaaaaaaa",
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread/trace-detail?ref=9.history-aaaaaaaaaaaaaaaaaaaa",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+        cache: "no-store",
       }),
     );
   });
@@ -197,6 +370,29 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("fetches the selected run response with authentication and an encoded identity", async () => {
+    const controller = new AbortController();
+    await fetchAutomationRunResult("tok", "task/id", 1234, "cron", controller.signal);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/result?id=task%2Fid&run_at_ms=1234&kind=cron",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("reads chat choices over HTTP and commits the opaque choice over WebSocket", async () => {
+    const controller = new AbortController();
+    await fetchAutomationChats("tok", "task/id", controller.signal);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/chats?id=task%2Fid",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
+    );
+    vi.mocked(fetch).mockClear();
+    const values = { target_id: "opaque-id", revision: "reviewed-version", message: "Reviewed prompt" };
+    await changeAutomationChat(mutationTransport, "task/id", values);
+    expect(requestMutation).toHaveBeenCalledWith("automation.change_chat", { id: "task/id", values }, 20_000);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("validates channel settings with form values", async () => {
     await validateChannel(
       mutationTransport,
@@ -257,6 +453,20 @@ describe("webui API helpers", () => {
       "settings.channel.connect.cancel",
       { channel: "weixin", session_id: "session+/=" },
       20_000,
+    );
+  });
+
+  it("forwards channel-owned connect parameters without overriding the channel", async () => {
+    await startChannelConnect(mutationTransport, "plugin-chat", {
+      region: "eu",
+      interactive: false,
+      channel: "another-channel",
+    });
+
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.start",
+      { channel: "plugin-chat", region: "eu", interactive: false },
+      150_000,
     );
   });
 
@@ -402,30 +612,6 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("serializes settings updates as a narrow mutation payload", async () => {
-    await updateSettings(mutationTransport, {
-      modelPreset: "default",
-      model: "openrouter/test",
-      provider: "openrouter",
-      contextWindowTokens: 262144,
-      timezone: "Asia/Shanghai",
-      toolHintMaxLength: 120,
-    });
-
-    expect(requestMutation).toHaveBeenCalledWith(
-      "settings.agent.update",
-      {
-        model_preset: "default",
-        model: "openrouter/test",
-        provider: "openrouter",
-        context_window_tokens: 262144,
-        timezone: "Asia/Shanghai",
-        tool_hint_max_length: 120,
-      },
-      20_000,
-    );
-  });
-
   it("fetches token usage through the lightweight settings endpoint", async () => {
     await fetchSettingsUsage("tok");
 
@@ -439,7 +625,7 @@ describe("webui API helpers", () => {
 
   it("serializes model configuration creation", async () => {
     await createModelConfiguration(mutationTransport, {
-      label: "Fast writing",
+      name: "Fast writing",
       provider: "openai",
       model: "openai/gpt-4.1-mini",
       maxTokens: 4096,
@@ -451,7 +637,7 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenCalledWith(
       "settings.model_configuration.create",
       {
-        label: "Fast writing",
+        name: "Fast writing",
         provider: "openai",
         model: "openai/gpt-4.1-mini",
         max_tokens: 4096,
@@ -466,7 +652,7 @@ describe("webui API helpers", () => {
   it("serializes model configuration updates", async () => {
     await updateModelConfiguration(mutationTransport, {
       name: "codex",
-      label: "Codex",
+      newName: "Codex",
       provider: "openai_codex",
       model: "openai-codex/gpt-5.5",
       maxTokens: 8192,
@@ -479,7 +665,7 @@ describe("webui API helpers", () => {
       "settings.model_configuration.update",
       {
         name: "codex",
-        label: "Codex",
+        new_name: "Codex",
         provider: "openai_codex",
         model: "openai-codex/gpt-5.5",
         max_tokens: 8192,
@@ -835,6 +1021,13 @@ describe("webui API helpers", () => {
       150_000,
     );
 
+    await enableNanobotFeature(mutationTransport, "whatsapp", { installOnly: true });
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.feature.enable",
+      { name: "whatsapp", install_only: true },
+      150_000,
+    );
+
     await disableNanobotFeature(mutationTransport, "matrix");
     expect(requestMutation).toHaveBeenLastCalledWith(
       "settings.feature.disable",
@@ -980,7 +1173,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("reads and writes persisted sidebar state", async () => {
+  it("reads persisted sidebar state", async () => {
     const state = {
       schema_version: 1,
       pinned_keys: ["websocket:chat-1"],
@@ -1011,13 +1204,6 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
-
-    await updateSidebarState(mutationTransport, state);
-    expect(requestMutation).toHaveBeenCalledWith(
-      "sidebar.update",
-      { state },
-      20_000,
-    );
   });
 
   it("fetches workspace project state", async () => {
@@ -1032,7 +1218,6 @@ describe("webui API helpers", () => {
       },
       controls: {
         can_change_project: true,
-        can_use_full_access: true,
       },
     };
     vi.mocked(fetch).mockResolvedValueOnce({
@@ -1061,6 +1246,10 @@ describe("webui API helpers", () => {
             title: "优化 WebUI 标题",
             model_preset: "fast",
             run_started_at: 1_700_000_000,
+            handle: {
+              id: "handle_0123456789abcdef0123456789abcdef",
+              name: "mira-0123456789",
+            },
           },
         ],
       }),
@@ -1073,6 +1262,10 @@ describe("webui API helpers", () => {
         preview: "",
         modelPreset: "fast",
         runStartedAt: 1_700_000_000,
+        handle: {
+          id: "handle_0123456789abcdef0123456789abcdef",
+          name: "mira-0123456789",
+        },
       },
     ]);
   });

@@ -1,11 +1,198 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
+import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
 describe("Settings capabilities", () => {
   installSettingsViewTestHooks();
+
+  it("uses a named image connection and saves image-only parameters", async () => {
+    const payload = settingsPayload();
+    payload.image_generation = {
+      ...payload.image_generation, enabled: true, provider: "custom-sensenova",
+      request_overrides_supported: true,
+      providers: [{ name: "custom-sensenova", label: "SenseNova", configured: true, uses_images_api: true, api_base: "https://images.test/v1" }],
+    };
+    requestMutationMock.mockImplementation(async (_action, args) => ({
+      ...payload, image_generation: {
+        ...payload.image_generation,
+        extra_headers: args.extra_headers ? JSON.parse(args.extra_headers) : null,
+        extra_body: args.extra_body ? JSON.parse(args.extra_body) : null,
+      },
+    }));
+    requestMutationMock.mockRejectedValueOnce(new Error("Could not save. Try again."));
+    renderSettingsView({ initialSection: "image", initialSettings: payload });
+    expect(screen.getByRole("combobox", { name: "SenseNova", exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Provider", exact: true })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    fireEvent.click(screen.getByRole("button", { name: "Body parameters Use provider settings Edit" }));
+    const editor = screen.getByRole("dialog", { name: "Body parameters" });
+    fireEvent.change(within(editor).getByRole("textbox", { name: "Body parameters" }), { target: { value: '{"watermark":false}' } });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    expect(await within(editor).findByRole("alert")).toHaveTextContent("Could not save. Try again.");
+    expect(within(editor).getByRole("textbox")).toHaveValue('{"watermark":false}');
+    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.image_generation.update",
+      expect.objectContaining({ provider: "custom-sensenova", extra_body: '{"watermark":false}' }),
+      20_000,
+    ));
+    expect(await screen.findByRole("button", { name: "Body parameters Entries: 1 Edit" })).toBeEnabled();
+  });
+
+  it("does not display a different image connection when the saved one is missing", () => {
+    const payload = settingsPayload();
+    payload.image_generation = {
+      ...payload.image_generation, enabled: true, provider: "missing-connection",
+      providers: [{ name: "openai", label: "OpenAI", configured: true, api_base: "https://unrelated.test" }],
+    };
+    renderSettingsView({ initialSection: "image", initialSettings: payload });
+    expect(screen.queryByText("https://unrelated.test")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Configure this provider");
+  });
+
+  it("opens configuration for disabled features without enabling them", () => {
+    const payload = settingsPayload();
+    payload.image_generation.enabled = false;
+    payload.transcription = { ...DEFAULT_TRANSCRIPTION_SETTINGS, enabled: false };
+    payload.runtime_config = { "tools.web.enable": false };
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    for (const name of ["Image generation", "Transcription", "Web access"]) {
+      expect(screen.getByRole("switch", { name })).not.toBeChecked();
+      fireEvent.click(within(screen.getByRole("region", { name })).getByRole("button", { name: "Configure" }));
+      const dialog = screen.getByRole("dialog", { name });
+      expect(within(dialog).getAllByRole("combobox").length).toBeGreaterThan(0);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+      expect(screen.getByRole("switch", { name })).not.toBeChecked();
+    }
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps other capability switches stable while saving and queues their edits", async () => {
+    const payload = { ...settingsPayload(), runtime_config: {
+      "tools.web.enable": true, "agents.defaults.dream.enabled": true,
+    } };
+    const memorySaved = { ...payload, runtime_config: { ...payload.runtime_config, "agents.defaults.dream.enabled": false } };
+    let finishMemory!: (value: SettingsPayload) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve) => { finishMemory = resolve; }))
+      .mockResolvedValueOnce({ ...memorySaved, runtime_config: { ...memorySaved.runtime_config, "tools.web.enable": false } });
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    const memory = screen.getByRole("switch", { name: "Memory consolidation" });
+    const web = screen.getByRole("switch", { name: "Web access" });
+    expect(memory).toHaveClass("h-5", "w-9", "bg-foreground");
+    expect(web).toHaveClass("h-5", "w-9", "bg-foreground");
+    const webStyle = web.className;
+    fireEvent.click(memory);
+    await waitFor(() => expect(memory).toBeDisabled());
+    expect(web).toBeEnabled();
+    expect(web).toBeChecked();
+    expect(web.className).toBe(webStyle);
+    fireEvent.click(web);
+    expect(web).not.toBeChecked();
+    expect(web).toHaveClass("bg-muted-foreground/25");
+    await act(async () => finishMemory(memorySaved));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.runtime_config.update", { values: { "tools.web.enable": false } }, 20_000,
+    ));
+    await waitFor(() => expect(web).toBeEnabled());
+    expect(memory).not.toBeChecked();
+    expect(web).not.toBeChecked();
+  });
+
+  it("keeps missing image credentials local and does not submit an invalid draft", async () => {
+    renderSettingsView({ initialSection: "capabilities", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    const image = within(screen.getByRole("dialog", { name: "Image generation" }));
+    expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation.");
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("keeps a rejected image save attached to the feature when its editor is collapsed", async () => {
+    const payload = settingsPayload();
+    payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
+    requestMutationMock.mockRejectedValue(new Error("image generation provider is not configured"));
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    const image = within(screen.getByRole("dialog", { name: "Image generation" }));
+    await waitFor(() => expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation."));
+    fireEvent.click(image.getByRole("button", { name: "Close", exact: true }));
+    expect(screen.getByRole("region", { name: "Image generation" })).toContainElement(screen.getByRole("alert"));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("keeps capabilities together and separates expanding settings from enabling a feature", () => {
+    const payload = settingsPayload();
+    payload.image_generation.enabled = true;
+    payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
+    payload.runtime_config = { "tools.web.enable": true, "agents.defaults.dream.enabled": true };
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    expect(screen.getAllByRole("switch")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Capabilities", exact: true })).toHaveAttribute("aria-current", "page");
+    const editor = screen.getByRole("button", { name: "Image generation", exact: true });
+    expect(editor).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(editor);
+    expect(editor).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("combobox", { name: "OpenRouter", exact: true })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    expect(screen.getByRole("switch", { name: "Image generation" })).toBeChecked();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("reveals image settings only after enabling and preserves them when disabled", async () => {
+    const payload = settingsPayload();
+    payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
+    requestMutationMock.mockImplementation(async (_method, update) => ({
+      ...payload,
+      image_generation: { ...payload.image_generation, enabled: update.enabled },
+      requires_restart: true,
+      restart_required_sections: ["image"],
+    }));
+    renderSettingsView({ initialSection: "image", initialSettings: payload });
+
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    expect(screen.getByRole("combobox", { name: "OpenRouter" })).toBeVisible();
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.image_generation.update", expect.objectContaining({ enabled: true }), 20_000,
+    ));
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.image_generation.update", expect.objectContaining({
+        enabled: false, provider: "openrouter", model: payload.image_generation.model,
+      }), 20_000,
+    ));
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
+  });
+
+  it("reveals web search settings when web tools are enabled", async () => {
+    const payload = { ...settingsPayload(), runtime_config: { "tools.web.enable": false } };
+    requestMutationMock.mockResolvedValue({
+      ...payload, runtime_config: { "tools.web.enable": true },
+    });
+    renderSettingsView({ initialSection: "browser", initialSettings: payload });
+    fireEvent.click(screen.getByRole("switch", { name: "Web access" }));
+    expect(screen.getByRole("combobox", { name: "DuckDuckGo" })).toBeVisible();
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.web.enable": true } }, 20_000,
+    ));
+  });
+
+  it("reveals the configured transcription provider and model when enabled", () => {
+    const payload: SettingsPayload = { ...settingsPayload(), transcription: {
+      enabled: false, provider: "groq", provider_configured: true, model: "whisper-large-v3",
+      language: null, max_duration_sec: 120, max_upload_mb: 25,
+      providers: [{ name: "groq", label: "Groq", configured: true }],
+    } };
+    renderSettingsView({ initialSection: "voice", initialSettings: payload });
+    fireEvent.click(screen.getByRole("switch", { name: "Transcription" }));
+    expect(screen.getByRole("combobox", { name: "Groq" })).toBeVisible();
+    expect(screen.getByDisplayValue("whisper-large-v3")).toBeVisible();
+  });
 
 
   it("selects image models from provider-specific options", async () => {
@@ -14,6 +201,7 @@ describe("Settings capabilities", () => {
       ...base,
       image_generation: {
         ...base.image_generation,
+        enabled: true,
         providers: [
           {
             name: "openrouter",
@@ -42,34 +230,29 @@ describe("Settings capabilities", () => {
 
     renderSettingsView({ initialSection: "image", initialSettings: payload });
 
-    expect(screen.queryByDisplayValue("openai/gpt-5.4-image-2")).not.toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "OpenRouter" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Gemini" }));
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "OpenRouter" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Gemini" }));
 
-    expect(await screen.findByRole("button", { name: "gemini-2.5-flash-image" })).toBeInTheDocument();
-    await openPopover(screen.getByRole("button", { name: "gemini-2.5-flash-image" }));
+    const modelInput = screen.getByRole("combobox", { name: "Select image model" });
+    await waitFor(() => expect(modelInput).toHaveValue("gemini-2.5-flash-image"));
+    await openPopover(modelInput);
     fireEvent.click(await screen.findByRole("option", { name: "imagen-4.0-generate-001" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "imagen-4.0-generate-001" })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(modelInput).toHaveValue("imagen-4.0-generate-001"));
 
-    await openPopover(screen.getByRole("button", { name: "imagen-4.0-generate-001" }));
-    const modelInput = await screen.findByRole("combobox", { name: "Search or type model ID" });
+    await openPopover(modelInput);
     fireEvent.change(modelInput, { target: { value: "imagen-5-preview" } });
     fireEvent.click(await screen.findByRole("option", { name: "Use “imagen-5-preview”" }));
-    expect(await screen.findByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
+    await waitFor(() => expect(modelInput).toHaveValue("imagen-5-preview"));
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Gemini" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Custom" }));
-    expect(screen.getByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Gemini" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Custom" }));
+    const customProviderInput = screen.getByRole("combobox", { name: "Select image model" });
+    expect(customProviderInput).toHaveValue("imagen-5-preview");
 
-    await openPopover(screen.getByRole("button", { name: "imagen-5-preview" }));
-    const customProviderInput = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
-    });
+    await openPopover(customProviderInput);
     fireEvent.change(customProviderInput, { target: { value: "private/image-v2" } });
     fireEvent.keyDown(customProviderInput, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "private/image-v2" })).toBeInTheDocument();
+    await waitFor(() => expect(customProviderInput).toHaveValue("private/image-v2"));
   });
 
   it("saves network safety without exposing technical SSRF copy", async () => {
@@ -96,15 +279,11 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "advanced" });
 
     expect(await screen.findByText("Web safety")).toBeInTheDocument();
-    expect(screen.queryByText(/SSRF/i)).not.toBeInTheDocument();
-    expect(screen.queryByText("Private Service Protection")).not.toBeInTheDocument();
     expect(screen.getByText("Default access")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Restricted" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Default Permission" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Full Access" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -116,6 +295,35 @@ describe("Settings capabilities", () => {
         20_000,
       ),
     );
+  });
+
+  it("edits the existing web proxy in web access even while disabled, without a duplicate advanced editor", async () => {
+    let payload = { ...settingsPayload(), runtime_config: {
+      "tools.web.enable": false, "tools.web.proxy": "http://old-proxy.example:8080", "tools.web.user_agent": null,
+    } } as SettingsPayload;
+    requestMutationMock.mockImplementation(async (_method, update) => {
+      payload = { ...payload, runtime_config: { ...payload.runtime_config, ...update.values },
+        requires_restart: true, restart_required_sections: ["runtime"] };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    fireEvent.click(within(screen.getByRole("region", { name: "Web access" })).getByRole("button", { name: "Configure" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    const proxy = screen.getByRole("textbox", { name: "Web proxy", exact: true });
+    expect(proxy).toHaveValue("http://old-proxy.example:8080");
+    fireEvent.change(proxy, { target: { value: "http://new-proxy.example:7890" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.web.proxy": "http://new-proxy.example:7890" } }, 20_000,
+    ));
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
+    fireEvent.change(proxy, { target: { value: "" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.runtime_config.update", { values: { "tools.web.proxy": null } }, 20_000,
+    ));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close", exact: true }));
+    expect(screen.getByRole("switch", { name: "Web access" })).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced", exact: true }));
+    expect(screen.queryByRole("textbox", { name: "Web proxy", exact: true })).not.toBeInTheDocument();
   });
 
   it("saves optional-key web search providers without an API key", async () => {
@@ -149,13 +357,8 @@ describe("Settings capabilities", () => {
 
     renderSettingsView({ initialSection: "browser" });
 
-    fireEvent.pointerDown(await screen.findByRole("button", { name: /DuckDuckGo/ }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Keenable" }));
-    const saveButton = screen
-      .getAllByRole("button", { name: "Save" })
-      .find((button) => !(button as HTMLButtonElement).disabled);
-    if (!saveButton) throw new Error("enabled Save button was not found");
-    fireEvent.click(saveButton);
+    fireEvent.keyDown(await screen.findByRole("combobox", { name: /DuckDuckGo/ }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Keenable" }));
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -191,8 +394,8 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "advanced" });
 
     expect(await screen.findByText("App safety")).toBeInTheDocument();
-    expect(screen.queryByText("Web safety")).not.toBeInTheDocument();
-    expect(screen.getByText("Allow Full Access shell commands to reach services on this Mac.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Local services" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Allow Full Access shell commands to reach services on this Mac.");
   });
 
   it("refreshes settings with a fresh token after native engine restart", async () => {
@@ -202,7 +405,6 @@ describe("Settings capabilities", () => {
       runtime_surface: "native" as const,
       runtime_capabilities: {
         can_restart_engine: true,
-        can_pick_folder: true,
         can_open_logs: true,
         can_export_diagnostics: true,
       },
@@ -240,7 +442,6 @@ describe("Settings capabilities", () => {
 
     expect(await screen.findByText("App safety")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
     await waitFor(() =>

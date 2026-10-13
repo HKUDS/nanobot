@@ -335,6 +335,56 @@ async def test_independent_sessions(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_same_session_projects_one_turn_to_both_clients(bus: MagicMock) -> None:
+    ch = _ch(bus, 29925)
+    t = asyncio.create_task(ch.start())
+    try:
+        async with WsTestClient("ws://127.0.0.1:29925/", client_id="terminal-a") as a:
+            async with WsTestClient("ws://127.0.0.1:29925/", client_id="terminal-b") as b:
+                chat_id = (await a.recv_ready()).chat_id
+                await b.recv_ready()
+                await b.send_json({"type": "attach", "chat_id": chat_id})
+                attached = await b.recv()
+                assert attached.event == "attached"
+                assert attached.chat_id == chat_id
+
+                await a.send_json(
+                    {
+                        "type": "message",
+                        "chat_id": chat_id,
+                        "content": "hello from terminal A",
+                        "webui": True,
+                        "turn_id": "turn-a",
+                    }
+                )
+
+                accepted = await a.recv()
+                projected = await b.recv()
+                assert accepted.event == "message_accepted"
+                assert accepted.raw["turn_id"] == "turn-a"
+                assert accepted.raw["starts_turn"] is True
+                assert accepted.raw["active_turn_id"] == "turn-a"
+                assert projected.raw == {
+                    "event": "user_message",
+                    "chat_id": chat_id,
+                    "text": "hello from terminal A",
+                    "starts_turn": True,
+                    "turn_id": "turn-a",
+                    "active_turn_id": "turn-a",
+                    "started_at": projected.raw["started_at"],
+                }
+
+                await ch.send_delta(chat_id, "shared reply", stream_id="stream-a")
+                assert (await a.recv_delta()).text == "shared reply"
+                assert (await b.recv_delta()).text == "shared reply"
+
+                assert bus.publish_inbound.await_count == 1
+    finally:
+        await ch.stop()
+        await t
+
+
+@pytest.mark.asyncio
 async def test_disconnected_client_cleanup(bus: MagicMock) -> None:
     ch = _ch(bus, 29914)
     t = asyncio.create_task(ch.start())

@@ -31,12 +31,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { HoverHint } from "@/components/ui/tooltip";
 import {
   createWorkbenchLayoutGeometry,
   resizeHandleRatio,
@@ -174,8 +169,7 @@ function HeaderIconButton({
   onClick: () => void;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
+    <HoverHint content={disabled ? disabledLabel ?? label : label} side="bottom">
         <span className="inline-flex">
           <Button
             type="button"
@@ -183,16 +177,13 @@ function HeaderIconButton({
             size="icon"
             disabled={disabled}
             aria-label={label}
-            title={disabled ? disabledLabel : undefined}
             onClick={onClick}
-            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:text-foreground"
           >
             <Icon className="h-4 w-4" aria-hidden />
           </Button>
         </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{disabled ? disabledLabel ?? label : label}</TooltipContent>
-    </Tooltip>
+    </HoverHint>
   );
 }
 
@@ -220,7 +211,9 @@ export function PaneWorkbench({
   const gridRef = useRef<HTMLDivElement | null>(null);
   const paneRefs = useRef(new Map<string, HTMLElement>());
   const lastRectsRef = useRef(new Map<string, DOMRect>());
+  const lastElementRectsRef = useRef(new Map<HTMLElement, DOMRect>());
   const pendingRectsRef = useRef<Map<string, DOMRect> | null>(null);
+  const pendingElementRectsRef = useRef<Map<HTMLElement, DOMRect> | null>(null);
   const animationsRef = useRef(new Map<string, Animation>());
   const sourceSplitRatiosKey = splitRatios.join("\u0000");
   const [previewSplitRatios, setPreviewSplitRatios] = useState(splitRatios);
@@ -284,24 +277,36 @@ export function PaneWorkbench({
     return rects;
   }, []);
 
+  const measurePaneElements = useCallback(() => {
+    const rects = new Map<HTMLElement, DOMRect>();
+    for (const element of paneRefs.current.values()) {
+      if (!element.hidden) rects.set(element, element.getBoundingClientRect());
+    }
+    return rects;
+  }, []);
+
   const captureLayout = useCallback(() => {
     pendingRectsRef.current = measurePanes();
+    pendingElementRectsRef.current = measurePaneElements();
     for (const animation of animationsRef.current.values()) animation.cancel();
     animationsRef.current.clear();
-  }, [measurePanes]);
+  }, [measurePaneElements, measurePanes]);
 
   useLayoutEffect(() => {
     const previousRects = pendingRectsRef.current ?? lastRectsRef.current;
+    const previousElementRects = pendingElementRectsRef.current ?? lastElementRectsRef.current;
     pendingRectsRef.current = null;
+    pendingElementRectsRef.current = null;
     const nextRects = measurePanes();
+    const nextElementRects = measurePaneElements();
     const reduceMotion = typeof window.matchMedia === "function"
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     if (!reduceMotion) {
       for (const [key, nextRect] of nextRects) {
-        const previousRect = previousRects.get(key);
         const element = paneRefs.current.get(key);
         if (!element) continue;
+        const previousRect = previousRects.get(key) ?? previousElementRects.get(element);
         if (!previousRect) {
           if (previousRects.size === 0 || typeof element.animate !== "function") continue;
           const animation = element.animate(
@@ -356,7 +361,8 @@ export function PaneWorkbench({
       }
     }
     lastRectsRef.current = nextRects;
-  }, [activePaneKey, effectiveLayout, measurePanes, paneOrder]);
+    lastElementRectsRef.current = nextElementRects;
+  }, [activePaneKey, effectiveLayout, measurePaneElements, measurePanes, paneOrder]);
 
   useEffect(() => () => {
     for (const animation of animationsRef.current.values()) animation.cancel();
@@ -617,7 +623,7 @@ export function PaneWorkbench({
               aria-label={t("workbench.layout", {
                 defaultValue: "Pane layout",
               })}
-              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:text-foreground"
             >
               <currentLayout.icon className="h-4 w-4" aria-hidden />
             </Button>
@@ -670,18 +676,21 @@ export function PaneWorkbench({
   return (
     <section
       aria-label={t("workbench.aria", { defaultValue: "Conversation workbench" })}
-      className="flex h-full min-h-0 flex-col overflow-hidden bg-background"
+      className={cn(
+        "thread-workspace relative flex h-full min-h-0 flex-col overflow-hidden bg-background",
+        chrome && displayedPanes.length > 1
+          && "[--thread-header-position:relative]",
+      )}
     >
-      <TooltipProvider delayDuration={500} skipDelayDuration={100}>
         {chrome ? (
-          <header className="shrink-0 bg-background">
+          <header className="pointer-events-none inset-x-0 top-0 z-30 shrink-0 [position:var(--thread-header-position,absolute)]">
             <div
               ref={setHeaderPortalTarget}
               data-testid="workbench-header-host"
             />
           </header>
         ) : null}
-        <div className="relative min-h-0 flex-1 bg-background">
+        <div className="workbench-body relative min-h-0 flex-1 bg-background">
           <div
             ref={gridRef}
             data-testid="pane-grid"
@@ -713,13 +722,20 @@ export function PaneWorkbench({
                 >
                   {renderPane(pane, {
                     active,
-                    headerPortalTarget: chrome ? headerPortalTarget : undefined,
+                    // A single conversation owns its header, alongside its preview tabs.
+                    // Multiple conversation panes still share the workbench toolbar.
+                    headerPortalTarget: chrome && displayedPanes.length > 1 ? headerPortalTarget : undefined,
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
                     headerActions,
                   })}
                   {chrome && panes.length > 1 && !compact ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+                    <HoverHint
+                      enabled={active}
+                      side="top"
+                      content={t("workbench.movePaneHint", {
+                        defaultValue: "Drag to move, or use the arrow keys.",
+                      })}
+                    >
                         <button
                           type="button"
                           tabIndex={active ? 0 : -1}
@@ -752,15 +768,7 @@ export function PaneWorkbench({
                             )}
                           />
                         </button>
-                      </TooltipTrigger>
-                      {active ? (
-                        <TooltipContent side="top">
-                          {t("workbench.movePaneHint", {
-                            defaultValue: "Drag to move · Arrow keys also work",
-                          })}
-                        </TooltipContent>
-                      ) : null}
-                    </Tooltip>
+                    </HoverHint>
                   ) : null}
                 </section>
               );
@@ -816,7 +824,7 @@ export function PaneWorkbench({
         </div>
 
         {chrome ? (
-          <footer className="shrink-0 bg-background px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
+          <footer className="workbench-composer-footer shrink-0 bg-background px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
             <div
               ref={setComposerPortalTarget}
               data-testid="workbench-composer-host"
@@ -824,7 +832,6 @@ export function PaneWorkbench({
             />
           </footer>
         ) : null}
-      </TooltipProvider>
     </section>
   );
 }

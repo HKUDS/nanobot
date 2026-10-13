@@ -7,7 +7,7 @@ domains; this module preserves the established Python and HTTP-facing seams.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -19,6 +19,7 @@ from nanobot.config.schema import Config
 from nanobot.webui import settings_capabilities as capabilities
 from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as models
+from nanobot.webui import settings_runtime as runtime
 from nanobot.webui import settings_system as system
 from nanobot.webui.settings_contracts import QueryParams, WebUISettingsError
 from nanobot.webui.workspaces import write_webui_default_access_mode
@@ -42,14 +43,12 @@ _reasoning_effort_values_for = models.reasoning_effort_values_for
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
-    "can_pick_folder": False,
     "can_open_logs": False,
     "can_export_diagnostics": False,
 }
 _NATIVE_RUNTIME_CAPABILITIES = {
     **_RUNTIME_CAPABILITIES,
     "can_restart_engine": True,
-    "can_pick_folder": True,
     "can_open_logs": True,
     "can_export_diagnostics": True,
 }
@@ -234,14 +233,32 @@ def update_model_configuration(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    rename_model_preset: Callable[[str, str], int] | None = None,
 ) -> dict[str, Any]:
     config = _load_settings_config(config_path)
-    if models.update_model_configuration(
+    names_before = set(config.model_presets)
+    changed = models.update_model_configuration(
         config,
         query,
         oauth_status=_oauth_provider_status,
-    ):
-        _save_settings_config(config, config_path)
+    )
+    if changed:
+        removed = names_before - set(config.model_presets)
+        added = set(config.model_presets) - names_before
+        rename = (
+            (next(iter(removed)), next(iter(added)))
+            if len(removed) == len(added) == 1
+            else None
+        )
+        if rename is not None and rename_model_preset is not None:
+            rename_model_preset(*rename)
+            try:
+                _save_settings_config(config, config_path)
+            except BaseException:
+                rename_model_preset(rename[1], rename[0])
+                raise
+        else:
+            _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
 
 
@@ -251,7 +268,11 @@ def update_model_call_order(
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     config = _load_settings_config(config_path)
-    if models.update_model_call_order(config, query):
+    if models.update_model_call_order(
+        config,
+        query,
+        oauth_status=_oauth_provider_status,
+    ):
         _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
 
@@ -262,7 +283,10 @@ def migrate_model_configurations(
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     config = _load_settings_config(config_path)
-    if models.migrate_model_configurations(config):
+    if models.migrate_model_configurations(
+        config,
+        oauth_status=_oauth_provider_status,
+    ):
         _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
 
@@ -304,6 +328,14 @@ def update_provider_settings(
         requires_restart=restart_required,
         config_path=config_path,
     )
+
+
+def model_api_resolution_payload(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    return models.model_api_resolution_payload(_load_settings_config(config_path), query)
 
 
 def provider_models_payload(
@@ -434,3 +466,16 @@ def update_transcription_settings(
     if capabilities.update_transcription_settings(config, query):
         _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
+
+
+def update_runtime_config_settings(
+    values: dict[str, Any], *, local_browser: bool = False, config_path: Path | None = None,
+) -> dict[str, Any]:
+    config = _load_settings_config(config_path)
+    changed = runtime.update_runtime_config(config, values, local_browser=local_browser)
+    if changed:
+        _save_settings_config(config, config_path)
+    return settings_payload(
+        requires_restart=changed,
+        config_path=config_path,
+    )

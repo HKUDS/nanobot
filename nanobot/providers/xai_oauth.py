@@ -35,7 +35,7 @@ from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPr
 
 XAI_OAUTH_ISSUER = "https://auth.x.ai"
 XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
-XAI_CLIENT_VERSION = "0.2.109"
+XAI_CLIENT_VERSION = "1.0.13"
 XAI_ALLOWED_CALLBACK_ORIGIN = "https://accounts.x.ai"
 XAI_OAUTH_SCOPES = (
     "openid",
@@ -58,6 +58,10 @@ _HTTP_TIMEOUT_S = 15.0
 
 class XAIOAuthError(RuntimeError):
     """An actionable xAI OAuth failure with no credential material."""
+
+
+class XAIOAuthReauthRequiredError(XAIOAuthError):
+    """No usable login remains; an explicit sign-in is required."""
 
 
 @dataclass(frozen=True)
@@ -357,7 +361,7 @@ def get_xai_oauth_token(
     """Load a usable token, refreshing it under an inter-process lock when needed."""
     token = _load_token()
     if token is None:
-        raise XAIOAuthError(
+        raise XAIOAuthReauthRequiredError(
             "xAI is not signed in. Run `nanobot provider login xai-grok` first."
         )
     if not force_refresh and _token_is_fresh(token, min_ttl_ms):
@@ -365,7 +369,7 @@ def get_xai_oauth_token(
     if not token.refresh:
         if not force_refresh and token.expires > _now_ms():
             return token
-        raise XAIOAuthError(
+        raise XAIOAuthReauthRequiredError(
             "The xAI login has expired and cannot be refreshed. "
             "Run `nanobot provider login xai-grok` again."
         )
@@ -373,13 +377,13 @@ def get_xai_oauth_token(
     with _token_lock():
         latest = _load_token()
         if latest is None:
-            raise XAIOAuthError(
+            raise XAIOAuthReauthRequiredError(
                 "xAI is not signed in. Run `nanobot provider login xai-grok` first."
             )
         if not force_refresh and _token_is_fresh(latest, min_ttl_ms):
             return latest
         if not latest.refresh:
-            raise XAIOAuthError(
+            raise XAIOAuthReauthRequiredError(
                 "The xAI login has expired and cannot be refreshed. "
                 "Run `nanobot provider login xai-grok` again."
             )
@@ -705,6 +709,11 @@ def _oauth_http_error(response: httpx.Response, action: str) -> XAIOAuthError:
             description = raw_description[:200] if isinstance(raw_description, str) else None
     detail = ": ".join(value for value in (code, description) if value)
     suffix = f" ({detail})" if detail else ""
+    if action == "token refresh" and (
+        response.status_code == 401
+        or (response.status_code in {400, 403} and code in {"invalid_grant", "invalid_token"})
+    ):
+        return XAIOAuthReauthRequiredError("The xAI login has expired. Please sign in again.")
     return XAIOAuthError(f"xAI OAuth {action} failed with HTTP {response.status_code}{suffix}.")
 
 

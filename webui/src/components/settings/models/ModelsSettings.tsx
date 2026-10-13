@@ -1,12 +1,17 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
+import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
+import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticModelAPI";
+import { useModelPresetDrag } from "@/components/settings/models/useModelPresetDrag";
+import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
+import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
+import { ToggleButton } from "@/components/settings/ToggleButton";
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
-  ChevronDown,
-  ChevronRight,
   GripVertical,
   ListOrdered,
   Loader2,
-  Plus,
-  Trash2,
+  Pencil,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -15,6 +20,8 @@ import {
   ProviderPicker,
   ProviderPickerIcon,
   formatContextWindow,
+  formatContextWindowInput,
+  parseContextWindowTokens,
   formatModelContextWindow,
   normalizeContextWindowTokens,
   settingsProviderConfigured,
@@ -27,6 +34,8 @@ import {
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
 import { Button } from "@/components/ui/button";
+import { HoverHint } from "@/components/ui/hover-hint";
+import { TruncatedTextTooltip } from "@/components/ui/truncated-text-tooltip";
 import {
   Dialog,
   DialogContent,
@@ -34,26 +43,29 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
-import type { SettingsPayload } from "@/lib/types";
+import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
+import { ProviderParameterFields, type RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
+import { providerJsonValue } from "@/components/settings/models/providerForm";
 
 export interface AgentSettingsDraft {
   model: string;
   provider: string;
   modelPreset: string;
-  presetLabel: string;
   maxTokens: number;
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  api: ModelAPIConfig | null;
+  extraHeaders: string;
+  extraQuery: string;
+  extraBody: string;
   timezone: string;
   toolHintMaxLength: number;
 }
-
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
 
 function modelPresetValue(payload: SettingsPayload): string {
   return (
@@ -63,15 +75,38 @@ function modelPresetValue(payload: SettingsPayload): string {
   );
 }
 
+function suggestedPresetName(
+  model: string,
+  presets: SettingsPayload["model_presets"],
+): string {
+  const modelName = model.trim().split("/").filter(Boolean).at(-1) ?? "";
+  const base = (modelName.toLowerCase() === "default" ? "model" : modelName).slice(0, 48);
+  if (!base) return "";
+
+  const existing = new Set(
+    presets.filter((preset) => !preset.is_default).map((preset) => preset.name.toLowerCase()),
+  );
+  if (!existing.has(base.toLowerCase())) return base;
+
+  for (let index = 2; ; index += 1) {
+    const suffix = ` ${index}`;
+    const candidate = `${base.slice(0, 48 - suffix.length)}${suffix}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
 export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   model: "",
   provider: "",
   modelPreset: "",
-  presetLabel: "",
   maxTokens: 8192,
   contextWindowTokens: 200_000,
   temperature: 0.1,
   reasoningEffort: "",
+  api: null,
+  extraHeaders: "",
+  extraQuery: "",
+  extraBody: "",
   timezone: "UTC",
   toolHintMaxLength: 40,
 };
@@ -89,13 +124,16 @@ export function agentDraftFromPayload(
     model: activePreset?.model ?? payload.agent.model,
     provider: activePreset?.provider ?? payload.agent.provider ?? payload.agent.resolved_provider ?? "",
     modelPreset: activePresetName,
-    presetLabel: activePreset?.label ?? activePresetName,
     maxTokens: activePreset?.max_tokens ?? payload.agent.max_tokens,
     contextWindowTokens: normalizeContextWindowTokens(
       activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
+    api: activePreset ? activePreset.api ?? null : payload.agent.api ?? null,
+    extraHeaders: providerJsonValue(activePreset?.extra_headers),
+    extraQuery: providerJsonValue(activePreset?.extra_query),
+    extraBody: providerJsonValue(activePreset?.extra_body),
     timezone: payload.agent.timezone,
     toolHintMaxLength: payload.agent.tool_hint_max_length,
   };
@@ -117,7 +155,7 @@ export function ModelPresetDeleteDialog({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   return (
     <Dialog open={preset !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[440px] rounded-[24px]">
+      <DialogContent className="max-w-[440px]">
         <DialogHeader className="text-left">
           <DialogTitle>
             {tx("settings.models.deletePresetTitle", "Delete model preset?")}
@@ -125,16 +163,15 @@ export function ModelPresetDeleteDialog({
           <DialogDescription className="leading-5">
             {tx(
               "settings.models.deletePresetHelp",
-              "This removes the preset “{{name}}”. Provider credentials are not affected.",
-              { name: preset?.label ?? "" },
+              "Delete “{{name}}” and remove it from the fallback list. Provider credentials will be kept.",
+              { name: preset?.name ?? "" },
             )}
           </DialogDescription>
         </DialogHeader>
-        <DialogFooter className="gap-2 sm:space-x-0">
+        <DialogFooter>
           <Button
             type="button"
             variant="ghost"
-            className="rounded-full"
             disabled={deleting}
             onClick={() => onOpenChange(false)}
           >
@@ -143,7 +180,6 @@ export function ModelPresetDeleteDialog({
           <Button
             type="button"
             variant="destructive"
-            className="rounded-full"
             disabled={deleting}
             onClick={onConfirm}
           >
@@ -164,6 +200,8 @@ export function ModelsSettings({
   token,
   form,
   setForm,
+  editingPresetName,
+  presetNameError,
   settings,
   dirty,
   creating,
@@ -176,16 +214,23 @@ export function ModelsSettings({
   providerSaving,
   onChangeCallOrder,
   onProviderOAuthLogin,
+  onAddProvider,
+  onConfigureProvider,
+  onManageProviders,
   onSave,
+  onSaveRequestSettings,
   onMigrate,
   onBeginCreate,
   onCancelCreate,
+  onClearPresetNameError,
   onSelectConfiguration,
   onDeleteConfiguration,
 }: {
   token: string;
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
+  editingPresetName: string;
+  presetNameError: string | null;
   settings: SettingsPayload;
   dirty: boolean;
   creating: boolean;
@@ -198,21 +243,49 @@ export function ModelsSettings({
   providerSaving: string | null;
   onChangeCallOrder: (order: string[]) => void;
   onProviderOAuthLogin: (provider: string) => void;
+  onAddProvider: (trigger: HTMLButtonElement | null, onAdded: (provider: string) => void) => void;
+  onConfigureProvider: (provider: string, trigger: HTMLButtonElement | null) => void;
+  onManageProviders: (trigger: HTMLButtonElement) => void;
   onSave: () => void;
+  onSaveRequestSettings: (values: Partial<RequestParameterDraft>) => Promise<void>;
   onMigrate: () => void;
   onBeginCreate: () => void;
   onCancelCreate: () => void;
-  onSelectConfiguration: () => void;
-  onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number]) => void;
+  onClearPresetNameError: () => void;
+  onSelectConfiguration: (name: string) => void;
+  onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number], onDeleted: () => void) => void;
 }) {
   const { t } = useTranslation();
+  useAutoSave(form, dirty, saving, onSave, !creating && !!form.model.trim());
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
+  const [hideEditorReturnFocus, setHideEditorReturnFocus] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
-  const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
+  const resolvedAutomaticAPI = useAutomaticModelAPI({
+    token,
+    provider: form.provider,
+    model: form.model,
+    reasoningEffort: form.reasoningEffort,
+    providers: settings.providers,
+    supported: settings.model_api_resolution_supported === true,
+    editorOpen: editorOpen && advancedOpen,
+  });
+  const editorTriggerRef = useRef<HTMLElement | null>(null);
+  const presetNameInputRef = useRef<HTMLInputElement>(null);
+  const suggestedPresetNameRef = useRef<string | null>(null);
+  const presetContextInitializedRef = useRef(false);
+  const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (presetNameError) presetNameInputRef.current?.focus();
+  }, [presetNameError]);
+  useEffect(() => {
+    if (!creating) {
+      suggestedPresetNameRef.current = null;
+      presetContextInitializedRef.current = false;
+    }
+  }, [creating]);
   const namedPresets = settings.model_presets.filter((preset) => !preset.is_default);
   const namedPresetsByName = new Map(namedPresets.map((preset) => [preset.name, preset]));
   const unorderedPresets = namedPresets.filter((preset) => !callOrder.includes(preset.name));
@@ -235,7 +308,7 @@ export function ModelsSettings({
       preset,
     })),
   ];
-  const selectedPreset = namedPresetsByName.get(form.modelPreset) ?? null;
+  const selectedPreset = namedPresetsByName.get(editingPresetName) ?? null;
   const activeEditorRowKey =
     editorRowKey ??
     presetRows.find((row) => row.name === selectedPreset?.name)?.key ??
@@ -257,6 +330,24 @@ export function ModelsSettings({
   const providerValue = providerOptions.some((provider) => provider.name === form.provider)
     ? form.provider
     : "";
+  const selectProvider = (provider: string) => {
+    const clearSuggestedName =
+      creating &&
+      provider !== form.provider &&
+      suggestedPresetNameRef.current !== null &&
+      form.modelPreset === suggestedPresetNameRef.current;
+    if (clearSuggestedName) suggestedPresetNameRef.current = null;
+    setForm((prev) => ({
+      ...prev,
+      provider,
+      model: provider === prev.provider ? prev.model : "",
+      api: provider === prev.provider ? prev.api : null,
+      extraHeaders: provider === prev.provider ? prev.extraHeaders : "",
+      extraQuery: provider === prev.provider ? prev.extraQuery : "",
+      extraBody: provider === prev.provider ? prev.extraBody : "",
+      modelPreset: clearSuggestedName ? "" : prev.modelPreset,
+    }));
+  };
   const selectedProviderNeedsSignIn =
     selectedProvider?.auth_type === "oauth" && !selectedProvider.configured;
   const selectedProviderSigningIn = providerSaving === selectedProvider?.name;
@@ -268,21 +359,31 @@ export function ModelsSettings({
   const modelFieldsMissing =
     !form.model.trim() ||
     !form.provider.trim() ||
-    !form.presetLabel.trim() ||
+    !form.modelPreset.trim() ||
+    !Number.isSafeInteger(form.maxTokens) ||
     form.maxTokens <= 0 ||
+    !Number.isSafeInteger(form.contextWindowTokens) ||
+    form.contextWindowTokens <= 0 ||
     form.temperature < 0 ||
     form.temperature > 2;
   const selectedPresetReferenced = Boolean(
-    selectedPreset && callOrder.includes(selectedPreset.name),
+    selectedPreset && callOrder[0] === selectedPreset.name,
   );
   const callOrderBusy = orderSaving || saving;
+  const presetDrag = useModelPresetDrag({
+    keys: presetRows.filter((row) => row.orderIndex >= 0).map((row) => row.key),
+    disabled: callOrderBusy,
+    onReorder: (keys) => onChangeCallOrder(keys.map((key) => presetRows.find((row) => row.key === key)!.name)),
+  });
   const selectPreset = (
     preset: SettingsPayload["model_presets"][number],
     rowKey: string,
   ) => {
+    setHideEditorReturnFocus(false);
+    editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const toggleCurrentPreset =
       !creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey;
-    onSelectConfiguration();
+    onSelectConfiguration(preset.name);
     if (toggleCurrentPreset) {
       setEditorOpen((open) => !open);
       return;
@@ -292,11 +393,14 @@ export function ModelsSettings({
       modelPreset: preset.name,
       model: preset.model,
       provider: preset.provider,
-      presetLabel: preset.label,
       maxTokens: preset.max_tokens,
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
+      api: preset.api ?? null,
+      extraHeaders: providerJsonValue(preset.extra_headers),
+      extraQuery: providerJsonValue(preset.extra_query),
+      extraBody: providerJsonValue(preset.extra_body),
     }));
     setEditorRowKey(rowKey);
     setEditorOpen(true);
@@ -316,52 +420,54 @@ export function ModelsSettings({
     onChangeCallOrder(callOrder.filter((_, itemIndex) => itemIndex !== index));
   };
 
-  const dropCallOrderItem = (targetIndex: number) => {
-    if (
-      callOrderBusy ||
-      draggedCallOrderIndex === null ||
-      draggedCallOrderIndex === targetIndex
-    ) {
-      setDraggedCallOrderIndex(null);
-      setDragOverCallOrderIndex(null);
-      return;
-    }
-    const next = [...callOrder];
-    const moved = next.splice(draggedCallOrderIndex, 1)[0];
-    if (!moved) {
-      setDraggedCallOrderIndex(null);
-      setDragOverCallOrderIndex(null);
-      return;
-    }
-    next.splice(targetIndex, 0, moved);
-    setDraggedCallOrderIndex(null);
-    setDragOverCallOrderIndex(null);
-    onChangeCallOrder(next);
-  };
-
   const renderPresetEditor = () => (
     <div
       id="model-preset-editor"
       data-testid="model-preset-editor"
-      className="mx-3 mb-3 divide-y divide-border/45 overflow-hidden rounded-[18px] border border-border/45 bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl"
+      className="space-y-1 pb-4 [&_.settings-row>div:first-child]:pl-3"
     >
-      {creating ? (
-        <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
-          <span className="text-[13px] font-semibold text-foreground/85">
-            {tx("settings.models.newPreset", "New model preset")}
-          </span>
+      <SettingsRow
+        title={tx("settings.models.presetName", "Preset name")}
+        description={tx(
+          "settings.models.presetNameHelp",
+          "Used everywhere, including /model commands. Names must be unique.",
+        )}
+      >
+        <div
+          className={cn(
+            "w-full motion-reduce:animate-none",
+            presetNameError && "animate-[preset-name-shake_180ms_ease-in-out]",
+          )}
+        >
+          <Input
+            ref={presetNameInputRef}
+            autoFocus={creating}
+            aria-label={tx("settings.models.presetName", "Preset name")}
+            aria-invalid={Boolean(presetNameError)}
+            aria-describedby={presetNameError ? "model-preset-name-error" : undefined}
+            value={form.modelPreset}
+            placeholder={tx("settings.models.presetNamePlaceholder", "e.g. Fast writing")}
+            onChange={(event) => {
+              suggestedPresetNameRef.current = null;
+              onClearPresetNameError();
+              setForm((prev) => ({ ...prev, modelPreset: event.target.value }));
+            }}
+            className={cn(
+              "h-9 rounded-full text-[13px]",
+              presetNameError &&
+                "border-destructive/70 focus-visible:border-destructive focus-visible:ring-destructive/25",
+            )}
+          />
+          {presetNameError ? (
+            <p
+              id="model-preset-name-error"
+              role="alert"
+              className="mt-1.5 px-1 text-[12px] leading-4 text-destructive"
+            >
+              {presetNameError}
+            </p>
+          ) : null}
         </div>
-      ) : null}
-      <SettingsRow title={tx("settings.models.presetName", "Preset name")}>
-        <Input
-          autoFocus={creating}
-          value={form.presetLabel}
-          placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
-          onChange={(event) =>
-            setForm((prev) => ({ ...prev, presetLabel: event.target.value }))
-          }
-          className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
-        />
       </SettingsRow>
       <SettingsRow title={t("settings.rows.provider")}>
         <ProviderPicker
@@ -369,13 +475,9 @@ export function ModelsSettings({
           value={providerValue}
           emptyLabel={t("settings.byok.noConfiguredProviders")}
           showProviderLogos={showBrandLogos}
-          onChange={(provider) =>
-            setForm((prev) => ({
-              ...prev,
-              provider,
-              model: provider === prev.provider ? prev.model : "",
-            }))
-          }
+          onAddProvider={(trigger) => onAddProvider(trigger, selectProvider)}
+          onConfigureProvider={selectedProvider ? onConfigureProvider : undefined}
+          onChange={selectProvider}
         />
       </SettingsRow>
       {selectedProviderNeedsSignIn ? (
@@ -409,50 +511,110 @@ export function ModelsSettings({
           provider={form.provider}
           value={form.model}
           showProviderLogos={showBrandLogos}
-          onChange={(model) => setForm((prev) => ({ ...prev, model }))}
+          onProviderOAuthLogin={onProviderOAuthLogin}
+          providerSigningIn={selectedProviderSigningIn}
+          onChange={(model, info) => {
+            const contextWindow = info?.context_window;
+            const initializeContext = creating && !presetContextInitializedRef.current
+              && typeof contextWindow === "number" && Number.isSafeInteger(contextWindow) && contextWindow > 0;
+            if (creating) presetContextInitializedRef.current = true;
+            const canSuggestName =
+              creating &&
+              (!form.modelPreset.trim() || form.modelPreset === suggestedPresetNameRef.current);
+            const suggestion = canSuggestName
+              ? suggestedPresetName(model, settings.model_presets)
+              : "";
+            if (canSuggestName) suggestedPresetNameRef.current = suggestion;
+            setForm((prev) => ({
+              ...prev,
+              model,
+              contextWindowTokens: initializeContext ? contextWindow : prev.contextWindowTokens,
+              api: model === prev.model ? prev.api : null,
+              modelPreset: canSuggestName ? suggestion : prev.modelPreset,
+            }));
+          }}
         />
       </SettingsRow>
-      <button
-        type="button"
-        aria-expanded={advancedOpen}
-        onClick={() => setAdvancedOpen((value) => !value)}
-        className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
-      >
-        <span>
-          <span className="block text-[14px] font-medium text-foreground">
-            {tx("settings.models.advancedOptions", "Advanced options")}
-          </span>
-          <span className="mt-0.5 block text-[12px] text-muted-foreground">
-            {tx(
-              "settings.models.advancedSummary",
-              "Context {{context}} · Max {{max}} tokens",
-              {
-                context: formatModelContextWindow(form.contextWindowTokens),
-                max: formatContextWindow(form.maxTokens),
-              },
-            )}
-          </span>
-        </span>
-        <ChevronDown
-          className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-            advancedOpen && "rotate-180",
-          )}
-          aria-hidden
+      <SettingsRow title={tx("settings.models.reasoningEffort", "Reasoning effort")}>
+        <ReasoningEffortPicker
+          token={token}
+          provider={selectedProvider ?? settings.providers.find((provider) => provider.name === selectedPreset?.resolved_provider)}
+          model={form.model}
+          savedValues={form.model === selectedPreset?.model && form.provider === selectedPreset.provider
+            ? selectedPreset.reasoning_effort_values : undefined}
+          value={form.reasoningEffort}
+          onChange={(reasoningEffort) => setForm((prev) => ({ ...prev, reasoningEffort }))}
         />
-      </button>
-      {advancedOpen ? (
-        <div className="bg-muted/12 px-4 py-4 sm:px-5">
-          <ModelAdvancedFields
-            maxTokens={form.maxTokens}
-            contextWindowTokens={form.contextWindowTokens}
-            temperature={form.temperature}
-            reasoningEffort={form.reasoningEffort}
-            onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
-          />
-        </div>
-      ) : null}
-      <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      </SettingsRow>
+      <Dialog open={advancedOpen} onOpenChange={setAdvancedOpen}>
+        <DialogTrigger asChild>
+          <button
+            type="button"
+            className="settings-disclosure-row w-full text-left transition-colors settings-hover"
+          >
+            <span className="min-w-0 pl-3">
+              <span className="block text-[14px] font-medium text-foreground">
+                {tx("settings.models.advancedOptions", "Advanced options")}
+              </span>
+              <span className="mt-0.5 flex flex-wrap gap-x-3 text-[12px] tabular-nums text-muted-foreground">
+                <span>{tx("settings.models.contextSummary", "Context {{context}}", {
+                  context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
+                })}</span>{" "}
+                <span>{tx("settings.models.outputSummary", "Max {{max}} tokens", {
+                  max: Number.isFinite(form.maxTokens) ? formatContextWindow(form.maxTokens) : "—",
+                })}</span>
+              </span>
+            </span>
+            <span className="settings-control">
+              <span className="control-layout justify-end border-transparent">
+                <Pencil className="h-4 w-4 text-muted-foreground" aria-hidden />
+              </span>
+            </span>
+          </button>
+        </DialogTrigger>
+        <DialogContent aria-describedby={undefined}
+          className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0">
+          <DialogHeader className="px-6 pb-2 pt-6 pr-12 text-left">
+            <DialogTitle>{tx("settings.models.advancedOptions", "Advanced options")}</DialogTitle>
+          </DialogHeader>
+          <div className="settings-grid !px-0 pb-4 [&_.settings-row>div:first-child]:pl-3">
+            <ModelAPIControl
+              provider={selectedProvider ?? settings.providers.find(
+                (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
+              )}
+              automaticAPI={resolvedAutomaticAPI?.api}
+              value={form.api}
+              onChange={(api) => setForm((prev) => ({ ...prev, api }))}
+            />
+            <ModelAdvancedFields
+              maxTokens={form.maxTokens}
+              contextWindowTokens={form.contextWindowTokens}
+              temperature={form.temperature}
+              onChange={(value) => {
+                if (creating && value.contextWindowTokens !== undefined) presetContextInitializedRef.current = true;
+                setForm((prev) => ({ ...prev, ...value }));
+              }}
+            />
+            {settings.model_request_overrides_supported && (
+              <div className="settings-list-inset space-y-3 py-3">
+                <p className="text-[13px] text-muted-foreground">{t("settings.models.requestOverridesHint")}</p>
+                <ProviderParameterFields
+                  inherit
+                  draft={creating}
+                  disabled={saving || (!creating && dirty)}
+                  onSave={creating ? undefined : onSaveRequestSettings}
+                  fields={(selectedProvider ?? settings.providers.find(
+                    (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
+                  ))?.advanced_fields ?? []}
+                  form={form}
+                  onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
+                />
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <div className="settings-list-inset flex min-h-[58px] flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         {creating ? (
           <Button
             size="sm"
@@ -468,27 +630,33 @@ export function ModelsSettings({
           </Button>
         ) : selectedPreset ? (
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="rounded-full text-muted-foreground hover:text-destructive"
-              disabled={selectedPresetReferenced || saving || orderSaving}
-              aria-describedby={
-                selectedPresetReferenced ? "model-preset-delete-hint" : undefined
-              }
-              onClick={() => onDeleteConfiguration(selectedPreset)}
+            <HoverHint
+              enabled={selectedPresetReferenced}
+              content={tx("settings.models.removeBeforeDelete", "Cannot delete the primary model")}
             >
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-              {tx("settings.actions.delete", "Delete")}
-            </Button>
+              <span className="inline-flex">
+                <RemoveActionButton
+                  disabled={selectedPresetReferenced || saving || orderSaving}
+                  aria-describedby={
+                    selectedPresetReferenced ? "model-preset-delete-hint" : undefined
+                  }
+                  onClick={() => onDeleteConfiguration(selectedPreset, () => {
+                    setEditorOpen(false);
+                    setEditorRowKey(null);
+                  })}
+                >
+                  {tx("settings.actions.delete", "Delete")}
+                </RemoveActionButton>
+              </span>
+            </HoverHint>
             {selectedPresetReferenced ? (
               <span
                 id="model-preset-delete-hint"
-                className="text-[11px] leading-4 text-muted-foreground"
+                className="sr-only"
               >
                 {tx(
                   "settings.models.removeBeforeDelete",
-                  "Remove this preset from the call order before deleting it.",
+                  "Cannot delete the primary model",
                 )}
               </span>
             ) : null}
@@ -510,24 +678,25 @@ export function ModelsSettings({
           >
             {saving || creatingSaving
               ? tx("settings.actions.saving", "Saving...")
-              : tx("settings.actions.savePreset", "Save preset")}
+              : tx("settings.actions.savePreset", "Save")}
           </Button>
         </div>
       </div>
     </div>
   );
 
+  const showMigration = !settings.model_call_order_editable
+    && settings.model_configuration_migratable !== false;
+
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
-        <SettingsSectionTitle>
-          {tx("settings.models.presets", "Model presets")}
-        </SettingsSectionTitle>
-        <SettingsGroup>
-          {!settings.model_call_order_editable ? (
+        <SettingsSectionTitle>{t("settings.models.presets")}</SettingsSectionTitle>
+        {showMigration ? (
+          <SettingsGroup>
             <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="flex min-w-0 items-start gap-3">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[12px] bg-muted text-muted-foreground">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
                   <ListOrdered className="h-4 w-4" aria-hidden />
                 </span>
                 <div className="min-w-0">
@@ -557,245 +726,207 @@ export function ModelsSettings({
                   : tx("settings.models.convertAction", "Convert to presets")}
               </Button>
             </div>
-          ) : (
-            <>
-              <div role="list" className="divide-y divide-border/45">
-                {presetRows.map(({ key, name, orderIndex, preset }) => {
-                  const ordered = orderIndex >= 0;
-                  const provider = preset
-                    ? modelPresetProviderKey(preset, settings)
-                    : settings.agent.resolved_provider ?? settings.agent.provider;
-                  const presetConfigured = preset
-                    ? settingsProviderConfigured(
-                        settings,
-                        preset.provider,
-                        preset.resolved_provider,
-                      )
-                    : true;
-                  const isDropTarget =
-                    ordered &&
-                    dragOverCallOrderIndex === orderIndex &&
-                    draggedCallOrderIndex !== orderIndex;
-                  const dropAfterTarget =
-                    isDropTarget &&
-                    draggedCallOrderIndex !== null &&
-                    draggedCallOrderIndex < orderIndex;
-                  const isSelected =
-                    editorOpen &&
-                    !creating &&
-                    activeEditorRowKey === key &&
-                    selectedPreset?.name === name;
-                  const presetRow = (
-                    <div
-                      tabIndex={ordered ? 0 : -1}
-                      draggable={ordered && !callOrderBusy}
-                      aria-label={
-                        ordered
-                          ? `${preset?.label ?? name}. ${tx(
-                              "settings.models.dragToReorder",
-                              "Drag to reorder",
-                            )}`
-                          : preset?.label ?? name
-                      }
-                      data-testid={`model-call-order-row-${name}`}
-                      onDragStart={(event) => {
-                        if (!ordered || callOrderBusy) {
-                          event.preventDefault();
-                          return;
-                        }
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", name);
-                        setDraggedCallOrderIndex(orderIndex);
-                        setDragOverCallOrderIndex(orderIndex);
-                      }}
-                      onDragEnd={() => {
-                        setDraggedCallOrderIndex(null);
-                        setDragOverCallOrderIndex(null);
-                      }}
-                      onDragEnter={(event) => {
-                        if (ordered && draggedCallOrderIndex !== null) {
-                          event.preventDefault();
-                          setDragOverCallOrderIndex(orderIndex);
-                        }
-                      }}
-                      onDragOver={(event) => {
-                        if (!ordered || draggedCallOrderIndex === null) return;
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = "move";
-                      }}
-                      onDrop={(event) => {
-                        if (!ordered) return;
-                        event.preventDefault();
-                        dropCallOrderItem(orderIndex);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.currentTarget !== event.target) return;
-                        if (ordered && event.key === "ArrowUp") {
-                          event.preventDefault();
-                          moveCallOrderItem(orderIndex, -1);
-                        } else if (ordered && event.key === "ArrowDown") {
-                          event.preventDefault();
-                          moveCallOrderItem(orderIndex, 1);
-                        } else if ((event.key === "Enter" || event.key === " ") && preset) {
-                          event.preventDefault();
-                          selectPreset(preset, key);
-                        }
-                      }}
-                      className={cn(
-                        "group relative flex min-h-[76px] select-none items-center gap-3 px-4 py-3 outline-none transition-[background-color,opacity] duration-150 sm:px-5",
-                        ordered &&
-                          (callOrderBusy
-                            ? "cursor-wait"
-                            : "cursor-grab active:cursor-grabbing"),
-                        "hover:bg-muted/25",
-                        isDropTarget &&
-                          !dropAfterTarget &&
-                          "before:absolute before:inset-x-4 before:top-0 before:z-10 before:h-0.5 before:rounded-full before:bg-foreground sm:before:inset-x-5",
-                        isDropTarget &&
-                          dropAfterTarget &&
-                          "after:absolute after:inset-x-4 after:bottom-0 after:z-10 after:h-0.5 after:rounded-full after:bg-foreground sm:after:inset-x-5",
-                        ordered && draggedCallOrderIndex === orderIndex && "opacity-35",
-                        isSelected && "bg-muted/45 hover:bg-muted/45",
-                        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                      )}
-                    >
-                      {ordered ? (
-                        <GripVertical
-                          className="pointer-events-none h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
-                          aria-hidden
-                        />
-                      ) : (
-                        <span className="h-4 w-4 shrink-0" aria-hidden />
-                      )}
-                      <button
-                        type="button"
-                        aria-pressed={selectedPreset?.name === name}
-                        aria-expanded={isSelected}
-                        aria-controls={isSelected ? "model-preset-editor" : undefined}
-                        disabled={!preset}
-                        onClick={() => preset && selectPreset(preset, key)}
-                        className="flex min-w-0 flex-1 items-center gap-3 rounded-[12px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        {ordered ? (
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
-                            {orderIndex + 1}
-                          </span>
-                        ) : (
-                          <span className="h-7 w-7 shrink-0" aria-hidden />
-                        )}
-                        <ProviderPickerIcon
-                          provider={provider}
-                          showBrandLogos={showBrandLogos}
-                          unconfigured={!presetConfigured}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex min-w-0 flex-wrap items-center gap-2">
-                            <span className="truncate text-[14px] font-medium text-foreground">
-                              {preset?.label ?? name}
-                            </span>
-                            {orderIndex === 0 ? (
-                              <StatusPill tone="success">
-                                {tx("settings.models.primary", "Primary")}
-                              </StatusPill>
-                            ) : !ordered ? (
-                              <StatusPill tone="neutral">
-                                {tx("settings.models.disabled", "Disabled")}
-                              </StatusPill>
-                            ) : null}
-                            {!presetConfigured ? (
-                              <span className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                                {tx(
-                                  "settings.models.providerSetupRequired",
-                                  "Provider setup required",
-                                )}
-                              </span>
-                            ) : null}
-                          </span>
-                          <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                            {preset?.model ?? name}
-                          </span>
-                        </span>
-                        <ChevronRight
-                          className={cn(
-                            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                            isSelected && "rotate-90",
-                          )}
-                          aria-hidden
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={ordered}
-                        aria-label={
-                          ordered
-                            ? tx("settings.models.removeFromOrder", "Disable preset")
-                            : tx("settings.models.addToOrder", "Enable preset")
-                        }
-                        disabled={callOrderBusy || (ordered && callOrder.length <= 1)}
-                        onClick={() => {
-                          if (ordered) {
-                            removeCallOrderItem(orderIndex);
-                          } else if (preset) {
-                            onChangeCallOrder([...callOrder, preset.name]);
+          </SettingsGroup>
+        ) : presetRows.length ? (
+          <div ref={presetDrag.listRef} {...presetDrag.listProps} className="flex flex-col"
+            role="list" aria-label={t("settings.models.callOrder")}>
+            {callOrder.length > 0 && presetRows.length > 1 ? (
+              <div role="presentation" className="order-1 mt-6">
+                <SettingsSectionTitle>{t("settings.models.otherPresets")}</SettingsSectionTitle>
+              </div>
+            ) : null}
+            {/* Keep card nodes stable while previewing their order. */}
+            {presetRows.map(({ key, name, preset }, rowIndex) => {
+              const orderIndex = presetDrag.previewKeys.indexOf(key);
+              const ordered = orderIndex >= 0;
+              const primary = orderIndex === 0;
+              const provider = preset ? modelPresetProviderKey(preset, settings) : "";
+              const presetConfigured = preset
+                ? settingsProviderConfigured(settings, preset.provider, preset.resolved_provider)
+                : true;
+              const isDragging = key === presetDrag.draggedKey;
+              const isSelected = editorOpen && !creating && activeEditorRowKey === key
+                && selectedPreset?.name === name;
+              return (
+                <div key={key} role="listitem" data-call-order-index={orderIndex} data-preset-sort-key={key}
+                  style={{ order: (ordered ? orderIndex : rowIndex) * 2 }} className={cn(!primary && "mb-2")}>
+                  <div data-preset-sort-surface={key}
+                    className={cn("relative origin-top-left rounded-panel", isDragging && "z-10 shadow-md ring-1 ring-border/50")}>
+                    <SettingsGroup>
+                      <div
+                        tabIndex={ordered ? 0 : -1}
+                        onDragStart={(event) => event.preventDefault()}
+                        aria-label={ordered ? `${name}. ${t("settings.models.dragToReorder")}` : name}
+                        data-testid={`model-call-order-row-${name}`}
+                        onPointerDown={(event) => {
+                          setHideEditorReturnFocus(false);
+                          presetDrag.start(event, key);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Escape") setHideEditorReturnFocus(false);
+                          if (event.currentTarget !== event.target) return;
+                          if (ordered && event.key === "ArrowUp") {
+                            event.preventDefault();
+                            moveCallOrderItem(orderIndex, -1);
+                          } else if (ordered && event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveCallOrderItem(orderIndex, 1);
+                          } else if ((event.key === "Enter" || event.key === " ") && preset) {
+                            event.preventDefault();
+                            selectPreset(preset, key);
                           }
                         }}
                         className={cn(
-                          "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40",
-                          ordered ? "bg-foreground" : "bg-muted-foreground/25",
+                          "settings-list-inset group relative grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-x-3 select-none outline-none transition-colors [transition-duration:240ms] motion-reduce:transition-none",
+                          primary ? "py-5 [--preset-title-size:1.375rem] sm:py-6 sm:[--preset-title-size:1.625rem]" : "py-4",
+                          ordered && (callOrderBusy ? "cursor-wait" : "cursor-grab active:cursor-grabbing"),
+                          !isDragging && "settings-hover",
+                          isSelected && "bg-muted/45",
+                          !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         )}
                       >
-                        <span
-                          className={cn(
-                            "h-4 w-4 rounded-full bg-background shadow-sm transition-transform",
-                            ordered ? "translate-x-[18px]" : "translate-x-0.5",
+                        <div className="contents">
+                          <button
+                            type="button"
+                            aria-pressed={selectedPreset?.name === name}
+                            aria-haspopup="dialog"
+                            disabled={!preset}
+                            onClick={() => preset && selectPreset(preset, key)}
+                            className={cn("col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none",
+                              !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-ring")}
+                          >
+                            {presetConfigured ? (
+                              <span className={cn("relative aspect-square min-w-8", primary ? "w-[calc(var(--preset-title-size)*1.375+1.5rem)]" : "h-8")}>
+                                <span className="absolute inset-0">
+                                  <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} fill />
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="grid h-8 w-8 shrink-0 place-items-center">
+                                <ProviderPickerIcon provider={provider} showBrandLogos={showBrandLogos} unconfigured />
+                              </span>
+                            )}
+                            <span className="min-w-0 flex-1">
+                              <span className="flex min-w-0 items-center gap-x-2">
+                                <TruncatedTextTooltip text={name} className={cn("font-medium text-foreground",
+                                  primary ? "text-[length:var(--preset-title-size)] leading-snug tracking-tight" : "text-[14px]")} />
+                                {primary ? (
+                                  <span className="shrink-0 whitespace-nowrap"><StatusPill tone="success">{t("settings.models.primary")}</StatusPill></span>
+                                ) : !ordered ? (
+                                  <span className="text-[11px] leading-5 text-muted-foreground">
+                                    {t("settings.models.disabled")}
+                                  </span>
+                                ) : null}
+                              </span>
+                              {preset ? (
+                                <TruncatedTextTooltip
+                                  text={primary
+                                    ? `${preset.model}  ${formatModelContextWindow(preset.context_window_tokens)}  ${preset.reasoning_effort || t("settings.values.default")}`
+                                    : preset.model}
+                                  className={cn("mt-1 block whitespace-pre text-muted-foreground", primary ? "text-[13px] leading-5" : "text-[12px]")} />
+                              ) : null}
+                            </span>
+                          </button>
+                          <Button type="button" variant="link" size="sm"
+                            className="h-auto px-0 text-[13px] font-normal text-muted-foreground hover:text-foreground hover:no-underline"
+                            disabled={!preset}
+                            onClick={() => preset && selectPreset(preset, key)}>
+                            <span className="sr-only sm:not-sr-only">{t("settings.configure")}</span>
+                            <Pencil className="h-4 w-4 sm:hidden" aria-hidden />
+                          </Button>
+                          {ordered ? (
+                            <GripVertical
+                              className="h-4 w-4 shrink-0 touch-none text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
+                              aria-hidden
+                            />
+                          ) : (
+                            <span className="h-4 w-4 shrink-0" aria-hidden />
                           )}
-                          aria-hidden
-                        />
-                      </button>
-                    </div>
-                  );
-                  return (
-                    <div key={key} role="listitem">
-                      {presetRow}
-                      {isSelected ? renderPresetEditor() : null}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                {!creating ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="rounded-full"
-                    disabled={callOrderBusy}
-                    onClick={() => {
-                      setEditorRowKey(null);
-                      setEditorOpen(true);
-                      onBeginCreate();
-                    }}
-                  >
-                    <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                    {tx("settings.models.newPreset", "New model preset")}
-                  </Button>
-                ) : (
-                  <span />
-                )}
-                {orderSaving ? (
-                  <SettingsStatusMessage>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                      {tx("settings.actions.saving", "Saving...")}
-                    </span>
-                  </SettingsStatusMessage>
-                ) : null}
-              </div>
-              {creating && editorOpen ? renderPresetEditor() : null}
-            </>
-          )}
-        </SettingsGroup>
+                          <ToggleButton
+                            checked={ordered}
+                            label={t(ordered ? "settings.models.removeFromOrder" : "settings.models.addToOrder")}
+                            disabled={callOrderBusy || (ordered && callOrder.length <= 1)}
+                            onChange={() => {
+                              if (ordered) removeCallOrderItem(orderIndex);
+                              else if (preset) onChangeCallOrder([...callOrder, preset.name]);
+                            }}
+                          />
+                        </div>
+                        {!presetConfigured ? (
+                          <p className="col-[2/-1] mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                            {t("settings.models.providerSetupRequired")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </SettingsGroup>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <SettingsGroup>
+            <div className="settings-list-inset py-8">
+              <p className="text-[14px] font-medium text-foreground">{t("settings.models.noPresets")}</p>
+              <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{t("settings.models.newPresetHelp")}</p>
+            </div>
+          </SettingsGroup>
+        )}
+        <div className="settings-footer flex flex-wrap justify-end gap-2">
+          {orderSaving ? (
+            <span role="status" className="order-last w-full text-[12px] text-muted-foreground">
+              <SettingsStatusMessage>
+                <span className="inline-flex items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  {t("settings.actions.saving")}
+                </span>
+              </SettingsStatusMessage>
+            </span>
+          ) : null}
+          {!showMigration ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className={cn("mr-auto h-11 gap-2 text-[13px] font-normal text-muted-foreground hover:font-semibold hover:text-orange-700 hover:no-underline dark:hover:text-orange-400 sm:h-9",
+                hideEditorReturnFocus && "focus-visible:ring-0 focus-visible:ring-offset-0")}
+              onKeyDown={(event) => { if (event.key !== "Escape") setHideEditorReturnFocus(false); }}
+              disabled={callOrderBusy}
+              onClick={(event) => {
+                editorTriggerRef.current = event.currentTarget;
+                setHideEditorReturnFocus(false);
+                setEditorRowKey(null);
+                setEditorOpen(true);
+                onBeginCreate();
+              }}
+            >
+              {tx("settings.models.newPreset", "New preset")}
+            </Button>
+          ) : null}
+          <Button type="button" variant="link" size="sm"
+            className="h-11 shrink-0 text-[13px] font-normal text-muted-foreground hover:font-semibold hover:text-orange-700 hover:no-underline dark:hover:text-orange-400 sm:h-9"
+            onClick={(event) => onManageProviders(event.currentTarget)}>
+            {t("settings.providers.manageProviders")}
+          </Button>
+        </div>
       </section>
+      <Dialog open={editorOpen && (creating || selectedPreset !== null)} onOpenChange={(open) => {
+        setEditorOpen(open);
+        if (!open && creating) onCancelCreate();
+      }}>
+        <DialogContent aria-describedby={undefined}
+          onEscapeKeyDown={() => setHideEditorReturnFocus(true)}
+          className="relative max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            editorTriggerRef.current?.focus();
+          }}>
+          <DialogTitle className="sr-only">
+            {creating ? tx("settings.models.newPreset", "New model preset") : selectedPreset?.name}
+          </DialogTitle>
+          <div className="settings-grid !px-0 pt-8">{renderPresetEditor()}</div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -804,93 +935,90 @@ function ModelAdvancedFields({
   maxTokens,
   contextWindowTokens,
   temperature,
-  reasoningEffort,
   onChange,
 }: {
   maxTokens: number;
   contextWindowTokens: number;
   temperature: number;
-  reasoningEffort: string;
   onChange: (
     value: Partial<
       Pick<
         AgentSettingsDraft,
-        "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
+        "maxTokens" | "contextWindowTokens" | "temperature"
       >
     >,
   ) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const contextWindowOptions = Array.from(
-    new Set([...CONTEXT_WINDOW_TOKEN_OPTIONS, contextWindowTokens]),
-  ).sort((left, right) => left - right);
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-            {tx("settings.models.maxTokens", "Max output tokens")}
-          </span>
-          <Input
-            type="number"
-            min={1}
-            step={1}
-            value={maxTokens}
-            onChange={(event) => {
-              const value = Number(event.target.value);
-              if (Number.isFinite(value)) onChange({ maxTokens: value });
-            }}
-            className="h-9 rounded-[12px] text-[13px]"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-            {tx("settings.models.temperature", "Temperature")}
-          </span>
-          <Input
-            type="number"
-            min={0}
-            max={2}
-            step={0.1}
-            value={temperature}
-            onChange={(event) => {
-              const value = Number(event.target.value);
-              if (Number.isFinite(value)) onChange({ temperature: value });
-            }}
-            className="h-9 rounded-[12px] text-[13px]"
-          />
-        </label>
-      </div>
-      <div>
-        <span className="mb-2 block text-[12px] font-medium text-muted-foreground">
-          {tx("settings.rows.contextWindow", "Context window")}
-        </span>
-        <SegmentedControl
-          value={String(contextWindowTokens)}
-          options={contextWindowOptions.map((tokens) => ({
-            value: String(tokens),
-            label: formatModelContextWindow(tokens),
-          }))}
-          onChange={(value) =>
-            onChange({ contextWindowTokens: normalizeContextWindowTokens(Number(value)) })
-          }
-        />
-      </div>
-      <label className="block">
-        <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-          {tx("settings.models.reasoningEffort", "Reasoning effort")}
-        </span>
+    <>
+      <ModelTokenBudgetRow
+        label={tx("settings.models.maxTokens", "Max output tokens")}
+        value={maxTokens}
+        onChange={(value) => onChange({ maxTokens: value })}
+      />
+      <SettingsRow title={tx("settings.models.temperature", "Temperature")}>
         <Input
-          value={reasoningEffort}
-          onChange={(event) => onChange({ reasoningEffort: event.target.value })}
-          placeholder={tx("settings.values.default", "Default")}
+          aria-label={tx("settings.models.temperature", "Temperature")}
+          type="number"
+          min={0}
+          max={2}
+          step={0.1}
+          value={temperature}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            if (Number.isFinite(value)) onChange({ temperature: value });
+          }}
+          className="h-9 text-[13px]"
+        />
+      </SettingsRow>
+      <ModelTokenBudgetRow
+        label={tx("settings.rows.contextWindow", "Context window")}
+        value={contextWindowTokens}
+        onChange={(value) => onChange({ contextWindowTokens: value })}
+      />
+    </>
+  );
+}
+
+function ModelTokenBudgetRow({ label, value, onChange }: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<{ text: string; tokens: number } | null>(null);
+  const hintId = useId();
+  const valid = Number.isSafeInteger(value) && value > 0;
+  const hint = valid
+    ? t("settings.models.contextWindowHint", { tokens: value.toLocaleString() })
+    : t("settings.models.contextWindowError");
+  return (
+    <SettingsRow title={label} description={valid ? hint : undefined}>
+      <div className="w-full">
+        <Input
+          aria-label={label}
+          type="text"
           autoCapitalize="none"
           spellCheck={false}
-          className="h-9 rounded-[12px] text-[13px]"
+          required
+          value={draft && Object.is(draft.tokens, value) ? draft.text : formatContextWindowInput(value)}
+          onChange={(event) => {
+            const text = event.target.value;
+            const tokens = parseContextWindowTokens(text);
+            setDraft({ text, tokens });
+            onChange(tokens);
+          }}
+          aria-invalid={!valid}
+          aria-describedby={hintId}
+          className="h-9 text-[13px]"
         />
-      </label>
-    </div>
+        <p id={hintId} className={valid ? "sr-only" : "mt-1.5 px-3 text-[12px] text-destructive"}>
+          {hint}
+        </p>
+      </div>
+    </SettingsRow>
   );
 }
 

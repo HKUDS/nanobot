@@ -73,10 +73,11 @@ def set_webui_skill_enabled(
     *,
     enabled: bool,
     disabled_skills: set[str],
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Persist and apply one skill's enabled state."""
     _require_skill_entry(workspace_path, name)
-    config = load_config()
+    config = load_config(config_path)
     next_disabled = set(config.agents.defaults.disabled_skills)
     if enabled:
         next_disabled.discard(name)
@@ -84,7 +85,7 @@ def set_webui_skill_enabled(
         next_disabled.add(name)
     if next_disabled != set(config.agents.defaults.disabled_skills):
         config.agents.defaults.disabled_skills = sorted(next_disabled)
-        save_config(config)
+        save_config(config, config_path)
     disabled_skills.clear()
     disabled_skills.update(next_disabled)
     return {"name": name, "enabled": enabled, "deleted": False}
@@ -95,6 +96,7 @@ def delete_webui_skill(
     name: str,
     *,
     disabled_skills: set[str],
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Delete one workspace skill and remove its disabled-state entry."""
     entry = _require_skill_entry(workspace_path, name)
@@ -116,7 +118,7 @@ def delete_webui_skill(
     if not target.is_symlink() and not target.is_dir():
         raise SkillManagementError("skill directory was not found", status=404)
 
-    config = load_config()
+    config = load_config(config_path)
     original_disabled = list(config.agents.defaults.disabled_skills)
     next_disabled = set(original_disabled)
     if name in next_disabled:
@@ -127,7 +129,7 @@ def delete_webui_skill(
         try:
             if next_disabled != set(original_disabled):
                 config.agents.defaults.disabled_skills = sorted(next_disabled)
-                save_config(config)
+                save_config(config, config_path)
         except Exception:
             config.agents.defaults.disabled_skills = original_disabled
             staged_target.replace(target)

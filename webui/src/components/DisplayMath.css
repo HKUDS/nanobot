@@ -1,0 +1,76 @@
+.math-fit {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-block: 0.45em 0.5em;
+}
+
+.math-fit-content {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: max-content;
+  padding-block: 0.1em;
+  transform-origin: top center;
+}
+
+.math-fit .katex-display {
+  margin: 0;
+}
+
+.math-fit .katex-display > .katex {
+  font-size: 1.1em;
+}
+
+/* Math-heavy prose uses a tighter reading rhythm than ordinary chat. */
+.markdown-content:has(.math-fit) {
+  --cjk-line-height: 1.65;
+}
+
+/* Keep list formulas close to their explanations. */
+.markdown-content li .math-fit {
+  margin-block: 0.3em 0.35em;
+}
+
+.markdown-content li > p:has(.math-fit) {
+  margin-block: 0;
+}
+
+.markdown-content li:has(.math-fit) {
+  margin-block: 0.35em;
+}
+
+.markdown-content li:has(.math-fit) > p:first-child:not(:has(.math-fit)) {
+  margin-bottom: 0.3em;
+  font-weight: 500;
+}
+
+/* Unindented Markdown equations may follow a list as sibling blocks. */
+.markdown-content :is(ol, ul):has(+ .math-fit) {
+  list-style-position: outside;
+  padding-left: 1.5em;
+  margin-top: 0.85em;
+  margin-bottom: 0.3em;
+}
+
+.markdown-content :is(ol, ul):has(+ .math-fit) > li {
+  font-weight: 500;
+}
+
+.markdown-content :is(ol, ul) + .math-fit:not([hidden]) {
+  width: calc(100% - 1.5em);
+  margin-left: 1.5em;
+  margin-top: 0.3em;
+  margin-bottom: 0.35em;
+}
+
+.markdown-content .math-fit + :is(ol, ul):has(+ .math-fit) {
+  margin-top: 0.35em;
+}
+
+/* Typography paragraph margins otherwise add a full line after equations. */
+.markdown-content .math-fit:not([hidden]) + p,
+.markdown-content :is(ol, ul):has(> li:last-child > .math-fit:last-child) + p {
+  margin-top: 0.5em;
+}

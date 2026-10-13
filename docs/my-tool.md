@@ -4,11 +4,11 @@ Let the agent sense and adjust its own runtime state — like asking a coworker 
 
 ## Why You Need It
 
-Normal tools let the agent operate on the outside world (read/write files, search code). But the agent knows nothing about itself — it doesn't know which model it's running on, how many iterations are left, or how many tokens it has consumed.
+Normal tools let the agent operate on the outside world (read/write files, search code). But the agent knows nothing about itself — it doesn't know which model it's running on, which workspace it can access, or which runtime limits apply.
 
 My tool fills this gap. With it, the agent can:
 
-- **Know who it is**: What model am I using? Where is my workspace? How many iterations remain?
+- **Know who it is**: What model am I using? Where is my workspace? What is my per-turn iteration limit?
 - **Adapt on the fly**: Complex task? Expand the context window. Simple chat? Switch to a faster model.
 - **Remember across turns**: Store notes in your scratchpad that persist into the next conversation turn.
 
@@ -27,8 +27,7 @@ To allow the agent to set its configuration (e.g. switch models, adjust paramete
 
 Legacy `tools.myEnabled` / `tools.mySet` keys are auto-migrated on load, and rewritten in-place the next time `nanobot onboard` refreshes the config.
 
-Most modifications are held in memory only. `model_preset` is the exception: it is
-stored in the current session so the selection survives a restart.
+Most modifications are held in memory only. `model_preset` is the exception: it is stored in the current session so the selection survives a restart.
 
 ---
 
@@ -44,7 +43,6 @@ my(action="check")
 #   workspace: PosixPath('/tmp/workspace')
 #   provider_retry_mode: 'standard'
 #   max_tool_result_chars: 16000
-#   _current_iteration: 3
 #   _last_usage: {'prompt_tokens': 45000, 'completion_tokens': 8000}
 #   Note: prompt_tokens is cumulative across all turns, not current context window occupancy.
 ```
@@ -68,7 +66,7 @@ my(action="check", key="web_config.enable")
 |----------|-----|
 | "What model are you using?" | `check("model")` |
 | "Which model preset is active?" | `check("model_preset")` |
-| "How many more tool calls can you make?" | `check("max_iterations")` minus `check("_current_iteration")` |
+| "What is the per-turn iteration limit?" | `check("max_iterations")` |
 | "How many tokens has this conversation used?" | `check("_last_usage")` — cumulative across all turns |
 | "Where is your working directory?" | `check("workspace")` |
 | "Show me your full config" | `check()` |
@@ -78,11 +76,7 @@ my(action="check", key="web_config.enable")
 
 ## set — Runtime tuning
 
-Changes do not require a restart. `model_preset` is saved for the current session and
-applies to its next turn; other writable runtime tuning takes effect immediately.
-Direct `model` and `context_window_tokens` writes are rejected during an active session
-because those setters change the shared instance default. Configure a named preset for
-model or context-window changes instead.
+Changes do not require a restart. `model_preset` is saved for the current session and applies to its next turn; other writable runtime tuning takes effect immediately. Direct `model` and `context_window_tokens` writes are rejected during an active session because those setters change the shared instance default. Configure a named preset for model or context-window changes instead.
 
 ```text
 my(action="set", key="max_iterations", value=80)
@@ -161,6 +155,8 @@ Agent: I've used ~53k tokens total so far. I'll keep my remaining replies concis
 
 ### "Subagent monitoring"
 
+Subagent snapshots include only tasks created by the current session. This scope also applies to `subagents._task_statuses.<task_id>` and nested fields. Without a current session key, direct subagent checks return an error and the full overview contains no tasks. Completed tasks are removed; this is not a result archive.
+
 ```text
 Agent: Let me check on the background tasks.
 → my(action="check", key="subagents")
@@ -179,9 +175,7 @@ Agent: The code review is progressing well. The test task hasn't started yet.
 
 ## Safety Mechanisms
 
-Core design principle: **The tool does not rewrite `config.json`.** Instance-wide
-changes live in memory only, while `model_preset` persists only as the current
-session's selector.
+Core design principle: **The tool does not rewrite `config.json`.** Instance-wide changes live in memory only, while `model_preset` persists only as the current session's selector.
 
 ### Off-limits (BLOCKED)
 
@@ -205,7 +199,6 @@ Can be checked but not set:
 | Subagent manager | `subagents` | Observable, but replacing breaks the system |
 | Execution config | `exec_config` | Can check sandbox/enable status, cannot change it |
 | Web config | `web_config` | Can check enable status, cannot change it |
-| Iteration counter | `_current_iteration` | Updated by runner only |
 
 ### Sensitive field protection
 

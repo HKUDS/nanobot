@@ -1,20 +1,20 @@
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://napneko.github.io/assets/newnewlogo.png",
     displayName: "NapCat",
     initials: "NC",
     color: "#F97316",
-    logoUrl: "https://napneko.github.io/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("napcat"),
       fields: [
-        { key: "channels.napcat.wsUrl" },
-        { key: "channels.napcat.accessToken" },
-        { key: "channels.napcat.groupPolicy" },
-        { key: "channels.napcat.allowFrom" },
+        { key: "channels.napcat.wsUrl", section: "connection" },
+        { key: "channels.napcat.accessToken", section: "credentials" },
+        { key: "channels.napcat.groupPolicy", section: "behavior" },
+        { key: "channels.napcat.allowFrom", section: "access" },
       ],
     },
   },
