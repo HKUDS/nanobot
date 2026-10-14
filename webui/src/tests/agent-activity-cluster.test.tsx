@@ -1580,6 +1580,41 @@ describe("AgentActivityCluster", () => {
     expect(document.querySelector("details")).not.toBeInTheDocument();
   });
 
+  it("keeps the working header animated while waiting after a tool completes", () => {
+    const args = { path: "skills/weather/SKILL.md" };
+    const line = `read_file(${JSON.stringify(args)})`;
+    const messages: UIMessage[] = [{
+      id: "t-read-weather-skill",
+      role: "tool",
+      kind: "trace",
+      content: line,
+      traces: [line],
+      toolEvents: [{
+        phase: "end",
+        call_id: "call-read-weather-skill",
+        name: "read_file",
+        arguments: args,
+        result: "Weather skill instructions",
+      }],
+      createdAt: Date.now(),
+    }];
+    const view = render(
+      <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
+    );
+    const header = screen.getByText(/^Working for /);
+    expect(header).toHaveAttribute("data-sheen-text", header.textContent);
+    const tool = screen.getByText("Read file skills/weather/SKILL.md");
+    expect(tool).toHaveClass("text-muted-foreground");
+    expect(tool).not.toHaveAttribute("data-sheen-text");
+
+    view.rerender(
+      <AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow={false} />,
+    );
+    expect(screen.getByText(/^Worked/)).toBe(header);
+    expect(header).toHaveClass("text-muted-foreground/65");
+    expect(header).not.toHaveAttribute("data-sheen-text");
+  });
+
   it("groups repeated searches over internal tool results without exposing raw paths", () => {
     const pattern = "Jul (1[0-7]), 2026|July (1[0-7]), 2026|2026-07-(1[0-7])";
     const secondPattern = "Anthropic|OpenAI|DeepMind";

@@ -402,6 +402,11 @@
     text-wrap: balance;
   }
 
+  .activity-current,
+  .streaming-text-sheen {
+    --activity-animation: 2.8s ease-in-out infinite;
+  }
+
   /* L→R sheen clipped to live activity labels. The highlight lives inside
      the glyphs, not in the row background, so dark mode stays quiet. */
   @keyframes streaming-text-sheen-ltr {
@@ -420,7 +425,7 @@
     color: inherit;
   }
   .streaming-text-sheen::after {
-    content: attr(data-sheen-text);
+    content: attr(data-sheen-text) / "";
     position: absolute;
     inset: 0;
     display: block;
@@ -428,6 +433,7 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     pointer-events: none;
+    padding-right: inherit;
     color: transparent;
     background: linear-gradient(
       90deg,
@@ -443,7 +449,7 @@
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    animation: streaming-text-sheen-ltr 2.8s ease-in-out infinite;
+    animation: streaming-text-sheen-ltr var(--activity-animation);
   }
   .dark .streaming-text-sheen::after {
     background-image: linear-gradient(
@@ -1467,14 +1473,13 @@
     .activity-current-trace {
       display: block;
       stroke-dasharray: 16 84;
-      animation: activity-current-flow 1800ms linear infinite;
+      animation: activity-current-flow var(--activity-animation);
     }
   }
   @keyframes activity-current-flow {
     0% { stroke-dashoffset: 16; opacity: 0; }
-    10% { opacity: 1; }
-    65% { stroke-dashoffset: 116; opacity: 1; }
-    75%, 100% { stroke-dashoffset: 116; opacity: 0; }
+    50% { opacity: 1; }
+    100% { stroke-dashoffset: 116; opacity: 0; }
   }
   .quiet-control, .settings-hover {
     --control-hover-fill: hsl(var(--foreground) / 0.045);
