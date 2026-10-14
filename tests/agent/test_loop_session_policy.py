@@ -112,7 +112,7 @@ async def test_turn_tool_selection_preserves_empty_registries(tmp_path, monkeypa
         kwargs["tools"] = ToolRegistry()
     elif selection == "disable_all":
         session = loop.sessions.get_or_create(key)
-        session.policy = SessionPolicy(disabled_tools=frozenset(loop.tools.tool_names))
+        session.policy = SessionPolicy(disabled_tools=frozenset(loop.tools.registered_tool_names))
 
     try:
         response = await loop.process_direct("Handle this request", session_key=key, **kwargs)
@@ -139,6 +139,31 @@ async def test_turn_tool_selection_preserves_empty_registries(tmp_path, monkeypa
             provide_context.assert_not_awaited()
             assert not output_file.exists()
             assert "Tool 'apply_patch' not found" in tool_result["content"]
+    finally:
+        await loop.aclose()
+
+
+async def test_session_disabling_exec_retains_default_file_tools(tmp_path) -> None:
+    loop = _loop(tmp_path, [], max_iterations=2)
+    key = "cli:file-tools-without-exec"
+    session = loop.sessions.get_or_create(key)
+    session.policy = SessionPolicy(disabled_tools=frozenset({"exec", "rg"}))
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[ToolCallRequest(
+            id="write-1", name="write_file",
+            arguments={"path": "result.txt", "content": "created without shell"},
+        )]),
+        LLMResponse(content="done"),
+    ])
+
+    try:
+        response = await loop.process_direct("Create the file", session_key=key)
+        assert response is not None and response.content == "done"
+        for call in loop.provider.chat_stream_with_retry.await_args_list:
+            names = {schema["function"]["name"] for schema in call.kwargs["tools"]}
+            assert {"write_file", "list_dir", "find_files"} <= names
+            assert {"exec", "rg"}.isdisjoint(names)
+        assert (tmp_path / "result.txt").read_text(encoding="utf-8") == "created without shell"
     finally:
         await loop.aclose()
 

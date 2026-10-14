@@ -298,7 +298,7 @@ async def test_workspace_inspection_matches_registered_file_tool(
     outside.write_text("outside marker", encoding="utf-8")
     loop = _make_loop(agent, allow_set=True, restricted=True, sandbox=sandbox)
     tool = _my_tool(loop)
-    definitions = json.dumps(loop.tools.get_definitions(), sort_keys=True)
+    definitions = {schema["function"]["name"]: schema for schema in loop.tools.get_definitions()}
     token = bind_workspace_scope(build_workspace_scope(project, mode))
     try:
         # Legacy display writes must not spoof the effective directory or permission.
@@ -319,8 +319,12 @@ async def test_workspace_inspection_matches_registered_file_tool(
         assert "project marker" in await loop.tools.execute("read_file", {"path": "marker.txt"})
         result = await loop.tools.execute("read_file", {"path": str(outside)})
         assert ("outside allowed directory" if restricted else "outside marker") in result
-        # The directory and permission enter tool results, not the reusable tool schemas.
-        assert json.dumps(loop.tools.get_definitions(), sort_keys=True) == definitions
+        # Access selects defaults without embedding paths or permissions in their schemas.
+        expected = {
+            name: schema for name, schema in definitions.items()
+            if restricted or name not in {"write_file", "list_dir", "find_files"}
+        }
+        assert {schema["function"]["name"]: schema for schema in loop.tools.get_definitions()} == expected
         status["workspace_root"] = "changed snapshot"
         assert tool._runtime_control.snapshot().workspace_sandbox["workspace_root"] == str(project.resolve())
     finally:
@@ -466,7 +470,7 @@ async def test_workspace_context_does_not_require_my_tool(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_path: Path, wire_request) -> None:
+async def test_access_changes_preserve_history_and_shared_tool_schemas(tmp_path: Path, wire_request) -> None:
     project = tmp_path / "project"
     project.mkdir()
     other = tmp_path / "other"
@@ -489,13 +493,20 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
     assert "File access: no workspace restriction." in second[-1]["content"]
     assert json.dumps(str(other.resolve())) in third[-1]["content"]
     assert json.dumps(str(project.resolve())) not in third[-1]["content"]
-    assert all(call.kwargs["tools"] == calls[0].kwargs["tools"] for call in calls)
+    superseded = {"write_file", "list_dir", "find_files"}
+    assert calls[2].kwargs["tools"] == calls[0].kwargs["tools"]
+    assert calls[1].kwargs["tools"] == [
+        schema for schema in calls[0].kwargs["tools"] if schema["function"]["name"] not in superseded
+    ]
     before, after = [wire_request(call.kwargs) for call in calls[:2]]
     assert json.dumps(
         after["messages"][:len(before["messages"])], sort_keys=True,
     ) == json.dumps(before["messages"], sort_keys=True)
-    assert {key: value for key, value in before.items() if key != "messages"} == {
-        key: value for key, value in after.items() if key != "messages"
+    assert after["tools"] == [
+        schema for schema in before["tools"] if schema.get("function", schema)["name"] not in superseded
+    ]
+    assert {key: value for key, value in before.items() if key not in {"messages", "tools"}} == {
+        key: value for key, value in after.items() if key not in {"messages", "tools"}
     }
     assert all(message["content"] == "Check access" for message in session.get_history(
         include_runtime_context=False,

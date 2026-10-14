@@ -158,6 +158,18 @@ class ExecTool(Tool):
     def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
+    def can_replace(self, tool: Tool) -> bool:
+        if isinstance(tool, ExecTool):
+            return True
+        access = current_tool_workspace(
+            self.working_dir,
+            restrict_to_workspace=self.restrict_to_workspace,
+            sandbox_restricts_workspace=bool(self.sandbox),
+        )
+        # Restricted file tools retain skill read roots that exec does not grant.
+        # The same scope also enforces exec command allow/deny filters.
+        return not access.restrict_to_workspace
+
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
         cfg = ctx.config.exec

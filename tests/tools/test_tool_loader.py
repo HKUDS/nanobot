@@ -506,3 +506,105 @@ def test_loader_selects_file_tools_for_shell_availability(tmp_path, scope, exec_
     expected.update({"exec"} if exec_enabled else {"write_file", "list_dir", "find_files"})
     assert set(registered) == expected
     assert {schema["function"]["name"] for schema in registry.get_definitions()} == expected
+
+
+async def test_default_file_tools_follow_scope_and_preserve_skill_reads(tmp_path, monkeypatch):
+    from nanobot.agent.tools.filesystem import ListDirTool, WriteFileTool
+    from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+    from nanobot.agent.tools.search import FindFilesTool
+    from nanobot.agent.tools.shell import ExecTool
+    from nanobot.config.schema import ToolsConfig
+    from nanobot.security.workspace_access import (
+        bind_workspace_scope,
+        default_workspace_scope,
+        reset_workspace_scope,
+    )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    builtin = tmp_path / "builtin-skills"
+    references = builtin / "documentation" / "references"
+    references.mkdir(parents=True)
+    guide = references / "guide.md"
+    guide.write_text("Skill reference", encoding="utf-8")
+    (references / "asset.bin").write_bytes(b"\x00\x01")
+    monkeypatch.setattr("nanobot.agent.skill_metadata.BUILTIN_SKILLS_DIR", builtin)
+    registry = ToolRegistry()
+    ToolLoader(test_classes=[ExecTool, ListDirTool, FindFilesTool, WriteFileTool]).load(
+        ToolContext(config=ToolsConfig(), workspace=str(workspace)), registry,
+    )
+    full_definitions = registry.get_definitions()
+    assert registry.tool_names == ["exec"]
+    assert is_tool_error_result(await registry.execute("list_dir", {"path": "."}))
+
+    token = bind_workspace_scope(default_workspace_scope(workspace, restrict_to_workspace=True))
+    try:
+        assert {schema["function"]["name"] for schema in registry.get_definitions()} == {
+            "exec", "list_dir", "find_files", "write_file",
+        }
+        listing = await registry.execute("list_dir", {"path": str(references)})
+        assert "guide.md" in listing and "asset.bin" in listing
+        found = await registry.execute("find_files", {"path": str(references), "query": "asset"})
+        assert "asset.bin" in found
+        shell_listing = await registry.execute("exec", {"command": f'ls "{references.as_posix()}"'})
+        assert is_tool_error_result(shell_listing)
+        assert "path outside working dir" in shell_listing
+        denied = await registry.execute("write_file", {"path": str(guide), "content": "replace"})
+        assert is_tool_error_result(denied)
+        assert guide.read_text(encoding="utf-8") == "Skill reference"
+    finally:
+        reset_workspace_scope(token)
+    assert registry.tool_names == ["exec"]
+    assert registry.get_definitions() == full_definitions
+
+
+async def test_restricted_exec_allowlist_keeps_standalone_file_operations(tmp_path):
+    from nanobot.agent.tools.filesystem import ListDirTool, WriteFileTool
+    from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+    from nanobot.agent.tools.search import FindFilesTool
+    from nanobot.agent.tools.shell import ExecTool
+    from nanobot.config.schema import ToolsConfig
+
+    config = ToolsConfig(restrict_to_workspace=True)
+    config.exec.allow_patterns = [r"git status"]
+    registry = ToolRegistry()
+    ToolLoader(test_classes=[ExecTool, ListDirTool, FindFilesTool, WriteFileTool]).load(
+        ToolContext(config=config, workspace=str(tmp_path)), registry,
+    )
+    blocked = await registry.execute("exec", {"command": "ls"})
+    assert is_tool_error_result(blocked)
+    assert "not in allowlist" in blocked
+    written = await registry.execute("write_file", {"path": "created.txt", "content": "created"})
+    assert not is_tool_error_result(written)
+    assert (tmp_path / "created.txt").read_text(encoding="utf-8") == "created"
+    assert "created.txt" in await registry.execute("list_dir", {"path": "."})
+    assert "created.txt" in await registry.execute("find_files", {"query": "created"})
+
+
+async def test_caller_exec_policy_does_not_discard_default_file_tools(tmp_path):
+    from nanobot.agent.tools.filesystem import ListDirTool, WriteFileTool
+    from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+    from nanobot.agent.tools.search import FindFilesTool
+    from nanobot.agent.tools.shell import ExecTool
+    from nanobot.config.schema import ToolsConfig
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    shell_root = tmp_path / "shell-root"
+    shell_root.mkdir()
+    shell = ExecTool(working_dir=str(shell_root), restrict_to_workspace=True)
+    registry = ToolRegistry()
+    registry.register(shell)
+    ToolLoader(test_classes=[ExecTool, ListDirTool, FindFilesTool, WriteFileTool]).load(
+        ToolContext(config=ToolsConfig(), workspace=str(workspace)), registry,
+    )
+
+    assert registry.get("exec") is shell
+    result = await registry.execute("exec", {"command": "ls", "working_dir": str(workspace)})
+    assert is_tool_error_result(result)
+    assert "working_dir is outside" in result
+    written = await registry.execute("write_file", {"path": "created.txt", "content": "created"})
+    assert not is_tool_error_result(written)
+    assert (workspace / "created.txt").read_text(encoding="utf-8") == "created"
+    assert "created.txt" in await registry.execute("list_dir", {"path": "."})
+    assert "created.txt" in await registry.execute("find_files", {"query": "created"})

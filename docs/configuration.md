@@ -1744,9 +1744,9 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 
 ## File Search
 
-When shell execution (`tools.exec.enable`) is enabled in the current agent's tool scope, use `exec` for file creation, directory listing, and filename searches. The default tool list omits `write_file`, `list_dir`, `find_files`, and the dedicated `rg` wrapper. Installed ripgrep remains callable through `exec`.
+When shell execution (`tools.exec.enable`) is available in the current agent's tool scope, the default tool list omits the dedicated `rg` wrapper. In Full Access without an exec sandbox, it also omits `write_file`, `list_dir`, and `find_files`; use `exec` for file creation, directory listing, and filename searches. Restricted scopes retain those file tools because their skill read roots and permitted operations are not fully covered by shell access. Installed ripgrep remains callable through `exec`.
 
-`read_file`, `grep`, `edit_file`, and `apply_patch` remain available when file tools are enabled. `read_file` handles images and documents; `grep` searches text, PDF, DOCX, XLSX, and PPTX content. Without shell execution, the standalone write, directory, and filename search tools remain available. Memory tasks have no shell tool and retain `write_file`. Caller-supplied tool overrides and explicit tool plugins are preserved.
+`read_file`, `grep`, `edit_file`, and `apply_patch` remain available when file tools are enabled. `read_file` handles images and documents; `grep` searches text, PDF, DOCX, XLSX, and PPTX content. Without shell execution, including when a session disables `exec`, the standalone write, directory, and filename search tools remain available. Memory tasks have no shell tool and retain `write_file`. Caller-supplied tool overrides and explicit tool plugins are preserved.
 
 ## Web Tools
 

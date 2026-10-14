@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -25,26 +26,50 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
+        self._default_tools: set[str] = set()
         self._cached_definitions: list[dict[str, Any]] | None = None
+        self._cached_names: tuple[str, ...] = ()
 
-    def register(self, tool: Tool) -> None:
+    def register(self, tool: Tool, *, default: bool = False) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
+        if default:
+            self._default_tools.add(tool.name)
+        else:
+            self._default_tools.discard(tool.name)
         self._cached_definitions = None
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
+        self._default_tools.discard(name)
         self._cached_definitions = None
 
     def get(self, name: str) -> Tool | None:
-        """Get a tool by name."""
-        return self._tools.get(name)
+        """Get a tool available in the current scope."""
+        tool = self._tools.get(name)
+        if tool is not None and name in self._default_tools and tool.superseded_by:
+            replacement = self.get(tool.superseded_by)
+            if (
+                replacement is not None
+                and tool.superseded_by in self._default_tools
+                and replacement.can_replace(tool)
+            ):
+                return None
+        return tool
+
+    def without(self, names: Collection[str]) -> ToolRegistry:
+        """Exclude named tools before resolving default replacements."""
+        registry = ToolRegistry()
+        for name, tool in self._tools.items():
+            if name not in names:
+                registry.register(tool, default=name in self._default_tools)
+        return registry
 
     def get_runtime_context_providers(self) -> list[RuntimeContextProvider]:
         """Return tool-owned providers in stable tool-name order."""
         providers: list[RuntimeContextProvider] = []
-        for name in sorted(self._tools):
+        for name in sorted(self.tool_names):
             provider = self._tools[name].runtime_context_provider()
             if provider is not None:
                 providers.append(provider)
@@ -61,7 +86,7 @@ class ToolRegistry:
             return None
         matches = [
             registered
-            for registered in self._tools
+            for registered in self.tool_names
             if self._lookup_key(registered) == key
         ]
         if len(matches) == 1:
@@ -88,10 +113,11 @@ class ToolRegistry:
 
         Built-in tools are sorted first as a stable prefix, then MCP tools are
         sorted and appended. The result is cached until the next
-        register/unregister call.
+        register/unregister call or effective tool selection change.
         """
-        if self._cached_definitions is None:
-            definitions = [tool.to_schema() for tool in self._tools.values()]
+        names = tuple(self.tool_names)
+        if self._cached_definitions is None or names != self._cached_names:
+            definitions = [self._tools[name].to_schema() for name in names]
             builtins: list[dict[str, Any]] = []
             mcp_tools: list[dict[str, Any]] = []
             for schema in definitions:
@@ -104,6 +130,7 @@ class ToolRegistry:
             builtins.sort(key=self._schema_name)
             mcp_tools.sort(key=self._schema_name)
             self._cached_definitions = builtins + mcp_tools
+            self._cached_names = names
 
         return self._cached_definitions
 
@@ -202,11 +229,16 @@ class ToolRegistry:
 
     @property
     def tool_names(self) -> list[str]:
-        """Get list of registered tool names."""
+        """Get tool names available in the current scope."""
+        return [name for name in self._tools if self.has(name)]
+
+    @property
+    def registered_tool_names(self) -> list[str]:
+        """Include defaults currently superseded when selecting tools to disable."""
         return list(self._tools.keys())
 
     def __len__(self) -> int:
-        return len(self._tools)
+        return len(self.tool_names)
 
     def __contains__(self, name: str) -> bool:
         return self.has(name)

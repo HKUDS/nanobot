@@ -1964,12 +1964,7 @@ class AgentLoop:
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
-            restricted = ToolRegistry()
-            for name in tools.tool_names:
-                tool = tools.get(name)
-                if name not in session.policy.disabled_tools and tool:
-                    restricted.register(tool)
-            tools = restricted
+            tools = tools.without(session.policy.disabled_tools)
         ctx.tools = tools
 
         if ctx.kind is TurnKind.SYSTEM:

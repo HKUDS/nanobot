@@ -233,7 +233,11 @@ class Tool(ABC):
     config_key: str = ""
     _plugin_discoverable: bool = True
     _scopes: set[str] = {"core"}
-    superseded_by: str = ""  # Yield default registration to this tool in the same scope.
+    superseded_by: str = ""  # Replacement name for default tool selection.
+
+    def can_replace(self, tool: Tool) -> bool:
+        """Whether this instance covers the declaring default in the current scope."""
+        return False
 
     @classmethod
     def config_cls(cls) -> type[BaseModel] | None:
