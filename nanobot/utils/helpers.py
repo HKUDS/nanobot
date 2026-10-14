@@ -547,6 +547,22 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def atomic_write_text(path: Path, content: str) -> None:
+    """Create parent directories and durably replace *path* with UTF-8 text."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        _fsync_directory_after_replace(path.parent)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def atomic_write_lines(path: Path, lines: Iterable[str], *, fsync: bool = True) -> None:
     """Atomically replace *path* with already-serialized record lines.
 

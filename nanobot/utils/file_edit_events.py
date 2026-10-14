@@ -410,26 +410,17 @@ def _resolve_apply_patch_paths(
 def _resolve_single_path(tool: Any, workspace: Path | None, raw_path: Any) -> Path | None:
     if not isinstance(raw_path, str) or not raw_path.strip():
         return None
-    resolver = getattr(tool, "_resolve_write", None)
-    if callable(resolver):
-        try:
-            resolved = resolver(raw_path)
-            if isinstance(resolved, Path):
-                return resolved
-            if resolved:
-                return Path(cast(str, resolved))
-        except Exception:
-            return None
-    resolver = getattr(tool, "_resolve", None)
-    if callable(resolver):
-        try:
-            resolved = resolver(raw_path)
-            if isinstance(resolved, Path):
-                return resolved
-            if resolved:
-                return Path(cast(str, resolved))
-        except Exception:
-            return None
+    for resolver_name in ("_resolve_write", "_resolve"):
+        resolver = getattr(tool, resolver_name, None)
+        if callable(resolver):
+            try:
+                resolved = resolver(raw_path)
+                if isinstance(resolved, Path):
+                    return resolved
+                if resolved:
+                    return Path(cast(str, resolved))
+            except Exception:
+                return None
     if workspace is None:
         return Path(raw_path).expanduser().resolve()
     return (workspace / raw_path).expanduser().resolve()
