@@ -39,10 +39,8 @@ class SessionClient:
         save: bool = True,
     ) -> SessionSnapshot:
         """Import an existing transcript without running the model."""
-        session = self._loop.sessions.get_or_create(session_key)
-        if metadata:
-            session.metadata.update(deepcopy(dict(metadata)))
-
+        prepared_metadata = deepcopy(dict(metadata)) if metadata else {}
+        prepared: list[tuple[str, Any, dict[str, Any]]] = []
         for raw in messages:
             if "role" not in raw:
                 raise ValueError("ingested messages must include a role")
@@ -58,7 +56,12 @@ class SessionClient:
             }
             if source is not None and "source" not in extra:
                 extra["source"] = source
-            session.add_message(role, deepcopy(raw["content"]), **extra)
+            prepared.append((role, deepcopy(raw["content"]), extra))
+
+        session = self._loop.sessions.get_or_create(session_key)
+        session.metadata.update(prepared_metadata)
+        for role, content, extra in prepared:
+            session.add_message(role, content, **extra)
 
         if save:
             self._loop.sessions.save(session)
