@@ -8,11 +8,10 @@ interface SubagentThreadProps {
   task: SubagentTaskSnapshot;
   historyEnabled: boolean;
   isStreaming: boolean;
-  connectionSignal: AbortSignal | null;
 }
 
-export function SubagentThread({ token, sessionKey, task, historyEnabled, isStreaming, connectionSignal }: SubagentThreadProps) {
-  const { messages, loading, failed, activeTurnId, retry } = useSubagentThread({ token, sessionKey, task, historyEnabled, connectionSignal });
+export function SubagentThread({ token, sessionKey, task, historyEnabled, isStreaming }: SubagentThreadProps) {
+  const { messages, loading, failed, activeTurnId, retry } = useSubagentThread({ token, sessionKey, task, historyEnabled });
   return <SubagentThreadView messages={messages} loading={loading} failed={failed} isStreaming={isStreaming}
     activeTurnId={activeTurnId} runStartedAt={task.created_at} onRetry={retry} />;
 }

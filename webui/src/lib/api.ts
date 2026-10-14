@@ -562,9 +562,9 @@ export async function updateAutomation(
   return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
 }
 
-export async function fetchSubagentTasks(token: string, sessionKey: string, signal?: AbortSignal): Promise<SubagentTasksPayload> {
+export async function fetchSubagentTasks(token: string, sessionKey: string): Promise<SubagentTasksPayload> {
   const payload = await request<unknown>(
-    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`, token, { signal }, API_READ_TIMEOUT_MS,
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`, token, undefined, API_READ_TIMEOUT_MS,
   );
   if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)
     || new Set(payload.tasks.map((task) => task.task_id)).size !== payload.tasks.length) {

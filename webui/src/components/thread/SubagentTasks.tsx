@@ -19,7 +19,6 @@ import { SubagentThread } from "@/components/thread/SubagentThread";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import { useGatewayConnection } from "@/hooks/useGatewayConnection";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import { cancelSubagentTask, fetchSubagentTasks } from "@/lib/api";
@@ -32,7 +31,6 @@ function isActive(task: SubagentTaskSnapshot): boolean {
 }
 
 interface TaskContext {
-  connected: boolean;
   tasks: ObservedSubagentTask[];
   loadError: string | null;
   stopError: string | null;
@@ -44,20 +42,20 @@ interface TaskContext {
 const TasksContext = createContext<TaskContext | null>(null);
 
 interface SubagentTasksProviderProps {
-  client: Pick<NanobotClient, "requestMutation" | "onChat" | "onStatus" | "status">;
+  client: Pick<NanobotClient, "requestMutation" | "onChat" | "onStatus">;
   sessionKey: string | null;
   token: string;
   enabled: boolean;
+  liveEvents: boolean;
   historyEnabled?: boolean;
   active?: boolean;
   children: ReactNode;
 }
 
-export function SubagentTasksProvider({ client, sessionKey, token, enabled, historyEnabled = false, active = true, children }: SubagentTasksProviderProps) {
+export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, active = true, children }: SubagentTasksProviderProps) {
   const { t } = useTranslation("common");
   const pageVisible = usePageVisibility();
   const paneVisible = useThreadVisibility();
-  const connectionSignal = useGatewayConnection(client, enabled && active && pageVisible && paneVisible);
   const [tasks, setTasks] = useState<ObservedSubagentTask[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
@@ -89,23 +87,21 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, hist
   }, [active, paneVisible]);
 
   useEffect(() => {
-    if (!connectionSignal || !sessionKey || !token) return;
-    setLoadError(null);
+    if (!enabled || !active || !pageVisible || !paneVisible || !sessionKey || !token) return;
     let cancelled = false;
     let refreshing = false;
     let refreshPending = false;
     const refresh = async () => {
-      if (connectionSignal.aborted) return;
       if (refreshing) { refreshPending = true; return; }
       refreshing = true;
       try {
-        const payload = await fetchSubagentTasks(token, sessionKey, connectionSignal);
-        if (!cancelled && !connectionSignal.aborted) {
+        const payload = await fetchSubagentTasks(token, sessionKey);
+        if (!cancelled) {
           setTasks((current) => mergeSubagentTasks(current, payload.tasks));
           setLoadError(null);
         }
       } catch {
-        if (!cancelled && !connectionSignal.aborted) setLoadError(t("thread.subagents.loadFailed"));
+        if (!cancelled) setLoadError(t("thread.subagents.loadFailed"));
       } finally {
         refreshing = false;
         if (refreshPending && !cancelled) {
@@ -114,44 +110,47 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, hist
         }
       }
     };
-    const unsubscribeChat = client.onChat(sessionKey.slice("websocket:".length), (event) => {
+    const unsubscribeChat = liveEvents ? client.onChat(sessionKey.slice("websocket:".length), (event) => {
       if (cancelled || event.event !== "subagent_task") return;
       if (!isSubagentTask(event.task)) {
         setLoadError(t("thread.subagents.loadFailed"));
         return;
       }
       setTasks((current) => mergeSubagentTasks(current, [event.task]));
-    });
-    void refresh();
+    }) : undefined;
+    const unsubscribeStatus = liveEvents ? client.onStatus((status) => {
+      if (status === "open") void refresh();
+    }) : undefined;
+    if (!refreshing) void refresh();
     const focus = () => void refresh();
     window.addEventListener("focus", focus);
     return () => {
       cancelled = true;
-      unsubscribeChat();
+      unsubscribeChat?.();
+      unsubscribeStatus?.();
       window.removeEventListener("focus", focus);
     };
-  }, [client, connectionSignal, sessionKey, token, t]);
+  }, [client, enabled, liveEvents, active, sessionKey, token, pageVisible, paneVisible, t]);
 
   const stop = async (task: SubagentTaskSnapshot) => {
-    if (!sessionKey || !connectionSignal || connectionSignal.aborted) return;
+    if (!sessionKey) return;
     const generation = scopeGeneration.current;
     setStoppingId(task.task_id);
     setStopError(null);
     try {
       const next = await cancelSubagentTask(client, sessionKey, task.task_id);
-      if (!mounted.current || connectionSignal.aborted || generation !== scopeGeneration.current) return;
+      if (!mounted.current || generation !== scopeGeneration.current) return;
       setTasks((current) => mergeSubagentTasks(current, [next]));
     } catch (reason) {
-      if (mounted.current && !connectionSignal.aborted && generation === scopeGeneration.current) setStopError(reason instanceof Error ? reason.message : t("thread.subagents.stopFailed"));
+      if (mounted.current && generation === scopeGeneration.current) setStopError(reason instanceof Error ? reason.message : t("thread.subagents.stopFailed"));
     } finally {
       if (mounted.current && generation === scopeGeneration.current) setStoppingId(null);
     }
   };
   const selected = enabled && active && paneVisible ? tasks.find((task) => task.task_id === selectedId) : undefined;
   const value: TaskContext = {
-    connected: !!connectionSignal,
-    tasks: enabled ? tasks : [], loadError: connectionSignal ? loadError : null,
-    stopError: connectionSignal ? stopError : null, stoppingId,
+    tasks: enabled ? tasks : [], loadError: enabled ? loadError : null,
+    stopError: enabled ? stopError : null, stoppingId,
     open: (task, target) => { trigger.current = target; setSelectedId(task.task_id); }, stop,
     register: (id, button, previous) => {
       if (button) buttons.current.set(id, button);
@@ -193,7 +192,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, hist
               {selected.error ? <p role="alert" className="whitespace-pre-wrap break-words text-destructive">{selected.error}</p> : null}
             </div> : null}
             <SubagentThread key={`${sessionKey}:${selected.task_id}`} token={token} sessionKey={sessionKey}
-              task={selected} historyEnabled={historyEnabled} isStreaming={isActive(selected)} connectionSignal={connectionSignal} />
+              task={selected} historyEnabled={historyEnabled} isStreaming={isActive(selected)} />
             {Object.keys(selected.receipts).length ? <details className="mt-5 space-y-2 px-5 text-xs text-muted-foreground">
               <summary className="cursor-pointer py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("thread.subagents.messages")}</summary>
               <p>{t("thread.subagents.receiptHelp")}</p>
@@ -204,9 +203,9 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, hist
             </details> : null}
           </div> : null}
           {selected && (selected.state === "queued" || selected.state === "running") ? <div className="shrink-0 border-t px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <Button type="button" variant="outline" size="sm" disabled={!connectionSignal || stoppingId !== null}
+            <Button type="button" variant="outline" size="sm" disabled={stoppingId !== null}
               onClick={() => void stop(selected)}><StopIcon className="mr-2 h-3 w-3" aria-hidden />{t("thread.subagents.stopTask", { label: selected.label })}</Button>
-            {connectionSignal && stopError ? <p role="alert" className="mt-2 text-xs text-destructive">{stopError}</p> : null}
+            {stopError ? <p role="alert" className="mt-2 text-xs text-destructive">{stopError}</p> : null}
           </div> : null}
         </SheetContent>
       </Sheet>
@@ -323,7 +322,7 @@ function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask
         {tasks.map((task) => <div key={task.task_id} className="flex items-center gap-1 pr-1">
           <TaskButton task={task} />
           {task.state === "queued" || task.state === "running" ? <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0"
-            aria-label={t("thread.subagents.stopTask", { label: task.label })} disabled={!context.connected || context.stoppingId !== null}
+            aria-label={t("thread.subagents.stopTask", { label: task.label })} disabled={context.stoppingId !== null}
             onClick={() => void context.stop(task)}><StopIcon className="h-3 w-3" aria-hidden /></Button> : null}
         </div>)}
       </div>

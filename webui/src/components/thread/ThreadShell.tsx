@@ -1905,6 +1905,7 @@ export function ThreadShell({
   return (
     <SubagentTasksProvider client={client} token={token}
       sessionKey={session?.key ?? null}
+      liveEvents={webuiCapabilities.includes("webui.subagents.events.v1")}
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
