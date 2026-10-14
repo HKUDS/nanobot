@@ -76,15 +76,10 @@ class SubagentTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Create, message, cancel, or check your session's private subagent tasks. "
-            "Use create for independent work; set wait=true for a blocking consultation. "
-            "Use send for follow-up instructions, cancel to stop one task, and check to read "
-            "progress, message receipts, and results. Check without task_id lists active and recent tasks; "
-            "use a known task_id to read an older result. "
-            "Background results arrive automatically; do not repeatedly poll check while waiting. "
-            "A partial result or iteration limit does not mean the task completed. "
-            "For deliverables or existing projects, inspect the workspace first "
-            "and use a dedicated subdirectory when helpful."
+            "Manage the current session's private subagent tasks. "
+            "Background results arrive automatically; avoid repeated polling. "
+            "Check with a known task_id to read older results. "
+            "Partial results or iteration limits do not mean completion."
         )
 
     @property

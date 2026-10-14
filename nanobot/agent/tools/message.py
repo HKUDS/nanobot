@@ -38,18 +38,15 @@ def capture_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
 @tool_parameters(
     tool_parameters_schema(
         content=StringSchema(
-            "Message content for proactive or cross-channel delivery. "
-            "Do not use this for a normal reply in the current chat."
+            "Message content."
         ),
         channel=StringSchema(
-            "Optional target channel for cross-channel/proactive delivery. "
-            "Do not set this to the current runtime channel for a normal reply."
+            "Target channel; defaults to the current channel."
         ),
         chat_id=StringSchema(
-            "Optional target chat/user ID for cross-channel/proactive delivery. "
+            "Target chat/user ID; defaults to the current chat. "
             "On WebSocket/WebUI turns: omit chat_id to use the server's conversation id "
-            "(never pass client_id values like anon-…). "
-            "Do not set this to the current runtime chat for a normal reply."
+            "(never pass client_id values like anon-…)."
         ),
         media=ArraySchema(
             StringSchema(""),
@@ -119,15 +116,10 @@ class MessageTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Proactively send a message to a user/channel, optionally with file attachments. "
-            "Use this for separate sends requested by the user or task, including sends to multiple chats. "
-            "For a normal reply, including a scheduled reminder or report, answer naturally instead: "
-            "nanobot delivers the final reply to the current chat. "
-            "Follow explicit task instructions that require this tool or name other recipients. "
-            "When generate_image creates images in the current chat, use the message tool "
-            "with the artifact paths in the media parameter to deliver the images to the user. "
-            "For proactive attachment delivery, use the 'media' parameter with file paths. "
-            "Do NOT use read_file to send files — that only reads content for your own analysis."
+            "Send separate messages requested by the user or task, optionally with attachments. "
+            "For normal replies, including scheduled reminders and reports, answer directly; "
+            "the final reply is delivered to the current chat automatically. "
+            "Use this tool to deliver generated images via media."
         )
 
     def _resolve_media(self, media: list[str]) -> list[str]:

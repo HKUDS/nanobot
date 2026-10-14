@@ -23,16 +23,13 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY
 _CRON_PARAMETERS = tool_parameters_schema(
     action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
     name=StringSchema(
-        "Optional short human-readable label for the job "
-        "(e.g., 'weather-monitor', 'daily-standup'). Defaults to first 30 chars of message."
+        "Job label; defaults to the first 30 characters of message."
     ),
     message=StringSchema(
-        "REQUIRED when action='add'. Instruction for the agent to execute when the job triggers "
-        "(e.g., 'Remind me to drink water' or 'Check system status and report'). "
+        "REQUIRED when action='add': instruction to execute when the job triggers. "
         "The final reply goes to the task's saved chat automatically. "
         "Do not copy the current channel/chat ID or require a message tool call for that reply. "
-        "Include other recipients only when the user requests separate sends. "
-        "Not used for action='list' or action='remove'."
+        "Include other recipients only when the user requests separate sends."
     ),
     every_seconds=IntegerSchema(
         description="Interval in seconds (for recurring tasks)", minimum=1
@@ -50,10 +47,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
     required=["action"],
     description=(
         "Action-specific parameters: add requires a non-empty message plus one schedule "
-        "(every_seconds, cron_expr, or at); remove requires job_id; list only needs action. "
-        "Per-action requirements are enforced at runtime (see field descriptions) so the "
-        "top-level schema stays compatible with providers (e.g. OpenAI Codex/Responses) that "
-        "reject oneOf/anyOf/allOf/enum/not at the root of function parameters."
+        "(every_seconds, cron_expr, or at); remove requires job_id; list only needs action."
     ),
 )
 

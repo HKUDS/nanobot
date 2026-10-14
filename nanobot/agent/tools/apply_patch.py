@@ -86,11 +86,9 @@ class ApplyPatchTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Default tool for code edits. Supports multi-file changes in a single call. "
-            "Provide a list of structured edits, each specifying a file path, action "
-            "(replace/add), and the exact text to change. "
-            "Paths are resolved by the current workspace access policy. "
-            "Set dry_run=true to validate and preview without writing files. "
+            "Default tool for code edits, including multi-file changes. "
+            "Paths follow the current workspace access policy. "
+            "Set dry_run=true to preview without writing. "
             "Use edit_file only for small exact replacements on a single file."
         )
 
