@@ -960,15 +960,15 @@ class OpenAICompatProvider(LLMProvider):
         wire_effort = reasoning_effort
         slug = _model_slug(model_name)
         if slug == _KIMI_K3_MODEL and semantic_effort is not None:
-            # K3 always reasons and currently accepts only the top-level
-            # reasoning_effort="max". Preserve disabled/default semantics by
-            # omitting the field; normalize older enabled presets to "max" so
-            # switching from a K2.x model does not send an unsupported value.
+            # K3 always reasons and accepts top-level low/high/max effort.
+            # Keep disabled presets on the default and normalize other legacy
+            # enabled values to "max".
             if semantic_effort in ("none", "minimal"):
                 wire_effort = None
             else:
-                semantic_effort = "max"
-                wire_effort = "max"
+                if semantic_effort not in ("low", "high", "max"):
+                    semantic_effort = "max"
+                wire_effort = semantic_effort
         if spec and spec.name == "dashscope" and semantic_effort == "minimal":
             # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"

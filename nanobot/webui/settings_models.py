@@ -886,7 +886,7 @@ def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
 
     model_lower = (model or "").lower()
     if model_lower.rsplit("/", 1)[-1] == "kimi-k3":
-        return ["", "max"]
+        return ["", "low", "high", "max"]
 
     implicit = getattr(spec, "implicit_reasoning_models", ())
     if implicit and any(pattern in model_lower for pattern in implicit):

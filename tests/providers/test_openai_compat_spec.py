@@ -1936,26 +1936,28 @@ def test_kimi_k3_uses_native_defaults() -> None:
     assert "extra_body" not in kw
 
 
-def test_kimi_k3_uses_top_level_max_reasoning_effort() -> None:
-    """K3 uses top-level reasoning_effort=max, never the K2.x thinking body."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="max")
+@pytest.mark.parametrize("effort", ["low", "high", "max"])
+def test_kimi_k3_preserves_supported_reasoning_effort(effort: str) -> None:
+    """K3 uses top-level reasoning_effort, never the K2.x thinking body."""
+    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort=effort)
 
-    assert kw["reasoning_effort"] == "max"
+    assert kw["reasoning_effort"] == effort
     assert "temperature" not in kw
     assert "extra_body" not in kw
 
 
 def test_kimi_k3_normalizes_legacy_enabled_reasoning_effort() -> None:
     """Switching a K2.x preset to K3 must not send unsupported effort values."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="high")
+    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="medium")
 
     assert kw["reasoning_effort"] == "max"
     assert "extra_body" not in kw
 
 
-def test_kimi_k3_omits_disabled_reasoning_effort() -> None:
+@pytest.mark.parametrize("effort", ["none", "minimal"])
+def test_kimi_k3_omits_disabled_reasoning_effort(effort: str) -> None:
     """K3 cannot disable reasoning, so disabled effort falls back to its default."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="none")
+    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort=effort)
 
     assert "reasoning_effort" not in kw
     assert "temperature" not in kw
