@@ -191,3 +191,106 @@ async def test_preparation_allows_status_heartbeat_and_cancellation(
         if captured:
             await asyncio.wait_for(finished.wait(), 5)
         await loop.aclose()
+
+
+@pytest.mark.parametrize("phase", ["success_snapshot", "finally_snapshot"])
+async def test_cancellation_during_run_cleanup_delivers_finally_once(
+    tmp_path, monkeypatch, loop_factory, phase,
+):
+    provider = ControlledProvider()
+    loop = loop_factory(provider=provider)
+    prompt_file = tmp_path / "AGENTS.md"
+    prompt_file.write_text("Lifecycle test instructions", encoding="utf-8")
+    session = loop.sessions.get_or_create("cli:first")
+    session.messages = [
+        {"role": "user", "content": [{"type": "text", "text": "Earlier question"}]},
+        {"role": "assistant", "content": "Earlier answer"},
+    ]
+    loop.sessions.save(session)
+    runtime_loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
+    hook_returned = asyncio.Event()
+    worker_finished = asyncio.Event()
+    release = threading.Event()
+    events = []
+    finals = []
+    raw_messages = []
+    blockers = []
+
+    class Lifecycle(AgentHook):
+        async def start_other_session(self):
+            blockers.append(asyncio.create_task(
+                loop.process_direct("Blocked", session_key="cli:blocker"),
+            ))
+            await asyncio.wait_for(entered.wait(), 5)
+            hook_returned.set()
+
+        async def before_run(self, context):
+            events.append("before_run")
+
+        async def after_iteration(self, context):
+            raw_messages.append(context.messages)
+            events.append("after_iteration")
+            if phase == "success_snapshot":
+                await self.start_other_session()
+
+        async def after_run(self, context):
+            events.append("after_run")
+            if phase == "finally_snapshot":
+                await self.start_other_session()
+
+        async def on_error(self, context):
+            events.append("on_error")
+
+        async def on_finally(self, context):
+            events.append("on_finally")
+            finals.append(context)
+            assert context.messages is not raw_messages[0]
+            context.messages[1]["content"][0]["text"] = "hook-only"
+
+    original_read = type(prompt_file).read_text
+
+    def read_text(path, *args, **kwargs):
+        request = current_request_context()
+        if path == prompt_file and request is not None and request.session_key == "cli:blocker":
+            runtime_loop.call_soon_threadsafe(entered.set)
+            try:
+                assert release.wait(5), "test did not release the other session's prompt read"
+                return original_read(path, *args, **kwargs)
+            finally:
+                runtime_loop.call_soon_threadsafe(worker_finished.set)
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(prompt_file), "read_text", read_text)
+    first = asyncio.create_task(loop.process_direct("First", session_key="cli:first", hooks=[Lifecycle()]))
+    try:
+        await asyncio.wait_for(hook_returned.wait(), 5)
+        await asyncio.sleep(0)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(first, 0.5)
+        assert not worker_finished.is_set()
+        assert len(provider.requests) == 1
+        assert provider.requests[0][-1]["content"].startswith("First")
+        assert len(finals) == 1
+        assert finals[0].stop_reason == "cancelled"
+        assert isinstance(finals[0].exception, asyncio.CancelledError)
+        assert finals[0].error is None
+        assert len(finals[0].messages) == 5
+        assert raw_messages[0][1]["content"][0]["text"] == "Earlier question"
+        assert events == [
+            "before_run", "after_iteration",
+            *(["after_run"] if phase == "finally_snapshot" else []),
+            "on_finally",
+        ]
+        assert current_request_context() is None
+        assert current_workspace_scope() is None
+    finally:
+        for task in [first, *blockers]:
+            if not task.done():
+                task.cancel()
+        release.set()
+        await asyncio.gather(first, *blockers, return_exceptions=True)
+        if entered.is_set():
+            await asyncio.wait_for(worker_finished.wait(), 5)
+        await loop.aclose()

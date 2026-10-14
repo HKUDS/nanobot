@@ -329,40 +329,53 @@ class AgentRunner:
         )
 
         try:
-            messages, compaction = await self.prepare_prompt(self._initial_transcript_and_compaction, spec)
-            context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
-            await hook.before_run(context)
-            result = await self._run_core(spec, hook, messages, compaction)
-        except asyncio.CancelledError as exc:
-            context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
-            context.stop_reason = "cancelled"
-            context.error = None
-            context.exception = exc
-            raise
-        except Exception as exc:
-            context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
-            context.stop_reason = "error"
-            context.error = f"Error: {type(exc).__name__}: {exc}"
-            context.exception = exc
-            await hook.on_error(context)
-            raise
-        else:
-            context.messages = await self._run_context_snapshot(result.messages) if has_run_hooks else []
-            context.final_content = result.final_content
-            context.tools_used = list(result.tools_used)
-            context.usage = result.usage
-            context.stop_reason = result.stop_reason
-            context.error = result.error
-            context.tool_events = deepcopy(result.tool_events)
-            context.had_injections = result.had_injections
-            context.exception = None
-            if context.error is not None:
-                await hook.on_error(context)
-            await hook.after_run(context)
-            return result
+            try:
+                try:
+                    messages, compaction = await self.prepare_prompt(self._initial_transcript_and_compaction, spec)
+                    context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
+                    await hook.before_run(context)
+                    result = await self._run_core(spec, hook, messages, compaction)
+                except Exception as exc:
+                    context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
+                    context.stop_reason = "error"
+                    context.error = f"Error: {type(exc).__name__}: {exc}"
+                    context.exception = exc
+                    await hook.on_error(context)
+                    raise
+                else:
+                    context.messages = await self._run_context_snapshot(result.messages) if has_run_hooks else []
+                    context.final_content = result.final_content
+                    context.tools_used = list(result.tools_used)
+                    context.usage = result.usage
+                    context.stop_reason = result.stop_reason
+                    context.error = result.error
+                    context.tool_events = deepcopy(result.tool_events)
+                    context.had_injections = result.had_injections
+                    context.exception = None
+                    if context.error is not None:
+                        await hook.on_error(context)
+                    await hook.after_run(context)
+                    return result
+            except asyncio.CancelledError as exc:
+                context.stop_reason = "cancelled"
+                context.error = None
+                context.exception = exc
+                raise
+            finally:
+                if has_run_hooks:
+                    try:
+                        if isinstance(context.exception, asyncio.CancelledError):
+                            context.messages = await self.copy_messages_on_loop(messages)
+                        else:
+                            context.messages = await self._run_context_snapshot(messages)
+                    except asyncio.CancelledError as exc:
+                        context.stop_reason = "cancelled"
+                        context.error = None
+                        context.exception = exc
+                        context.messages = await self.copy_messages_on_loop(messages)
+                        raise
         finally:
             try:
-                context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
                 if context.exception is None:
                     await hook.on_finally(context)
                 else:
