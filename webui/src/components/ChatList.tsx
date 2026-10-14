@@ -1001,17 +1001,15 @@ export const ChatList = memo(function ChatList({
                                   partial={tabPartiallySelected}
                                 />
                               ) : null}
-                              <span className="min-w-0 flex-1 overflow-hidden">
-                                <span className={cn(
-                                  "relative flex w-full min-w-0 items-center",
-                                  projectMode ? "gap-2" : "gap-1.5",
-                                )}>
-                                  <SidebarSessionHandle handle={s.handle} />
-                                  <span className="min-w-0 flex-1 truncate font-normal leading-5">
-                                    {title}
-                                  </span>
-                                  {isPinned ? <PinnedChatIndicator /> : null}
+                              <span className={cn(
+                                "relative flex min-w-0 flex-1 items-center overflow-hidden",
+                                projectMode ? "gap-2" : "gap-1.5",
+                              )}>
+                                <SidebarSessionHandle handle={s.handle} />
+                                <span className="min-w-0 flex-1 truncate font-normal leading-5">
+                                  {title}
                                 </span>
+                                {isPinned ? <PinnedChatIndicator /> : null}
                               </span>
                           </button>
                           <SessionActivityIndicator state={activityState} />
