@@ -549,23 +549,10 @@ export function useSessionHistory(key: string | null): {
               ? "reset"
               : "initial";
             return {
-              key,
-              messages: [],
-              loading: false,
-              loadingOlder: false,
-              olderError: null,
-              error: null,
-              hasPendingToolCalls: false,
-              completedTurnIds: [],
-              completionIdsProvided: false,
-              forkBoundaryMessageCount: null,
-              beforeCursor: null,
-              hasMoreBefore: false,
-              userMessageOffset: 0,
+              ...emptyHistoryState(key),
               version: responseVersion,
               continuity,
               lineage: responseVersion,
-              activeTurnId: null,
             };
           });
         } else {

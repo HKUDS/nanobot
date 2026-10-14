@@ -389,8 +389,7 @@ function replaceCanonicalCompletedTurns(
   type AnchorQueue = { indices: number[]; offset: number };
   type ShapeAnchors = {
     all: AnchorQueue;
-    untagged: AnchorQueue;
-    byTurnId: Map<string, AnchorQueue>;
+    byTurnId: Map<string | undefined, AnchorQueue>;
   };
   const anchorIndex = new Map<string, Map<string, ShapeAnchors>>();
   for (let index = 0; index < retained.length; index += 1) {
@@ -405,22 +404,15 @@ function replaceCanonicalCompletedTurns(
     if (!positions) {
       positions = {
         all: { indices: [], offset: 0 },
-        untagged: { indices: [], offset: 0 },
         byTurnId: new Map(),
       };
       byContent.set(message.content, positions);
     }
     positions.all.indices.push(index);
-    if (!message.turnId) {
-      positions.untagged.indices.push(index);
-    } else {
-      let queue = positions.byTurnId.get(message.turnId);
-      if (!queue) {
-        queue = { indices: [], offset: 0 };
-        positions.byTurnId.set(message.turnId, queue);
-      }
-      queue.indices.push(index);
-    }
+    const turnId = message.turnId || undefined;
+    const queue = positions.byTurnId.get(turnId) ?? { indices: [], offset: 0 };
+    queue.indices.push(index);
+    positions.byTurnId.set(turnId, queue);
   }
   let cursor = 0;
   const firstAnchor = (queue: AnchorQueue | undefined): number => {
@@ -436,7 +428,10 @@ function replaceCanonicalCompletedTurns(
       .get(JSON.stringify([message.role, message.kind ?? ""]))
       ?.get(message.content);
     const index = message.turnId
-      ? Math.min(firstAnchor(positions?.byTurnId.get(message.turnId)), firstAnchor(positions?.untagged))
+      ? Math.min(
+          firstAnchor(positions?.byTurnId.get(message.turnId)),
+          firstAnchor(positions?.byTurnId.get(undefined)),
+        )
       : firstAnchor(positions?.all);
     if (index === retained.length) return -1;
     cursor = index + 1;
@@ -1254,25 +1249,20 @@ export function ThreadShell({
     });
     // Capture the request's run generation when entering a conversation, before
     // its history response can race with another send or running event.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, client, historyKey]);
 
   useEffect(() => {
     if (!historyKey || !chatId || loading) return;
     const pendingCanonicalHydrate = pendingCanonicalHydrateRef.current.get(chatId);
-    const hasNewCanonicalHistory = (
+    const shouldReconcileRun = (
       pendingCanonicalHydrate !== undefined
       && historyVersion > pendingCanonicalHydrate.historyVersion
       && (
         pendingCanonicalHydrate.source === "refresh"
-        || historical.length > 0
-        || completedTurnIds.length > 0
-      )
-      && (
-        pendingCanonicalHydrate.source === "refresh"
-        || isStreaming
-        || runStartedAt !== null
-        || client.hasUnsettledRun(chatId)
+        || (
+          (historical.length > 0 || completedTurnIds.length > 0)
+          && (isStreaming || runStartedAt !== null || client.hasUnsettledRun(chatId))
+        )
       )
     );
     const normalizedHistory = projectWebuiThreadMessages(historical);
@@ -1288,7 +1278,7 @@ export function ThreadShell({
     const keepLiveMessages = (current: UIMessage[]) => projectWebuiThreadMessages(
       replaceCanonicalCompletedTurns(current, normalizedHistory, canonicalCompletedTurnIds),
     );
-    if (hasNewCanonicalHistory && pendingCanonicalHydrate) {
+    if (shouldReconcileRun && pendingCanonicalHydrate) {
       // Transcript replay strips streaming metadata and uses persisted ids.
       // Never adopt it while the turn is active: even if no assistant delta
       // arrived locally yet, the next resumed delta must create/continue the
@@ -1413,23 +1403,15 @@ export function ThreadShell({
       pendingCanonicalCommitRef.current.delete(chatId);
       return;
     }
-    if (uiRevisionRef.current !== commit.expectedUiRevision) {
-      pendingCanonicalCommitRef.current.delete(chatId);
-      const fallback = replaceCanonicalCompletedTurns(
-        messageCacheRef.current.get(chatId) ?? commit.previousMessages,
-        commit.messages,
+    if (
+      uiRevisionRef.current !== commit.expectedUiRevision
+      || !client.reconcileCanonicalCompletion(
+        chatId,
+        commit.hydrate.runGeneration,
         commit.completedTurnIds,
-      );
-      messageCacheRef.current.set(chatId, fallback);
-      setMessages((current) => current === commit.messages ? fallback : current);
-      return;
-    }
-    if (!client.reconcileCanonicalCompletion(
-      chatId,
-      commit.hydrate.runGeneration,
-      commit.completedTurnIds,
-      commit.canonicalSnapshot,
-    )) {
+        commit.canonicalSnapshot,
+      )
+    ) {
       pendingCanonicalCommitRef.current.delete(chatId);
       const fallback = replaceCanonicalCompletedTurns(
         messageCacheRef.current.get(chatId) ?? commit.previousMessages,

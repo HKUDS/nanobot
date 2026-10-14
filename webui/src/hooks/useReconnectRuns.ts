@@ -10,10 +10,8 @@ const RECONNECT_READ_CONCURRENCY = 4;
 /** Reconcile durable runs even when their threads are not mounted. */
 export function useReconnectRuns(client: NanobotClient, getToken: () => string): void {
   useEffect(() => {
-    let epoch = 0;
     let controller: AbortController | null = null;
     const unsubscribe = client.onStatus((status) => {
-      const requestEpoch = ++epoch;
       controller?.abort();
       controller = null;
       if (status !== "open") return;
@@ -29,7 +27,7 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
       const recover = async ({ chatId, generation, turnId }: typeof jobs[number]) => {
         const key = `websocket:${chatId}`;
         const body = await fetchLatestWebuiThread(client, getToken(), key, signal);
-        if (!body || signal.aborted || requestEpoch !== epoch || client.status !== "open") return;
+        if (!body || signal.aborted) return;
         const { completedTurnIds, snapshot } = persistedCanonicalRunState(body);
         const explicitlyCompleted = turnId !== null && completedTurnIds.includes(turnId);
         if (!explicitlyCompleted && (snapshot.hasPendingToolCalls || snapshot.activeTurnId)) return;
@@ -42,7 +40,7 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
       };
       let nextJob = 0;
       const worker = async () => {
-        while (!signal.aborted && requestEpoch === epoch) {
+        while (!signal.aborted) {
           const job = jobs[nextJob++];
           if (!job) return;
           try {
@@ -55,7 +53,6 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
       void Promise.allSettled(Array.from({ length: Math.min(RECONNECT_READ_CONCURRENCY, jobs.length) }, worker));
     });
     return () => {
-      epoch += 1;
       controller?.abort();
       unsubscribe();
     };
