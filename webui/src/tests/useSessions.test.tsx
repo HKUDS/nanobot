@@ -843,21 +843,18 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
-  it("exposes turn ids backed by persisted completion events", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+  it("exposes valid completion ids from parsed persisted history", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(api.parseWebuiThreadPayload({
       schemaVersion: 3,
+      projection: "events",
       has_pending_tool_calls: false,
-      completed_turn_ids: ["turn-empty", "", "turn-empty"],
-      messages: [
+      completed_turn_ids: ["turn-empty", "", null, "turn-empty"],
+      events: [
         {
-          id: "u1",
-          role: "user",
-          content: "stop",
-          turnId: "turn-empty",
-          createdAt: 1,
+          event: "user_message", chat_id: "chat-empty", text: "stop", turn_id: "turn-empty", starts_turn: true,
         },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-empty"), {
       wrapper: wrap(fakeClient()),
@@ -865,6 +862,8 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages[0]?.content).toBe("stop");
     expect(result.current.completedTurnIds).toEqual(["turn-empty"]);
     expect(result.current.hasPendingToolCalls).toBe(false);
   });

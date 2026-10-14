@@ -124,7 +124,9 @@ function completedTurnIdsFromThread(
   body: Awaited<ReturnType<typeof fetchWebuiThread>>,
 ): string[] {
   if (Array.isArray(body?.completed_turn_ids)) {
-    return Array.from(new Set(body.completed_turn_ids.filter((turnId) => turnId.length > 0)));
+    return Array.from(new Set(body.completed_turn_ids.filter(
+      (turnId) => typeof turnId === "string" && turnId.length > 0,
+    )));
   }
   if (body?.has_pending_tool_calls !== false || body.active_turn_id) return [];
   return Array.from(new Set(
