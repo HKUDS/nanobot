@@ -72,6 +72,37 @@ describe("shared latest thread requests", () => {
     await expect(recovered).resolves.toEqual(body);
   });
 
+  it.each(["thread update", "turn end"] as const)("replaces surviving reads only for their own chat's %s", async (invalidation) => {
+    const socket = {
+      readyState: 1, onopen: null as (() => void) | null,
+      onmessage: null as ((event: MessageEvent) => void) | null, send() {}, close() {},
+    };
+    const client = new NanobotClient({ url: "ws://host", reconnect: false, socketFactory: () => socket as unknown as WebSocket });
+    client.connect();
+    socket.onopen?.();
+    const reads = [deferredResponse(), deferredResponse()];
+    const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const first = fetchLatestWebuiThread(client, "token", KEY);
+    const surviving = fetchLatestWebuiThread(client, "token", KEY);
+    const receive = (chatId: string, scope: string) => socket.onmessage?.({
+      data: JSON.stringify({ event: "session_updated", chat_id: chatId, scope }),
+    } as MessageEvent);
+    receive("shared", "metadata");
+    receive("another-chat", "thread");
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(false);
+    if (invalidation === "thread update") receive("shared", "thread");
+    else socket.onmessage?.({
+      data: JSON.stringify({ event: "turn_end", chat_id: "shared", turn_id: "turn-shared" }),
+    } as MessageEvent);
+    const fresh = fetchLatestWebuiThread(client, "token", KEY);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const body = cachedThread("complete");
+    reads[0].resolve(new Response(JSON.stringify(cachedThread("stale")), { status: 200 }));
+    reads[1].resolve(new Response(JSON.stringify(body), { status: 200 }));
+    await Promise.all([first, surviving, fresh].map((read) => expect(read).resolves.toEqual(body)));
+  });
+
   it("keeps host clients and renewed credentials in separate reads", async () => {
     const firstHost = connectedClient("ws://first-host");
     const secondHost = connectedClient("ws://second-host");

@@ -40,6 +40,7 @@ function makeClient() {
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
   const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
+  const runCompletionHandlers = new Set<(chatId: string) => void>();
   const runStartedAtByChatId = new Map<string, number>();
   const runGenerationByChatId = new Map<string, number>();
   const latestRunTurnIdByChatId = new Map<string, string>();
@@ -74,7 +75,8 @@ function makeClient() {
       prospectiveFences.has(turnId)
       || existingFences?.has(turnId) === true
       || (
-        snapshot?.hasPendingToolCalls === false
+        snapshot?.completionIdsProvided !== true
+        && snapshot?.hasPendingToolCalls === false
         && observedTurnIds.has(turnId)
       )
     );
@@ -123,6 +125,10 @@ function makeClient() {
       return () => {
         runStatusHandlers.delete(handler);
       };
+    },
+    onRunCompletion: (handler: (chatId: string) => void) => {
+      runCompletionHandlers.add(handler);
+      return () => { runCompletionHandlers.delete(handler); };
     },
     onRuntimeModelUpdate: (
       handler: (modelName: string | null, modelPreset?: string | null) => void,
@@ -195,6 +201,7 @@ function makeClient() {
       ) {
         runStartedAtByChatId.delete(chatId);
         for (const h of runStatusHandlers) h(chatId, null);
+        for (const h of runCompletionHandlers) h(chatId);
       }
       if (ev.event === "goal_state") {
         goalStateByChatId.set(chatId, ev.goal_state);
@@ -2812,6 +2819,7 @@ describe("ThreadShell", () => {
         observedTurnIds: [canonicalTurnId],
         hasPendingToolCalls: false,
         activeTurnId: null,
+        completionIdsProvided: false,
       },
     );
   });
@@ -2992,6 +3000,7 @@ describe("ThreadShell", () => {
         observedTurnIds: [],
         hasPendingToolCalls: false,
         activeTurnId: null,
+        completionIdsProvided: false,
       },
     );
   });
@@ -3479,6 +3488,64 @@ describe("ThreadShell", () => {
     expect(other.compareDocumentPosition(newer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("outdated prefix")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+  });
+
+  it.each(["identified", "anonymous"] as const)("keeps completed guidance after a paginated prefix with %s live identity", async (guidanceIdentity) => {
+    const client = makeClient();
+    const chatId = "completed-guidance-paged-prefix";
+    const messageCache = new ThreadMessageCache(() => false);
+    messageCache.set(chatId, [
+      { id: "old-user", role: "user", content: "continue", createdAt: 1 },
+      { id: "old-answer", role: "assistant", content: "older answer", createdAt: 2 },
+      { id: "question", role: "user", content: "current question", turnId: "main", createdAt: 3 },
+      { id: "first", role: "assistant", content: "first partial", turnId: "main", createdAt: 4 },
+      { id: "guidance", role: "user", content: "continue",
+        ...(guidanceIdentity === "identified" ? { turnId: "guidance" } : {}), createdAt: 5 },
+      { id: "last", role: "assistant", content: "last partial", turnId: "main", createdAt: 6 },
+      { id: "new-user", role: "user", content: "new question", turnId: "new", createdAt: 7 },
+      { id: "new-answer", role: "assistant", content: "new live answer", turnId: "new", isStreaming: true, createdAt: 8 },
+    ]);
+    client._emitChat(chatId, {
+      event: "goal_status", chat_id: chatId, turn_id: "new", status: "running", started_at: 2_000,
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (!String(input).includes(`websocket%3A${chatId}/webui-thread`)) {
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
+      return httpJson({
+        ...transcriptFromSimpleMessages([
+          { role: "user", content: "current question", turnId: "main" },
+          { role: "assistant", content: "completed first", turnId: "main" },
+          { role: "user", content: "continue", turnId: "guidance" },
+          { role: "assistant", content: "completed last", turnId: "main" },
+        ]),
+        has_pending_tool_calls: false,
+        completed_turn_ids: ["main"],
+        page: { before_cursor: "older-page", has_more_before: true, user_message_offset: 25 },
+      });
+    }));
+    render(wrap(client, <ThreadShell
+      session={session(chatId)} title="Completed paged guidance" messageCache={messageCache}
+      onToggleSidebar={() => {}} onNewChat={() => {}}
+    />));
+    await screen.findByText("completed last");
+    const messages = [
+      ...screen.getAllByText("continue"),
+      ...["older answer", "current question", "completed first", "completed last", "new question", "new live answer"]
+        .map((text) => screen.getByText(text)),
+    ];
+    messages.sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    expect(messages.map((message) => message.textContent)).toEqual([
+      "continue", "older answer", "current question", "completed first",
+      "continue", "completed last", "new question", "new live answer",
+    ]);
+    expect(screen.queryByText("first partial")).not.toBeInTheDocument();
+    expect(screen.queryByText("last partial")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    act(() => client._emitChat(chatId, {
+      event: "delta", chat_id: chatId, turn_id: "new", text: " continued",
+    }));
+    await screen.findByText("new live answer continued");
   });
 
   it("remembers explicit completed turns on initial history load", async () => {

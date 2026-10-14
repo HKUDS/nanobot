@@ -12,6 +12,7 @@ export function canonicalRunSnapshot(
   messages: UIMessage[],
   hasPendingToolCalls: boolean,
   activeTurnId: string | null,
+  completionIdsProvided = false,
 ): CanonicalRunSnapshot {
   return {
     observedTurnIds: Array.from(new Set(messages.flatMap((message) => (
@@ -19,6 +20,7 @@ export function canonicalRunSnapshot(
     )))),
     hasPendingToolCalls,
     activeTurnId,
+    completionIdsProvided,
   };
 }
 
@@ -27,14 +29,15 @@ export function persistedCanonicalRunState(body: WebuiThreadPersistedPayload): {
   snapshot: CanonicalRunSnapshot;
 } {
   const messages = projectThreadEvents(body.events);
+  const suppliedCompletionIds = Array.isArray(body.completed_turn_ids) ? body.completed_turn_ids : null;
   // The older protocol-1 host may omit active_turn_id. Its explicit pending
   // flag still confirms idle; a missing flag cannot establish completion.
   const snapshot = canonicalRunSnapshot(
     messages,
     body.has_pending_tool_calls !== false,
     typeof body.active_turn_id === "string" ? body.active_turn_id : null,
+    suppliedCompletionIds !== null,
   );
-  const suppliedCompletionIds = Array.isArray(body.completed_turn_ids) ? body.completed_turn_ids : null;
   const completedTurnIds = suppliedCompletionIds?.filter(
     (turnId) => typeof turnId === "string" && turnId.length > 0,
   ) ?? [];

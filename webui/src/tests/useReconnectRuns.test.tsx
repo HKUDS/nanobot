@@ -3,6 +3,7 @@ import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useReconnectRuns } from "@/hooks/useReconnectRuns";
+import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
@@ -176,6 +177,87 @@ describe("durable run recovery", () => {
     close();
   });
 
+  it.each(["together", "separate"] as const)("starts fresh terminal history without adopting the old read when completion frames arrive %s", async (timing) => {
+    const idle: WebuiThreadPersistedPayload = {
+      schemaVersion: 1, projection: "events", events: [],
+      completed_turn_ids: [], has_pending_tool_calls: false, active_turn_id: null,
+    };
+    const active = completedThread();
+    active.events = active.events.slice(0, 1);
+    active.completed_turn_ids = [];
+    active.has_pending_tool_calls = true;
+    active.active_turn_id = "turn-old";
+    const reads: Array<{ signal: AbortSignal; resolve: (value: Response) => void }> = [];
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(idle))
+      .mockImplementation((_url: string, init: RequestInit) => new Promise<Response>((resolve) => {
+        reads.push({ signal: init.signal!, resolve });
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, sockets, running, reopen, close } = setup();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="renewed-token">{children}</ClientProvider>
+    );
+    const mounted = renderHook(() => {
+      const history = useSessionHistory("websocket:inactive");
+      const stream = useNanobotStream(
+        "inactive", history.messages, history.hasPendingToolCalls,
+        undefined, undefined, history.completedTurnIds,
+      );
+      useEffect(() => client.onSessionUpdate((chatId, scope) => {
+        if (chatId === "inactive" && scope !== "metadata") history.refresh();
+      }), [history.refresh]);
+      useEffect(() => {
+        let refreshOnOpen = false;
+        return client.onStatus((status) => {
+          if (status !== "open") refreshOnOpen = true;
+          else if (refreshOnOpen) {
+            refreshOnOpen = false;
+            history.refresh();
+          }
+        });
+      }, [history.refresh]);
+      return { history, stream };
+    }, { wrapper });
+    await act(async () => {});
+    act(() => running());
+    await reopen();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    act(() => {
+      sockets.at(-1)!.receive({ event: "message", chat_id: "inactive", turn_id: "turn-old", text: "The complete answer" });
+      sockets.at(-1)!.receive({ event: "turn_end", chat_id: "inactive", turn_id: "turn-old" });
+      if (timing === "together") {
+        sockets.at(-1)!.receive({ event: "session_updated", chat_id: "inactive", scope: "thread" });
+      }
+    });
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(reads[0].signal.aborted).toBe(true);
+    await act(async () => { reads[0].resolve(response(active)); });
+    expect(mounted.result.current.history.hasPendingToolCalls).toBe(false);
+    expect(mounted.result.current.stream.isStreaming).toBe(false);
+    const completed = completedThread();
+    completed.completed_turn_ids = ["turn-old"];
+    if (timing === "separate") {
+      act(() => sockets.at(-1)!.receive({ event: "session_updated", chat_id: "inactive", scope: "thread" }));
+      await act(async () => {});
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      await act(async () => {
+        reads[1].resolve(response(completed));
+        reads[2].resolve(new Response("unavailable", { status: 503 }));
+      });
+      expect(mounted.result.current.history.error).toBe("HTTP 503");
+      expect(mounted.result.current.history.loading).toBe(false);
+      expect(mounted.result.current.stream.messages.at(-1)?.content).toBe("The complete answer");
+    } else {
+      await act(async () => { reads[1].resolve(response(completed)); });
+      expect(mounted.result.current.history.messages.at(-1)?.content).toBe("The complete answer");
+    }
+    expect(mounted.result.current.stream.isStreaming).toBe(false);
+    expect(client.hasUnsettledRun("inactive")).toBe(false);
+    mounted.unmount();
+    close();
+  });
+
   it.each(["before", "during"] as const)("starts fresh recovery instead of sharing a mounted read from %s the outage", async (timing) => {
     const stale = completedThread();
     stale.events = stale.events.slice(0, 1);
@@ -331,6 +413,37 @@ describe("durable run recovery", () => {
     expect(client.getRunStartedAt("inactive")).toBe(123);
     expect(client.hasUnsettledRun("inactive")).toBe(true);
     expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
+    close();
+  });
+
+  it("keeps a queued turn and its resumed frames active when a racing idle page has no completion", async () => {
+    let resolveRead!: (value: Response) => void;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise<Response>((resolve) => {
+      resolveRead = resolve;
+    })));
+    const { client, sockets, running, close } = setup();
+    act(() => sockets[0].close());
+    client.sendMessage("inactive", "A queued task", undefined, { turnId: "turn-queued" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    await act(async () => { sockets.at(-1)!.open(); });
+    act(() => running("inactive", "turn-queued", 456));
+    const body = completedThread("inactive", "turn-queued");
+    body.events = body.events.slice(0, 1);
+    body.completed_turn_ids = [];
+    body.active_turn_id = null;
+    await act(async () => { resolveRead(response(body)); });
+    expect(client.getRunStartedAt("inactive")).toBe(456);
+    expect(client.hasUnsettledRun("inactive")).toBe(true);
+    expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
+    const resumed = vi.fn();
+    client.onChat("inactive", resumed);
+    resumed.mockClear();
+    act(() => {
+      running("inactive", "turn-queued", 456);
+      sockets.at(-1)!.receive({ event: "delta", chat_id: "inactive", turn_id: "turn-queued", text: "Resumed answer" });
+    });
+    expect(resumed).toHaveBeenCalledWith(expect.objectContaining({ event: "goal_status", status: "running" }));
+    expect(resumed).toHaveBeenCalledWith(expect.objectContaining({ event: "delta", text: "Resumed answer" }));
     close();
   });
 

@@ -415,24 +415,32 @@ function replaceCanonicalCompletedTurns(
     positions.byTurnId.set(turnId, queue);
   }
   let cursor = 0;
-  const firstAnchor = (queue: AnchorQueue | undefined): number => {
+  let fallbackBoundary = 0;
+  const firstAnchor = (queue: AnchorQueue | undefined, minimumIndex: number): number => {
     if (!queue) return retained.length;
-    while (queue.offset < queue.indices.length && queue.indices[queue.offset] < cursor) {
+    while (queue.offset < queue.indices.length && queue.indices[queue.offset] < minimumIndex) {
       queue.offset += 1;
     }
     return queue.indices[queue.offset] ?? retained.length;
   };
   const anchors = canonical.map((message) => {
-    if (message.turnId && represented.has(message.turnId)) return -1;
+    if (message.turnId && represented.has(message.turnId)) {
+      // Keep anonymous matches after this turn's retained pagination prefix.
+      fallbackBoundary = Math.max(fallbackBoundary, originalPositions.get(message.turnId) ?? 0);
+      return -1;
+    }
     const positions = anchorIndex
       .get(JSON.stringify([message.role, message.kind ?? ""]))
       ?.get(message.content);
-    const index = message.turnId
-      ? Math.min(
-          firstAnchor(positions?.byTurnId.get(message.turnId)),
-          firstAnchor(positions?.byTurnId.get(undefined)),
-        )
-      : firstAnchor(positions?.all);
+    const exactIndex = message.turnId
+      ? firstAnchor(positions?.byTurnId.get(message.turnId), cursor)
+      : retained.length;
+    const index = exactIndex < retained.length
+      ? exactIndex
+      : firstAnchor(
+          message.turnId ? positions?.byTurnId.get(undefined) : positions?.all,
+          Math.max(cursor, fallbackBoundary),
+        );
     if (index === retained.length) return -1;
     cursor = index + 1;
     return index;
@@ -1321,6 +1329,7 @@ export function ThreadShell({
         normalizedHistory,
         hasPendingToolCalls,
         historyActiveTurnId,
+        completionIdsProvided,
       );
       if (!client.canReconcileCanonicalCompletion(
         chatId,

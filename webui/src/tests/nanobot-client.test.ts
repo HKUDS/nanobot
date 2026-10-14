@@ -717,6 +717,12 @@ describe("NanobotClient", () => {
         "chat-guidance",
         requestGeneration,
         ["turn-active"],
+        {
+          observedTurnIds: ["turn-active", "turn-guidance"],
+          hasPendingToolCalls: false,
+          activeTurnId: null,
+          completionIdsProvided: true,
+        },
       ),
     ).toBe(true);
   });
@@ -1099,6 +1105,38 @@ describe("NanobotClient", () => {
       ),
     ).toBe(true);
     expect(client.hasUnsettledRun("chat-ack-lost")).toBe(false);
+  });
+
+  it("requires a supplied completion identity before closing an observed lifecycle turn", () => {
+    const client = new NanobotClient({
+      url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const received = vi.fn();
+    client.onChat("chat-authority", received);
+    client.connect();
+    lastSocket().fakeOpen();
+    client.sendMessage("chat-authority", "question", undefined, { turnId: "turn-authority" });
+    const requestGeneration = client.getRunGeneration("chat-authority");
+    lastSocket().fakeMessage({
+      event: "goal_status", chat_id: "chat-authority", turn_id: "turn-authority",
+      status: "running", started_at: 123,
+    });
+    const snapshot = {
+      observedTurnIds: ["turn-authority"], hasPendingToolCalls: false,
+      activeTurnId: null, completionIdsProvided: true,
+    };
+    expect(client.canReconcileCanonicalCompletion("chat-authority", requestGeneration, [], snapshot)).toBe(false);
+    expect(client.reconcileCanonicalCompletion("chat-authority", requestGeneration, [], snapshot)).toBe(false);
+    expect(client.getRunStartedAt("chat-authority")).toBe(123);
+    expect(client.hasUnsettledRun("chat-authority")).toBe(true);
+    received.mockClear();
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-authority", turn_id: "turn-authority", text: "Still running" });
+    expect(received).toHaveBeenCalledWith(expect.objectContaining({ event: "delta", text: "Still running" }));
+    expect(client.reconcileCanonicalCompletion(
+      "chat-authority", requestGeneration, ["turn-authority"], snapshot,
+    )).toBe(true);
+    expect(client.hasUnsettledRun("chat-authority")).toBe(false);
   });
 
   it("settles an accepted turn that never reached running from canonical idle", () => {

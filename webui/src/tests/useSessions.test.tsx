@@ -35,6 +35,7 @@ function fakeClient() {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
+    onRunCompletion: () => () => {},
     onError: () => () => {},
     onChat: () => () => {},
     getRunStartedAt: () => null,

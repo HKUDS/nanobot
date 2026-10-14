@@ -70,6 +70,7 @@ function summarizeInboundWsPayload(ev: InboundEvent): unknown {
 type Unsubscribe = () => void;
 type EventHandler = (ev: InboundEvent) => void;
 type StatusHandler = (status: ConnectionStatus) => void;
+type RunCompletionHandler = (chatId: string) => void;
 type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
 type SessionUpdateScope = "metadata" | "thread" | string;
 type SessionUpdateHandler = (
@@ -171,6 +172,8 @@ export interface CanonicalRunSnapshot {
   hasPendingToolCalls: boolean;
   /** Exact active turn when supplied by a current gateway. */
   activeTurnId?: string | null;
+  /** Supplied completion identities are authoritative for lifecycle turns. */
+  completionIdsProvided?: boolean;
 }
 
 type PendingMessageState = "queued" | "sent" | "unknown" | "accepted";
@@ -198,6 +201,7 @@ export class NanobotClient {
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
   private sidebarStateUpdateHandlers = new Set<SidebarStateUpdateHandler>();
   private runStatusHandlers = new Set<RunStatusHandler>();
+  private runCompletionHandlers = new Set<RunCompletionHandler>();
   private errorHandlers = new Set<ErrorHandler>();
   // chat_id -> handlers listening on it
   private chatHandlers = new Map<string, Set<EventHandler>>();
@@ -360,6 +364,12 @@ export class NanobotClient {
     return (this.unsettledRunTurnIdsByChatId.get(chatId)?.size ?? 0) > 0;
   }
 
+  /** Observe terminal wire facts without subscribing to or attaching a chat. */
+  onRunCompletion(handler: RunCompletionHandler): Unsubscribe {
+    this.runCompletionHandlers.add(handler);
+    return () => this.runCompletionHandlers.delete(handler);
+  }
+
   /** Durable runs that need a canonical disposition after transport recovery. */
   getUnsettledRunChatIds(): string[] {
     return Array.from(new Set([
@@ -383,10 +393,11 @@ export class NanobotClient {
     snapshot?: CanonicalRunSnapshot,
   ): boolean {
     if (completed.has(turnId)) return true;
+    const pending = this.pendingMessageSends.get(this.runSendKey(chatId, turnId));
+    if (snapshot?.completionIdsProvided && pending?.startsNewRun !== false) return false;
     if (!snapshot || snapshot.activeTurnId === turnId) return false;
     if (snapshot.hasPendingToolCalls) return false;
     if (observed.has(turnId)) return true;
-    const pending = this.pendingMessageSends.get(this.runSendKey(chatId, turnId));
     return pending?.state === "unknown" || pending?.state === "accepted";
   }
 
@@ -778,6 +789,7 @@ export class NanobotClient {
     if (closesCurrentRun && this.runStartedAtByChatId.delete(chatId)) {
       this.emitRunStatus(chatId, null);
     }
+    for (const handler of this.runCompletionHandlers) handler(chatId);
   }
 
   private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {

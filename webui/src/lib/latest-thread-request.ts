@@ -13,6 +13,7 @@ interface LatestThreadRequest {
 }
 
 const requestsByClient = new WeakMap<NanobotClient, Map<string, LatestThreadRequest>>();
+const INVALIDATED_THREAD_READ = Symbol("invalidated thread read");
 
 function abortedRequest(): DOMException {
   return new DOMException("The request was aborted", "AbortError");
@@ -53,11 +54,24 @@ export function fetchLatestWebuiThread(
       // Recovery must not join a read started before or during an outage.
       if (status !== "open") current.shareable = false;
     });
+    const unsubscribeSessionUpdate = client.onSessionUpdate((chatId, scope) => {
+      if (key === `websocket:${chatId}` && scope !== "metadata") {
+        current.controller.abort(INVALIDATED_THREAD_READ);
+      }
+    });
+    const unsubscribeRunCompletion = client.onRunCompletion((chatId) => {
+      if (key === `websocket:${chatId}`) current.controller.abort(INVALIDATED_THREAD_READ);
+    });
     const finish = () => {
+      if (current.settled) return;
       current.settled = true;
       unsubscribeStatus();
+      unsubscribeSessionUpdate();
+      unsubscribeRunCompletion();
+      current.controller.signal.removeEventListener("abort", finish);
       if (requests.get(requestKey) === current) requests.delete(requestKey);
     };
+    current.controller.signal.addEventListener("abort", finish, { once: true });
     void current.promise.then(finish, finish);
   }
   const current = request;
@@ -68,14 +82,22 @@ export function fetchLatestWebuiThread(
       if (!active) return;
       active = false;
       signal?.removeEventListener("abort", abort);
+      current.controller.signal.removeEventListener("abort", abort);
       current.consumers -= 1;
       if (current.consumers === 0 && !current.settled) current.controller.abort();
     };
     const abort = () => {
       release();
+      if (current.controller.signal.reason === INVALIDATED_THREAD_READ) {
+        // Replace the stale page after the current notification finishes so
+        // all surviving consumers can join one read of its updated thread.
+        resolve(Promise.resolve().then(() => fetchLatestWebuiThread(client, token, key, signal)));
+        return;
+      }
       reject(abortedRequest());
     };
     signal?.addEventListener("abort", abort, { once: true });
+    current.controller.signal.addEventListener("abort", abort, { once: true });
     void current.promise.then((body) => {
       if (!active) return;
       release();
