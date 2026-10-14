@@ -73,6 +73,7 @@ import type {
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { canonicalRunSnapshot, completedAssistantTurnIds } from "@/lib/canonical-run-snapshot";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
@@ -80,6 +81,7 @@ import { useClient } from "@/providers/ClientProvider";
 type MessageShape = Pick<UIMessage, "role" | "kind" | "content" | "isStreaming" | "turnId">;
 
 interface PendingCanonicalHydrate {
+  source: "initial" | "refresh";
   historyLineage: number;
   historyVersion: number;
   runGeneration: number;
@@ -358,28 +360,65 @@ function hasInlineDeliveryError(
   ));
 }
 
-function completedAssistantTurnIds(messages: UIMessage[]): string[] {
-  return Array.from(new Set(
-    messages
-      .filter((message) => message.role === "assistant" && !!message.turnId)
-      .map((message) => message.turnId as string),
-  ));
-}
-
-function canonicalRunSnapshot(
-  messages: UIMessage[],
-  hasPendingToolCalls: boolean,
-  activeTurnId: string | null,
-): CanonicalRunSnapshot {
-  return {
-    observedTurnIds: Array.from(new Set(
-      messages
-        .filter((message) => message.role === "user" && !!message.turnId)
-        .map((message) => message.turnId as string),
-    )),
-    hasPendingToolCalls,
-    activeTurnId,
-  };
+function replaceCanonicalCompletedTurns(
+  current: UIMessage[],
+  canonical: UIMessage[],
+  completedTurnIds: readonly string[],
+): UIMessage[] {
+  const completed = new Set(completedTurnIds);
+  const represented = new Set(canonical.flatMap((message) => (
+    message.turnId && completed.has(message.turnId) ? [message.turnId] : []
+  )));
+  if (!current.some((message) => message.turnId && represented.has(message.turnId))) {
+    return current;
+  }
+  const retained: UIMessage[] = [];
+  const originalPositions = new Map<string, number>();
+  for (const message of current) {
+    if (message.turnId && represented.has(message.turnId)) {
+      if (!originalPositions.has(message.turnId)) {
+        originalPositions.set(message.turnId, retained.length);
+      }
+    } else {
+      retained.push(message);
+    }
+  }
+  // Supplemental inputs may have their own turn identity between two answer
+  // segments. Match those retained rows as anchors so completed rows keep the
+  // canonical chronology instead of being grouped at the first turn row.
+  let cursor = 0;
+  const anchors = canonical.map((message) => {
+    if (message.turnId && represented.has(message.turnId)) return -1;
+    const index = retained.findIndex((candidate, index) => (
+      index >= cursor && sameMessageShape(candidate, message)
+    ));
+    if (index >= 0) cursor = index + 1;
+    return index;
+  });
+  const insertions = new Map<number, UIMessage[]>();
+  let precedingAnchor = 0;
+  let previousInsertionPosition = 0;
+  for (let index = 0; index < canonical.length; index += 1) {
+    if (anchors[index] >= 0) precedingAnchor = anchors[index] + 1;
+    const message = canonical[index];
+    if (!message.turnId || !represented.has(message.turnId)) continue;
+    const nextAnchor = anchors.slice(index + 1).find((anchor) => anchor >= 0);
+    const position = Math.max(
+      previousInsertionPosition,
+      nextAnchor ?? Math.max(
+        precedingAnchor,
+        originalPositions.get(message.turnId) ?? precedingAnchor,
+      ),
+    );
+    previousInsertionPosition = position;
+    const rows = insertions.get(position) ?? [];
+    rows.push(message);
+    insertions.set(position, rows);
+  }
+  return retained.flatMap((message, index) => [
+    ...insertions.get(index) ?? [],
+    message,
+  ]).concat(insertions.get(retained.length) ?? []);
 }
 
 const FILE_PREVIEW_DEFAULT_WIDTH = 544;
@@ -694,6 +733,7 @@ export function ThreadShell({
     userMessageOffset,
     hasPendingToolCalls,
     completedTurnIds,
+    completionIdsProvided,
     continuity: historyContinuity,
     lineage: historyLineage,
     activeTurnId: historyActiveTurnId,
@@ -806,8 +846,11 @@ export function ThreadShell({
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
-    return messageCacheRef.current.get(chatId) ?? historical;
-  }, [chatId, historical]);
+    const cached = messageCacheRef.current.get(chatId);
+    return cached
+      ? replaceCanonicalCompletedTurns(cached, historical, completedTurnIds)
+      : historical;
+  }, [chatId, completedTurnIds, historical]);
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
     setSubmittedViewportTurnId(null);
@@ -833,7 +876,9 @@ export function ThreadShell({
     setMessages,
     streamError,
     dismissStreamError,
-  } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd, handleStreamDetach);
+  } = useNanobotStream(
+    chatId, initial, hasPendingToolCalls, handleTurnEnd, handleStreamDetach, completedTurnIds,
+  );
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const requestKey = historyKey;
@@ -1145,21 +1190,52 @@ export function ThreadShell({
   }, [client, refreshModelSettings]);
 
   useEffect(() => {
+    if (!historyKey || !chatId) return;
+    pendingCanonicalHydrateRef.current.set(chatId, {
+      source: "initial",
+      historyLineage,
+      historyVersion,
+      runGeneration: client.getRunGeneration(chatId),
+      uiBaseline: durableMessageShapes(initial),
+      uiLineage: committedHistoryLineageRef.current.get(chatId) ?? null,
+      uiRevision: uiRevisionRef.current,
+    });
+    // Capture the request's run generation when entering a conversation, before
+    // its history response can race with another send or running event.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, client, historyKey]);
+
+  useEffect(() => {
     if (!historyKey || !chatId || loading) return;
-    client.fenceCanonicalCompletedTurns(chatId, completedTurnIds);
-    const cached = messageCacheRef.current.get(chatId);
     const pendingCanonicalHydrate = pendingCanonicalHydrateRef.current.get(chatId);
     const hasNewCanonicalHistory = (
       pendingCanonicalHydrate !== undefined
       && historyVersion > pendingCanonicalHydrate.historyVersion
+      && (
+        pendingCanonicalHydrate.source === "refresh"
+        || historical.length > 0
+        || completedTurnIds.length > 0
+      )
+      && (
+        pendingCanonicalHydrate.source === "refresh"
+        || isStreaming
+        || runStartedAt !== null
+        || client.hasUnsettledRun(chatId)
+      )
     );
-    // When the user switches away and back, keep the local in-memory thread
-    // state (including not-yet-persisted messages) instead of replacing it with
-    // whatever the history endpoint currently knows about. Once a fresh
-    // canonical replay arrives (e.g. after ``session_updated`` refresh), prefer it
-    // so rendering converges to the same shape as a manual refresh.
     const normalizedHistory = projectWebuiThreadMessages(historical);
-    const keepLiveMessages = (current: UIMessage[]) => projectWebuiThreadMessages(current);
+    const canonicalCompletedTurnIds = Array.from(new Set([
+      ...completedTurnIds,
+      ...(!completionIdsProvided && !hasPendingToolCalls && historyActiveTurnId === null
+        ? completedAssistantTurnIds(normalizedHistory)
+        : []),
+    ]));
+    // Completion is a fact about a turn, even when a newer local turn prevents
+    // this snapshot from settling the conversation's current run.
+    client.fenceCanonicalCompletedTurns(chatId, canonicalCompletedTurnIds);
+    const keepLiveMessages = (current: UIMessage[]) => projectWebuiThreadMessages(
+      replaceCanonicalCompletedTurns(current, normalizedHistory, canonicalCompletedTurnIds),
+    );
     if (hasNewCanonicalHistory && pendingCanonicalHydrate) {
       // Transcript replay strips streaming metadata and uses persisted ids.
       // Never adopt it while the turn is active: even if no assistant delta
@@ -1175,7 +1251,8 @@ export function ThreadShell({
         && (
           historyContinuity === "reset"
           || (
-            historyContinuity === "overlap"
+            pendingCanonicalHydrate.source === "refresh"
+            && historyContinuity === "overlap"
             && historyLineage === pendingCanonicalHydrate.historyLineage
           )
         )
@@ -1198,10 +1275,6 @@ export function ThreadShell({
         setMessages((current) => keepLiveMessages(current));
         return;
       }
-      const canonicalCompletedTurnIds = Array.from(new Set([
-        ...completedTurnIds,
-        ...completedAssistantTurnIds(normalizedHistory),
-      ]));
       const canonicalSnapshot = canonicalRunSnapshot(
         normalizedHistory,
         hasPendingToolCalls,
@@ -1224,7 +1297,7 @@ export function ThreadShell({
         historyVersion,
         hydrate: pendingCanonicalHydrate,
         messages: normalizedHistory,
-        previousMessages: messages,
+        previousMessages: keepLiveMessages(messages),
       });
       setMessages((current) => {
         if (current !== messages) return current;
@@ -1239,12 +1312,11 @@ export function ThreadShell({
       });
       return;
     }
-    const adoptsNormalizedHistory = cached && cached.length > 0
-      ? (
-          normalizedHistory.length > cached.length
-          && !isStaleThreadSnapshot(messages, normalizedHistory)
-        )
-      : !isStaleThreadSnapshot(messages, normalizedHistory);
+    const reconciledMessages = keepLiveMessages(messages);
+    const adoptsNormalizedHistory = (
+      (!hasPendingToolCalls || messages.length === 0)
+      && !isStaleThreadSnapshot(reconciledMessages, normalizedHistory, true)
+    );
     if (adoptsNormalizedHistory) {
       pendingHistoryLineageCommitRef.current.set(chatId, {
         lineage: historyLineage,
@@ -1252,24 +1324,18 @@ export function ThreadShell({
       });
     }
     setMessages((current) => {
-      if (cached && cached.length > 0) {
-        if (
-          normalizedHistory.length > cached.length
-          && !isStaleThreadSnapshot(current, normalizedHistory)
-        ) {
-          return normalizedHistory;
-        }
-        return isStaleThreadSnapshot(current, cached) ? keepLiveMessages(current) : cached;
-      }
-      return isStaleThreadSnapshot(current, normalizedHistory)
-        ? keepLiveMessages(current)
-        : normalizedHistory;
+      const reconciled = keepLiveMessages(current);
+      return (hasPendingToolCalls && current.length > 0)
+        || isStaleThreadSnapshot(reconciled, normalizedHistory, true)
+          ? reconciled
+          : normalizedHistory;
     });
   }, [
     loading,
     chatId,
     client,
     completedTurnIds,
+    completionIdsProvided,
     historical,
     historyVersion,
     historyContinuity,
@@ -1297,7 +1363,11 @@ export function ThreadShell({
     }
     if (uiRevisionRef.current !== commit.expectedUiRevision) {
       pendingCanonicalCommitRef.current.delete(chatId);
-      const fallback = messageCacheRef.current.get(chatId) ?? commit.previousMessages;
+      const fallback = replaceCanonicalCompletedTurns(
+        messageCacheRef.current.get(chatId) ?? commit.previousMessages,
+        commit.messages,
+        commit.completedTurnIds,
+      );
       messageCacheRef.current.set(chatId, fallback);
       setMessages((current) => current === commit.messages ? fallback : current);
       return;
@@ -1309,7 +1379,11 @@ export function ThreadShell({
       commit.canonicalSnapshot,
     )) {
       pendingCanonicalCommitRef.current.delete(chatId);
-      const fallback = messageCacheRef.current.get(chatId) ?? commit.previousMessages;
+      const fallback = replaceCanonicalCompletedTurns(
+        messageCacheRef.current.get(chatId) ?? commit.previousMessages,
+        commit.messages,
+        commit.completedTurnIds,
+      );
       messageCacheRef.current.set(chatId, fallback);
       setMessages((current) => current === commit.messages ? fallback : current);
       return;
@@ -1330,6 +1404,7 @@ export function ThreadShell({
   const refreshCanonicalHistory = useCallback(() => {
     if (!historyKey || !chatId) return;
     pendingCanonicalHydrateRef.current.set(chatId, {
+      source: "refresh",
       historyLineage,
       historyVersion,
       runGeneration: client.getRunGeneration(chatId),

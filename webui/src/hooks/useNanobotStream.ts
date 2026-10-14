@@ -138,6 +138,7 @@ export function useNanobotStream(
   hasPendingToolCalls = false,
   onTurnEnd?: () => void,
   onStreamDetach?: (messages: UIMessage[]) => void,
+  completedTurnIds: readonly string[] = [],
 ): {
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
@@ -186,7 +187,10 @@ export function useNanobotStream(
   }, []);
   const [messageOwnerChatId, setMessageOwnerChatId] = useState(chatId);
   /** If history ends in unfinished agent activity, keep the loading spinner alive. */
-  const initialStreaming = hasPendingAgentActivity(initialMessages);
+  const completedInitialTurns = new Set(completedTurnIds);
+  const initialStreaming = hasPendingAgentActivity(initialMessages.filter((message) => (
+    !message.turnId || !completedInitialTurns.has(message.turnId)
+  )));
   const [isStreaming, setIsStreaming] = useState(
     initialStreaming || hasPendingToolCalls || initialRunStartedAt !== null,
   );
@@ -518,7 +522,7 @@ export function useNanobotStream(
     setMessages(initialMessages);
     setMessageOwnerChatId(chatId);
     setIsStreaming(
-      hasPendingAgentActivity(initialMessages)
+      initialStreaming
       || hasPendingToolCalls
       || restoredRunStartedAt !== null,
     );
@@ -1023,7 +1027,7 @@ export function useNanobotStream(
 
   const reconcileTurnComplete = useCallback(() => {
     clearPendingStreamWork();
-    projectionRef.current = resetThreadProjectionCursor(projectionRef.current);
+    projectionRef.current = resetThreadProjectionCursor(projectionRef.current, messagesRef.current);
     setRunStartedAt(null);
     setRetryStatus(null);
     setIsStreaming(false);

@@ -360,6 +360,14 @@ export class NanobotClient {
     return (this.unsettledRunTurnIdsByChatId.get(chatId)?.size ?? 0) > 0;
   }
 
+  /** Durable runs that need a canonical disposition after transport recovery. */
+  getUnsettledRunChatIds(): string[] {
+    return Array.from(new Set([
+      ...this.unsettledRunTurnIdsByChatId.keys(),
+      ...this.runStartedAtByChatId.keys(),
+    ])).filter((chatId) => !this.temporaryChatIds.has(chatId));
+  }
+
   private normalizeMaxFrameBytes(value: number | undefined): number | undefined {
     if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
       return undefined;
@@ -1132,14 +1140,6 @@ export class NanobotClient {
     for (const handler of this.statusHandlers) handler(status);
   }
 
-  private clearRunStatusesForReconnect(): void {
-    if (this.runStartedAtByChatId.size === 0) return;
-    const chatIds = [...this.runStartedAtByChatId.keys()];
-    this.runStartedAtByChatId.clear();
-    this.runStartedAtByTurnKey.clear();
-    for (const chatId of chatIds) this.emitRunStatus(chatId, null);
-  }
-
   private handleOpen(): void {
     this.setStatus("open");
     this.reconnectAttempts = 0;
@@ -1530,7 +1530,6 @@ export class NanobotClient {
   }
 
   private scheduleReconnect(): void {
-    this.clearRunStatusesForReconnect();
     this.setStatus("reconnecting");
     const attempt = this.reconnectAttempts++;
     // Exponential backoff: 0.5s, 1s, 2s, 4s, capped.

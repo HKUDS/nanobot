@@ -863,6 +863,18 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("does not restore execution from cached activity for an explicitly completed turn", () => {
+    const fake = fakeClient();
+    const initialMessages: UIMessage[] = [{
+      id: "cached-tool-activity", role: "tool", kind: "trace", content: "exec(…)",
+      traces: ["exec(…)"], turnId: "completed-tool-turn", isStreaming: true, createdAt: 1,
+    }];
+    const { result } = renderHook(() => useNanobotStream(
+      "completed-tools", initialMessages, false, undefined, undefined, ["completed-tool-turn"],
+    ), { wrapper: wrap(fake.client) });
+    expect(result.current.isStreaming).toBe(false);
+  });
+
   it("drops pending stream work when switching chats", async () => {
     const fake = fakeClient();
     const { result, rerender } = renderHook(

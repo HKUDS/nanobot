@@ -324,6 +324,7 @@ describe("NanobotClient", () => {
     lastSocket().sent = [];
     client.onChat(chatId, vi.fn());
     client.sendMessage(chatId, "hello", undefined, { turnId: "turn-1" });
+    expect(client.getUnsettledRunChatIds()).toEqual([]);
 
     expect(lastSocket().sent.map((raw) => JSON.parse(raw))).toEqual([
       {
@@ -584,7 +585,7 @@ describe("NanobotClient", () => {
     expect(handler).toHaveBeenLastCalledWith("chat-stop", null);
   });
 
-  it("clears stale run strip when reconnecting after a dropped socket", async () => {
+  it("preserves durable run clocks and identities through transport reconnect", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: true,
@@ -598,16 +599,30 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({
       event: "goal_status",
       chat_id: "chat-strip",
+      turn_id: "turn-strip",
       status: "running",
       started_at: 12_345,
     });
 
     lastSocket().close();
 
-    expect(client.getRunStartedAt("chat-strip")).toBeNull();
-    expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
+    expect(client.status).toBe("reconnecting");
+    expect(client.getRunStartedAt("chat-strip")).toBe(12_345);
+    expect(client.getRunTurnId("chat-strip")).toBe("turn-strip");
+    expect(client.getUnsettledRunChatIds()).toEqual(["chat-strip"]);
+    expect(handler).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(20);
     expect(FakeSocket.instances.length).toBeGreaterThan(1);
+    lastSocket().fakeOpen();
+    expect(client.getRunStartedAt("chat-strip")).toBe(12_345);
+    expect(handler).toHaveBeenCalledTimes(1);
+    lastSocket().fakeMessage({
+      event: "turn_end", chat_id: "chat-strip", turn_id: "turn-strip",
+    });
+    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+    expect(client.getUnsettledRunChatIds()).toEqual([]);
+    expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
+    client.close();
   });
 
   it("clears run strip when a turn_end arrives without idle", () => {
