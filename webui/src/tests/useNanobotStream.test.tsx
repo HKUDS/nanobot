@@ -863,15 +863,28 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
-  it("does not restore execution from cached activity for an explicitly completed turn", () => {
+  it("restores cached tool activity according to each conversation's completed turns", () => {
     const fake = fakeClient();
     const initialMessages: UIMessage[] = [{
       id: "cached-tool-activity", role: "tool", kind: "trace", content: "exec(…)",
       traces: ["exec(…)"], turnId: "completed-tool-turn", isStreaming: true, createdAt: 1,
     }];
-    const { result } = renderHook(() => useNanobotStream(
-      "completed-tools", initialMessages, false, undefined, undefined, ["completed-tool-turn"],
-    ), { wrapper: wrap(fake.client) });
+    const initialProps = {
+      chatId: "completed-tools",
+      initialMessages,
+      completedTurnIds: ["completed-tool-turn"],
+    };
+    const { result, rerender } = renderHook((props: typeof initialProps) => useNanobotStream(
+      props.chatId, props.initialMessages, false, undefined, undefined, props.completedTurnIds,
+    ), { wrapper: wrap(fake.client), initialProps });
+    expect(result.current.isStreaming).toBe(false);
+    rerender({
+      chatId: "active-tools",
+      initialMessages: [{ ...initialMessages[0], turnId: "active-tool-turn" }],
+      completedTurnIds: [],
+    });
+    expect(result.current.isStreaming).toBe(true);
+    rerender(initialProps);
     expect(result.current.isStreaming).toBe(false);
   });
 

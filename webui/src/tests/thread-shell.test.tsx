@@ -3321,11 +3321,12 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("replaces completed segments around guidance while preserving a newer live turn", async () => {
+  it.each(["both", "current", "canonical"] as const)("keeps repeated guidance order and newer live output with %s turn ids", async (guidanceTurnIds) => {
     const client = makeClient();
     const chatId = "completed-guidance-new-tail";
     const turnId = "completed-guided-turn";
     const guidanceTurnId = "guidance-input";
+    const repeatedGuidanceTurnId = "repeated-guidance-input";
     let historyCalls = 0;
     let resolveRefresh!: (response: ReturnType<typeof httpJson>) => void;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -3359,7 +3360,13 @@ describe("ThreadShell", () => {
         event: "stream_end", chat_id: chatId, turn_id: turnId, resuming: true,
       });
       client._emitChat(chatId, {
-        event: "user_message", chat_id: chatId, turn_id: guidanceTurnId,
+        event: "user_message", chat_id: chatId,
+        turn_id: guidanceTurnIds === "canonical" ? undefined : guidanceTurnId,
+        text: "supplemental guidance", starts_turn: false, active_turn_id: turnId,
+      });
+      client._emitChat(chatId, {
+        event: "user_message", chat_id: chatId,
+        turn_id: guidanceTurnIds === "canonical" ? undefined : repeatedGuidanceTurnId,
         text: "supplemental guidance", starts_turn: false, active_turn_id: turnId,
       });
       client._emitChat(chatId, {
@@ -3392,18 +3399,23 @@ describe("ThreadShell", () => {
       ...transcriptFromSimpleMessages([
         { role: "user", content: "guided question", turnId },
         { role: "assistant", content: "canonical first segment", turnId },
-        { role: "user", content: "supplemental guidance", turnId: guidanceTurnId },
+        { role: "user", content: "supplemental guidance",
+          turnId: guidanceTurnIds === "current" ? undefined : guidanceTurnId },
+        { role: "user", content: "supplemental guidance",
+          turnId: guidanceTurnIds === "current" ? undefined : repeatedGuidanceTurnId },
         { role: "assistant", content: "canonical final segment", turnId },
       ]),
       has_pending_tool_calls: false,
       completed_turn_ids: [turnId],
     })));
     const first = await screen.findByText("canonical first segment");
-    const guidance = screen.getByText("supplemental guidance");
+    const guidance = screen.getAllByText("supplemental guidance");
     const final = screen.getByText("canonical final segment");
     const newer = screen.getByText("newer live reply");
-    expect(first.compareDocumentPosition(guidance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(guidance.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(guidance).toHaveLength(2);
+    expect(first.compareDocumentPosition(guidance[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(guidance[0].compareDocumentPosition(guidance[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(guidance[1].compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(final.compareDocumentPosition(newer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("first partial segment")).not.toBeInTheDocument();
     expect(screen.queryByText("last partial segment")).not.toBeInTheDocument();

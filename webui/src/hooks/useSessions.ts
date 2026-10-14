@@ -11,6 +11,7 @@ import {
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
+import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import { readReloadSessions, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
@@ -22,7 +23,6 @@ import type {
 } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
-const INITIAL_HISTORY_PAGE_LIMIT = 40;
 const OLDER_HISTORY_PAGE_LIMIT = 120;
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
@@ -412,7 +412,7 @@ export function useSessionHistory(key: string | null): {
   /** Exact active turn when supplied by a current gateway. */
   activeTurnId: string | null;
 } {
-  const { getToken } = useClient();
+  const { client, getToken } = useClient();
   const loadingOlderRef = useRef(false);
   const olderRequestAbortRef = useRef<AbortController | null>(null);
   const historyVersionRef = useRef(0);
@@ -531,13 +531,7 @@ export function useSessionHistory(key: string | null): {
     });
     (async () => {
       try {
-        const body = await fetchWebuiThread(getToken(), key, {
-          limit: INITIAL_HISTORY_PAGE_LIMIT,
-          direction: "latest",
-          signal: controller.signal,
-          revision: cachedBody?.revision,
-          cached: cachedBody,
-        });
+        const body = await fetchLatestWebuiThread(client, getToken(), key, controller.signal);
         if (cancelled) return;
         publishingBody = true;
         if (body) webuiThreadCache.set(key, body);
@@ -586,7 +580,7 @@ export function useSessionHistory(key: string | null): {
       controller.abort();
       unsubscribeCache();
     };
-  }, [getToken, key, refreshSeq]);
+  }, [client, getToken, key, refreshSeq]);
 
   const loadOlder = useCallback(async () => {
     if (!key || loadingOlderRef.current) return;

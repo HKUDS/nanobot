@@ -1,11 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
+import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useReconnectRuns } from "@/hooks/useReconnectRuns";
+import { useSessionHistory } from "@/hooks/useSessions";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import type { WebuiThreadPersistedPayload } from "@/lib/types";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
+import { ClientProvider } from "@/providers/ClientProvider";
 
 class TestSocket {
   readyState = 0;
@@ -76,6 +79,135 @@ afterEach(() => {
 });
 
 describe("durable run recovery", () => {
+  it("bounds recovery reads while draining all chats and preserving a newer queued turn", async () => {
+    const reads: Array<{ chatId: string; resolve: (value: Response) => void }> = [];
+    let active = 0;
+    let peak = 0;
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      const key = decodeURIComponent(url.split("/sessions/")[1].split("/")[0]);
+      return new Promise<Response>((resolve) => { reads.push({ chatId: key.slice("websocket:".length), resolve }); })
+        .finally(() => { active -= 1; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, running, reopen, close } = setup();
+    for (let index = 0; index < 9; index += 1) running(`chat-${index}`);
+    await reopen();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    running("chat-8", "turn-new", 456);
+    let answered = 0;
+    for (let round = 0; round < 9 && answered < 9; round += 1) {
+      const batch = reads.slice(answered);
+      await act(async () => {
+        for (const read of batch) read.resolve(response(completedThread(read.chatId)));
+      });
+      answered += batch.length;
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+    expect(peak).toBe(4);
+    expect(client.getUnsettledRunChatIds()).toEqual(["chat-8"]);
+    expect(client.getRunStartedAt("chat-8")).toBe(456);
+    expect(webuiThreadCache.get("websocket:chat-8")).toBeUndefined();
+    close();
+  });
+
+  it("aborts outstanding recovery reads without starting queued chats after another drop", async () => {
+    const reads: Array<{ signal: AbortSignal; resolve: (value: Response) => void }> = [];
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => (
+      new Promise<Response>((resolve) => { reads.push({ signal: init.signal!, resolve }); })
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, sockets, running, reopen, close } = setup();
+    for (let index = 0; index < 8; index += 1) running(`chat-${index}`);
+    await reopen();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await act(async () => { sockets.at(-1)!.close(); });
+    expect(reads.every((read) => read.signal.aborted)).toBe(true);
+    await act(async () => {
+      for (const read of reads) read.resolve(response(completedThread()));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(client.getUnsettledRunChatIds()).toHaveLength(8);
+    close();
+  });
+
+  it("shares one simultaneous recovery HTTP read with the mounted history hook", async () => {
+    const cached = completedThread();
+    cached.events = cached.events.slice(0, 2);
+    cached.events[1] = { event: "message", chat_id: "inactive", turn_id: "turn-old", text: "Partial" };
+    cached.has_pending_tool_calls = true;
+    cached.active_turn_id = "turn-old";
+    cached.revision = "active-page";
+    webuiThreadCache.set("websocket:inactive", cached);
+    let resolveRecovery!: (value: Response) => void;
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 304 }))
+      .mockImplementation(() => new Promise<Response>((resolve) => { resolveRecovery = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, running, reopen, close } = setup();
+    running();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="renewed-token">{children}</ClientProvider>
+    );
+    const mounted = renderHook(() => {
+      const history = useSessionHistory("websocket:inactive");
+      useEffect(() => {
+        let refreshOnOpen = false;
+        return client.onStatus((status) => {
+          if (status !== "open") refreshOnOpen = true;
+          else if (refreshOnOpen) {
+            refreshOnOpen = false;
+            history.refresh();
+          }
+        });
+      }, [history.refresh]);
+      return history;
+    }, { wrapper });
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await reopen();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1].headers["If-None-Match"]).toBe('"active-page"');
+    await act(async () => { resolveRecovery(response(completedThread())); });
+    expect(mounted.result.current.messages.at(-1)?.content).toBe("The complete answer");
+    expect(client.getRunStartedAt("inactive")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    mounted.unmount();
+    close();
+  });
+
+  it.each(["before", "during"] as const)("starts fresh recovery instead of sharing a mounted read from %s the outage", async (timing) => {
+    const stale = completedThread();
+    stale.events = stale.events.slice(0, 1);
+    stale.has_pending_tool_calls = true;
+    stale.active_turn_id = "turn-old";
+    const reads: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { reads.push(resolve); }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, sockets, running, reopen, close } = setup();
+    running();
+    if (timing === "during") {
+      act(() => sockets.at(-1)!.close());
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(client.status).toBe("connecting");
+    }
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="renewed-token">{children}</ClientProvider>
+    );
+    const mounted = renderHook(() => useSessionHistory("websocket:inactive"), { wrapper });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    if (timing === "before") await reopen();
+    else await act(async () => { sockets.at(-1)!.open(); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => { reads[1](response(completedThread())); });
+    await act(async () => { reads[0](response(stale)); });
+    expect(mounted.result.current.messages.at(-1)?.content).toBe("The complete answer");
+    expect(mounted.result.current.hasPendingToolCalls).toBe(false);
+    expect(client.getRunStartedAt("inactive")).toBeNull();
+    mounted.unmount();
+    close();
+  });
+
   it("settles an inactive completed chat and retains its answer before clearing the run", async () => {
     // The oldest protocol-1 host need not supply active_turn_id or completed_turn_ids.
     const body = completedThread();

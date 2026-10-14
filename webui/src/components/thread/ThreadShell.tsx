@@ -386,15 +386,68 @@ function replaceCanonicalCompletedTurns(
   // Supplemental inputs may have their own turn identity between two answer
   // segments. Match those retained rows as anchors so completed rows keep the
   // canonical chronology instead of being grouped at the first turn row.
+  type AnchorQueue = { indices: number[]; offset: number };
+  type ShapeAnchors = {
+    all: AnchorQueue;
+    untagged: AnchorQueue;
+    byTurnId: Map<string, AnchorQueue>;
+  };
+  const anchorIndex = new Map<string, Map<string, ShapeAnchors>>();
+  for (let index = 0; index < retained.length; index += 1) {
+    const message = retained[index];
+    const shape = JSON.stringify([message.role, message.kind ?? ""]);
+    let byContent = anchorIndex.get(shape);
+    if (!byContent) {
+      byContent = new Map();
+      anchorIndex.set(shape, byContent);
+    }
+    let positions = byContent.get(message.content);
+    if (!positions) {
+      positions = {
+        all: { indices: [], offset: 0 },
+        untagged: { indices: [], offset: 0 },
+        byTurnId: new Map(),
+      };
+      byContent.set(message.content, positions);
+    }
+    positions.all.indices.push(index);
+    if (!message.turnId) {
+      positions.untagged.indices.push(index);
+    } else {
+      let queue = positions.byTurnId.get(message.turnId);
+      if (!queue) {
+        queue = { indices: [], offset: 0 };
+        positions.byTurnId.set(message.turnId, queue);
+      }
+      queue.indices.push(index);
+    }
+  }
   let cursor = 0;
+  const firstAnchor = (queue: AnchorQueue | undefined): number => {
+    if (!queue) return retained.length;
+    while (queue.offset < queue.indices.length && queue.indices[queue.offset] < cursor) {
+      queue.offset += 1;
+    }
+    return queue.indices[queue.offset] ?? retained.length;
+  };
   const anchors = canonical.map((message) => {
     if (message.turnId && represented.has(message.turnId)) return -1;
-    const index = retained.findIndex((candidate, index) => (
-      index >= cursor && sameMessageShape(candidate, message)
-    ));
-    if (index >= 0) cursor = index + 1;
+    const positions = anchorIndex
+      .get(JSON.stringify([message.role, message.kind ?? ""]))
+      ?.get(message.content);
+    const index = message.turnId
+      ? Math.min(firstAnchor(positions?.byTurnId.get(message.turnId)), firstAnchor(positions?.untagged))
+      : firstAnchor(positions?.all);
+    if (index === retained.length) return -1;
+    cursor = index + 1;
     return index;
   });
+  const nextAnchors = new Array<number | undefined>(anchors.length);
+  let nextAnchor: number | undefined;
+  for (let index = anchors.length - 1; index >= 0; index -= 1) {
+    nextAnchors[index] = nextAnchor;
+    if (anchors[index] >= 0) nextAnchor = anchors[index];
+  }
   const insertions = new Map<number, UIMessage[]>();
   let precedingAnchor = 0;
   let previousInsertionPosition = 0;
@@ -402,10 +455,9 @@ function replaceCanonicalCompletedTurns(
     if (anchors[index] >= 0) precedingAnchor = anchors[index] + 1;
     const message = canonical[index];
     if (!message.turnId || !represented.has(message.turnId)) continue;
-    const nextAnchor = anchors.slice(index + 1).find((anchor) => anchor >= 0);
     const position = Math.max(
       previousInsertionPosition,
-      nextAnchor ?? Math.max(
+      nextAnchors[index] ?? Math.max(
         precedingAnchor,
         originalPositions.get(message.turnId) ?? precedingAnchor,
       ),
