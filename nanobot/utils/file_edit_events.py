@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from itertools import groupby, islice
 from pathlib import Path
 from typing import Any, cast
 
@@ -120,15 +121,18 @@ class FileDiff:
             for code in group:
                 if code.tag == "equal":
                     yield from (
-                        " " + line for line in self.before_lines[code.src_start:code.src_end]
+                        " " + self.before_lines[index]
+                        for index in range(code.src_start, code.src_end)
                     )
                 if code.tag in ("replace", "delete"):
                     yield from (
-                        "-" + line for line in self.before_lines[code.src_start:code.src_end]
+                        "-" + self.before_lines[index]
+                        for index in range(code.src_start, code.src_end)
                     )
                 if code.tag in ("replace", "insert"):
                     yield from (
-                        "+" + line for line in self.after_lines[code.dest_start:code.dest_end]
+                        "+" + self.after_lines[index]
+                        for index in range(code.dest_start, code.dest_end)
                     )
 
 
@@ -195,12 +199,8 @@ def build_unified_diff_payload(
         return None
     if diff is None:
         diff = FileDiff.from_text(before, after)
-    diff_lines = list(diff.unified_lines(fromfile, tofile, max(0, int(context_lines))))
-    if not diff_lines:
-        return None
-
     limited_lines, truncated, emitted_body_lines = _limit_unified_diff_lines(
-        diff_lines,
+        diff.unified_lines(fromfile, tofile, max(0, int(context_lines))),
         max_lines=max_lines,
         max_line_chars=max_line_chars,
     )
@@ -215,7 +215,7 @@ def build_unified_diff_payload(
 
 
 def _limit_unified_diff_lines(
-    diff_lines: list[str],
+    diff_lines: Iterable[str],
     *,
     max_lines: int,
     max_line_chars: int,
@@ -226,27 +226,21 @@ def _limit_unified_diff_lines(
     limited: list[str] = []
     emitted_body_lines = 0
     truncated = False
-    index = 0
+    line_groups = groupby(diff_lines, key=lambda line: line.startswith("@@ "))
 
-    while index < len(diff_lines):
-        line = diff_lines[index]
-        if not line.startswith("@@ "):
-            limited.append(line)
-            index += 1
+    for is_hunk_header, lines in line_groups:
+        if not is_hunk_header:
+            limited.extend(lines)
             continue
 
-        hunk_header = line
-        hunk_body: list[str] = []
-        index += 1
-        while index < len(diff_lines) and not diff_lines[index].startswith("@@ "):
-            hunk_body.append(diff_lines[index])
-            index += 1
-
+        hunk_header = next(lines)
         remaining = body_limit - emitted_body_lines
         if remaining <= 0:
             truncated = True
             break
 
+        _, hunk_lines = next(line_groups)
+        hunk_body = list(islice(hunk_lines, remaining + 1))
         selected_body = hunk_body[:remaining]
         if len(selected_body) < len(hunk_body):
             truncated = True
