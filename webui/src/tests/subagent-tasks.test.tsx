@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SubagentTasksProvider, SubagentThreadMessages as ThreadMessages } from "@/components/thread/SubagentTasks";
@@ -12,7 +13,9 @@ import type { ConnectionStatus, InboundEvent, SubagentTaskSnapshot, UIMessage } 
 const requestMutation = vi.fn();
 const chatHandlers = new Map<string, Set<(event: InboundEvent) => void>>();
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
+let status: ConnectionStatus = "open";
 const client = {
+  get status() { return status; },
   requestMutation,
   onChat: vi.fn((chatId: string, handler: (event: InboundEvent) => void) => {
     const handlers = chatHandlers.get(chatId) ?? new Set();
@@ -22,12 +25,18 @@ const client = {
   }),
   onStatus: vi.fn((handler: (status: ConnectionStatus) => void) => {
     statusHandlers.add(handler);
-    handler("open");
+    handler(status);
     return () => { statusHandlers.delete(handler); };
   }),
 };
 function emitTask(snapshot: SubagentTaskSnapshot, chatId = "a") {
   act(() => { chatHandlers.get(chatId)?.forEach((handler) => handler({ event: "subagent_task", chat_id: chatId, task: snapshot })); });
+}
+function emitStatus(next: ConnectionStatus) {
+  act(() => {
+    status = next;
+    statusHandlers.forEach((handler) => handler(next));
+  });
 }
 const messages: UIMessage[] = [
   { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a" },
@@ -56,9 +65,9 @@ function childThread(answer: string, active = true): Response {
     ],
   }), { headers: { "content-type": "application/json" } });
 }
-function layout({ enabled = true, liveEvents = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, threadMessages = messages } = {}) {
+function layout({ enabled = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, threadMessages = messages } = {}) {
   return <ThreadVisibilityContext.Provider value={visible}>
-    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled}>
+    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} historyEnabled={historyEnabled}>
       <div data-testid="messages"><ThreadMessages messages={threadMessages} /></div>
       <div data-testid="composer"><textarea aria-label="Message" /></div>
     </SubagentTasksProvider>
@@ -74,6 +83,7 @@ describe("session-owned task UI", () => {
     client.onStatus.mockClear();
     chatHandlers.clear();
     statusHandlers.clear();
+    status = "open";
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response([task()])));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
@@ -287,6 +297,79 @@ describe("session-owned task UI", () => {
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
   });
 
+  it("pauses task reads while disconnected", async () => {
+    vi.useFakeTimers();
+    status = "reconnecting";
+    render(layout());
+    fireEvent(window, new Event("focus"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => { emitStatus("open"); });
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    vi.mocked(fetch).mockRejectedValue(new Error("HTTP 500"));
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByText("Could not load subtasks.")).toBeVisible();
+
+    emitStatus("reconnecting");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    const reads = vi.mocked(fetch).mock.calls.length;
+    fireEvent(window, new Event("focus"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(fetch).toHaveBeenCalledTimes(reads);
+
+    vi.mocked(fetch).mockResolvedValue(response([task({ revision: 2, state: "done", completed_at: 102 })]));
+    await act(async () => { emitStatus("open"); });
+    expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("aborts a disconnected read and ignores its late response after reconnect", async () => {
+    let resolveOld!: (value: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    render(layout());
+    const signal = vi.mocked(fetch).mock.calls[0][1]!.signal!;
+    expect(signal.aborted).toBe(false);
+    vi.mocked(fetch).mockResolvedValue(response([task()]));
+    act(() => { emitStatus("closed"); emitStatus("open"); });
+    expect(signal.aborted).toBe(true);
+    await screen.findByRole("button", { name: /Config check Running/ });
+    await act(async () => { resolveOld(response([task({ task_id: "stale", label: "Stale work" })])); });
+    expect(screen.queryByText("Stale work")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("loads tasks when React replays the connection subscription", async () => {
+    render(<StrictMode>{layout()}</StrictMode>);
+    expect(await screen.findByRole("button", { name: /Config check Running/ })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("retains child history and ignores a read failure from the disconnected gateway", async () => {
+    let rejectOld!: (reason: Error) => void;
+    vi.mocked(fetch).mockImplementation(async (url) => String(url).endsWith("/webui-thread")
+      ? childThread("Saved child answer") : response([task()]));
+    render(layout({ historyEnabled: true }));
+    fireEvent.click(await screen.findByRole("button", { name: /Config check Running/ }));
+    const detail = screen.getByRole("dialog", { name: "Config check" });
+    await within(detail).findByText("Saved child answer");
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
+    emitTask(task({ revision: 2 }));
+    const signal = vi.mocked(fetch).mock.calls.at(-1)![1]!.signal!;
+    emitStatus("reconnecting");
+    expect(signal.aborted).toBe(true);
+    await act(async () => { rejectOld(new Error("Network disconnected")); });
+    expect(within(detail).getByText("Saved child answer")).toBeVisible();
+    expect(within(detail).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(detail).getByRole("button", { name: "Stop Config check" })).toBeDisabled();
+    vi.mocked(fetch).mockImplementation(async (url) => String(url).endsWith("/webui-thread")
+      ? childThread("Recovered child answer") : response([task({ revision: 3 })]));
+    emitStatus("open");
+    expect(await within(detail).findByText("Recovered child answer")).toBeVisible();
+  });
+
   it("shows a read error for malformed or duplicate task records", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({
       tasks: [{ ...task(), label: { unexpected: true } }],
@@ -458,7 +541,7 @@ describe("session-owned task UI", () => {
     vi.mocked(fetch).mockImplementationOnce(async () => response([
       task({ revision: 2 }), task({ task_id: "task-2", label: "Recovered check", created_at: 101 }),
     ]));
-    act(() => { statusHandlers.forEach((handler) => { handler("closed"); handler("open"); }); });
+    act(() => { emitStatus("closed"); emitStatus("open"); });
     await act(async () => { resolveOld(response([task()])); });
     await screen.findByRole("button", { name: /Recovered check Running/ });
     expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
@@ -467,19 +550,22 @@ describe("session-owned task UI", () => {
     expect(screen.getByText("Could not load subtasks.")).toBeVisible();
   });
 
-  it("keeps protocol 1 task controls usable on a host without event support", async () => {
-    vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined })]));
+  it("updates task state from notifications without polling", async () => {
     vi.useFakeTimers();
-    const view = render(layout({ liveEvents: false }));
+    const view = render(layout());
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
-    vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined, state: "done", completed_at: 102 })]));
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    emitTask(task({ revision: 2, state: "done", completed_at: 102 }));
     expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
-    expect(client.onChat).not.toHaveBeenCalled();
-    view.rerender(layout({ liveEvents: false, visible: false }));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    view.rerender(layout({ visible: false }));
     const reads = vi.mocked(fetch).mock.calls.length;
     await act(async () => { vi.advanceTimersByTime(6000); });
     expect(fetch).toHaveBeenCalledTimes(reads);
+    vi.mocked(fetch).mockResolvedValue(response([task({ task_id: "missed", label: "Work while hidden" })]));
+    await act(async () => { view.rerender(layout()); });
+    expect(screen.getByRole("button", { name: /Work while hidden Running/ })).toBeVisible();
   });
 });
