@@ -28,6 +28,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
+from nanobot.session.keys import session_key_for_channel
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -718,8 +719,17 @@ class WebUICommandRouter:
             if temporary_policy is not None
             else webui_session_key(chat_id)
         )
+        execution_session_key = (
+            temporary_policy.session_key
+            if temporary_policy is not None
+            else session_key_for_channel(
+                "websocket", chat_id, unified_session=self.gateway.unified_session,
+            )
+        )
         session_generation: str | None = None
         session_created = False
+        execution_generation: str | None = None
+        execution_created = False
         try:
             if not restart_control:
                 session_generation, session_created = await self._workspaces.persist_scope(
@@ -732,6 +742,16 @@ class WebUICommandRouter:
                         else None
                     ),
                 )
+                execution_generation = session_generation
+                if (
+                    execution_session_key != admission_session_key
+                    and self.gateway.session_manager is not None
+                ):
+                    execution_generation, execution_created = (
+                        await self.gateway.session_manager.state.open_with_metadata(
+                            execution_session_key, {},
+                        )
+                    )
             if is_webui and not restart_control and (
                 temporary_policy is None or temporary_policy.persist_transcript
             ):
@@ -769,14 +789,17 @@ class WebUICommandRouter:
                 metadata=metadata,
                 is_dm=False,
                 session_key=(
-                    temporary_policy.session_key if temporary_policy is not None else None
+                    execution_session_key
+                    if temporary_policy is not None
+                    or execution_session_key != admission_session_key
+                    else None
                 ),
                 require_existing_session=(
                     temporary_policy.require_existing_session
                     if temporary_policy is not None
                     else False
                 ),
-                session_generation=session_generation,
+                session_generation=execution_generation,
             )
             accepted = True
             if turn_id:
@@ -784,6 +807,11 @@ class WebUICommandRouter:
                 if len(self._accepted_messages) > 1024:
                     del self._accepted_messages[next(iter(self._accepted_messages))]
         except BaseException:
+            await self._workspaces.rollback_scope_admission(
+                execution_session_key,
+                execution_generation,
+                created=execution_created,
+            )
             await self._workspaces.rollback_scope_admission(
                 admission_session_key,
                 session_generation,

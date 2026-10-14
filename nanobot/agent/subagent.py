@@ -49,6 +49,7 @@ from nanobot.security.workspace_access import (
     workspace_sandbox_status,
 )
 from nanobot.session.manager import Session, SessionManager, SessionPolicy
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -565,7 +566,16 @@ class SubagentManager:
         self._admitting += 1
         try:
             if self.sessions is not None:
-                child = await self.sessions.create(status, policy=session_policy)
+                admission = asyncio.create_task(self.sessions.create(status, policy=session_policy))
+                try:
+                    child = await shield_and_drain(admission)
+                except asyncio.CancelledError:
+                    if not admission.cancelled() and admission.exception() is None:
+                        child = admission.result()
+                        await shield_and_drain(self.sessions.sessions.state.delete(
+                            child.key, expected_generation=child.generation,
+                        ))
+                    raise
             else:
                 child = Session(key=SubagentSessions.key(task_id), policy=session_policy or SessionPolicy())
                 child.add_message("user", task)

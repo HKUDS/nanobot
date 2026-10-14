@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -56,18 +57,18 @@ async def seed_history(bot, key):
     ])
 
 
-def schedule_idle_archive(bot, key):
-    session = bot._loop.sessions.get_or_create(key)
-    session.updated_at = datetime.now() - timedelta(minutes=30)
-    bot._loop.sessions.save(session)
+async def schedule_idle_archive(bot):
     scheduled = []
-    bot._loop.auto_compact.check_expired(scheduled.append, bot._loop.runtime_for_session)
+    with patch("nanobot.agent.autocompact.datetime") as clock:
+        clock.now.return_value = datetime.now() + timedelta(minutes=30)
+        clock.fromisoformat.side_effect = datetime.fromisoformat
+        await bot._loop.auto_compact.check_expired(scheduled.append, bot._loop.runtime_for_session)
     assert len(scheduled) == 1
     return scheduled[0]
 
 
-def assert_reply_and_summary(bot, key):
-    snapshot = bot.sessions.export(key)
+async def assert_reply_and_summary(bot, key):
+    snapshot = await bot.sessions.export(key)
     assert snapshot is not None
     assert ("assistant", "new reply") in [
         (message["role"], message["content"]) for message in snapshot.messages
@@ -82,7 +83,7 @@ async def test_compaction_waits_for_active_sdk_turn_and_preserves_reply(
     bot, provider = bot
     key = "sdk:shared"
     await seed_history(bot, key)
-    idle_archive = schedule_idle_archive(bot, key) if trigger == "scheduled_idle" else None
+    idle_archive = await schedule_idle_archive(bot) if trigger == "scheduled_idle" else None
     compact_attempted = asyncio.Event()
 
     async def compact():
@@ -112,7 +113,7 @@ async def test_compaction_waits_for_active_sdk_turn_and_preserves_reply(
         provider.release_summary.set()
         compacted = await asyncio.wait_for(compaction, timeout=5)
 
-        assert_reply_and_summary(bot, key)
+        await assert_reply_and_summary(bot, key)
         assert summary_started_during_turn is False
         assert {"role": "assistant", "content": "new reply"} in provider.summary_messages
         if trigger == "compact_session":
@@ -123,7 +124,7 @@ async def test_compaction_waits_for_active_sdk_turn_and_preserves_reply(
 
         await bot.aclose()
         async with Nanobot(loop_factory(provider=ControlledProvider())) as restarted:
-            assert_reply_and_summary(restarted, key)
+            await assert_reply_and_summary(restarted, key)
     finally:
         provider.release_turn.set()
         provider.release_summary.set()
@@ -136,7 +137,7 @@ async def test_sdk_turn_waits_for_running_idle_archive_and_uses_its_summary(bot)
     bot, provider = bot
     key = "sdk:shared"
     await seed_history(bot, key)
-    archive = asyncio.create_task(schedule_idle_archive(bot, key))
+    archive = asyncio.create_task(await schedule_idle_archive(bot))
     turn_attempted = asyncio.Event()
 
     async def run():
@@ -160,7 +161,7 @@ async def test_sdk_turn_waits_for_running_idle_archive_and_uses_its_summary(bot)
         provider.release_turn.set()
         result = await asyncio.wait_for(turn, timeout=5)
         assert result.content == "new reply"
-        assert_reply_and_summary(bot, key)
+        await assert_reply_and_summary(bot, key)
     finally:
         provider.release_turn.set()
         provider.release_summary.set()

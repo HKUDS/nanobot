@@ -2148,12 +2148,6 @@ class AgentLoop:
             )
         if ctx.on_runtime_admitted is not None:
             await ctx.on_runtime_admitted(runtime)
-        if not ctx.ephemeral:
-            ctx.session, ctx.pending_summary = await self.auto_compact.prepare_session(
-                session,
-                ctx.session_key,
-            )
-            session = ctx.require_session()
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
         ctx.history = await self.runner.prepare_prompt(

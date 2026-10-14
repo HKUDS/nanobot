@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Collection
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
@@ -30,7 +31,8 @@ class AutoCompact:
         consolidator: Consolidator,
         session_ttl_minutes: int = 0,
         bind_events: SessionEventFactory | None = None,
-        *, session_lock: Callable[[str], asyncio.Lock],
+        *,
+        session_lock: Callable[[str], asyncio.Lock],
     ):
         self.sessions = sessions
         self.consolidator = consolidator
@@ -89,7 +91,7 @@ class AutoCompact:
             return
         try:
             async with self._session_lock(key):
-                # Keep the session live while the synchronous callback binds its route.
+                # Idle compaction and turns share one transcript boundary.
                 session = await self.sessions.state.get(key)
                 summary = await self.consolidator.compact_idle_session(
                     key,
@@ -114,14 +116,11 @@ class AutoCompact:
         session: Session,
         key: str,
     ) -> tuple[Session, SessionSummary | None]:
-        """Prepare a session without blocking on a reload."""
+        """Resolve a summary while preserving the turn's owner-issued draft."""
         if is_dream_session(key):
             self._archiving.discard(key)
             self._summaries.pop(key, None)
             return session, None
-        if key in self._archiving or self._is_expired(session.updated_at):
-            logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
-            session = await self.sessions.state.get(key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
         entry = self._summaries.pop(key, None)
         if entry:

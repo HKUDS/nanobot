@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.config.loader import load_config
+from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
 from nanobot.session.location import SessionLocation
 from nanobot.session.manager import SessionManager
 
@@ -239,3 +240,24 @@ def test_migration_rejects_symlinked_source_directory(tmp_path, create_symlink):
     create_symlink(workspace / "sessions", outside, target_is_directory=True)
     with pytest.raises(ValueError, match="symlink"):
         SessionManager(workspace)
+
+
+def test_workspace_migration_rejects_symlinked_backup_directory(tmp_path, create_symlink):
+    workspace = tmp_path / "workspace"
+    root = tmp_path / "root"
+    source = _write_legacy_session(workspace / "sessions", "cli:test", "original")
+    original = source.read_bytes()
+    location = SessionLocation(workspace, sessions_root=root)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    backup = location.sessions_dir / WORKSPACE_BACKUP_DIR
+    create_symlink(backup, outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="Could not move legacy sessions"):
+        SessionManager(workspace, sessions_root=root)
+    assert source.read_bytes() == original
+    assert list(outside.iterdir()) == []
+    backup.unlink()
+    manager = SessionManager(workspace, sessions_root=root)
+    assert not source.exists()
+    assert (manager.sessions_dir / WORKSPACE_BACKUP_DIR / source.name).read_bytes() == original

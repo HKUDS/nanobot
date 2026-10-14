@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -18,12 +19,14 @@ from nanobot.config.schema import AgentDefaults, Config
 from nanobot.events import NO_EVENTS
 from nanobot.providers.base import LLMResponse
 from nanobot.runtime_context import public_history_message
-from nanobot.session.keys import HEARTBEAT_SESSION_KEY
+from nanobot.sdk.clients import RuntimeClient
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY, UNIFIED_SESSION_KEY
 
 
 def _make_loop(
     tmp_path: Path,
     session_ttl_minutes: int = 15,
+    unified_session: bool = False,
 ) -> AgentLoop:
     """Create a minimal AgentLoop for testing."""
     bus = MessageBus()
@@ -39,6 +42,7 @@ def _make_loop(
         model="test-model",
         context_window_tokens=128_000,
         session_ttl_minutes=session_ttl_minutes,
+        unified_session=unified_session,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     return loop
@@ -143,6 +147,100 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
     assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
     assert loop.bus.outbound.empty()
+
+
+async def test_expired_unified_turn_keeps_latest_delivery_route(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    loop = _make_loop(tmp_path / "workspace", unified_session=True)
+    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    session.metadata["last_channel"] = "telegram:old"
+    session.metadata["_compaction_route"] = {
+        "channel": "telegram", "chat_id": "old", "metadata": {},
+    }
+    session.updated_at = datetime.now() - timedelta(minutes=20)
+    loop.sessions.save(session)
+    try:
+        response = await loop.process_direct(
+            "hello", session_key=UNIFIED_SESSION_KEY, channel="discord", chat_id="new",
+        )
+
+        assert response is not None and response.content == "ok"
+        saved = await loop.sessions.state.get(UNIFIED_SESSION_KEY)
+        assert saved.generation == session.generation
+        assert saved.metadata["last_channel"] == "discord:new"
+        assert saved.metadata["_compaction_route"] == {
+            "channel": "discord", "chat_id": "new", "metadata": {},
+        }
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.parametrize("compaction", ["idle", "compact_session", "compact_idle_session"])
+async def test_turn_resuming_during_archive_commits_reply(tmp_path, monkeypatch, compaction):
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    loop = _make_loop(tmp_path / "workspace")
+    session = loop.sessions.get_or_create("cli:idle")
+    _add_turns(session, 1, prefix="old")
+    session.updated_at = datetime.now() - timedelta(minutes=20)
+    loop.sessions.save(session)
+    entered, release = asyncio.Event(), asyncio.Event()
+    archive_committed = asyncio.Event()
+
+    async def archive(_session, **_kwargs):
+        entered.set()
+        await release.wait()
+        return "Old session summary."
+
+    loop.consolidator.archive_session = archive
+
+    async def respond(**_kwargs):
+        request = current_request_context()
+        if request is not None and request.session_key == session.key:
+            await archive_committed.wait()
+        return LLMResponse(content="new reply")
+
+    loop.provider.chat_stream_with_retry.side_effect = respond
+    turn = None
+    compact_task = None
+    try:
+        if compaction == "idle":
+            await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
+        else:
+            compact_task = asyncio.create_task(getattr(RuntimeClient(loop), compaction)(session.key))
+        await asyncio.wait_for(entered.wait(), 5)
+        turn = asyncio.create_task(loop.process_direct("new input", session_key=session.key))
+
+        # The pending archive only holds its own conversation's execution slot.
+        other = await asyncio.wait_for(
+            loop.process_direct("other input", session_key="cli:other"), 5,
+        )
+        assert other is not None and other.content == "new reply"
+
+        release.set()
+        if compact_task is not None:
+            await compact_task
+        else:
+            await _drain_background_tasks(loop)
+        archive_committed.set()
+        response = await asyncio.wait_for(turn, 5)
+        assert response is not None and response.content == "new reply"
+        saved = await loop.sessions.state.get(session.key)
+        assert saved.generation == session.generation
+        assert saved.metadata["_last_summary"]["text"] == "Old session summary."
+        assert saved.messages[-1]["content"] == "new reply"
+        assert saved.messages[-2]["content"].startswith("new input")
+        assert "pending_user_turn" not in saved.metadata
+        assert "runtime_checkpoint" not in saved.metadata
+    finally:
+        release.set()
+        archive_committed.set()
+        if turn is not None:
+            await asyncio.gather(turn, return_exceptions=True)
+        if compact_task is not None:
+            await compact_task
+        await loop.aclose()
 
 
 class TestSessionTTLConfig:

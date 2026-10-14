@@ -124,6 +124,9 @@ class _EmptyGatewaySessionManager:
     def list_sessions(self) -> list[dict[str, object]]:
         return []
 
+    def list_session_metadata(self) -> list[dict[str, object]]:
+        return []
+
     @property
     def state(self):
         return SimpleNamespace(
@@ -4195,11 +4198,6 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     channel_finished = asyncio.Event()
     channels_stopping = asyncio.Event()
 
-    class _FakeSessionManager(_EmptyGatewaySessionManager):
-        def flush_all(self) -> int:
-            seen["sessions_flushed"] = True
-            return 0
-
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
@@ -4208,7 +4206,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         def __init__(self, **_kwargs) -> None:
             self.model = "test-model"
             self.provider = object()
-            self.sessions = _FakeSessionManager()
+            self.sessions = _EmptyGatewaySessionManager()
             self.runtime_resolver = MagicMock()
 
         def llm_runtime(self) -> None:
@@ -4331,7 +4329,6 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     assert seen["channel_task_cleaned_up"] is True
     assert seen["channels_stopped"] is True
     assert seen["cron_stopped"] is True
-    assert seen["sessions_flushed"] is True
     assert seen["shutdown_handlers_restored"] is True
     if shutdown_signal is not None:
         assert seen["graceful_shutdown_requested"] is True

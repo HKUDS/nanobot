@@ -156,6 +156,7 @@ class SqliteSessionStore:
 
     def initialize(self, workspace: Path) -> None:
         """Upgrade the schema and import legacy sessions in one atomic transaction."""
+        workspace = workspace.expanduser().resolve(strict=False)
         # WAL is persistent and must be enabled outside a transaction.
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
@@ -194,6 +195,9 @@ class SqliteSessionStore:
                     f"invalid JSONL migration marker in {self.path}: {marker[0]!r}; "
                     "restore a valid database backup or repair the marker explicitly"
                 )
+        from nanobot.session.jsonl_migration import finish_workspace_migration
+
+        finish_workspace_migration(self, workspace)
 
     def _metadata(self, db: sqlite3.Connection, key: str, raw: str) -> dict[str, Any]:
         metadata = _object(raw)

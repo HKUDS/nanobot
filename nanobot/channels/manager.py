@@ -202,6 +202,7 @@ class ChannelManager:
                 static_dist_path=static_path,
                 workspace_path=workspace,
                 default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
+                unified_session=self.config.agents.defaults.unified_session,
                 config_path=self._config_path,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,

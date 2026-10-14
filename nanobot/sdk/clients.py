@@ -159,7 +159,9 @@ class RuntimeClient:
                 session_key,
                 runtime=runtime,
             )
-            return snapshot_from_session(await self._loop.sessions.state.get(session_key))
+            return snapshot_from_session(
+                await self._loop.sessions.state.get(session_key)
+            )
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 0) -> str | None:
         """Return a replacement summary; legacy ``max_suffix`` no longer retains history."""

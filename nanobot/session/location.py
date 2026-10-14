@@ -56,7 +56,8 @@ class SessionLocation:
             self.sessions_dir = ensure_dir(root / workspace_id)
 
     @staticmethod
-    def _fsync_directory(path: Path) -> None:
+    def fsync_directory(path: Path) -> None:
+        """Persist storage directory entries where directory fsync is supported."""
         with suppress(PermissionError, NotImplementedError):
             fd = os.open(path, os.O_RDONLY)
             try:
@@ -77,7 +78,7 @@ class SessionLocation:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp, path)
-            cls._fsync_directory(path.parent)
+            cls.fsync_directory(path.parent)
         finally:
             tmp.unlink(missing_ok=True)
 
@@ -163,7 +164,7 @@ class SessionLocation:
             raise
         finally:
             os.close(fd)
-        cls._fsync_directory(marker.parent)
+        cls.fsync_directory(marker.parent)
         return workspace_id
 
     @classmethod

@@ -22,6 +22,7 @@ from nanobot.agent.subagent_sessions import SUBAGENT, TASK_METADATA_KEY, Subagen
 from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
 from nanobot.agent.tools.session_messages import ListSessionsTool, SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
+from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
@@ -32,6 +33,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
+from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
 from nanobot.session.location import SessionLocation
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
@@ -63,6 +65,57 @@ def gateway_for(manager, sessions, workspace):
     )
     token = gateway.tokens.issue_api_token(60)
     return gateway, SimpleNamespace(remote_address=("127.0.0.1", 12345)), Headers({"Authorization": f"Bearer {token}"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wait", [False, True])
+async def test_cancelled_task_creation_removes_committed_child(tmp_path, monkeypatch, wait):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    owner = "websocket:parent"
+    await sessions.state.get(owner)
+    entered, release = asyncio.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    save = sessions._store.save
+    children = []
+
+    def blocked_save(session, **kwargs):
+        save(session, **kwargs)
+        if session.key.startswith("subagent:"):
+            children.append(session.key)
+            loop.call_soon_threadsafe(entered.set)
+            assert release.wait(5), "test did not release child persistence"
+
+    monkeypatch.setattr(sessions._store, "save", blocked_save)
+    manager.runner.run = AsyncMock()
+
+    async def create():
+        with request_context(RequestContext(
+            channel="websocket", chat_id="parent", session_key=owner,
+            runtime=runtime, can_receive_background_results=True,
+        )):
+            return await SubagentTool(manager).execute(action="create", task="Inspect config", wait=wait)
+
+    task = asyncio.create_task(create())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+        assert len(children) == 1
+        assert await sessions.state.read(children[0]) is None
+        assert sessions.child_session_keys(owner) == []
+        assert manager.statuses_for_session(owner) == {}
+        assert manager.get_running_count() == 0
+        manager.runner.run.assert_not_awaited()
+        assert await sessions.state.read(owner) is not None
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await manager.close()
+        await sessions.state.aclose()
 
 
 @pytest.mark.asyncio
@@ -831,7 +884,7 @@ async def test_child_sessions_migrate_from_legacy_jsonl_and_reopen(tmp_path):
         (legacy / f"{SessionLocation.storage_key(key)}.jsonl").write_text(
             "\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8",
         )
-    source_hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in legacy.glob("*.jsonl")}
+    source_hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in legacy.glob("*.jsonl")}
 
     for _ in range(2):
         manager, sessions, _ = manager_with_storage(workspace, root)
@@ -846,8 +899,10 @@ async def test_child_sessions_migrate_from_legacy_jsonl_and_reopen(tmp_path):
                 restored = sessions.read_session_file(key)
                 assert restored["metadata"] == records[0]["metadata"]
                 assert restored["messages"] == records[1:]
-            assert {path: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in legacy.glob("*.jsonl")} == source_hashes
+            assert list(legacy.glob("*.jsonl")) == []
+            backups = sessions.sessions_dir / WORKSPACE_BACKUP_DIR
+            assert {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in backups.glob("*.jsonl")} == source_hashes
         finally:
             await manager.close()
 

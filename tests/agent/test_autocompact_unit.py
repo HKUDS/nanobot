@@ -1,6 +1,7 @@
 """Direct unit tests for AutoCompact class methods in isolation."""
 
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -64,7 +65,7 @@ def _make_autocompact(
         sessions=sessions,
         consolidator=consolidator,
         session_ttl_minutes=ttl,
-        session_lock=lambda _key: asyncio.Lock(),
+        session_lock=defaultdict(asyncio.Lock).__getitem__,
     )
 
 
@@ -83,8 +84,10 @@ async def test_default_ttl_disables_idle_compaction():
     sessions.get_or_create.return_value = _make_session(
         key="cli:idle", messages=[{"role": "user", "content": "pending"}],
     )
-    ac = AutoCompact(sessions=sessions, consolidator=MagicMock(),
-                     session_lock=lambda _key: asyncio.Lock())
+    ac = AutoCompact(
+        sessions=sessions, consolidator=MagicMock(),
+        session_lock=defaultdict(asyncio.Lock).__getitem__,
+    )
     schedule = MagicMock(side_effect=lambda pending: pending.close())
 
     await ac.check_expired(schedule, _resolve_runtime)
@@ -465,7 +468,7 @@ class TestArchiveDelegates:
             consolidator=consolidator,
             session_ttl_minutes=15,
             bind_events=bind,
-            session_lock=lambda _key: asyncio.Lock(),
+            session_lock=defaultdict(asyncio.Lock).__getitem__,
         )
 
         await ac._archive("cli:test", runtime=_runtime())
@@ -545,34 +548,19 @@ class TestArchiveDelegates:
 class TestPrepareSession:
     """Test AutoCompact.prepare_session logic."""
 
-    async def test_key_in_archiving_reloads_session(self):
-        """If key is in _archiving, session should be reloaded via get_or_create."""
-        ac = _make_autocompact()
-        mock_sm = _mock_sessions()
-        reloaded = _make_session(key="cli:test")
-        mock_sm.get_or_create.return_value = reloaded
-        ac.sessions = mock_sm
-        ac._archiving.add("cli:test")
-
-        original_session = _make_session()
-        result_session, summary = await ac.prepare_session(original_session, "cli:test")
-
-        mock_sm.get_or_create.assert_called_once_with("cli:test")
-        assert result_session is reloaded
-
-    async def test_expired_session_reloads(self):
-        """If session is expired, it should be reloaded via get_or_create."""
+    @pytest.mark.parametrize("archiving", [False, True])
+    async def test_preparing_idle_session_preserves_turn_metadata(self, archiving):
         ac = _make_autocompact(ttl=15)
-        mock_sm = _mock_sessions()
-        reloaded = _make_session(key="cli:test", updated_at=datetime.now())
-        mock_sm.get_or_create.return_value = reloaded
-        ac.sessions = mock_sm
+        session = _make_session(
+            updated_at=datetime.now() - timedelta(minutes=20),
+            metadata={"last_channel": "discord:new"},
+        )
+        if archiving:
+            ac._archiving.add(session.key)
 
-        old_session = _make_session(updated_at=datetime.now() - timedelta(minutes=20))
-        result_session, summary = await ac.prepare_session(old_session, "cli:test")
+        prepared, _ = await ac.prepare_session(session, session.key)
 
-        mock_sm.get_or_create.assert_called_once_with("cli:test")
-        assert result_session is reloaded
+        assert prepared.metadata["last_channel"] == "discord:new"
 
     async def test_hot_path_summary_from_summaries(self):
         """Summary from _summaries dict should be returned (hot path)."""

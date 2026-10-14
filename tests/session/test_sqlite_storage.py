@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 from packaging.version import Version
 
-from nanobot.session.jsonl_migration import SUNSET_VERSION
+import nanobot.session.jsonl_migration as jsonl_migration
+from nanobot.session.jsonl_migration import SUNSET_VERSION, WORKSPACE_BACKUP_DIR
 from nanobot.session.location import SessionLocation
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.sqlite_store import SessionConflictError
@@ -38,9 +39,11 @@ def test_migration_must_be_removed_at_declared_sunset():
     )
 
 
-def test_import_is_once_and_sources_are_unchanged(tmp_path):
+def test_import_is_once_and_private_sources_are_unchanged(tmp_path):
     workspace = tmp_path / "workspace"
     path = legacy(workspace)
+    location = SessionLocation(workspace)
+    path = path.replace(location.sessions_dir / path.name)
     original = path.read_bytes()
     manager = SessionManager(workspace)
     assert manager.read_session_snapshot("websocket:old").messages[0]["content"] == "hello"
@@ -54,14 +57,17 @@ def test_import_is_once_and_sources_are_unchanged(tmp_path):
 def test_invalid_source_rolls_back_entire_migration(tmp_path):
     workspace = tmp_path / "workspace"
     path = legacy(workspace)
+    original = path.read_bytes()
     bad = path.parent / "zz-invalid.jsonl"
     bad.write_text("not json")
     with pytest.raises(RuntimeError, match="migration failed"):
         SessionManager(workspace)
+    assert path.read_bytes() == original
     bad.unlink()
     manager = SessionManager(workspace)
     assert len(manager.list_sessions()) == 1
-    assert path.exists()
+    assert not path.exists()
+    assert (manager.sessions_dir / WORKSPACE_BACKUP_DIR / path.name).read_bytes() == original
 
 
 def test_migration_preserves_checkpoint_and_pending_inputs(tmp_path):
@@ -70,9 +76,144 @@ def test_migration_preserves_checkpoint_and_pending_inputs(tmp_path):
     checkpoint = {"version": 1, "session_key": "websocket:old", "base_message_count": 1,
                   "base_updated_at": "2026-01-01T00:00:00", "checkpoint": {"messages": [{"role": "assistant", "content": "partial"}]},
                   "provider_state": None}
-    path.with_suffix(".checkpoint.json").write_text(json.dumps(checkpoint))
+    checkpoint_path = path.with_suffix(".checkpoint.json")
+    checkpoint_path.write_text(json.dumps(checkpoint))
+    original, original_checkpoint = path.read_bytes(), checkpoint_path.read_bytes()
+    original_mtime, checkpoint_mtime = path.stat().st_mtime_ns, checkpoint_path.stat().st_mtime_ns
     manager = SessionManager(workspace)
     assert manager.get_or_create("websocket:old").metadata["runtime_checkpoint"] == checkpoint["checkpoint"]
+    backup = manager.sessions_dir / WORKSPACE_BACKUP_DIR
+    assert (backup / path.name).read_bytes() == original
+    assert (backup / checkpoint_path.name).read_bytes() == original_checkpoint
+    assert (backup / path.name).stat().st_mtime_ns == original_mtime
+    assert (backup / checkpoint_path.name).stat().st_mtime_ns == checkpoint_mtime
+    assert not path.exists() and not checkpoint_path.exists()
+
+
+async def test_workspace_migration_isolates_raw_private_records(tmp_path):
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.sessions import ReadSessionTool
+    from nanobot.providers.base import ProviderConversationState
+
+    workspace = tmp_path / "workspace"
+    path = legacy(workspace)
+    provider = ProviderConversationState(
+        kind="openai_responses", provider="openai", model="gpt-test", version=1,
+        payload={"items": [{"encrypted_content": "private-provider-state"}]},
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"_type": "provider_state", "state": provider.to_private_record()}) + "\n")
+        handle.write(json.dumps({"role": "tool", "tool_call_id": "call", "content": "private-tool-output"}) + "\n")
+    original = path.read_bytes()
+    manager = SessionManager(workspace)
+    backup = manager.sessions_dir / WORKSPACE_BACKUP_DIR / path.name
+    assert not path.exists()
+    assert backup.read_bytes() == original
+    if sys.platform != "win32":
+        assert backup.stat().st_mode & 0o777 == 0o600
+        assert backup.parent.stat().st_mode & 0o777 == 0o700
+
+    public = await ReadSessionTool(manager).execute(session_key="websocket:old")
+    assert "private-provider-state" not in public and "private-tool-output" not in public
+    tool = ReadFileTool(workspace=workspace, allowed_dir=workspace, restrict_to_workspace=True)
+    assert (await tool.execute(path=str(path))).is_error
+    blocked = await tool.execute(path=str(backup))
+    assert blocked.is_error and "outside allowed directory" in blocked
+    manager.delete_session("websocket:old")
+    assert SessionManager(workspace).read_session_snapshot("websocket:old") is None
+    assert backup.read_bytes() == original
+
+
+def test_restart_finishes_workspace_isolation_after_import_commit(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    root = tmp_path / "root"
+    path = legacy(workspace)
+    original = path.read_bytes()
+    location = SessionLocation(workspace, sessions_root=root)
+
+    def interrupted(*_args):
+        raise RuntimeError("interrupted after import commit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jsonl_migration, "finish_workspace_migration", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted after import commit"):
+            SessionManager(workspace, sessions_root=root)
+    assert path.read_bytes() == original
+    with sqlite3.connect(location.sessions_dir / "sessions.sqlite3") as db:
+        assert db.execute("SELECT count(*) FROM sessions").fetchone()[0] == 1
+        assert db.execute("SELECT value FROM storage_meta WHERE key='jsonl_import'").fetchone()[0] == "complete"
+
+    manager = SessionManager(workspace, sessions_root=root)
+    assert len(manager.list_sessions()) == 1
+    assert not path.exists()
+    assert (manager.sessions_dir / WORKSPACE_BACKUP_DIR / path.name).read_bytes() == original
+
+
+def test_workspace_backup_failure_retains_sources_and_retries(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    path = legacy(workspace)
+    original = path.read_bytes()
+
+    def failed_backup(*_args):
+        raise OSError("backup storage unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jsonl_migration, "_write_backup", failed_backup)
+        with pytest.raises(RuntimeError, match="Could not move legacy sessions"):
+            SessionManager(workspace)
+    assert path.read_bytes() == original
+    manager = SessionManager(workspace)
+    assert not path.exists()
+    assert (manager.sessions_dir / WORKSPACE_BACKUP_DIR / path.name).read_bytes() == original
+
+
+def test_restart_finishes_partial_workspace_source_removal(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    path = legacy(workspace)
+    checkpoint_path = path.with_suffix(".checkpoint.json")
+    checkpoint_path.write_text(json.dumps({"version": 1}))
+    original, original_checkpoint = path.read_bytes(), checkpoint_path.read_bytes()
+    original_unlink = Path.unlink
+
+    def interrupted_unlink(target, *args, **kwargs):
+        if target == checkpoint_path:
+            raise OSError("interrupted checkpoint removal")
+        return original_unlink(target, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", interrupted_unlink)
+        with pytest.raises(RuntimeError, match="Could not move legacy sessions"):
+            SessionManager(workspace)
+    assert not path.exists()
+    assert checkpoint_path.read_bytes() == original_checkpoint
+    manager = SessionManager(workspace)
+    assert len(manager.list_sessions()) == 1
+    assert not checkpoint_path.exists()
+    backup = manager.sessions_dir / WORKSPACE_BACKUP_DIR
+    assert (backup / path.name).read_bytes() == original
+    assert (backup / checkpoint_path.name).read_bytes() == original_checkpoint
+
+
+def test_restart_requires_durable_workspace_source_removal(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    path = legacy(workspace)
+    original = path.read_bytes()
+    original_sync = SessionLocation.fsync_directory
+
+    def unavailable_directory_sync(directory):
+        if directory == path.parent:
+            raise OSError("source directory flush unavailable")
+        original_sync(directory)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(SessionLocation, "fsync_directory", staticmethod(unavailable_directory_sync))
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match="Could not move legacy sessions"):
+                SessionManager(workspace)
+            assert not path.exists()
+    manager = SessionManager(workspace)
+    assert len(manager.list_sessions()) == 1
+    assert (manager.sessions_dir / WORKSPACE_BACKUP_DIR / path.name).read_bytes() == original
 
 
 def test_stale_administrative_save_is_rejected(tmp_path):
