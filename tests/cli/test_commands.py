@@ -149,9 +149,11 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
         task = asyncio.create_task(never.wait())
         output: list[str] = []
 
+        tasks: list[asyncio.Task[object]] = []
         restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
-            loop, shutdown_event, [task], output.append,
+            loop, shutdown_event, tasks, output.append,
         )
+        tasks.append(task)
         try:
             callback, args = loop.handlers[int(signal.SIGINT)]
             assert callable(callback)
@@ -174,6 +176,46 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
         assert int(signal.SIGTERM) in loop.removed
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGBREAK"])
+async def test_gateway_signal_fallback_requests_shutdown_then_forces_and_restores(
+    monkeypatch, signal_name: str,
+) -> None:
+    sigbreak = getattr(signal, "SIGBREAK", 21)
+    monkeypatch.setattr(signal, "SIGBREAK", sigbreak, raising=False)
+    previous = object()
+    handlers = {}
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: previous)
+    monkeypatch.setattr(signal, "signal", lambda signum, handler: handlers.update({signum: handler}))
+    loop = MagicMock()
+    loop.add_signal_handler.side_effect = NotImplementedError
+    shutdown_event = asyncio.Event()
+    task = asyncio.create_task(asyncio.Event().wait())
+    await asyncio.sleep(0)
+    tasks: list[asyncio.Task[object]] = []
+    output: list[str] = []
+    restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
+        loop, shutdown_event, tasks, output.append,
+    )
+    tasks.append(task)
+    signum = getattr(signal, signal_name)
+    try:
+        handlers[signum](signum, None)
+        assert shutdown_event.is_set()
+        assert output == ["\nShutting down... Press Ctrl+C again to force."]
+        assert not task.done()
+        handlers[signum](signum, None)
+        await asyncio.sleep(0)
+        assert task.cancelled()
+    finally:
+        restore()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    assert handlers == dict.fromkeys((signal.SIGINT, signal.SIGTERM, sigbreak), previous)
 
 
 def test_interactive_tty_mode_restores_line_input(monkeypatch) -> None:
@@ -4124,18 +4166,33 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     assert isinstance(hook, cli_gateway_runtime._MCPReadinessHook)
 
 
+@pytest.mark.parametrize("shutdown_signal", [
+    None,
+    pytest.param(signal.SIGINT, id="SIGINT"),
+    pytest.param(
+        getattr(signal, "SIGBREAK", None),
+        marks=pytest.mark.skipif(not hasattr(signal, "SIGBREAK"), reason="Windows SIGBREAK only"),
+        id="SIGBREAK",
+    ),
+])
 def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     monkeypatch,
     tmp_path: Path,
+    shutdown_signal: int | None,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.gateway.port = 18791
     seen: dict[str, object] = {}
     shutdown_order: list[str] = []
+    channel_started = asyncio.Event()
+    channel_draining = asyncio.Event()
+    channel_finished = asyncio.Event()
+    channels_stopping = asyncio.Event()
 
     class _FakeSessionManager:
         def flush_all(self) -> int:
+            seen["sessions_flushed"] = True
             return 0
 
     class _FakeAgentLoop(_GatewayAgentContractStub):
@@ -4169,15 +4226,25 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
             self.enabled_channels = ["websocket"]
 
         async def start_all(self) -> None:
+            channel_started.set()
             try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                if shutdown_signal is None:
+                    raise
+                channel_draining.set()
                 await asyncio.Event().wait()
             finally:
                 seen["channel_task_cleaned_up"] = True
+                channel_finished.set()
                 shutdown_order.append("channel_task_cleaned_up")
 
         async def stop_all(self) -> None:
             seen["channels_stopped"] = True
             shutdown_order.append("channels_stopped")
+            channels_stopping.set()
+            if shutdown_signal is not None:
+                await asyncio.wait_for(channel_finished.wait(), timeout=1)
 
     class _FakeCronService:
         def __init__(self, _store_path: Path) -> None:
@@ -4208,14 +4275,29 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     async def _fake_start_server(_handler, _host: str, _port: int):
         return _FakeServer()
 
-    def _fake_install_shutdown_handlers(_loop, event, _tasks, _print_status):
+    install_shutdown_handlers = cli_gateway_runtime._install_gateway_shutdown_handlers
+
+    def _install_shutdown_handlers(loop, event, tasks, print_status):
+        restore = install_shutdown_handlers(loop, event, tasks, print_status)
+
         async def _trigger_shutdown() -> None:
-            await asyncio.sleep(0)
-            event.set()
+            await channel_started.wait()
+            if shutdown_signal is None:
+                event.set()
+                return
+            signal.raise_signal(shutdown_signal)
+            await channel_draining.wait()
+            await channels_stopping.wait()
+            assert event.is_set()
+            assert seen["agent_stopped"] is True
+            assert not channel_finished.is_set()
+            seen["graceful_shutdown_requested"] = True
+            signal.raise_signal(shutdown_signal)
 
         asyncio.create_task(_trigger_shutdown())
 
         def _restore() -> None:
+            restore()
             seen["shutdown_handlers_restored"] = True
 
         return _restore
@@ -4232,7 +4314,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
     monkeypatch.setattr(
         "nanobot.cli.gateway_runtime._install_gateway_shutdown_handlers",
-        _fake_install_shutdown_handlers,
+        _install_shutdown_handlers,
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
@@ -4244,7 +4326,10 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     assert seen["channel_task_cleaned_up"] is True
     assert seen["channels_stopped"] is True
     assert seen["cron_stopped"] is True
+    assert seen["sessions_flushed"] is True
     assert seen["shutdown_handlers_restored"] is True
+    if shutdown_signal is not None:
+        assert seen["graceful_shutdown_requested"] is True
     # Channel cleanup must run before cancellation drains the manager task.
     # DingTalk's stream SDK can otherwise swallow cancellation and reconnect.
     assert shutdown_order == ["channels_stopped", "channel_task_cleaned_up"]
