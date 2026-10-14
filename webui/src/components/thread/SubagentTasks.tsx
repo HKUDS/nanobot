@@ -89,19 +89,23 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   useEffect(() => {
     if (!enabled || !active || !pageVisible || !paneVisible || !sessionKey || !token) return;
     let cancelled = false;
+    let connected = false;
+    let connectionGeneration = 0;
     let refreshing = false;
     let refreshPending = false;
     const refresh = async () => {
+      if (!connected) return;
       if (refreshing) { refreshPending = true; return; }
       refreshing = true;
+      const generation = connectionGeneration;
       try {
         const payload = await fetchSubagentTasks(token, sessionKey);
-        if (!cancelled) {
+        if (!cancelled && connected && generation === connectionGeneration) {
           setTasks((current) => mergeSubagentTasks(current, payload.tasks));
           setLoadError(null);
         }
       } catch {
-        if (!cancelled) setLoadError(t("thread.subagents.loadFailed"));
+        if (!cancelled && connected && generation === connectionGeneration) setLoadError(t("thread.subagents.loadFailed"));
       } finally {
         refreshing = false;
         if (refreshPending && !cancelled) {
@@ -111,23 +115,27 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       }
     };
     const unsubscribeChat = liveEvents ? client.onChat(sessionKey.slice("websocket:".length), (event) => {
-      if (cancelled || event.event !== "subagent_task") return;
+      if (cancelled || !connected || event.event !== "subagent_task") return;
       if (!isSubagentTask(event.task)) {
         setLoadError(t("thread.subagents.loadFailed"));
         return;
       }
       setTasks((current) => mergeSubagentTasks(current, [event.task]));
     }) : undefined;
-    const unsubscribeStatus = liveEvents ? client.onStatus((status) => {
-      if (status === "open") void refresh();
-    }) : undefined;
-    if (!refreshing) void refresh();
+    const unsubscribeStatus = client.onStatus((status) => {
+      connected = status === "open";
+      if (connected) void refresh();
+      else {
+        connectionGeneration += 1;
+        setLoadError(null);
+      }
+    });
     const focus = () => void refresh();
     window.addEventListener("focus", focus);
     return () => {
       cancelled = true;
       unsubscribeChat?.();
-      unsubscribeStatus?.();
+      unsubscribeStatus();
       window.removeEventListener("focus", focus);
     };
   }, [client, enabled, liveEvents, active, sessionKey, token, pageVisible, paneVisible, t]);
