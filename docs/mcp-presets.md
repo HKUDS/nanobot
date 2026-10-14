@@ -124,7 +124,7 @@ Install `npx` or `uvx` on the gateway computer. Stdio servers use a managed work
 | Firebase | Node.js, npx, and Firebase CLI sign-in | [Server guide](https://firebase.google.com/docs/ai-assistance/mcp-server) |
 | MongoDB | Node.js, npx, and MongoDB connection string | [Server guide](https://www.mongodb.com/docs/mcp-server/local-mcp/security-best-practices/) |
 | ClickHouse | uvx and ClickHouse connection credentials | [Server guide](https://github.com/ClickHouse/mcp-clickhouse) |
-| Redis | uvx and Redis connection settings | [Server guide](https://github.com/redis/mcp-redis) |
+| Redis | uvx and Redis connection URL | [Server guide](https://github.com/redis/mcp-redis) |
 | dbt | uvx and dbt account with a static subdomain | [Server guide](https://docs.getdbt.com/docs/dbt-ai/setup-local-mcp) |
 | Google Workspace | uvx and Google Cloud OAuth app with the required APIs enabled | [Server guide](https://github.com/taylorwilsdon/google_workspace_mcp) |
 | Microsoft 365 | Node.js, npx, and Microsoft work or school account | [Server guide](https://github.com/Softeria/ms-365-mcp-server) |
@@ -140,7 +140,7 @@ Install `npx` or `uvx` on the gateway computer. Stdio servers use a managed work
 
 Google Workspace uses the community `workspace-mcp` server by Taylor Wilsdon. Create a Google Cloud OAuth app, enable the APIs you need, and follow the server's sign-in instructions. It provides Gmail, Drive, Calendar, Docs, Sheets, Slides, Contacts, and other Workspace tools. Microsoft 365 uses Softeria's community server for work or school accounts; ask its login tool to start the device-code flow. Tenant administrators may need to approve access. Personal Outlook accounts can use a custom configuration without `--org-mode`.
 
-Firebase uses your Firebase CLI sign-in. The dbt server completes its own browser sign-in and requires an account with a static subdomain. MongoDB starts with `--readOnly`; ClickHouse uses HTTPS and read-only queries by default. For Redis Cloud, set **Use TLS** to `true` and use the port supplied by your Redis deployment.
+Firebase uses your Firebase CLI sign-in. The dbt server completes its own browser sign-in and requires an account with a static subdomain. MongoDB starts with `--readOnly`; ClickHouse uses HTTPS and read-only queries by default. Redis takes a connection URL such as `rediss://default:password@your-redis-host:6379/0`; use `rediss://` for TLS and the port supplied by your deployment.
 
 Azure uses your Azure CLI sign-in. BigQuery uses Google Application Default Credentials and the project ID you provide. Salesforce DX uses your authorized default target org and enables its data, orgs, and metadata toolsets. AWS uses the official SigV4 proxy with your IAM credentials; its preset connects to the `us-east-1` managed endpoint. Alation uses a service-account integration. Tableau uses a personal access token and requires a site name for Tableau Cloud.
 
@@ -163,3 +163,7 @@ Shopify Developer provides developer resources and validation; it does not suppl
 [Box](https://developer.box.com/guides/box-mcp), [G2](https://documentation.g2.com/docs/g2-mcp-server), [Lovable](https://github.com/lovablelabs/mcp), and [Docusign](https://developers.docusign.com/platform/mcp-server/) require client-specific OAuth setup. [QuickBooks Online's local server](https://github.com/intuit/quickbooks-online-mcp-server) requires an Intuit OAuth app, an initial authorization handshake, and a local build. These services need a custom connection rather than a native browser-sign-in preset.
 
 Expedia Travel Recommendations provides API-based travel recommendations and needs an Expedia API key. GoDaddy's preset searches public domain data. ThoughtSpot Developer provides documentation; its authenticated administrative endpoint needs a custom connection. [Zoom](https://developers.zoom.us/docs/mcp/servers/) and [Tredict](https://www.tredict.com/blog/mcp_server_docs/) also require provider-specific OAuth setup.
+
+## Maintaining presets
+
+The built-in catalogue is maintained in [`nanobot/webui/mcp_presets.json`](../nanobot/webui/mcp_presets.json). Each entry declares its server configuration and setup fields. Field types and defaults are defined in [`mcp_presets.py`](../nanobot/webui/mcp_presets.py); the gateway validates the catalogue when loading it. Add service connections to the JSON file and document their requirements here.

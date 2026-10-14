@@ -414,6 +414,38 @@ def test_google_workspace_uses_managed_stdio_and_environment_credentials(
     assert Path(saved.cwd) == tmp_path / "mcp" / "google-workspace"
     assert "google-test-secret" not in json.dumps(payload)
 
+
+@pytest.mark.parametrize("from_environment", [False, True])
+def test_redis_url_is_passed_to_cli_and_kept_secret(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    from_environment: bool,
+) -> None:
+    from nanobot.config.loader import resolve_config_env_vars
+
+    _use_config(tmp_path, monkeypatch)
+    url = "rediss://default:redis-test-secret@cache.example.com:16380/3"
+    query = {"name": ["redis"]}
+    if from_environment:
+        monkeypatch.setenv("REDIS_URL", url)
+    else:
+        query["redis_url"] = [url]
+
+    payload = mcp_presets_action("enable", query)
+    config = load_config()
+    saved = config.tools.mcp_servers["redis"]
+    assert saved.args == [
+        "--from", "redis-mcp-server@latest", "redis-mcp-server", "--url",
+        "${REDIS_URL}" if from_environment else url,
+    ]
+    resolved = resolve_config_env_vars(config)
+    assert resolved.tools.mcp_servers["redis"].args[-1] == url
+    row = next(item for item in payload["presets"] if item["name"] == "redis")
+    assert row["configured"] is True
+    assert row["required_fields"][0]["secret"] is True
+    assert "redis-test-secret" not in json.dumps(payload)
+
+
 def test_enable_requires_missing_secret(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _use_config(tmp_path, monkeypatch)
 
