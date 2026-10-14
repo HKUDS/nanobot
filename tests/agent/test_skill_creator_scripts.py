@@ -72,6 +72,45 @@ def test_validate_skill_rejects_root_files_outside_allowed_dirs(tmp_path: Path) 
     assert "Unexpected file or directory in skill root" in message
 
 
+def test_validate_skill_accepts_manual_only_frontmatter(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "manual-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: manual-skill\n"
+        "description: Run a user-controlled workflow.\n"
+        "disable-model-invocation: true\n"
+        "---\n"
+        "# Manual workflow\n",
+        encoding="utf-8",
+    )
+
+    valid, message = quick_validate.validate_skill(skill_dir)
+
+    assert valid, message
+
+
+def test_validate_skill_rejects_non_boolean_manual_only_frontmatter(
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "manual-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: manual-skill\n"
+        "description: Run a user-controlled workflow.\n"
+        'disable-model-invocation: "true"\n'
+        "---\n"
+        "# Manual workflow\n",
+        encoding="utf-8",
+    )
+
+    valid, message = quick_validate.validate_skill(skill_dir)
+
+    assert not valid
+    assert "'disable-model-invocation' must be a boolean" in message
+
+
 def test_package_skill_creates_archive(tmp_path: Path) -> None:
     skill_dir = tmp_path / "package-me"
     skill_dir.mkdir()
