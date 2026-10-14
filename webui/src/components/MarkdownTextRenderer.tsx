@@ -300,7 +300,7 @@ function remarkCjkStrongBoundaries() {
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkCjkStrongBoundaries,
   remarkBreaks,
-  remarkGfm,
+  [remarkGfm, { singleTilde: false }],
   remarkCjkAutolinks,
   [remarkMath, { singleDollarTextMath: false }],
   remarkTexMath,
