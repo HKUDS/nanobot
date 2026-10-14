@@ -567,9 +567,7 @@ async with Nanobot.from_config() as bot:
 | `await clear(session_key)` | Clear and persist one session. |
 | `await delete(session_key)` | Delete one session from disk and cache. |
 
-Session operations read committed SQLite state and acknowledge durable commits. Returned
-snapshots are detached; there is no deferred save or cache flush. See
-[Session storage](session-storage.md) for migration and backup rules.
+Session writes commit before returning. Returned snapshots are detached; changing a snapshot does not save it. See [Session storage](cli-reference.md#session-storage) for upgrade and backup instructions.
 
 Ingested messages must include `role` and `content`. Roles may be `user`, `assistant`, `tool`, or `system`. Other fields, such as `timestamp`, `source_session_id`, or `source_date`, are persisted as message metadata.
 
