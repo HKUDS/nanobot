@@ -13,7 +13,6 @@ from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import (
     SessionSummary,
-    is_summary_checkpoint,
     session_summary_from_metadata,
 )
 
@@ -59,13 +58,6 @@ class AutoCompact:
             return False
         return idle_seconds >= self._ttl * 60
 
-    @staticmethod
-    def _session_has_unarchived_messages(session: Session) -> bool:
-        return any(
-            not message.get("_command") and not is_summary_checkpoint(message)
-            for message in session.messages[session.last_archived:]
-        )
-
     async def check_expired(
         self,
         schedule_background: Callable[[Coroutine[Any, Any, None]], None],
@@ -81,9 +73,9 @@ class AutoCompact:
                 continue
             if key in active_keys or not self._is_expired(info.get("updated_at"), now):
                 continue
-            session = await self.sessions.state.get(key)
-            if not self._session_has_unarchived_messages(session):
+            if not await self.sessions.state.has_unarchived_messages(key):
                 continue
+            session = await self.sessions.state.get(key)
             try:
                 runtime = await resolve_runtime(session)
             except (KeyError, ValueError):

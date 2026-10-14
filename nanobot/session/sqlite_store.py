@@ -22,6 +22,7 @@ from nanobot.session.manager import (
     message_preview_text,
     metadata_title,
 )
+from nanobot.session.summary import is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY
 
 _CHECKPOINT = "runtime_checkpoint"
@@ -233,6 +234,21 @@ class SqliteSessionStore:
                 # A header carries the real offset even though history was not requested.
                 session.last_archived = row["last_archived"]
             return session
+
+    def has_unarchived_messages(self, key: str) -> bool:
+        """Check the indexed suffix without loading the archived transcript."""
+        with self.transaction(write=False) as db:
+            for row in db.execute(
+                """SELECT record FROM messages
+                   WHERE session_key=? AND position >= (
+                       SELECT last_archived FROM sessions WHERE key=?
+                   ) ORDER BY position""",
+                (key, key),
+            ):
+                message = _object(row[0])
+                if not message.get("_command") and not is_summary_checkpoint(message):
+                    return True
+            return False
 
     @staticmethod
     def _write_metadata(db: sqlite3.Connection, key: str, values: dict[str, Any], *, bump_revision: bool = True) -> None:

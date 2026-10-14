@@ -998,8 +998,9 @@ class TestProactiveAutoCompact:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_no_reschedule_after_successful_archive(self, tmp_path):
-        """Already-archived session should NOT be re-scheduled on subsequent ticks."""
+    @pytest.mark.parametrize("command_tail", [False, True])
+    async def test_no_reschedule_after_successful_archive(self, tmp_path, monkeypatch, command_tail):
+        """Idle scans skip archived history until another ordinary message arrives."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 5, prefix="old")
@@ -1009,14 +1010,33 @@ class TestProactiveAutoCompact:
         _fake_compact = _make_fake_compact(loop)
         loop.consolidator.compact_idle_session = _fake_compact
 
-        # First tick: archives the session
-        await self._run_check_expired(loop)
-        assert _fake_compact.state["count"] == 1
+        try:
+            await self._run_check_expired(loop)
+            assert _fake_compact.state["count"] == 1
 
-        # Second tick: should NOT re-schedule because the session has no removable tail.
-        await self._run_check_expired(loop)
-        assert _fake_compact.state["count"] == 1  # Still 1, not re-scheduled
-        await loop.aclose()
+            if command_tail:
+                session = await loop.sessions.state.get(session.key)
+                session.add_message("user", "/status", _command=True)
+                session.add_message("assistant", "Ready.", _command=True)
+                session.updated_at = datetime.now() - timedelta(minutes=20)
+                await loop.sessions.state.finish_turn(session)
+
+            await loop.sessions.state.discard(session.key)
+            with monkeypatch.context() as patch:
+                patch.setattr(loop.sessions.state, "get", AsyncMock(side_effect=AssertionError(
+                    "an idle scan must not load an already-archived transcript",
+                )))
+                await self._run_check_expired(loop)
+            assert _fake_compact.state["count"] == 1
+
+            session = await loop.sessions.state.get(session.key)
+            session.add_message("user", "Another topic.")
+            session.updated_at = datetime.now() - timedelta(minutes=20)
+            await loop.sessions.state.finish_turn(session)
+            await self._run_check_expired(loop)
+            assert _fake_compact.state["count"] == 2
+        finally:
+            await loop.aclose()
 
     @pytest.mark.asyncio
     async def test_empty_session_does_not_schedule_idle_compact(self, tmp_path):

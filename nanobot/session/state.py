@@ -779,6 +779,15 @@ class SessionState:
             return cast(dict[str, Any] | None, self._store.read_metadata(key))
         return await self._execute(key, read, write=False)
 
+    async def has_unarchived_messages(self, key: str) -> bool:
+        """Check committed archive eligibility without returning a turn draft."""
+        return await self._execute(
+            key,
+            lambda: self._store.has_unarchived_messages(key),
+            operation_name="has_unarchived_messages",
+            write=False,
+        )
+
     async def list_sessions(self) -> list[dict[str, Any]]:
         return await self._execute(
             None,

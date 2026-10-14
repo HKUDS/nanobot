@@ -15,6 +15,7 @@ def _mock_sessions():
     sessions = MagicMock(spec=SessionManager)
     sessions.state.get = AsyncMock(side_effect=lambda key: sessions.get_or_create(key))
     sessions.state.list_sessions = AsyncMock(side_effect=lambda: sessions.list_sessions())
+    sessions.state.has_unarchived_messages = AsyncMock(return_value=True)
     return sessions
 
 
@@ -406,12 +407,14 @@ class TestCheckExpired:
             {"key": "cli:done", "updated_at": last_active.isoformat()},
         ]
         mock_sm.get_or_create.return_value = session
+        mock_sm.state.has_unarchived_messages.return_value = False
         ac.sessions = mock_sm
 
         scheduler = MagicMock()
         await ac.check_expired(scheduler, _resolve_runtime)
 
         scheduler.assert_not_called()
+        mock_sm.state.get.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
