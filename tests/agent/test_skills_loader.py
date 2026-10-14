@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.agent import skills as agent_skills
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.filesystem import ListDirTool, WriteFileTool
 from nanobot.agent.tools.search import GrepTool
@@ -463,6 +465,93 @@ def test_multiple_explicit_skills_share_one_ordered_runtime_context(tmp_path: Pa
         "### Skill: alpha"
     )
     assert "### Skill: always" not in context.content
+
+
+def test_plain_message_skips_explicit_skill_discovery(tmp_path: Path, monkeypatch) -> None:
+    loader = SkillsLoader(tmp_path)
+
+    def unexpected_discovery():
+        pytest.fail("ordinary chat must not scan skills for explicit references")
+
+    monkeypatch.setattr(loader, "_discover_skills", unexpected_discovery)
+    assert loader.build_explicit_skill_runtime_context("Explain this project") is None
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_prompt_reads_skills_once_and_refreshes_on_next_build(
+    tmp_path: Path, monkeypatch, explicit: bool,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    skills = workspace / "skills"
+    alpha = _write_skill(skills, "alpha", metadata_json={"always": True}, body="First instructions")
+    beta = _write_skill(skills, "beta", metadata_json={"requires": {"bins": ["prompt-test-cli"]}})
+    builder = ContextBuilder(workspace)
+    builder.skills = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    documents = {alpha, beta}
+    reads: list[Path] = []
+    parses: list[str] = []
+    original_read = Path.read_text
+    original_parse = agent_skills.parse_skill_metadata
+    original_discover = builder.skills._discover_skills
+    discoveries = 0
+    command_available = False
+    checks: list[str] = []
+
+    def discover():
+        nonlocal discoveries
+        discoveries += 1
+        return original_discover()
+
+    def read(path, *args, **kwargs):
+        if path in documents:
+            reads.append(path)
+        return original_read(path, *args, **kwargs)
+
+    def parse(content):
+        parses.append(content)
+        return original_parse(content)
+
+    def which(command):
+        checks.append(command)
+        return "installed-command" if command_available else None
+
+    def build_prompt():
+        if explicit:
+            messages = builder.build_messages(history=[], current_message="Use $alpha and $beta")
+            return "\n".join(message["content"] for message in messages)
+        return builder.build_system_prompt()
+
+    monkeypatch.setattr(builder.skills, "_discover_skills", discover)
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(agent_skills, "parse_skill_metadata", parse)
+    monkeypatch.setattr("nanobot.agent.skills.shutil.which", which)
+    first = build_prompt()
+    assert "First instructions" in first
+    assert "unavailable: CLI: prompt-test-cli" in first
+    assert discoveries == 1
+    assert all(reads.count(path) == 1 for path in documents)
+    assert len(parses) == len(documents)
+    assert checks == ["prompt-test-cli"]
+
+    alpha.write_text(original_read(alpha).replace("First instructions", "Updated instructions"), encoding="utf-8")
+    beta.write_text(original_read(beta).replace("---\n", "---\ndescription: Updated description\n", 1), encoding="utf-8")
+    command_available = True
+    documents.add(_write_skill(skills, "gamma", body="New skill"))
+    reads.clear()
+    parses.clear()
+    checks.clear()
+    second = build_prompt()
+    assert "Updated instructions" in second and "First instructions" not in second
+    assert "Updated description" in second
+    assert "unavailable: CLI: prompt-test-cli" not in second
+    assert "**gamma**" in second
+    assert discoveries == 2
+    assert all(reads.count(path) == 1 for path in documents)
+    assert len(parses) == len(documents)
+    assert checks == ["prompt-test-cli"]
 
 
 # -- multiline description tests (YAML folded > and literal |) -----------------

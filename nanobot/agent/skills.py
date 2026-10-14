@@ -4,6 +4,10 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,6 +28,15 @@ from nanobot.runtime_context import RuntimeContextBlock
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
 
 
+@dataclass
+class _SkillSnapshot:
+    entries: list[dict[str, str]] | None = None
+    aliases: dict[str, str] | None = None
+    documents: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, dict[str, object] | None] = field(default_factory=dict)
+    binaries: dict[str, bool] = field(default_factory=dict)
+
+
 class SkillsLoader:
     """
     Loader for agent skills.
@@ -37,15 +50,34 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self._snapshot: ContextVar[_SkillSnapshot | None] = ContextVar("skill_snapshot", default=None)
+
+    @contextmanager
+    def snapshot(self) -> Generator[None, None, None]:
+        """Reuse discovery, documents, metadata, and CLI checks until this scope exits."""
+        if self._snapshot.get() is not None:
+            yield
+            return
+        token = self._snapshot.set(_SkillSnapshot())
+        try:
+            yield
+        finally:
+            self._snapshot.reset(token)
 
     def _skill_aliases(self) -> dict[str, str]:
         """Return compatibility aliases owned by installed CLI Apps."""
         from nanobot.apps.cli import CliAppManager
 
+        snapshot = self._snapshot.get()
+        if snapshot is not None and snapshot.aliases is not None:
+            return snapshot.aliases
         try:
-            return CliAppManager(workspace=self.workspace).installed_skill_aliases()
+            aliases = CliAppManager(workspace=self.workspace).installed_skill_aliases()
         except OSError:
-            return {}
+            aliases = {}
+        if snapshot is not None:
+            snapshot.aliases = aliases
+        return aliases
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
@@ -73,6 +105,22 @@ class SkillsLoader:
         Returns:
             List of skill info dicts with 'name', 'path', 'source'.
         """
+        with self.snapshot():
+            return self._list_skills(filter_unavailable)
+
+    def _list_skills(self, filter_unavailable: bool) -> list[dict[str, str]]:
+        snapshot = self._snapshot.get()
+        if snapshot is not None and snapshot.entries is not None:
+            skills = snapshot.entries
+        else:
+            skills = self._discover_skills()
+            if snapshot is not None:
+                snapshot.entries = skills
+        if filter_unavailable:
+            return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
+        return skills
+
+    def _discover_skills(self) -> list[dict[str, str]]:
         from nanobot.agent.plugins import enabled_agent_plugin_skills
 
         plugin_skills = enabled_agent_plugin_skills(self.workspace)
@@ -101,8 +149,6 @@ class SkillsLoader:
                     disabled.update((legacy, canonical))
             skills = [s for s in skills if s["name"] not in disabled]
 
-        if filter_unavailable:
-            return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
         return skills
 
     def load_skill(self, name: str) -> str | None:
@@ -119,7 +165,15 @@ class SkillsLoader:
         available = {skill["name"] for skill in skills}
         resolved = name if name in available else self._skill_aliases().get(name, name)
         entry = next((skill for skill in skills if skill["name"] == resolved), None)
-        return Path(entry["path"]).read_text(encoding="utf-8") if entry else None
+        if entry is None:
+            return None
+        snapshot = self._snapshot.get()
+        if snapshot is not None and resolved in snapshot.documents:
+            return snapshot.documents[resolved]
+        content = Path(entry["path"]).read_text(encoding="utf-8")
+        if snapshot is not None:
+            snapshot.documents[resolved] = content
+        return content
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
@@ -140,7 +194,8 @@ class SkillsLoader:
 
     def get_explicitly_invoked_skills(self, text: str) -> list[str]:
         """Resolve ``$skill-name`` references to enabled, available skills."""
-        if not text:
+        references = list(_SKILL_REFERENCE.finditer(text))
+        if not references:
             return []
         available = {
             entry["name"]
@@ -148,7 +203,7 @@ class SkillsLoader:
         }
         aliases = self._skill_aliases()
         invoked: list[str] = []
-        for match in _SKILL_REFERENCE.finditer(text):
+        for match in references:
             requested = match.group(1)
             name = requested if requested in available else aliases.get(requested, requested)
             if name in available and name not in invoked:
@@ -160,6 +215,10 @@ class SkillsLoader:
         text: str,
     ) -> RuntimeContextBlock | None:
         """Load non-always skills explicitly invoked by the current message."""
+        with self.snapshot():
+            return self._build_explicit_skill_runtime_context(text)
+
+    def _build_explicit_skill_runtime_context(self, text: str) -> RuntimeContextBlock | None:
         skill_names = self.get_explicitly_invoked_skills(text)
         if not skill_names:
             return None
@@ -196,6 +255,10 @@ class SkillsLoader:
         Returns:
             Markdown-formatted skills summary.
         """
+        with self.snapshot():
+            return self._build_skills_summary(exclude, workspace=workspace)
+
+    def _build_skills_summary(self, exclude: set[str] | None, *, workspace: Path | None) -> str:
         all_skills = self.list_skills(filter_unavailable=False)
         if not all_skills:
             return ""
@@ -256,7 +319,7 @@ class SkillsLoader:
         """Get a description of missing requirements."""
         required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return ", ".join(
-            [f"CLI: {command_name}" for command_name in required_bins if not shutil.which(command_name)]
+            [f"CLI: {command_name}" for command_name in required_bins if not self._binary_available(command_name)]
             + [f"ENV: {env_name}" for env_name in required_env_vars if not os.environ.get(env_name)]
         )
 
@@ -272,7 +335,7 @@ class SkillsLoader:
         return {
             "bins": bins,
             "env": env,
-            "missing_bins": [value for value in bins if not shutil.which(value)],
+            "missing_bins": [value for value in bins if not self._binary_available(value)],
             "missing_env": [value for value in env if not os.environ.get(value)],
         }
 
@@ -316,9 +379,18 @@ class SkillsLoader:
     def _check_requirements(self, skill_meta: dict[str, Any]) -> bool:
         """Check if skill requirements are met (bins, env vars)."""
         required_bins, required_env_vars = self._requirement_lists(skill_meta)
-        return all(shutil.which(cmd) for cmd in required_bins) and all(
+        return all(self._binary_available(cmd) for cmd in required_bins) and all(
             os.environ.get(var) for var in required_env_vars
         )
+
+    def _binary_available(self, command: str) -> bool:
+        snapshot = self._snapshot.get()
+        if snapshot is not None and command in snapshot.binaries:
+            return snapshot.binaries[command]
+        available = shutil.which(command) is not None
+        if snapshot is not None:
+            snapshot.binaries[command] = available
+        return available
 
     def _get_skill_meta(self, name: str) -> dict[str, Any]:
         """Get nanobot metadata for a skill (cached in frontmatter)."""
@@ -327,6 +399,10 @@ class SkillsLoader:
 
     def get_always_skills(self) -> list[str]:
         """Get skills marked as always=true that meet requirements."""
+        with self.snapshot():
+            return self._get_always_skills()
+
+    def _get_always_skills(self) -> list[str]:
         return [
             entry["name"]
             for entry in self.list_skills(filter_unavailable=True)
@@ -347,4 +423,10 @@ class SkillsLoader:
         Returns:
             Metadata dict or None.
         """
-        return parse_skill_metadata(self.load_skill(name) or "")
+        snapshot = self._snapshot.get()
+        if snapshot is not None and name in snapshot.metadata:
+            return snapshot.metadata[name]
+        metadata = parse_skill_metadata(self.load_skill(name) or "")
+        if snapshot is not None:
+            snapshot.metadata[name] = metadata
+        return metadata

@@ -115,16 +115,17 @@ class ContextBuilder:
             if memory and not self._is_template_content(memory, "memory/MEMORY.md"):
                 parts.append(f"# Memory\n\n## Long-term Memory\n{memory}")
 
-        active_skills = self.skills.get_always_skills()
-        if active_skills:
-            active_content = self.skills.load_skills_for_context(active_skills)
-            if active_content:
-                parts.append(f"# Active Skills\n\n{active_content}")
+        with self.skills.snapshot():
+            active_skills = self.skills.get_always_skills()
+            if active_skills:
+                active_content = self.skills.load_skills_for_context(active_skills)
+                if active_content:
+                    parts.append(f"# Active Skills\n\n{active_content}")
 
-        skills_summary = self.skills.build_skills_summary(
-            exclude=set(active_skills),
-            workspace=root,
-        )
+            skills_summary = self.skills.build_skills_summary(
+                exclude=set(active_skills),
+                workspace=root,
+            )
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
@@ -269,29 +270,30 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
-        messages: list[dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": self.build_system_prompt(
-                    channel=channel,
-                    session_summary=transcript.session_summary,
-                    workspace=root,
-                    include_memory=include_memory,
-                ),
-            },
-            *transcript.history,
-        ]
-        if transcript.current_message is None:
-            return messages
+        with self.skills.snapshot():
+            messages: list[dict[str, Any]] = [
+                {
+                    "role": "system",
+                    "content": self.build_system_prompt(
+                        channel=channel,
+                        session_summary=transcript.session_summary,
+                        workspace=root,
+                        include_memory=include_memory,
+                    ),
+                },
+                *transcript.history,
+            ]
+            if transcript.current_message is None:
+                return messages
 
-        current = self.build_current_message(
-            transcript.current_message,
-            media=list(transcript.media) if transcript.media else None,
-            current_role=transcript.current_role,
-            runtime_context_blocks=transcript.runtime_context_blocks,
-        )
-        messages.append(current)
-        return messages
+            current = self.build_current_message(
+                transcript.current_message,
+                media=list(transcript.media) if transcript.media else None,
+                current_role=transcript.current_role,
+                runtime_context_blocks=transcript.runtime_context_blocks,
+            )
+            messages.append(current)
+            return messages
 
     def build_current_message(
         self,
