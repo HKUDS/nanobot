@@ -34,7 +34,7 @@ interface McpManagementDialogProps {
   onOpenChange: (open: boolean) => void;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onAction: (action: McpAction, name: string, values?: Record<string, string>) => void;
-  onOAuthConnect: (name: string, reset?: boolean) => void;
+  onOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
 }
 
@@ -115,7 +115,7 @@ export function McpManagementDialog({
   const connect = () => {
     onOpenChange(false);
     if (isOAuth) {
-      onOAuthConnect(preset.name, configuredInstalled);
+      onOAuthConnect(preset.name, configuredInstalled, values);
       return;
     }
     onAction(configuredInstalled ? "reconnect" : "enable", preset.name, values);

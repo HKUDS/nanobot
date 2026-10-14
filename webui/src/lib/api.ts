@@ -1000,11 +1000,12 @@ export async function startMcpOAuth(
   transport: WebUIMutationTransport,
   name: string,
   reset: boolean = false,
+  values: Record<string, string> = {},
 ): Promise<McpOAuthFlowPayload> {
   return mutation<McpOAuthFlowPayload>(
     transport,
     "settings.mcp.oauth_start",
-    { name, ...(reset ? { reset: true } : {}) },
+    { ...values, name, ...(reset ? { reset: true } : {}) },
     30_000,
   );
 }

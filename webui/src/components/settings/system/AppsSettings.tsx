@@ -173,7 +173,7 @@ export function AppsCatalogSettings({
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
   onMcpAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect", name: string, values?: Record<string, string>) => void;
-  onMcpOAuthConnect: (name: string, reset?: boolean) => void;
+  onMcpOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onMcpOAuthCancel: () => void;
   onMcpOAuthOpen: () => void;
   onMcpOAuthCallbackUrlChange: (value: string) => void;
@@ -526,7 +526,7 @@ function McpAppsCatalogRow({
   showTypeBadge: boolean;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect", name: string, values?: Record<string, string>) => void;
-  onOAuthConnect: (name: string, reset?: boolean) => void;
+  onOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onOAuthCancel: () => void;
   onOAuthOpen: () => void;
   onOAuthCallbackUrlChange: (value: string) => void;
@@ -582,13 +582,13 @@ function McpAppsCatalogRow({
   const callbackErrorId = `${callbackInputId}-error`;
 
   const enableOrOpenSetup = () => {
-    if (isOAuth) {
-      onOAuthConnect(preset.name);
-      return;
-    }
     if (needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
       setManagementTab("connection");
       setManagementOpen(true);
+      return;
+    }
+    if (isOAuth) {
+      onOAuthConnect(preset.name);
       return;
     }
     onAction("enable", preset.name, values);
@@ -732,7 +732,7 @@ function McpAppsCatalogRow({
               visibleLabel={tx("settings.mcp.setup", "Connect")}
               busy={oauthBusy}
               disabled={anotherOAuthBusy}
-              onClick={() => onOAuthConnect(preset.name)}
+              onClick={enableOrOpenSetup}
             />
           ) : preset.installed && !preset.configured ? (
             <AppsActionButton

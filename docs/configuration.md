@@ -2172,6 +2172,8 @@ MCP servers can run locally over stdio or connect remotely over HTTP:
 
 Remote HTTP servers may use browser OAuth instead of static headers. In the WebUI, open **Apps → MCP → Add MCP server**, choose **Custom**, select HTTP or SSE, and choose **OAuth** under **Authentication**. Save the server, then choose **Connect**. For manual configuration, add `auth: "oauth"` and open **Apps → MCP** to connect. Known presets such as Xmind, Notion, and Linear add the config automatically on first click.
 
+The [MCP service presets](./mcp-presets.md) include hosted services with browser sign-in or API keys, plus local servers for Google Workspace, Microsoft 365, Firebase, and databases. Services such as Metabase and Sigma first ask for your instance or organization MCP URL. Credential fields accept the token itself; nanobot adds the required authorization header.
+
 <details>
 <summary>Manual configuration</summary>
 
