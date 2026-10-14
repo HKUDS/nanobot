@@ -1620,7 +1620,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "No se pudieron cargar las subtareas.",
       "stopFailed": "No se pudo detener esta tarea.",
       "stopTask": "Detener {{label}}",
       "receiptHelp": "Entregado significa que el mensaje se incluyó en la siguiente solicitud del subagente, sin confirmar su ejecución.",

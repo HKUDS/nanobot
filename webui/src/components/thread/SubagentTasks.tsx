@@ -32,7 +32,6 @@ function isActive(task: SubagentTaskSnapshot): boolean {
 
 interface TaskContext {
   tasks: ObservedSubagentTask[];
-  loadError: string | null;
   stopError: string | null;
   stoppingId: string | null;
   open: (task: SubagentTaskSnapshot, trigger: HTMLButtonElement) => void;
@@ -59,7 +58,6 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   const [tasks, setTasks] = useState<ObservedSubagentTask[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [stopError, setStopError] = useState<string | null>(null);
   const scopeGeneration = useRef(0);
   const mounted = useRef(true);
@@ -72,7 +70,6 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     setTasks([]);
     setSelectedId(null);
     setStoppingId(null);
-    setLoadError(null);
     setStopError(null);
     return () => { scopeGeneration.current += 1; };
   }, [client, sessionKey]);
@@ -102,10 +99,9 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
         const payload = await fetchSubagentTasks(token, sessionKey);
         if (!cancelled && connected && generation === connectionGeneration) {
           setTasks((current) => mergeSubagentTasks(current, payload.tasks));
-          setLoadError(null);
         }
       } catch {
-        if (!cancelled && connected && generation === connectionGeneration) setLoadError(t("thread.subagents.loadFailed"));
+        // Background read failures retain the last task snapshot.
       } finally {
         refreshing = false;
         if (refreshPending && !cancelled) {
@@ -116,19 +112,13 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     };
     const unsubscribeChat = liveEvents ? client.onChat(sessionKey.slice("websocket:".length), (event) => {
       if (cancelled || !connected || event.event !== "subagent_task") return;
-      if (!isSubagentTask(event.task)) {
-        setLoadError(t("thread.subagents.loadFailed"));
-        return;
-      }
+      if (!isSubagentTask(event.task)) return;
       setTasks((current) => mergeSubagentTasks(current, [event.task]));
     }) : undefined;
     const unsubscribeStatus = client.onStatus((status) => {
       connected = status === "open";
       if (connected) void refresh();
-      else {
-        connectionGeneration += 1;
-        setLoadError(null);
-      }
+      else connectionGeneration += 1;
     });
     const focus = () => void refresh();
     window.addEventListener("focus", focus);
@@ -138,7 +128,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       unsubscribeStatus();
       window.removeEventListener("focus", focus);
     };
-  }, [client, enabled, liveEvents, active, sessionKey, token, pageVisible, paneVisible, t]);
+  }, [client, enabled, liveEvents, active, sessionKey, token, pageVisible, paneVisible]);
 
   const stop = async (task: SubagentTaskSnapshot) => {
     if (!sessionKey) return;
@@ -157,7 +147,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   };
   const selected = enabled && active && paneVisible ? tasks.find((task) => task.task_id === selectedId) : undefined;
   const value: TaskContext = {
-    tasks: enabled ? tasks : [], loadError: enabled ? loadError : null,
+    tasks: enabled ? tasks : [],
     stopError: enabled ? stopError : null, stoppingId,
     open: (task, target) => { trigger.current = target; setSelectedId(task.task_id); }, stop,
     register: (id, button, previous) => {
@@ -266,7 +256,7 @@ function TaskButton({ task }: { task: ObservedSubagentTask }) {
 
 export function useHasSubagentContent(): boolean {
   const context = useContext(TasksContext);
-  return !!context && (context.tasks.length > 0 || !!context.loadError || !!context.stopError);
+  return !!context && (context.tasks.length > 0 || !!context.stopError);
 }
 
 /** Prefer an exact prompt, then its turn's first prompt when replay changed message IDs. */
@@ -292,7 +282,7 @@ export function SubagentThreadMessages(props: ComponentProps<typeof ThreadMessag
   return <ThreadMessages {...props}
     beforeMessages={<SubagentWork tasks={groups.unlinked} unlinked />}
     afterUserMessage={(message) => <SubagentWork tasks={groups.byMessage.get(message.id) ?? []} />}
-    afterMessages={<SubagentTaskErrors />} />;
+    afterMessages={<SubagentStopError />} />;
 }
 
 function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask[]; unlinked?: boolean }) {
@@ -338,11 +328,10 @@ function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask
   </section>;
 }
 
-function SubagentTaskErrors() {
+function SubagentStopError() {
   const context = useContext(TasksContext);
-  if (!context?.loadError && !context?.stopError) return null;
+  if (!context?.stopError) return null;
   return <div className="thread-message-row mt-2 space-y-1 text-xs text-destructive">
-    {context.loadError ? <p role="alert">{context.loadError}</p> : null}
-    {context.stopError ? <p role="alert">{context.stopError}</p> : null}
+    <p role="alert">{context.stopError}</p>
   </div>;
 }

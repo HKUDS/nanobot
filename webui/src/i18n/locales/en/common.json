@@ -1819,7 +1819,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Could not load subtasks.",
       "stopFailed": "Could not stop this task.",
       "stopTask": "Stop {{label}}",
       "receiptHelp": "Delivered means the message was included in the subtask’s next model request. It does not mean the instructions have been carried out.",

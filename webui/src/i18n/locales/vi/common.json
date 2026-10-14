@@ -1619,7 +1619,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Không thể tải tác vụ con.",
       "stopFailed": "Không thể dừng tác vụ này.",
       "stopTask": "Dừng {{label}}",
       "receiptHelp": "Đã chuyển nghĩa là tin nhắn đã được đưa vào yêu cầu mô hình tiếp theo của tác nhân con, không xác nhận công việc đã hoàn tất.",

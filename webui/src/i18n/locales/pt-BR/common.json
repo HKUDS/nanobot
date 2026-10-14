@@ -1633,7 +1633,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Não foi possível carregar as subtarefas.",
       "stopFailed": "Não foi possível interromper esta tarefa.",
       "stopTask": "Interromper {{label}}",
       "receiptHelp": "Entregue significa que a mensagem foi incluída na próxima solicitação do subagente, sem confirmar sua execução.",

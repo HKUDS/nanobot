@@ -1619,7 +1619,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Tidak dapat memuat subtugas.",
       "stopFailed": "Tidak dapat menghentikan tugas ini.",
       "stopTask": "Hentikan {{label}}",
       "receiptHelp": "Terkirim berarti pesan disertakan dalam permintaan model berikutnya dari subagen, bukan konfirmasi bahwa pekerjaan selesai.",

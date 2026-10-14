@@ -1619,7 +1619,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Impossible de charger les sous-tâches.",
       "stopFailed": "Impossible d’arrêter cette tâche.",
       "stopTask": "Arrêter {{label}}",
       "receiptHelp": "Livré signifie que le message a été inclus dans la prochaine requête du sous-agent, sans confirmer son exécution.",
