@@ -121,32 +121,37 @@ class SkillsLoader:
         return skills
 
     def _discover_skills(self) -> list[dict[str, str]]:
-        from nanobot.agent.plugins import enabled_agent_plugin_skills
+        from nanobot.agent.plugins import enabled_agent_plugin_skill_documents
 
-        plugin_skills = enabled_agent_plugin_skills(self.workspace)
+        plugin_skills = enabled_agent_plugin_skill_documents(self.workspace)
+        disabled = set(self.disabled_skills)
+        if disabled:
+            for legacy, canonical in self._skill_aliases().items():
+                if legacy in disabled or canonical in disabled:
+                    disabled.update((legacy, canonical))
         skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
         seen_names = {entry["name"] for entry in skills}
-        for name, path in plugin_skills:
-            if name in seen_names:
+        snapshot = self._snapshot.get()
+        for skill in plugin_skills:
+            if skill.name in seen_names:
                 continue
             skills.append(
                 {
-                    "name": name,
-                    "path": str(path),
+                    "name": skill.name,
+                    "path": str(skill.path),
                     "source": "plugin",
                 }
             )
-            seen_names.add(name)
+            if snapshot is not None and skill.name not in disabled:
+                snapshot.documents[skill.name] = skill.content
+                snapshot.metadata[skill.name] = skill.metadata
+            seen_names.add(skill.name)
         if self.builtin_skills and self.builtin_skills.exists():
             skills.extend(
                 self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=seen_names)
             )
 
-        if self.disabled_skills:
-            disabled = set(self.disabled_skills)
-            for legacy, canonical in self._skill_aliases().items():
-                if legacy in disabled or canonical in disabled:
-                    disabled.update((legacy, canonical))
+        if disabled:
             skills = [s for s in skills if s["name"] not in disabled]
 
         return skills
@@ -161,6 +166,10 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
+        with self.snapshot():
+            return self._load_skill(name)
+
+    def _load_skill(self, name: str) -> str | None:
         skills = self.list_skills(filter_unavailable=False)
         available = {skill["name"] for skill in skills}
         resolved = name if name in available else self._skill_aliases().get(name, name)
