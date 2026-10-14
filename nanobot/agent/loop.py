@@ -1330,10 +1330,14 @@ class AgentLoop:
         if now < self._next_idle_compact_check_at:
             return
         self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
+        # Direct turns share dispatch locks with bus turns but have no pending queue.
+        active_session_keys = self._pending_queues.keys() | {
+            key for key, lock in self._session_locks.items() if lock.locked()
+        }
         self.auto_compact.check_expired(
             self.schedule_background,
             self.runtime_for_session,
-            active_session_keys=self._pending_queues.keys(),
+            active_session_keys=active_session_keys,
         )
 
     async def run(self) -> None:
