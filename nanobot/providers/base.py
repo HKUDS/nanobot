@@ -29,6 +29,7 @@ from nanobot.events import (
 )
 from nanobot.llm_usage.types import LLMUsage as LLMUsage
 from nanobot.providers.generation import GenerationSettings as GenerationSettings
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
 if TYPE_CHECKING:
@@ -433,6 +434,7 @@ class LLMProvider(ABC):
         self.provider_name = provider_name
         self.generation: GenerationSettings = GenerationSettings()
         self._llm_call_observer: LLMCallObserver | None = None
+        self._usage_estimation_slots = asyncio.Semaphore(2)
 
     def set_llm_call_observer(self, observer: LLMCallObserver | None) -> None:
         """Attach a fail-open observer for each physical retry-managed call."""
@@ -497,7 +499,59 @@ class LLMProvider(ABC):
         observer = self._llm_call_observer
         if observer is None:
             return response
+        finished_at_ns = time.monotonic_ns()
         usage = self._usage_for_call(response, kwargs)
+        return self._record_llm_call(
+            response, kwargs, observer=observer, usage=usage,
+            started_at_ms=started_at_ms, started_at_ns=started_at_ns,
+            finished_at_ns=finished_at_ns, stream=stream,
+        )
+
+    async def _observe_llm_call_async(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+        *,
+        started_at_ms: int,
+        started_at_ns: int,
+        stream: bool,
+    ) -> LLMResponse:
+        observer = self._llm_call_observer
+        if (
+            observer is None
+            or response.finish_reason in {"error", "cancelled"}
+            or (response.usage is not None and response.usage.total_tokens > 0)
+        ):
+            return self._observe_llm_call(
+                response, kwargs, started_at_ms=started_at_ms,
+                started_at_ns=started_at_ns, stream=stream,
+            )
+        finished_at_ns = time.monotonic_ns()
+
+        async def observe() -> LLMResponse:
+            async with self._usage_estimation_slots:
+                usage = await asyncio.to_thread(self._usage_for_call, response, kwargs)
+            return self._record_llm_call(
+                response, kwargs, observer=observer, usage=usage,
+                started_at_ms=started_at_ms, started_at_ns=started_at_ns,
+                finished_at_ns=finished_at_ns, stream=stream,
+            )
+
+        # Once the request completes, settle its usage and observer before cancellation.
+        return await shield_and_drain(observe())
+
+    def _record_llm_call(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+        *,
+        observer: LLMCallObserver,
+        usage: LLMUsage | None,
+        started_at_ms: int,
+        started_at_ns: int,
+        finished_at_ns: int,
+        stream: bool,
+    ) -> LLMResponse:
         if usage is not None:
             response.usage = usage
         model_value = kwargs.get("model")
@@ -508,7 +562,7 @@ class LLMProvider(ABC):
 
             observer(LLMCallRecord(
                 started_at_ms=started_at_ms,
-                duration_ms=max(0, (time.monotonic_ns() - started_at_ns) // 1_000_000),
+                duration_ms=max(0, (finished_at_ns - started_at_ns) // 1_000_000),
                 provider=self.provider_name,
                 model=model,
                 source=current_llm_usage_source(),
@@ -1014,7 +1068,7 @@ class LLMProvider(ABC):
             raise
         except Exception as exc:
             response = self._error_response_from_exception(exc)
-        return self._observe_llm_call(
+        return await self._observe_llm_call_async(
             response,
             kwargs,
             started_at_ms=started_at_ms,
@@ -1159,7 +1213,7 @@ class LLMProvider(ABC):
             raise
         except Exception as exc:
             response = self._error_response_from_exception(exc)
-        return self._observe_llm_call(
+        return await self._observe_llm_call_async(
             _attach_stream_timing(response),
             kwargs,
             started_at_ms=started_at_ms,

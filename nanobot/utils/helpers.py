@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from loguru import logger
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
+_TOOLS_TOKEN_CACHE_LOCK = Lock()
 _T = TypeVar("_T")
 
 
@@ -112,12 +114,16 @@ def _cache_tools_token_count(
     fingerprint: tuple[int, ...],
     counts: dict[bool, int],
 ) -> None:
-    if (
-        tools_id not in _TOOLS_TOKEN_CACHE
-        and len(_TOOLS_TOKEN_CACHE) >= _TOOLS_TOKEN_CACHE_MAX_ENTRIES
-    ):
-        _TOOLS_TOKEN_CACHE.pop(next(iter(_TOOLS_TOKEN_CACHE)))
-    _TOOLS_TOKEN_CACHE[tools_id] = (fingerprint, counts)
+    with _TOOLS_TOKEN_CACHE_LOCK:
+        cached = _TOOLS_TOKEN_CACHE.get(tools_id)
+        if cached is not None and cached[0] == fingerprint:
+            counts = {**cached[1], **counts}
+        if (
+            tools_id not in _TOOLS_TOKEN_CACHE
+            and len(_TOOLS_TOKEN_CACHE) >= _TOOLS_TOKEN_CACHE_MAX_ENTRIES
+        ):
+            _TOOLS_TOKEN_CACHE.pop(next(iter(_TOOLS_TOKEN_CACHE)))
+        _TOOLS_TOKEN_CACHE[tools_id] = (fingerprint, counts)
 
 
 def _estimate_tools_tokens(
@@ -130,14 +136,15 @@ def _estimate_tools_tokens(
     # ToolRegistry keeps the returned definitions list alive until the registry changes.
     tools_id = id(tools)
     fingerprint = tuple(id(tool) for tool in tools)
-    cached = _TOOLS_TOKEN_CACHE.get(tools_id)
-    if cached and cached[0] == fingerprint:
-        token_count = cached[1].get(leading_separator)
-        if token_count is not None:
-            return token_count
-        counts = cached[1]
-    else:
-        counts = {}
+    with _TOOLS_TOKEN_CACHE_LOCK:
+        cached = _TOOLS_TOKEN_CACHE.get(tools_id)
+        if cached and cached[0] == fingerprint:
+            token_count = cached[1].get(leading_separator)
+            if token_count is not None:
+                return token_count
+            counts = dict(cached[1])
+        else:
+            counts = {}
 
     rendered = json.dumps(tools, ensure_ascii=False)
     if leading_separator:
