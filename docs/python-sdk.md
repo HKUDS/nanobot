@@ -592,11 +592,13 @@ Ingested messages must include `role` and `content`. Roles may be `user`, `assis
 | `await compact_session(session_key)` | Run token-based consolidation for a session. |
 | `await compact_idle_session(session_key, max_suffix=8)` | Run idle-session compaction and return its summary. |
 
+Both compaction methods serialize with turns for the same session key. Call them after `bot.run()` returns, or from a separate task that can wait for the active turn to finish.
+
 ### Host integration context and persisted-turn callbacks
 
 Host applications can attach external context without copying or modifying the nanobot agent loop. A context provider receives a `RequestContext` before each model turn and may return one or more `RuntimeContextBlock` values. Use `attributes` for caller-owned routing data; nanobot keeps it separate from trusted channel metadata and does not persist it in session messages.
 
-`on_session_turn_persisted()` invokes its callback after a non-ephemeral turn has been saved. The callback receives `SessionTurnPersisted` and may read the completed transcript through `bot.sessions`. Callbacks run in registration order, and async callbacks are awaited before the run continues. They are observational: callback exceptions are logged and suppressed so the completed local turn remains successful. Durable external synchronization must catch failures and persist retry work before the callback returns. During SDK runs, callbacks execute while the session is still serialized and must not re-enter `bot.run()` for the same session.
+`on_session_turn_persisted()` invokes its callback after a non-ephemeral turn has been saved. The callback receives `SessionTurnPersisted` and may read the completed transcript through `bot.sessions`. Callbacks run in registration order, and async callbacks are awaited before the run continues. They are observational: callback exceptions are logged and suppressed so the completed local turn remains successful. Durable external synchronization must catch failures and persist retry work before the callback returns. During SDK runs, callbacks execute while the session is still serialized and must not await `bot.run()`, `bot.runtime.compact_session()`, or `bot.runtime.compact_idle_session()` for the same session.
 
 ```python
 import json

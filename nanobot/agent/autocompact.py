@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Collection
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
@@ -27,13 +28,15 @@ SessionEventFactory = Callable[[str], EventSink]
 class AutoCompact:
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0,
-                 bind_events: SessionEventFactory | None = None):
+                 bind_events: SessionEventFactory | None = None,
+                 *, session_lock: Callable[[str], asyncio.Lock]):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
         self._summaries: dict[str, SessionSummary] = {}
         self._bind_events = bind_events
+        self._session_lock = session_lock
 
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
@@ -91,19 +94,20 @@ class AutoCompact:
             self._archiving.discard(key)
             return
         try:
-            summary = await self.consolidator.compact_idle_session(
-                key,
-                runtime=runtime,
-                events=self._bind_events(key) if self._bind_events else NO_EVENTS,
-            )
-            if summary:
-                session = self.sessions.get_or_create(key)
-                stored = session_summary_from_metadata(
-                    session.metadata,
-                    fallback_last_active=session.updated_at,
+            async with self._session_lock(key):
+                summary = await self.consolidator.compact_idle_session(
+                    key,
+                    runtime=runtime,
+                    events=self._bind_events(key) if self._bind_events else NO_EVENTS,
                 )
-                if stored is not None:
-                    self._summaries[key] = stored
+                if summary:
+                    session = self.sessions.get_or_create(key)
+                    stored = session_summary_from_metadata(
+                        session.metadata,
+                        fallback_last_active=session.updated_at,
+                    )
+                    if stored is not None:
+                        self._summaries[key] = stored
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
         finally:

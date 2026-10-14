@@ -210,20 +210,22 @@ class RuntimeClient:
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Summarize one session and exclude its archived messages from replay."""
-        session = self._loop.sessions.get_or_create(session_key)
-        runtime = self._loop.runtime_for_session(session)
-        await self._loop.consolidator.compact_idle_session(
-            session_key,
-            runtime=runtime,
-        )
-        return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
+        async with self._loop._get_session_lock(session_key):  # pyright: ignore[reportPrivateUsage]
+            session = self._loop.sessions.get_or_create(session_key)
+            runtime = self._loop.runtime_for_session(session)
+            await self._loop.consolidator.compact_idle_session(
+                session_key,
+                runtime=runtime,
+            )
+            return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 0) -> str | None:
         """Return a replacement summary; legacy ``max_suffix`` no longer retains history."""
-        session = self._loop.sessions.get_or_create(session_key)
-        runtime = self._loop.runtime_for_session(session)
-        return await self._loop.consolidator.compact_idle_session(
-            session_key,
-            runtime=runtime,
-            max_suffix=max_suffix,
-        )
+        async with self._loop._get_session_lock(session_key):  # pyright: ignore[reportPrivateUsage]
+            session = self._loop.sessions.get_or_create(session_key)
+            runtime = self._loop.runtime_for_session(session)
+            return await self._loop.consolidator.compact_idle_session(
+                session_key,
+                runtime=runtime,
+                max_suffix=max_suffix,
+            )
