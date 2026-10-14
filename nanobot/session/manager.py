@@ -406,6 +406,13 @@ class SessionInfo(TypedDict):
     path: str
 
 
+class SessionActivityInfo(TypedDict):
+    """Idle-maintenance view: identity and freshness only, no transcript preview."""
+
+    key: str
+    updated_at: str
+
+
 @dataclass(frozen=True)
 class _SessionFileSnapshot:
     digest: str
@@ -1412,6 +1419,62 @@ class JsonlSessionStore:
                 }
             return None
 
+    def list_session_activity(self) -> list[SessionActivityInfo]:
+        """List key/updated_at without reading transcript bodies for WebUI previews.
+
+        Idle compaction (#6192) only needs freshness. Walking every message line to
+        build a preview on each scan dominates CPU when the session directory is large.
+        """
+        with self._session_files_lock:
+            return self._list_session_activity_unlocked()
+
+    def _list_session_activity_unlocked(self) -> list[SessionActivityInfo]:
+        sessions: list[SessionActivityInfo] = []
+        for path in self.sessions_dir.glob("*.jsonl"):
+            storage_key = self.session_key_from_path(path)
+            if storage_key is None:
+                continue
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    first_line = handle.readline().strip()
+                    if not first_line:
+                        continue
+                    raw_data: object = json.loads(first_line)
+                    data = _json_object(raw_data)
+                    if data.get("_type") != "metadata":
+                        continue
+                    key_value = cast(object, data.get("key"))
+                    key = (
+                        key_value
+                        if isinstance(key_value, str) and key_value
+                        else storage_key
+                    )
+                    fallback_time = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
+                    updated_at = cast(object, data.get("updated_at"))
+                    sessions.append(
+                        {
+                            "key": key,
+                            "updated_at": (
+                                updated_at
+                                if isinstance(updated_at, str) and updated_at
+                                else fallback_time
+                            ),
+                        }
+                    )
+            except FileNotFoundError:
+                continue
+            except _SESSION_DATA_ERRORS:
+                repaired = self._repair_unlocked(storage_key, path=path)
+                if repaired is not None:
+                    sessions.append(
+                        {
+                            "key": repaired.key,
+                            "updated_at": repaired.updated_at.isoformat(),
+                        }
+                    )
+                continue
+        return sorted(sessions, key=lambda item: item["updated_at"], reverse=True)
+
     def list_sessions(self) -> list[SessionInfo]:
         with self._session_files_lock:
             return self._list_sessions_unlocked()
@@ -1878,6 +1941,16 @@ class SessionManager:
         if updated and (session := self.get_cached(key)) is not None:
             session.metadata.update(deepcopy(updates))
         return updated
+
+    def list_session_activity(self) -> list[dict[str, Any]]:
+        """Keys and updated_at for idle maintenance without transcript previews."""
+        list_activity = getattr(self._store, "list_session_activity", None)
+        if callable(list_activity):
+            return cast(list[dict[str, Any]], list_activity())
+        return [
+            {"key": row["key"], "updated_at": row["updated_at"]}
+            for row in self.list_sessions()
+        ]
 
     def list_sessions(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._store.list_sessions())

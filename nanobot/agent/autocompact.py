@@ -71,7 +71,9 @@ class AutoCompact:
     ) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
         now = datetime.now()
-        for info in self.sessions.list_sessions():
+        # Metadata-only listing: full list_sessions() also builds WebUI previews by
+        # scanning transcript lines, which dominated idle ticks on large session dirs (#6192).
+        for info in self.sessions.list_session_activity():
             key = info.get("key", "")
             # Dream sessions are per-run; persistent maintenance sessions still compact.
             if not key or is_dream_session(key) or key in self._archiving:

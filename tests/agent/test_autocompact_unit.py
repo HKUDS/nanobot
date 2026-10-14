@@ -65,6 +65,9 @@ def test_default_ttl_disables_idle_compaction():
     sessions.list_sessions.return_value = [
         {"key": "cli:idle", "updated_at": datetime.now() - timedelta(days=365)},
     ]
+    sessions.list_session_activity.return_value = [
+        {"key": "cli:idle", "updated_at": datetime.now() - timedelta(days=365)},
+    ]
     sessions.get_or_create.return_value = _make_session(
         key="cli:idle", messages=[{"role": "user", "content": "pending"}],
     )
@@ -167,6 +170,7 @@ class TestCheckExpired:
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
         mock_sm.list_sessions.return_value = []
+        mock_sm.list_session_activity.return_value = []
         ac.sessions = mock_sm
         scheduler = MagicMock()
         ac.check_expired(scheduler, _runtime)
@@ -180,6 +184,7 @@ class TestCheckExpired:
         session = _make_session("cli:old", updated_at=old_dt)
         _add_turns(session, 5)
         mock_sm.list_sessions.return_value = [{"key": "cli:old", "updated_at": old_dt.isoformat()}]
+        mock_sm.list_session_activity.return_value = [{"key": "cli:old", "updated_at": old_dt.isoformat()}]
         mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
 
@@ -210,6 +215,10 @@ class TestCheckExpired:
             {"key": "cli:corrupt", "updated_at": "not-a-timestamp"},
             {"key": "cli:old", "updated_at": old_dt.isoformat()},
         ]
+        mock_sm.list_session_activity.return_value = [
+            {"key": "cli:corrupt", "updated_at": "not-a-timestamp"},
+            {"key": "cli:old", "updated_at": old_dt.isoformat()},
+        ]
         mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
         scheduled = []
@@ -230,6 +239,9 @@ class TestCheckExpired:
         session = _make_session("cli:old", updated_at=old_dt)
         _add_turns(session, 5)
         ac.sessions.list_sessions.return_value = [
+            {"key": "cli:old", "updated_at": old_dt.isoformat()}
+        ]
+        ac.sessions.list_session_activity.return_value = [
             {"key": "cli:old", "updated_at": old_dt.isoformat()}
         ]
         ac.sessions.get_or_create.return_value = session
@@ -263,6 +275,10 @@ class TestCheckExpired:
             {"key": key, "updated_at": old_dt.isoformat()}
             for key in sessions
         ]
+        ac.sessions.list_session_activity.return_value = [
+            {"key": key, "updated_at": old_dt.isoformat()}
+            for key in sessions
+        ]
         ac.sessions.get_or_create.side_effect = sessions.__getitem__
         healthy_runtime = _runtime()
 
@@ -290,6 +306,9 @@ class TestCheckExpired:
         ac.sessions.list_sessions.return_value = [
             {"key": session.key, "updated_at": old_dt.isoformat()}
         ]
+        ac.sessions.list_session_activity.return_value = [
+            {"key": session.key, "updated_at": old_dt.isoformat()}
+        ]
         ac.sessions.get_or_create.return_value = session
 
         def fail(_session: Session):
@@ -304,6 +323,7 @@ class TestCheckExpired:
         mock_sm = MagicMock(spec=SessionManager)
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
         mock_sm.list_sessions.return_value = [{"key": "cli:busy", "updated_at": old_ts}]
+        mock_sm.list_session_activity.return_value = [{"key": "cli:busy", "updated_at": old_ts}]
         ac.sessions = mock_sm
         scheduler = MagicMock()
         ac.check_expired(scheduler, _runtime, active_session_keys={"cli:busy"})
@@ -315,6 +335,7 @@ class TestCheckExpired:
         mock_sm = MagicMock(spec=SessionManager)
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
         mock_sm.list_sessions.return_value = [{"key": "cli:dup", "updated_at": old_ts}]
+        mock_sm.list_session_activity.return_value = [{"key": "cli:dup", "updated_at": old_ts}]
         ac.sessions = mock_sm
         ac._archiving.add("cli:dup")
         scheduler = MagicMock()
@@ -326,6 +347,7 @@ class TestCheckExpired:
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
         mock_sm.list_sessions.return_value = [{"key": "", "updated_at": "old"}]
+        mock_sm.list_session_activity.return_value = [{"key": "", "updated_at": "old"}]
         ac.sessions = mock_sm
         scheduler = MagicMock()
         ac.check_expired(scheduler, _runtime)
@@ -336,6 +358,7 @@ class TestCheckExpired:
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
         mock_sm.list_sessions.return_value = [{"updated_at": "old"}]
+        mock_sm.list_session_activity.return_value = [{"updated_at": "old"}]
         ac.sessions = mock_sm
         scheduler = MagicMock()
         ac.check_expired(scheduler, _runtime)
@@ -347,6 +370,9 @@ class TestCheckExpired:
         mock_sm = MagicMock(spec=SessionManager)
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
         mock_sm.list_sessions.return_value = [
+            {"key": "dream:20260602-155256", "updated_at": old_ts},
+        ]
+        mock_sm.list_session_activity.return_value = [
             {"key": "dream:20260602-155256", "updated_at": old_ts},
         ]
         ac.sessions = mock_sm
@@ -365,6 +391,9 @@ class TestCheckExpired:
         session = _make_session("cli:short", updated_at=last_active)
         _add_turns(session, 2)
         mock_sm.list_sessions.return_value = [
+            {"key": "cli:short", "updated_at": last_active.isoformat()},
+        ]
+        mock_sm.list_session_activity.return_value = [
             {"key": "cli:short", "updated_at": last_active.isoformat()},
         ]
         mock_sm.get_or_create.return_value = session
@@ -389,6 +418,9 @@ class TestCheckExpired:
         _add_turns(session, 2)
         session.last_archived = len(session.messages)
         mock_sm.list_sessions.return_value = [
+            {"key": "cli:done", "updated_at": last_active.isoformat()},
+        ]
+        mock_sm.list_session_activity.return_value = [
             {"key": "cli:done", "updated_at": last_active.isoformat()},
         ]
         mock_sm.get_or_create.return_value = session
