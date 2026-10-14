@@ -950,11 +950,15 @@ describe("ChatList", () => {
     );
 
     const chatsSection = screen.getAllByRole("region")[0];
-    const text = chatsSection.textContent ?? "";
+    const chats = within(chatsSection).getAllByRole("button", {
+      name: /^(Newest|Middle|Older) chat$/,
+    });
 
-    expect(text.indexOf("Newest chat")).toBeLessThan(text.indexOf("Middle chat"));
-    expect(text.indexOf("Middle chat")).toBeLessThan(text.indexOf("Older chat"));
-    expect(within(chatsSection).getByRole("button", { name: "Older chat" })).toBeInTheDocument();
+    expect(chats.map((chat) => chat.textContent)).toEqual([
+      "Newest chat",
+      "Middle chat",
+      "Older chat",
+    ]);
   });
 
   it("shows a pin indicator for pinned chats", () => {

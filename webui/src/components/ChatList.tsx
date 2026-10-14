@@ -1001,26 +1001,17 @@ export const ChatList = memo(function ChatList({
                                   partial={tabPartiallySelected}
                                 />
                               ) : null}
-                                <span className="min-w-0 flex-1 overflow-hidden">
-                                  {projectMode ? (
-                                    <span className="relative flex w-full min-w-0 items-center gap-2">
-                                      <SidebarSessionHandle handle={s.handle} />
-                                      <span className="min-w-0 flex-1 truncate font-normal leading-5">
-                                        {title}
-                                      </span>
-                                      {isPinned ? <PinnedChatIndicator /> : null}
-
+                              <span className="min-w-0 flex-1 overflow-hidden">
+                                <span className={cn(
+                                  "relative flex w-full min-w-0 items-center",
+                                  projectMode ? "gap-2" : "gap-1.5",
+                                )}>
+                                  <SidebarSessionHandle handle={s.handle} />
+                                  <span className="min-w-0 flex-1 truncate font-normal leading-5">
+                                    {title}
                                   </span>
-                                ) : (
-                                  <span className="relative flex w-full min-w-0 items-center gap-1.5">
-                                    <SidebarSessionHandle handle={s.handle} />
-                                    <span className="min-w-0 flex-1 truncate font-normal leading-5">
-                                      {title}
-                                    </span>
-                                    {isPinned ? <PinnedChatIndicator /> : null}
-
-                                  </span>
-                                )}
+                                  {isPinned ? <PinnedChatIndicator /> : null}
+                                </span>
                               </span>
                           </button>
                           <SessionActivityIndicator state={activityState} />

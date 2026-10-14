@@ -125,6 +125,36 @@ it("submits a message through the actual composer using only local preview state
   expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
 });
 
+it("switches the chat list preview between ready, loading, empty and archived states", async () => {
+  const source = "webui/src/components/SidebarSelectionHighlight.tsx";
+  window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => inventory }));
+  render(<Gallery />);
+  await screen.findByRole("heading", { name: "ChatList · 会话列表" });
+  const preview = within(screen.getByRole("region", { name: "Component preview" }));
+  const setMode = async (mode: string) => {
+    await userEvent.click(preview.getByRole("combobox", { name: "会话列表状态" }));
+    await userEvent.click(screen.getByRole("option", { name: mode, exact: true }));
+  };
+
+  expect(preview.getByRole("button", { name: "@design 组件设计" })).toBeVisible();
+  expect(preview.getByRole("button", { name: "@tests 验证交互" })).toBeVisible();
+  expect(preview.getAllByRole("button", { name: /^@/ })).toHaveLength(2);
+
+  await setMode("loading");
+  expect(preview.getByText("Loading…")).toBeVisible();
+  await setMode("empty");
+  expect(preview.getByText("No sessions yet.")).toBeVisible();
+  await setMode("archived");
+  const archived = within(preview.getByRole("region", { name: "Archived" }));
+  expect(archived.getByRole("button", { name: "@history 历史方案" })).toBeVisible();
+  expect(preview.getAllByRole("button", { name: /^@/ })).toHaveLength(3);
+
+  await setMode("ready");
+  expect(preview.getByRole("button", { name: "@design 组件设计" })).toHaveAttribute("aria-current", "page");
+  expect(preview.getAllByRole("button", { name: /^@/ })).toHaveLength(2);
+});
+
 it("edits a pairing route without mounting a client or making a gateway mutation", async () => {
   const source = "webui/src/components/remote/PairRouteSettingsView.tsx";
   window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);

@@ -47,18 +47,20 @@ const initialSessions: ChatSummary[] = [
     createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-13T08:00:00Z", handle: { id: "gallery-components", name: "design" } },
   { key: "websocket:gallery-tests", chatId: "gallery-tests", channel: "websocket", title: "验证交互", preview: "检查错误状态与键盘操作。",
     createdAt: "2026-10-02T12:00:00Z", updatedAt: "2026-10-13T09:00:00Z", handle: { id: "gallery-tests", name: "tests" } },
+  { key: "websocket:gallery-history", chatId: "gallery-history", channel: "websocket", title: "历史方案", preview: "已归档的会话示例。",
+    createdAt: "2026-10-01T10:00:00Z", updatedAt: "2026-10-05T10:00:00Z", handle: { id: "gallery-history", name: "history" } },
 ];
 
 function ChatsPreview() {
   const [sessions, setSessions] = useState(initialSessions);
   const [active, setActive] = useState<string | null>(initialSessions[0].key);
   const [pinned, setPinned] = useState<string[]>([]);
-  const [archived, setArchived] = useState<string[]>([]);
+  const [archived, setArchived] = useState<string[]>(["websocket:gallery-history"]);
   const [mode, setMode] = useState<"ready" | "loading" | "empty" | "archived">("ready");
   const [action, setAction] = useState("");
   const toggle = (keys: string[], key: string) => keys.includes(key) ? keys.filter((value) => value !== key) : [...keys, key];
   return <><StatePicker label="会话列表状态" value={mode} options={["ready", "loading", "empty", "archived"]} onChange={setMode} />
-    <div className="flex h-80 max-w-sm flex-col rounded-panel bg-sidebar p-2"><ChatList sessions={mode === "empty" ? [] : sessions}
+    <div className="flex h-80 max-w-sm flex-col rounded-panel bg-sidebar p-2"><ChatList sessions={mode === "loading" || mode === "empty" ? [] : sessions}
       activeKey={active} onSelect={setActive} pinnedKeys={pinned} archivedKeys={archived} showArchived={mode === "archived"}
       loading={mode === "loading"}
       onTogglePin={(key) => setPinned(toggle(pinned, key))} onToggleArchive={(key) => setArchived(toggle(archived, key))}
