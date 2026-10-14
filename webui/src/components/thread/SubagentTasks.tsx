@@ -86,18 +86,14 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   useEffect(() => {
     if (!enabled || !active || !pageVisible || !paneVisible || !sessionKey || !token) return;
     let cancelled = false;
-    let connected = false;
-    let connectionGeneration = 0;
     let refreshing = false;
     let refreshPending = false;
     const refresh = async () => {
-      if (!connected) return;
       if (refreshing) { refreshPending = true; return; }
       refreshing = true;
-      const generation = connectionGeneration;
       try {
         const payload = await fetchSubagentTasks(token, sessionKey);
-        if (!cancelled && connected && generation === connectionGeneration) {
+        if (!cancelled) {
           setTasks((current) => mergeSubagentTasks(current, payload.tasks));
         }
       } catch {
@@ -111,21 +107,20 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       }
     };
     const unsubscribeChat = liveEvents ? client.onChat(sessionKey.slice("websocket:".length), (event) => {
-      if (cancelled || !connected || event.event !== "subagent_task") return;
+      if (cancelled || event.event !== "subagent_task") return;
       if (!isSubagentTask(event.task)) return;
       setTasks((current) => mergeSubagentTasks(current, [event.task]));
     }) : undefined;
-    const unsubscribeStatus = client.onStatus((status) => {
-      connected = status === "open";
-      if (connected) void refresh();
-      else connectionGeneration += 1;
-    });
+    const unsubscribeStatus = liveEvents ? client.onStatus((status) => {
+      if (status === "open") void refresh();
+    }) : undefined;
+    if (!refreshing) void refresh();
     const focus = () => void refresh();
     window.addEventListener("focus", focus);
     return () => {
       cancelled = true;
       unsubscribeChat?.();
-      unsubscribeStatus();
+      unsubscribeStatus?.();
       window.removeEventListener("focus", focus);
     };
   }, [client, enabled, liveEvents, active, sessionKey, token, pageVisible, paneVisible]);

@@ -29,7 +29,6 @@ const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
 const sendMessageSpy = vi.fn();
 const sendSystemCommandSpy = vi.fn().mockResolvedValue(undefined);
 let mockDefaultChatId: string | null = null;
-let mockClientStatus: ConnectionStatus = "idle";
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 const sessionUpdateHandlers = new Set<(
@@ -244,13 +243,12 @@ vi.mock("@/lib/bootstrap", () => ({
 vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/nanobot-client")>();
   class MockClient {
-    status = mockClientStatus;
+    status = "idle" as const;
     defaultChatId = mockDefaultChatId;
     sendSystemCommand = sendSystemCommandSpy;
     connect = connectSpy;
     onStatus = (handler: (status: ConnectionStatus) => void) => {
       statusHandlers.add(handler);
-      handler(this.status);
       return () => statusHandlers.delete(handler);
     };
     onRuntimeModelUpdate = () => () => {};
@@ -304,7 +302,6 @@ describe("App layout", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     mockSessions = [];
-    mockClientStatus = "idle";
     connectSpy.mockClear();
     updateUrlSpy.mockClear();
     refreshSpy.mockReset();
@@ -370,7 +367,6 @@ describe("App layout", () => {
   });
 
   it.each([false, true])("enables task controls only when bootstrap advertises support: %s", async (supported) => {
-    mockClientStatus = "open";
     mockSessions = [{
       key: "websocket:chat-a", channel: "websocket", chatId: "chat-a",
       createdAt: null, updatedAt: null, title: "Inspection", preview: "Inspect config",
@@ -395,7 +391,7 @@ describe("App layout", () => {
     else expect(screen.queryByText("Config check")).not.toBeInTheDocument();
     const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/subagents"));
     expect(reads).toHaveLength(supported ? 1 : 0);
-    expect(requestMutationSpy.mock.calls.filter(([action]) => action.startsWith("subagent."))).toHaveLength(0);
+    expect(requestMutationSpy).not.toHaveBeenCalled();
   });
 
   it("shows the auth form without an invalid-password error on first load", async () => {

@@ -12,7 +12,6 @@ import type { ConnectionStatus, InboundEvent, SubagentTaskSnapshot, UIMessage } 
 const requestMutation = vi.fn();
 const chatHandlers = new Map<string, Set<(event: InboundEvent) => void>>();
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
-let status: ConnectionStatus = "open";
 const client = {
   requestMutation,
   onChat: vi.fn((chatId: string, handler: (event: InboundEvent) => void) => {
@@ -23,18 +22,12 @@ const client = {
   }),
   onStatus: vi.fn((handler: (status: ConnectionStatus) => void) => {
     statusHandlers.add(handler);
-    handler(status);
+    handler("open");
     return () => { statusHandlers.delete(handler); };
   }),
 };
 function emitTask(snapshot: SubagentTaskSnapshot, chatId = "a") {
   act(() => { chatHandlers.get(chatId)?.forEach((handler) => handler({ event: "subagent_task", chat_id: chatId, task: snapshot })); });
-}
-function emitStatus(next: ConnectionStatus) {
-  act(() => {
-    status = next;
-    statusHandlers.forEach((handler) => handler(next));
-  });
 }
 const messages: UIMessage[] = [
   { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a" },
@@ -81,7 +74,6 @@ describe("session-owned task UI", () => {
     client.onStatus.mockClear();
     chatHandlers.clear();
     statusHandlers.clear();
-    status = "open";
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response([task()])));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
@@ -293,46 +285,6 @@ describe("session-owned task UI", () => {
     await act(async () => { fireEvent(window, new Event("focus")); });
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
     expect(screen.getByText("Cannot stop task")).toBeVisible();
-  });
-
-  it("pauses snapshots while disconnected and refreshes cached tasks after reconnect", async () => {
-    render(layout());
-    await screen.findByRole("button", { name: /Config check Running/ });
-
-    emitStatus("reconnecting");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
-    const reads = vi.mocked(fetch).mock.calls.length;
-    fireEvent(window, new Event("focus"));
-    fireEvent(window, new Event("focus"));
-    expect(fetch).toHaveBeenCalledTimes(reads);
-
-    vi.mocked(fetch).mockResolvedValue(response([task({ revision: 2, state: "done", completed_at: 102 })]));
-    emitStatus("open");
-    await screen.findByRole("button", { name: /Subtasks Finished: 1/ });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("waits for the gateway to open before reading task snapshots", async () => {
-    status = "connecting";
-    render(layout());
-    fireEvent(window, new Event("focus"));
-    expect(fetch).not.toHaveBeenCalled();
-    emitStatus("open");
-    await screen.findByRole("button", { name: /Config check Running/ });
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("refreshes tasks when an earlier snapshot fails during reconnect", async () => {
-    let rejectOld!: (reason: Error) => void;
-    vi.mocked(fetch).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
-    render(layout());
-    vi.mocked(fetch).mockResolvedValue(response([task()]));
-    act(() => { emitStatus("closed"); emitStatus("open"); });
-    await act(async () => { rejectOld(new Error("Network disconnected")); });
-    await screen.findByRole("button", { name: /Config check Running/ });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("retains the last valid snapshot after malformed reads and recovers on refresh", async () => {
