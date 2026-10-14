@@ -108,7 +108,7 @@ def enabled_agent_plugin_skill_documents(workspace: Path) -> list[AgentPluginSki
         for name, path in skill_files:
             raw = documents[path]
             try:
-                content = raw.decode("utf-8") if raw is not None else ""
+                content = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n") if raw is not None else ""
             except UnicodeError:
                 content = ""
             metadata = parse_skill_metadata(content)

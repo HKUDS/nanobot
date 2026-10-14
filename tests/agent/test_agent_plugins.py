@@ -67,12 +67,14 @@ def _loaded_skills(workspace: Path) -> list[str]:
 
 def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
     plugin = _plugin(tmp_path)
-    _skill(
+    plugin_skill = _skill(
         plugin / "skills",
         "shared",
         "name: shared\ndescription: Plugin version.\nalways: true",
         "Plugin body.",
-    )
+    ) / "SKILL.md"
+    plugin_content = plugin_skill.read_text(encoding="utf-8")
+    plugin_skill.write_bytes(plugin_content.replace("\n", "\r\n").encode("utf-8"))
     _skill(tmp_path / "builtin", "shared", body="Built-in body.")
     workspace_skill = _skill(
         tmp_path / "skills", "shared", "name: shared\ndescription: Workspace version."
@@ -88,7 +90,7 @@ def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
     assert [entry["source"] for entry in loader.list_skills()] == ["plugin"]
     assert loader.get_explicitly_invoked_skills("Use $shared") == ["shared"]
     assert loader.get_always_skills() == ["shared"]
-    assert "Plugin body" in (loader.load_skill("shared") or "")
+    assert loader.load_skill("shared") == plugin_content
     summary = loader.build_skills_summary()
     assert "### Agent Plugin skills (`plugins`)" in summary
     assert "`demo/skills/shared/SKILL.md`" in summary
