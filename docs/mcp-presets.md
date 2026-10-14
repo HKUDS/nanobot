@@ -1,13 +1,21 @@
 # MCP service presets
 
-Open **Apps → MCP** to find a service, configure its connection, and select **Connect**. Presets save MCP server configuration; the gateway discovers and runs the tools. Each service still requires its own account access and permissions.
+Open **Apps → MCP** to find a service, configure its connection, and select **Connect**. Presets save MCP server configuration; the gateway discovers and runs the tools. Each service still requires its own account access and permissions. The tables below list all built-in presets.
 
 ## Hosted services
 
-Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the credential listed below and add the required HTTP header. Paste the token itself into the credential field.
+Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the credential listed below and add it to the required HTTP header or URL parameter. Paste the token itself into the credential field.
 
 | Service | Authentication | Setup |
 | --- | --- | --- |
+| Browserbase | API key | [Official guide](https://docs.browserbase.com/integrations/mcp/setup) |
+| Firecrawl | None (keyless preset) | [Official guide](https://docs.firecrawl.dev/use-cases/developers-mcp) |
+| Parallel Search | None (anonymous access) | [Official guide](https://docs.parallel.ai/integrations/mcp/search-mcp) |
+| Exa | None | [Official guide](https://exa.ai/mcp) |
+| Microsoft Learn | None (public documentation) | [Official guide](https://learn.microsoft.com/en-us/training/support/mcp) |
+| Xmind | Browser OAuth | [Official guide](https://xmind.com/user-guide/xmind-mcp) |
+| Notion | Browser OAuth | [Official guide](https://developers.notion.com/guides/mcp/get-started-with-mcp) |
+| Linear | Browser OAuth | [Official guide](https://linear.app/docs/mcp) |
 | Stripe | Browser OAuth | [Official guide](https://docs.stripe.com/mcp) |
 | monday.com | Browser OAuth | [Official guide](https://developer.monday.com/api-reference/docs/mcp-dynamic-client-registration) |
 | ClickUp | Browser OAuth | [Official guide](https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server) |
@@ -82,12 +90,12 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 | Metricool | Browser OAuth | [Official guide](https://help.metricool.com/how-to-connect-metricools-mcp-eqp9h) |
 | Supermetrics | Browser OAuth | [Official guide](https://docs.supermetrics.com/docs/supermetrics-mcp-server) |
 | Resend | Browser OAuth | [Official guide](https://github.com/resend/resend-mcp) |
-| Smartsheet | None | [Official guide](https://developers.smartsheet.com/ai-mcp/smartsheet/install-the-smartsheet-mcp-server) |
-| Lusha | None | [Official guide](https://docs.lusha.com/mcp/overview) |
-| Semrush | None | [Official guide](https://developer.semrush.com/api/v3/introduction/semrush-mcp/) |
-| Blockscout | None | [Official guide](https://github.com/blockscout/mcp-server) |
-| Snowflake | None; service MCP URL required | [Official guide](https://www.snowflake.com/en/developers/guides/getting-started-with-snowflake-mcp-server/) |
-| Parallel Task | None | [Official guide](https://docs.parallel.ai/integrations/mcp/task-mcp) |
+| Smartsheet | API token | [Official guide](https://developers.smartsheet.com/ai-mcp/smartsheet/install-the-smartsheet-mcp-server) |
+| Lusha | API key | [Official guide](https://docs.lusha.com/mcp/overview) |
+| Semrush | API key | [Official guide](https://developer.semrush.com/api/v3/introduction/semrush-mcp/) |
+| Blockscout | PRO API key | [Official guide](https://github.com/blockscout/mcp-server) |
+| Snowflake | Programmatic access token; service MCP URL required | [Official guide](https://www.snowflake.com/en/developers/guides/getting-started-with-snowflake-mcp-server/) |
+| Parallel Task | API key | [Official guide](https://docs.parallel.ai/integrations/mcp/task-mcp) |
 | Zoho CRM | Browser OAuth; service MCP URL required | [Official guide](https://www.zoho.com/crm/developer/docs/mcp/setup/claude.html) |
 | Wispr Flow | Browser OAuth | [Official guide](https://github.com/Wispr-AI/wispr-flow-plugin) |
 | GitBook | Browser OAuth | [Official guide](https://gitbook.com/docs/documentation/docs-as-code/gitbook-mcp) |
@@ -113,14 +121,22 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 
 Datadog uses the MCP endpoint for your Datadog site and a Personal or Service Access Token. DigitalOcean publishes separate endpoints for its services; copy the endpoint for the service you need. Metabase requires an instance with MCP enabled. Copy Sigma's URL from **Profile → Integrations** and Descript's URL from **Settings → Descript MCP**.
 
-The existing Figma and Supabase presets retain their local setup. Their **(remote)** variants use browser sign-in. The existing GitHub preset uses Docker; **GitHub (remote)** uses a personal access token. Changes to credentials retain the connection's tool selection, timeout, and other saved settings.
+Figma uses the desktop app's local MCP endpoint, and Supabase starts a local server in read-only mode. Their **(remote)** variants use browser sign-in. GitHub uses Docker; **GitHub (remote)** uses a personal access token. Changes to credentials retain the connection's tool selection, timeout, and other saved settings.
 
 ## Local servers
 
-Install `npx` or `uvx` on the gateway computer. Stdio servers use a managed working directory under the nanobot data directory so their runtime files stay outside the source checkout.
+Local servers run on the gateway computer. Install the runtime or application listed for each service. Stdio servers use a managed working directory under the nanobot data directory so their runtime files stay outside the source checkout. Figma connects over HTTP to the local desktop app.
 
 | Service | Requirements | Setup |
 | --- | --- | --- |
+| Playwright | Node.js and npx | [Server guide](https://playwright.dev/docs/getting-started-mcp) |
+| Context7 | Node.js and npx; API key optional | [Server guide](https://context7.com/docs/resources/all-clients) |
+| AWS Documentation | uvx | [Server guide](https://awslabs.github.io/mcp/servers/aws-documentation-mcp-server/) |
+| Brave Search | Node.js, npx, and Brave Search API key | [Server guide](https://www.npmjs.com/package/@brave/brave-search-mcp-server) |
+| Postman | Node.js, npx, and Postman API key | [Server guide](https://learning.postman.com/docs/developer/postman-api/postman-mcp-server/postman-mcp-local-server) |
+| Figma | Figma desktop app with MCP enabled | [Server guide](https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server) |
+| GitHub | Docker and GitHub token | [Server guide](https://github.com/github/github-mcp-server) |
+| Supabase | Node.js, npx, and Supabase access token | [Server guide](https://supabase.com/docs/guides/ai-tools/mcp) |
 | Firebase | Node.js, npx, and Firebase CLI sign-in | [Server guide](https://firebase.google.com/docs/ai-assistance/mcp-server) |
 | MongoDB | Node.js, npx, and MongoDB connection string | [Server guide](https://www.mongodb.com/docs/mcp-server/local-mcp/security-best-practices/) |
 | ClickHouse | uvx and ClickHouse connection credentials | [Server guide](https://github.com/ClickHouse/mcp-clickhouse) |
