@@ -1744,7 +1744,9 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 
 ## File Search
 
-When ripgrep (`rg`) is installed, nanobot automatically uses it in place of the built-in `grep` and `find_files` tools.
+When shell execution (`tools.exec.enable`) is enabled in the current agent's tool scope, use `exec` for file creation, directory listing, and filename searches. The default tool list omits `write_file`, `list_dir`, `find_files`, and the dedicated `rg` wrapper. Installed ripgrep remains callable through `exec`.
+
+`read_file`, `grep`, `edit_file`, and `apply_patch` remain available when file tools are enabled. `read_file` handles images and documents; `grep` searches text, PDF, DOCX, XLSX, and PPTX content. Without shell execution, the standalone write, directory, and filename search tools remain available. Memory tasks have no shell tool and retain `write_file`. Caller-supplied tool overrides and explicit tool plugins are preserved.
 
 ## Web Tools
 

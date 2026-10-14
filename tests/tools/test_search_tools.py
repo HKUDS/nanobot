@@ -20,7 +20,7 @@ from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import WebSearchConfig
+from nanobot.config.schema import ToolsConfig, WebSearchConfig
 from nanobot.providers.base import GenerationSettings
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -776,24 +776,28 @@ async def test_search_tools_reject_paths_outside_workspace(tmp_path: Path) -> No
     assert grep_result.startswith("Error:")
 
 
-@pytest.mark.parametrize("use_rg", [True, False])
-def test_agent_loop_registers_search_backend(tmp_path: Path, monkeypatch, use_rg) -> None:
-    monkeypatch.setattr("nanobot.agent.tools.rg.RgTool.enabled", lambda ctx: use_rg)
+@pytest.mark.parametrize("exec_enabled", [True, False])
+def test_agent_loop_registers_search_tools(tmp_path: Path, exec_enabled) -> None:
+    config = ToolsConfig()
+    config.exec.enable = exec_enabled
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = AgentLoop(
+        bus=bus, provider=provider, workspace=tmp_path, model="test-model", tools_config=config,
+    )
 
-    assert ("rg" in loop.tools.tool_names) == use_rg
-    assert ("find_files" in loop.tools.tool_names) == (not use_rg)
-    assert ("grep" in loop.tools.tool_names) == (not use_rg)
+    assert ("exec" in loop.tools.tool_names) == exec_enabled
+    assert ("find_files" in loop.tools.tool_names) == (not exec_enabled)
+    assert "grep" in loop.tools.tool_names
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("use_rg", [True, False])
-async def test_subagent_registers_search_backend(tmp_path: Path, monkeypatch, use_rg) -> None:
-    monkeypatch.setattr("nanobot.agent.tools.rg.RgTool.enabled", lambda ctx: use_rg)
+@pytest.mark.parametrize("exec_enabled", [True, False])
+async def test_subagent_registers_search_tools(tmp_path: Path, exec_enabled) -> None:
+    config = ToolsConfig()
+    config.exec.enable = exec_enabled
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -803,6 +807,7 @@ async def test_subagent_registers_search_backend(tmp_path: Path, monkeypatch, us
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=4096,
+        tools_config=config,
     )
     captured: dict[str, list[str]] = {}
 
@@ -827,9 +832,9 @@ async def test_subagent_registers_search_backend(tmp_path: Path, monkeypatch, us
     )
     await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
-    assert ("rg" in captured["tool_names"]) == use_rg
-    assert ("find_files" in captured["tool_names"]) == (not use_rg)
-    assert ("grep" in captured["tool_names"]) == (not use_rg)
+    assert ("exec" in captured["tool_names"]) == exec_enabled
+    assert ("find_files" in captured["tool_names"]) == (not exec_enabled)
+    assert "grep" in captured["tool_names"]
 
 
 def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:

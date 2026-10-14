@@ -93,16 +93,16 @@ async def test_turn_tool_selection_preserves_empty_registries(tmp_path, monkeypa
     monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", lambda **kwargs: [])
     loop = _loop(tmp_path, [], max_iterations=2)
     key = "cli:tool-selection"
-    write_tool = loop.tools.get("write_file")
-    assert write_tool is not None
-    tool_context = RuntimeContextBlock(source="write_file", content="Write tool runtime context")
+    patch_tool = loop.tools.get("apply_patch")
+    assert patch_tool is not None
+    tool_context = RuntimeContextBlock(source="apply_patch", content="Write tool runtime context")
     provide_context = AsyncMock(return_value=tool_context)
-    monkeypatch.setattr(write_tool, "runtime_context_provider", lambda: provide_context)
+    monkeypatch.setattr(patch_tool, "runtime_context_provider", lambda: provide_context)
     loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content="", tool_calls=[
             ToolCallRequest(
-                id="write-1", name="write_file",
-                arguments={"path": "result.txt", "content": "tool executed"},
+                id="write-1", name="apply_patch",
+                arguments={"edits": [{"path": "result.txt", "action": "add", "new_text": "tool executed\n"}]},
             ),
         ]),
         LLMResponse(content="done"),
@@ -133,12 +133,12 @@ async def test_turn_tool_selection_preserves_empty_registries(tmp_path, monkeypa
         output_file = tmp_path / "result.txt"
         if allowed:
             provide_context.assert_awaited_once()
-            assert output_file.read_text(encoding="utf-8") == "tool executed"
-            assert "Successfully wrote" in tool_result["content"]
+            assert output_file.read_text(encoding="utf-8") == "tool executed\n"
+            assert "Patch applied" in tool_result["content"]
         else:
             provide_context.assert_not_awaited()
             assert not output_file.exists()
-            assert "Tool 'write_file' not found" in tool_result["content"]
+            assert "Tool 'apply_patch' not found" in tool_result["content"]
     finally:
         await loop.aclose()
 

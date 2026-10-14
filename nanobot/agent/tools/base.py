@@ -233,6 +233,7 @@ class Tool(ABC):
     config_key: str = ""
     _plugin_discoverable: bool = True
     _scopes: set[str] = {"core"}
+    superseded_by: str = ""  # Yield default registration to this tool in the same scope.
 
     @classmethod
     def config_cls(cls) -> type[BaseModel] | None:

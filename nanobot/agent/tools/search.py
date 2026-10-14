@@ -240,6 +240,7 @@ class _SearchTool(_FsTool):
 class FindFilesTool(_SearchTool):
     """Find files by path fragment, glob, or type."""
     _scopes = {"core", "subagent"}
+    superseded_by = "exec"
 
     @property
     def name(self) -> str:

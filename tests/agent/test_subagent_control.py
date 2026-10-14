@@ -543,7 +543,8 @@ async def test_provider_suppressed_cancellation_cannot_execute_returned_tools(tm
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             return LLMResponse(content=None, tool_calls=[ToolCallRequest(
-                id="write", name="write_file", arguments={"path": "resurrected.txt", "content": "bad"},
+                id="write", name="apply_patch",
+                arguments={"edits": [{"path": "resurrected.txt", "action": "add", "new_text": "bad"}]},
             )])
 
     provider.chat_stream_with_retry = AsyncMock(side_effect=chat)
@@ -574,7 +575,9 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
 
     async def run(spec):
         name = spec.initial_messages[-1]["content"]
-        written = await spec.tools.execute("write_file", {"path": f"{name}-output.txt", "content": name})
+        written = await spec.tools.execute("apply_patch", {"edits": [
+            {"path": f"{name}-output.txt", "action": "add", "new_text": f"{name}\n"},
+        ]})
         assert not is_tool_error_result(written), written
         output = await spec.tools.execute("exec", kwargs)
         assert not is_tool_error_result(output), output
@@ -632,8 +635,8 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
     finally:
         await manager.close()
     assert script.exists()
-    assert (tmp_path / "one-output.txt").read_text() == "one"
-    assert (tmp_path / "two-output.txt").read_text() == "two"
+    assert (tmp_path / "one-output.txt").read_text() == "one\n"
+    assert (tmp_path / "two-output.txt").read_text() == "two\n"
 
 
 @pytest.mark.asyncio
@@ -866,7 +869,8 @@ async def test_resistant_dependency_has_bounded_stop_and_no_late_result(tmp_path
             cancelled.set()
             await release.wait()
             return LLMResponse(content="must not publish", tool_calls=[ToolCallRequest(
-                id="late", name="write_file", arguments={"path": "late.txt", "content": "bad"},
+                id="late", name="apply_patch",
+                arguments={"edits": [{"path": "late.txt", "action": "add", "new_text": "bad"}]},
             )])
 
     provider.chat_stream_with_retry = AsyncMock(side_effect=chat)

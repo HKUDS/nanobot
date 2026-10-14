@@ -541,7 +541,7 @@ class TestSubagentCancellation:
             if call_count["n"] == 1:
                 return LLMResponse(
                     content="thinking",
-                    tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+                    tool_calls=[ToolCallRequest(id="call_1", name="grep", arguments={"pattern": "needle"})],
                     reasoning_content="hidden reasoning",
                     thinking_blocks=[{"type": "thinking", "thinking": "step"}],
                 )
@@ -558,7 +558,7 @@ class TestSubagentCancellation:
         async def fake_execute(self, **kwargs):
             return "tool result"
 
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
+        monkeypatch.setattr("nanobot.agent.tools.search.GrepTool.execute", fake_execute)
 
         await mgr.spawn(
             task="do task",
@@ -634,13 +634,13 @@ class TestSubagentCancellation:
             LLMResponse(
                 content="first attempt",
                 tool_calls=[
-                    ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})
+                    ToolCallRequest(id="call_1", name="grep", arguments={"pattern": "needle"})
                 ],
             ),
             LLMResponse(
                 content="retrying",
                 tool_calls=[
-                    ToolCallRequest(id="call_2", name="list_dir", arguments={"path": "."})
+                    ToolCallRequest(id="call_2", name="grep", arguments={"pattern": "needle"})
                 ],
             ),
             LLMResponse(content="recovered after tool failure", tool_calls=[]),
@@ -661,7 +661,7 @@ class TestSubagentCancellation:
                 return "first result"
             raise RuntimeError("boom")
 
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
+        monkeypatch.setattr("nanobot.agent.tools.search.GrepTool.execute", fake_execute)
 
         await mgr.spawn(
             task="do task",
@@ -690,7 +690,7 @@ class TestSubagentCancellation:
         provider.get_default_model.return_value = "test-model"
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
             content="thinking",
-            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+            tool_calls=[ToolCallRequest(id="call_1", name="grep", arguments={"pattern": "needle"})],
         ))
         mgr = SubagentManager(
             workspace=tmp_path,
@@ -711,7 +711,7 @@ class TestSubagentCancellation:
                 cancelled.set()
                 raise
 
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
+        monkeypatch.setattr("nanobot.agent.tools.search.GrepTool.execute", fake_execute)
 
         await mgr.spawn("do task", label="label", runtime=_runtime(provider), session_key="test:c1")
         task = next(iter(mgr._running_tasks.values()))

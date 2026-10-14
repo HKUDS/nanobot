@@ -177,8 +177,8 @@ async def test_ephemeral_tool_loop_pressure_summarizes_before_next_model_call(
                 content="checking",
                 tool_calls=[ToolCallRequest(
                     id=f"call-{normal_calls}",
-                    name="list_dir",
-                    arguments={"path": "."},
+                    name="grep",
+                    arguments={"pattern": "needle"},
                 )],
             )
         return LLMResponse(content="done", tool_calls=[])

@@ -588,13 +588,13 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_loop_no_hooks_backward_compat(tmp_path):
-    """Without hooks param, behavior is identical to before."""
+    """Tools execute normally when no hooks are configured."""
     from nanobot.providers.base import LLMResponse, ToolCallRequest
 
     loop = _make_loop(tmp_path)
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
-        tool_calls=[ToolCallRequest(id="c1", name="list_dir", arguments={"path": "."})],
+        tool_calls=[ToolCallRequest(id="c1", name="grep", arguments={"pattern": "needle"})],
     ))
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.tools.execute = AsyncMock(return_value="ok")
@@ -608,4 +608,4 @@ async def test_agent_loop_no_hooks_backward_compat(tmp_path):
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."
     )
-    assert result.tools_used == ["list_dir", "list_dir"]
+    assert result.tools_used == ["grep", "grep"]

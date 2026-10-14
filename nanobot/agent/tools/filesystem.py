@@ -551,6 +551,7 @@ class ReadFileTool(_FsTool):
 class WriteFileTool(_FsTool):
     """Write content to a file."""
     _scopes = {"core", "subagent", "memory"}
+    superseded_by = "exec"
 
     @property
     def name(self) -> str:
@@ -1124,6 +1125,7 @@ class EditFileTool(_FsTool):
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
     _scopes = {"core", "subagent"}
+    superseded_by = "exec"
 
     _DEFAULT_MAX = 200
     _IGNORE_DIRS = {

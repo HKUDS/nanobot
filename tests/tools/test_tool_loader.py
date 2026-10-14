@@ -1,11 +1,12 @@
 """Tests for tool plugin architecture: ToolLoader, ToolContext, metadata."""
 from __future__ import annotations
 
-import shutil
 from dataclasses import fields
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
+
+import pytest
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext
@@ -176,20 +177,22 @@ def test_loader_wires_shared_exec_session_manager(tmp_path):
 
 
 def test_loader_preserves_caller_supplied_tool(tmp_path):
-    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.filesystem import WriteFileTool
     from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.agent.tools.shell import ExecTool
     from nanobot.config.schema import ToolsConfig
 
-    tool = ReadFileTool(workspace=tmp_path / "custom-root")
+    tool = WriteFileTool(workspace=tmp_path / "custom-root")
     registry = ToolRegistry()
     registry.register(tool)
 
-    registered = ToolLoader(test_classes=[ReadFileTool]).load(
+    registered = ToolLoader(test_classes=[WriteFileTool, ExecTool]).load(
         ToolContext(config=ToolsConfig(), workspace=str(tmp_path)), registry,
     )
 
-    assert registry.get("read_file") is tool
-    assert "read_file" not in registered
+    assert registry.get("write_file") is tool
+    assert registered == ["exec"]
+    assert set(registry.tool_names) == {"exec", "write_file"}
 
 
 # --- Task 4: _FsTool.create() ---
@@ -428,7 +431,7 @@ def test_mcp_wrappers_not_discoverable():
 
 
 def test_loader_registers_builtin_tools():
-    """Verify the loader produces the same tool set as the old _register_default_tools."""
+    """Verify the default tool set keeps document and edit tools alongside exec."""
     from nanobot.agent.tools.loader import ToolLoader
     from nanobot.agent.tools.registry import ToolRegistry
 
@@ -465,12 +468,41 @@ def test_loader_registers_builtin_tools():
     registered = loader.load(ctx, registry)
 
     expected = {
-        "read_file", "write_file", "edit_file", "list_dir",
+        "read_file", "edit_file", "apply_patch", "grep",
         "exec", "exec_session", "list_exec_sessions",
         "web_search", "web_fetch",
         "message", "subagent", "cron",
         "my",
     }
     actual = set(registered)
-    expected.update({"rg"} if shutil.which("rg") else {"find_files", "grep"})
     assert expected <= actual, f"Missing tools: {expected - actual}"
+
+
+@pytest.mark.parametrize("scope", ["core", "subagent"])
+@pytest.mark.parametrize("exec_enabled", [True, False])
+def test_loader_selects_file_tools_for_shell_availability(tmp_path, scope, exec_enabled):
+    from nanobot.agent.tools.apply_patch import ApplyPatchTool
+    from nanobot.agent.tools.filesystem import (
+        EditFileTool,
+        ListDirTool,
+        ReadFileTool,
+        WriteFileTool,
+    )
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.agent.tools.rg import RgTool
+    from nanobot.agent.tools.search import FindFilesTool, GrepTool
+    from nanobot.agent.tools.shell import ExecTool
+    from nanobot.config.schema import ToolsConfig
+
+    config = ToolsConfig()
+    config.exec.enable = exec_enabled
+    registry = ToolRegistry()
+    registered = ToolLoader(test_classes=[
+        WriteFileTool, ListDirTool, FindFilesTool, RgTool,
+        ReadFileTool, GrepTool, EditFileTool, ApplyPatchTool, ExecTool,
+    ]).load(ToolContext(config=config, workspace=str(tmp_path)), registry, scope=scope)
+
+    expected = {"read_file", "grep", "edit_file", "apply_patch"}
+    expected.update({"exec"} if exec_enabled else {"write_file", "list_dir", "find_files"})
+    assert set(registered) == expected
+    assert {schema["function"]["name"] for schema in registry.get_definitions()} == expected

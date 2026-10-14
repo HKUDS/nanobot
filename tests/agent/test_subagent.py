@@ -36,7 +36,9 @@ async def test_subagent_uses_tool_loader():
     )
     tools = sm._build_tools()
     assert tools.has("read_file")
-    assert tools.has("write_file")
+    assert tools.has("apply_patch")
+    assert tools.has("grep")
+    assert tools.has("exec")
     assert not tools.has("message")
     assert not tools.has("spawn")
     assert not tools.has("subagent")
@@ -224,16 +226,16 @@ async def test_subagent_pressure_uses_transient_summary(tmp_path):
             content="checking",
             tool_calls=[ToolCallRequest(
                 id="call-1",
-                name="list_dir",
-                arguments={"path": "."},
+                name="grep",
+                arguments={"pattern": "needle"},
             )],
         ),
         LLMResponse(
             content="checking again",
             tool_calls=[ToolCallRequest(
                 id="call-2",
-                name="list_dir",
-                arguments={"path": "."},
+                name="grep",
+                arguments={"pattern": "needle"},
             )],
         ),
         LLMResponse(content="done", tool_calls=[]),

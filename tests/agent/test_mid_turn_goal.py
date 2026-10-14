@@ -135,7 +135,7 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
             )
             if boundary == "tool":
                 return LLMResponse(content=None, tool_calls=[ToolCallRequest(
-                    id="list", name="list_dir", arguments={"path": "."},
+                    id="list", name="grep", arguments={"pattern": "needle"},
                 )])
             if boundary == "error":
                 return LLMResponse(content="Temporary model error", finish_reason="error")

@@ -14,6 +14,8 @@ from nanobot.agent.tools.shell import ExecTool
 
 
 class RgTool(ExecTool):
+    superseded_by = "exec"
+
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
         if not ctx.config.file.enable or not super().enabled(ctx):

@@ -94,6 +94,7 @@ class ToolLoader:
         registered: list[str] = []
         supplied_names = set(registry.tool_names)
         builtin_names: set[str] = set()
+        replacements: dict[str, str] = {}
         sources = [(self.discover(), False), (self._discover_plugins().values(), True)]
         for source, is_plugin_source in sources:
             for tool_cls in source:
@@ -125,10 +126,15 @@ class ToolLoader:
                     registered.append(tool.name)
                     if not is_plugin_source:
                         builtin_names.add(tool.name)
+                        if tool.superseded_by:
+                            replacements[tool.name] = tool.superseded_by
                 except Exception:
                     logger.exception("Failed to register tool: %s", cls_label)
-            if not is_plugin_source and "rg" in builtin_names:
-                replaced = (builtin_names & {"grep", "find_files"}) - supplied_names
+            if not is_plugin_source:
+                replaced = {
+                    name for name, replacement in replacements.items()
+                    if registry.has(replacement)
+                }
                 for name in replaced:
                     registry.unregister(name)
                 registered = [name for name in registered if name not in replaced]

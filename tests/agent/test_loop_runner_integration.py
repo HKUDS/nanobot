@@ -370,7 +370,7 @@ async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop = _make_loop(tmp_path)
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+        tool_calls=[ToolCallRequest(id="call_1", name="grep", arguments={})],
     ))
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.tools.execute = AsyncMock(return_value="ok")
@@ -392,7 +392,7 @@ async def test_loop_goal_turn_uses_standard_iteration_budget(tmp_path):
     loop = _make_loop(tmp_path)
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+        tool_calls=[ToolCallRequest(id="call_1", name="grep", arguments={})],
     ))
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.tools.execute = AsyncMock(return_value="ok")
@@ -648,7 +648,7 @@ async def test_subagent_max_iterations_announces_partial_incomplete_result(tmp_p
     provider.get_default_model.return_value = "test-model"
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+        tool_calls=[ToolCallRequest(id="call_1", name="grep", arguments={"pattern": "needle"})],
     ))
     mgr = SubagentManager(
         workspace=tmp_path,
@@ -661,7 +661,7 @@ async def test_subagent_max_iterations_announces_partial_incomplete_result(tmp_p
     async def fake_execute(self, **kwargs):
         return "tool result"
 
-    monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
+    monkeypatch.setattr("nanobot.agent.tools.search.GrepTool.execute", fake_execute)
 
     await mgr.spawn(
         task="do task",
