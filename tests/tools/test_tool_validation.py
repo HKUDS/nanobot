@@ -1,7 +1,9 @@
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
@@ -341,6 +343,64 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
         "Error: Command blocked by safety guard (path outside working dir)"
     )
     assert "hard policy boundary" in error
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix resolves named homes through passwd")
+@pytest.mark.parametrize(
+    "command",
+    ["cat ~unknown/file.txt", "cat --config=~unknown/file.txt", "cat <~unknown/file.txt"],
+)
+async def test_exec_rejects_unknown_user_home(tmp_path, monkeypatch, command) -> None:
+    home_path = f"~nanobot-missing-{tmp_path.name}/file.txt"
+    command = command.replace("~unknown/file.txt", home_path)
+    with pytest.raises(RuntimeError):
+        Path(home_path).expanduser()
+
+    spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
+    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command=command)
+
+    assert result.startswith("Error: Command blocked by safety guard (path outside working dir)")
+    assert "hard policy boundary" in result
+    spawn.assert_not_called()
+
+
+async def test_exec_rejects_home_path_without_home_directory(tmp_path, monkeypatch) -> None:
+    for key in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(key, raising=False)
+    if sys.platform != "win32":
+        import pwd
+
+        def missing_passwd_entry(uid):
+            # A container UID may have no passwd entry when HOME is unset.
+            raise KeyError(uid)
+
+        monkeypatch.setattr(pwd, "getpwuid", missing_passwd_entry)
+    with pytest.raises(RuntimeError):
+        Path("~/file.txt").expanduser()
+
+    spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
+    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command="cat ~/file.txt")
+
+    assert result.startswith("Error: Command blocked by safety guard (path outside working dir)")
+    assert "hard policy boundary" in result
+    spawn.assert_not_called()
+
+
+async def test_exec_allows_resolved_home_inside_workspace(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("USERPROFILE" if sys.platform == "win32" else "HOME", str(tmp_path))
+    (tmp_path / "file.txt").write_text("allowed home content", encoding="utf-8")
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command="cat ~/file.txt", login=False)
+
+    assert "allowed home content" in result
+    assert "Exit code: 0" in result
 
 
 @pytest.mark.parametrize(
