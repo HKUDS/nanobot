@@ -155,7 +155,7 @@ class MyTool(Tool):
                     "description": "Dot-path for check; top-level runtime or scratchpad key for set. "
                     "Read-only routing metadata: request.channel, request.chat_id, request.sender_id.",
                 },
-                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
+                "value": {"description": "New value for set; match the setting's type. Scratchpad accepts JSON values."},
             },
             "required": ["action"],
         }

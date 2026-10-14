@@ -16,7 +16,7 @@ def test_coding_tool_descriptions_steer_editing_priority() -> None:
 
     assert "default tool for code edits" in apply_patch
     assert "multi-file" in apply_patch
-    assert "dry_run=true" in apply_patch
+    assert "without writing files" in ApplyPatchTool().parameters["properties"]["dry_run"]["description"]
     assert "edit_file only for small exact replacements" in apply_patch
 
     assert "small, exact replacement" in edit_file

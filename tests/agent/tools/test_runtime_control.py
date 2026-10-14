@@ -200,17 +200,13 @@ async def test_default_allow_set_and_public_parameter_schema_are_unchanged(
             "key": {
                 "type": "string",
                 "description": (
-                    "Dot-path for check/set. Examples: 'max_iterations', 'workspace', "
-                    "'provider_retry_mode'. Use 'request.channel', 'request.chat_id', or "
-                    "'request.sender_id' for current routing metadata. Use 'model_preset' "
-                    "to switch named model presets. For check without key, shows all "
-                    "config values."
+                    "Dot-path for check; top-level runtime or scratchpad key for set. "
+                    "Read-only routing metadata: request.channel, request.chat_id, request.sender_id."
                 ),
             },
             "value": {
                 "description": (
-                    "New value (for set). Type must match target (int for "
-                    "max_iterations/context_window_tokens, str for model/model_preset)."
+                    "New value for set; match the setting's type. Scratchpad accepts JSON values."
                 ),
             },
         },

@@ -116,14 +116,13 @@ class _GoalToolsMixin:
 @tool_parameters(
     tool_parameters_schema(
         objective=StringSchema(
-            "The sustained objective for this session. It may consolidate a plan from earlier "
-            "discussion, but must be self-contained, bounded, safe under repetition, and "
-            "explicit about done-ness.",
+            "Self-contained goal with explicit completion criteria, bounded and safe to repeat. "
+            "May incorporate prior discussion.",
             min_length=1,
             max_length=MAX_GOAL_OBJECTIVE_CHARS,
         ),
         ui_summary=StringSchema(
-            "Optional one-line display label for session lists and logs. It is not load-bearing.",
+            "One-line display label for session lists and logs; objective defines the goal.",
             max_length=120,
             nullable=True,
         ),

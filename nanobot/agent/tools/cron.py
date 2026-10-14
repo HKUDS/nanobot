@@ -22,11 +22,9 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 _CRON_PARAMETERS = tool_parameters_schema(
     action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
-    name=StringSchema(
-        "Job label; defaults to the first 30 characters of message."
-    ),
+    name=StringSchema("Job label; generated from message if omitted."),
     message=StringSchema(
-        "REQUIRED when action='add': instruction to execute when the job triggers. "
+        "REQUIRED when action='add': non-empty instruction to execute when the job triggers. "
         "The final reply goes to the task's saved chat automatically. "
         "Do not copy the current channel/chat ID or require a message tool call for that reply. "
         "Include other recipients only when the user requests separate sends."
@@ -36,8 +34,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
     ),
     cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
     tz=StringSchema(
-        "Optional IANA timezone for cron expressions (e.g. 'America/Vancouver'). "
-        "When omitted with cron_expr, the tool's default timezone applies."
+        "IANA timezone for cron_expr only, e.g. 'America/Vancouver'."
     ),
     at=StringSchema(
         "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). "
@@ -46,8 +43,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
     job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
     required=["action"],
     description=(
-        "Action-specific parameters: add requires a non-empty message plus one schedule "
-        "(every_seconds, cron_expr, or at); remove requires job_id; list only needs action."
+        "add requires exactly one schedule: every_seconds, cron_expr, or at."
     ),
 )
 

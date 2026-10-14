@@ -31,17 +31,16 @@ if TYPE_CHECKING:
         enum=("create", "send", "cancel", "check"),
     ),
     task=StringSchema("Required for create: the task for the subagent to complete.", min_length=1),
-    label=StringSchema("Optional short label for create (for display)."),
+    label=StringSchema("Display label for create."),
     temperature=NumberSchema(
-        description="Optional sampling temperature for create. Defaults to the parent's model runtime.",
+        description="Sampling temperature for create; inherits the parent's runtime if omitted.",
         minimum=0.0,
         maximum=2.0,
     ),
     wait=BooleanSchema(
         description=(
-            "For create: wait for the result directly when it must inform the current turn. "
-            "Defaults to false for background execution with a completion notification. "
-            "Ephemeral requests and hosts without a background consumer always wait."
+            "For create: true waits for the result; false runs in background with a completion notification. "
+            "Temporary sessions and hosts unable to receive background results always wait."
         ),
         default=False,
     ),

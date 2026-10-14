@@ -559,10 +559,9 @@ class WriteFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Create a new file or intentionally replace an entire file with "
-            "the provided content. Overwrites existing files and creates parent "
-            "directories as needed. For code changes or partial edits, prefer "
-            "apply_patch; use edit_file only for small exact replacements."
+            "Create a file or replace an entire file. "
+            "Overwrites existing files and creates parent directories. "
+            "Prefer apply_patch for partial edits."
         )
 
     async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
@@ -1140,9 +1139,8 @@ class ListDirTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "List the contents of a directory. "
-            "Set recursive=true to explore nested structure. "
-            "Common noise directories (.git, node_modules, __pycache__, etc.) are auto-ignored."
+            "List directory contents, skipping common noise directories "
+            "(.git, node_modules, __pycache__, etc.)."
         )
 
     @property

@@ -322,7 +322,7 @@ def _normalize_volcengine_auth_level(value: Any) -> int | None:
 @tool_parameters(
     tool_parameters_schema(
         query=StringSchema("Search query"),
-        count=IntegerSchema(description="Results (1-10)", minimum=1, maximum=10),
+        count=IntegerSchema(description="Maximum results; uses the configured default if omitted.", minimum=1, maximum=10),
         timeRange=StringSchema(
             "Optional time filter for providers that support it: "
             "OneDay, OneWeek, OneMonth, OneYear, or YYYY-MM-DD..YYYY-MM-DD",
@@ -344,10 +344,8 @@ class WebSearchTool(Tool):
 
     name = "web_search"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
     description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
-        "Search the web. Returns titles, URLs, and snippets. "
-        "count defaults to 5 (max 10). "
-        "Some providers support timeRange, authLevel, and queryRewrite. "
-        "Use web_fetch to read a specific page in full."
+        "Search the web for titles, URLs, and snippets. "
+        "Use web_fetch to read a specific page."
     )
 
     config_key = "web"
@@ -1086,7 +1084,7 @@ class WebSearchTool(Tool):
             "enum": ["markdown", "text"],
             "default": "markdown",
         },
-        maxChars=IntegerSchema(minimum=100),
+        maxChars=IntegerSchema(description="Maximum output characters; defaults to 50000.", minimum=100),
         required=["url"],
     )
 )
@@ -1096,9 +1094,8 @@ class WebFetchTool(Tool):
 
     name = "web_fetch"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
     description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
-        "Fetch a URL and extract readable content (HTML → markdown/text). "
-        "Output is capped at maxChars (default 50 000). "
-        "Works for most web pages and docs; may fail on login-walled or JS-heavy sites."
+        "Fetch a URL as readable markdown/text. "
+        "May fail on login-walled or JavaScript-heavy pages."
     )
 
     config_key = "web"
