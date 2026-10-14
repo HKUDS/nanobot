@@ -201,13 +201,14 @@ class TestDreamRunCompletion:
 
 
 class TestDreamTools:
-    def test_dream_tools_are_restricted_to_file_edits(self, store):
+    def test_dream_tools_are_restricted_to_memory_edits(self, store):
         tools = store.build_dream_tools()
 
         assert set(tools.tool_names) == {
             "apply_patch",
             "edit_file",
             "read_file",
+            "save_learned_skill",
             "write_file",
         }
 
