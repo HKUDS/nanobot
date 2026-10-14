@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -74,13 +74,16 @@ async def test_process_message_hands_complete_replay_to_runner(tmp_path: Path) -
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     session = loop.sessions.get_or_create("cli:test")
-    with patch.object(session, "get_history", wraps=session.get_history) as get_history:
-        result = await loop._process_message(
-            InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
-        )
+    session.messages = _populated_session(30).messages
+    expected_history = session.get_history()
+    loop.provider.aclose = AsyncMock()
+    result = await loop.process_direct("hello", session_key="cli:test")
 
     assert result is not None
-    assert get_history.call_args.kwargs == {"extend_to_user": False}
+    sent = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
+    assert sent[1:-1] == expected_history
+    assert sent[-1]["content"].startswith("hello\n\n")
+    await loop.aclose()
 
 
 @pytest.mark.asyncio

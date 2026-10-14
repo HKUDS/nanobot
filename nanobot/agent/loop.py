@@ -74,6 +74,7 @@ from nanobot.runtime_context import (
     runtime_context_blocks_from_metadata,
 )
 from nanobot.security.workspace_access import (
+    WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeResolver,
     bind_workspace_scope,
     reset_workspace_scope,
@@ -124,6 +125,12 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 _SUBAGENT_PROVIDER_TASK_META = "subagent_provider_task_id"
 _SUBAGENT_TERMINAL_WAIT_SECONDS = 300.0
+
+
+def _prompt_scope_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Detach only the metadata consumed by workspace scope resolution."""
+    key = WORKSPACE_SCOPE_METADATA_KEY
+    return {key: deepcopy(metadata[key])} if key in metadata else {}
 
 
 class TurnKind(Enum):
@@ -721,12 +728,13 @@ class AgentLoop:
             runtime_context_blocks=ctx.runtime_context_blocks,
         )
 
-    def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
+    async def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
         assert ctx.session is not None
-        scope = self.workspace_scopes.for_turn(
+        scope = await self.runner.prepare_prompt(
+            self.workspace_scopes.for_turn,
             channel=ctx.delivery.route.channel,
-            message_metadata=ctx.msg.metadata,
-            session_metadata=ctx.session.metadata,
+            message_metadata=_prompt_scope_metadata(ctx.msg.metadata),
+            session_metadata=_prompt_scope_metadata(ctx.session.metadata),
         )
         return RequestContext(
             channel=ctx.delivery.route.channel,
@@ -767,8 +775,9 @@ class AgentLoop:
         ]
         blocks = runtime_context_blocks_from_metadata(request.metadata)
         blocks.extend(await resolve_runtime_context(providers, request))
-        skill_context = self.context.skills.build_explicit_skill_runtime_context(
-            request.original_user_text or ""
+        skill_context = await self.runner.prepare_prompt(
+            self.context.skills.build_explicit_skill_runtime_context,
+            request.original_user_text or "",
         )
         if skill_context is not None and skill_context not in blocks:
             blocks.append(skill_context)
@@ -1065,10 +1074,11 @@ class AgentLoop:
                     else {}
                 )
                 if pending_msg.is_user_input:
-                    scope = self.workspace_scopes.for_turn(
+                    scope = await self.runner.prepare_prompt(
+                        self.workspace_scopes.for_turn,
                         channel=pending_msg.channel,
-                        message_metadata=metadata,
-                        session_metadata=session.metadata if session is not None else None,
+                        message_metadata=_prompt_scope_metadata(metadata),
+                        session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
                     )
                     pending_request = RequestContext(
                         channel=pending_msg.channel,
@@ -1178,10 +1188,11 @@ class AgentLoop:
         active_session_key = session.key if session else request_ctx.session_key
         consolidation_session_key = active_session_key or "agent:transient"
         request_metadata = request_ctx.metadata
-        effective_scope = self.workspace_scopes.for_turn(
+        effective_scope = await self.runner.prepare_prompt(
+            self.workspace_scopes.for_turn,
             channel=request_ctx.channel,
-            message_metadata=request_metadata,
-            session_metadata=session.metadata if session is not None else None,
+            message_metadata=_prompt_scope_metadata(request_metadata),
+            session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
         )
         transcript_builder = partial(
             self.context.build_transcript,
@@ -2084,7 +2095,15 @@ class AgentLoop:
             session = ctx.require_session()
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
-        ctx.history = session.get_history(extend_to_user=is_subagent)
+        # Capture replay inputs on the loop; the worker never sees the live Session/cache.
+        history_records = session.messages[session.last_archived:]
+        history_snapshot = Session(
+            key=session.key,
+            messages=await self.runner.copy_messages_on_loop(history_records),
+        )
+        ctx.history = await self.runner.prepare_prompt(
+            history_snapshot.get_history, extend_to_user=is_subagent,
+        )
         stored_state = session.provider_state
         subagent_followup_persisted = False
         if is_subagent:
@@ -2107,7 +2126,7 @@ class AgentLoop:
             ctx.input_persisted_early = True
         await ctx.delivery.runtime_admitted(runtime)
 
-        ctx.request_context = self._request_context_for_turn(ctx)
+        ctx.request_context = await self._request_context_for_turn(ctx)
         if ctx.kind is TurnKind.USER:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         staged_provider_state = False

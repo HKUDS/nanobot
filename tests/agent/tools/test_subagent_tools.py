@@ -1,7 +1,6 @@
 """Tests for subagent tool registration and wiring."""
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -768,7 +767,8 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
             content="result",
         )
 
-    fake_loop = SimpleNamespace(time=clock)
+    fake_loop = MagicMock(wraps=asyncio.get_running_loop())
+    fake_loop.time = clock
     with (
         patch("nanobot.agent.loop.asyncio.get_running_loop", return_value=fake_loop),
         patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_deliver),
