@@ -880,6 +880,35 @@ async def test_assemblyai_uploads_creates_and_polls(audio_file: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_assemblyai_retries_transient_upload_and_poll_errors(audio_file: Path) -> None:
+    provider = AssemblyAITranscriptionProvider(api_key="aai-test")
+    post = AsyncMock(side_effect=[
+        _json_response(503, {}, url=provider.upload_url),
+        _json_response(200, {"upload_url": "https://cdn.example/audio"}, url=provider.upload_url),
+        _json_response(200, {"id": "tr_retry"}, url=provider.transcript_url),
+    ])
+    poll_url = f"{provider.transcript_url}/tr_retry"
+    get = AsyncMock(side_effect=[
+        httpx.ReadError("connection lost"),
+        _json_response(200, {"status": "completed", "text": "recovered"}, method="GET", url=poll_url),
+    ])
+    sleep = AsyncMock()
+
+    with patch("httpx.AsyncClient.post", post), patch("httpx.AsyncClient.get", get), patch(
+        "asyncio.sleep", sleep
+    ):
+        assert await provider.transcribe(audio_file) == "recovered"
+
+    assert post.await_count == 3
+    assert get.await_count == 2
+    for upload_call in post.await_args_list[:2]:
+        assert upload_call.args == (provider.upload_url,)
+        assert upload_call.kwargs["content"] == audio_file.read_bytes()
+    assert get.await_args.args == (poll_url,)
+    assert [call.args for call in sleep.await_args_list] == [(1.0,), (1.0,)]
+
+
+@pytest.mark.asyncio
 async def test_assemblyai_polls_until_completed(audio_file: Path) -> None:
     provider = AssemblyAITranscriptionProvider(api_key="aai-test")
     post = AsyncMock(
