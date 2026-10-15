@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import types
+from importlib.machinery import ModuleSpec
 from types import SimpleNamespace
 from typing import Any
 
@@ -44,36 +45,42 @@ def _capture_codex_warnings(monkeypatch: pytest.MonkeyPatch) -> _WarningCaptureL
 
 
 class _FakeGeneration:
-    def __init__(self, start_kwargs: dict[str, Any], *, fail_update: bool = False) -> None:
+    def __init__(self, start_kwargs: dict[str, Any]) -> None:
         self.start_kwargs = start_kwargs
         self.update_calls: list[dict[str, Any]] = []
-        self.ended = False
         self.end_calls = 0
-        self._fail_update = fail_update
 
     def update(self, **kwargs: Any) -> None:
         self.update_calls.append(kwargs)
-        if self._fail_update:
-            raise RuntimeError("langfuse update failed")
 
     def end(self) -> None:
         self.end_calls += 1
-        self.ended = True
 
 
-def _install_fake_langfuse(monkeypatch: pytest.MonkeyPatch, start_generation) -> None:
+def _install_fake_langfuse(monkeypatch: pytest.MonkeyPatch, start_observation) -> None:
     """Insert a fake ``langfuse`` module so ``from langfuse import get_client`` resolves."""
     fake_module = types.ModuleType("langfuse")
-    fake_module.get_client = lambda: SimpleNamespace(start_generation=start_generation)  # type: ignore[attr-defined]
+    fake_module.__spec__ = ModuleSpec("langfuse", loader=None)
+    fake_module.get_client = lambda: SimpleNamespace(start_observation=start_observation)  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "langfuse", fake_module)
-    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
 
 
-async def _fake_request_success(
-    url, headers, body, verify, proxy=None, on_content_delta=None,
-    on_thinking_delta=None, on_tool_call_delta=None,
-) -> provider_base.LLMResponse:
-    _ = url, headers, body, verify, proxy, on_content_delta, on_thinking_delta, on_tool_call_delta
+@pytest.fixture
+def generations(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
+    _mock_codex_token(monkeypatch)
+    generations: list[_FakeGeneration] = []
+
+    def start_observation(**kwargs: Any) -> _FakeGeneration:
+        gen = _FakeGeneration(kwargs)
+        generations.append(gen)
+        return gen
+
+    _install_fake_langfuse(monkeypatch, start_observation)
+    return generations
+
+
+async def _fake_request_success(*_args, **_kwargs) -> provider_base.LLMResponse:
     return provider_base.LLMResponse(
         content="hello",
         usage=provider_base.LLMUsage.reported(input_tokens=1, output_tokens=2, total_tokens=3),
@@ -137,19 +144,8 @@ async def test_codex_langfuse_disabled_when_env_var_unset(monkeypatch) -> None:
     ids=["unreported-cache", "zero-cache", "cache-read", "cache-write"],
 )
 async def test_codex_langfuse_success_records_generation_with_expected_fields(
-    monkeypatch, cache_counts, expected_usage_details,
+    monkeypatch, generations, cache_counts, expected_usage_details,
 ) -> None:
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
-    _mock_codex_token(monkeypatch)
-    generations: list[_FakeGeneration] = []
-
-    def start_generation(**kwargs: Any) -> _FakeGeneration:
-        gen = _FakeGeneration(kwargs)
-        generations.append(gen)
-        return gen
-
-    _install_fake_langfuse(monkeypatch, start_generation)
-
     async def fake_request(*_args, **_kwargs):
         return provider_base.LLMResponse(
             content="hello",
@@ -169,26 +165,16 @@ async def test_codex_langfuse_success_records_generation_with_expected_fields(
     assert len(generations) == 1
     gen = generations[0]
     assert gen.start_kwargs["name"] == "codex_request"
+    assert gen.start_kwargs["as_type"] == "generation"
     assert gen.start_kwargs["model"] == "gpt-5.6-sol"
     assert gen.update_calls[-1]["output"] == "hello"
     assert gen.update_calls[-1]["usage_details"] == expected_usage_details
-    assert gen.ended is True
+    assert gen.end_calls == 1
 
 
 async def test_codex_langfuse_error_records_generation_and_original_error_still_returned(
-    monkeypatch,
+    monkeypatch, generations,
 ) -> None:
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
-    _mock_codex_token(monkeypatch)
-    generations: list[_FakeGeneration] = []
-
-    def start_generation(**kwargs: Any) -> _FakeGeneration:
-        gen = _FakeGeneration(kwargs)
-        generations.append(gen)
-        return gen
-
-    _install_fake_langfuse(monkeypatch, start_generation)
-
     async def fake_request_error(*_args, **_kwargs):
         raise _CodexHTTPError("boom", status_code=500)
 
@@ -205,7 +191,7 @@ async def test_codex_langfuse_error_records_generation_and_original_error_still_
     gen = generations[0]
     assert gen.update_calls[-1]["level"] == "ERROR"
     assert gen.update_calls[-1]["status_message"] == result.content
-    assert gen.ended is True
+    assert gen.end_calls == 1
 
 
 async def test_codex_langfuse_tracing_failure_does_not_break_codex_call(monkeypatch) -> None:
@@ -213,10 +199,10 @@ async def test_codex_langfuse_tracing_failure_does_not_break_codex_call(monkeypa
     _mock_codex_token(monkeypatch)
     capture = _capture_codex_warnings(monkeypatch)
 
-    def broken_start_generation(**_kwargs: Any):
+    def broken_start_observation(**_kwargs: Any):
         raise RuntimeError("langfuse backend unreachable")
 
-    _install_fake_langfuse(monkeypatch, broken_start_generation)
+    _install_fake_langfuse(monkeypatch, broken_start_observation)
     monkeypatch.setattr(
         "nanobot.providers.openai_codex_provider._request_codex", _fake_request_success
     )
@@ -230,18 +216,13 @@ async def test_codex_langfuse_tracing_failure_does_not_break_codex_call(monkeypa
     assert "Langfuse tracing failed for Codex request" in message
 
 
-async def test_codex_langfuse_generation_still_ends_when_update_raises(monkeypatch) -> None:
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
-    _mock_codex_token(monkeypatch)
+async def test_codex_langfuse_generation_still_ends_when_update_raises(monkeypatch, generations) -> None:
     capture = _capture_codex_warnings(monkeypatch)
-    generations: list[_FakeGeneration] = []
 
-    def start_generation(**kwargs: Any) -> _FakeGeneration:
-        gen = _FakeGeneration(kwargs, fail_update=True)
-        generations.append(gen)
-        return gen
+    def fail_update(self, **_kwargs):
+        raise RuntimeError("langfuse update failed")
 
-    _install_fake_langfuse(monkeypatch, start_generation)
+    monkeypatch.setattr(_FakeGeneration, "update", fail_update)
     monkeypatch.setattr(
         "nanobot.providers.openai_codex_provider._request_codex", _fake_request_success
     )
@@ -252,24 +233,12 @@ async def test_codex_langfuse_generation_still_ends_when_update_raises(monkeypat
     assert result.content == "hello"
     assert len(generations) == 1
     gen = generations[0]
-    assert gen.end_calls == 1  # end() still attempted, exactly once, despite update() raising
-    assert gen.ended is True
+    assert gen.end_calls == 1
     assert len(capture.calls) == 1
     assert "Langfuse tracing failed for Codex request" in capture.calls[0][0]
 
 
-async def test_codex_langfuse_generation_ends_on_cancellation(monkeypatch) -> None:
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
-    _mock_codex_token(monkeypatch)
-    generations: list[_FakeGeneration] = []
-
-    def start_generation(**kwargs: Any) -> _FakeGeneration:
-        gen = _FakeGeneration(kwargs)
-        generations.append(gen)
-        return gen
-
-    _install_fake_langfuse(monkeypatch, start_generation)
-
+async def test_codex_langfuse_generation_ends_on_cancellation(monkeypatch, generations) -> None:
     async def fake_request_cancelled(*_args, **_kwargs):
         raise asyncio.CancelledError()
 
@@ -283,23 +252,11 @@ async def test_codex_langfuse_generation_ends_on_cancellation(monkeypatch) -> No
 
     assert len(generations) == 1
     gen = generations[0]
-    assert gen.end_calls == 1  # closed exactly once even though neither record_* method ran
-    assert gen.ended is True
+    assert gen.end_calls == 1
     assert gen.update_calls == []  # no output/usage known - nothing to attach
 
 
-async def test_codex_langfuse_traces_each_request_during_native_compaction(monkeypatch) -> None:
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
-    _mock_codex_token(monkeypatch)
-    generations: list[_FakeGeneration] = []
-
-    def start_generation(**kwargs: Any) -> _FakeGeneration:
-        gen = _FakeGeneration(kwargs)
-        generations.append(gen)
-        return gen
-
-    _install_fake_langfuse(monkeypatch, start_generation)
-
+async def test_codex_langfuse_traces_each_request_during_native_compaction(monkeypatch, generations) -> None:
     provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
     state_provider = provider._responses_state_provider()
     state = build_responses_state(
@@ -356,12 +313,10 @@ async def test_codex_langfuse_traces_each_request_during_native_compaction(monke
     )
 
     assert response.content == "done"
-    # Both the compaction sub-request and the main request are real Codex
-    # HTTP calls; each must get its own generation, not just the last one.
     assert len(generations) == 2
     assert generations[0].start_kwargs["name"] == "codex_compaction"
     assert generations[1].start_kwargs["name"] == "codex_request"
-    assert all(gen.ended for gen in generations)
+    assert [gen.end_calls for gen in generations] == [1, 1]
     assert generations[1].update_calls[-1]["output"] == "done"
 
 
@@ -387,18 +342,8 @@ async def test_codex_langfuse_detection_failure_does_not_break_codex_call(monkey
 
 
 async def test_codex_langfuse_traces_the_actual_wire_body_not_the_prenormalized_one(
-    monkeypatch,
+    monkeypatch, generations,
 ) -> None:
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
-    _mock_codex_token(monkeypatch)
-    generations: list[_FakeGeneration] = []
-
-    def start_generation(**kwargs: Any) -> _FakeGeneration:
-        gen = _FakeGeneration(kwargs)
-        generations.append(gen)
-        return gen
-
-    _install_fake_langfuse(monkeypatch, start_generation)
 
     provider = OpenAICodexProvider(
         default_model="openai-codex/gpt-5.6-sol",
@@ -457,19 +402,13 @@ async def test_codex_langfuse_traces_the_actual_wire_body_not_the_prenormalized_
     assert all("id" not in item for item in wire_body["input"])
     assert len(generations) == 1
     gen = generations[0]
-    # extra_body's model override must be what's traced, not the original
-    # default_model argument that _extra_body overrides.
     assert gen.start_kwargs["model"] == "override-model"
-    # Traced input must match the actually-sent, ID-stripped items, not the
-    # pre-normalized body that still carries server-assigned "id" fields.
     assert gen.start_kwargs["input"]["input"] == wire_body["input"]
     assert all("id" not in item for item in gen.start_kwargs["input"]["input"])
 
 
-async def test_codex_langfuse_records_rejected_compaction_as_error(monkeypatch) -> None:
+async def test_codex_langfuse_records_rejected_compaction_as_error(monkeypatch, generations) -> None:
     """A transport-successful compaction with no usable item must not trace as a success."""
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
-    _mock_codex_token(monkeypatch)
     provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
     state = build_responses_state(
         provider=provider._responses_state_provider(),
@@ -484,23 +423,12 @@ async def test_codex_langfuse_records_rejected_compaction_as_error(monkeypatch) 
         ],
         usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5, total_tokens=95),
     )
-    generations: list[_FakeGeneration] = []
-
-    def start_generation(**kwargs: Any) -> _FakeGeneration:
-        gen = _FakeGeneration(kwargs)
-        generations.append(gen)
-        return gen
-
-    _install_fake_langfuse(monkeypatch, start_generation)
 
     async def fake_request(
         url, headers, body, verify, proxy=None, on_content_delta=None,
         on_thinking_delta=None, on_tool_call_delta=None,
     ):
         if body["input"][-1].get("type") == "compaction_trigger":
-            # HTTP/transport succeeds, but with no usable compaction item -
-            # this is the "success" that _call_codex's own validation
-            # rejects and falls back on.
             return provider_base.LLMResponse(content=None)
         return provider_base.LLMResponse(content="done")
 
@@ -525,4 +453,4 @@ async def test_codex_langfuse_records_rejected_compaction_as_error(monkeypatch) 
     compaction_gen = generations[0]
     assert compaction_gen.start_kwargs["name"] == "codex_compaction"
     assert compaction_gen.update_calls[-1]["level"] == "ERROR"
-    assert compaction_gen.ended is True
+    assert compaction_gen.end_calls == 1

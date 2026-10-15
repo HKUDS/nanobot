@@ -8,7 +8,10 @@ import hashlib
 import io
 import json
 import random
+import subprocess
+import sys
 from dataclasses import dataclass, field, replace
+from textwrap import dedent
 from types import SimpleNamespace
 from typing import Any
 
@@ -35,7 +38,7 @@ class _Peer:
     closed: asyncio.Event = field(default_factory=asyncio.Event)
 
 
-def _events(response_id: str, output: list[dict[str, Any]] | None = None):
+def _events(response_id: str, output: list[dict[str, Any]] | None = None, *, usage=None):
     if output is None:
         output = [{
             "type": "message", "id": f"msg_{response_id}", "role": "assistant",
@@ -49,13 +52,13 @@ def _events(response_id: str, output: list[dict[str, Any]] | None = None):
         events.append({"type": "response.output_item.done", "output_index": index, "item": item})
     events.append({"type": "response.completed", "response": {
         "id": response_id, "status": "completed", "output": output,
-        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        "usage": usage if usage is not None else {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
     }})
     return events
 
 
-async def _complete(peer: _Peer, response_id: str, output=None):
-    for event in _events(response_id, output):
+async def _complete(peer: _Peer, response_id: str, output=None, *, usage=None):
+    for event in _events(response_id, output, usage=usage):
         await peer.socket.send_json(event)
 
 
@@ -68,16 +71,17 @@ class _ResponsesServer:
         self.reject_upgrade = False
         self.upgrade_status = 426
         self.upgrade_headers = []
+        self.usage = None
         self.respond = self._respond
 
     async def _respond(self, peer, _body):
-        await _complete(peer, f"resp_{len(self.requests)}")
+        await _complete(peer, f"resp_{len(self.requests)}", usage=self.usage)
 
     async def handle(self, request):
         if request.method == "POST":
             body = await request.json()
             self.http_requests.append(body)
-            data = "".join(f"data: {json.dumps(event)}\n\n" for event in _events("resp_http"))
+            data = "".join(f"data: {json.dumps(event)}\n\n" for event in _events("resp_http", usage=self.usage))
             return web.Response(text=data, content_type="text/event-stream")
         self.upgrade_attempts += 1
         if self.reject_upgrade:
@@ -138,6 +142,100 @@ def _context(result: LLMResponse | None = None, pending=None, session="session-a
             pending if pending is not None else [{"role": "user", "content": "next"}],
         )
     return ProviderCallContext(session_id=session, conversation_state=state, **kwargs)
+
+
+@pytest.mark.parametrize("reject_upgrade", [False, True], ids=["websocket", "sse-fallback"])
+async def test_codex_exports_langfuse_usage(codex_peer, reject_upgrade):
+    pytest.importorskip("langfuse")
+    from importlib.metadata import version
+
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    import nanobot.providers.openai_codex_provider as codex
+
+    _, server, _ = codex_peer
+    server.reject_upgrade = reject_upgrade
+    server.usage = {
+        "input_tokens": 100, "output_tokens": 20, "total_tokens": 120,
+        "input_tokens_details": {"cached_tokens": 80},
+    }
+    spans = []
+    sdk_versions = []
+
+    async def collect(request):
+        sdk_versions.append(request.headers.get("x-langfuse-sdk-version"))
+        exported = ExportTraceServiceRequest.FromString(await request.read())
+        for resource in exported.resource_spans:
+            for scope in resource.scope_spans:
+                spans.extend(scope.spans)
+        return web.Response(body=b"", content_type="application/x-protobuf")
+
+    app = web.Application()
+    app.router.add_post("/api/public/otel/v1/traces", collect)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        langfuse_url = f"http://127.0.0.1:{runner.addresses[0][1]}"
+        # Isolate the SDK's global client and export threads from the test process.
+        script = dedent('''
+            import asyncio
+            import os
+            import sys
+            from types import SimpleNamespace
+
+            from langfuse import Langfuse
+            import nanobot.providers.openai_codex_provider as codex
+            from nanobot.providers.base import ProviderCallContext
+
+            os.environ.pop("OTEL_EXPORTER_OTLP_HEADERS", None)
+            os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_HEADERS", None)
+            client = Langfuse(
+                public_key="pk-local", secret_key="sk-local", base_url=sys.argv[2],
+                tracing_enabled=True,
+            )
+            os.environ["LANGFUSE_SECRET_KEY"] = "sk-local"
+            codex.DEFAULT_CODEX_URL = sys.argv[1]
+            codex.get_codex_token = lambda **_: SimpleNamespace(account_id="acct", access="token")
+
+            async def run():
+                provider = codex.OpenAICodexProvider(default_model="gpt-5.4")
+                try:
+                    result = await provider.chat(
+                        [{"role": "user", "content": "hello"}],
+                        provider_context=ProviderCallContext(session_id="langfuse-test"),
+                    )
+                    assert result.content == "answer"
+                finally:
+                    await provider.aclose()
+
+            try:
+                asyncio.run(run())
+            finally:
+                client.shutdown()
+        ''')
+        completed = await asyncio.to_thread(
+            subprocess.run, [sys.executable, "-c", script, codex.DEFAULT_CODEX_URL, langfuse_url],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+    finally:
+        await runner.cleanup()
+
+    assert len(server.requests) == int(not reject_upgrade)
+    assert len(server.http_requests) == int(reject_upgrade)
+    assert sdk_versions == [version("langfuse")]
+    assert len(spans) == 1
+    span = spans[0]
+    attributes = {item.key: item.value.string_value for item in span.attributes}
+    assert span.name == "codex_request"
+    assert span.end_time_unix_nano >= span.start_time_unix_nano > 0
+    assert attributes["langfuse.observation.type"] == "generation"
+    assert attributes["langfuse.observation.model.name"] == "gpt-5.4"
+    assert attributes["langfuse.observation.output"] == "answer"
+    assert json.loads(attributes["langfuse.observation.usage_details"]) == {
+        "input": 20, "output": 20, "total": 120, "input_cached_tokens": 80,
+    }
 
 
 async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_path):

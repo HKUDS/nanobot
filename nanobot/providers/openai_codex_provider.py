@@ -39,10 +39,12 @@ from nanobot.providers.oauth_catalog_cache import (
 from nanobot.providers.openai_responses import (
     ResponsesBackend,
     ResponsesWebSocketOptions,
-    responses_state_items,
     responses_state_matches,
 )
-from nanobot.providers.openai_responses.state import without_response_item_ids
+from nanobot.providers.openai_responses.state import (
+    responses_compaction_items,
+    without_response_item_ids,
+)
 from nanobot.providers.openai_responses.websocket import ResponsesWebSocketError
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
 from nanobot.utils.helpers import estimate_prompt_tokens
@@ -75,16 +77,10 @@ def _usage_details(usage: LLMUsage | None) -> dict[str, int] | None:
 
 
 class _CodexGenerationTracer:
-    """Best-effort Langfuse generation for one Codex request.
-
-    No OpenAI SDK client to swap here (raw httpx + OAuth), so this logs
-    manually. Failures never break the real call, and finalization is
-    idempotent so a cancelled request can't double-end.
-    """
+    """Best-effort Langfuse updates; the request owns generation closure."""
 
     def __init__(self, generation: Any | None) -> None:
         self._generation = generation
-        self._ended = False
 
     def record_success(self, result: LLMResponse) -> None:
         output: Any = result.content
@@ -95,30 +91,29 @@ class _CodexGenerationTracer:
                     {"name": call.name, "arguments": call.arguments} for call in result.tool_calls
                 ],
             }
-        self._finish(output=output, usage_details=_usage_details(result.usage))
+        self._update(output=output, usage_details=_usage_details(result.usage))
 
     def record_error(self, response: LLMResponse) -> None:
-        self._finish(
+        self._update(
             output=response.content,
             level="ERROR",
             status_message=response.content,
         )
 
-    def close_if_open(self) -> None:
-        """Best-effort ``.end()`` for a generation neither method above closed."""
-        self._finish()
-
-    def _finish(self, **kwargs: Any) -> None:
+    def _update(self, **kwargs: Any) -> None:
         generation = self._generation
-        if generation is None or self._ended:
-            return
-        self._ended = True
         filtered = {k: v for k, v in kwargs.items() if v is not None}
+        if generation is None or not filtered:
+            return
         try:
-            if filtered:
-                generation.update(**filtered)
+            generation.update(**filtered)
         except Exception as exc:
             logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+
+    def close(self) -> None:
+        generation = self._generation
+        if generation is None:
+            return
         try:
             generation.end()
         except Exception as exc:
@@ -141,8 +136,9 @@ def _start_codex_langfuse_generation(
             from langfuse import get_client
 
             langfuse = get_client()
-            generation = langfuse.start_generation(
+            generation = langfuse.start_observation(
                 name=name,
+                as_type="generation",
                 model=model,
                 input={
                     "instructions": body.get("instructions"),
@@ -295,7 +291,7 @@ class OpenAICodexProvider(LLMProvider):
                 *,
                 emit_deltas: bool,
                 trace_name: str,
-                validate: Callable[[LLMResponse], None] | None = None,
+                validate: Callable[[LLMResponse], object] | None = None,
             ) -> LLMResponse:
                 wire_body = await prepare_inline_images(without_response_item_ids(request_body))
                 tracer = _start_codex_langfuse_generation(
@@ -342,10 +338,6 @@ class OpenAICodexProvider(LLMProvider):
                                 on_thinking_delta=on_thinking_delta if emit_deltas else None,
                                 on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
                             )
-                    # Transport succeeding isn't the same as the caller
-                    # accepting the response (e.g. a compaction reply with no
-                    # usable compaction item) - validate before the
-                    # generation is finalized as a success.
                     if validate is not None:
                         validate(result)
                 except Exception as exc:
@@ -355,9 +347,7 @@ class OpenAICodexProvider(LLMProvider):
                     tracer.record_success(result)
                     return result
                 finally:
-                    # Covers cancellation: neither branch above ran, so the
-                    # generation would otherwise stay open indefinitely.
-                    tracer.close_if_open()
+                    tracer.close()
 
             if self.supports_native_compaction(model) and replayed and sanitized_state is not None:
                 stage = "codex_compaction"
@@ -367,7 +357,7 @@ class OpenAICodexProvider(LLMProvider):
                         request,
                         emit_deltas=False,
                         trace_name="codex_compaction",
-                        validate=_validate_compaction_result,
+                        validate=responses_compaction_items,
                     )
 
                 native_compaction_state = await self._responses.compact_before_request(
@@ -534,23 +524,6 @@ def _strip_model_prefix(model: str) -> str:
     if model.startswith("openai-codex/") or model.startswith("openai_codex/"):
         return model.split("/", 1)[1]
     return model
-
-
-def _validate_compaction_result(result: LLMResponse) -> None:
-    """Reject a transport-successful compaction reply with no usable item.
-
-    Passed to ``_send`` as its ``validate`` hook so a response Codex sent
-    fine but the caller can't use gets traced as an error, not a success.
-    """
-    compact_items = (
-        responses_state_items(result.provider_state) if result.provider_state is not None else None
-    )
-    if not compact_items or compact_items[-1].get("type") not in {
-        "compaction",
-        "compaction_summary",
-        "context_compaction",
-    }:
-        raise RuntimeError("Responses compaction returned no compaction item")
 
 
 def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str] | None:

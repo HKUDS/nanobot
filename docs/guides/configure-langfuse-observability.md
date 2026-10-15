@@ -22,6 +22,8 @@ Install Langfuse:
 nanobot plugins enable langfuse
 ```
 
+nanobot uses Langfuse Python SDK 4.7 or later in the 4.x series. Tracing supports Langfuse Cloud and self-hosted Langfuse 3.63.0 or later. The SDK enables real-time ingestion on Langfuse v4 automatically; see [Langfuse compatibility](https://langfuse.com/docs/compatibility).
+
 ## Minimal working example
 
 Set credentials before starting nanobot:
