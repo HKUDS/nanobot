@@ -10,17 +10,17 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
+from nanobot.agent.prompt_worker import PromptWorker
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
@@ -71,9 +71,6 @@ BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
     "[Previous assistant message omitted.]",
 })
-
-_PreparationArgs = ParamSpec("_PreparationArgs")
-_PreparationResult = TypeVar("_PreparationResult")
 
 
 class ContextWindowExceededError(RuntimeError):
@@ -260,47 +257,26 @@ class ModelRequestState:
     events: EventSink = NO_EVENTS
 
 
+@dataclass(frozen=True, slots=True)
+class _RequestAssessment:
+    messages: list[dict[str, Any]]
+    model_messages: list[dict[str, Any]] | None
+    supplemental_messages: list[dict[str, Any]] | None
+    pressure: tuple[int, str] | None
+
+
 class ContextGovernor:
     """Own model-request context while preserving persisted history."""
 
-    def __init__(self) -> None:
-        self._preparation_slots = asyncio.Semaphore(1)
-        self._preparation_jobs: set[Awaitable[object]] = set()
-
-    async def prepare_in_background(
-        self, operation: Callable[_PreparationArgs, _PreparationResult],
-        *args: _PreparationArgs.args, **kwargs: _PreparationArgs.kwargs,
-    ) -> _PreparationResult:
-        """Run read-only prompt preparation with one physical job at a time."""
-        await self._preparation_slots.acquire()
-        context = copy_context()
-
-        def prepare() -> _PreparationResult:
-            return context.run(operation, *args, **kwargs)
-
-        try:
-            future = asyncio.get_running_loop().run_in_executor(None, prepare)
-        except BaseException:
-            self._preparation_slots.release()
-            raise
-        self._preparation_jobs.add(future)
-
-        def finished(done: asyncio.Future[_PreparationResult]) -> None:
-            self._preparation_jobs.discard(done)
-            self._preparation_slots.release()
-            if not done.cancelled():
-                done.exception()
-
-        future.add_done_callback(finished)
-        # The caller can stop immediately; its worker holds the slot until it exits.
-        return await asyncio.shield(future)
+    def __init__(self, prompt_worker: PromptWorker | None = None) -> None:
+        self._prompt_worker = prompt_worker or PromptWorker()
 
     async def accept_request(
         self, state: ModelRequestState, model_messages: list[dict[str, Any]],
         *, raw_boundary: int,
     ) -> None:
         """Advance accepted history on the loop after copying its payload."""
-        accepted = await self.prepare_in_background(deepcopy, model_messages)
+        accepted = await self._prompt_worker.run(deepcopy, model_messages)
         state.compaction.accepted_messages = accepted
         state.compaction.raw_accepted_boundary = raw_boundary
 
@@ -491,14 +467,6 @@ class ContextGovernor:
             return None
         return measured, source
 
-    @staticmethod
-    def _summary_transcript(
-        compaction: ContextCompactionState,
-        summary: str,
-    ) -> list[dict[str, Any]]:
-        """Rebuild only the stable system prefix around a replacement summary."""
-        return compaction.summary_transcript_builder(summary)
-
     async def summarize_provider_compaction(
         self,
         state: ModelRequestState,
@@ -552,7 +520,7 @@ class ContextGovernor:
         try:
             summary = await compaction.consolidate_provider_compaction(
                 response.provider_compaction_state,
-                await self.prepare_in_background(deepcopy, accepted_messages),
+                await self._prompt_worker.run(deepcopy, accepted_messages),
                 compaction.active_summary,
             )
         except (Exception, asyncio.CancelledError) as exc:
@@ -596,15 +564,11 @@ class ContextGovernor:
             ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
         try:
-            delta_messages = await self.prepare_in_background(
-                compaction.delta_after_accepted, messages,
-            )
-            consolidation_prefix = await self.prepare_in_background(
-                self.prepare_messages_for_model, state.config,
-                compaction.accepted_messages,
+            delta_messages, consolidation_prefix = await self._prompt_worker.run(
+                self._prepare_consolidation, state.config, compaction, messages,
             )
             summary = await compaction.consolidate_history(
-                await self.prepare_in_background(deepcopy, consolidation_prefix),
+                consolidation_prefix,
                 compaction.active_summary,
             )
             if not summary:
@@ -616,34 +580,15 @@ class ContextGovernor:
                 )
 
             compaction.active_summary = summary
-            # Fresh user input defines the next task. Only ongoing work without
-            # new user input needs a temporary instruction to resume after H is replaced.
-            continuation = (
-                []
-                if any(message.get("role") == "user" for message in delta_messages)
-                else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
-            )
-            summary_transcript = await self.prepare_in_background(
-                self._summary_transcript, compaction, summary,
-            )
-            prepared = await self.prepare_in_background(
-                self.prepare_messages_for_model, state.config,
-                [
-                    *summary_transcript,
-                    *continuation,
-                    *delta_messages,
-                ],
+            prepared = await self._prompt_worker.run(
+                self._rebuild_compacted_request, state.config, compaction, summary,
+                delta_messages, tool_definitions=tool_definitions,
             )
             # Responses-style state is append-only. Replacing H with a
             # checkpoint requires a fresh request; a successful response may
             # establish a new provider-owned state at the rewritten boundary.
             state.conversation.replace_transcript(compaction.raw_messages)
             state.usage = None
-            prepared = await self.prepare_in_background(
-                self.ensure_request_fits, state.config,
-                prepared,
-                tool_definitions=tool_definitions,
-            )
             compaction.summary_checkpoint = SessionSummaryCheckpoint(
                 summary=summary,
                 transcript_boundary=compaction.raw_accepted_boundary,
@@ -664,18 +609,42 @@ class ContextGovernor:
         )
         return prepared
 
-    async def prepare_request(
+    def _prepare_consolidation(
+        self, config: ContextGovernanceConfig, compaction: ContextCompactionState,
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        delta = compaction.delta_after_accepted(messages)
+        prefix = self.prepare_messages_for_model(config, compaction.accepted_messages)
+        return delta, deepcopy(prefix)
+
+    def _rebuild_compacted_request(
+        self, config: ContextGovernanceConfig, compaction: ContextCompactionState,
+        summary: str, delta_messages: list[dict[str, Any]],
+        *, tool_definitions: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        # Fresh user input defines the next task. Only ongoing work without
+        # new user input needs a temporary instruction to resume after H is replaced.
+        continuation = (
+            []
+            if any(message.get("role") == "user" for message in delta_messages)
+            else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
+        )
+        summary_transcript = compaction.summary_transcript_builder(summary)
+        prepared = self.prepare_messages_for_model(
+            config, [*summary_transcript, *continuation, *delta_messages],
+        )
+        return self.ensure_request_fits(config, prepared, tool_definitions=tool_definitions)
+
+    def _assess_request(
         self,
         state: ModelRequestState,
         messages: list[dict[str, Any]],
         *,
         tool_definitions: list[dict[str, Any]] | None,
         transcript: list[dict[str, Any]] | None = None,
-    ) -> tuple[list[dict[str, Any]], ProviderCallContext | None]:
-        """Prepare or compact and record the exact provider payload."""
-        prepared = await self.prepare_in_background(
-            self.prepare_messages_for_model, state.config, messages,
-        )
+    ) -> _RequestAssessment:
+        """Shape and measure a request without advancing its loop-owned state."""
+        prepared = self.prepare_messages_for_model(state.config, messages)
         model_messages: list[dict[str, Any]] | None = prepared
         supplemental_messages: list[dict[str, Any]] | None = None
         request_context_tokens = None
@@ -683,8 +652,8 @@ class ContextGovernor:
             if tool_definitions is None:
                 model_messages = None
                 supplemental_messages = [prepared[-1]]
-            request_context_tokens = await self.prepare_in_background(
-                state.conversation.estimate_request_context_tokens, transcript,
+            request_context_tokens = state.conversation.estimate_request_context_tokens(
+                transcript,
                 model_messages=model_messages,
                 supplemental_messages=supplemental_messages,
                 tool_definitions=tool_definitions,
@@ -694,20 +663,36 @@ class ContextGovernor:
             and prepared == state.messages
             and tool_definitions == state.tool_definitions
         )
-        pressure = await self.prepare_in_background(
-            self.request_pressure, state.config,
+        pressure = self.request_pressure(
+            state.config,
             prepared,
             state.usage,
             usage_matches_messages=usage_matches_messages,
             tool_definitions=tool_definitions,
             request_context_tokens=request_context_tokens,
         )
+        return _RequestAssessment(prepared, model_messages, supplemental_messages, pressure)
+
+    async def prepare_request(
+        self,
+        state: ModelRequestState,
+        messages: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+        transcript: list[dict[str, Any]] | None = None,
+    ) -> tuple[list[dict[str, Any]], ProviderCallContext | None]:
+        """Prepare or compact and record the exact provider payload."""
+        assessment = await self._prompt_worker.run(
+            self._assess_request, state, messages,
+            tool_definitions=tool_definitions, transcript=transcript,
+        )
+        prepared, pressure = assessment.messages, assessment.pressure
         provider_context = (
             state.conversation.prepare_request(
                 transcript,
                 context_window_tokens=state.config.context_window_tokens,
-                model_messages=model_messages,
-                supplemental_messages=supplemental_messages,
+                model_messages=assessment.model_messages,
+                supplemental_messages=assessment.supplemental_messages,
             )
             if transcript is not None
             else state.conversation.independent_request_context(
@@ -744,7 +729,7 @@ class ContextGovernor:
             provider_context = replace(
                 provider_context or ProviderCallContext(), events=state.events,
             )
-        state.messages, state.tool_definitions = await self.prepare_in_background(
+        state.messages, state.tool_definitions = await self._prompt_worker.run(
             self._request_snapshot, prepared, tool_definitions,
         )
         return prepared, provider_context
