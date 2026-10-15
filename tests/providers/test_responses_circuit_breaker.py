@@ -218,9 +218,20 @@ def test_serde_deserialize_error_does_not_trigger_fallback():
     assert OpenAICompatProvider._should_fallback_from_responses_error(err) is False
 
 
-def test_legacy_compatibility_markers_still_trigger_fallback():
+def test_explicit_unsupported_responses_parameter_allows_fallback():
     err = _FakeAPIError(400, "parameter `instructions` is unsupported")
     assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
+
+
+@pytest.mark.parametrize(("status", "body", "expected"), [
+    (400, {"code": "unsupported_parameter", "param": "instructions"}, True),
+    (400, {"code": "unsupported_value", "param": "instructions", "message": "Invalid instructions"}, False),
+    (404, {"message": "Previous response with id 'resp_missing' not found"}, False),
+    (422, {"message": "Unsupported value for max_output_tokens: must be at most 64"}, False),
+])
+def test_responses_errors_distinguish_unsupported_parameters_from_invalid_requests(status, body, expected):
+    err = _FakeAPIError(status, body)
+    assert OpenAICompatProvider._should_fallback_from_responses_error(err) is expected
 
 
 # ======================================================================

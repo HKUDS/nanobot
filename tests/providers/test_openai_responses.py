@@ -865,9 +865,9 @@ class TestResponsesConversationState:
     ):
         assert resolve_compact_threshold(context_window, max_output) == expected
 
-    def test_compaction_compatibility_recognizes_old_sdk_signature_error(self):
+    def test_local_sdk_errors_do_not_disable_server_compaction(self):
         error = TypeError("create() got an unexpected keyword argument 'context_management'")
-        assert is_compaction_compatibility_error(error) is True
+        assert is_compaction_compatibility_error(error) is False
         assert is_compaction_compatibility_error(TypeError("unrelated argument")) is False
 
     def test_state_observability_logs_counts_without_opaque_content(self):

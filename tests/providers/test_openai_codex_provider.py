@@ -319,8 +319,9 @@ async def test_codex_request_non_200_populates_http_metadata(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("unsupported", [False, True])
 async def test_codex_request_marks_rejected_compaction_without_retaining_raw_body(
-    monkeypatch,
+    monkeypatch, unsupported,
 ) -> None:
     original_client = httpx.AsyncClient
     secret = "PRIVATE PROMPT MUST NOT BE RETAINED"
@@ -330,7 +331,10 @@ async def test_codex_request_marks_rejected_compaction_without_retaining_raw_bod
             400,
             json={
                 "error": {
-                    "message": f"Unknown input type compaction_trigger; {secret}",
+                    "message": (
+                        f"Unknown input type compaction_trigger; {secret}" if unsupported
+                        else f"Invalid compaction_trigger: input exceeds context window; {secret}"
+                    ),
                 },
             },
             request=request,
@@ -355,7 +359,7 @@ async def test_codex_request_marks_rejected_compaction_without_retaining_raw_bod
         )
 
     error = caught.value
-    assert error.compaction_unsupported is True
+    assert error.compaction_unsupported is unsupported
     assert secret not in str(error)
     assert not hasattr(error, "body")
 
