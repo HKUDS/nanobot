@@ -12,7 +12,7 @@
         "placeholder": "ID de canal separados por comas"
       },
       "groupPolicy": {
-        "label": "Comportamiento en grupos",
+        "label": "Reglas de grupo",
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
@@ -27,7 +27,7 @@
         "label": "proxy de red"
       },
       "proxyUsername": {
-        "label": "Nombre de usuario proxy"
+        "label": "Usuario del proxy"
       },
       "proxyPassword": {
         "label": "Contraseña de proxy"
@@ -39,10 +39,10 @@
         "label": "Leer emojis"
       },
       "workingEmoji": {
-        "label": "Emoji de trabajo"
+        "label": "Emoji de actividad"
       },
       "workingEmojiDelay": {
-        "label": "Retraso de emoji de trabajo"
+        "label": "Retraso del emoji (segundos)"
       },
       "streaming": {
         "label": "Transmisión",

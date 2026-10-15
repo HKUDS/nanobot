@@ -155,6 +155,7 @@ function fileEditAction(
   const deleting = edit.operation === "delete";
   if (failed) return t(`message.agentActivity.${deleting ? "deleteFileFailed" : "editFileFailedShort"}`);
   if (editing) return t(`message.agentActivity.${deleting ? "deletingFile" : "editingFileShort"}`);
+  if (edit.operation === "create") return t("message.agentActivity.createdFile");
   return t(`message.agentActivity.${deleting ? "deletedFile" : "editedFileShort"}`);
 }
 

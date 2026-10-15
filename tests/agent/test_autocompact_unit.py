@@ -1,5 +1,6 @@
 """Direct unit tests for AutoCompact class methods in isolation."""
 
+import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -48,6 +49,7 @@ def _make_autocompact(
         sessions=sessions,
         consolidator=consolidator,
         session_ttl_minutes=ttl,
+        session_lock=lambda _key: asyncio.Lock(),
     )
 
 
@@ -66,7 +68,8 @@ def test_default_ttl_disables_idle_compaction():
     sessions.get_or_create.return_value = _make_session(
         key="cli:idle", messages=[{"role": "user", "content": "pending"}],
     )
-    ac = AutoCompact(sessions=sessions, consolidator=MagicMock())
+    ac = AutoCompact(sessions=sessions, consolidator=MagicMock(),
+                     session_lock=lambda _key: asyncio.Lock())
     schedule = MagicMock(side_effect=lambda pending: pending.close())
 
     ac.check_expired(schedule, _runtime)
@@ -443,6 +446,7 @@ class TestArchiveDelegates:
             consolidator=consolidator,
             session_ttl_minutes=15,
             bind_events=bind,
+            session_lock=lambda _key: asyncio.Lock(),
         )
 
         await ac._archive("cli:test", runtime=_runtime())

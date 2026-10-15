@@ -88,7 +88,9 @@ export function parseGenericToolTrace(line: string): GenericToolTrace | null {
   const call = parseCall(line);
   if (!call || isExcludedTool(call.name)) return null;
   const family = toolFamily(call.name);
-  const fields = safeFields(call.args);
+  const fields: ToolField[] = call.name === "subagent" && typeof call.args === "string"
+    ? [{ key: "action", value: call.args.trim() }]
+    : safeFields(call.args);
   if (call.name === "rg" && call.args && typeof call.args === "object") {
     const argv = (call.args as Record<string, unknown>).args;
     if (Array.isArray(argv) && argv.every((arg) => typeof arg === "string")) {
@@ -98,12 +100,14 @@ export function parseGenericToolTrace(line: string): GenericToolTrace | null {
     }
   }
   const collectedSource = fields.some((field) => isCollectedSourcePath(field.value));
+  let groupKey = family === "generic"
+    ? `${family}:${call.name}`
+    : `${family}:${collectedSource ? "collected" : "workspace"}`;
+  if (call.name === "subagent") groupKey += `:${fields.find((field) => field.key === "action")?.value.toLowerCase() ?? ""}`;
   return {
     name: call.name,
     family,
-    groupKey: family === "generic"
-      ? `${family}:${call.name}`
-      : `${family}:${collectedSource ? "collected" : "workspace"}`,
+    groupKey,
     fields,
     collectedSource,
   };
@@ -256,6 +260,12 @@ function activityLabel(
       return activityStatus(t, status, "generatingImage", "generatedImage", "generateImageFailed");
     case "spawn":
       return activityStatus(t, status, "delegatingTask", "delegatedTask", "delegateTaskFailed");
+    case "subagent":
+      if (action === "create") return activityStatus(t, status, "delegatingTask", "delegatedTask", "delegateTaskFailed");
+      if (action === "check") return activityStatus(t, status, "checkingSubtask", "checkedSubtask", "checkSubtaskFailed");
+      if (action === "send") return activityStatus(t, status, "messagingSubtask", "queuedSubtaskMessage", "messageSubtaskFailed");
+      if (action === "cancel") return activityStatus(t, status, "stoppingSubtask", "requestedSubtaskStop", "stopSubtaskFailed");
+      return activityStatus(t, status, "managingSubtasks", "managedSubtasks", "manageSubtasksFailed");
     case "message":
       return activityStatus(t, status, "sendingMessage", "sentMessage", "sendMessageFailed");
     case "my":
@@ -311,6 +321,7 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
 
   switch (name) {
     case "spawn":
+    case "subagent":
       return safeText(fieldValue(trace, "label"));
     case "message":
       return safeText(fieldValue(trace, "channel"));

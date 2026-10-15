@@ -17,6 +17,22 @@ from nanobot.webui.settings_runtime import (
 )
 
 
+def test_web_proxy_roundtrip_while_disabled_preserves_model_proxy(tmp_path):
+    path = tmp_path / "config.json"
+    config = Config()
+    config.tools.web.enable = False
+    config.providers.openai.proxy = "http://model-proxy.example:8080"
+    save_config(config, path)
+    for proxy in ("http://web-proxy.example:7890", None):
+        payload = update_runtime_config_settings({"tools.web.proxy": proxy}, local_browser=True, config_path=path)
+        assert payload["runtime_config"]["tools.web.proxy"] == proxy
+        assert payload["requires_restart"]
+        saved = load_config(path)
+        assert saved.tools.web.proxy == proxy
+        assert saved.tools.web.enable is False
+        assert saved.providers.openai.proxy == "http://model-proxy.example:8080"
+
+
 def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
     path = tmp_path / "config.json"
     config = Config.model_validate({

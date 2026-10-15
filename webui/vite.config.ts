@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import { componentGallery } from "./src/dev/gallery/inventory-plugin";
 
 const GZIP_MIN_BYTES = 4 * 1024;
 const GZIP_ASSET_PATTERN = /\.(?:css|html|js|json|mjs|svg)$/i;
@@ -119,7 +120,7 @@ export default defineConfig(({ mode }) => {
   const hmrPath = "/__nanobot_vite_hmr";
 
   return {
-    plugins: [react(), guardWebuiEntryChunk(), gzipWebuiAssets()],
+    plugins: [react(), componentGallery(path.resolve(__dirname, "..")), guardWebuiEntryChunk(), gzipWebuiAssets()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
@@ -176,7 +177,7 @@ export default defineConfig(({ mode }) => {
       coverage: {
         provider: "v8",
         include: ["src/**/*.{ts,tsx}"],
-        exclude: ["src/tests/**", "src/**/*.d.ts"],
+        exclude: ["src/tests/**", "src/dev/**", "src/**/*.d.ts"],
         reporter: ["text", "json-summary"],
         thresholds: {
           statements: 85,

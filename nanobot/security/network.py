@@ -238,7 +238,8 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
         proto: int = 0,
         flags: int = 0,
     ) -> list[Any]:
-        if str(host).rstrip(".").lower() != pinned_host:
+        normalized_host = host.decode("ascii") if isinstance(host, bytes) else str(host)
+        if normalized_host.rstrip(".").lower() != pinned_host:
             return original_getaddrinfo(host, port, family, type, proto, flags)
         infos: list[Any] = []
         for ip in resolved_ips:

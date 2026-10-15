@@ -7,7 +7,7 @@ import {
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
 import { channelSetup } from "@/components/settings/channels/ChannelIdentity";
-import type { ChannelConfigField } from "@/components/settings/channels/catalog";
+import type { ChannelConfigField } from "@/channel-plugins/catalog";
 
 const fields: ChannelConfigField[] = [
   {
@@ -123,7 +123,7 @@ describe("CredentialForm", () => {
     const password = screen.getByLabelText("Password");
     expect(password).toHaveAttribute("aria-invalid", "true");
     expect(password).toHaveAccessibleDescription("Required to complete setup.");
-    fireEvent.click(screen.getByRole("button", { name: "Remove saved credential" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials" }));
     expect(onClearSecret).toHaveBeenCalledWith("channels.matrix.password", true);
   });
 

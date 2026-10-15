@@ -15,6 +15,10 @@ from nanobot import __logo__, __version__
 from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.image_generation import (
+    register_image_generation_tool,
+    reload_image_generation_tool,
+)
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.cli import terminal as cli_terminal
@@ -123,7 +127,11 @@ def _install_gateway_shutdown_handlers(
         print_status("\nShutting down... Press Ctrl+C again to force.")
         shutdown_event.set()
 
-    for signum in (signal.SIGINT, signal.SIGTERM):
+    shutdown_signals = [signal.SIGINT, signal.SIGTERM]
+    if sigbreak := getattr(signal, "SIGBREAK", None):
+        shutdown_signals.append(sigbreak)
+
+    for signum in shutdown_signals:
         try:
             loop.add_signal_handler(signum, request_shutdown, signum)
         except (NotImplementedError, RuntimeError, ValueError):
@@ -377,9 +385,7 @@ def _run_gateway(
         load_provider_snapshot,
     )
     from nanobot.providers.fallback_provider import FallbackProvider
-    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
-    from nanobot.session.recovery import RecoveryCoordinator
     from nanobot.session.webui_turns import (
         WebuiTurnCoordinator,
         WebuiTurnRoutePolicy,
@@ -387,6 +393,7 @@ def _run_gateway(
     )
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
+    from nanobot.webui.recovery import RecoveryCoordinator
 
     port = port if port is not None else config.gateway.port
     webui_url = _webui_browser_url(config)
@@ -476,6 +483,7 @@ def _run_gateway(
     )
 
     tools = ToolRegistry()
+    register_image_generation_tool(config, tools, workspace=config.workspace_path)
     mcp_provider = MCPProvider.from_config(config, tools)
 
     recovery = RecoveryCoordinator(
@@ -492,7 +500,6 @@ def _run_gateway(
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-        image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
         turn_delivery_factory=turn_delivery_factory,
@@ -716,6 +723,13 @@ def _run_gateway(
         agent.context.skills.disabled_skills = set(disabled_skills)
         agent.subagents.disabled_skills = set(disabled_skills)
 
+    async def _webui_image_generation_reload() -> dict[str, Any]:
+        return await reload_image_generation_tool(
+            config_path=Path(config_path),
+            workspace=agent.workspace,
+            registry=tools,
+        )
+
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
     channels = ChannelManager(
@@ -733,8 +747,11 @@ def _run_gateway(
         webui_runtime_capabilities=webui_runtime_capabilities,
         webui_mcp_runtime_status=mcp_provider.runtime_status,
         webui_mcp_reload=mcp_provider.reload,
+        webui_image_generation_reload=_webui_image_generation_reload,
         webui_skill_state_action=_webui_skill_state_action,
         webui_recovery_action=recovery.handle_action,
+        webui_subagent_manager=agent.subagents,
+        webui_discard_session=agent.discard_session,
         config_path=Path(config_path),
     )
 
@@ -935,7 +952,7 @@ def _run_gateway(
                 if orphaned:
                     logger.info("Last local client disappeared; stopping on-demand gateway")
 
-            tasks = [
+            tasks.extend([
                 asyncio.create_task(
                     watch_config_file(
                         Path(config_path),
@@ -957,7 +974,7 @@ def _run_gateway(
                     _monitor_local_clients(),
                     name="nanobot-gateway-client-monitor",
                 ),
-            ]
+            ])
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),
@@ -1035,6 +1052,7 @@ def _run_gateway(
         gateway_runtime.foreground_instance(gateway_start_options),
         webui_turn_coordinator.connected(),
     ):
+        agent.subagents.recover_interrupted()
         if health_server_enabled:
             gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

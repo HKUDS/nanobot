@@ -3,7 +3,7 @@ import { Download, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { ChannelFeatureAction } from "@/channel-plugins/types";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import {
   ChannelLogo,
   ChannelStatusBadge,
@@ -98,7 +98,7 @@ export function ChannelCatalogRow({
         {!feature.installed ? (
           <Button ref={installButtonRef} type="button" variant="outline" size="icon"
             className={cn(
-              "h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0 shadow-sm settings-hover active:scale-[0.96]",
+              "h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0",
               installHint && "border-[#2997FF]/60 bg-[#2997FF]/10 text-[#087FE7] ring-2 ring-[#2997FF]/25 ring-offset-2",
             )}
             disabled={actionsDisabled || anyActionBusy || !feature.install_supported}

@@ -166,6 +166,35 @@ def test_write_file_start_tracks_snapshot_and_end_emits_exact_diff(tmp_path: Pat
     assert "+extra" in diff_text
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("before", "content", "operation"), [
+    (None, "", "create"),
+    (None, "hello\n", "create"),
+    ("", "hello\n", None),
+])
+async def test_file_creation_is_distinct_from_editing_an_empty_file(
+    tmp_path: Path, before: str | None, content: str, operation: str | None,
+) -> None:
+    target = tmp_path / "new.txt"
+    if before is not None:
+        target.write_text(before, encoding="utf-8")
+    tool = _edit_tool(tmp_path)
+    params = {"path": "new.txt", "old_text": "", "new_text": content}
+    [tracker] = prepare_file_edit_trackers(
+        call_id="call-create", tool_name="edit_file", tool=tool, workspace=tmp_path,
+        params=params,
+    )
+    await tool.execute(**params)
+    assert target.read_text(encoding="utf-8") == content
+    event = build_file_edit_end_event(tracker)
+    assert event.get("operation") == operation
+    assert (event["added"], event["deleted"]) == (int(bool(content)), 0)
+    if content:
+        assert "+hello" in event["diff"]["text"]
+    else:
+        assert "diff" not in event
+
+
 def test_unified_diff_payload_truncates_large_diffs() -> None:
     before = "\n".join(f"old {i}" for i in range(12))
     after = "\n".join(f"new {i}" for i in range(12))
@@ -180,6 +209,29 @@ def test_unified_diff_payload_truncates_large_diffs() -> None:
         if line.startswith((" ", "+", "-")) and not line.startswith(("+++", "---"))
     ]
     assert len(body_lines) == 5
+
+
+@pytest.mark.parametrize(("max_lines", "expected_tail", "truncated"), [
+    (2, "", True),
+    (3, "\n@@ -3,0 +3 @@\n+new last", True),
+    (4, "\n@@ -3 +3 @@\n+new last\n-old last", False),
+])
+def test_unified_diff_line_limit_across_hunks(
+    max_lines: int, expected_tail: str, truncated: bool,
+) -> None:
+    payload = build_unified_diff_payload(
+        "old first\nkeep\nold last\n",
+        "new first\nkeep\nnew last\n",
+        context_lines=0,
+        max_lines=max_lines,
+    )
+
+    assert payload == {
+        "format": "unified",
+        "context": 0,
+        "truncated": truncated,
+        "text": "--- before\n+++ after\n@@ -1 +1 @@\n+new first\n-old first" + expected_tail,
+    }
 
 
 def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:

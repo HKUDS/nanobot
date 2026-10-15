@@ -1,8 +1,10 @@
 # nanobot Documentation
 
-Use these docs to get a working agent first, then open a task guide only when you need the next capability. Source-level design and extension details are kept in the contributor section.
+Use these docs to get a working agent first. After the first reply, describe your next goal to nanobot or choose a task guide to read yourself. Source-level design and extension details are kept in the contributor section.
 
 Repository docs follow the current source tree and can be newer than the latest package release. For published release docs, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
+
+Use the graphical setup steps first when the WebUI exposes the setting. Expand **Manual configuration** for headless deployments or configuration managed as code. Settings without a graphical control keep their direct configuration instructions.
 
 ## Start Here
 
@@ -19,7 +21,13 @@ The recommended first-run path is:
 3. Configure a provider and model in **Settings → Models**.
 4. Send `Hello!` before configuring anything else.
 
-Most people do not need to edit JSON for the first run. The WebUI handles the initial provider, model, and local browser settings. SSH, headless, existing-config, and older-release installs retain `nanobot onboard --wizard` as a terminal fallback. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for Agent Plugins, CLI Apps, and MCP integrations.
+Most people do not need to edit JSON for the first run. The WebUI handles the initial provider, model, and local browser settings. SSH, headless, existing-config, and older-release installs retain `nanobot onboard --wizard` as a terminal fallback. After the WebUI opens, use **Settings** for models and built-in capabilities, **Channels** for chat apps, and **Apps** for Agent Plugins, CLI Apps, and MCP integrations.
+
+## After the First Reply
+
+When the built-in `nanobot-document` skill is available and enabled, nanobot can consult the documentation bundled with your installation as you ask about features, configuration, or errors. Describe your current setup and one goal in the same chat; see [Continue with nanobot](./quick-start.md#continue-with-nanobot) for examples and explicit skill invocation. The skill links to the task and reference pages below as needed.
+
+For independent reading, choose a task guide below. Use the reference section when you need an exact field, default, command, or protocol detail.
 
 ## Add One Capability
 

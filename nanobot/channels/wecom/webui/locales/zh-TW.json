@@ -13,7 +13,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "允許的使用者",
+        "label": "允許使用者",
         "placeholder": "使用者 ID，以逗號分隔"
       },
       "welcomeMessage": {

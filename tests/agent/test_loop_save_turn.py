@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
-from agent.session_helpers import run_session
+from agent.session_helpers import run_session, save_completed_subagent, visible_message
 from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
@@ -124,7 +124,10 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    bus = MessageBus()
+    loop = AgentLoop(
+        bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+    )
     WebuiTurnCoordinator(
         bus=loop.bus,
         sessions=loop.sessions,
@@ -290,7 +293,10 @@ async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> N
 @pytest.mark.parametrize(
     ("content", "expected"),
     [
-        ("/neaw", 'Unknown command "/neaw". Did you mean "/new"?'),
+        (
+            "/stop now",
+            'Command "/stop" does not accept arguments. Did you mean "/stop"?',
+        ),
         (
             "/status now",
             'Command "/status" does not accept arguments. Did you mean "/status"?',
@@ -325,6 +331,32 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
         ("user", content, True),
         ("assistant", response.content, True),
     ]
+
+
+@pytest.mark.parametrize(("channel", "content"), [
+    ("websocket", "/tmp 看看这个目录"),
+    ("weixin", "/home/user/project"),
+    ("cli", "/new/file.txt"),
+])
+async def test_absolute_path_reaches_provider_as_chat(tmp_path, channel, content) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.aclose = AsyncMock()
+    try:
+        response = await loop._process_message(InboundMessage(
+            channel=channel, sender_id="user", chat_id="path", content=content,
+        ))
+
+        assert response is not None and response.content == "Test title"
+        request = loop.provider.chat_stream_with_retry.await_args.kwargs
+        assert any(
+            message["role"] == "user" and content in message["content"]
+            for message in request["messages"]
+        )
+        session = loop.sessions.get_or_create(f"{channel}:path")
+        assert session.get_history(include_runtime_context=False)[0]["content"] == content
+        assert not session.messages[0].get("_command")
+    finally:
+        await loop.aclose()
 
 
 def test_clean_generated_title_strips_reasoning_tags() -> None:
@@ -1073,7 +1105,7 @@ async def test_process_message_persists_user_message_before_turn_completes(tmp_p
     loop.sessions.invalidate("feishu:c1")
     persisted = loop.sessions.get_or_create("feishu:c1")
     assert [m["role"] for m in persisted.messages] == ["user"]
-    assert persisted.messages[0]["content"] == "persist me"
+    assert public_history_message(persisted.messages[0])["content"] == "persist me"
     assert persisted.metadata.get(AgentLoop._PENDING_USER_TURN_KEY) is True
     assert persisted.updated_at >= persisted.created_at
 
@@ -1088,6 +1120,7 @@ async def test_subagent_followup_stages_provider_state_before_turn_runs(
     session = loop.sessions.get_or_create("cli:subagent-crash")
     session.provider_state = _provider_state()
     loop.sessions.save(session)
+    save_completed_subagent(loop, "sub-1", session.key)
 
     msg = InboundMessage(
         channel="system",
@@ -1119,6 +1152,7 @@ async def test_subagent_followup_state_is_durable_before_prompt_assembly(
     session = loop.sessions.get_or_create("cli:subagent-prompt-crash")
     session.provider_state = _provider_state()
     loop.sessions.save(session)
+    save_completed_subagent(loop, "sub-1", session.key)
 
     msg = InboundMessage(
         channel="system",
@@ -1152,6 +1186,7 @@ async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
     session = loop.sessions.get_or_create("cli:subagent-redelivery")
     session.provider_state = _provider_state()
     loop.sessions.save(session)
+    save_completed_subagent(loop, "sub-1", session.key)
     msg = InboundMessage(
         channel="system",
         sender_id="subagent",
@@ -1201,6 +1236,7 @@ async def test_subagent_followup_clears_state_before_compatibility_failure(
     session = loop.sessions.get_or_create("cli:subagent-compat-crash")
     session.provider_state = _provider_state()
     loop.sessions.save(session)
+    save_completed_subagent(loop, "sub-1", session.key)
 
     msg = InboundMessage(
         channel="system",
@@ -1343,7 +1379,7 @@ async def test_process_message_persists_media_paths_on_user_turn(tmp_path: Path)
     loop.sessions.invalidate("websocket:c-media")
     persisted = loop.sessions.get_or_create("websocket:c-media")
     assert [m["role"] for m in persisted.messages] == ["user"]
-    assert persisted.messages[0]["content"] == "look"
+    assert public_history_message(persisted.messages[0])["content"] == "look"
     assert persisted.messages[0]["media"] == [str(img_a), str(img_b)]
 
 
@@ -1375,7 +1411,7 @@ async def test_process_message_persists_media_only_turn_without_text(tmp_path: P
     persisted = loop.sessions.get_or_create("websocket:c-images-only")
     assert len(persisted.messages) == 1
     assert persisted.messages[0]["role"] == "user"
-    assert persisted.messages[0]["content"] == ""
+    assert public_history_message(persisted.messages[0])["content"] == ""
     assert persisted.messages[0]["media"] == [str(img)]
 
 
@@ -1401,7 +1437,7 @@ async def test_process_message_does_not_duplicate_early_persisted_user_message(t
     session = loop.sessions.get_or_create("feishu:c2")
     assert [
         {k: v for k, v in m.items() if k in {"role", "content"}}
-        for m in session.messages
+        for m in map(public_history_message, session.messages)
     ] == [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "done"},
@@ -1759,11 +1795,11 @@ async def test_process_direct_skip_user_persist_does_not_save_retry_user(
 
 
 @pytest.mark.asyncio
-async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
+async def test_request_context_uses_effective_key_for_subagent_tool(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    spawn_tool = loop.tools.get("spawn")
-    assert spawn_tool is not None
-    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    subagent_tool = loop.tools.get("subagent")
+    assert subagent_tool is not None
+    subagent_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
     runtime = loop.llm_runtime()
 
     with request_context(RequestContext(
@@ -1772,9 +1808,9 @@ async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path)
         session_key="discord:parent-456:thread:thread-777",
         runtime=runtime,
     )):
-        await spawn_tool.execute(task="inspect context")
+        await subagent_tool.execute(action="create", task="inspect context")
 
-    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    call = subagent_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
     assert call["origin_channel"] == "discord"
     assert call["origin_chat_id"] == "thread-777"
     assert call["session_key"] == "discord:parent-456:thread:thread-777"
@@ -1815,7 +1851,7 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
     session = loop.sessions.get_or_create("feishu:c3")
     assert [
         {k: v for k, v in m.items() if k in {"role", "content"}}
-        for m in session.messages
+        for m in map(public_history_message, session.messages)
     ] == [
         {"role": "user", "content": "old question"},
         {"role": "assistant", "content": "Error: Task interrupted before a response was generated."},
@@ -1914,7 +1950,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     session = loop.sessions.get_or_create("feishu:c4")
     assert [
         {k: v for k, v in m.items() if k in {"role", "content", "tool_call_id", "name"}}
-        for m in session.messages
+        for m in map(public_history_message, session.messages)
     ] == [
         {"role": "user", "content": "keep progress"},
         {"role": "assistant", "content": "working"},
@@ -1940,6 +1976,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     session.add_message("user", "question")
     session.add_message("assistant", "working")
     loop.sessions.save(session)
+    save_completed_subagent(loop, "sub-1", session.key)
 
     runtime = loop.llm_runtime()
     seen: dict[str, object] = {}
@@ -2040,6 +2077,7 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
+    save_completed_subagent(loop, "sub-logs", "cli:logs")
 
     async def fake_run_agent_loop(transcript_input, **_kwargs):
         initial_messages = _assembled_messages(loop.context, transcript_input)
@@ -2076,6 +2114,7 @@ async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> 
 @pytest.mark.asyncio
 async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
+    save_completed_subagent(loop, "sub-1", "cli:test")
     visited: list[str] = []
 
     for name in (
@@ -2204,6 +2243,7 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
     for idx in range(3):
+        save_completed_subagent(loop, f"sub-{idx}", "cli:multi")
         await loop._process_message(
             InboundMessage(
                 channel="system",
@@ -2291,11 +2331,11 @@ def test_subagent_followup_skips_empty_content() -> None:
 
 
 @pytest.mark.asyncio
-async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
+async def test_request_context_passes_thread_session_key_to_subagent_create(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    spawn_tool = loop.tools.get("spawn")
-    assert spawn_tool is not None
-    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    subagent_tool = loop.tools.get("subagent")
+    assert subagent_tool is not None
+    subagent_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
     runtime = loop.llm_runtime()
 
     with request_context(RequestContext(
@@ -2306,9 +2346,9 @@ async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path
         session_key="slack:C123:1700.42",
         runtime=runtime,
     )):
-        await spawn_tool.execute(task="inspect thread")
+        await subagent_tool.execute(action="create", task="inspect thread")
 
-    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    call = subagent_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
     assert call["session_key"] == "slack:C123:1700.42"
     assert call["origin_message_id"] == "msg-123"
     assert call["runtime"] is runtime
@@ -2321,6 +2361,7 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
     thread_session = loop.sessions.get_or_create("slack:C123:1700.42")
     thread_session.add_message("user", "thread question")
     loop.sessions.save(thread_session)
+    save_completed_subagent(loop, "sub-1", thread_session.key)
 
     seen: dict[str, object] = {}
 
@@ -2384,7 +2425,7 @@ async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path
         initial_messages = _assembled_messages(loop.context, transcript_input)
         assert [m["role"] for m in initial_messages] == ["system", "user", "user"]
         assert initial_messages[-2]["content"] == "earlier question that never got an answer"
-        assert initial_messages[-1]["content"] == "and another thing"
+        assert visible_message(initial_messages[-1])["content"] == "and another thing"
         return _agent_run_result(
             "done",
             [

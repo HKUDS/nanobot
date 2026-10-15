@@ -6,16 +6,16 @@ import asyncio
 import os
 import re
 import threading
-import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from zipfile import ZipFile
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator
-from nanobot.agent.subagent import SubagentManager, SubagentStatus
+from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
@@ -27,6 +27,7 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     reset_workspace_scope,
 )
+from nanobot.utils.document import extract_text
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -336,9 +337,13 @@ async def test_grep_defaults_to_match_context(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_grep_searches_xlsx_with_sheet_cell_locator(tmp_path: Path) -> None:
+@pytest.mark.parametrize("declared_dimension", ["A1:B2", "A1:A1", "A1:A2", "A1:B1"])
+async def test_grep_searches_xlsx_with_sheet_cell_locator(
+    tmp_path: Path, declared_dimension: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from openpyxl import Workbook
 
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
     workbook_path = tmp_path / "people.xlsx"
     workbook = Workbook()
     sheet = workbook.active
@@ -347,6 +352,18 @@ async def test_grep_searches_xlsx_with_sheet_cell_locator(tmp_path: Path) -> Non
     sheet.append(["Ada", "Engineer"])
     workbook.save(workbook_path)
     workbook.close()
+
+    # Some XLSX producers report a smaller used range than their actual cells.
+    with ZipFile(workbook_path) as archive:
+        entries = {item.filename: archive.read(item) for item in archive.infolist()}
+    entries["xl/worksheets/sheet1.xml"] = entries["xl/worksheets/sheet1.xml"].replace(
+        b'<dimension ref="A1:B2"', f'<dimension ref="{declared_dimension}"'.encode(),
+    )
+    with ZipFile(workbook_path, "w") as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
+
+    assert extract_text(workbook_path) == "--- Sheet: People ---\nName\tRole\nAda\tEngineer"
 
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
     result = await tool.execute(
@@ -801,15 +818,14 @@ async def test_subagent_registers_search_backend(tmp_path: Path, monkeypatch, us
     mgr.runner.run = fake_run
     mgr._announce_result = AsyncMock()
 
-    status = SubagentStatus(task_id="sub-1", label="label", task_description="search task", started_at=time.monotonic())
-    await mgr._run_subagent(
-        "sub-1",
-        "search task",
-        "label",
-        {"channel": "cli", "chat_id": "direct"},
-        status,
-        LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
+    await mgr.spawn(
+        task="search task",
+        label="label",
+        origin_channel="cli",
+        origin_chat_id="direct",
+        runtime=LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
     )
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
     assert ("rg" in captured["tool_names"]) == use_rg
     assert ("find_files" in captured["tool_names"]) == (not use_rg)

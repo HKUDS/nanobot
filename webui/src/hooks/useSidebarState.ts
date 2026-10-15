@@ -17,8 +17,6 @@ const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   workbench: { version: 1, tabs: {} },
   view: {
     density: "comfortable",
-    show_previews: false,
-    show_timestamps: false,
     show_archived: false,
     sort: "updated_desc",
   },
@@ -98,8 +96,6 @@ function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     workbench: normalizeWorkbenchState(value.workbench),
     view: {
       density,
-      show_previews: Boolean(view.show_previews),
-      show_timestamps: Boolean(view.show_timestamps),
       show_archived: Boolean(view.show_archived),
       sort,
     },

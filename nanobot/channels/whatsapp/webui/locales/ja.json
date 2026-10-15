@@ -9,10 +9,10 @@
         "placeholder": "電話番号または WhatsApp ID"
       },
       "groupPolicy": {
-        "label": "グループでの動作",
+        "label": "グループのルール",
         "choices": {
           "mention": "メンションのみ",
-          "open": "すべてのメッセージ",
+          "open": "全メッセージ",
           "allowlist": "許可リスト"
         }
       },

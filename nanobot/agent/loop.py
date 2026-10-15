@@ -11,6 +11,7 @@ import time
 import weakref
 from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
@@ -43,7 +44,13 @@ from nanobot.agent.turn_delivery import (
 )
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
+from nanobot.bus.events import (
+    INBOUND_META_RUNTIME_CONTROL,
+    INBOUND_META_USER_SHELL,
+    RUNTIME_CONTROL_SESSION_DISCARD,
+    InboundMessage,
+    OutboundMessage,
+)
 from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -51,7 +58,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.command.router import command_text, normalize_command_text
+from nanobot.command.router import command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
@@ -76,7 +83,7 @@ from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
-from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
+from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
@@ -109,7 +116,6 @@ if TYPE_CHECKING:
     from nanobot.config.schema import (
         ChannelsConfig,
         Config,
-        ProviderConfig,
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
@@ -280,8 +286,6 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
-        image_generation_provider_config: ProviderConfig | None = None,
-        image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
         model_presets: dict[str, ModelPresetConfig] | None = None,
@@ -350,12 +354,6 @@ class AgentLoop:
         self.tools_config = _tc
         self.web_config = _tc.web
         self.exec_config = _tc.exec
-        self._image_generation_provider_configs = dict(image_generation_provider_configs or {})
-        if (
-            image_generation_provider_config is not None
-            and "openrouter" not in self._image_generation_provider_configs
-        ):
-            self._image_generation_provider_configs["openrouter"] = image_generation_provider_config
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.restrict_to_workspace = restrict_to_workspace
@@ -399,6 +397,7 @@ class AgentLoop:
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
             consolidator=self.consolidator,
+            session_manager=self.sessions,
         )
         self._unified_session = unified_session
         self._running = False
@@ -438,6 +437,7 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
             bind_events=self._idle_events,
+            session_lock=self._get_session_lock,
         )
         self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
         self._next_idle_compact_check_at = time.monotonic()
@@ -517,6 +517,10 @@ class AgentLoop:
     def _sync_subagent_runtime_limits(self) -> None:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
+
+    def set_runtime_max_iterations(self, value: int) -> None:
+        self.max_iterations = value
+        self._sync_subagent_runtime_limits()
 
     def invalidate_runtime_config(self) -> None:
         """Invalidate runtime config for lazy refresh at the next admission."""
@@ -614,6 +618,8 @@ class AgentLoop:
         from nanobot.agent.tools.context import ToolContext
         from nanobot.agent.tools.loader import ToolLoader
 
+        runtime_control = AgentRuntimeControl(self)
+        self.register_runtime_context_provider(runtime_control.workspace_context)
         ctx = ToolContext(
             config=self.tools_config,
             workspace=str(self.workspace),
@@ -623,10 +629,9 @@ class AgentLoop:
             exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
-            image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
-            runtime_control=AgentRuntimeControl(self),
+            runtime_control=runtime_control,
         )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
@@ -733,9 +738,12 @@ class AgentLoop:
             metadata=dict(ctx.msg.metadata or {}),
             attributes=dict(ctx.attributes),
             sender_id=ctx.msg.sender_id,
-            turn_id=ctx.turn_id,
+            turn_id=ctx.delivery.route.turn_id or ctx.turn_id,
             workspace=scope.project_path,
+            workspace_scope=scope,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
+            persist_session=ctx.session.policy.persist and not ctx.ephemeral,
+            can_receive_background_results=self._running,
         )
 
     async def _resolve_runtime_context_for_turn(
@@ -774,8 +782,7 @@ class AgentLoop:
         dispatch_fn: Callable[[CommandContext], Awaitable[InboundMessage | OutboundMessage | None]],
     ) -> None:
         """Dispatch a command directly from the run() loop and publish the result."""
-        if normalize_command_text(raw).lower() == "/compact":
-            # Compaction must wait for the active turn to commit its session.
+        if self.commands.requires_session_queue(raw):
             self._enqueue_session_message(msg)
             return
 
@@ -792,10 +799,8 @@ class AgentLoop:
             result = await dispatch_fn(ctx)
             if isinstance(result, InboundMessage):
                 self._enqueue_session_message(result)
-            elif result:
+            elif result is not None:
                 await self.bus.publish_outbound(result)
-            else:
-                logger.warning("Command '{}' matched but dispatch returned None", raw)
 
         # A shell command may run for up to the configured exec timeout. Keep
         # the inbound consumer responsive when it runs beside an active turn.
@@ -1001,7 +1006,7 @@ class AgentLoop:
         ephemeral = ephemeral or (session is not None and not session.policy.persist)
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
-            if session is None:
+            if session is None or ephemeral:
                 return
             public_payload = dict(payload)
             private_state = public_payload.pop("provider_state", None)
@@ -1077,6 +1082,8 @@ class AgentLoop:
                         sender_id=pending_msg.sender_id,
                         turn_id=request_ctx.turn_id,
                         workspace=scope.project_path,
+                        # Injected input continues the active run's tool policy.
+                        workspace_scope=effective_scope,
                         log_content=request_ctx.log_content,
                     )
                     blocks = await self._resolve_runtime_context_for_request(
@@ -1166,6 +1173,7 @@ class AgentLoop:
             chat_id="direct",
             session_key=session.key if session is not None else None,
             runtime=runtime,
+            can_receive_background_results=self._running,
         )
         active_session_key = session.key if session else request_ctx.session_key
         consolidation_session_key = active_session_key or "agent:transient"
@@ -1188,9 +1196,14 @@ class AgentLoop:
             )
         request_ctx = dataclasses.replace(
             request_ctx,
+            workspace_scope=effective_scope,
             log_content=(
                 request_ctx.log_content and not ephemeral
                 and (session is None or session.policy.log_content)
+            ),
+            persist_session=(
+                request_ctx.persist_session and not ephemeral
+                and (session is None or session.policy.persist)
             ),
         )
         effective_tools = tools if tools is not None else self.tools
@@ -1351,11 +1364,12 @@ class AgentLoop:
 
                 raw = command_text(msg)
                 effective_key = self._effective_session_key(msg)
-                if await agent_context.handle_runtime_control(self, msg, self.tools):
+                if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
+                    await self.discard_session(msg.session_key)
                     continue
                 if (
                     msg.require_existing_session
-                    and self.sessions.get_cached(effective_key) is None
+                    and self.sessions.get_existing(effective_key) is None
                 ):
                     continue
                 if msg.is_user_input:
@@ -1432,6 +1446,8 @@ class AgentLoop:
     def _enqueue_session_message(self, msg: InboundMessage) -> None:
         """Admit session work without waiting for its execution or result."""
         session_key = self._effective_session_key(msg)
+        if not self.subagents.accepts_result(msg, session_key):
+            return
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
 
@@ -1511,7 +1527,7 @@ class AgentLoop:
                 coordinator.complete(msg, error=error)
             if (
                 msg.channel != "system"
-                and normalize_command_text(msg.content).lower() == "/compact"
+                and self.commands.requires_session_queue(command_text(msg))
             ):
                 delivery = self.turn_delivery_factory.unrouted(msg, session_key)
                 await delivery.complete(None, publish_completion=True)
@@ -1625,7 +1641,7 @@ class AgentLoop:
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await delivery.idle()
         except asyncio.CancelledError:
-            if not completion_published and normalize_command_text(msg.content).lower() == "/compact":
+            if not completion_published and self.commands.requires_session_queue(command_text(msg)):
                 await delivery.complete(None, publish_completion=True)
             raise
         finally:
@@ -1685,6 +1701,7 @@ class AgentLoop:
         cleanup_steps = (
             self.subagents.close,
             self._exec_session_manager.close_all,
+            self.runtime_resolver.aclose,
         )
         for cleanup in cleanup_steps:
             try:
@@ -1735,6 +1752,7 @@ class AgentLoop:
         delivery: TurnDelivery | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
+        session: Session | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         kind = TurnKind.USER if msg.is_user_input else TurnKind.SYSTEM
@@ -1745,6 +1763,8 @@ class AgentLoop:
             key = session_key or msg.session_key_override or f"{destination[0]}:{destination[1]}"
         else:
             key = session_key or msg.session_key
+        if not self.subagents.accepts_result(msg, key):
+            return None
         if delivery is None:
             delivery = self.turn_delivery_factory.create(msg, key)
         elif delivery.session_key != key:
@@ -1752,7 +1772,7 @@ class AgentLoop:
         t0 = time.time()
         ctx = TurnContext(
             msg=msg,
-            session=None,
+            session=session,
             session_key=key,
             turn_id=f"{key}:{time.time_ns()}",
             runtime=runtime,
@@ -1936,7 +1956,7 @@ class AgentLoop:
 
         if ctx.session is None:
             if msg.require_existing_session:
-                ctx.session = self.sessions.get_cached(ctx.session_key)
+                ctx.session = self.sessions.get_existing(ctx.session_key)
                 if ctx.session is None:
                     raise RuntimeError("required session is not active")
             else:
@@ -1955,7 +1975,7 @@ class AgentLoop:
 
         if ctx.kind is TurnKind.SYSTEM:
             logger.info("Processing system message from {}", msg.sender_id)
-        elif session.policy.log_content:
+        elif session.policy.log_content and not ctx.ephemeral:
             preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
             logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
         else:
@@ -2009,18 +2029,17 @@ class AgentLoop:
             is_user_turn=is_user_turn,
             turn_scopes=ctx.turn_scopes,
         )
+        command_matched = self.commands.command_name(raw) is not None
         result = await self.commands.dispatch(cmd_ctx)
         if isinstance(result, InboundMessage):
             ctx.msg = result
             result = None
+            command_matched = False
         ctx.turn_scopes.append(GoalInputScope(ctx.msg))
-        if cmd_ctx.raw.lower() == "/compact":
-            # Compaction reports through events, not an archiveable command reply.
-            return True
         if result is not None:
             ctx.outbound = result
             # Shortcut commands skip BUILD and SAVE, so we must persist the
-            # turn here so WebUI history hydration after _turn_end sees the
+            # turn here so WebUI history hydration after turn_end sees the
             # message.  Mark messages with _command so get_history can filter
             # them out of LLM context.  /new is excluded because it
             # intentionally clears the session.
@@ -2041,7 +2060,7 @@ class AgentLoop:
                         attributes=ctx.attributes,
                     )
             return True
-        return False
+        return command_matched
 
     async def _build_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
@@ -2194,7 +2213,6 @@ class AgentLoop:
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
-        turn_continuation.prepare_save_boundary(ctx)
 
         if (
             ctx.kind is TurnKind.USER
@@ -2213,6 +2231,8 @@ class AgentLoop:
             else ctx.turn_wall_started_at
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
+        ctx.delivery.record_latency(ctx.turn_latency_ms)
+        turn_continuation.prepare_save_boundary(ctx)
         if ctx.usage is not None and not ctx.ephemeral:
             session.metadata["_last_usage"] = ctx.usage.to_dict()
         self._save_turn(
@@ -2229,7 +2249,6 @@ class AgentLoop:
             # The next request must rebuild from the portable checkpoint;
             # the opaque continuation predates that transcript rewrite.
             session.provider_state = None
-        ctx.delivery.record_latency(ctx.turn_latency_ms)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
@@ -2515,8 +2534,13 @@ class AgentLoop:
         runtime: LLMRuntime | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
+        _session_policy: SessionPolicy | None = None,
     ) -> OutboundMessage | None:
-        """Process an external message directly and return the outbound payload."""
+        """Process an external message directly and return the outbound payload.
+
+        ``ephemeral`` skips Memory journaling and extra hooks. SDK temporary
+        turns also supply a non-persistent policy for a detached session.
+        """
         if channel == "system":
             raise ValueError("channel 'system' is reserved for internal messages")
         metadata: dict[str, Any] = {}
@@ -2537,6 +2561,16 @@ class AgentLoop:
                     "on_stream_end": on_stream_end,
                     "ephemeral": ephemeral,
                 }
+                if _session_policy is not None:
+                    # Isolate per-run state before any early save or checkpoint;
+                    # the cached conversation must survive a temporary SDK turn.
+                    session = deepcopy(self.sessions.get_or_create(session_key))
+                    session.policy = SessionPolicy(
+                        persist=session.policy.persist and _session_policy.persist,
+                        log_content=session.policy.log_content and _session_policy.log_content,
+                        disabled_tools=session.policy.disabled_tools | _session_policy.disabled_tools,
+                    )
+                    kwargs["session"] = session
                 if _run_extra_hooks_for_ephemeral:
                     kwargs["run_extra_hooks_for_ephemeral"] = True
                 if hooks is not None:

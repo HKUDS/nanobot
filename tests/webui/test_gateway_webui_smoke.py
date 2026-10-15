@@ -16,6 +16,8 @@ import httpx
 import pytest
 import websockets
 
+from nanobot.agent.subagent_sessions import SubagentSessions
+from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.config.loader import load_config
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import PENDING_USER_TURN_KEY, RUNTIME_CHECKPOINT_KEY
@@ -276,6 +278,60 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
         assert "!printf shell-ok" in contents
         assert any("shell-ok" in text for text in contents)
+    finally:
+        _stop_gateway(process)
+
+
+@pytest.mark.asyncio
+async def test_gateway_recovers_private_children_and_deletes_them_with_parent(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config_path, log_path = tmp_path / "config.json", tmp_path / "gateway.log"
+    ws_port, gateway_port = _free_port(), _free_port()
+    _write_smoke_config(config_path, workspace=workspace, ws_port=ws_port, gateway_port=gateway_port)
+    sessions = SessionManager(workspace, sessions_root=tmp_path / "sessions")
+    parent = sessions.get_or_create("websocket:subagent-smoke")
+    parent.add_message("user", "Inspect config")
+    sessions.save(parent)
+    children = SubagentSessions(sessions)
+    now = time.monotonic()
+    children.create(SubagentStatus(
+        task_id="finished", label="Finished", task_description="inspect", owner=parent.key,
+        started_at=now, finished_at=now, completed_at=time.time(), state="done", phase="done", result="Verified",
+    ))
+    children.create(SubagentStatus(
+        task_id="abandoned", label="Abandoned", task_description="inspect", owner=parent.key,
+        started_at=now, state="running", phase="thinking", result="Partial findings", partial=True,
+        receipts={"follow-up": "accepted"},
+    ))
+    process = _start_gateway(config_path, log_path)
+    base_url = f"http://127.0.0.1:{ws_port}"
+    try:
+        bootstrap = _wait_for_bootstrap(base_url, process, log_path)
+        api_token = bootstrap["api_token"]
+        path = f"{base_url}/api/sessions/{quote(parent.key, safe='')}/subagents"
+        first = _get_json(path, token=api_token)
+        tasks = {task["task_id"]: task for task in first["tasks"]}
+        assert tasks["finished"]["state"] == "done"
+        assert tasks["finished"]["result"] == "Verified"
+        assert tasks["abandoned"]["state"] == "interrupted"
+        assert tasks["abandoned"]["stop_reason"] == "host_restarted"
+        assert tasks["abandoned"]["result"] == "Partial findings"
+        assert tasks["abandoned"]["receipts"] == {"follow-up": "undelivered"}
+        assert _get_json(path, token=api_token) == first
+        sidebar = _get_json(f"{base_url}/api/sessions", token=api_token)
+        assert {row["key"] for row in sidebar["sessions"]} == {parent.key}
+        ws_url = bootstrap["ws_url"] + "?token=" + bootstrap["token"] + "&client_id=child-session-smoke"
+        async with websockets.connect(ws_url) as ws:
+            await _recv_until(ws, "ready")
+            await ws.send(json.dumps({
+                "type": "webui_request", "request_id": "delete-parent",
+                "action": "session.delete", "payload": {"key": parent.key},
+            }))
+            response = await _recv_until(ws, "webui_response")
+            assert response["ok"] is True, response
+        assert sessions.read_session_file(parent.key) is None
+        assert all(sessions.read_session_file(children.key(task_id)) is None for task_id in tasks)
     finally:
         _stop_gateway(process)
 

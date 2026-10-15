@@ -1,7 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
+import { useAppViewport } from "@/hooks/useAppViewport";
 import type { ChatSummary } from "@/lib/types";
 
 function session(index: number): ChatSummary {
@@ -29,7 +31,58 @@ describe("SessionSearchDialog", () => {
     expect(screen.getAllByRole("button").length).toBeLessThanOrEqual(24);
   });
   afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("shares keyboard rotation and dismissal with the body portal without losing a draft", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    const viewport = Object.assign(new EventTarget(), { height: 428, offsetTop: 0, scale: 1 });
+    vi.stubGlobal("visualViewport", viewport);
+    const onSelect = vi.fn();
+    function SearchApp() {
+      useAppViewport();
+      const [open, setOpen] = useState(true);
+      return <>
+        <textarea aria-label="Draft" defaultValue="Unsent draft" />
+        <SessionSearchDialog open={open} sessions={[session(1), session(2)]}
+          activeKey={null} loading={false} onOpenChange={setOpen} onSelect={onSelect} />
+      </>;
+    }
+    const root = document.createElement("div");
+    root.id = "root";
+    document.body.append(root);
+    const app = render(<SearchApp />, { container: root });
+    try {
+      const dialog = screen.getByRole("dialog");
+      expect(root.contains(dialog)).toBe(false);
+      act(() => {
+        Object.assign(viewport, { height: 128, offsetTop: -68 });
+        viewport.dispatchEvent(new Event("resize"));
+      });
+      expect(root).toHaveClass("short-visual-viewport");
+      expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("128px");
+      expect(dialog).toHaveClass("session-search-dialog");
+      expect(document.documentElement.style.getPropertyValue("--app-viewport-top")).toBe("0px");
+      act(() => {
+        Object.assign(viewport, { height: 428, offsetTop: 0 });
+        viewport.dispatchEvent(new Event("resize"));
+      });
+      expect(root).not.toHaveClass("short-visual-viewport");
+      fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "Chat 2" } });
+      expect(screen.getAllByRole("button")).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: /Chat 2/ }));
+      expect(onSelect).toHaveBeenCalledOnce();
+      expect(onSelect).toHaveBeenCalledWith("websocket:chat-2");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Draft" })).toHaveValue("Unsent draft");
+    } finally {
+      app.unmount();
+      root.remove();
+    }
   });
 
   it("uses a solid compact command palette surface", () => {
@@ -48,6 +101,14 @@ describe("SessionSearchDialog", () => {
     expect(dialog).toHaveClass("bg-background");
     expect(dialog.className).not.toContain("bg-popover/");
     expect(dialog.className).not.toContain("backdrop-blur");
+    // The body portal must share the app's keyboard-fitted frame. Its list
+    // height is bounded by that frame, not by the layout viewport's 100vh.
+    expect(dialog.parentElement).toHaveStyle({
+      top: "var(--app-viewport-top, 0px)",
+      height: "var(--app-viewport-height, 100%)",
+      bottom: "auto",
+    });
+    expect(dialog).toHaveClass("max-h-[min(40rem,100%)]");
     expect(screen.getByTestId("session-search-scroll")).toHaveClass("overflow-y-auto");
     expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Search" }), {

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
 
 const Popover = PopoverPrimitive.Root;
+const PopoverAnchor = PopoverPrimitive.Anchor;
 const PopoverTrigger = PopoverPrimitive.Trigger;
 
 interface PopoverContentProps
@@ -41,6 +42,7 @@ PopoverContent.displayName = PopoverPrimitive.Content.displayName;
 
 export {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 };

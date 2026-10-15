@@ -1,7 +1,6 @@
 # How to Configure an OpenAI-Compatible Provider in nanobot
 
-nanobot can call OpenAI-compatible model providers by configuring an `apiBase`,
-optional `apiKey`, and a model preset that references that provider name.
+nanobot can call OpenAI-compatible model providers by configuring an `apiBase`, optional `apiKey`, and a model preset that references that provider name.
 
 ## What you will build
 
@@ -11,16 +10,11 @@ optional `apiKey`, and a model preset that references that provider name.
 
 ## When to use this
 
-Use this for local or hosted services that expose OpenAI-compatible endpoints,
-including internal gateways, local model servers, and provider proxies that are
-not already named in nanobot.
+Use this for local or hosted services that expose OpenAI-compatible endpoints, including internal gateways, local model servers, and provider proxies that are not already named in nanobot.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-```
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Verify the endpoint responds before debugging nanobot:
 
@@ -29,6 +23,14 @@ curl -sS https://api.example.com/v1/models
 ```
 
 ## Minimal working example
+
+1. Open **Settings → Models → New preset**.
+2. In **Provider**, choose **Add provider** and create a custom connection with your endpoint URL and credential.
+3. Select the model served by that endpoint, name the preset, and save.
+4. Select the preset in the chat composer and send `Hello!`.
+
+<details>
+<summary>Manual configuration</summary>
 
 Merge this into `~/.nanobot/config.json`:
 
@@ -57,19 +59,17 @@ Merge this into `~/.nanobot/config.json`:
 }
 ```
 
-Then run:
+</details>
 
-```bash
-nanobot agent -m "Hello!"
-```
+Verify in the WebUI with the new preset selected. For the manual snippet above, which sets the global default, you can instead run `nanobot agent -m "Hello!"` from the same instance. A different CLI session does not inherit a WebUI topic's model selection.
 
 ## Production notes
 
 - Include the version path in `apiBase` when the service expects `/v1`.
 - Use separate provider names for separate endpoints.
-- Use a placeholder key such as `EMPTY` only when the endpoint requires a
-  non-empty key but does not validate it.
-- Leave `apiType` unset for OpenAI-compatible custom endpoints.
+- Use a placeholder key such as `EMPTY` only when the endpoint requires a non-empty key but does not validate it.
+- Leave the preset's API selection on Auto for ordinary Chat Completions services.
+- If the service requires Responses or Anthropic Messages, set its supported APIs and default in the connection's **Advanced options**. To choose an API for an individual model, use **Settings → Models → a preset → Advanced options → API connection**. See [connection settings](../configuration.md#custom-connection-apis) and [preset settings](../configuration.md#preset-request-api) for JSON examples.
 
 ## Security notes
 
@@ -80,10 +80,8 @@ nanobot agent -m "Hello!"
 ## Troubleshooting
 
 - If `curl /models` fails, fix the provider endpoint before changing nanobot.
-- If nanobot says the model is unknown, check the model ID expected by the
-  provider.
-- If auth fails, confirm whether the provider wants Bearer auth and whether the
-  key is present in the environment that starts nanobot.
+- If nanobot says the model is unknown, check the model ID expected by the provider.
+- If auth fails, confirm whether the provider wants Bearer auth and whether the key is present in the environment that starts nanobot.
 
 ## Related nanobot docs
 

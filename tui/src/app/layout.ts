@@ -23,8 +23,8 @@ import type { UsagePanel } from "../views/usage-panel"
 import type { Palette } from "./theme"
 
 export const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
-export const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now · Tab send next"
-export const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
+export const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now  Tab send next"
+export const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now  Tab next"
 
 const TRANSCRIPT_EDGE_INSET = 1
 const TRANSCRIPT_TEXT_INSET = TRANSCRIPT_EDGE_INSET + 2

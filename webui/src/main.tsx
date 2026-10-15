@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./globals.css";
 import { initializeI18n } from "./i18n";
-import { initializeLoopbackRuntimeHost } from "./lib/runtime";
 import { initializePairReturn } from "./lib/remote-pair-return";
 
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
@@ -27,7 +26,6 @@ if (!root) throw new Error("root element missing");
 
 initializePairReturn();
 window.addEventListener("hashchange", initializePairReturn);
-initializeLoopbackRuntimeHost();
 
 async function renderWebui(container: HTMLElement) {
   await initializeI18n();

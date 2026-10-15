@@ -206,7 +206,7 @@ describe("NanobotTui transcript", () => {
     }
     const status = ui.status
     expect(status.plainText).toMatch(/^Thinking\s+0s/u)
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
     expect(ui.composerFrame.height).toBe(3)
     const shimmerColors = new Set(
       status.content.chunks
@@ -260,7 +260,7 @@ describe("NanobotTui transcript", () => {
       retry_after_s: 5,
     })
     expect(ui.status.plainText).toMatch(
-      /^Could not connect to the model provider · retrying in [45]s · attempt 1\/4/u,
+      /^Could not connect to the model provider\. Retrying in [45]s \(attempt 1\/4\)\./u,
     )
 
     app.accept({
@@ -325,7 +325,7 @@ describe("NanobotTui transcript", () => {
     await setup.renderOnce()
     let frame = setup.captureCharFrame()
 
-    expect(frame).toContain("7 earlier steps · Ctrl+O expand")
+    expect(frame).toContain("7 earlier steps  Ctrl+O expand")
     expect(frame).not.toContain("tool_0")
     expect(frame).toContain("tool_7")
     expect(frame).toContain("tool_9")
@@ -381,7 +381,7 @@ describe("NanobotTui transcript", () => {
     await setup.renderOnce()
     let frame = setup.captureCharFrame()
 
-    expect(frame).toContain("6 steps · Ctrl+O expand")
+    expect(frame).toContain("6 steps  Ctrl+O expand")
     expect(frame).toContain("✓ Read 6 files")
     expect(frame).not.toContain("src/file-0.ts")
 

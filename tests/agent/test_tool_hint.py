@@ -262,7 +262,7 @@ class TestToolHintMixedFolding:
 class TestToolHintMaxLength:
     """Test max_length parameter controls truncation of tool hints."""
 
-    def test_exec_default_truncates_at_40(self):
+    def test_exec_explicit_max_length_limits_hint(self):
         cmd = "cd /very/long/path/to/some/project && npm run build && npm test"
         result = _hint([_tc("exec", {"command": cmd})], max_length=40)
         assert len(result) <= 50  # "$ " prefix + 40 + ellipsis

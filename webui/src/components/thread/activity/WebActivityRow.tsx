@@ -32,7 +32,7 @@ export function WebActivityRow({
           href={href}
           target="_blank"
           rel="noreferrer noopener"
-          aria-label={`${title} · ${displayUrl}`}
+          aria-label={`${title}, ${displayUrl}`}
           className="flex min-w-0 items-center gap-2 overflow-hidden text-foreground/82 hover:text-foreground"
         >
           <span className="min-w-0 truncate font-medium">{title}</span>

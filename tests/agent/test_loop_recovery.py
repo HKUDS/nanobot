@@ -11,8 +11,11 @@ from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.session.manager import SessionManager
-from nanobot.session.recovery import RECOVERY_METADATA_KEY, RecoveryCoordinator
+from nanobot.session.recovery import (
+    RECOVERY_METADATA_KEY,
+)
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
+from nanobot.webui.recovery import RecoveryCoordinator
 
 
 @pytest.mark.asyncio

@@ -91,6 +91,14 @@ class GoalStateChanged(AgentEvent):
 
 
 @dataclass(frozen=True)
+class SubagentTaskChanged(AgentEvent):
+    """A parent-owned task observation changed."""
+
+    context: RuntimeEventContext
+    task_id: str
+
+
+@dataclass(frozen=True)
 class RuntimeModelChanged(AgentEvent):
     """The active runtime model/preset changed."""
 

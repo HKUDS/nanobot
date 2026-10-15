@@ -60,6 +60,14 @@ from nanobot.utils.runtime import (
     is_blank_text,
 )
 
+
+def _raise_if_cancelling() -> None:
+    """Do not resume model work when a dependency suppresses cancellation."""
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        raise asyncio.CancelledError
+
+
 ContinuationCallback = Callable[[], str | None]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[[], Awaitable[Iterable[Any] | None]]
@@ -283,8 +291,9 @@ class AgentRunner:
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
+        has_run_hooks = hook.has_run_hooks()
         messages, compaction = self._initial_transcript_and_compaction(spec)
-        context = AgentRunHookContext(messages=deepcopy(messages))
+        context = AgentRunHookContext(messages=deepcopy(messages) if has_run_hooks else [])
         llm_usage_source_token = bind_llm_usage_source(
             spec.llm_usage_source or source_from_session_key(spec.session_key)
         )
@@ -293,20 +302,20 @@ class AgentRunner:
             await hook.before_run(context)
             result = await self._run_core(spec, hook, messages, compaction)
         except asyncio.CancelledError as exc:
-            context.messages = deepcopy(messages)
+            context.messages = deepcopy(messages) if has_run_hooks else []
             context.stop_reason = "cancelled"
             context.error = None
             context.exception = exc
             raise
         except Exception as exc:
-            context.messages = deepcopy(messages)
+            context.messages = deepcopy(messages) if has_run_hooks else []
             context.stop_reason = "error"
             context.error = f"Error: {type(exc).__name__}: {exc}"
             context.exception = exc
             await hook.on_error(context)
             raise
         else:
-            context.messages = deepcopy(result.messages)
+            context.messages = deepcopy(result.messages) if has_run_hooks else []
             context.final_content = result.final_content
             context.tools_used = list(result.tools_used)
             context.usage = result.usage
@@ -321,7 +330,7 @@ class AgentRunner:
             return result
         finally:
             try:
-                context.messages = deepcopy(messages)
+                context.messages = deepcopy(messages) if has_run_hooks else []
                 if context.exception is None:
                     await hook.on_finally(context)
                 else:
@@ -863,6 +872,7 @@ class AgentRunner:
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
     ) -> tuple[LLMResponse, LLMUsage]:
+        _raise_if_cancelling()
         tool_definitions = spec.tools.get_definitions()
         messages, provider_context = await self.context_governor.prepare_request(
             request_state,
@@ -876,6 +886,7 @@ class AgentRunner:
             messages,
             tools=tool_definitions,
         )
+        _raise_if_cancelling()
         wants_streaming = hook.wants_streaming()
         provider_context = replace(
             provider_context or ProviderCallContext(),
@@ -993,6 +1004,7 @@ class AgentRunner:
         request_started_at = time.perf_counter()
         try:
             response = await coro
+            _raise_if_cancelling()
         except asyncio.CancelledError:
             _pause_generation()
             await _close_native_reasoning()
@@ -1214,6 +1226,7 @@ class AgentRunner:
         request_state: ModelRequestState,
         transcript: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
+        _raise_if_cancelling()
         messages, provider_context = await self.context_governor.prepare_request(
             request_state,
             messages,
@@ -1225,6 +1238,7 @@ class AgentRunner:
             messages,
             tools=None,
         )
+        _raise_if_cancelling()
         response = await spec.runtime.provider.chat_stream_with_retry(
             **kwargs,
             provider_context=replace(
@@ -1232,11 +1246,13 @@ class AgentRunner:
                 response_preset=spec.runtime.model_preset or "",
             ),
         )
+        _raise_if_cancelling()
         await self.context_governor.summarize_provider_compaction(
             request_state,
             response,
             current_request_boundary=(len(transcript) if transcript is not None else None),
         )
+        _raise_if_cancelling()
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
 

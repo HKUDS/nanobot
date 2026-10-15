@@ -7,6 +7,8 @@ from loguru import logger
 from agent.session_helpers import run_session
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.runner import AgentRunResult
+from nanobot.agent.subagent_sessions import SubagentSessions
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import (
@@ -16,9 +18,11 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
-from nanobot.runtime_context import RuntimeContextBlock
+from nanobot.runtime_context import RuntimeContextBlock, public_history_message
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionPolicy
+from nanobot.webui.temporary_chats import WebUITemporaryChats
+from nanobot.webui.workspaces import WebUIWorkspaceController
 
 
 def _message(key: str, content: str) -> InboundMessage:
@@ -33,7 +37,7 @@ def _message(key: str, content: str) -> InboundMessage:
 
 
 def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.chat_stream_with_retry = AsyncMock(
@@ -53,11 +57,14 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
 async def test_transient_session_keeps_history_without_persisting_or_durable_tools(tmp_path) -> None:
     loop = _loop(tmp_path, ["first answer", "second answer"])
     loop.context.memory.write_memory("private durable memory")
-    key = "websocket:transient-test"
-    loop.sessions.get_or_create_transient(
-        key,
-        disabled_tools={"create_goal", "update_goal", "spawn", "cron"},
+    temporary_chats = WebUITemporaryChats(
+        bus=loop.bus, session_manager=loop.sessions, logger=logger,
+        workspaces=WebUIWorkspaceController(
+            session_manager=loop.sessions, default_workspace=tmp_path,
+            default_restrict_to_workspace=True,
+        ),
     )
+    key = f"websocket:{temporary_chats.create(object(), trusted_webui=True)}"
 
     await loop._process_message(_message(key, "first question"))
     await loop._process_message(_message(key, "second question"))
@@ -66,7 +73,7 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     assert "private durable memory" not in str(calls[0].kwargs["messages"])
     tool_names = {item["function"]["name"] for item in calls[0].kwargs["tools"]}
     assert "read_session" in tool_names
-    assert {"create_goal", "update_goal", "spawn", "cron"}.isdisjoint(tool_names)
+    assert {"create_goal", "update_goal", "subagent", "cron"}.isdisjoint(tool_names)
     assert "first answer" in str(calls[1].kwargs["messages"])
     session = loop.sessions.get_cached(key)
     assert session is not None
@@ -77,6 +84,8 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
         "assistant",
     ]
     assert loop.sessions.read_session_file(key) is None
+    temporary_chats.close()
+    await loop.aclose()
 
 
 @pytest.mark.parametrize("selection", ["explicit_empty", "disable_all", "default"])
@@ -273,7 +282,7 @@ async def test_transient_session_stays_outside_unified_session(tmp_path) -> None
 
     await run_session(loop, _message(key, "private question"))
 
-    assert [message["content"] for message in transient.messages] == [
+    assert [public_history_message(message)["content"] for message in transient.messages] == [
         "private question",
         "private answer",
     ]
@@ -293,6 +302,47 @@ async def test_missing_required_session_cannot_fall_back_to_disk(tmp_path) -> No
 
     loop.provider.chat_stream_with_retry.assert_not_awaited()
     assert loop.sessions.read_session_file(key) is None
+
+
+@pytest.mark.asyncio
+async def test_required_durable_session_survives_cache_eviction(tmp_path) -> None:
+    loop = _loop(tmp_path, ["received"])
+    key = "websocket:durable-parent"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "earlier question")
+    loop.sessions.save(session)
+    loop.sessions.invalidate(key)
+    try:
+        response = await loop._process_message(_message(key, "follow-up"))
+        assert response is not None and response.content == "received"
+        assert "earlier question" in str(loop.provider.chat_stream_with_retry.await_args.kwargs["messages"])
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
+async def test_deleted_child_cannot_notify_a_recreated_parent(tmp_path) -> None:
+    loop = _loop(tmp_path, [])
+    key = "websocket:recreated-parent"
+    loop.subagents.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="old result"))
+    try:
+        await loop.subagents.spawn("old task", session_key=key, runtime=loop.llm_runtime())
+        await asyncio.gather(*loop.subagents._running_tasks.values())
+        task_id, = loop.subagents.statuses_for_session(key)
+        notice = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=2)
+        assert notice.require_existing_session
+        assert loop.sessions.delete_session(key)
+        assert loop.sessions.read_session_file(SubagentSessions.key(task_id)) is None
+        loop.sessions.save(loop.sessions.get_or_create(key))
+
+        assert loop.subagents.statuses_for_session(key) == {}
+        loop._enqueue_session_message(notice)
+        assert key not in loop._pending_queues
+        assert await loop._process_message(notice) is None
+        loop.provider.chat_stream_with_retry.assert_not_awaited()
+        assert loop.sessions.read_session_file(key)["messages"] == []
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio
@@ -322,7 +372,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
     previous_file_state = loop._file_state_store.for_session(key)
     loop.sessions.get_or_create_transient(
         key,
-        disabled_tools={"create_goal", "update_goal", "spawn", "cron"},
+        disabled_tools={"create_goal", "update_goal", "subagent", "cron"},
     )
     run_task = asyncio.create_task(loop.run())
     await loop.bus.publish_inbound(_message(key, "private"))

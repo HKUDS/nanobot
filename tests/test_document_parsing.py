@@ -385,6 +385,40 @@ class TestExtractText:
         assert "Alice" in result
         assert "Bob" in result
 
+    @pytest.mark.parametrize(
+        ("cells", "expected"),
+        [
+            (("Alice", "", "100"), "Alice\t\t100"),
+            (("", "10", "100"), "\t10\t100"),
+            (("Alice", "10", ""), "Alice\t10\t"),
+            (("", " ", ""), None),
+        ],
+    )
+    def test_extract_text_pptx_table_preserves_empty_columns(
+        self, tmp_path: Path, cells: tuple[str, ...], expected: str | None
+    ):
+        """Blank cells keep values aligned with their table headers."""
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        pptx_file = tmp_path / "empty-columns.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        table = slide.shapes.add_table(
+            2, 3, Inches(1), Inches(1), Inches(4), Inches(1)
+        ).table
+        for column, text in enumerate(("Name", "Q1", "Q2")):
+            table.cell(0, column).text = text
+        for column, text in enumerate(cells):
+            table.cell(1, column).text = text
+        prs.save(pptx_file)
+
+        result = extract_text(pptx_file)
+        expected_lines = ["--- Slide 1 ---", "Name\tQ1\tQ2"]
+        if expected is not None:
+            expected_lines.append(expected)
+        assert result == "\n".join(expected_lines)
+
     def test_extract_text_pptx_grouped_shapes(self, tmp_path: Path):
         """Text inside grouped shapes must be extracted recursively."""
         from pptx import Presentation

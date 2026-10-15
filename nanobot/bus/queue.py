@@ -145,4 +145,6 @@ class MessageBus:
     async def drain(self) -> None:
         """Finish scheduled dispatches after producers stop, before disconnecting."""
         while self._pending:
-            await asyncio.gather(*self._pending, return_exceptions=True)
+            pending = tuple(self._pending)
+            await asyncio.gather(*pending, return_exceptions=True)
+            self._pending.difference_update(pending)

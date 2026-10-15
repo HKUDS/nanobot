@@ -7,7 +7,7 @@ import {
   formatMessageHoverTime,
   formatTurnLatency,
   relativeTime,
-} from "@/lib/format";
+} from "@/lib/format-time";
 
 describe("localized format helpers", () => {
   beforeEach(() => {
