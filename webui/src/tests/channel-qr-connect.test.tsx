@@ -4,6 +4,8 @@ import QRCode from "qrcode";
 
 import { ChannelQrConnectFlow } from "@/components/settings/channels/ChannelQrConnectFlow";
 import { FeishuConnectFlow } from "../../../nanobot/channels/feishu/webui/FeishuConnectFlow";
+import { FeishuAssistantsPanel } from "../../../nanobot/channels/feishu/webui/FeishuAssistantsPanel";
+import type { NanobotFeatureInfo } from "@/lib/types";
 
 const { requestMutation } = vi.hoisted(() => ({ requestMutation: vi.fn() }));
 
@@ -34,6 +36,53 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("channel QR connect parameters", () => {
+  it("adds an assistant without replacing existing ones, and supports cancellation and retry", async () => {
+    const feature: NanobotFeatureInfo = {
+      name: "feishu", display_name: "Feishu", type: "channel", webui: "webui/index.tsx",
+      enabled: true, configured: true, installed: true, ready: true, status: "enabled",
+      install_supported: true, requires_restart: false,
+      instances: [{
+        id: "default", name: "First assistant", enabled: true, configured: true,
+        runtime_status: "running", config_values: {}, configured_fields: [],
+      }],
+    };
+    const onFeaturesUpdate = vi.fn();
+    const props = { token: "tok", feature, showBrandLogos: false, onFeaturesUpdate };
+    const view = render(<FeishuAssistantsPanel {...props} />);
+    requestMutation.mockResolvedValueOnce({
+      session_id: "add-1", status: "pending", qr_url: "https://example.com/authorize",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add another assistant" }));
+    expect(await screen.findByText("Scan with Feishu")).toBeVisible();
+    expect(requestMutation).toHaveBeenCalledWith("settings.channel.connect.start", {
+      channel: "feishu", domain: "feishu", instance_id: "default", mode: "create",
+    }, 150_000);
+    expect(screen.getByText("First assistant")).toBeVisible();
+    requestMutation.mockResolvedValueOnce({ session_id: "add-1", status: "cancelled" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    await screen.findByRole("button", { name: "Add another assistant" });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.channel.connect.cancel", {
+      channel: "feishu", session_id: "add-1",
+    }, 20_000);
+    expect(onFeaturesUpdate).not.toHaveBeenCalled();
+
+    requestMutation.mockRejectedValueOnce(new Error("Authorization unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "Add another assistant" }));
+    expect(await screen.findByText("Authorization unavailable")).toBeVisible();
+    const updated = { ...feature, instances: [...feature.instances!, {
+      ...feature.instances![0], id: "assistant-new", name: "Second assistant",
+    }] };
+    const payload = { features: [updated], enabled_count: 1 };
+    requestMutation.mockResolvedValueOnce({ status: "succeeded", nanobot_features: payload });
+    fireEvent.click(screen.getByRole("button", { name: "Add another assistant" }));
+    await waitFor(() => expect(onFeaturesUpdate).toHaveBeenCalledWith(payload));
+    view.rerender(<FeishuAssistantsPanel {...props} feature={updated} />);
+    expect(screen.getByText("First assistant")).toBeVisible();
+    expect(screen.getByText("Second assistant")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add another assistant" })).toBeEnabled();
+    expect(screen.queryByText("Authorization unavailable")).not.toBeInTheDocument();
+  });
+
   it.each([false, true])("keeps QR generation enabled by default (minimal=%s)", async (minimalPending) => {
     const generateQr = vi.spyOn(QRCode, "toDataURL").mockResolvedValue("data:image/png;base64,preview");
     requestMutation.mockResolvedValueOnce({

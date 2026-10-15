@@ -21,6 +21,7 @@ import type {
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
 import { modelAPISelection } from "@/components/settings/models/modelAPI";
+import { providerJsonValue } from "@/components/settings/models/providerForm";
 import { useModelSettingsActions } from "@/components/settings/models/useModelSettingsActions";
 import {
   useProviderFormsSync,
@@ -98,12 +99,12 @@ export function useSettingsController({
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
   const modelState = useModelSettingsState(initialSettings);
   const {
-    editingProviderKeys, expandedProvider, form, modelCallOrder, modelCallOrderSaving,
+    editingProviderKeys, form, modelCallOrder, modelCallOrderSaving,
     modelConfigurationSaving, modelMigrationSaving, modelPresetBeforeCreateRef,
     modelPresetCreating, modelPresetEditingName, modelPresetNameError, modelPresetPendingDelete,
     providerForms, providerOAuthCompleting,
     providerOAuthDialogError, providerOAuthFlow, providerOAuthFlowRef, providerOAuthResponse,
-    providerSaving, saving, setForm,
+    providerSaving, providerOperation, saving, setForm,
     setModelCallOrder, setModelPresetCreating, setModelPresetEditingName, setModelPresetNameError,
     setModelPresetPendingDelete,
     setProviderForms, setProviderOAuthCompleting, setProviderOAuthDialogError,
@@ -300,7 +301,10 @@ export function useSettingsController({
       form.contextWindowTokens !== normalizeContextWindowTokens(selectedPreset.context_window_tokens) ||
       form.temperature !== selectedPreset.temperature ||
       form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "") ||
-      modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
+      modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api) ||
+      form.extraHeaders !== providerJsonValue(selectedPreset.extra_headers) ||
+      form.extraQuery !== providerJsonValue(selectedPreset.extra_query) ||
+      form.extraBody !== providerJsonValue(selectedPreset.extra_body)
     );
   }, [form, modelPresetEditingName, settings]);
 
@@ -312,7 +316,11 @@ export function useSettingsController({
       imageGenerationForm.model !== settings.image_generation.model ||
       imageGenerationForm.defaultAspectRatio !== settings.image_generation.default_aspect_ratio ||
       imageGenerationForm.defaultImageSize !== settings.image_generation.default_image_size ||
-      imageGenerationForm.maxImagesPerTurn !== settings.image_generation.max_images_per_turn
+      imageGenerationForm.maxImagesPerTurn !== settings.image_generation.max_images_per_turn ||
+      (settings.image_generation.request_overrides_supported && (
+        imageGenerationForm.extraHeaders !== providerJsonValue(settings.image_generation.extra_headers) ||
+        imageGenerationForm.extraBody !== providerJsonValue(settings.image_generation.extra_body)
+      )) === true
     );
   }, [imageGenerationForm, settings]);
 
@@ -450,7 +458,7 @@ export function useSettingsController({
     createCustomProvider,
     handleDeleteModelConfiguration,
     handleMigrateModelConfigurations,
-    handleToggleProvider,
+    resetProviderDraft,
     runProviderOAuth,
     saveModelSettings,
     saveProvider,
@@ -523,7 +531,6 @@ export function useSettingsController({
     customMcpForm,
     editingProviderKeys,
     error,
-    expandedProvider,
     featureCatalog,
     form,
     handleApiServiceAction,
@@ -542,7 +549,7 @@ export function useSettingsController({
     handleMigrateModelConfigurations,
     handleNanobotFeatureAction,
     handleSaveCustomMcp,
-    handleToggleProvider,
+    resetProviderDraft,
     handleWebSearchProviderChange,
     hostEngineApplying,
     imageGenerationDirty,
@@ -588,13 +595,16 @@ export function useSettingsController({
     providerOAuthFlow,
     providerOAuthResponse,
     providerSaving,
+    providerOperation,
     remoteBrowserAccess,
     resetWebSearchDraft,
     restartViaSettingsSurface,
     runProviderOAuth,
     saveImageGenerationSettings,
     saveModelSettings,
+    saveImageRequestSettings: capabilityActions.saveImageRequestSettings,
     saveNetworkSafetySettings,
+    saveModelRequestSettings: modelActions.saveModelRequestSettings,
     saveProvider,
     saveTranscriptionSettings,
     saveWebSearch,

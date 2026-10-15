@@ -13,27 +13,25 @@ nanobot can expose a local OpenAI-compatible endpoint behind `/v1/chat/completio
 
 Use this when an existing client, another language, or a separate process already knows how to call an OpenAI-compatible API. Use the Python SDK when you want in-process access to sessions, memory, runtime helpers, and hooks.
 
-## Install
+## Start from your current setup
+
+If you already get replies in the WebUI, open **Settings → System**, configure the API service, and start it. Keep that gateway running; do not also start `nanobot serve` on the same port.
+
+If nanobot is not configured yet, complete the [quick start](../quick-start.md) first. For a terminal-managed API using that existing config:
 
 ```bash
-python -m pip install nanobot-ai
 nanobot plugins enable api
-nanobot onboard --wizard
 nanobot agent -m "Hello!"
-```
-
-## Minimal working example
-
-Start the API server:
-
-```bash
 nanobot serve
 ```
 
-Call the chat endpoint:
+## Make a request
+
+In another terminal, call the chat endpoint. If you configured an API key, set `NANOBOT_API_KEY` to it first:
 
 ```bash
 curl http://127.0.0.1:8900/v1/chat/completions \
+  -H "Authorization: Bearer $NANOBOT_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": "hi"}],
@@ -43,8 +41,9 @@ curl http://127.0.0.1:8900/v1/chat/completions \
 
 ## Production notes
 
-- Pass `session_id` to isolate users, jobs, or workflows.
-- Streaming uses Server-Sent Events when `stream` is `true`.
+- Pass `session_id` to separate conversation histories. Callers still share files, memory, and tool permissions; it is not a user authorization boundary.
+- Streaming uses Server-Sent Events when `stream` is `true`. A stream without `[DONE]` is incomplete; retries can repeat tool actions. See [sessions, failures, and retries](../openai-api.md#sessions-failures-and-retries).
+- The API service returns results to its HTTP client; it does not deliver `message` tool calls to chat apps. Forward results from your application when that is needed.
 - `/v1/models` reports the fixed model surface expected by compatible clients.
 - File uploads are supported through JSON base64 or multipart form data.
 

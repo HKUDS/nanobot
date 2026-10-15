@@ -9,7 +9,7 @@ import { remarkTexMath } from "@/lib/remark-tex-math";
 
 const boundaryParser = unified()
   .use(remarkParse)
-  .use(remarkGfm)
+  .use(remarkGfm, { singleTilde: false })
   .use(remarkMath, { singleDollarTextMath: false })
   .use(remarkTexMath, { allowUnclosedFlow: true })
   .freeze();

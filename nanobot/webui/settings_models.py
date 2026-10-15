@@ -40,7 +40,9 @@ from nanobot.providers.oauth_model_catalog import (
     invalidate_oauth_model_catalog,
 )
 from nanobot.providers.registry import PROVIDERS, ProviderSpec, create_dynamic_spec, find_by_name
+from nanobot.providers.request_overrides import isolate_request_overrides
 from nanobot.providers.routing import resolve_automatic_model_api, resolve_model_api
+from nanobot.webui import request_settings
 from nanobot.webui.settings_contracts import (
     QueryParams,
     SettingsRequest,
@@ -93,6 +95,7 @@ class ModelSettingsPayload(TypedDict):
     model_configuration_migratable: bool
     model_api_resolution_supported: bool
     provider_api_configuration_supported: bool
+    model_request_overrides_supported: bool
     providers: list[dict[str, Any]]
 
 
@@ -100,108 +103,7 @@ _OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
 _WEBUI_OAUTH_TIMEOUT_S = 600
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-_REDACTED_PROVIDER_SECRET = "••••••••"
 _PROVIDER_STRUCTURED_FIELDS = ("extra_headers", "extra_body", "extra_query")
-_PROVIDER_SECRET_KEYS = frozenset({
-    "auth",
-    "authentication",
-    "authorization",
-    "bearer",
-    "cookie",
-    "credential",
-    "credentials",
-    "hmac",
-    "key",
-    "passphrase",
-    "passwd",
-    "proxyauthorization",
-    "setcookie",
-    "sig",
-    "signature",
-})
-_PROVIDER_SECRET_KEY_SUFFIXES = (
-    "accesskey",
-    "apikey",
-    "encryptionkey",
-    "password",
-    "privatekey",
-    "secret",
-    "secretkey",
-    "signingkey",
-    "subscriptionkey",
-    "token",
-)
-
-
-def _provider_json_setting(
-    query: QueryParams,
-    snake: str,
-    camel: str,
-) -> dict[str, Any] | None:
-    raw = (query_first_alias(query, snake, camel) or "").strip()
-    if not raw:
-        return None
-    try:
-        value: object = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise WebUISettingsError(f"{snake} must be a JSON object") from exc
-    if not isinstance(value, dict):
-        raise WebUISettingsError(f"{snake} must be a JSON object")
-    return cast(dict[str, Any], value) or None
-
-
-def _provider_setting_key_is_secret(key: str) -> bool:
-    compact = re.sub(r"[^a-z0-9]", "", key.lower())
-    return compact in _PROVIDER_SECRET_KEYS or compact.endswith(_PROVIDER_SECRET_KEY_SUFFIXES)
-
-
-def _redact_provider_secret_values(value: Any, *, secret: bool = False) -> Any:
-    if secret and value not in (None, ""):
-        return _REDACTED_PROVIDER_SECRET
-    if isinstance(value, dict):
-        value_mapping = cast(dict[str, Any], value)
-        return {
-            key: _redact_provider_secret_values(
-                item,
-                secret=_provider_setting_key_is_secret(key),
-            )
-            for key, item in value_mapping.items()
-        }
-    if isinstance(value, list):
-        return [_redact_provider_secret_values(item) for item in cast(list[Any], value)]
-    return value
-
-
-def _restore_redacted_provider_secret_values(
-    submitted: Any,
-    current: Any,
-    *,
-    secret: bool = False,
-) -> Any:
-    if secret and submitted == _REDACTED_PROVIDER_SECRET:
-        return current
-    if isinstance(submitted, dict):
-        submitted_mapping = cast(dict[str, Any], submitted)
-        current_mapping = cast(dict[str, Any], current) if isinstance(current, dict) else {}
-        return {
-            key: _restore_redacted_provider_secret_values(
-                item,
-                current_mapping.get(key),
-                secret=_provider_setting_key_is_secret(key),
-            )
-            for key, item in submitted_mapping.items()
-        }
-    if isinstance(submitted, list):
-        submitted_items = cast(list[Any], submitted)
-        current_items = cast(list[Any], current) if isinstance(current, list) else []
-        return [
-            _restore_redacted_provider_secret_values(
-                item,
-                current_items[index] if index < len(current_items) else None,
-            )
-            for index, item in enumerate(submitted_items)
-        ]
-    return submitted
 
 
 def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
@@ -226,7 +128,7 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
         ("extra_query", "extraQuery"),
     ):
         if query_has_alias(query, snake, camel):
-            updates[snake] = _provider_json_setting(query, snake, camel)
+            updates[snake] = request_settings.parse_request_object(query, snake, camel)
     if query_has_alias(query, "api", "api"):
         try:
             updates["api"] = json.loads(query_first(query, "api") or "null")
@@ -236,35 +138,6 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     if query_has_alias(query, "api_type", "apiType"):
         updates["api_type"] = query_first_alias(query, "api_type", "apiType") or "auto"
     return updates
-
-
-def _validated_provider_config(
-    provider_config: ProviderConfig | None,
-    updates: dict[str, Any],
-) -> ProviderConfig:
-    config_type = type(provider_config) if provider_config is not None else ProviderConfig
-    values = provider_config.model_dump(mode="python") if provider_config is not None else {}
-    if provider_config is not None:
-        for field in _PROVIDER_STRUCTURED_FIELDS:
-            if field in updates:
-                updates[field] = _restore_redacted_provider_secret_values(
-                    updates[field],
-                    getattr(provider_config, field),
-                )
-    values.update(updates)
-    try:
-        return config_type.model_validate(values)
-    except ValueError as exc:
-        errors_callback = getattr(exc, "errors", None)
-        errors: list[dict[str, Any]] = (
-            cast(Any, errors_callback)() if callable(errors_callback) else []
-        )
-        if errors:
-            error = errors[0]
-            field = ".".join(str(part) for part in error.get("loc", ()))
-            message = str(error.get("msg", "invalid value"))
-            raise WebUISettingsError(f"{field}: {message}" if field else message) from exc
-        raise WebUISettingsError(str(exc)) from exc
 
 
 def mask_secret_hint(secret: str | None) -> str | None:
@@ -495,9 +368,9 @@ def _provider_settings_row(
         "provider_api_configurable": spec.provider_api_configurable,
         "model_api_configurable": len(request_apis) > 1,
         "advanced_fields": _provider_advanced_field_names(name, spec),
-        "extra_headers": _redact_provider_secret_values(provider_config.extra_headers),
-        "extra_body": _redact_provider_secret_values(provider_config.extra_body),
-        "extra_query": _redact_provider_secret_values(provider_config.extra_query),
+        "extra_headers": request_settings.redact_request_secrets(provider_config.extra_headers),
+        "extra_body": request_settings.redact_request_secrets(provider_config.extra_body),
+        "extra_query": request_settings.redact_request_secrets(provider_config.extra_query),
         "thinking_style": provider_config.thinking_style,
         "region": getattr(provider_config, "region", None),
         "profile": getattr(provider_config, "profile", None),
@@ -690,7 +563,9 @@ def provider_models_payload(
         }
     if catalog_kind == "hybrid":
         proxy = _resolve_env_placeholders(provider_config.proxy)
-        catalog = get_oauth_model_catalog(spec.name, proxy=proxy)
+        catalog = get_oauth_model_catalog(
+            spec.name, proxy=proxy, refresh=query_first(query, "refresh") == "1",
+        )
         rows = [
             {
                 "id": model.id,
@@ -1011,7 +886,7 @@ def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
 
     model_lower = (model or "").lower()
     if model_lower.rsplit("/", 1)[-1] == "kimi-k3":
-        return ["", "max"]
+        return ["", "low", "high", "max"]
 
     implicit = getattr(spec, "implicit_reasoning_models", ())
     if implicit and any(pattern in model_lower for pattern in implicit):
@@ -1127,6 +1002,10 @@ def model_settings_payload(
                 "temperature": preset.temperature,
                 "reasoning_effort": preset.reasoning_effort,
                 "api": preset.api.model_dump(mode="json") if preset.api is not None else None,
+                **{
+                    field: request_settings.redact_request_secrets(getattr(preset, field))
+                    for field in _PROVIDER_STRUCTURED_FIELDS
+                },
                 "reasoning_effort_values": reasoning_effort_values_for(
                     resolved_preset_provider,
                     preset.model,
@@ -1156,6 +1035,7 @@ def model_settings_payload(
             "tool_hint_max_length": defaults.tool_hint_max_length,
         },
         "model_presets": model_presets,
+        "model_request_overrides_supported": True,
         "model_call_order": model_call_order,
         "model_call_order_editable": model_call_order_editable,
         "model_configuration_migratable": _legacy_model_configuration_migratable(
@@ -1164,6 +1044,33 @@ def model_settings_payload(
         ),
         "providers": providers,
     }
+
+
+def _preset_with_request_updates(
+    config: Config, preset: ModelPresetConfig, query: QueryParams,
+) -> ModelPresetConfig:
+    from nanobot.providers.routing import resolve_provider_route
+
+    updates = {
+        snake: request_settings.restore_request_secrets(
+            request_settings.parse_request_object(query, snake, camel), getattr(preset, snake),
+        )
+        for snake, camel in (
+            ("extra_headers", "extraHeaders"),
+            ("extra_query", "extraQuery"),
+            ("extra_body", "extraBody"),
+        )
+        if query_has_alias(query, snake, camel)
+    }
+    # The provider validator already owns structured JSON validation and safe errors.
+    validated = request_settings.validate_request_config(None, updates)
+    candidate = preset.model_copy(update={key: getattr(validated, key) for key in updates})
+    if any(getattr(candidate, key) for key in _PROVIDER_STRUCTURED_FIELDS):
+        try:
+            resolve_provider_route(config, preset=candidate)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
+    return candidate
 
 
 def update_agent_model_settings(
@@ -1299,7 +1206,7 @@ def create_model_configuration(
         reasoning_effort = (
             query_first_alias(query, "reasoning_effort", "reasoningEffort") or ""
         ).strip() or None
-    config.model_presets[name] = ModelPresetConfig(
+    candidate = ModelPresetConfig(
         model=model,
         provider=provider,
         max_tokens=max_tokens if max_tokens is not None else base.max_tokens,
@@ -1312,6 +1219,7 @@ def create_model_configuration(
         reasoning_effort=reasoning_effort,
         api=_parse_preset_api(config, model, provider, query_first(query, "api")),
     )
+    config.model_presets[name] = _preset_with_request_updates(config, candidate, query)
     if activate_as_primary:
         config.agents.defaults.model_preset = name
         config.agents.defaults.fallback_models = []
@@ -1332,6 +1240,11 @@ def update_model_configuration(
     if preset is None:
         raise WebUISettingsError("unknown model configuration")
 
+    has_request_settings = any((preset.extra_headers, preset.extra_query, preset.extra_body))
+    previous_provider = None
+    if has_request_settings:
+        resolved_config = resolve_config_env_vars(config)
+        previous_provider = resolved_config.get_provider_name(preset=resolved_config.model_presets[name])
     changed = False
     identity_changed = False
     new_name_value = query_first_alias(query, "new_name", "newName")
@@ -1400,6 +1313,17 @@ def update_model_configuration(
             changed = True
     elif identity_changed:
         preset.api = None
+    candidate = preset
+    if has_request_settings:
+        resolved_config = resolve_config_env_vars(config)
+        candidate = isolate_request_overrides(
+            preset, previous_provider=previous_provider,
+            provider=resolved_config.get_provider_name(preset=resolved_config.model_presets[name]),
+        )
+    candidate = _preset_with_request_updates(config, candidate, query)
+    if candidate != preset:
+        config.model_presets[name] = candidate
+        changed = True
     return changed
 
 
@@ -1506,6 +1430,9 @@ def migrate_model_configurations(
             ),
             reasoning_effort=fallback.reasoning_effort,
             api=fallback.api,
+            extra_headers=fallback.extra_headers,
+            extra_query=fallback.extra_query,
+            extra_body=fallback.extra_body,
         )
         fallback_models.append(name)
         created.append(name)
@@ -1561,7 +1488,7 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
 
     provider_key = _custom_provider_key(config, display_name)
     updates["display_name"] = display_name
-    provider_config = _validated_provider_config(None, updates)
+    provider_config = request_settings.validate_request_config(None, updates)
     setattr(config.providers, provider_key, provider_config)
     return provider_key
 
@@ -1617,7 +1544,7 @@ def update_provider_settings(
         if _provider_display_name_exists(config, display_name, exclude_key=provider_key):
             raise WebUISettingsError("provider already exists", status=409)
 
-    updated_provider_config = _validated_provider_config(provider_config, updates)
+    updated_provider_config = request_settings.validate_request_config(provider_config, updates)
     if updated_provider_config.api != provider_config.api:
         candidates = [
             *config.model_presets.values(), config.agents.defaults,
@@ -1639,7 +1566,7 @@ def update_provider_settings(
         changed
         and image_config.enabled
         and image_config.provider == provider_key
-        and get_image_gen_provider(provider_key) is not None
+        and get_image_gen_provider(provider_key, updated_provider_config) is not None
     )
     return changed, restart_required
 

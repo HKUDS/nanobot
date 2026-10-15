@@ -118,6 +118,34 @@ def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
     assert bot._mcp_provider._registry is bot._loop.tools
 
 
+@pytest.mark.parametrize("provider_name", ["openrouter", "SenseNova"])
+def test_from_config_uses_instance_image_settings(tmp_path, monkeypatch, provider_name):
+    from nanobot.agent.tools.image_generation import ImageGenerationTool
+
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "default.json")
+    config_path = _write_config(
+        tmp_path,
+        {
+            "providers": {
+                "openrouter": {"apiKey": "sk-test-key"},
+                "SenseNova": {"apiKey": "named-image-key", "apiBase": "https://images.test/v1"},
+            },
+            "tools": {"imageGeneration": {
+                "enabled": True, "model": "instance-image-model", "provider": provider_name,
+            }},
+        },
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    tool = bot._loop.tools.get("generate_image")
+    assert isinstance(tool, ImageGenerationTool)
+    assert tool.config.model == "instance-image-model"
+    client = tool._provider_client()
+    assert client is not None
+    assert client.api_key == ("sk-test-key" if provider_name == "openrouter" else "named-image-key")
+
+
 def test_from_config_accepts_default_model_override(tmp_path):
     config_path = _write_config(tmp_path)
 
@@ -1417,6 +1445,7 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
                 "role": "assistant",
                 "content": "Congratulations on your degree.",
                 "timestamp": "2023/05/30 (Tue) 17:27",
+                "source": "original-source",
             },
         ],
         metadata={"title": "LongMemEval case"},
@@ -1430,12 +1459,80 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     assert snapshot.messages[0]["timestamp"] == "2023/05/30 (Tue) 17:27"
     assert snapshot.messages[0]["source_session_id"] == "answer_1"
     assert snapshot.messages[0]["source"] == "longmemeval"
-    assert snapshot.messages[1]["source"] == "longmemeval"
+    assert snapshot.messages[1]["source"] == "original-source"
     bot._loop.process_direct.assert_not_called()
 
     reloaded = bot.sessions.get("sdk:history")
     assert reloaded is not None
     assert reloaded.messages == snapshot.messages
+
+    await bot.aclose()
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as restarted:
+        assert restarted.sessions.export("sdk:history") == snapshot
+
+
+@pytest.mark.asyncio
+async def test_sessions_ingest_without_save_detaches_inputs_and_can_be_flushed(tmp_path):
+    config_path = _write_config(tmp_path)
+    metadata = {"import": {"dataset": "original"}}
+    messages = [{
+        "role": " user ",
+        "content": [{"type": "text", "text": "hello"}],
+        "import_info": {"index": 1},
+    }]
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as bot:
+        snapshot = await bot.sessions.ingest(
+            "sdk:unsaved", iter(messages), metadata=metadata, save=False,
+        )
+        metadata["import"]["dataset"] = "changed"
+        messages[0]["content"][0]["text"] = "changed"
+        messages[0]["import_info"]["index"] = 2
+
+        assert snapshot.metadata == {"import": {"dataset": "original"}}
+        assert snapshot.messages[0]["role"] == "user"
+        assert snapshot.messages[0]["content"] == [{"type": "text", "text": "hello"}]
+        assert snapshot.messages[0]["import_info"] == {"index": 1}
+        assert bot.sessions.get("sdk:unsaved") == snapshot
+        async with Nanobot.from_config(config_path, workspace=tmp_path) as reader:
+            assert reader.sessions.export("sdk:unsaved") is None
+        assert bot.sessions.flush() == 1
+
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as restarted:
+        assert restarted.sessions.export("sdk:unsaved") == snapshot
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [False, True], ids=["new-session", "existing-session"])
+@pytest.mark.parametrize("invalid_message", [
+    pytest.param({"role": "developer", "content": "invalid role"}, id="role"),
+    pytest.param({"role": "assistant"}, id="content"),
+])
+async def test_sessions_ingest_rejects_batch_without_session_changes(
+    tmp_path, existing, invalid_message,
+):
+    config_path = _write_config(tmp_path)
+    key = "sdk:rejected"
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as bot:
+        if existing:
+            await bot.sessions.ingest(
+                key, [{"role": "user", "content": "original history"}],
+                metadata={"title": "Original", "import": {"dataset": "original"}},
+            )
+        before = bot.sessions.export(key)
+
+        with pytest.raises(ValueError, match="role|content"):
+            await bot.sessions.ingest(
+                key,
+                iter([{"role": "user", "content": "valid first message"}, invalid_message]),
+                metadata={"title": "Changed", "new_field": "must not leak"},
+            )
+
+        assert bot.sessions.get(key) == before
+        assert bot.sessions.export(key) == before
+        bot.sessions.flush()
+
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as restarted:
+        assert restarted.sessions.export(key) == before
 
 
 @pytest.mark.asyncio

@@ -19,23 +19,11 @@ Follow [Quick Start](../quick-start.md) to install nanobot using the recommended
 
 ## Minimal working example
 
-First prove the runtime can answer:
-
-```bash
-nanobot agent -m "Hello!"
-```
-
-Then open the browser workbench:
-
-```bash
-nanobot webui
-```
-
-The WebUI starts the local gateway, opens a browser, and keeps persistent chat sessions for longer work.
+Continue in the WebUI from Quick Start. Start a new topic, select a practice folder and **Restricted** access, and ask nanobot to summarize a file there. See [Your first file task](../start-without-technical-background.md#your-first-file-task) for a complete example. Reopen the same instance with `nanobot webui` if it is not running; the launcher starts or joins its gateway.
 
 ## Production notes
 
-- Keep one workspace per project or personal context.
+- Choose a project folder for file work. Use [separate instances](../multiple-instances.md) when identity or long-term memory must be isolated.
 - Use `modelPresets` when you want stable names for fast, deep, local, or fallback models.
 - Keep `nanobot gateway` running for WebUI, chat apps, automations, and the WebSocket channel.
 - Use the Python SDK or OpenAI-compatible API when another program should call the agent.
@@ -50,7 +38,7 @@ The WebUI starts the local gateway, opens a browser, and keeps persistent chat s
 ## Troubleshooting
 
 - `nanobot status` shows the config path, workspace path, and active model.
-- If `nanobot agent -m "Hello!"` fails, fix provider setup before opening the WebUI or chat apps.
+- If the model cannot reply, use **Settings → Models** to correct its connection before adding chat apps.
 - If the WebUI opens but does not answer, check gateway logs and provider credentials.
 
 ## Related nanobot docs

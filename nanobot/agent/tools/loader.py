@@ -90,7 +90,9 @@ class ToolLoader:
         return plugins
 
     def load(self, ctx: ToolContext, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
+        """Load defaults while preserving tools already supplied by the caller."""
         registered: list[str] = []
+        supplied_names = set(registry.tool_names)
         builtin_names: set[str] = set()
         sources = [(self.discover(), False), (self._discover_plugins().values(), True)]
         for source, is_plugin_source in sources:
@@ -104,6 +106,10 @@ class ToolLoader:
                     tool = tool_cls.create(ctx)
                     if is_plugin_source:
                         tool = _LegacyErrorPrefixTool(tool)
+                    if tool.name in supplied_names:
+                        if not is_plugin_source:
+                            builtin_names.add(tool.name)
+                        continue
                     if registry.has(tool.name):
                         if is_plugin_source and tool.name in builtin_names:
                             logger.warning(
@@ -122,7 +128,7 @@ class ToolLoader:
                 except Exception:
                     logger.exception("Failed to register tool: %s", cls_label)
             if not is_plugin_source and "rg" in builtin_names:
-                replaced = builtin_names & {"grep", "find_files"}
+                replaced = (builtin_names & {"grep", "find_files"}) - supplied_names
                 for name in replaced:
                     registry.unregister(name)
                 registered = [name for name in registered if name not in replaced]

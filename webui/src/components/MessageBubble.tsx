@@ -19,17 +19,13 @@ import { InlineImageProvider, useInlineImages } from "@/components/InlineImageCo
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { HoverHint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { formatMessageEndTime } from "@/lib/format";
+import { formatMessageEndTime } from "@/lib/format-time";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
 import { sessionHandleColor } from "@/lib/session-handle";
@@ -124,7 +120,7 @@ export function MessageCopyButton({ message, className }: { message: UIMessage; 
   const content = messageCopyContent(message, t);
   const { copied, label, onCopy } = useMessageCopy(content);
   if (!content.trim()) return null;
-  return <TooltipProvider><Tooltip><TooltipTrigger asChild><button type="button" data-message-block-copy-action
+  return <HoverHint content={label} side="top" align="center"><button type="button" data-message-block-copy-action
     data-assistant-copy-action={message.role === "assistant" || undefined}
     onClick={onCopy} aria-label={label}
     className={cn(
@@ -135,7 +131,7 @@ export function MessageCopyButton({ message, className }: { message: UIMessage; 
     )}>
     {copied ? <Check className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
       : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />}
-  </button></TooltipTrigger><TooltipContent side="top" align="center">{label}</TooltipContent></Tooltip></TooltipProvider>;
+  </button></HoverHint>;
 }
 
 interface MessageBlockMenuActivity {
@@ -185,7 +181,6 @@ export function MessageBlockMenuActions({
     : "";
 
   return (
-    <TooltipProvider>
       <div
         data-message-block-menu-actions
         className={cn("flex max-w-full flex-col items-start gap-1", sheet ? "w-full" : "w-max")}
@@ -199,8 +194,7 @@ export function MessageBlockMenuActions({
               <div className="flex min-h-[var(--message-block-control-size)] items-center gap-0.5">
                 {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
                 {showFork ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+                  <HoverHint content={t("message.forkFromHere")} side="top" align="center">
                       <button
                         type="button"
                         data-message-block-fork-action
@@ -219,11 +213,7 @@ export function MessageBlockMenuActions({
                         <ForkArrowIcon className="h-3.5 w-3.5" />
                         {sheet ? <span>{t("message.forkFromHere")}</span> : null}
                       </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" align="center">
-                      {t("message.forkFromHere")}
-                    </TooltipContent>
-                  </Tooltip>
+                  </HoverHint>
                 ) : null}
               </div>
             ) : null}
@@ -298,7 +288,6 @@ export function MessageBlockMenuActions({
           </div>
         ) : null}
       </div>
-    </TooltipProvider>
   );
 }
 
@@ -355,8 +344,15 @@ function UserDeliveryStatus({
   const { title, body } = deliveryErrorCopy(errorKind, t);
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
+      <HoverHint
+        side="top"
+        align="end"
+        contentClassName="max-w-72 px-3 py-2.5 text-left"
+        content={<>
+          <p className="font-medium text-popover-foreground">{title}</p>
+          <p className="mt-1 leading-relaxed text-muted-foreground">{body}</p>
+        </>}
+      >
           <button
             type="button"
             aria-label={`${label}: ${title}`}
@@ -370,16 +366,7 @@ function UserDeliveryStatus({
             <CircleAlert className="h-3.5 w-3.5" aria-hidden />
             {label}
           </button>
-        </TooltipTrigger>
-        <TooltipContent
-          side="top"
-          align="end"
-          className="max-w-72 px-3 py-2.5 text-left"
-        >
-          <p className="font-medium text-popover-foreground">{title}</p>
-          <p className="mt-1 leading-relaxed text-muted-foreground">{body}</p>
-        </TooltipContent>
-      </Tooltip>
+      </HoverHint>
       <span role="alert" aria-live="assertive" className="sr-only">
         {title}. {body}
       </span>
@@ -526,14 +513,12 @@ export function MessageBubble({
           </p>
         ) : null}
         {showDeliveryStatus ? (
-          <TooltipProvider>
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
               <UserDeliveryStatus
                 status={message.deliveryStatus}
                 errorKind={message.deliveryErrorKind}
               />
             </div>
-          </TooltipProvider>
         ) : null}
       </div>
     );
@@ -716,35 +701,6 @@ function ThinkingState() {
       <StreamingLabelSheen active>
         {t("message.reasoningStreaming", { defaultValue: "Thinking…" })}
       </StreamingLabelSheen>
-    </span>
-  );
-}
-
-/** L→R sheen on the glyphs themselves; inactive labels stay solid muted text. */
-export function StreamingLabelSheen({
-  children,
-  active,
-  className,
-}: {
-  children: ReactNode;
-  active: boolean;
-  className?: string;
-}) {
-  const sheenText =
-    typeof children === "string" || typeof children === "number"
-      ? String(children)
-      : undefined;
-  return (
-    <span className={cn("block min-w-0 overflow-hidden py-px", className)}>
-      <span
-        data-sheen-text={active ? sheenText : undefined}
-        className={cn(
-          "block w-fit max-w-full truncate pr-0.5 font-medium leading-normal",
-          active ? "streaming-text-sheen after:pr-0.5" : "text-muted-foreground",
-        )}
-      >
-        {children}
-      </span>
     </span>
   );
 }

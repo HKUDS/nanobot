@@ -16,7 +16,7 @@ Use the launcher:
 nanobot webui
 ```
 
-`nanobot webui` creates the config/workspace when needed, enables the local WebSocket channel after confirmation, generates a WebUI bootstrap secret when one is missing, starts or joins the same on-demand gateway used by the native TUI, and opens the browser. With a fresh config, it can open before a model is configured so you can finish setup in **Settings → Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so it is not available from other devices on your LAN. While the launcher remains attached, it mirrors new log output from that exact gateway instance in the terminal without replaying older logs.
+`nanobot webui` asks for one confirmation on a new installation, creates the config/workspace, enables the local WebSocket channel, and generates a WebUI bootstrap secret when one is missing. It starts or joins the same on-demand gateway used by the native TUI and opens the browser. With a fresh config, it can open before a model is configured so you can finish setup in **Settings → Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so it is not available from other devices on your LAN. The startup summary groups the login link, model setup guidance, config, and exit controls with blank lines. While attached, the launcher displays new gateway warnings and errors; use the printed logs command for full output.
 
 After model setup, explicitly promote the shared gateway when you do not want to keep a client open:
 
@@ -28,7 +28,16 @@ nanobot gateway --background
 
 Each foreground WebUI or TUI launcher releases only its own client. The last interactive launcher stops an on-demand gateway. `nanobot gateway --background` makes the gateway persistent; manage it with `nanobot gateway status`, `nanobot gateway logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
 
-Manual config still works. Same-machine localhost WebUI access can run without a browser password. Set `tokenIssueSecret` when you intentionally expose the WebUI beyond localhost or want a browser password:
+The browser signs in automatically using the generated credential in the launch URL. The terminal also prints the complete login link: if automatic opening fails, copy that link into your browser, including the fragment after `#`. In WSL, the launcher opens your Windows default browser through Windows PowerShell; an explicit `BROWSER` setting takes precedence. If Windows integration is unavailable, open the printed link in your Windows browser. The plain page address does not sign in a new browser. Treat the login link as a credential and do not share it.
+
+`nanobot webui --no-open` prints the same login link without opening a browser. Development mode uses the Vite address, normally `http://127.0.0.1:5173`, with the same gateway authentication.
+
+If no provider is configured, follow the **Next step** prompt to open **Settings → Models**. Errors for a configured provider appear with that prompt.
+
+<details>
+<summary>Manual configuration for the local WebUI</summary>
+
+Manual config still works. Same-machine localhost WebUI access can run without a browser password. Set `tokenIssueSecret` when you intentionally expose the WebUI beyond localhost or want a browser password. These listener and authentication fields have no graphical editor:
 
 ```json
 {
@@ -43,7 +52,15 @@ Manual config still works. Same-machine localhost WebUI access can run without a
 }
 ```
 
+</details>
+
 The WebUI is served by the WebSocket channel on port `8765` by default. The gateway health endpoint, `18790` by default, is not the browser UI.
+
+## Sharing access
+
+The WebUI is an administration interface for one nanobot instance. Signed-in WebUI users can work with its saved topics and manage models, channels, Apps, automations, and settings within the gateway's supported capabilities. There are no per-user roles or private topic ownership boundaries. Remote package installation has an additional restriction described under [LAN Access](#lan-access); that restriction does not turn other WebUI users into read-only users.
+
+Share WebUI access only with people you trust to administer the same agent. To give someone chat access without the administration interface, connect a [chat platform](./chat-apps.md) and configure its access policy. Channel approval still does not create a separate agent or memory store. For separate clients or users whose data must not mix, use [separate instances](./multiple-instances.md).
 
 ## First 10 Minutes
 
@@ -52,7 +69,7 @@ Use the WebUI as the primary setup surface:
 1. Open **Settings → Models** and configure a provider, credential, and active model preset.
 2. Send `Hello!` in a new topic to prove the selected model works.
 3. Start a separate topic before project work, then choose the intended workspace and access mode.
-4. Add only one capability next: a chat channel in **Settings → Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
+4. Add only one capability next: a chat channel in **Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
 5. Restart when the WebUI shows a restart requirement, then test that capability with the smallest possible request.
 
 This path avoids hand-editing `config.json` for normal setup. Use the reference docs when you need an option the WebUI does not expose or when you manage config as code.
@@ -164,13 +181,13 @@ Selecting a project does not replace the configured agent workspace. The two pat
 | Relative file paths and shell working directory | Long-term memory and history |
 | The normal read/write boundary in Restricted mode | Custom skills and instance state |
 
+A new topic separates conversation history; a project selection changes the file working directory. Neither creates a separate long-term memory store. Project switching can therefore carry preferences and facts learned in other topics into the new project. Use [separate instances](./multiple-instances.md) when client or user data must stay separate; see [Memory](./memory.md) for how shared memory is maintained.
+
 Project-local `SOUL.md` and `USER.md` files are ignored, and the agent workspace's `AGENTS.md` is not inherited by a separately selected project. When the selected project is the configured agent workspace, both roles naturally use the same directory.
 
 The access control in the composer controls the local capability level for the chat. It does not bypass your gateway, provider, shell sandbox, or operating system configuration; it only selects among the capabilities that are already available to the current topic.
 
 In Restricted mode, ordinary file and shell work stays inside the selected project. To preserve agent continuity, filesystem/search tools receive narrow, read-only access to built-in skills, custom skills in the agent workspace, and the exact agent `memory/history.jsonl` file. This does not grant access to neighboring memory or profile files, and it does not allow writes outside the selected project. These tool exceptions do not broaden the browser's file preview boundary.
-
-Remote WebUI connections may reduce access for the current workspace and may select a different workspace by browsing folders or entering its server-side path. A remote project change must use Restricted mode; enabling Full Access remains limited to local and native clients.
 
 ## Composer
 
@@ -188,7 +205,7 @@ For image generation, configure an image provider first and then use the WebUI i
 
 ## Channels
 
-Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
+Open **Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
 
 - install missing optional channel support when the WebUI is running locally;
 - collect platform credentials while preserving previously saved values;
@@ -265,6 +282,8 @@ Some settings take effect immediately. Runtime settings that affect the gateway 
 
 Browser-only display preferences, such as file edit display mode, take effect immediately for the current browser and do not change gateway configuration.
 
+To add a model, follow [Configure Your Model](./quick-start.md#2-configure-your-model).
+
 ## LAN Access
 
 To open the WebUI from another device on the same network, bind the WebSocket channel to all interfaces and set a token or token issue secret:
@@ -287,6 +306,9 @@ Plain HTTP is enough for basic WebUI access, but browsers expose microphone capt
 
 Remote WebUI clients with a valid token can view and use Apps and installed skills. Actions that install missing nanobot support packages or third-party marketplace skills are blocked by default. To let trusted remote administrators perform those installations through the WebUI, opt in explicitly:
 
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "tools": {
@@ -294,6 +316,8 @@ Remote WebUI clients with a valid token can view and use Apps and installed skil
   }
 }
 ```
+
+</details>
 
 Use this only for a private deployment where every authenticated WebUI user is trusted to change nanobot's Python environment and install workspace skill instructions or scripts. If you publish the WebUI through Nginx, Caddy, Cloudflare Tunnel, or a similar service, treat it as remote access and leave package and skill installs disabled unless that is intentional.
 

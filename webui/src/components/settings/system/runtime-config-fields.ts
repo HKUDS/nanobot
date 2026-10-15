@@ -9,7 +9,7 @@ export interface RuntimeConfigField {
   max?: number;
 }
 
-export type RuntimeConfigPage = "memory" | "runtime" | "advanced" | "browser" | "image";
+export type RuntimeConfigPage = "memory" | "runtime" | "advanced" | "browser" | "network" | "image";
 
 export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabledBy?: string }[] = [
   { id: "identity", page: "runtime" },
@@ -20,7 +20,7 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabl
   { id: "tools", page: "runtime" },
   { id: "web", page: "browser" },
   { id: "shell", page: "advanced", enabledBy: "tools.exec.enable" },
-  { id: "network", page: "advanced", enabledBy: "tools.web.enable" },
+  { id: "network", page: "network" },
   { id: "safety", page: "advanced" },
   { id: "cli", page: "advanced", enabledBy: "tools.cli_apps.enable" },
   { id: "gateway", page: "advanced" },

@@ -13,13 +13,9 @@ nanobot includes a browser WebUI for persistent chat sessions, visible agent act
 
 Use the WebUI when you want a local AI agent interface that is easier to operate than a terminal, especially for project work, file attachments, model switching, workspace selection, Apps, Skills, and scheduled automations.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
-```
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 The published wheel already includes the WebUI bundle. You only need the `webui/` source directory when changing the frontend.
 

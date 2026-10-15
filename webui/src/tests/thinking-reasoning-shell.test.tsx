@@ -51,11 +51,14 @@ describe("ThinkingReasoningShell", () => {
     const headerClass = button.className;
     const contentClass = content.className;
     expect(button.querySelector("svg")).toHaveClass("lucide-activity");
+    expect(screen.getByText("Working")).toHaveAttribute("data-sheen-text", "Working");
     expect(view.container.querySelector("[data-contextual-activity-guide]")).toBeInTheDocument();
 
     view.rerender(shell(false));
 
     expect(screen.getByRole("button", { name: "Worked, Collapse activity details" })).toBe(button);
+    expect(screen.getByText("Worked")).toHaveClass("text-muted-foreground/65");
+    expect(screen.getByText("Worked")).not.toHaveAttribute("data-sheen-text");
     expect(button.className).toBe(headerClass);
     expect(screen.getByTestId("agent-activity-content")).toBe(content);
     expect(content.className).toBe(contentClass);
@@ -70,10 +73,12 @@ describe("ThinkingReasoningShell", () => {
     const status = screen.getByRole("status", { name: "Working" });
     expect(status).toHaveClass("touch-target", "h-7", "px-1.5");
     expect(status.querySelector("svg")).toHaveClass("lucide-activity");
+    expect(screen.getByText("Working")).toHaveAttribute("data-sheen-text", "Working");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
 
     view.rerender(shell(true));
     expect(screen.getByRole("button", { name: "Working" })).toHaveClass(...status.classList);
+    expect(screen.getByText("Working")).toHaveAttribute("data-sheen-text", "Working");
   });
 
   it("mounts details on first expansion and preserves their state across folding", () => {

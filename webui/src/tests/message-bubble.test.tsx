@@ -5,7 +5,7 @@ import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubb
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { setAppLanguage } from "@/i18n";
 import * as clipboard from "@/lib/clipboard";
-import { formatMessageEndTime } from "@/lib/format";
+import { formatMessageEndTime } from "@/lib/format-time";
 import type {
   CliAppInfo,
   McpPresetInfo,

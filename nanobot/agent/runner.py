@@ -291,8 +291,9 @@ class AgentRunner:
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
+        has_run_hooks = hook.has_run_hooks()
         messages, compaction = self._initial_transcript_and_compaction(spec)
-        context = AgentRunHookContext(messages=deepcopy(messages))
+        context = AgentRunHookContext(messages=deepcopy(messages) if has_run_hooks else [])
         llm_usage_source_token = bind_llm_usage_source(
             spec.llm_usage_source or source_from_session_key(spec.session_key)
         )
@@ -301,20 +302,20 @@ class AgentRunner:
             await hook.before_run(context)
             result = await self._run_core(spec, hook, messages, compaction)
         except asyncio.CancelledError as exc:
-            context.messages = deepcopy(messages)
+            context.messages = deepcopy(messages) if has_run_hooks else []
             context.stop_reason = "cancelled"
             context.error = None
             context.exception = exc
             raise
         except Exception as exc:
-            context.messages = deepcopy(messages)
+            context.messages = deepcopy(messages) if has_run_hooks else []
             context.stop_reason = "error"
             context.error = f"Error: {type(exc).__name__}: {exc}"
             context.exception = exc
             await hook.on_error(context)
             raise
         else:
-            context.messages = deepcopy(result.messages)
+            context.messages = deepcopy(result.messages) if has_run_hooks else []
             context.final_content = result.final_content
             context.tools_used = list(result.tools_used)
             context.usage = result.usage
@@ -329,7 +330,7 @@ class AgentRunner:
             return result
         finally:
             try:
-                context.messages = deepcopy(messages)
+                context.messages = deepcopy(messages) if has_run_hooks else []
                 if context.exception is None:
                     await hook.on_finally(context)
                 else:

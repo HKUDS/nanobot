@@ -1,5 +1,5 @@
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 const SLACK_SOCKET_MODE_MANIFEST = `display_information:
   name: nanobot

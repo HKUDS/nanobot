@@ -8,6 +8,51 @@ import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView,
 describe("Settings capabilities", () => {
   installSettingsViewTestHooks();
 
+  it("uses a named image connection and saves image-only parameters", async () => {
+    const payload = settingsPayload();
+    payload.image_generation = {
+      ...payload.image_generation, enabled: true, provider: "custom-sensenova",
+      request_overrides_supported: true,
+      providers: [{ name: "custom-sensenova", label: "SenseNova", configured: true, uses_images_api: true, api_base: "https://images.test/v1" }],
+    };
+    requestMutationMock.mockImplementation(async (_action, args) => ({
+      ...payload, image_generation: {
+        ...payload.image_generation,
+        extra_headers: args.extra_headers ? JSON.parse(args.extra_headers) : null,
+        extra_body: args.extra_body ? JSON.parse(args.extra_body) : null,
+      },
+    }));
+    requestMutationMock.mockRejectedValueOnce(new Error("Could not save. Try again."));
+    renderSettingsView({ initialSection: "image", initialSettings: payload });
+    expect(screen.getByRole("combobox", { name: "SenseNova", exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Provider", exact: true })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    fireEvent.click(screen.getByRole("button", { name: "Body parameters Use provider settings Edit" }));
+    const editor = screen.getByRole("dialog", { name: "Body parameters" });
+    fireEvent.change(within(editor).getByRole("textbox", { name: "Body parameters" }), { target: { value: '{"watermark":false}' } });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    expect(await within(editor).findByRole("alert")).toHaveTextContent("Could not save. Try again.");
+    expect(within(editor).getByRole("textbox")).toHaveValue('{"watermark":false}');
+    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.image_generation.update",
+      expect.objectContaining({ provider: "custom-sensenova", extra_body: '{"watermark":false}' }),
+      20_000,
+    ));
+    expect(await screen.findByRole("button", { name: "Body parameters Entries: 1 Edit" })).toBeEnabled();
+  });
+
+  it("does not display a different image connection when the saved one is missing", () => {
+    const payload = settingsPayload();
+    payload.image_generation = {
+      ...payload.image_generation, enabled: true, provider: "missing-connection",
+      providers: [{ name: "openai", label: "OpenAI", configured: true, api_base: "https://unrelated.test" }],
+    };
+    renderSettingsView({ initialSection: "image", initialSettings: payload });
+    expect(screen.queryByText("https://unrelated.test")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Configure this provider");
+  });
+
   it("opens configuration for disabled features without enabling them", () => {
     const payload = settingsPayload();
     payload.image_generation.enabled = false;
@@ -188,30 +233,26 @@ describe("Settings capabilities", () => {
     fireEvent.keyDown(screen.getByRole("combobox", { name: "OpenRouter" }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "Gemini" }));
 
-    expect(await screen.findByRole("button", { name: "gemini-2.5-flash-image" })).toBeInTheDocument();
-    await openPopover(screen.getByRole("button", { name: "gemini-2.5-flash-image" }));
+    const modelInput = screen.getByRole("combobox", { name: "Select image model" });
+    await waitFor(() => expect(modelInput).toHaveValue("gemini-2.5-flash-image"));
+    await openPopover(modelInput);
     fireEvent.click(await screen.findByRole("option", { name: "imagen-4.0-generate-001" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "imagen-4.0-generate-001" })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(modelInput).toHaveValue("imagen-4.0-generate-001"));
 
-    await openPopover(screen.getByRole("button", { name: "imagen-4.0-generate-001" }));
-    const modelInput = await screen.findByRole("combobox", { name: "Search or type model ID" });
+    await openPopover(modelInput);
     fireEvent.change(modelInput, { target: { value: "imagen-5-preview" } });
     fireEvent.click(await screen.findByRole("option", { name: "Use “imagen-5-preview”" }));
-    expect(await screen.findByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
+    await waitFor(() => expect(modelInput).toHaveValue("imagen-5-preview"));
 
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Gemini" }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "Custom" }));
-    expect(screen.getByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
+    const customProviderInput = screen.getByRole("combobox", { name: "Select image model" });
+    expect(customProviderInput).toHaveValue("imagen-5-preview");
 
-    await openPopover(screen.getByRole("button", { name: "imagen-5-preview" }));
-    const customProviderInput = await screen.findByRole("combobox", {
-      name: "Search or type model ID",
-    });
+    await openPopover(customProviderInput);
     fireEvent.change(customProviderInput, { target: { value: "private/image-v2" } });
     fireEvent.keyDown(customProviderInput, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "private/image-v2" })).toBeInTheDocument();
+    await waitFor(() => expect(customProviderInput).toHaveValue("private/image-v2"));
   });
 
   it("saves network safety without exposing technical SSRF copy", async () => {
@@ -254,6 +295,35 @@ describe("Settings capabilities", () => {
         20_000,
       ),
     );
+  });
+
+  it("edits the existing web proxy in web access even while disabled, without a duplicate advanced editor", async () => {
+    let payload = { ...settingsPayload(), runtime_config: {
+      "tools.web.enable": false, "tools.web.proxy": "http://old-proxy.example:8080", "tools.web.user_agent": null,
+    } } as SettingsPayload;
+    requestMutationMock.mockImplementation(async (_method, update) => {
+      payload = { ...payload, runtime_config: { ...payload.runtime_config, ...update.values },
+        requires_restart: true, restart_required_sections: ["runtime"] };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    fireEvent.click(within(screen.getByRole("region", { name: "Web access" })).getByRole("button", { name: "Configure" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    const proxy = screen.getByRole("textbox", { name: "Web proxy", exact: true });
+    expect(proxy).toHaveValue("http://old-proxy.example:8080");
+    fireEvent.change(proxy, { target: { value: "http://new-proxy.example:7890" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.web.proxy": "http://new-proxy.example:7890" } }, 20_000,
+    ));
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
+    fireEvent.change(proxy, { target: { value: "" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.runtime_config.update", { values: { "tools.web.proxy": null } }, 20_000,
+    ));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close", exact: true }));
+    expect(screen.getByRole("switch", { name: "Web access" })).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced", exact: true }));
+    expect(screen.queryByRole("textbox", { name: "Web proxy", exact: true })).not.toBeInTheDocument();
   });
 
   it("saves optional-key web search providers without an API key", async () => {

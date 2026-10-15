@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nanobot.config.home import get_home_path
-from nanobot.utils.helpers import ensure_dir
+from nanobot.utils.file_io import ensure_dir
 
 
 def get_config_path() -> Path:

@@ -30,19 +30,7 @@ python -m pip install nanobot-ai
 
 `Nanobot.from_config()` reuses your normal `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Provider, model, tools, memory, and session behavior match the CLI unless you override them. For the difference between config and workspace, see [Concepts: Config vs Workspace](concepts.md#config-vs-workspace).
 
-Before writing SDK code, run the same first-run checks from the main [Install and Quick Start](quick-start.md):
-
-```bash
-nanobot status
-```
-
-`nanobot status` should show the config path, workspace path, active model or preset, and provider summary. Then send one real message:
-
-```bash
-nanobot agent -m "Hello!"
-```
-
-A normal assistant reply means install, config, provider/model selection, and workspace access are all usable. Once that works, the SDK should see the same runtime.
+If you have already received a normal reply in the WebUI, use that saved configuration directly. For a separate Python environment, `nanobot status` shows which config, workspace, and model the SDK will load.
 
 ## 5-Minute Quick Start
 
@@ -67,6 +55,17 @@ Use `async with` when possible so tool connections and background cleanup are cl
 
 The SDK is async-first because agent runs may stream tokens, execute tools, and wait on external services. In a normal Python script, wrap your async function with `asyncio.run(...)` as shown above. In a notebook or another async app, call `await bot.run(...)` directly from your existing event loop.
 
+The default agent workspace comes from config, not the notebook's current directory. For a notebook that should use its current folder as both file workspace and agent state, choose it explicitly:
+
+```python
+from pathlib import Path
+
+async with Nanobot.from_config(workspace=Path.cwd()) as bot:
+    result = await bot.run("List the files in this workspace.")
+```
+
+This also places memory and skills in that workspace. Use a separate configured instance when notebook experiments must not share existing agent state.
+
 ### Inspect What Happened
 
 `bot.run(...)` returns a `RunResult`, not just a string:
@@ -82,7 +81,7 @@ print(result.stop_reason) # why the run stopped
 
 ### Continue A Conversation
 
-Use a `session_key` when you want history to carry across turns. Different session keys are isolated from each other:
+Use a `session_key` when you want history to carry across turns. Different session keys keep separate conversation histories:
 
 ```python
 await bot.run("My name is Alice.", session_key="user:alice")
@@ -91,7 +90,7 @@ result = await bot.run("What is my name?", session_key="user:alice")
 print(result.content)
 ```
 
-This is the SDK equivalent of giving each user, task, eval case, or workflow its own conversation thread.
+This gives each task or workflow its own conversation thread. Keys do not isolate workspace files, tools, credentials, or long-term memory: sessions in one agent workspace share `USER.md`, `SOUL.md`, and `memory/MEMORY.md`. For separate users or tenants, use separate configured instances and appropriate process/file permissions; see [Multiple Instances](multiple-instances.md).
 
 ### Stream A Long Answer
 
@@ -109,7 +108,7 @@ Streaming returns structured events, so you can also observe tool calls, reasoni
 
 ## Complete Starter Script
 
-Save this as `sdk_demo.py` after `nanobot agent -m "Hello!"` works:
+Save this as `sdk_demo.py` after your configured model has returned a normal reply:
 
 ```python
 import asyncio
@@ -260,7 +259,7 @@ result = await bot.run("Think deeply about this bug", model_preset="reasoning")
 
 `model` and `model_preset` are mutually exclusive.
 
-For first setup, prefer named presets in `config.json`. Mixing an API key from one provider with a model ID from another is the most common first-run failure. For the exact difference between `provider`, `model`, `apiKey`, and `apiBase`, see [Providers: Provider, Model, API Key, and Base URL](providers.md#provider-model-api-key-and-base-url). If a run fails before the SDK does anything interesting, confirm the same provider and model work with `nanobot agent -m "Hello!"` first.
+For first setup, create named presets in **Settings → Models**; the SDK reads those saved presets from `config.json`. Mixing an API key from one provider with a model ID from another is the most common first-run failure. For the exact difference between `provider`, `model`, `apiKey`, and `apiBase`, see [Providers: Provider, Model, API Key, and Base URL](providers.md#provider-model-api-key-and-base-url). If a run fails before the SDK does anything interesting, confirm the same provider and model work with `nanobot agent -m "Hello!"` first.
 
 ### Isolate conversations with `session_key`
 
@@ -380,6 +379,23 @@ result = await bot.run(
 )
 print(result.content)
 ```
+
+### Persist memory in a short-lived script
+
+Saved session history and curated long-term memory are different. The SDK does not start the gateway scheduler, so creating or closing `Nanobot` does not schedule Dream. Compaction archives a conversation into `memory/history.jsonl`; it does not itself update `USER.md` or `memory/MEMORY.md`.
+
+Before closing a script that should contribute material to Dream:
+
+```python
+async with Nanobot.from_config() as bot:
+    await bot.run("For release notes, use concise bullet points.", session_key="sdk:notes")
+    await bot.runtime.compact_session("sdk:notes")
+    print(bot.memory.read_history(session_key="sdk:notes"))
+```
+
+Then use `/dream` in a running WebUI or TUI connected to the same configured agent workspace, wait for completion, and inspect `/dream-log`. Scheduled Dream also processes this archive while the matching gateway runs and Dream is enabled. `await bot.run("/dream")` only returns the command acknowledgement; it is not an awaited Dream-completion API for short-lived scripts.
+
+For application-owned durable text, `bot.memory.write(text)` writes `memory/MEMORY.md` directly and `bot.memory.read()` reads it back. Writing replaces the whole file; it does not merge preferences or create a Dream audit entry. See [Memory](memory.md) for review and correction workflows.
 
 ### Attach hooks for observability
 
@@ -576,11 +592,13 @@ Ingested messages must include `role` and `content`. Roles may be `user`, `assis
 | `await compact_session(session_key)` | Run token-based consolidation for a session. |
 | `await compact_idle_session(session_key, max_suffix=8)` | Run idle-session compaction and return its summary. |
 
+Both compaction methods serialize with turns for the same session key. Call them after `bot.run()` returns, or from a separate task that can wait for the active turn to finish.
+
 ### Host integration context and persisted-turn callbacks
 
 Host applications can attach external context without copying or modifying the nanobot agent loop. A context provider receives a `RequestContext` before each model turn and may return one or more `RuntimeContextBlock` values. Use `attributes` for caller-owned routing data; nanobot keeps it separate from trusted channel metadata and does not persist it in session messages.
 
-`on_session_turn_persisted()` invokes its callback after a non-ephemeral turn has been saved. The callback receives `SessionTurnPersisted` and may read the completed transcript through `bot.sessions`. Callbacks run in registration order, and async callbacks are awaited before the run continues. They are observational: callback exceptions are logged and suppressed so the completed local turn remains successful. Durable external synchronization must catch failures and persist retry work before the callback returns. During SDK runs, callbacks execute while the session is still serialized and must not re-enter `bot.run()` for the same session.
+`on_session_turn_persisted()` invokes its callback after a non-ephemeral turn has been saved. The callback receives `SessionTurnPersisted` and may read the completed transcript through `bot.sessions`. Callbacks run in registration order, and async callbacks are awaited before the run continues. They are observational: callback exceptions are logged and suppressed so the completed local turn remains successful. Durable external synchronization must catch failures and persist retry work before the callback returns. During SDK runs, callbacks execute while the session is still serialized and must not await `bot.run()`, `bot.runtime.compact_session()`, or `bot.runtime.compact_idle_session()` for the same session.
 
 ```python
 import json

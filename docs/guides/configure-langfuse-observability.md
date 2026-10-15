@@ -14,13 +14,7 @@ Use Langfuse when you need observability for model requests, latency, errors, co
 
 ## Install
 
-Install nanobot and prove the agent works:
-
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
-```
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. Continue with the same working instance.
 
 Install Langfuse:
 

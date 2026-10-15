@@ -23,7 +23,7 @@ from nanobot.providers.base import (
     RetryEventCallback,
     RetryStatusCallback,
 )
-from nanobot.providers.oauth_model_catalog import oauth_catalog_auth_rejected
+from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.

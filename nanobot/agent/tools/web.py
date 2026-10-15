@@ -15,7 +15,6 @@ from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
 import httpx
 from loguru import logger
-from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext, tool_log_content_allowed
@@ -25,7 +24,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config_base import Base
+from nanobot.agent.tools.web_config import WebFetchConfig, WebSearchConfig, WebToolsConfig
 from nanobot.utils.helpers import build_image_content_blocks
 
 # Shared constants
@@ -58,29 +57,6 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
     {"name": "anysearch", "label": "AnySearch", "credential": "optional_api_key"},
 )
-
-
-class WebSearchConfig(Base):
-    """Web search configuration."""
-    provider: str = "duckduckgo"
-    api_key: str = ""
-    base_url: str = ""
-    max_results: int = 5
-    timeout: int = 30
-
-
-class WebFetchConfig(Base):
-    """Web fetch tool configuration."""
-    use_jina_reader: bool = True
-
-
-class WebToolsConfig(Base):
-    """Web tools configuration."""
-    enable: bool = True
-    proxy: str | None = None
-    user_agent: str | None = None
-    search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 def _strip_tags(text: str) -> str:
@@ -346,7 +322,7 @@ def _normalize_volcengine_auth_level(value: Any) -> int | None:
 @tool_parameters(
     tool_parameters_schema(
         query=StringSchema("Search query"),
-        count=IntegerSchema(description="Results (1-10)", minimum=1, maximum=10),
+        count=IntegerSchema(description="Maximum results; uses the configured default if omitted.", minimum=1, maximum=10),
         timeRange=StringSchema(
             "Optional time filter for providers that support it: "
             "OneDay, OneWeek, OneMonth, OneYear, or YYYY-MM-DD..YYYY-MM-DD",
@@ -368,10 +344,8 @@ class WebSearchTool(Tool):
 
     name = "web_search"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
     description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
-        "Search the web. Returns titles, URLs, and snippets. "
-        "count defaults to 5 (max 10). "
-        "Some providers support timeRange, authLevel, and queryRewrite. "
-        "Use web_fetch to read a specific page in full."
+        "Search the web for titles, URLs, and snippets. "
+        "Use web_fetch to read a specific page."
     )
 
     config_key = "web"
@@ -1110,7 +1084,7 @@ class WebSearchTool(Tool):
             "enum": ["markdown", "text"],
             "default": "markdown",
         },
-        maxChars=IntegerSchema(minimum=100),
+        maxChars=IntegerSchema(description="Maximum output characters; defaults to 50000.", minimum=100),
         required=["url"],
     )
 )
@@ -1120,9 +1094,8 @@ class WebFetchTool(Tool):
 
     name = "web_fetch"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
     description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
-        "Fetch a URL and extract readable content (HTML → markdown/text). "
-        "Output is capped at maxChars (default 50 000). "
-        "Works for most web pages and docs; may fail on login-walled or JS-heavy sites."
+        "Fetch a URL as readable markdown/text. "
+        "May fail on login-walled or JavaScript-heavy pages."
     )
 
     config_key = "web"

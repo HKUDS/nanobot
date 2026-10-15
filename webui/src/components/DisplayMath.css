@@ -11,6 +11,7 @@
   top: 0;
   left: 50%;
   width: max-content;
+  min-width: 100%;
   padding-block: 0.1em;
   transform-origin: top center;
 }
@@ -21,6 +22,11 @@
 
 .math-fit .katex-display > .katex {
   font-size: 1.1em;
+}
+
+/* KaTeX tags are out of flow; reserve equal space to keep the formula centered. */
+.math-fit .katex-html:has(> .tag) {
+  padding-inline: calc(var(--math-tag-width) + 1em);
 }
 
 /* Math-heavy prose uses a tighter reading rhythm than ordinary chat. */

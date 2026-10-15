@@ -39,8 +39,10 @@ export function ThinkingReasoningShell({
         {active ? <path className="activity-current-trace" pathLength={100} d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /> : null}
       </Activity>
       <span
+        data-sheen-text={active ? label : undefined}
         className={cn(
           "min-w-0 truncate text-[12px] font-normal leading-4 text-muted-foreground/65",
+          active && "streaming-text-sheen",
         )}
       >
         {label}

@@ -168,6 +168,11 @@ def _thinking_styles_for(spec: ProviderSpec | None, model_name: str) -> list[str
     styles: list[str] = []
     if spec and spec.thinking_style:
         styles.append(spec.thinking_style)
+    elif spec and spec.name == "zhipu" and _model_slug(model_name) in {
+        "glm-4.6", "glm-4.7", "glm-5", "glm-5.1", "glm-5.2",
+    }:
+        # Keep this model-specific: GLM-5.3 requires thinking and cannot disable it.
+        styles.append("thinking_type")
     model_style = _model_thinking_style(model_name)
     if model_style and model_style not in styles:
         styles.append(model_style)
@@ -955,15 +960,15 @@ class OpenAICompatProvider(LLMProvider):
         wire_effort = reasoning_effort
         slug = _model_slug(model_name)
         if slug == _KIMI_K3_MODEL and semantic_effort is not None:
-            # K3 always reasons and currently accepts only the top-level
-            # reasoning_effort="max". Preserve disabled/default semantics by
-            # omitting the field; normalize older enabled presets to "max" so
-            # switching from a K2.x model does not send an unsupported value.
+            # K3 always reasons and accepts top-level low/high/max effort.
+            # Keep disabled presets on the default and normalize other legacy
+            # enabled values to "max".
             if semantic_effort in ("none", "minimal"):
                 wire_effort = None
             else:
-                semantic_effort = "max"
-                wire_effort = "max"
+                if semantic_effort not in ("low", "high", "max"):
+                    semantic_effort = "max"
+                wire_effort = semantic_effort
         if spec and spec.name == "dashscope" and semantic_effort == "minimal":
             # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"
@@ -1244,7 +1249,9 @@ class OpenAICompatProvider(LLMProvider):
                     model_name,
                 )
             )
-        is_deepseek = bool(self._spec and self._spec.name == "deepseek")
+        supports_reasoning_none = bool(
+            self._spec and self._spec.name in {"deepseek", "xiaomi_mimo"}
+        )
         capabilities = self._responses_capabilities()
         preserve_reasoning = (
             capabilities is not None and capabilities.reasoning_replay == "plaintext"
@@ -1273,7 +1280,7 @@ class OpenAICompatProvider(LLMProvider):
             and capabilities.reasoning_replay == "encrypted"
         ):
             body["include"] = ["reasoning.encrypted_content"]
-        if reasoning_effort and (reasoning_effort.lower() != "none" or is_deepseek):
+        if reasoning_effort and (reasoning_effort.lower() != "none" or supports_reasoning_none):
             body["reasoning"] = {"effort": reasoning_effort}
         if prepared.replayed and "gpt-5.6" in model_name.lower():
             body.setdefault("reasoning", {})["context"] = "all_turns"

@@ -41,7 +41,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.logging_bridge import redirect_lib_logging
 

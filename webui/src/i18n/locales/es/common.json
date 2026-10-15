@@ -339,6 +339,9 @@
       "description": "Interfaz web de nanobot: conversa con tu espacio de trabajo de nanobot."
     },
     "pairing": {
+      "haveCode": "¿Ya recibiste un código?",
+      "deliveryFailed": "No se pudo enviar el código. Revisa los permisos de envío del bot y los registros de la pasarela. Después, envíale otro mensaje privado para reintentar.",
+      "deliverySending": "Enviando el código al chat. Si no llega, envía otro mensaje privado al bot para reintentar.",
       "title": "Vincular cuenta",
       "description": "Introduce el código de vinculación recibido en el chat.",
       "code": "Código de vinculación",
@@ -416,7 +419,7 @@
         "tools_exec_allowed_env_keys": {"label": "Variables de entorno", "help": "Variables adicionales para los comandos, un nombre por línea.\n\nVariables adicionales que se pasan a los comandos, una por línea. Las variables básicas necesarias siguen disponibles."},
         "tools_exec_allow_patterns": {"label": "Comandos permitidos", "help": "Ejecuta solo comandos que coincidan por completo con las reglas permitidas.\n\nUna expresión regular por línea. Si añades reglas, cada segmento del comando debe coincidir por completo con alguna de ellas. Los comandos permitidos omiten las reglas de bloqueo integradas y personalizadas, pero mantienen las restricciones de red y del espacio de trabajo."},
         "tools_exec_deny_patterns": {"label": "Comandos bloqueados", "help": "Bloquea los comandos que coincidan con estas reglas.\n\nExpresiones regulares de bloqueo adicionales, una por línea. Las reglas de permiso explícitas tienen prioridad sobre las reglas de bloqueo integradas y personalizadas."},
-        "tools_web_proxy": {"label": "Proxy web", "help": "URL del proxy; en blanco usa la red predeterminada.\n\nURL del proxy para las herramientas web. Déjalo vacío para usar la red predeterminada."},
+        "tools_web_proxy": {"label": "Proxy web", "help": "Se usa para las búsquedas web y la lectura de páginas del agente. Déjalo vacío para usar la red predeterminada, incluidas las variables de entorno del proxy.\n\n127.0.0.1 es el equipo que ejecuta nanobot. Este ajuste no cambia las conexiones de modelos, MCP ni del navegador."},
         "tools_web_user_agent": {"label": "Cabecera User-Agent", "help": "User-Agent para solicitudes web; en blanco usa el predeterminado.\n\nCabecera User-Agent personalizada. Déjalo vacío para usar el valor predeterminado."},
         "tools_restrict_to_workspace": {"label": "Restricción del espacio", "help": "Límites globales del espacio; los permisos de chats WebUI se ajustan aparte.\n\nPolítica global de herramientas. Los permisos de cada conversación WebUI se configuran por separado."},
         "tools_ssrf_whitelist": {"label": "IP permitidas", "help": "IP o rangos CIDR permitidos, uno por línea.\n\nDirecciones IP o rangos CIDR exentos de la protección de solicitudes salientes, uno por línea."},
@@ -762,6 +765,19 @@
       }
     },
     "providers": {
+      "manageProviders": "Gestionar proveedores",
+      "configureProvider": "Configurar {{provider}}…",
+      "sharedProviderHelp": "Los cambios afectan a todos los preajustes que usan este proveedor.",
+      "parameterCount": "{{count}} entradas",
+      "useProviderSettings": "Usar ajustes del proveedor",
+      "applyToDraft": "Añadir al preajuste",
+      "draftHint": "Guarda el nuevo preajuste para aplicar estos ajustes.",
+      "invalidObject": "Introduce un objeto JSON, por ejemplo: {\"key\":\"value\"}.",
+      "stringValuesRequired": "Usa valores de texto en cabeceras y parámetros de consulta.",
+      "maskedSecretMissing": "No hay un secreto guardado que corresponda a esta máscara. Introduce el valor real o elimina la entrada.",
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "Local",
       "title": "Proveedores",
       "searchPlaceholder": "Buscar proveedores",
       "noMatches": "Ningún proveedor coincide con esta búsqueda.",
@@ -788,13 +804,15 @@
       "extraBody": "Parámetros del cuerpo",
       "extraQuery": "Parámetros de consulta",
       "capabilityFastMode": "Modo rápido",
-      "capabilityFastModeHelp": "Las respuestas más rápidas consumen créditos más rápido.\n\nUsa el nivel de servicio prioritario de OpenAI para responder más rápido. Esto consume créditos más deprisa.",
+      "capabilityFastModeHelp": "Respuestas más rápidas, mayor consumo.",
       "capabilityXSearch": "Búsqueda en X",
       "capabilityXSearchHelp": "Los modelos Grok compatibles pueden buscar en X.\n\nPermite que los modelos Grok compatibles usen X Search alojado por xAI. La actividad de búsqueda aparece en el chat.",
       "capabilityOpenAISearch": "Búsqueda web de OpenAI",
       "capabilityOpenAISearchHelp": "Los modelos compatibles pueden buscar en la web.\n\nPermite que los modelos compatibles con Responses API busquen en la web. La actividad de búsqueda aparece en el chat."
     },
     "image": {
+      "imagesApiHint": "Usa OpenAI Images API en la URL de esta conexión. Compruebe que admite imágenes.",
+      "requestOverridesHint": "Solo para imágenes. Los campos vacíos usan los ajustes del proveedor. Cambiar de proveedor borra estos valores.",
       "selectProvider": "Seleccionar proveedor",
       "selectAspect": "Seleccionar proporción",
       "selectSize": "Seleccionar tamaño",
@@ -812,10 +830,12 @@
       "installing": "Instalando dependencias…"
     },
     "models": {
+      "requestOverridesHint": "Deja los campos vacíos para usar los ajustes del proveedor. Cambiar de proveedor borra estos valores.",
+      "otherPresets": "Preajustes alternativos",
       "catalogAuthRequired": "La autorización ha caducado. Inicia sesión de nuevo.",
-      "catalogUnavailable": "No se pudieron actualizar los modelos. Inténtalo más tarde.",
-      "catalogStale": "Se muestran modelos en caché; la lista puede estar desactualizada.",
-      "catalogFallback": "Se muestran modelos integrados; la lista puede estar desactualizada.",
+      "catalogUnavailable": "No se pudo actualizar. Haz clic para reintentar",
+      "catalogStale": "La lista en caché puede estar desactualizada.",
+      "catalogFallback": "La lista integrada puede estar desactualizada.",
       "selectModel": "Seleccionar modelo",
       "addConfiguration": "Agregar configuración",
       "newConfiguration": "Nueva configuración de modelo",
@@ -825,7 +845,6 @@
       "configurationNamePlaceholder": "Escritura rápida",
       "callOrder": "Orden de modelos",
       "primary": "Principal",
-      "fallbackNumber": "Alternativa {{number}}",
       "addToOrder": "Activar preajuste",
       "newPreset": "Nuevo preajuste",
       "newPresetHelp": "Guarda un modelo y sus ajustes para reutilizarlos.",
@@ -862,7 +881,7 @@
       "disabled": "Desactivado",
       "noPresets": "Aún no hay preajustes de modelo",
       "noPresetsHelp": "Crea un preajuste y añádelo al orden de llamada.",
-      "removeBeforeDelete": "Elige otro preajuste principal antes de eliminar este.",
+      "removeBeforeDelete": "No se puede eliminar el modelo principal",
       "providerSetupRequired": "El proveedor requiere configuración",
       "configureProviderBeforeSaving": "Configura este proveedor antes de guardar el preajuste.",
       "deletePresetTitle": "¿Eliminar el preajuste de modelo?",
@@ -1602,7 +1621,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "No se pudieron cargar las subtareas.",
       "stopFailed": "No se pudo detener esta tarea.",
       "stopTask": "Detener {{label}}",
       "receiptHelp": "Entregado significa que el mensaje se incluyó en la siguiente solicitud del subagente, sin confirmar su ejecución.",
@@ -2263,6 +2281,7 @@
     }
   },
   "common": {
+    "retry": "Reintentar",
     "dismiss": "Cerrar",
     "close": "Cerrar",
     "current": "Actual",

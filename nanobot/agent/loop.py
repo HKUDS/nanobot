@@ -44,7 +44,13 @@ from nanobot.agent.turn_delivery import (
 )
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
+from nanobot.bus.events import (
+    INBOUND_META_RUNTIME_CONTROL,
+    INBOUND_META_USER_SHELL,
+    RUNTIME_CONTROL_SESSION_DISCARD,
+    InboundMessage,
+    OutboundMessage,
+)
 from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -52,7 +58,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.command.router import command_text, normalize_command_text
+from nanobot.command.router import command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
@@ -110,7 +116,6 @@ if TYPE_CHECKING:
     from nanobot.config.schema import (
         ChannelsConfig,
         Config,
-        ProviderConfig,
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
@@ -281,8 +286,6 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
-        image_generation_provider_config: ProviderConfig | None = None,
-        image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
         model_presets: dict[str, ModelPresetConfig] | None = None,
@@ -351,12 +354,6 @@ class AgentLoop:
         self.tools_config = _tc
         self.web_config = _tc.web
         self.exec_config = _tc.exec
-        self._image_generation_provider_configs = dict(image_generation_provider_configs or {})
-        if (
-            image_generation_provider_config is not None
-            and "openrouter" not in self._image_generation_provider_configs
-        ):
-            self._image_generation_provider_configs["openrouter"] = image_generation_provider_config
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.restrict_to_workspace = restrict_to_workspace
@@ -440,6 +437,7 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
             bind_events=self._idle_events,
+            session_lock=self._get_session_lock,
         )
         self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
         self._next_idle_compact_check_at = time.monotonic()
@@ -620,6 +618,8 @@ class AgentLoop:
         from nanobot.agent.tools.context import ToolContext
         from nanobot.agent.tools.loader import ToolLoader
 
+        runtime_control = AgentRuntimeControl(self)
+        self.register_runtime_context_provider(runtime_control.workspace_context)
         ctx = ToolContext(
             config=self.tools_config,
             workspace=str(self.workspace),
@@ -629,10 +629,9 @@ class AgentLoop:
             exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
-            image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
-            runtime_control=AgentRuntimeControl(self),
+            runtime_control=runtime_control,
         )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
@@ -741,6 +740,7 @@ class AgentLoop:
             sender_id=ctx.msg.sender_id,
             turn_id=ctx.delivery.route.turn_id or ctx.turn_id,
             workspace=scope.project_path,
+            workspace_scope=scope,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
             persist_session=ctx.session.policy.persist and not ctx.ephemeral,
             can_receive_background_results=self._running,
@@ -782,8 +782,7 @@ class AgentLoop:
         dispatch_fn: Callable[[CommandContext], Awaitable[InboundMessage | OutboundMessage | None]],
     ) -> None:
         """Dispatch a command directly from the run() loop and publish the result."""
-        if normalize_command_text(raw).lower() == "/compact":
-            # Compaction must wait for the active turn to commit its session.
+        if self.commands.requires_session_queue(raw):
             self._enqueue_session_message(msg)
             return
 
@@ -800,10 +799,8 @@ class AgentLoop:
             result = await dispatch_fn(ctx)
             if isinstance(result, InboundMessage):
                 self._enqueue_session_message(result)
-            elif result:
+            elif result is not None:
                 await self.bus.publish_outbound(result)
-            else:
-                logger.warning("Command '{}' matched but dispatch returned None", raw)
 
         # A shell command may run for up to the configured exec timeout. Keep
         # the inbound consumer responsive when it runs beside an active turn.
@@ -1085,6 +1082,8 @@ class AgentLoop:
                         sender_id=pending_msg.sender_id,
                         turn_id=request_ctx.turn_id,
                         workspace=scope.project_path,
+                        # Injected input continues the active run's tool policy.
+                        workspace_scope=effective_scope,
                         log_content=request_ctx.log_content,
                     )
                     blocks = await self._resolve_runtime_context_for_request(
@@ -1197,6 +1196,7 @@ class AgentLoop:
             )
         request_ctx = dataclasses.replace(
             request_ctx,
+            workspace_scope=effective_scope,
             log_content=(
                 request_ctx.log_content and not ephemeral
                 and (session is None or session.policy.log_content)
@@ -1364,7 +1364,8 @@ class AgentLoop:
 
                 raw = command_text(msg)
                 effective_key = self._effective_session_key(msg)
-                if await agent_context.handle_runtime_control(self, msg, self.tools):
+                if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
+                    await self.discard_session(msg.session_key)
                     continue
                 if (
                     msg.require_existing_session
@@ -1526,7 +1527,7 @@ class AgentLoop:
                 coordinator.complete(msg, error=error)
             if (
                 msg.channel != "system"
-                and normalize_command_text(msg.content).lower() == "/compact"
+                and self.commands.requires_session_queue(command_text(msg))
             ):
                 delivery = self.turn_delivery_factory.unrouted(msg, session_key)
                 await delivery.complete(None, publish_completion=True)
@@ -1640,7 +1641,7 @@ class AgentLoop:
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await delivery.idle()
         except asyncio.CancelledError:
-            if not completion_published and normalize_command_text(msg.content).lower() == "/compact":
+            if not completion_published and self.commands.requires_session_queue(command_text(msg)):
                 await delivery.complete(None, publish_completion=True)
             raise
         finally:
@@ -2028,14 +2029,13 @@ class AgentLoop:
             is_user_turn=is_user_turn,
             turn_scopes=ctx.turn_scopes,
         )
+        command_matched = self.commands.command_name(raw) is not None
         result = await self.commands.dispatch(cmd_ctx)
         if isinstance(result, InboundMessage):
             ctx.msg = result
             result = None
+            command_matched = False
         ctx.turn_scopes.append(GoalInputScope(ctx.msg))
-        if cmd_ctx.raw.lower() == "/compact":
-            # Compaction reports through events, not an archiveable command reply.
-            return True
         if result is not None:
             ctx.outbound = result
             # Shortcut commands skip BUILD and SAVE, so we must persist the
@@ -2060,7 +2060,7 @@ class AgentLoop:
                         attributes=ctx.attributes,
                     )
             return True
-        return False
+        return command_matched
 
     async def _build_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()

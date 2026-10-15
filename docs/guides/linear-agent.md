@@ -104,7 +104,7 @@ Keep `nanobot webui` running throughout the setup.
 
 ### 1. Enter the public address
 
-1. Open **Settings → Channels → Linear**.
+1. Open **Channels → Linear**.
 2. Enter your public origin in **Public HTTPS URL**, for example `https://nanobot.example.com`.
 3. Leave the three credential fields empty for now.
 4. Wait for **Settings saved.**, then select **Create Linear app**. Selecting it before entering an address shows a prompt and returns focus to the URL field.
@@ -141,7 +141,7 @@ In the new Linear app's settings, copy these values:
 | Client Secret | **OAuth client secret** |
 | Webhook signing secret | **Webhook signing secret** |
 
-Return to **Settings → Channels → Linear** and paste all three values. Ordinary fields save automatically after a short pause. For each secret, select **Save** beside that field and wait for its **Saved** status. **Connect Linear** becomes available once the required settings are saved. Listener settings, callback paths, and allowed users are in **Advanced**; setup guides are in the dialog's **Help** menu.
+Return to **Channels → Linear** and paste all three values. Ordinary fields save automatically after a short pause. For each secret, select **Save** beside that field and wait for its **Saved** status. **Connect Linear** becomes available once the required settings are saved. Listener settings, callback paths, and allowed users are in **Advanced**; setup guides are in the dialog's **Help** menu.
 
 A masked value with **Saved** means this instance already has the secret; it is not an empty input. To change it, select **Replace**, enter the new secret, then **Save**. **Cancel** or Escape leaves the saved secret unchanged. Leaving the field or showing the newly typed value does not save it. A failed save retains the draft for retry; the old secret is never sent back to the browser.
 
@@ -223,7 +223,7 @@ Member switches are stored in the instance's `linear/state.sqlite3`, separately 
 
 The setup is complete when all of these checks pass:
 
-- **Settings → Channels → Linear** shows the channel as on with no runtime error.
+- **Channels → Linear** shows the channel as on with no runtime error.
 - The Linear app's **Webhooks → Delivery status** is enabled, its URL uses the current public origin, and **Events** includes **Agent session events**.
 - While the channel is running, opening `http://127.0.0.1:3979/linear/health` on the nanobot machine returns `{"ok":true}`. Use your configured host and port if you changed them.
 - If your proxy also forwards `/linear/health`, its public URL returns `{"ok":true}`. This is optional: a proxy exposing only the callback and webhook can correctly return 404 for public health. Use successful OAuth and webhook delivery to verify those two routes; do not expose the admin UI for this check.
@@ -233,6 +233,9 @@ The setup is complete when all of these checks pass:
 - A follow-up inside the Agent Session receives a response without another @mention.
 
 ## Manual configuration
+
+<details>
+<summary>Manual configuration</summary>
 
 Use this path when deployment tooling manages `~/.nanobot/config.json` directly. The WebUI path above is easier because it generates the Linear app definition and completes OAuth for you.
 
@@ -266,6 +269,8 @@ Webhook:        https://nanobot.example.com/linear/webhook
 ```
 
 Subscribe the webhook to exactly `AgentSessionEvent`, `PermissionChange`, and `OAuthAuthorization` and enable webhook delivery in the Linear app's settings. Do not subscribe to `Comment`. The OAuth connection step in the WebUI is still required: it installs the app and stores the workspace-scoped access and refresh tokens.
+
+</details>
 
 ## Security and reliability
 

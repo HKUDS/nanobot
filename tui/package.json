@@ -7,6 +7,8 @@
     "start": "bun src/index.ts",
     "build": "bun scripts/build.ts",
     "check": "tsc --noEmit",
+    "check:imports": "bun ../scripts/check_client_import_boundaries.mjs --project tui",
+    "test:imports": "bun test ../scripts/check_client_import_boundaries.test.mjs",
     "test": "bun test"
   },
   "dependencies": {

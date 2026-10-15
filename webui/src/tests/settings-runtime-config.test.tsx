@@ -163,11 +163,18 @@ describe("Runtime configuration settings", () => {
   });
 
   it("preserves drafts when navigating away and supports explicit clearing", async () => {
-    renderSettingsView({ initialSection: "advanced", initialSettings: runtimeSettings() });
+    renderSettingsView({ initialSection: "capabilities", initialSettings: runtimeSettings() });
+    const openWebSettings = () => {
+      fireEvent.click(within(screen.getByRole("region", { name: "Web access" })).getByRole("button", { name: "Configure" }));
+      fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    };
+    openWebSettings();
     const proxy = screen.getByRole("textbox", { name: "Web proxy" });
     fireEvent.change(proxy, { target: { value: "" } });
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "System" }));
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
+    openWebSettings();
     expect(screen.getByRole("textbox", { name: "Web proxy" })).toHaveValue("");
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: { "tools.web.proxy": null } }, 20_000,

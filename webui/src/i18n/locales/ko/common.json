@@ -339,6 +339,9 @@
       "description": "nanobot 웹 UI — nanobot 작업공간과 대화하세요."
     },
     "pairing": {
+      "haveCode": "이미 코드를 받으셨나요?",
+      "deliveryFailed": "페어링 코드를 보내지 못했습니다. 봇의 메시지 전송 권한과 게이트웨이 로그를 확인한 후, 봇에게 개인 메시지를 다시 보내세요.",
+      "deliverySending": "채팅으로 페어링 코드를 보내고 있습니다. 코드가 도착하지 않으면 봇에게 개인 메시지를 다시 보내세요.",
       "title": "계정 연결",
       "description": "채팅에서 받은 연결 코드를 입력하세요.",
       "code": "연결 코드",
@@ -416,7 +419,7 @@
         "tools_exec_allowed_env_keys": {"label": "환경 변수", "help": "명령에 추가로 전달할 변수 이름을 한 줄에 하나씩 입력하세요.\n\n명령에 전달할 환경 변수를 추가합니다. 한 줄에 하나씩 입력하세요. 실행에 필요한 기본 환경 변수는 계속 전달됩니다."},
         "tools_exec_allow_patterns": {"label": "허용 명령", "help": "허용 규칙과 완전히 일치하는 명령만 실행합니다.\n\n정규식을 한 줄에 하나씩 입력하세요. 규칙을 추가하면 명령의 각 부분이 규칙 중 하나와 완전히 일치해야 실행됩니다. 허용된 명령에는 기본 및 추가 차단 규칙이 적용되지 않지만, 네트워크와 작업 공간 제한은 유지됩니다."},
         "tools_exec_deny_patterns": {"label": "차단 명령", "help": "이 규칙과 일치하는 명령을 차단합니다.\n\n추가 차단 정규식을 한 줄에 하나씩 입력하세요. 명시적 허용 규칙이 기본 및 추가 차단 규칙보다 우선합니다."},
-        "tools_web_proxy": {"label": "웹 프록시", "help": "프록시 URL입니다. 비워 두면 기본 네트워크를 사용합니다.\n\n웹 도구의 프록시 URL입니다. 비워 두면 기본 네트워크를 사용합니다."},
+        "tools_web_proxy": {"label": "웹 프록시", "help": "에이전트의 웹 검색과 페이지 읽기에 사용합니다. 비워 두면 프록시 환경 변수를 포함한 기본 네트워크 설정을 사용합니다.\n\n127.0.0.1은 nanobot이 실행되는 기기입니다. 모델, MCP 또는 브라우저 연결에는 영향을 주지 않습니다."},
         "tools_web_user_agent": {"label": "User-Agent 헤더", "help": "웹 요청의 User-Agent입니다. 비워 두면 기본값을 사용합니다.\n\n사용자 지정 User-Agent 헤더입니다. 비워 두면 기본값을 사용합니다."},
         "tools_restrict_to_workspace": {"label": "작업 공간 제한", "help": "전체 작업 공간 제한입니다. WebUI 채팅 권한은 별도로 설정합니다.\n\n전체 도구 접근 정책입니다. WebUI의 대화별 권한은 별도로 설정합니다."},
         "tools_ssrf_whitelist": {"label": "허용 IP", "help": "허용할 IP 또는 CIDR 범위를 한 줄에 하나씩 입력하세요.\n\n외부 요청 보호에서 제외할 IP/CIDR 범위를 한 줄에 하나씩 입력하세요."},
@@ -762,6 +765,19 @@
       }
     },
     "providers": {
+      "manageProviders": "제공업체 관리",
+      "configureProvider": "{{provider}} 설정…",
+      "sharedProviderHelp": "변경 사항은 이 제공업체를 사용하는 모든 프리셋에 적용됩니다.",
+      "parameterCount": "{{count}}개 항목",
+      "useProviderSettings": "제공업체 설정 사용",
+      "applyToDraft": "프리셋에 추가",
+      "draftHint": "새 프리셋을 저장하면 이 설정이 적용됩니다.",
+      "invalidObject": "JSON 객체를 입력하세요. 예: {\"key\":\"value\"}.",
+      "stringValuesRequired": "헤더와 쿼리 매개변수의 값은 문자열로 입력하세요.",
+      "maskedSecretMissing": "이 마스크에 해당하는 저장된 비밀 값이 없습니다. 실제 값을 입력하거나 항목을 삭제하세요.",
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "로컬",
       "title": "제공업체",
       "searchPlaceholder": "제공업체 검색",
       "noMatches": "일치하는 제공업체가 없습니다.",
@@ -788,13 +804,15 @@
       "extraBody": "본문 매개변수",
       "extraQuery": "쿼리 매개변수",
       "capabilityFastMode": "고속 모드",
-      "capabilityFastModeHelp": "더 빠른 답변은 크레딧도 더 빨리 소모합니다.\n\nOpenAI 우선 서비스 등급을 사용해 더 빠르게 응답합니다. 크레딧도 더 빠르게 소모됩니다.",
+      "capabilityFastModeHelp": "응답이 빨라지고 사용량이 늘어납니다.",
       "capabilityXSearch": "X 검색",
       "capabilityXSearchHelp": "지원되는 Grok 모델은 X를 검색할 수 있습니다.\n\n지원되는 Grok 모델이 xAI 호스팅 X Search를 사용하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
       "capabilityOpenAISearch": "OpenAI 웹 검색",
       "capabilityOpenAISearchHelp": "지원되는 모델은 웹을 검색할 수 있습니다.\n\nResponses API 호환 모델이 웹을 검색하도록 허용합니다. 검색 활동은 채팅에 표시됩니다."
     },
     "image": {
+      "imagesApiHint": "이 연결의 URL에서 OpenAI Images API를 사용합니다. 이미지 생성을 지원하는지 확인하세요.",
+      "requestOverridesHint": "이미지에만 적용됩니다. 비워 두면 제공업체 설정을 사용합니다. 제공업체를 바꾸면 입력한 값이 지워집니다.",
       "selectProvider": "제공업체 선택",
       "selectAspect": "비율 선택",
       "selectSize": "크기 선택",
@@ -812,10 +830,12 @@
       "installing": "필수 패키지 설치 중…"
     },
     "models": {
+      "requestOverridesHint": "비워 두면 제공업체 설정을 사용합니다. 제공업체를 바꾸면 입력한 값이 지워집니다.",
+      "otherPresets": "대체 프리셋",
       "catalogAuthRequired": "인증이 만료되었습니다. 다시 로그인해 주세요.",
-      "catalogUnavailable": "모델 목록을 갱신할 수 없습니다. 나중에 다시 시도해 주세요.",
-      "catalogStale": "캐시된 모델을 표시합니다. 최신 목록이 아닐 수 있습니다.",
-      "catalogFallback": "기본 제공 모델을 표시합니다. 최신 목록이 아닐 수 있습니다.",
+      "catalogUnavailable": "갱신 실패. 클릭하여 다시 시도",
+      "catalogStale": "캐시된 목록이 최신이 아닐 수 있습니다.",
+      "catalogFallback": "기본 제공 목록이 최신이 아닐 수 있습니다.",
       "selectModel": "모델 선택",
       "addConfiguration": "설정 추가",
       "newConfiguration": "새 모델 설정",
@@ -825,7 +845,6 @@
       "configurationNamePlaceholder": "빠른 작성",
       "callOrder": "모델 순서",
       "primary": "기본",
-      "fallbackNumber": "대체 {{number}}",
       "addToOrder": "프리셋 활성화",
       "newPreset": "프리셋 만들기",
       "newPresetHelp": "모델과 설정을 저장해 다시 사용하세요.",
@@ -862,7 +881,7 @@
       "disabled": "비활성화됨",
       "noPresets": "아직 모델 프리셋이 없습니다",
       "noPresetsHelp": "프리셋을 만든 다음 호출 순서에 추가하세요.",
-      "removeBeforeDelete": "삭제하기 전에 다른 프리셋을 기본으로 선택하세요.",
+      "removeBeforeDelete": "기본 모델은 삭제할 수 없습니다",
       "providerSetupRequired": "제공업체 설정 필요",
       "configureProviderBeforeSaving": "프리셋을 저장하기 전에 이 제공업체를 설정하세요.",
       "deletePresetTitle": "모델 프리셋을 삭제할까요?",
@@ -1601,7 +1620,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "하위 작업을 불러올 수 없습니다.",
       "stopFailed": "이 작업을 중지할 수 없습니다.",
       "stopTask": "{{label}} 중지",
       "receiptHelp": "전달됨은 메시지가 하위 작업의 다음 모델 요청에 포함되었음을 뜻하며, 실행 완료를 의미하지 않습니다.",
@@ -2262,6 +2280,7 @@
     }
   },
   "common": {
+    "retry": "다시 시도",
     "dismiss": "닫기",
     "close": "닫기",
     "current": "현재",

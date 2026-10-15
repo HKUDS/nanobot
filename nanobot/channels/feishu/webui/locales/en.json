@@ -73,6 +73,7 @@
     }
   },
   "custom": {
+    "addAssistant": "Add another assistant",
     "toggleAssistant": "{{name}} assistant",
     "configured": "Connected",
     "needsSetup": "Needs authorization",

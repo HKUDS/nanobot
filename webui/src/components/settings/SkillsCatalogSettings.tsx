@@ -27,12 +27,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
 import { ExpandableText } from "@/components/ui/expandable-text";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
 import { notifySkillsChanged, requestSkillsRefresh } from "@/lib/skill-events";
 import type { SkillDetail, SkillSummary } from "@/lib/types";
@@ -113,7 +113,7 @@ export function SkillsCatalogSettings({ skills, loading = false, error = false }
                 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden
               />
-              <Input
+              <SearchInput
                 value={installedQuery}
                 onChange={(event) => setInstalledQuery(event.target.value)}
                 placeholder={t("settings.skills.searchInstalled", {

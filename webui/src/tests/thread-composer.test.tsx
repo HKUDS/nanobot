@@ -17,7 +17,7 @@ function workspacePickerProps(scope: WorkspaceScopePayload) {
       default_scope: scope,
       recent_projects: [],
       favorite_projects: [],
-      controls: { can_change_project: true, can_use_full_access: true },
+      controls: { can_change_project: true },
     }),
     onBrowseWorkspaceDirectories: async (path: string) => ({
       path: resolvePath(path), parent: null, entries: [], partial: false,
@@ -1415,10 +1415,10 @@ describe("ThreadComposer", () => {
       project_path: "/tmp/project", project_name: "project",
       access_mode: "restricted", restrict_to_workspace: true,
     };
-    const composer = (workspaceScope: WorkspaceScopePayload, canUseFullAccess = true) => (
+    const composer = (workspaceScope: WorkspaceScopePayload) => (
       <ThreadComposer onSend={vi.fn()} placeholder="Type your message..."
         workspaceScope={workspaceScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: canUseFullAccess }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={onWorkspaceScopeChange} />
     );
     const { rerender } = render(composer(restricted));
@@ -1434,11 +1434,10 @@ describe("ThreadComposer", () => {
     expect(access).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(restricted);
-    rerender(composer(restricted, false));
-    expect(access).toBeDisabled();
-    onWorkspaceScopeChange.mockClear();
+    rerender(composer(restricted));
+    expect(access).toBeEnabled();
     await user.click(access);
-    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
+    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(full);
   });
 
   it("exposes full and compact workspace labels for container-driven compression", () => {
@@ -1453,7 +1452,7 @@ describe("ThreadComposer", () => {
           access_mode: "full",
           restrict_to_workspace: false,
         }}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={vi.fn()}
       />,
     );
@@ -1490,7 +1489,7 @@ describe("ThreadComposer", () => {
         }}
         workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true, can_browse_directories: true, can_resolve_project: true }}
+        workspaceControls={{ can_change_project: true, can_browse_directories: true, can_resolve_project: true }}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
@@ -1555,7 +1554,7 @@ describe("ThreadComposer", () => {
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
@@ -1584,7 +1583,7 @@ describe("ThreadComposer", () => {
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={vi.fn()}
       />
     );
@@ -1663,7 +1662,6 @@ describe("ThreadComposer", () => {
         {...workspacePickerProps(defaultScope)}
         workspaceControls={{
           can_change_project: true,
-          can_use_full_access: true,
           can_browse_directories: true,
           can_resolve_project: true,
         }}
@@ -1689,7 +1687,7 @@ describe("ThreadComposer", () => {
     }));
   });
 
-  it("selects an entered host path in Restricted mode when Full Access is unavailable", async () => {
+  it("preserves Full Access when selecting an entered host path", async () => {
     const user = userEvent.setup();
     const onWorkspaceScopeChange = vi.fn();
     const defaultScope = {
@@ -1708,7 +1706,6 @@ describe("ThreadComposer", () => {
         {...workspacePickerProps(defaultScope)}
         workspaceControls={{
           can_change_project: true,
-          can_use_full_access: false,
         }}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
@@ -1726,8 +1723,8 @@ describe("ThreadComposer", () => {
 
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
       project_path: "/srv/nas-project",
-      access_mode: "restricted",
-      restrict_to_workspace: true,
+      access_mode: "full",
+      restrict_to_workspace: false,
     }));
   });
 

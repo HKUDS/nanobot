@@ -18,7 +18,7 @@ import {
   updateWebSearchSettings,
 } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
-import type { SettingsPayload, WebSearchSettingsUpdate } from "@/lib/types";
+import type { ImageGenerationSettingsUpdate, SettingsPayload, WebSearchSettingsUpdate } from "@/lib/types";
 import { imageGenerationFormFromPayload } from "@/components/settings/capabilities/ImageGenerationSettings";
 import { transcriptionFormFromPayload } from "@/components/settings/capabilities/TranscriptionSettings";
 import { networkSafetyFormFromPayload } from "@/components/settings/capabilities/SecuritySettings";
@@ -71,15 +71,11 @@ export function useCapabilitySettingsActions({
   const setError = (section: "image" | "voice" | "web" | "safety", message?: string) =>
     state.setCapabilityErrors((prev) => ({ ...prev, [section]: message }));
 
-  const saveImageGenerationSettings = async () => {
-    if (!settings || !imageGenerationDirty || imageGenerationSaving) return;
-    if (imageGenerationForm.enabled && !settings.image_generation.providers.find(
-      (provider) => provider.name === imageGenerationForm.provider,
-    )?.configured) return;
+  const persistImageSettings = async (values: ImageGenerationSettingsUpdate) => {
     setError("image");
     setImageGenerationSaving(true);
     try {
-      const payload = await updateImageGenerationSettings(client, imageGenerationForm);
+      const payload = await updateImageGenerationSettings(client, values);
       applyPayload(payload, { preserveCapabilityForms: true });
       state.setImageGenerationForm(imageGenerationFormFromPayload(payload));
       if (!payload.restart_required_sections && payload.requires_restart) {
@@ -87,12 +83,25 @@ export function useCapabilitySettingsActions({
       }
       await maybeRestartHostEngine(payload);
       setError("image");
+    } finally {
+      setImageGenerationSaving(false);
+    }
+  };
+
+  const saveImageRequestSettings = (values: Pick<ImageGenerationSettingsUpdate, "extraHeaders" | "extraBody">) =>
+    persistImageSettings({ ...imageGenerationForm, ...values });
+
+  const saveImageGenerationSettings = async () => {
+    if (!settings || !imageGenerationDirty || imageGenerationSaving) return;
+    if (imageGenerationForm.enabled && !settings.image_generation.providers.find(
+      (provider) => provider.name === imageGenerationForm.provider,
+    )?.configured) return;
+    try {
+      await persistImageSettings(imageGenerationForm);
     } catch (err) {
       const message = (err as Error).message;
       setError("image", message === "image generation provider is not configured"
         ? t("settings.image.missingCredential") : message);
-    } finally {
-      setImageGenerationSaving(false);
     }
   };
 
@@ -230,6 +239,7 @@ export function useCapabilitySettingsActions({
     handleWebSearchProviderChange,
     resetWebSearchDraft,
     saveImageGenerationSettings,
+    saveImageRequestSettings,
     saveNetworkSafetySettings,
     saveTranscriptionSettings,
     saveWebSearch,

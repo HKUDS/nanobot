@@ -175,7 +175,6 @@ def workspaces_payload(
     default_workspace: Path,
     default_restrict_to_workspace: bool,
     can_change_project: bool,
-    can_use_full_access: bool,
 ) -> dict[str, Any]:
     state = read_webui_workspace_state()
     default_access_mode = state["default_access_mode"]
@@ -203,7 +202,6 @@ def workspaces_payload(
         ],
         "controls": {
             "can_change_project": can_change_project,
-            "can_use_full_access": can_use_full_access,
             "can_browse_directories": can_change_project,
             "can_resolve_project": can_change_project,
             "can_manage_favorites": can_change_project,
@@ -302,13 +300,11 @@ class WebUIWorkspaceController:
         self,
         *,
         can_change_project: bool,
-        can_use_full_access: bool,
     ) -> dict[str, Any]:
         return workspaces_payload(
             default_workspace=self._default_workspace,
             default_restrict_to_workspace=self._default_restrict_to_workspace,
             can_change_project=can_change_project,
-            can_use_full_access=can_use_full_access,
         )
 
     def resolve_project(self, path: object) -> dict[str, str]:
@@ -358,7 +354,6 @@ class WebUIWorkspaceController:
         *,
         session_key: str | None,
         can_change_project: bool,
-        can_use_full_access: bool,
     ) -> WorkspaceScope:
         current = self.scope_for_session_key(session_key) if session_key else self.default_scope()
         raw = envelope.get(WORKSPACE_SCOPE_METADATA_KEY)
@@ -376,18 +371,6 @@ class WebUIWorkspaceController:
                 "project selection is unavailable for this connection",
                 status=403,
             )
-        if (
-            not can_use_full_access
-            and scope.access_mode == "full"
-            and (
-                current.access_mode != "full"
-                or scope.project_path != current.project_path
-            )
-        ):
-            raise WorkspaceScopeError(
-                "full workspace access is unavailable for this connection",
-                status=403,
-            )
         return scope
 
     def scope_for_new_chat(
@@ -395,13 +378,11 @@ class WebUIWorkspaceController:
         envelope: dict[str, Any],
         *,
         can_change_project: bool,
-        can_use_full_access: bool,
     ) -> WorkspaceScope:
         return self.scope_from_envelope(
             envelope,
             session_key=None,
             can_change_project=can_change_project,
-            can_use_full_access=can_use_full_access,
         )
 
     def scope_for_set_request(
@@ -411,7 +392,6 @@ class WebUIWorkspaceController:
         chat_id: str,
         chat_running: bool,
         can_change_project: bool,
-        can_use_full_access: bool,
     ) -> WorkspaceScope:
         if chat_running:
             raise WorkspaceScopeError("chat_running", status=409)
@@ -419,7 +399,6 @@ class WebUIWorkspaceController:
             envelope,
             session_key=webui_session_key(chat_id),
             can_change_project=can_change_project,
-            can_use_full_access=can_use_full_access,
         )
 
     def scope_for_message(
@@ -429,13 +408,11 @@ class WebUIWorkspaceController:
         chat_id: str,
         chat_running: bool,
         can_change_project: bool,
-        can_use_full_access: bool,
     ) -> WorkspaceScope:
         scope = self.scope_from_envelope(
             envelope,
             session_key=webui_session_key(chat_id),
             can_change_project=can_change_project,
-            can_use_full_access=can_use_full_access,
         )
         if (
             WORKSPACE_SCOPE_METADATA_KEY in envelope

@@ -1,0 +1,53 @@
+.component-gallery {
+  display: flex;
+  height: 100dvh;
+  flex-direction: column;
+  background: hsl(var(--background));
+}
+
+.gallery-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid hsl(var(--border));
+  padding: 1rem 1.5rem;
+}
+
+.gallery-workspace {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 17rem minmax(0, 1fr);
+}
+
+.gallery-sidebar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid hsl(var(--border));
+  padding: 1rem;
+  background: hsl(var(--sidebar));
+}
+
+.gallery-source-list { min-height: 0; flex: 1; overflow-y: auto; }
+.gallery-main { min-width: 0; overflow-y: auto; padding: 2rem; }
+.gallery-preview { min-width: 0; border: 1px solid hsl(var(--border)); border-radius: var(--radius-panel); padding: 1.5rem; }
+.gallery-code { overflow: auto; border-radius: var(--radius-control); padding: 1rem; background: hsl(var(--muted)); font-size: 12px; line-height: 1.6; tab-size: 2; }
+
+.gallery-startup-preview .startup-shell { position: relative; height: 100%; }
+.gallery-startup-preview .startup-header { display: flex; justify-content: space-between; padding: 5px 13px; }
+.gallery-startup-preview .startup-control-shadow { width: 28px; height: 28px; border-radius: 8px; background: rgba(0, 0, 0, .025); }
+.gallery-startup-preview .startup-composer { position: absolute; inset-inline: 16px; bottom: max(24px, env(safe-area-inset-bottom)); box-sizing: border-box; max-width: 768px; margin-inline: auto; height: 96px; border-radius: 24px; background: rgba(0, 0, 0, .025); }
+.gallery-startup-preview .startup-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+html.dark .gallery-startup-preview :is(.startup-control-shadow, .startup-composer) { background: rgba(255, 255, 255, .035); }
+
+@media (max-width: 700px) {
+  .gallery-header { padding: 0.75rem 1rem; }
+  .gallery-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, min(22rem, 50%)) minmax(0, 1fr); }
+  .gallery-sidebar { overflow-y: auto; border-right: 0; border-bottom: 1px solid hsl(var(--border)); padding: 0.75rem 1rem; }
+  .gallery-source-list { min-height: 6rem; }
+  .gallery-main { padding: 1.25rem 1rem; }
+  .gallery-preview { padding: 1rem; }
+}

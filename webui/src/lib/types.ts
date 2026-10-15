@@ -497,7 +497,6 @@ export interface WorkspacesPayload {
   host?: { name: string; platform: string };
   controls: {
     can_change_project: boolean;
-    can_use_full_access: boolean;
     can_browse_directories?: boolean;
     can_resolve_project?: boolean;
     can_manage_favorites?: boolean;
@@ -524,8 +523,6 @@ export interface WorkbenchState {
 
 export interface SidebarViewState {
   density: SidebarDensity;
-  show_previews: boolean;
-  show_timestamps: boolean;
   show_archived: boolean;
   sort: SidebarSortMode;
 }
@@ -707,6 +704,9 @@ export interface SettingsPayload {
     reasoning_effort: string | null;
     reasoning_effort_values?: string[];
     api?: ModelAPIConfig | null;
+    extra_headers?: Record<string, string> | null;
+    extra_query?: Record<string, string> | null;
+    extra_body?: Record<string, unknown> | null;
   }>;
   model_call_order: string[];
   model_call_order_editable: boolean;
@@ -715,6 +715,7 @@ export interface SettingsPayload {
   /** Host can resolve the default request API for an unsaved model configuration. */
   model_api_resolution_supported?: boolean;
   provider_api_configuration_supported?: boolean;
+  model_request_overrides_supported?: boolean;
   created_model_preset?: string;
   created_provider?: string;
   providers: Array<{
@@ -799,6 +800,9 @@ export interface SettingsPayload {
     default_image_size: string;
     max_images_per_turn: number;
     save_dir: string;
+    request_overrides_supported?: boolean;
+    extra_headers?: Record<string, string> | null;
+    extra_body?: Record<string, unknown> | null;
     providers: Array<{
       name: string;
       label: string;
@@ -809,6 +813,7 @@ export interface SettingsPayload {
       default_api_base?: string | null;
       models?: string[];
       default_model?: string | null;
+      uses_images_api?: boolean;
     }>;
   };
   transcription?: {
@@ -1194,6 +1199,7 @@ export interface PairingRequestInfo {
   created_at_ms?: number | null;
   expires_at_ms?: number | null;
   expires_in_seconds?: number | null;
+  delivery_status?: "sending" | "sent" | "failed";
 }
 
 export interface PairingPayload {
@@ -1333,6 +1339,9 @@ export interface ModelConfigurationCreate {
   temperature?: number;
   reasoningEffort?: string | null;
   api?: ModelAPIConfig | null;
+  extraHeaders?: string;
+  extraQuery?: string;
+  extraBody?: string;
 }
 
 export interface ModelConfigurationUpdate {
@@ -1345,6 +1354,9 @@ export interface ModelConfigurationUpdate {
   temperature?: number;
   reasoningEffort?: string | null;
   api?: ModelAPIConfig | null;
+  extraHeaders?: string;
+  extraQuery?: string;
+  extraBody?: string;
 }
 
 export interface ProviderSettingsUpdate {
@@ -1395,6 +1407,8 @@ export interface ImageGenerationSettingsUpdate {
   defaultAspectRatio: string;
   defaultImageSize: string;
   maxImagesPerTurn: number;
+  extraHeaders?: string;
+  extraBody?: string;
 }
 
 export interface TranscriptionSettingsUpdate {

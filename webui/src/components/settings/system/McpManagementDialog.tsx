@@ -13,7 +13,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input, SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { McpPresetInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -34,7 +34,7 @@ interface McpManagementDialogProps {
   onOpenChange: (open: boolean) => void;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onAction: (action: McpAction, name: string, values?: Record<string, string>) => void;
-  onOAuthConnect: (name: string, reset?: boolean) => void;
+  onOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
 }
 
@@ -115,7 +115,7 @@ export function McpManagementDialog({
   const connect = () => {
     onOpenChange(false);
     if (isOAuth) {
-      onOAuthConnect(preset.name, configuredInstalled);
+      onOAuthConnect(preset.name, configuredInstalled, values);
       return;
     }
     onAction(configuredInstalled ? "reconnect" : "enable", preset.name, values);
@@ -432,7 +432,7 @@ function ToolsPanel({
         <label className="relative min-w-0 flex-1">
           <span className="sr-only">{tx("settings.mcp.searchTools", "Search tools")}</span>
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input
+          <SearchInput
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder={tx("settings.mcp.searchToolsPlaceholder", "Search tools")}

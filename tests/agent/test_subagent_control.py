@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager
@@ -23,8 +24,11 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import TurnRunStatusChanged
+from nanobot.config import Config
 from nanobot.nanobot import Nanobot
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -174,6 +178,86 @@ async def test_child_origin_uses_the_channel_turn_identity(loop_factory):
         assert status.origin_turn_id == "visible-parent-turn"
     finally:
         await loop.subagents.close()
+
+
+@pytest.mark.asyncio
+async def test_default_loop_keeps_slack_thread_for_late_subagent_result(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.agent.loop._SUBAGENT_TERMINAL_WAIT_SECONDS", 0.01)
+    child_started, release_child, parent_idle = (asyncio.Event() for _ in range(3))
+
+    class Provider(LLMProvider):
+        def __init__(self):
+            super().__init__(provider_name="test")
+            self.parent_calls = 0
+
+        async def chat(self, messages, tools=None, **kwargs):
+            if not any(tool.get("function", {}).get("name") == "subagent" for tool in tools or []):
+                child_started.set()
+                await release_child.wait()
+                return LLMResponse(content="Child findings")
+            self.parent_calls += 1
+            if self.parent_calls == 1:
+                return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                    id="delegate", name="subagent",
+                    arguments={"action": "create", "task": "Inspect config", "wait": False},
+                )])
+            return LLMResponse(content="Parent reply" if self.parent_calls == 2 else "Late follow-up")
+
+        def get_default_model(self):
+            return "test-model"
+
+    workspace = tmp_path / "workspace"
+    sessions_root = tmp_path / "sessions"
+    sessions = SessionManager(workspace, sessions_root=sessions_root)
+    config = Config.model_validate({"agents": {"defaults": {
+        "workspace": str(workspace), "model": "test-model", "sessionTtlMinutes": 0,
+    }}})
+    bus = MessageBus()
+    loop = AgentLoop.from_config(
+        config, bus, provider=Provider(), session_manager=sessions, tool_registry=ToolRegistry(),
+    )
+    session_key = "slack:C1:1234.5678"
+    slack_route = {"thread_ts": "1234.5678", "channel_type": "channel"}
+    thread_metadata = {"slack": {"thread_ts": "1234.5678"}}
+
+    def observe_idle(event):
+        if event.context.session_key == session_key and event.status == "idle":
+            parent_idle.set()
+
+    unsubscribe = bus.subscribe(observe_idle, TurnRunStatusChanged)
+
+    async def next_reply(content):
+        async with asyncio.timeout(5):
+            while True:
+                message = await bus.consume_outbound()
+                if message.content == content and message.event is None:
+                    return message
+
+    consumer = asyncio.create_task(loop.run())
+    try:
+        await bus.publish_inbound(InboundMessage(
+            channel="slack", sender_id="U1", chat_id="C1", content="Delegate this inspection",
+            metadata={"slack": slack_route}, session_key_override=session_key,
+        ))
+        initial_reply = await next_reply("Parent reply")
+        await asyncio.wait_for(child_started.wait(), timeout=5)
+        await asyncio.wait_for(parent_idle.wait(), timeout=5)
+        saved = SessionManager(workspace, sessions_root=sessions_root).get_existing(session_key)
+        assert saved is not None
+        saved_route = saved.metadata["_compaction_route"]
+        release_child.set()
+        late_reply = await next_reply("Late follow-up")
+
+        assert (initial_reply.channel, initial_reply.chat_id) == ("slack", "C1")
+        assert initial_reply.metadata["slack"] == slack_route
+        assert saved_route == {"channel": "slack", "chat_id": "C1", "metadata": thread_metadata}
+        assert (late_reply.channel, late_reply.chat_id) == ("slack", "C1")
+        assert late_reply.metadata == thread_metadata
+    finally:
+        release_child.set()
+        loop.stop()
+        await asyncio.wait_for(consumer, timeout=2)
+        unsubscribe()
 
 
 @pytest.mark.asyncio

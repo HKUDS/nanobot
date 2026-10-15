@@ -1328,8 +1328,6 @@ describe("NanobotClient", () => {
       workbench: { version: 1, tabs: {} },
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "manual",
       },
@@ -1392,8 +1390,6 @@ describe("NanobotClient", () => {
       },
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "updated_desc",
       },
@@ -2448,6 +2444,7 @@ describe("binary attachment transport", () => {
       expect(request.method).toBe("POST");
       expect(request.headers.Authorization).toBe("Bearer upload-capability");
       expect(request.redirect).toBe("error");
+      expect(request.credentials).toBe("same-origin");
       expect(await request.body.text()).toBe(raw);
       const frame = socket.sent.find((value) => value.includes("opaque-ref"))!;
       expect(frame.length).toBeLessThan(1024);

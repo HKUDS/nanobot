@@ -2,7 +2,7 @@ import { CircleAlert, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
-export type HostConnectionState = "open" | "closed" | "connecting" | "error";
+import type { HostConnectionState } from "./remote-context";
 
 /** Connectivity is independent of which host the user is currently viewing. */
 export function HostConnectionStatus({ state, compact = false }: {

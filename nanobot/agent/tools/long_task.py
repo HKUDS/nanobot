@@ -116,14 +116,13 @@ class _GoalToolsMixin:
 @tool_parameters(
     tool_parameters_schema(
         objective=StringSchema(
-            "The sustained objective for this session. It may consolidate a plan from earlier "
-            "discussion, but must be self-contained, bounded, safe under repetition, and "
-            "explicit about done-ness.",
+            "Self-contained goal with explicit completion criteria, bounded and safe to repeat. "
+            "May incorporate prior discussion.",
             min_length=1,
             max_length=MAX_GOAL_OBJECTIVE_CHARS,
         ),
         ui_summary=StringSchema(
-            "Optional one-line display label for session lists and logs. It is not load-bearing.",
+            "One-line display label for session lists and logs; objective defines the goal.",
             max_length=120,
             nullable=True,
         ),
@@ -161,10 +160,8 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     @property
     def description(self) -> str:
         return (
-            "Create one sustained goal for the current session when Goal Runtime Guidance asks "
-            "you to record it. Consolidate relevant prior discussion into a durable objective "
-            "that is self-contained, bounded, safe under repetition, and explicit about "
-            "completion criteria. Do not retry after a successful creation."
+            "Create one sustained goal for the current session only when Goal Runtime Guidance "
+            "asks you to record it. Do not retry after successful creation."
         )
 
     def runtime_context_provider(self):

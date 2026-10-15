@@ -73,6 +73,7 @@
     }
   },
   "custom": {
+    "addAssistant": "Ajouter un autre assistant",
     "toggleAssistant": "Activer l’assistant {{name}}",
     "configured": "Connecté",
     "needsSetup": "Autorisation requise",

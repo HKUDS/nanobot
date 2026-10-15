@@ -2,6 +2,8 @@
 
 This page collects contributor-facing notes for extending nanobot. User-facing setup and runtime options live in [`configuration.md`](./configuration.md).
 
+For browser interface changes, start with [WebUI development](../webui/README.md). For Python setup and contribution checks, see [CONTRIBUTING.md](../CONTRIBUTING.md). The sections below cover provider extensions.
+
 ## Adding an LLM Provider
 
 nanobot uses the provider registry in `nanobot/providers/registry.py` as the source of truth for LLM provider metadata. Most OpenAI-compatible providers need only two changes.

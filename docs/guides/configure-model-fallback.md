@@ -12,17 +12,18 @@ Model fallback lets nanobot try a primary model first, then fall back to one or 
 
 Use fallback when you want better reliability across rate limits, provider outages, local model downtime, or cost-sensitive routing.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
-```
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Verify each provider works before adding it as a fallback.
 
 ## Minimal working example
+
+In **Settings → Models**, create the primary and backup presets, then use **Enable preset** and arrange their order. The first enabled preset is primary; later entries are tried as fallbacks. Save and test each preset before relying on the chain.
+
+<details>
+<summary>Manual configuration</summary>
 
 Merge this shape into `~/.nanobot/config.json` and replace provider/model names with ones you control:
 
@@ -54,6 +55,8 @@ Merge this shape into `~/.nanobot/config.json` and replace provider/model names 
 ```
 
 String entries in `fallbackModels` are preset names, not raw model IDs. Replace the placeholder model IDs with currently supported model IDs from your provider. The [Provider Cookbook](../provider-cookbook.md) has concrete recipes for common providers.
+
+</details>
 
 ## Production notes
 

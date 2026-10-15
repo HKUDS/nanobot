@@ -2531,7 +2531,7 @@ async def test_webui_automation_result_is_authenticated_and_returns_only_selecte
 
 
 @pytest.mark.asyncio
-async def test_remote_new_chat_accepts_server_project_path_but_rejects_remote_full_access(
+async def test_remote_new_chat_accepts_server_project_path_and_full_access(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     project = tmp_path / "remote-project"
@@ -2585,18 +2585,15 @@ async def test_remote_new_chat_accepts_server_project_path_but_rejects_remote_fu
         },
     )
 
-    rejected = [
-        json.loads(call.args[0])
-        for call in connection.send.await_args_list
-        if json.loads(call.args[0]).get("event") == "error"
-    ]
-    assert rejected == [
-        {
-            "event": "error",
-            "detail": "workspace_scope_rejected",
-            "reason": "full workspace access is unavailable for this connection",
-        }
-    ]
+    attached = next(
+        json.loads(call.args[0]) for call in connection.send.await_args_list
+        if json.loads(call.args[0]).get("event") == "attached"
+    )
+    scope = channel.gateway.workspaces.scope_for_session_key(
+        f"websocket:{attached['chat_id']}"
+    )
+    assert scope.project_path == other_project.resolve()
+    assert scope.access_mode == "full"
 
 
 @pytest.mark.asyncio
@@ -3656,18 +3653,17 @@ async def test_recovery_mutation_uses_authenticated_websocket_action(bus: MagicM
 
 
 @pytest.mark.parametrize(
-    ("connection", "headers", "can_use_full_access"),
+    ("connection", "headers"),
     [
-        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, False),
-        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, False),
-        (_LOCAL, {"Host": "127.0.0.1:8765"}, True),
+        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}),
+        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}),
+        (_LOCAL, {"Host": "127.0.0.1:8765"}),
     ],
 )
-def test_workspace_payload_separates_remote_project_selection_from_full_access(
+def test_workspace_payload_allows_access_selection_for_local_and_remote_clients(
     bus: MagicMock,
     connection: _FakeConn,
     headers: dict[str, str],
-    can_use_full_access: bool,
 ) -> None:
     channel = _ch(bus)
     token = channel.gateway.tokens.issue_api_token(300)
@@ -3681,7 +3677,6 @@ def test_workspace_payload_separates_remote_project_selection_from_full_access(
     assert response.status_code == 200
     controls = json.loads(response.body.decode())["controls"]
     assert controls["can_change_project"] is True
-    assert controls["can_use_full_access"] is can_use_full_access
     assert controls["can_browse_directories"] is True
     assert controls["can_resolve_project"] is True
     assert controls["can_manage_favorites"] is True
@@ -4178,11 +4173,11 @@ async def test_project_selection_remembers_resolved_path_without_changing_access
     assert response.status_code == 200
     assert response.json() == {"name": "project", "path": str(project)}
     assert channel.gateway.workspaces.default_scope() == scope
-    payload = channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)
+    payload = channel.gateway.workspaces.payload(can_change_project=True)
     assert payload["recent_projects"] == [{"name": "project", "path": str(project)}]
     rejected = await _webui_mutate(channel, "workspace.resolve_project", {"path": str(tmp_path / "missing")}, connection=connection)
     assert rejected.status_code == 400
-    assert channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)["recent_projects"] == payload["recent_projects"]
+    assert channel.gateway.workspaces.payload(can_change_project=True)["recent_projects"] == payload["recent_projects"]
 
 
 @pytest.mark.asyncio
@@ -4196,7 +4191,7 @@ async def test_project_favorites_mutation_persists_without_selecting_project(
     response = await _webui_mutate(channel, "workspace.favorite", {"path": str(project), "pinned": True}, connection=connection)
     assert response.status_code == 200
     assert response.json() == {"favorite_projects": [{"name": "pinned", "path": str(project)}]}
-    payload = channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)
+    payload = channel.gateway.workspaces.payload(can_change_project=True)
     assert payload["favorite_projects"] == response.json()["favorite_projects"]
     assert payload["recent_projects"] == []
     assert payload["default_scope"]["project_path"] == str(tmp_path)

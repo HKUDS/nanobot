@@ -12,13 +12,9 @@ This guide adds an MCP server to nanobot so the agent can use external tools thr
 
 Use MCP when the capability you need already exists as an MCP server, or when you want external tools to be managed outside nanobot core.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
-```
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Install the MCP server runtime separately. Many examples use `npx`, `uvx`, or a remote HTTP endpoint.
 
@@ -31,6 +27,9 @@ For local interactive setup:
 3. Limit the enabled tools when the server exposes more than the task needs.
 4. Save and restart when prompted.
 5. Mention the connected MCP server with `@` in the next message and ask for a small test action.
+
+<details>
+<summary>Manual configuration</summary>
 
 For manual or deployment-managed config, add this to `~/.nanobot/config.json`:
 
@@ -49,6 +48,8 @@ For manual or deployment-managed config, add this to `~/.nanobot/config.json`:
 ```
 
 Restart nanobot and ask a question that requires the MCP tool.
+
+</details>
 
 ## Production notes
 
@@ -74,6 +75,7 @@ Restart nanobot and ask a question that requires the MCP tool.
 
 ## Related nanobot docs
 
+- [MCP service presets](../mcp-presets.md)
 - [MCP tools for AI agents](./mcp-tools-for-ai-agents.md)
 - [Configuration: MCP](../configuration.md#mcp-model-context-protocol)
 - [Security](../configuration.md#security)

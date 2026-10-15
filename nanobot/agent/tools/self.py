@@ -19,16 +19,10 @@ from nanobot.agent.tools.runtime_control import (
     RuntimeControl,
     RuntimeSnapshot,
 )
-from nanobot.config_base import Base
+from nanobot.agent.tools.self_config import MyToolConfig
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import ToolContext
-
-
-class MyToolConfig(Base):
-    """Self-inspection tool configuration."""
-    enable: bool = True
-    allow_set: bool = False
 
 
 def _is_string_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
@@ -133,34 +127,17 @@ class MyTool(Tool):
     @property
     def description(self) -> str:
         base = (
-            "Check and set your own runtime state.\n"
-            "Actions: check, set.\n"
-            "- check (no key): full config overview — start here.\n"
-            "- check (key): drill into a value. Dot-paths allowed "
-            "(e.g. 'web_config.enable').\n"
-            "- set (key, value): change config or store notes in your scratchpad. "
-            "Scratchpad keys persist across turns but not restarts.\n"
-            "Current routing metadata is available read-only via request.channel, "
-            "request.chat_id, and request.sender_id.\n"
-            "Use model_preset for session-scoped model or context changes; direct "
-            "model/context_window_tokens writes are disabled during active sessions.\n"
-            "Note: web_config and exec_config are readable but read-only.\n"
-            "\n"
-            "When to use:\n"
-            "- User asks about your model or settings → check that key.\n"
-            "- User asks to switch to a named model preset → set model_preset to that preset name.\n"
-            "- A tool fails or behaves unexpectedly → check the related config to diagnose.\n"
-            "- User asks you to remember a preference for this session → set to store it in your scratchpad.\n"
-            "- About to start a large task → check context_window_tokens and max_iterations first."
+            "Inspect runtime state with check: omit key for an overview or use a dot-path. "
+            "set changes runtime parameters or stores scratchpad keys across turns, not restarts. "
+            "Use model_preset for session model/context switching; direct model and "
+            "context_window_tokens writes are disabled during active sessions. "
+            "Read-only access info: workspace_sandbox shows the current project and restriction; "
+            "exec_config shows shell sandbox settings and binds. Shell binds do not grant "
+            "file-tool access; OS permissions still apply. workspace is a legacy agent-directory "
+            "display, not the current project or an access grant. web_config is also read-only."
         )
         if not self._modify_allowed:
             base += "\nREAD-ONLY MODE: set is disabled."
-        else:
-            base += (
-                "\nIMPORTANT: Before setting state, predict the potential impact. "
-                "If the operation could cause crashes or instability "
-                "(e.g. changing model), warn the user first."
-            )
         return base
 
     @property
@@ -175,11 +152,10 @@ class MyTool(Tool):
                 },
                 "key": {
                     "type": "string",
-                    "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
-                    "Use 'request.channel', 'request.chat_id', or 'request.sender_id' for current routing metadata. "
-                    "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
+                    "description": "Dot-path for check; top-level runtime or scratchpad key for set. "
+                    "Read-only routing metadata: request.channel, request.chat_id, request.sender_id.",
                 },
-                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
+                "value": {"description": "New value for set; match the setting's type. Scratchpad accepts JSON values."},
             },
             "required": ["action"],
         }
@@ -206,7 +182,7 @@ class MyTool(Tool):
         for part in parts:
             if part in self._DENIED_ATTRS or part.startswith("__"):
                 return None, f"'{part}' is not accessible"
-            if part in self.BLOCKED:
+            if part in self.BLOCKED and path != "workspace_sandbox.restrict_to_workspace":
                 return None, f"'{part}' is not accessible"
             if part.lower() in self._SENSITIVE_NAMES:
                 return None, f"'{part}' is not accessible"
@@ -238,6 +214,8 @@ class MyTool(Tool):
         # Mapping — small: show content; large: show keys for dot-path navigation
         if isinstance(val, Mapping):
             value_mapping = cast(Mapping[object, object], val)
+            if key == "workspace_sandbox":
+                return f"{key}: {dict(value_mapping)!r}"
             ks = list(value_mapping.keys())
             if not ks:
                 return f"{key}: {{}}" if key else "{}"
@@ -344,6 +322,7 @@ class MyTool(Tool):
         ))
         for k in (
             "workspace",
+            "workspace_sandbox",
             "provider_retry_mode",
             "max_tool_result_chars",
             "web_config",

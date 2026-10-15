@@ -28,7 +28,7 @@ from nanobot.bus.events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
@@ -47,6 +47,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.inbound_commands import WebUICommandRouter
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_RESTART_CONTROL_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
@@ -1124,7 +1125,10 @@ class WebSocketChannel(BaseChannel):
         transcript_overrides: dict[str, Any] | None = None,
     ) -> bool:
         """Persist one canonical turn event and retain unsafe owners on failure."""
-        if not self._temporary_chats.should_persist_transcript(chat_id):
+        if (
+            (metadata or {}).get(WEBUI_RESTART_CONTROL_METADATA_KEY) is True
+            or not self._temporary_chats.should_persist_transcript(chat_id)
+        ):
             self._transcripts.prepare_event(
                 chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
             )

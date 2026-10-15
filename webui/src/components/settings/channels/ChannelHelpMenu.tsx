@@ -2,7 +2,7 @@ import { channelUiContribution } from "@/channel-plugins/registry";
 import { CircleHelp, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelSetup } from "@/components/settings/channels/ChannelIdentity";
-import { docsUrlWithBase } from "@/components/settings/channels/catalog";
+import { docsUrlWithBase } from "@/channel-plugins/catalog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import type { NanobotFeatureInfo } from "@/lib/types";

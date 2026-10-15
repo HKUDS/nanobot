@@ -27,6 +27,8 @@ const requestMutationSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
 const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
 const sendMessageSpy = vi.fn();
+const sendSystemCommandSpy = vi.fn().mockResolvedValue(undefined);
+let mockDefaultChatId: string | null = null;
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 const sessionUpdateHandlers = new Set<(
@@ -242,7 +244,8 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/nanobot-client")>();
   class MockClient {
     status = "idle" as const;
-    defaultChatId: string | null = null;
+    defaultChatId = mockDefaultChatId;
+    sendSystemCommand = sendSystemCommandSpy;
     connect = connectSpy;
     onStatus = (handler: (status: ConnectionStatus) => void) => {
       statusHandlers.add(handler);
@@ -317,6 +320,8 @@ describe("App layout", () => {
       `00000000-0000-4000-8000-${String(++temporaryChatCounter).padStart(12, "0")}`
     ));
     sendMessageSpy.mockReset();
+    sendSystemCommandSpy.mockReset().mockResolvedValue(undefined);
+    mockDefaultChatId = null;
     statusHandlers.clear();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
@@ -660,9 +665,10 @@ describe("App layout", () => {
     expect(
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Providers")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add provider" }))
-      .toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model presets" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Manage providers" }));
+    expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
@@ -986,7 +992,7 @@ describe("App layout", () => {
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     const temporaryToggle = screen.getByRole("button", { name: "Temporary chat" });
-    expect(temporaryToggle).toHaveClass("h-8", "w-8", "rounded-xl");
+    expect(temporaryToggle).toHaveClass("h-8", "w-8", "rounded-control");
     expect(within(temporaryToggle).queryByText("Temporary chat")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
@@ -1076,7 +1082,7 @@ describe("App layout", () => {
         schema_version: 1,
         default_access_mode: "full",
         default_scope: { ...projectScope, project_path: "/tmp/workspace", project_name: "workspace" },
-        controls: { can_change_project: true, can_use_full_access: true },
+        controls: { can_change_project: true },
       },
     });
     window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
@@ -1107,7 +1113,7 @@ describe("App layout", () => {
           access_mode: "full",
           restrict_to_workspace: false,
         },
-        controls: { can_change_project: true, can_use_full_access: true },
+        controls: { can_change_project: true },
       },
     });
     render(<App />);
@@ -1161,7 +1167,7 @@ describe("App layout", () => {
           access_mode: "restricted",
           restrict_to_workspace: true,
         },
-        controls: { can_change_project: true, can_use_full_access: true, can_browse_directories: true, can_resolve_project: true },
+        controls: { can_change_project: true, can_browse_directories: true, can_resolve_project: true },
       },
       [directoryUrl("C:\\workspace")]: directory("C:\\workspace"),
       [directoryUrl("C:\\workspace\\")]: directory("C:\\workspace"),
@@ -1235,6 +1241,24 @@ describe("App layout", () => {
     ).toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Channels" })).toHaveAttribute("aria-current", "page");
     expect(window.location.hash).toBe("#/settings?section=channels");
+  });
+
+  it.each(["before disconnect", "after disconnect"])("finishes a requested restart when another tab clears its marker %s", async (clearWhen) => {
+    mockDefaultChatId = "restart-fixture";
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restart", exact: true }));
+    expect(sendSystemCommandSpy).toHaveBeenCalledWith("restart-fixture", "/restart");
+    expect(screen.getByRole("button", { name: "Restarting...", exact: true })).toBeDisabled();
+    act(() => {
+      if (clearWhen === "before disconnect") localStorage.removeItem("nanobot-webui.restartStartedAt");
+      for (const handler of statusHandlers) handler("reconnecting");
+      localStorage.removeItem("nanobot-webui.restartStartedAt");
+      for (const handler of statusHandlers) handler("open");
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restart", exact: true })).toBeEnabled());
+    expect(createChatSpy).not.toHaveBeenCalled();
   });
 
   it("refreshes settings after the browser reconnects from a restart", async () => {
@@ -1831,8 +1855,7 @@ describe("App layout", () => {
       schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [],
       title_overrides: { [key]: "推特大战场" }, project_name_overrides: {},
       tags_by_key: {}, collapsed_groups: {}, workbench: { version: 1, tabs: {} },
-      view: { density: "comfortable", show_previews: false, show_timestamps: false,
-        show_archived: false, sort: "updated_desc" },
+      view: { density: "comfortable", show_archived: false, sort: "updated_desc" },
     };
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
@@ -2567,8 +2590,6 @@ describe("App layout", () => {
       collapsed_groups: {},
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "updated_desc",
       },
@@ -2650,8 +2671,6 @@ describe("App layout", () => {
       collapsed_groups: {},
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "title_asc",
       },
@@ -4037,6 +4056,82 @@ describe("App layout", () => {
     expect(fetchBootstrap).toHaveBeenCalledTimes(2);
     expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=tok-2");
     unmount();
+  });
+
+  it.each(["sending", "failed"])("explains an undelivered pairing reply (%s) without empty code slots", async (delivery_status) => {
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status,
+    }] } });
+    render(<App />);
+    const popup = await screen.findByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByText("Already received a code?").closest("details")).not.toHaveAttribute("open");
+    expect(within(popup).getByText(/another private message to retry/)).toBeVisible();
+    if (delivery_status === "failed") expect(within(popup).getByRole("alert")).toBeVisible();
+    fireEvent.click(within(popup).getByText("Already received a code?"));
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(requestMutationSpy).not.toHaveBeenCalledWith("settings.pairing.approve", expect.anything(), expect.anything());
+  });
+
+  it.each([undefined, "sent"])("keeps legacy/delivered pairing usable behind a failed request (%s)", async (delivery_status) => {
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [
+      { code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "failed" },
+      { code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", delivery_status },
+    ] } });
+    render(<App />);
+    const popup = await screen.findByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(popup).getByText("2 pending")).toBeVisible();
+  });
+
+  it("shows a recovered pairing reply even after its failure notice was dismissed", async () => {
+    vi.useFakeTimers();
+    let delivery_status = "failed";
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status,
+    }] }) });
+    render(<App />);
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Pair account" }))
+      .getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+    delivery_status = "sent";
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed pairing approval idle until the user retries", async () => {
+    vi.useFakeTimers();
+    let requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent" }];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    requestMutationSpy
+      .mockRejectedValueOnce(new Error("Approval unavailable"))
+      // Bound the old automatic retry loop while reproducing it.
+      .mockImplementation(() => new Promise(() => {}));
+    render(<App />);
+    await act(async () => {});
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    fireEvent.change(within(popup).getByRole("textbox", { name: "Pairing code" }), {
+      target: { value: "ABCD-EFGH" },
+    });
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(requestMutationSpy).toHaveBeenCalledTimes(1);
+    expect(within(popup).getByText("Approval unavailable")).toBeVisible();
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+
+    requests = [];
+    requestMutationSpy.mockResolvedValueOnce({ requests });
+    fireEvent.click(within(popup).getByRole("button", { name: "Retry" }));
+    await act(async () => {});
+    expect(requestMutationSpy).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
   });
 
   it("reuses an in-flight pairing poll when the page becomes visible again", async () => {

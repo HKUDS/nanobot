@@ -20,7 +20,7 @@ export async function uploadAttachments(
   if (!capability || !stillConnected()) throw new Error("Attachment upload connection is not ready");
   const url = new URL(capability.path, baseUrl.replace(/^ws:/, "http:").replace(/^wss:/, "https:"));
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("HTTP upload is unavailable");
-  // No handshake credentials in the URL, no redirects leaking the capability.
+  // Send same-origin edge-auth cookies without following redirects with the capability.
   url.search = "";
   url.username = "";
   url.password = "";
@@ -32,7 +32,7 @@ export async function uploadAttachments(
     const raw = atob(match[2]);
     const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
     const response = await fetch(url, {
-      method: "POST", redirect: "error", credentials: "omit",
+      method: "POST", redirect: "error", credentials: "same-origin",
       headers: {
         Authorization: `Bearer ${capability.token}`,
         "Content-Type": match[1],

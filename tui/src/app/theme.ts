@@ -96,7 +96,7 @@ export const TERMINAL: Palette = {
 }
 
 
-export function syntaxStyle(palette: Palette): SyntaxStyle {
+function syntaxStyle(palette: Palette): SyntaxStyle {
   const color = (value: ColorInput) => {
     const parsed = parseColor(value)
     return { fg: parsed }

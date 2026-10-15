@@ -9,6 +9,8 @@ export function DisplayMath({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const update = () => {
       if (!frame.current || !content.current) return;
+      const tag = content.current.querySelector<HTMLElement>(".katex-html > .tag");
+      content.current.style.setProperty("--math-tag-width", `${tag?.offsetWidth ?? 0}px`);
       const width = content.current.offsetWidth;
       const scale = width ? Math.min(1, frame.current.clientWidth / width) : 1;
       const height = content.current.offsetHeight * scale;

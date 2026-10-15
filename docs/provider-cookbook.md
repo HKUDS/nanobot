@@ -4,7 +4,7 @@ This page is for cases where you already know what you want to connect and need 
 
 If this is your first install and terminal commands are new to you, start with [`start-without-technical-background.md`](./start-without-technical-background.md). If you want the field-by-field explanation, read [`providers.md`](./providers.md) and then [`configuration.md#providers`](./configuration.md#providers).
 
-Most examples below are snippets to merge into `~/.nanobot/config.json`. Keep any existing sections you still need, and replace placeholder keys such as `${OPENROUTER_API_KEY}` with environment-variable references or real values only on your own machine.
+Use **Settings → Models** for the recipes below. The collapsed **Manual configuration** examples are snippets for headless deployments or configuration managed as code. Keep existing config sections when merging a snippet, and keep real credentials on your own machine.
 
 Recipes are examples, not rankings. Pick the recipe that matches the credential, endpoint, and model ID you already intend to use.
 
@@ -27,12 +27,14 @@ Match the recipe to the credential or endpoint you already have:
 
 ## How to Use a Recipe
 
-1. Install nanobot and run `nanobot onboard` once so `~/.nanobot/config.json` exists. Use `nanobot onboard --wizard` if you prefer prompts over hand-editing JSON.
-2. Put secrets in environment variables when possible.
-3. Merge the recipe snippet into `~/.nanobot/config.json`.
-4. Run `nanobot status`.
-5. Run `nanobot agent -m "Hello!"`.
-6. If the CLI works, then connect WebUI, gateway, or chat apps.
+1. Install nanobot and open `nanobot webui`.
+2. Open **Settings → Models → New preset**. If **Convert to presets** appears, choose it first.
+3. Select the recipe's provider from **Provider**, or choose **Add provider** and save its credentials and endpoint.
+4. Select a model available to your account. Expand **Advanced options** if you need generation settings or an explicit request API.
+5. Save the preset and select it in the chat composer.
+6. Send `Hello!` and confirm a normal reply before connecting a chat app.
+
+For fallback recipes, create each preset first, then use **Enable preset** and arrange the order in **Settings → Models**. The first enabled preset is the primary; the others are fallbacks.
 
 The active model should normally come from `agents.defaults.modelPreset`, and that name should point to an entry in `modelPresets`. Direct `agents.defaults.provider` and `agents.defaults.model` still work for older configs, but presets are easier to switch and easier to reuse as fallbacks.
 
@@ -60,7 +62,12 @@ Environment variables set this way apply only to the current terminal. For long-
 
 ## Recipe: OpenRouter Gateway
 
+Select OpenRouter in **Settings → Models → New preset**, add its API key through **Provider → Add provider** if needed, and choose a model available to your account. Save and select the preset in chat.
+
 This recipe applies when one API key routes many hosted model families.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -86,6 +93,8 @@ This recipe applies when one API key routes many hosted model families.
 }
 ```
 
+</details>
+
 Verify:
 
 ```bash
@@ -97,9 +106,14 @@ If this fails with `401` or `unauthorized`, check that `OPENROUTER_API_KEY` is v
 
 ## Recipe: OpenCode Zen or Go
 
+In **Settings → Models → New preset**, choose OpenCode Zen or OpenCode Go to match your account, add its credential, select a model from that endpoint, and save. Select the preset in chat.
+
 This recipe applies when your credential comes from OpenCode Zen or OpenCode Go. Both providers use `OPENCODE_API_KEY`; pick the provider block that matches the subscription or balance you want to use.
 
 OpenCode Zen:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -125,7 +139,12 @@ OpenCode Zen:
 }
 ```
 
+</details>
+
 OpenCode Go:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -151,6 +170,8 @@ OpenCode Go:
 }
 ```
 
+</details>
+
 Verify:
 
 ```bash
@@ -162,7 +183,12 @@ OpenCode's docs list models across multiple endpoint types. The `opencode_zen` a
 
 ## Recipe: OpenAI Direct
 
+In **Settings → Models → New preset**, select OpenAI, add its API key, choose a model available to your account, and save. Leave request API selection on Auto unless your endpoint requires an explicit choice.
+
 This recipe applies when you have an OpenAI API key and want to call OpenAI directly instead of through a gateway.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -188,6 +214,8 @@ This recipe applies when you have an OpenAI API key and want to call OpenAI dire
 }
 ```
 
+</details>
+
 Verify:
 
 ```bash
@@ -198,7 +226,12 @@ If your shell cannot use inline environment variables, set `OPENAI_API_KEY` firs
 
 ## Recipe: Anthropic Direct
 
+In **Settings → Models → New preset**, select Anthropic, add its API key, choose a Claude model available to your account, and save. Select the preset in chat.
+
 This recipe applies when your key comes from Anthropic and your model name is an Anthropic model ID, not an OpenRouter model path.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -224,6 +257,8 @@ This recipe applies when your key comes from Anthropic and your model name is an
 }
 ```
 
+</details>
+
 Verify:
 
 ```bash
@@ -233,6 +268,9 @@ ANTHROPIC_API_KEY="sk-ant-..." nanobot agent -m "Hello!"
 If you copied a model name such as `anthropic/claude-sonnet-4.5`, that is a gateway-style model path and belongs under `provider: "openrouter"`, not `provider: "anthropic"`.
 
 If you use an Anthropic-compatible proxy, keep the preset provider as `anthropic` and set `providers.anthropic.apiBase`:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -259,11 +297,18 @@ If you use an Anthropic-compatible proxy, keep the preset provider as `anthropic
 }
 ```
 
+</details>
+
 Do not configure Anthropic-compatible endpoints as arbitrary custom provider names; named custom providers use the OpenAI-compatible request format.
 
 ## Recipe: Kimi Coding Plan
 
+In **Settings → Models → New preset**, select Kimi Coding, add your Coding Plan key, choose `kimi-for-coding`, and save. Select the preset in chat.
+
 This recipe applies when your key comes from Kimi's Coding Plan endpoint. Nanobot uses a dedicated `kimi_coding` provider for this Anthropic Messages API endpoint; do not configure it as a generic `custom` provider.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -288,6 +333,8 @@ This recipe applies when your key comes from Kimi's Coding Plan endpoint. Nanobo
 }
 ```
 
+</details>
+
 Verify:
 
 ```bash
@@ -299,7 +346,12 @@ The default base URL is `https://api.kimi.com/coding/v1`. This endpoint requires
 
 ## Recipe: Custom OpenAI-Compatible Provider
 
+In **Settings → Models → New preset → Provider → Add provider**, create a custom connection with the endpoint URL and any required key. Select its served model, save the preset, and select it in chat.
+
 This recipe applies to an OpenAI-compatible service that is not a named nanobot provider.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -326,6 +378,8 @@ This recipe applies to an OpenAI-compatible service that is not a named nanobot 
 }
 ```
 
+</details>
+
 Verify the endpoint before blaming nanobot:
 
 ```bash
@@ -336,6 +390,9 @@ nanobot agent -m "Hello!"
 `apiBase` is the HTTP base URL, not the model name. Include the version path when the service expects it, such as `/v1`. If the service requires a non-empty key but does not validate it, use a placeholder such as `"apiKey": "EMPTY"`.
 
 For multiple custom endpoints, do not overload the single `custom` block. Name each endpoint under `providers` and reference that same name from the preset:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -372,16 +429,25 @@ For multiple custom endpoints, do not overload the single `custom` block. Name e
 }
 ```
 
+</details>
+
 These custom names define direct connections: `apiBase` is required and `apiKey` is optional when the endpoint allows anonymous or placeholder credentials. Declare accepted protocols and a default with [`providers.<name>.api`](./configuration.md#custom-connection-apis). An Anthropic-compatible endpoint uses `supportedApis: ["anthropic_messages"]`; model presets can select any protocol within the connection declaration.
 
 ## Recipe: Ollama Local Model
 
-This recipe applies when Ollama is already installed and the model has been pulled locally.
+Follow the server preparation below, then open **Settings → Models → New preset**, select or add an Ollama connection at `http://localhost:11434/v1`, choose the downloaded model, and save. Select the preset in chat. If nanobot runs in a container or on another computer, `localhost` refers to that host; use an address reachable from nanobot.
+
+If Ollama is not installed, follow its [official quickstart](https://docs.ollama.com/quickstart) ([Linux setup](https://docs.ollama.com/linux)). Keep the Ollama app or service running. If no service is running, start `ollama serve` in a terminal and leave it open; do not start a second server when the app or system service already owns the port. In a separate terminal, download a model and confirm it is listed:
 
 ```bash
-ollama serve
 ollama pull llama3.2
+ollama list
 ```
+
+Use that exact model name in nanobot. Downloading requires internet access and disk space; model inference then runs on the machine hosting Ollama.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -407,12 +473,17 @@ ollama pull llama3.2
 }
 ```
 
+</details>
+
 Verify:
 
 ```bash
 curl -sS http://localhost:11434/v1/models
-nanobot agent -m "Hello!"
 ```
+
+Send `Hello!` in the WebUI with the local preset selected. A CLI test uses its own session/default selection; to make the local preset the global primary, enable it and move it first in **Settings → Models**.
+
+Local inference does not disable network tools. For local-only document work, turn off **Web access**, avoid cloud fallbacks and remote integrations, and review shell access. Shell commands can still use the network even with a sandbox; a strict offline policy needs host/container network controls. See [local tool security](./guides/secure-local-ai-agent.md).
 
 If you see `connection refused`, Ollama is not running or `apiBase` points to the wrong port. If every response is slow, try a smaller local model or lower `contextWindowTokens`.
 
@@ -420,7 +491,12 @@ If direct Ollama responses are fast but tool-using nanobot turns repeatedly eval
 
 ## Recipe: vLLM or LM Studio
 
+Start your local model server, then use **Settings → Models → New preset** to add its connection with the local `/v1` endpoint and any required key. Enter the served model name, save, and select the preset in chat.
+
 This recipe applies when a local server exposes an OpenAI-compatible `/v1` API.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -447,7 +523,12 @@ This recipe applies when a local server exposes an OpenAI-compatible `/v1` API.
 }
 ```
 
+</details>
+
 For LM Studio, use its local base URL and provider name:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -472,11 +553,18 @@ For LM Studio, use its local base URL and provider name:
 }
 ```
 
+</details>
+
 The config key can be `lmStudio` or `lm_studio`, but the preset provider should use the registry name `lm_studio`.
 
 ## Recipe: Fallback Presets
 
+Create each preset in **Settings → Models**, use **Enable preset**, and arrange the primary first with backups after it. Test each preset in chat before relying on the fallback order.
+
 This recipe applies when one provider sometimes rate-limits, one model is expensive, or you want a local backup.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -511,6 +599,8 @@ This recipe applies when one provider sometimes rate-limits, one model is expens
   }
 }
 ```
+
+</details>
 
 `fallbackModels` belongs under `agents.defaults`. String entries are preset names, not raw model names. nanobot tries the active preset first, then the fallback presets in order.
 
@@ -550,6 +640,9 @@ Langfuse is not a model provider in `config.json`. It is configured through envi
 
 Use this after you have more than one preset and are chatting through a supported channel.
 
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "modelPresets": {
@@ -573,6 +666,8 @@ Use this after you have more than one preset and are chatting through a supporte
   }
 }
 ```
+
+</details>
 
 In chat:
 

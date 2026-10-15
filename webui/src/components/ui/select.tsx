@@ -9,6 +9,7 @@ import { ControlChevron } from "@/components/ui/control-chevron";
 
 export const Select = SelectPrimitive.Root;
 export const SelectValue = SelectPrimitive.Value;
+export const SelectSeparator = SelectPrimitive.Separator;
 
 export const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
@@ -24,7 +25,7 @@ SelectTrigger.displayName = "SelectTrigger";
 
 export function SelectContent({ children, ...props }: Pick<
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>,
-  "children" | "onPointerUpCapture" | "onPointerDownOutside" | "onKeyDownCapture" | "onEscapeKeyDown"
+  "children" | "onPointerUpCapture" | "onPointerDownOutside" | "onKeyDownCapture" | "onEscapeKeyDown" | "onCloseAutoFocus"
 >) {
   const container = useFloatingPortal();
   return (

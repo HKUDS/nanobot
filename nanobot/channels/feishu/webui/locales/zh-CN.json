@@ -74,6 +74,7 @@
     }
   },
   "custom": {
+    "addAssistant": "添加新助手",
     "toggleAssistant": "{{name}} 助手",
     "configured": "已连接",
     "needsSetup": "需要授权",

@@ -11,23 +11,23 @@ This guide turns nanobot into an email AI agent that polls IMAP for accepted mes
 
 ## Prerequisites
 
-- A working local nanobot reply:
-
-```bash
-nanobot agent -m "Hello!"
-```
+- A normal reply in your existing nanobot WebUI or CLI. If you have not reached that point, complete [Quick Start](../quick-start.md) first.
 
 - A mailbox for the bot.
 - IMAP and SMTP access. For Gmail, use an app password rather than your account password.
 
-## Install nanobot
+## Continue from your running instance
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-```
+If you are already chatting in the WebUI, keep it open and continue below. It has already started the gateway. To reopen it later, use the same installation's `nanobot webui` command; there is no need to install nanobot again.
+
+For terminal or server setup, use the manual configuration section below. Reuse the config/home and executable from your working instance. Docker users should use the [container commands](../deployment.md#docker-compose).
 
 ## Enable the Email channel
+
+Prepare a dedicated mailbox and app password. In **Channels → Email**, grant mailbox access, enter IMAP and SMTP settings, and restrict allowed senders. Use **Advanced** for trusted authentication services and other mailbox options. Enable the channel, save, and follow any restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Merge this snippet into `~/.nanobot/config.json` and replace the addresses and passwords:
 
@@ -54,12 +54,13 @@ Merge this snippet into `~/.nanobot/config.json` and replace the addresses and p
 }
 ```
 
-## Run nanobot gateway
+</details>
 
-```bash
-nanobot channels status
-nanobot gateway
-```
+## Apply the settings
+
+In the WebUI, follow any restart prompt and keep the launcher running for the first test. You do not need to start another gateway. For unattended operation afterward, use [background or service mode](../cli-reference.md#gateway).
+
+For manual config changes, restart the existing gateway through its owning terminal, `nanobot gateway restart` for background mode, or its service/container supervisor. If none is running, start `nanobot gateway` and leave it running. Run diagnostic CLI commands in a separate terminal using the same installation and config.
 
 ## Test a message
 
@@ -80,7 +81,12 @@ Email authentication now requires an explicit receiving-service trust anchor. Th
 
 1. Back up your configuration and temporarily disable the Email channel while configuring the receiver. Do not turn off SPF/DKIM verification as an upgrade workaround.
 2. Confirm with your receiving mail service or administrator which exact `authserv-id` it adds, and that it strips externally supplied headers claiming that identity. It must provide one consolidated `Authentication-Results` header. A name visible in a received email is not, by itself, proof of trust; do not infer it from your IMAP hostname or copy it from an arbitrary message.
-3. In Email settings, open **Advanced** and set **Trusted authentication services**, or merge the following fields into `channels.email` in your existing config:
+3. In **Channels → Email**, open **Advanced** and set **Trusted authentication services** to your confirmed receiver identity. Keep SPF/DKIM verification enabled.
+
+   <details>
+   <summary>Manual configuration</summary>
+
+   Merge these fields into `channels.email` in your existing config:
 
    ```json
    {
@@ -91,6 +97,9 @@ Email authentication now requires an explicit receiving-service trust anchor. Th
    ```
 
    The example is for a receiver using `mx.google.com`; use your confirmed receiver identity instead. JSON uses a list; the WebUI accepts comma-separated values. Wildcards and URLs are not accepted. Multiple configured identities are alternatives, not permission to combine multiple trusted result headers.
+
+   </details>
+
 4. Check the IMAP/SMTP connection, re-enable Email, and restart the gateway after editing a configuration file. Send one ordinary message from an allowed address and confirm receipt and reply. A successful connection check verifies credentials and configuration, not your mail service's header-stripping policy.
 
 Each enabled verification method must pass and identify the visible sender's domain, or a parent/subdomain of it. DKIM uses `header.d` when present, otherwise the domain of the receiver-reported `header.i`. This is not a full DMARC policy implementation, and domain authentication does not independently authenticate the mailbox local part. Forwarders, mailing lists, or receivers that emit separate SPF and DKIM result headers may need mail-service changes. Keep Email disabled if the receiver cannot meet the trust contract.

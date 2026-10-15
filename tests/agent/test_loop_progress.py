@@ -903,7 +903,7 @@ class TestToolEventProgress:
         assert requests[0][-1]["content"].endswith("Background research completed")
         assert any(
             message.get("role") == "user"
-            and message.get("content") == "Can you include the key detail?"
+            and str(message.get("content")).startswith("Can you include the key detail?\n\n")
             for message in requests[1]
         )
         assert len(request_contexts) == 1

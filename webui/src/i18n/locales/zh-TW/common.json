@@ -339,6 +339,9 @@
       "description": "nanobot Web UI —— 與你的 nanobot 工作區對話。"
     },
     "pairing": {
+      "haveCode": "已收到配對碼？",
+      "deliveryFailed": "配對碼傳送失敗。請檢查此機器人的訊息傳送權限和閘道日誌，再傳一則私訊給它以重試。",
+      "deliverySending": "正在向聊天傳送配對碼。如果沒有收到，請再傳一則私訊給機器人以重試。",
       "title": "賬號配對",
       "description": "輸入聊天平臺收到的配對碼",
       "code": "配對碼",
@@ -416,7 +419,7 @@
         "tools_exec_allowed_env_keys": {"label": "環境變數", "help": "額外傳給命令的變數名，每行一個\n\n除必需變數外，還要從主機傳遞給命令的環境變數名稱，每行一個。"},
         "tools_exec_allow_patterns": {"label": "允許命令", "help": "只允許完整匹配規則的命令\n\n每行一個正規表示式。填寫後，只允許每段命令都完整匹配規則的命令執行，且優先於內建和自定義拒絕規則；工作區和網路限制仍生效。"},
         "tools_exec_deny_patterns": {"label": "禁止命令", "help": "阻止匹配規則的命令\n\n每行一個正規表示式，與內建拒絕規則一同檢查。完整匹配允許規則的命令會跳過這些檢查。"},
-        "tools_web_proxy": {"label": "網頁代理", "help": "網頁代理地址，留空用預設網路\n\n網頁搜尋和讀取使用的代理地址，留空使用預設網路設定。"},
+        "tools_web_proxy": {"label": "網頁代理", "help": "用於智慧體搜尋和讀取網頁。留空使用預設網路設定，包括環境變數中的代理。\n\n127.0.0.1 指執行 nanobot 的機器，不是開啟網頁的手機。本設定不影響模型、MCP 或瀏覽器的連線。"},
         "tools_web_user_agent": {"label": "User-Agent", "help": "網頁請求標識，留空使用預設值\n\n網頁請求使用的 User-Agent 標識，留空使用預設值。"},
         "tools_restrict_to_workspace": {"label": "目錄限制", "help": "全域性目錄限制，WebUI 許可權另設\n\n設定全域性工作區訪問限制；WebUI 中每個對話的許可權單獨設定。"},
         "tools_ssrf_whitelist": {"label": "允許 IP", "help": "允許訪問的 IP 或 CIDR，每行一項\n\n允許網頁等出站請求訪問這些受限地址。每行填寫一個 IP 地址或 CIDR 網段。"},
@@ -762,6 +765,19 @@
       }
     },
     "providers": {
+      "manageProviders": "管理提供商",
+      "configureProvider": "設定 {{provider}}…",
+      "sharedProviderHelp": "變更會影響使用此提供商的所有預設。",
+      "parameterCount": "{{count}} 項",
+      "useProviderSettings": "使用供應商設定",
+      "applyToDraft": "加入預設",
+      "draftHint": "儲存新預設後，這些設定才會生效。",
+      "invalidObject": "請輸入 JSON 物件，例如：{\"key\":\"value\"}。",
+      "stringValuesRequired": "請求標頭和查詢參數的值須使用文字。",
+      "maskedSecretMissing": "遮罩沒有對應的已儲存金鑰。請輸入實際值，或刪除該項。",
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "本地",
       "title": "提供商",
       "searchPlaceholder": "搜尋供應商",
       "noMatches": "沒有符合的供應商。",
@@ -788,13 +804,15 @@
       "extraBody": "請求體引數",
       "extraQuery": "查詢引數",
       "capabilityFastMode": "快速模式",
-      "capabilityFastModeHelp": "回覆更快，額度消耗也更快\n\n透過 OpenAI 優先服務層獲取更快響應，會更快消耗額度。",
+      "capabilityFastModeHelp": "回應更快，用量更高",
       "capabilityXSearch": "X 搜尋",
       "capabilityXSearchHelp": "支援的 Grok 模型可搜尋 X\n\n允許受支援的 Grok 模型使用 xAI 託管的 X Search，並在對話中展示搜尋過程。",
       "capabilityOpenAISearch": "OpenAI 網路搜尋",
       "capabilityOpenAISearchHelp": "支援的模型可聯網搜尋"
     },
     "image": {
+      "imagesApiHint": "透過此連線的網址呼叫 OpenAI Images API。請確認該介面支援生圖。",
+      "requestOverridesHint": "僅用於生圖。留空時使用供應商設定，更換供應商會清空這裡填寫的值。",
       "selectProvider": "選擇供應商",
       "selectAspect": "選擇比例",
       "selectSize": "選擇尺寸",
@@ -812,10 +830,12 @@
       "installing": "正在安裝所需套件…"
     },
     "models": {
+      "requestOverridesHint": "留空時使用供應商設定。更換供應商會清空這裡填寫的值。",
+      "otherPresets": "備用預設",
       "catalogAuthRequired": "授權已失效，請重新登入。",
-      "catalogUnavailable": "暫時無法更新模型，請稍後重試。",
-      "catalogStale": "目前顯示快取的模型清單，可能不是最新。",
-      "catalogFallback": "目前顯示內建模型清單，可能不是最新。",
+      "catalogUnavailable": "更新失敗，點擊重試",
+      "catalogStale": "快取清單可能已過時。",
+      "catalogFallback": "內建清單可能已過時。",
       "selectModel": "選擇模型",
       "addConfiguration": "新增設定",
       "newConfiguration": "新增模型設定",
@@ -825,7 +845,6 @@
       "configurationNamePlaceholder": "快速寫作",
       "callOrder": "使用順序",
       "primary": "主要模型",
-      "fallbackNumber": "備用模型 {{number}}",
       "addToOrder": "啟用預設",
       "newPreset": "新建預設",
       "newPresetHelp": "儲存模型和引數，方便下次選用",
@@ -862,7 +881,7 @@
       "disabled": "未啟用",
       "noPresets": "尚無模型預設",
       "noPresetsHelp": "先建立預設，再將它加入呼叫順序。",
-      "removeBeforeDelete": "請先將其他預設設為主要模型，再刪除此預設。",
+      "removeBeforeDelete": "無法刪除主要模型",
       "providerSetupRequired": "供應商需要設定",
       "configureProviderBeforeSaving": "請先設定此供應商，再儲存預設。",
       "deletePresetTitle": "刪除模型預設？",
@@ -1601,7 +1620,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "無法載入子任務。",
       "stopFailed": "無法停止此任務。",
       "stopTask": "停止 {{label}}",
       "receiptHelp": "已送達表示訊息已進入子任務的下一次模型請求，不代表已執行完成。",
@@ -2262,6 +2280,7 @@
     }
   },
   "common": {
+    "retry": "重試",
     "dismiss": "關閉",
     "close": "關閉",
     "current": "目前",

@@ -11,22 +11,22 @@ This guide connects nanobot to WeChat through the `weixin` channel. The channel 
 
 ## Prerequisites
 
-- A working local nanobot reply:
-
-```bash
-nanobot agent -m "Hello!"
-```
+- A normal reply in your existing nanobot WebUI or CLI. If you have not reached that point, complete [Quick Start](../quick-start.md) first.
 
 - A WeChat account that can complete QR-code login.
 
-## Install nanobot
+## Continue from your running instance
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-```
+If you are already chatting in the WebUI, keep it open and continue below. It has already started the gateway. To reopen it later, use the same installation's `nanobot webui` command; there is no need to install nanobot again.
+
+For terminal or server setup, use the manual configuration section below. Reuse the config/home and executable from your working instance. Docker users should use the [container commands](../deployment.md#docker-compose).
 
 ## Enable the WeChat channel
+
+Open **Channels → WeChat (Weixin)**, install support if prompted, and follow the QR connection flow using your WeChat account. Enable the channel, save, and follow any restart prompt. New private senders receive a pairing code until approved.
+
+<details>
+<summary>Manual configuration</summary>
 
 Install the optional channel dependency:
 
@@ -56,20 +56,30 @@ nanobot channels login weixin
 
 Use `--force` if you need to discard saved login state and authenticate again.
 
-## Run nanobot gateway
+</details>
 
-```bash
-nanobot channels status
-nanobot gateway
-```
+## Apply the settings
+
+In the WebUI, follow any restart prompt and keep the launcher running for the first test. You do not need to start another gateway. For unattended operation afterward, use [background or service mode](../cli-reference.md#gateway).
+
+For manual config changes, restart the existing gateway through its owning terminal, `nanobot gateway restart` for background mode, or its service/container supervisor. If none is running, start `nanobot gateway` and leave it running. Run diagnostic CLI commands in a separate terminal using the same installation and config.
 
 ## Test a message
 
-Send a private WeChat message to the bot. It should reply with a pairing code. Approve it from a trusted local surface:
+Send a private WeChat message to the bot. It should reply with a pairing code. Return to the WebUI pairing prompt and enter the code from your own private chat. Only a matching pending code is approved; do not enter another person's code. Then send your message again.
+
+<details>
+<summary>Terminal-only pairing</summary>
+
+In a separate local terminal, using the same instance:
 
 ```bash
 nanobot agent -m "/pairing approve ABCD-EFGH"
 ```
+
+Replace the example code with your actual code.
+
+</details>
 
 Send the message again after approval and watch gateway logs for the sender ID and reply.
 

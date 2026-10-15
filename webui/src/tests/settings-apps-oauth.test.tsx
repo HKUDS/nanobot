@@ -36,6 +36,62 @@ const xmindMcpPreset = {
 describe("SettingsView Apps catalog", () => {
   installSettingsViewTestHooks();
 
+  it("collects an instance MCP URL before starting browser authorization", async () => {
+    const metabasePreset = {
+      ...xmindMcpPreset,
+      name: "metabase",
+      display_name: "Metabase",
+      description: "Query analytics in your Metabase instance.",
+      required_fields: [{
+        name: "mcp_url",
+        label: "MCP server URL",
+        secret: false,
+        required: true,
+        configured: false,
+        placeholder: "https://analytics.example.com/api/metabase-mcp",
+        env_var: null,
+      }],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [metabasePreset], installed_count: 0 });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    }));
+    vi.stubGlobal("open", vi.fn(() => null));
+    requestMutationMock.mockResolvedValue({
+      flow_id: "flow-metabase",
+      name: "metabase",
+      status: "failed",
+      error: "Stopped after the authorization request.",
+      expires_in: 300,
+    });
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Metabase" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Metabase" });
+    const connect = within(dialog).getByRole("button", { name: "Connect" });
+    expect(connect).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "MCP server URL" }), {
+      target: { value: "https://analytics.example.com/api/metabase-mcp" },
+    });
+    expect(connect).toBeEnabled();
+    await act(async () => fireEvent.click(connect));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.oauth_start",
+      { name: "metabase", mcp_url: "https://analytics.example.com/api/metabase-mcp" },
+      expect.any(Number),
+    ));
+  });
+
+
+
   it("connects an OAuth MCP from the Apps catalog without manual callback input", async () => {
     let connected = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

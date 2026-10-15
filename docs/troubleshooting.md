@@ -31,6 +31,14 @@ If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram,
 
 `nanobot status` does not call the model. If provider/model setup is incomplete, it points to WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
 
+## Empty topics after a WebUI restart
+
+The Restart button in WebUI settings does not create a conversation or add messages to an existing conversation. Reopening WebUI or reconnecting to the gateway also does not save a topic until a message or another session action creates it.
+
+Older gateway versions could save an empty topic when the Restart button had no current chat. Update the gateway to stop creating these topics. Existing topics are not deleted by the update; check their contents before removing them. A typed `/restart` command remains part of that chat's display history.
+
+If settings stay disabled after a restart while another tab has reconnected, reload the affected page. Updated WebUI clients track restart completion per tab, so one tab cannot leave another tab waiting by clearing the shared restart marker.
+
 ## Session storage overlaps the workspace
 
 Sessions live at `<config-dir>/sessions/<workspace-id>/`, outside the agent workspace. If startup reports a conflict, compare the printed paths. A valid layout is `bot/config.json`, `bot/sessions/`, and `bot/workspace/`.
@@ -86,7 +94,7 @@ Use the same Python command for install checks and module fallback. On macOS/Lin
 | `curl: command not found` | The macOS/Linux one-command installer could not download the script. Install curl, or use a manual isolated install such as `uv tool install nanobot-ai` or `pipx install nanobot-ai`. |
 | `irm` is not recognized | PowerShell could not run the download helper. Use manual install: `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or `py -m pip install nanobot-ai` inside an environment you control. |
 | Could not download `raw.githubusercontent.com` | Your network, proxy, or firewall blocked the installer script download. Use manual install from PyPI, or configure your proxy and rerun the command. |
-| `nanobot: command not found` | Use the module form, for example `python -m nanobot ...`, `python3 -m nanobot ...`, or `py -m nanobot ...`. Reinstall with the same Python command, or add that Python's scripts directory to `PATH`. |
+| `nanobot: command not found` | With the recommended installer, reuse its printed full command; with uv/pipx, use `uv tool run --from nanobot-ai nanobot ...` / `pipx run --spec nanobot-ai nanobot ...`. For a pip install, use `<installing-python> -m nanobot ...` from that same environment. A system `python` or `py` may not contain the isolated installation. |
 | `No module named nanobot` | You are running a different Python than the one used for installation. Run `python -m pip show nanobot-ai`, `python3 -m pip show nanobot-ai`, or `py -m pip show nanobot-ai`, matching the command that installed nanobot. |
 | `pip is not available` | When the installer uses a virtual environment, it tries `python -m ensurepip --upgrade`. If that fails, install pip for that Python, or use a Python installer/distribution that includes pip. |
 | `externally-managed-environment` | Your system Python blocks global pip installs. Use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual environment; do not add `--break-system-packages` for nanobot. |
@@ -247,6 +255,11 @@ For a system-level or custom service, use `sudo systemctl edit <unit>` instead. 
 
 ## WebUI Problems
 
+Run `nanobot webui` to prepare the local WebSocket channel and open the browser. Finish model setup in **Settings → Models**.
+
+<details>
+<summary>Manual WebSocket configuration</summary>
+
 The packaged WebUI is served by the WebSocket channel.
 
 Minimal config:
@@ -272,6 +285,10 @@ Open:
 ```text
 http://127.0.0.1:8765
 ```
+
+</details>
+
+For first access, copy the complete login link printed by `nanobot webui`, including the fragment after `#`. In WSL, open that link in your Windows browser if automatic opening fails. The plain page address does not sign in a new browser.
 
 If accessing from another device, bind the WebSocket channel to `0.0.0.0` and set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds without a token or token issue secret.
 
@@ -299,7 +316,7 @@ Then check:
 |---|---|
 | Bot never replies | Gateway is not running, the channel is not enabled, or the bot/app token is wrong. |
 | Unknown sender ignored | Configure `allowFrom`, pairing, or the channel-specific allow list. |
-| Telegram shows a saved configuration but cannot complete a live check | The token is saved. Confirm the gateway can reach `api.telegram.org`, or open **Settings → Channels → Telegram → Advanced → Network proxy** and enter an HTTP or SOCKS proxy. |
+| Telegram shows a saved configuration but cannot complete a live check | The token is saved. Confirm the gateway can reach `api.telegram.org`, or open **Channels → Telegram → Advanced → Network proxy** and enter an HTTP or SOCKS proxy. |
 | Telegram rejects the token | Copy the current token from BotFather or regenerate it. |
 | Telegram receives no messages | Confirm the channel is enabled, the gateway is running, and the sender is paired or listed in `allowFrom`. |
 | Discord replies missing | Enable Message Content intent and invite the bot with the required permissions. |
