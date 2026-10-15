@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 import typer
+from click import unstyle
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -405,7 +406,7 @@ def test_gateway_management_rejects_misplaced_selectors_before_side_effects(
     result = runner.invoke(app, ["gateway", *selectors, *command])
 
     assert result.exit_code == 2, result.output
-    output = " ".join(result.output.split())
+    output = " ".join(unstyle(result.output).split())
     assert "--config and --workspace must follow a management subcommand" in output
     assert f"nanobot gateway {command[0]} --help" in output
     assert runtime.runtime_selectors == []
