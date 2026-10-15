@@ -5,40 +5,24 @@ import { describe, expect, it, vi } from "vitest";
 import { CodeBlock } from "@/components/CodeBlock";
 import { ThemeProvider } from "@/hooks/useTheme";
 
-const mockedStyles = vi.hoisted(() => ({
-  dark: { pre: { background: "#111" } },
-  light: { pre: { background: "#fff" } },
-}));
-
 vi.mock("react-syntax-highlighter/dist/esm/prism-async-light", () => ({
   default: ({
     children,
     language,
-    style,
     customStyle,
   }: {
     children: string;
     language?: string;
-    style: Record<string, unknown>;
     customStyle?: React.CSSProperties;
   }) => (
     <pre
       data-testid="highlighted-code"
       data-language={language}
-      data-theme={style === mockedStyles.dark ? "dark" : "light"}
       style={customStyle}
     >
       <code>{children}</code>
     </pre>
   ),
-}));
-
-vi.mock("react-syntax-highlighter/dist/esm/styles/prism/one-dark", () => ({
-  default: mockedStyles.dark,
-}));
-
-vi.mock("react-syntax-highlighter/dist/esm/styles/prism/one-light", () => ({
-  default: mockedStyles.light,
 }));
 
 describe("CodeBlock", () => {
@@ -220,7 +204,7 @@ describe("CodeBlock", () => {
       "ansi",
     );
     expect(screen.queryByText("ansi")).not.toBeInTheDocument();
-    expect(screen.getByText("PASS")).toHaveStyle({ color: "#0dbc79" });
+    expect(screen.getByText("PASS")).toHaveStyle({ color: "#86efac" });
     expect(screen.getByText("<script>alert(1)</script>")).toBeInTheDocument();
     expect(document.querySelector("script")).toBeNull();
   });
@@ -239,6 +223,13 @@ describe("CodeBlock", () => {
     expect(screen.getByText("truecolor")).toHaveStyle({
       color: "rgb(35, 209, 139)",
     });
+  });
+
+  it("clears ANSI foreground and background colors on reset", () => {
+    render(<CodeBlock language="ansi" code={"\x1b[31;47merror\x1b[0m normal"} />);
+
+    expect(screen.getByText("error")).toHaveStyle({ color: "#cd3131", backgroundColor: "#e5e5e5" });
+    expect(screen.getByText("normal")).not.toHaveAttribute("style");
   });
 
   it("copies ANSI output as clean text", async () => {
@@ -314,7 +305,7 @@ describe("CodeBlock", () => {
     try {
       const { rerender } = render(
         <ThemeProvider theme="dark">
-          <CodeBlock language="ts" code="const value = 1;" />
+          <CodeBlock language="ansi" code={"\x1b[32mPASS\x1b[0m"} />
         </ThemeProvider>,
       );
 
@@ -323,14 +314,11 @@ describe("CodeBlock", () => {
         await Promise.resolve();
       });
 
-      expect(screen.getByTestId("highlighted-code")).toHaveAttribute(
-        "data-theme",
-        "dark",
-      );
+      expect(screen.getByText("PASS")).toHaveStyle({ color: "#86efac" });
 
       rerender(
         <ThemeProvider theme="light">
-          <CodeBlock language="ts" code="const value = 1;" />
+          <CodeBlock language="ansi" code={"\x1b[32mPASS\x1b[0m"} />
         </ThemeProvider>,
       );
 
@@ -338,10 +326,7 @@ describe("CodeBlock", () => {
         await Promise.resolve();
       });
 
-      expect(screen.getByTestId("highlighted-code")).toHaveAttribute(
-        "data-theme",
-        "light",
-      );
+      expect(screen.getByText("PASS")).toHaveStyle({ color: "#166534" });
       expect(observer).not.toHaveBeenCalled();
     } finally {
       vi.stubGlobal("MutationObserver", originalMutationObserver);

@@ -663,8 +663,8 @@ describe("MessageBubble", () => {
     expect(token).toHaveClass("font-[550]");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
-    expect(token.getAttribute("style")).toContain("color: #0B5CFF");
-    expect(token.getAttribute("style")).not.toContain("text-shadow");
+    expect(token).toHaveClass("text-foreground");
+    expect(token.style.textShadow).toBe("");
     const logo = screen.getByTestId("message-cli-mention-logo-zoom");
     expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
     expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
@@ -716,7 +716,7 @@ describe("MessageBubble", () => {
     expect(token).toHaveTextContent("@Draw.io");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
-    expect(token.getAttribute("style")).toContain("color: #F08705");
+    expect(token).toHaveClass("text-foreground");
     expect(screen.getByTestId("message-cli-mention-logo-drawio")).toBeInTheDocument();
   });
 
@@ -733,7 +733,7 @@ describe("MessageBubble", () => {
     const token = screen.getByTestId("message-mcp-mention-browserbase");
     expect(token).toHaveTextContent("@Browserbase");
     expect(token).toHaveAttribute("title", "MCP server: Browserbase (@browserbase)");
-    expect(token.getAttribute("style")).toContain("color: #111827");
+    expect(token).toHaveClass("text-foreground");
     const logo = screen.getByTestId("message-mcp-mention-logo-browserbase");
     expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
     expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");

@@ -2645,7 +2645,7 @@ export function ThreadComposer({
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
             className={cn(
               inputTextClasses,
-              "relative z-10 block caret-foreground placeholder:text-muted-foreground/70",
+              "relative z-10 block caret-foreground placeholder:text-muted-foreground",
               "focus:outline-none focus-visible:outline-none",
               "disabled:cursor-not-allowed",
               hasMentionDecorations && "text-transparent selection:bg-primary/20",

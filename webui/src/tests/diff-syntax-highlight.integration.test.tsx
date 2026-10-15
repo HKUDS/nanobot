@@ -50,10 +50,11 @@ describe("DiffSyntaxHighlight with Prism", () => {
     await waitFor(
       () => {
         const tokens = highlighted.querySelectorAll<HTMLElement>(
-          'td:last-child span[style*="color"]',
+          "td:last-child .token",
         );
         expect(tokens).not.toHaveLength(0);
-        expect(new Set([...tokens].map((token) => token.style.color)).size).toBeGreaterThan(1);
+        expect(highlighted.querySelector(".token.keyword")).not.toBeNull();
+        expect(highlighted.querySelector(".token.string")).not.toBeNull();
       },
       { timeout: 10_000 },
     );

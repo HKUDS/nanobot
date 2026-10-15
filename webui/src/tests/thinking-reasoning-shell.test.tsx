@@ -57,7 +57,7 @@ describe("ThinkingReasoningShell", () => {
     view.rerender(shell(false));
 
     expect(screen.getByRole("button", { name: "Worked, Collapse activity details" })).toBe(button);
-    expect(screen.getByText("Worked")).toHaveClass("text-muted-foreground/65");
+    expect(screen.getByText("Worked")).toHaveClass("text-muted-foreground");
     expect(screen.getByText("Worked")).not.toHaveAttribute("data-sheen-text");
     expect(button.className).toBe(headerClass);
     expect(screen.getByTestId("agent-activity-content")).toBe(content);

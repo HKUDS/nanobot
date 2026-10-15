@@ -48,14 +48,6 @@ vi.mock("react-syntax-highlighter/dist/esm/create-element", () => ({
   ),
 }));
 
-vi.mock("react-syntax-highlighter/dist/esm/styles/prism/one-dark", () => ({
-  default: { dark: { color: "#fff" } },
-}));
-
-vi.mock("react-syntax-highlighter/dist/esm/styles/prism/one-light", () => ({
-  default: { light: { color: "#111" } },
-}));
-
 describe("DiffSyntaxHighlight", () => {
   it("highlights a complete hunk while preserving diff rows and line numbers", async () => {
     render(

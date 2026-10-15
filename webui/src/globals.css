@@ -24,15 +24,20 @@
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
+    --muted-foreground: 240 4% 40%;
     --accent: 0 0% 96.1%;
     --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 73.7% 41.8%;
     --destructive-foreground: 0 0% 98%;
     --border: 40 8% 90.5%;
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
-    --inline-token-highlight: #ef8e30;
+    --inline-token-highlight: #ad450b;
+    --code-comment: #62626b;
+    --code-string: #166534;
+    --code-keyword: #7e22ce;
+    --code-function: #1d4ed8;
+    --code-property: #854d0e;
     --usage-token: 29 86% 56%;
     --session-handle-lightness: 0.5;
     --session-handle-chroma: 0.12;
@@ -78,7 +83,7 @@
     --secondary: var(--card);
     --secondary-foreground: 0 0% 98%;
     --muted: var(--card);
-    --muted-foreground: 0 0% 65%;
+    --muted-foreground: 0 0% 72%;
     --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
     /* Destructive text needs contrast on dark surfaces; filled controls use a dark label. */
@@ -88,6 +93,11 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --code-comment: #c8c8d0;
+    --code-string: #b5d99c;
+    --code-keyword: #e3a5f7;
+    --code-function: #93c5fd;
+    --code-property: #f6c177;
     --session-handle-lightness: 0.75;
     --session-handle-chroma: 0.11;
     --temporary-control-active: #ef8e30;
@@ -1616,4 +1626,33 @@
 
 @keyframes workspace-directory-shimmer {
   to { transform: translateX(100%); }
+}
+
+/* Prism classes are generated at runtime, outside Tailwind's source inventory. */
+.code-content {
+  color: hsl(var(--foreground));
+}
+.code-content :is(.token.comment, .token.prolog, .token.doctype, .token.cdata, .linenumber) {
+  color: var(--code-comment);
+}
+.code-content .token.comment {
+  font-style: italic;
+}
+.code-content :is(.token.string, .token.char, .token.attr-value, .token.regex, .token.inserted) {
+  color: var(--code-string);
+}
+.code-content :is(.token.keyword, .token.selector, .token.important, .token.atrule) {
+  color: var(--code-keyword);
+}
+.code-content :is(.token.function, .token.operator, .token.entity, .token.url) {
+  color: var(--code-function);
+}
+.code-content :is(.token.number, .token.boolean, .token.constant, .token.symbol, .token.attr-name, .token.class-name, .token.builtin, .token.tag, .token.property, .token.deleted) {
+  color: var(--code-property);
+}
+.code-content :is(.token.bold, .token.important) {
+  font-weight: 600;
+}
+.code-content .token.italic {
+  font-style: italic;
 }

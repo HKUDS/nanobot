@@ -261,7 +261,7 @@ export function MessageBlockMenuActions({
         {timestampLabel || automationSourceLabel ? (
           <div
             data-message-block-metadata
-            className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4", sheet ? "px-2 text-xs text-muted-foreground" : "text-[10px] text-muted-foreground/45")}
+            className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
           >
             {timestampLabel ? (
               <time

@@ -515,7 +515,7 @@ describe("NanobotTui layout and themes", () => {
     expect(internals.composerFrame.borderColor.toInts().slice(0, 3)).toEqual([185, 77, 11])
     expect(internals.composerFrame.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
     expect(internals.composer.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
-    expect(internals.composer.placeholderColor.toInts().slice(0, 3)).toEqual([111, 111, 120])
+    expect(internals.composer.placeholderColor.toInts().slice(0, 3)).toEqual([98, 98, 107])
 
     app.accept({ event: "attached", chat_id: "chat" })
     await waitUntil(() => internals.ready)
@@ -750,11 +750,12 @@ describe("NanobotTui layout and themes", () => {
     const internals = app as unknown as {
       palette: Record<string, string> & { referenceBackground: string; faint: string }
     }
-    const assertContrast = () => {
-      for (const tone of ["text", "muted", "accent", "link", "success", "error", "user", "warm", "cool"]) {
-        expect(contrastRatio(internals.palette[tone] ?? "", internals.palette.referenceBackground)).toBeGreaterThanOrEqual(4.5)
+    const assertContrast = (backgrounds: string[]) => {
+      for (const background of backgrounds) {
+        for (const tone of ["text", "muted", "faint", "accent", "link", "success", "error", "user", "warm", "cool"]) {
+          expect(contrastRatio(internals.palette[tone] ?? "", background)).toBeGreaterThanOrEqual(4.5)
+        }
       }
-      expect(contrastRatio(internals.palette.faint, internals.palette.referenceBackground)).toBeGreaterThanOrEqual(3)
       const turnContrast = contrastRatio(
         internals.palette.userBackground ?? "",
         internals.palette.referenceBackground,
@@ -764,11 +765,11 @@ describe("NanobotTui layout and themes", () => {
     }
 
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "dark")
-    assertContrast()
+    assertContrast([internals.palette.referenceBackground, "#282C34", "#282A36", "#282828", "#002B36"])
     expect(internals.palette.accent).toBe("#EF8E30")
     expect(internals.palette.user).toBe("#EF8E30")
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
-    assertContrast()
+    assertContrast([internals.palette.referenceBackground, "#FDF6E3"])
     expect(internals.palette.accent).toBe("#B94D0B")
     expect(internals.palette.user).toBe("#B94D0B")
   })

@@ -1611,7 +1611,7 @@ describe("AgentActivityCluster", () => {
       <AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow={false} />,
     );
     expect(screen.getByText(/^Worked/)).toBe(header);
-    expect(header).toHaveClass("text-muted-foreground/65");
+    expect(header).toHaveClass("text-muted-foreground");
     expect(header).not.toHaveAttribute("data-sheen-text");
   });
 

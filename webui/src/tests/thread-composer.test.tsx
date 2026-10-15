@@ -2506,8 +2506,8 @@ describe("ThreadComposer", () => {
     expect(token.className).not.toContain("zoom-in");
     expect(token.className).not.toContain("px-");
     expect(token.className).not.toContain("mx-");
-    expect(token.getAttribute("style")).toContain("color: #5C5543");
-    expect(token.getAttribute("style")).not.toContain("text-shadow");
+    expect(token).toHaveClass("text-foreground");
+    expect(token.style.textShadow).toBe("");
     expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     const logo = screen.getByTestId("composer-cli-mention-logo-gimp");
     expect(logo.className).toContain("top-1/2");
@@ -2543,7 +2543,7 @@ describe("ThreadComposer", () => {
     expect(name).toHaveClass("[-webkit-text-stroke:0.4px_currentColor]");
   });
 
-  it("uses the shared accent when an installed CLI app has no brand metadata", () => {
+  it("uses the theme foreground when an installed CLI app has no brand metadata", () => {
     const mention = "@obsidian-agent-cli";
     const app: CliAppInfo = {
       name: "obsidian-agent-cli",
@@ -2575,8 +2575,7 @@ describe("ThreadComposer", () => {
     });
 
     const token = screen.getByTestId("composer-cli-mention-obsidian-agent-cli");
-    expect(token.getAttribute("style")).toContain("var(--inline-token-highlight)");
-    expect(token.getAttribute("style")).not.toContain("var(--primary)");
+    expect(token).toHaveClass("text-foreground");
   });
 
   it.each([

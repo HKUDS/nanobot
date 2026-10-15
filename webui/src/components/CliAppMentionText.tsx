@@ -179,7 +179,6 @@ function CliAppMentionToken({
   isHero?: boolean;
 }) {
   const { t } = useTranslation();
-  const color = app.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const displayName = app.display_name?.trim() || app.name;
   const mentionName = variant === "message"
     ? displayName
@@ -195,7 +194,6 @@ function CliAppMentionToken({
       title={t("thread.composer.mentions.cliTitle", {
         name: variant === "message" ? `${displayName} (${label})` : displayName,
       })}
-      color={color}
       className={variant === "composer" ? "font-normal" : "inline-flex max-w-full items-baseline [overflow-wrap:anywhere]"}
     >
       <span
@@ -250,7 +248,6 @@ function McpPresetMentionToken({
   isHero?: boolean;
 }) {
   const { t } = useTranslation();
-  const color = preset.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const displayName = preset.display_name?.trim() || preset.name;
   const mentionName = variant === "message"
     ? displayName
@@ -266,7 +263,6 @@ function McpPresetMentionToken({
       title={t("thread.composer.mentions.mcpTitle", {
         name: variant === "message" ? `${displayName} (${label})` : displayName,
       })}
-      color={color}
       className={variant === "composer" ? "font-normal" : "inline-flex max-w-full items-baseline [overflow-wrap:anywhere]"}
     >
       <span
