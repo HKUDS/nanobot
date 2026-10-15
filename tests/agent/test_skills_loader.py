@@ -530,7 +530,7 @@ def test_prompt_reads_skills_once_and_refreshes_on_next_build(
     monkeypatch.setattr("nanobot.agent.skills.shutil.which", which)
     first = build_prompt()
     assert "First instructions" in first
-    assert "unavailable: CLI: prompt-test-cli" in first
+    assert "**beta**" not in first
     assert discoveries == 1
     assert all(reads.count(path) == 1 for path in documents)
     assert len(parses) == len(documents)
@@ -546,7 +546,7 @@ def test_prompt_reads_skills_once_and_refreshes_on_next_build(
     second = build_prompt()
     assert "Updated instructions" in second and "First instructions" not in second
     assert "Updated description" in second
-    assert "unavailable: CLI: prompt-test-cli" not in second
+    assert "**beta**" in second
     assert "**gamma**" in second
     assert discoveries == 2
     assert all(reads.count(path) == 1 for path in documents)
