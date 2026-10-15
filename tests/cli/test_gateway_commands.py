@@ -358,19 +358,16 @@ def test_gateway_rejects_conflicting_modes(tmp_path):
     ],
     ids=["status", "logs", "stop", "restart", "install-service"],
 )
-@pytest.mark.parametrize("selectors_before_command", [True, False], ids=["parent", "child"])
 def test_gateway_management_uses_instance_selectors(
     tmp_path: Path,
     command: list[str],
-    selectors_before_command: bool,
 ) -> None:
     app, runtime, service, _calls, _prepare_calls = _test_app(tmp_path)
     config_path = str(tmp_path / "custom" / "config.json")
     workspace = str(tmp_path / "workspace")
     selectors = ["--config", config_path, "--workspace", workspace]
-    args = ["gateway", *selectors, *command] if selectors_before_command else ["gateway", *command, *selectors]
 
-    result = runner.invoke(app, args)
+    result = runner.invoke(app, ["gateway", *command, *selectors])
 
     assert result.exit_code == 0, result.output
     if command[0] == "install-service":
@@ -386,45 +383,36 @@ def test_gateway_management_uses_instance_selectors(
         ).start_options(port=18790)
 
 
-def test_gateway_stop_child_config_overrides_parent_and_inherits_workspace(tmp_path: Path) -> None:
-    app, runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
-    parent_config = str(tmp_path / "parent" / "config.json")
-    child_config = str(tmp_path / "child" / "config.json")
-    workspace = str(tmp_path / "workspace")
+@pytest.mark.parametrize(
+    ("command", "options"),
+    [
+        (["status"], ["--config"]),
+        (["logs", "--no-follow"], ["--workspace"]),
+        (["stop"], ["--config", "--workspace"]),
+        (["restart"], ["-c"]),
+        (["install-service", "--dry-run", "--manager", "systemd"], ["-w"]),
+    ],
+    ids=["status", "logs", "stop", "restart", "install-service"],
+)
+def test_gateway_management_rejects_misplaced_selectors_before_side_effects(
+    tmp_path: Path,
+    command: list[str],
+    options: list[str],
+) -> None:
+    app, runtime, service, calls, prepare_calls = _test_app(tmp_path)
+    selectors = [argument for option in options for argument in (option, str(tmp_path / "custom instance"))]
 
-    result = runner.invoke(
-        app,
-        [
-            "gateway", "--config", parent_config, "--workspace", workspace,
-            "stop", "--config", child_config,
-        ],
-    )
+    result = runner.invoke(app, ["gateway", *selectors, *command])
 
-    assert result.exit_code == 0, result.output
-    assert runtime.runtime_selectors == [(child_config, workspace)]
-    assert runtime.stop_timeout == 20
-
-
-def test_gateway_restart_child_workspace_overrides_parent_and_inherits_config(tmp_path: Path) -> None:
-    app, runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
-    config_path = str(tmp_path / "config.json")
-    parent_workspace = str(tmp_path / "parent-workspace")
-    child_workspace = str(tmp_path / "child-workspace")
-
-    result = runner.invoke(
-        app,
-        [
-            "gateway", "-c", config_path, "-w", parent_workspace,
-            "restart", "-w", child_workspace,
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert runtime.config_selectors == [(config_path, child_workspace)]
-    assert runtime.runtime_selectors == [(config_path, child_workspace)]
-    assert runtime.restarted_options == GatewayInstance.resolve(
-        config_path=config_path, workspace=child_workspace,
-    ).start_options(port=18790)
+    assert result.exit_code == 2, result.output
+    output = " ".join(result.output.split())
+    assert "--config and --workspace must follow a management subcommand" in output
+    assert f"nanobot gateway {command[0]} --help" in output
+    assert runtime.runtime_selectors == []
+    assert runtime.config_selectors == []
+    assert service.installed_options is None
+    assert calls == []
+    assert prepare_calls == []
 
 
 def test_gateway_status_uses_runtime(tmp_path):

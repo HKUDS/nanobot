@@ -174,12 +174,12 @@ First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration 
 | `nanobot gateway install-service --dry-run` | Preview the generated service file and system commands |
 | `nanobot gateway uninstall-service` | Remove the installed system service |
 
-For custom instances, pass the same selector flags to management commands. `--config` and `--workspace` can appear before or after `status`, `logs`, `stop`, `restart`, or `install-service`. If an option appears in both places, the value after the subcommand takes precedence. Selectors omitted after the subcommand inherit the values given before it.
+For custom instances, pass the same selector flags after the management subcommand, as shown below. `--config` and `--workspace` before a management subcommand are rejected with a usage error; they are not inherited.
 
 ```bash
 nanobot gateway --background --config ./bot-a/config.json --workspace ./bot-a/workspace
 nanobot gateway status --config ./bot-a/config.json --workspace ./bot-a/workspace
-nanobot gateway --config ./bot-a/config.json --workspace ./bot-a/workspace stop
+nanobot gateway stop --config ./bot-a/config.json --workspace ./bot-a/workspace
 nanobot gateway install-service --config ./bot-a/config.json --workspace ./bot-a/workspace --name bot-a
 ```
 

@@ -151,15 +151,12 @@ def create_gateway_app(
     ) -> None:
         """Start the nanobot gateway."""
         if ctx.invoked_subcommand is not None:
-            # Click parses the subcommand next; explicit child options override these defaults.
-            defaults = dict(ctx.default_map or {})
-            command_defaults = dict(defaults.get(ctx.invoked_subcommand, {}))
-            if config is not None:
-                command_defaults["config"] = config
-            if workspace is not None:
-                command_defaults["workspace"] = workspace
-            defaults[ctx.invoked_subcommand] = command_defaults
-            ctx.default_map = defaults
+            if config is not None or workspace is not None:
+                ctx.fail(
+                    "--config and --workspace must follow a management subcommand that "
+                    "supports them. See "
+                    f"'nanobot gateway {ctx.invoked_subcommand} --help'."
+                )
             return
         if foreground and background:
             console.print("[red]Error: --foreground and --background cannot be used together.[/red]")
