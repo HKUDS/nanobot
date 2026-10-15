@@ -294,21 +294,24 @@ def test_exec_tool_enabled():
 
 
 def test_exec_tool_create():
-    from nanobot.agent.tools.shell import ExecTool
-    mock_config = MagicMock()
-    mock_config.exec.enable = True
-    mock_config.exec.timeout = 120
-    mock_config.exec.sandbox = ""
-    mock_config.exec.path_prepend = "/venv/bin"
-    mock_config.exec.path_append = ""
-    mock_config.exec.allowed_env_keys = []
-    mock_config.exec.allow_patterns = []
-    mock_config.exec.deny_patterns = []
-    mock_config.restrict_to_workspace = False
-    ctx = ToolContext(config=mock_config, workspace="/tmp")
+    from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
+    from nanobot.config.schema import ToolsConfig
+
+    config = ToolsConfig(exec=ExecToolConfig(
+        max_runtime=120,
+        max_runtime_limit=900,
+        idle_timeout=15,
+        idle_action="terminate",
+        path_prepend="/venv/bin",
+    ))
+    ctx = ToolContext(config=config, workspace="/tmp")
     tool = ExecTool.create(ctx)
+
     assert isinstance(tool, ExecTool)
     assert tool.path_prepend == "/venv/bin"
+    assert tool._resolve_timeout(None) == 120
+    for name in ("max_runtime", "timeout"):
+        assert tool.parameters["properties"][name]["maximum"] == 900
 
 
 def test_web_tools_config_cls():
@@ -431,16 +434,10 @@ def test_loader_registers_builtin_tools():
     """Verify the loader produces the same tool set as the old _register_default_tools."""
     from nanobot.agent.tools.loader import ToolLoader
     from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.agent.tools.shell import ExecToolConfig
 
     mock_config = MagicMock()
-    mock_config.exec.enable = True
-    mock_config.exec.timeout = 60
-    mock_config.exec.sandbox = ""
-    mock_config.exec.path_prepend = ""
-    mock_config.exec.path_append = ""
-    mock_config.exec.allowed_env_keys = []
-    mock_config.exec.allow_patterns = []
-    mock_config.exec.deny_patterns = []
+    mock_config.exec = ExecToolConfig(max_runtime=60)
     mock_config.restrict_to_workspace = False
     mock_config.web.enable = True
     mock_config.web.search = MagicMock()

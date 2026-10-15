@@ -2270,7 +2270,11 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.maxSessionMessagesPerMinute` | `6` | Maximum messages one source session may send during any rolling 60-second window. Additional sends are rejected to stop runaway agent loops. |
 | `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. `"bwrap"` (Linux) or `"seatbelt"` (macOS) restricts filesystem access to the workspace (read-write), media (read-only), required system paths and configured extra binds. The workspace's parent is denied except for allowed roots; keep secrets outside the workspace and binds. Automatically enables workspace restriction for file tools. `"bwrap"` requires bubblewrap (`apt install bubblewrap`; pre-installed in Docker). `"seatbelt"` uses macOS `sandbox-exec(1)`; it sets `HOME` and `TMPDIR` to the workspace rather than sharing host temporary directories. Use `mktemp "$TMPDIR/job.XXXXXX"` for macOS shell scratch files. Neither backend restricts network access. Windows logs a warning and runs commands without OS sandboxing. |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
-| `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
+| `tools.exec.maxRuntime` | `3600` | Default hard runtime in seconds for shell commands, measured from process start even while output is arriving. Set `0` only in trusted configuration to allow unlimited runtime. |
+| `tools.exec.maxRuntimeLimit` | `86400` | Positive upper bound in seconds for model-requested hard runtimes. If omitted, uses the greater of `86400` and a finite configured `maxRuntime`. An explicit limit must not be below a finite `maxRuntime`. |
+| `tools.exec.idleTimeout` | `300` | Seconds without stdout or stderr before the idle action applies. Set `0` to disable inactivity checks. |
+| `tools.exec.idleAction` | `"report"` | `"report"` reports inactivity without stopping the command; `"terminate"` stops it. |
+| `tools.exec.timeout` | alias | Legacy name for `maxRuntime`, not an inactivity timeout. Existing explicit values, including `0`, keep their hard-runtime meaning. Do not set both names. |
 | `tools.exec.pathPrepend` | `""` | Extra directories to prepend to `PATH` when running shell commands. Use this when configured tools should win executable lookup precedence, such as a Python virtual environment's `bin` or `Scripts` directory. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `tools.exec.sandboxRoBinds` | `[]` | Extra absolute paths to expose read-only inside the exec sandbox (`--ro-bind-try` for `"bwrap"`, an SBPL `file-read*` rule for `"seatbelt"`), such as `/home/user/.local/bin` or `/home/user/.cargo/bin` when those paths are also in `pathPrepend`/`pathAppend`. These roots are also accepted by the shell absolute-path guard only while a sandbox is active. Bind only directories whose contents are safe for agent commands to read; paths equal to or containing the active workspace are ignored so they cannot uncover its masked parent directory. |
@@ -2284,6 +2288,36 @@ Each new user request includes the current project and file-access restriction i
 To diagnose a path error, the agent can call `my(action="check", key="workspace_sandbox")`. This read-only result shows the current tool directory and workspace restriction, including the restriction from `tools.exec.sandbox`. The older `workspace` value is an agent-directory display; it does not select the current project or grant access. Check `exec_config` for the configured shell sandbox and extra binds. Those binds do not grant file-tool access or permit an external shell `working_dir`. OS file permissions still apply. The `workspace_sandbox.enforced` field reports external sandbox markers, not whether a configured shell sandbox has started successfully.
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. The default `docker-compose.yml` drops all Linux capabilities except the `CHOWN`, `SETGID`, and `SETUID` capabilities required by the root entrypoint to initialize bind-mount ownership and become UID 1000. It enables `no-new-privileges` so the final non-root process cannot regain those bootstrap capabilities, and keeps Docker's default AppArmor/seccomp profiles enabled. If you enable `"tools.exec.sandbox": "bwrap"` inside Docker, start Compose with `docker-compose.bwrap.yml` as an additional override so bubblewrap can create nested namespaces. The host must also allow unprivileged user namespaces; the override cannot bypass a host-level namespace restriction.
+
+
+### Shell command timing
+
+Shell commands have separate hard-runtime and inactivity checks. By default, a command can run for up to one hour. Five minutes without stdout or stderr produces an inactivity report but does not kill it. Output resets the inactivity clock; it never extends the hard-runtime deadline. A command that keeps printing can still reach its hard limit.
+
+Configure these defaults under `tools.exec` in `config.json`, then restart the gateway:
+
+```json
+{
+  "tools": {
+    "exec": {
+      "maxRuntime": 3600,
+      "maxRuntimeLimit": 86400,
+      "idleTimeout": 300,
+      "idleAction": "report"
+    }
+  }
+}
+```
+
+All durations are integer seconds. Snake-case configuration names (`max_runtime`, `max_runtime_limit`, `idle_timeout`, and `idle_action`) are also accepted; saved configuration uses camelCase. The existing shell timeout control in Settings changes the hard-runtime default. The agent can inspect the loaded defaults with `my(action="check", key="exec_config")`.
+
+A command may request a different hard runtime up to `maxRuntimeLimit`. This limit must be positive, including when the configured default is unlimited. Setting `maxRuntime` to `0` allows unlimited runtime only when the command uses that trusted default; the model cannot request an unlimited hard runtime. Set `idleTimeout` to `0` as well if a trusted command must run without either timing check.
+
+For existing configurations, `timeout` remains a hard-runtime alias: `"timeout": 60` still stops a command after 60 seconds, and `"timeout": 0` still means no hard deadline. Use either `timeout` or `maxRuntime`, not both. When `maxRuntimeLimit` is omitted, a configured hard runtime above 86400 seconds also raises the model-request limit to that value. An explicitly smaller limit is rejected rather than shortening the configured runtime.
+
+The tool result distinguishes a hard-runtime termination from inactivity. With `idleAction: "report"`, a silent command continues running under its hard-runtime limit. With `idleAction: "terminate"`, inactivity stops the command and the result reports that reason. Both limits apply without polling. Commands are cleaned up when they finish, reach an enforced limit, or their owning session is cancelled or deleted; normal operation does not require manual process management. `yield_time_ms` and an `exec_session` wait timeout only control how long a tool call waits before returning; neither stops the command nor resets its runtime or inactivity clock.
+
+Silence is not proof that a command is stuck: builds, downloads, and buffered programs can be quiet while working. Only bytes received through stdout or stderr count as activity; output redirected to files is not observed, and reading logs does not refresh the inactivity clock. Inactivity checks do not detect prompts or supply answers. Choose `"terminate"` only when stopping a quiet command is acceptable, and use a finite hard runtime when total execution time must remain bounded. Shell sessions are not durable jobs and should not be used as a replacement for a scheduler or service manager. A command that detaches a background service and exits is not a managed job; these timing checks do not manage that service afterward.
 
 
 ## Pairing
