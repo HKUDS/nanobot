@@ -406,8 +406,9 @@ async def test_cancelled_prompt_keeps_its_worker_slot_until_read_finishes() -> N
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["request", "usage"])
+@pytest.mark.parametrize("cancel", [False, True])
 async def test_local_token_estimation_leaves_loop_available(
-    tmp_path, monkeypatch, loop_factory, phase,
+    tmp_path, monkeypatch, loop_factory, phase, cancel,
 ) -> None:
     loop = loop_factory()
     loop.provider.provider_name = "token-test"
@@ -417,6 +418,13 @@ async def test_local_token_estimation_leaves_loop_available(
     completed = asyncio.Event()
     release = threading.Event()
     captured = []
+    finalized = []
+
+    class Lifecycle(AgentHook):
+        async def on_finally(self, context):
+            finalized.append((context.stop_reason, current_request_context(), asyncio.get_running_loop()))
+
+    loop._extra_hooks.append(Lifecycle())
 
     def count(*_args, **_kwargs):
         captured.append(current_request_context())
@@ -440,11 +448,21 @@ async def test_local_token_estimation_leaves_loop_available(
             loop.provider.chat_stream_with_retry.assert_not_awaited()
         else:
             loop.provider.chat_stream_with_retry.assert_awaited_once()
-        release.set()
-        result = await asyncio.wait_for(task, timeout=5)
-        assert result is not None and result.content == "Done"
-        saved = loop.sessions.read_session_snapshot("cli:token-work")
-        assert [public_history_message(message)["content"] for message in saved.messages] == ["Hello", "Done"]
+        if cancel:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(asyncio.shield(task), timeout=1)
+            assert len(finalized) == 1
+            reason, request, final_loop = finalized[0]
+            assert reason == "cancelled"
+            assert request is not None and request.session_key == "cli:token-work"
+            assert final_loop is runtime_loop
+        else:
+            release.set()
+            result = await asyncio.wait_for(task, timeout=5)
+            assert result is not None and result.content == "Done"
+            saved = loop.sessions.read_session_snapshot("cli:token-work")
+            assert [public_history_message(message)["content"] for message in saved.messages] == ["Hello", "Done"]
     finally:
         release.set()
         if not task.done():

@@ -166,7 +166,7 @@ class AgentRunner:
     ) -> list[dict[str, Any]]:
         if not messages or not hook.has_run_hooks():
             return []
-        return await self.prepare_prompt(deepcopy, messages)
+        return await asyncio.to_thread(deepcopy, messages)
 
     @staticmethod
     def _append_injected_messages(

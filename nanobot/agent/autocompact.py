@@ -92,7 +92,6 @@ class AutoCompact:
         try:
             async with self._session_lock(key):
                 # Idle compaction and turns share one transcript boundary.
-                session = await self.sessions.state.get(key)
                 summary = await self.consolidator.compact_idle_session(
                     key,
                     runtime=runtime,

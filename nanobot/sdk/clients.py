@@ -22,8 +22,6 @@ if TYPE_CHECKING:
 class SessionClient:
     """Asynchronous operations over committed session state."""
 
-    _RESERVED_MESSAGE_KEYS = {"role", "content", RUNTIME_CONTEXT_HISTORY_META}
-
     def __init__(self, loop: AgentLoop) -> None:
         self._loop = loop
         self._state = loop.sessions.state
