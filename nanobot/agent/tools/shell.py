@@ -38,6 +38,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.agent.tools.shell_config import ExecToolConfig
+from nanobot.agent.tools.shell_output import ShellOutputFilter
 from nanobot.config.paths import get_media_dir
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
@@ -309,13 +310,13 @@ class ExecTool(Tool):
 
             output_parts: list[str] = []
 
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
+            stdout_text = ShellOutputFilter().feed(stdout.decode("utf-8", errors="replace"))
+            if stdout_text:
+                output_parts.append(stdout_text)
 
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
+            stderr_text = ShellOutputFilter().feed(stderr.decode("utf-8", errors="replace"))
+            if stderr_text.strip():
+                output_parts.append(f"STDERR:\n{stderr_text}")
 
             output_parts.append(f"\nExit code: {process.returncode}")
 

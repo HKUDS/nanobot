@@ -27,6 +27,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.agent.tools.shell_config import ExecToolConfig
+from nanobot.agent.tools.shell_output import ShellOutputFilter
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -175,9 +176,10 @@ class _ExecSession:
         if stream is None:
             return
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        output_filter = ShellOutputFilter()
         while True:
             chunk = await stream.read(4096)
-            text = decoder.decode(chunk, final=not chunk)
+            text = output_filter.feed(decoder.decode(chunk, final=not chunk))
             async with self._lock:
                 buffer.append(text)
             if not chunk:
