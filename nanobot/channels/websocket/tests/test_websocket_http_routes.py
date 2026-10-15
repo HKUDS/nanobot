@@ -699,6 +699,74 @@ async def test_webui_skill_management_routes(
 
 
 @pytest.mark.asyncio
+async def test_webui_extension_management_routes(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    extension_dir = tmp_path / "extensions" / "demo-extension"
+    extension_dir.mkdir(parents=True)
+    (extension_dir / "extension.json").write_text(
+        json.dumps(
+            {
+                "id": "demo-extension",
+                "name": "Demo Extension",
+                "description": "demo",
+                "entry": "index.html",
+                "version": "0.1.0",
+                "enabled": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (extension_dir / "index.html").write_text("<h1>demo</h1>", encoding="utf-8")
+
+    port = _free_port()
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=port,
+    )
+    channel.gateway.extensions.root = tmp_path / "extensions"
+    channel.gateway.extensions.root.mkdir(parents=True, exist_ok=True)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        toggle_response = await _webui_mutate(
+            channel,
+            "extension.toggle",
+            {"id": "demo-extension", "enabled": False},
+            headers=headers,
+        )
+        assert toggle_response.status_code == 200
+        assert toggle_response.json()["extensions"][0]["enabled"] is False
+
+        config_response = await _webui_mutate(
+            channel,
+            "extension.config",
+            {"id": "demo-extension", "config": {"theme": "dark"}},
+            headers=headers,
+        )
+        assert config_response.status_code == 200
+        assert config_response.json()["config"]["theme"] == "dark"
+        assert config_response.json()["extensions"][0]["config"]["theme"] == "dark"
+
+        delete_response = await _webui_mutate(
+            channel,
+            "extension.delete",
+            {"id": "demo-extension"},
+            headers=headers,
+        )
+        assert delete_response.status_code == 200
+        assert all(item["id"] != "demo-extension" for item in delete_response.json()["extensions"])
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_webui_skills_marketplace_routes_search_and_install(
     bus: MagicMock,
     tmp_path: Path,
