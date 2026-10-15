@@ -96,4 +96,37 @@ describe("useSidebarState", () => {
     expect(result.current.state.pinned_keys).toEqual(["websocket:a"]);
     expect(setSidebarState).not.toHaveBeenCalled();
   });
+
+  it("persists local mutations when the initial fetch returns 404 (no saved state)", async () => {
+    const setSidebarState = vi.fn().mockImplementation(async (state: SidebarStatePayload) => state);
+    const client = {
+      status: "open" as const,
+      onStatus: () => () => {},
+      onSidebarStateUpdate: () => () => {},
+      setSidebarState,
+    } as unknown as NanobotClient;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+      text: async () => "",
+      headers: { get: () => null },
+    }));
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="token">
+        {children}
+      </ClientProvider>
+    );
+    const { result } = renderHook(() => useSidebarState([], false), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      void result.current.update((current) => ({
+        ...current,
+        pinned_keys: ["websocket:a"],
+      }));
+    });
+
+    await waitFor(() => expect(setSidebarState).toHaveBeenCalled());
+  });
 });

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import { normalizeWorkbenchState } from "@/components/workbench/workbench-model";
-import { fetchSidebarState } from "@/lib/api";
+import { ApiError, fetchSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
 const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
@@ -147,9 +147,11 @@ export function useSidebarState(
   const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
   const persistenceInFlightRef = useRef(false);
   const flushPersistenceRef = useRef<() => void>(() => {});
-  // Set only once the server state has been successfully loaded (or pushed).
-  // Until then, local mutations must not be persisted: writing the degraded
-  // DEFAULT_SIDEBAR_STATE fallback would wipe the user's saved state (#6008).
+  // Set once we know the server's state (or that it has none). Until then,
+  // local mutations must not be persisted: writing the degraded
+  // DEFAULT_SIDEBAR_STATE fallback after a failed load would wipe the user's
+  // saved state (#6008). A 404 means the server has no saved state, so it is
+  // safe to persist; other failures (network, 5xx, timeout) do not.
   const initialLoadSucceededRef = useRef(false);
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
@@ -166,10 +168,15 @@ export function useSidebarState(
         stateRef.current = loaded;
         setState(loaded);
         initialLoadSucceededRef.current = true;
-      } catch {
+      } catch (error) {
         if (cancelled) return;
         stateRef.current = DEFAULT_SIDEBAR_STATE;
         setState(DEFAULT_SIDEBAR_STATE);
+        // A 404 means the server has no saved state yet — persisting is safe.
+        // Any other failure leaves the flag unset to avoid wiping server state.
+        if (error instanceof ApiError && error.status === 404) {
+          initialLoadSucceededRef.current = true;
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
