@@ -907,7 +907,7 @@ describe("NanobotTui session navigation", () => {
   })
 
   test("opens the latest turn diff as a full-screen, navigable view", async () => {
-    setup = await createRenderer({ width: 96, height: 28, screenMode: "alternate-screen" })
+    setup = await createRenderer({ width: 96, height: 28, screenMode: "alternate-screen", consoleMode: "disabled" })
     const app = mount(setup)
     app.accept({ event: "attached", chat_id: "chat" })
     await waitUntil(() => (app as unknown as { ready: boolean }).ready)
@@ -982,6 +982,11 @@ describe("NanobotTui session navigation", () => {
     expect(selected.fg.intent).toBe("rgb")
     expect(selected.bg.intent).toBe("rgb")
     expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
+
+    setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
+    await setup.flush()
+    expect(setup.renderer.console.visible).toBe(false)
+    expect(setup.captureCharFrame()).toContain("const newValue = 2")
     setup.renderer.clearSelection()
 
     setup.mockInput.pressArrow("right")

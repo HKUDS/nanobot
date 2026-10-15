@@ -13,6 +13,7 @@ export interface SelectionColors {
 
 export function applySelectionColors(selection: Selection, colors: SelectionColors): void {
   for (const renderable of selection.selectedRenderables) {
+    if (renderable.isDestroyed) continue
     if (renderable instanceof TextBufferRenderable || renderable instanceof EditBufferRenderable) {
       renderable.selectionBg = colors.background
       renderable.selectionFg = colors.foreground

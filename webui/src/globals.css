@@ -1640,6 +1640,10 @@
 .code-content {
   color: hsl(var(--foreground));
 }
+/* Flattened JSX tokens retain the ancestor tag class; let inner token types win. */
+.code-content .token.tag {
+  color: var(--code-property);
+}
 .code-content :is(.token.comment, .token.prolog, .token.doctype, .token.cdata, .linenumber) {
   color: var(--code-comment);
 }
@@ -1655,7 +1659,7 @@
 .code-content :is(.token.function, .token.operator, .token.entity, .token.url) {
   color: var(--code-function);
 }
-.code-content :is(.token.number, .token.boolean, .token.constant, .token.symbol, .token.attr-name, .token.class-name, .token.builtin, .token.tag, .token.property, .token.deleted) {
+.code-content :is(.token.number, .token.boolean, .token.constant, .token.symbol, .token.attr-name, .token.class-name, .token.builtin, .token.property, .token.deleted) {
   color: var(--code-property);
 }
 .code-content :is(.token.bold, .token.important) {
