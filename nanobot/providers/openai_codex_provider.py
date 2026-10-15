@@ -58,18 +58,19 @@ _LANGFUSE_TRACE_WARNING = "Langfuse tracing failed for Codex request: {}"
 
 
 def _usage_details(usage: LLMUsage | None) -> dict[str, int] | None:
-    """Langfuse wants a plain token-count dict, not our LLMUsage dataclass."""
+    """Split inclusive input usage into Langfuse's exclusive token buckets."""
     if usage is None:
         return None
+    cached_tokens = (usage.cache_read_tokens or 0) + (usage.cache_write_tokens or 0)
     details = {
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_tokens": usage.total_tokens,
+        "input": usage.input_tokens - cached_tokens,
+        "output": usage.output_tokens,
+        "total": usage.total_tokens,
     }
     if usage.cache_read_tokens is not None:
-        details["cache_read_tokens"] = usage.cache_read_tokens
+        details["input_cached_tokens"] = usage.cache_read_tokens
     if usage.cache_write_tokens is not None:
-        details["cache_write_tokens"] = usage.cache_write_tokens
+        details["input_cache_creation"] = usage.cache_write_tokens
     return details
 
 

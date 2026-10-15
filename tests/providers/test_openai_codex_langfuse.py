@@ -117,7 +117,28 @@ async def test_codex_langfuse_disabled_when_env_var_unset(monkeypatch) -> None:
     assert find_spec_calls == []  # short-circuited before ever checking the package
 
 
-async def test_codex_langfuse_success_records_generation_with_expected_fields(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("cache_counts", "expected_usage_details"),
+    [
+        ({}, {"input": 100, "output": 20, "total": 120}),
+        (
+            {"cache_read_tokens": 0},
+            {"input": 100, "output": 20, "total": 120, "input_cached_tokens": 0},
+        ),
+        (
+            {"cache_read_tokens": 80},
+            {"input": 20, "output": 20, "total": 120, "input_cached_tokens": 80},
+        ),
+        (
+            {"cache_write_tokens": 20},
+            {"input": 80, "output": 20, "total": 120, "input_cache_creation": 20},
+        ),
+    ],
+    ids=["unreported-cache", "zero-cache", "cache-read", "cache-write"],
+)
+async def test_codex_langfuse_success_records_generation_with_expected_fields(
+    monkeypatch, cache_counts, expected_usage_details,
+) -> None:
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
     _mock_codex_token(monkeypatch)
     generations: list[_FakeGeneration] = []
@@ -128,8 +149,17 @@ async def test_codex_langfuse_success_records_generation_with_expected_fields(mo
         return gen
 
     _install_fake_langfuse(monkeypatch, start_generation)
+
+    async def fake_request(*_args, **_kwargs):
+        return provider_base.LLMResponse(
+            content="hello",
+            usage=provider_base.LLMUsage.reported(
+                input_tokens=100, output_tokens=20, total_tokens=120, **cache_counts,
+            ),
+        )
+
     monkeypatch.setattr(
-        "nanobot.providers.openai_codex_provider._request_codex", _fake_request_success
+        "nanobot.providers.openai_codex_provider._request_codex", fake_request
     )
 
     provider = OpenAICodexProvider()
@@ -141,11 +171,7 @@ async def test_codex_langfuse_success_records_generation_with_expected_fields(mo
     assert gen.start_kwargs["name"] == "codex_request"
     assert gen.start_kwargs["model"] == "gpt-5.6-sol"
     assert gen.update_calls[-1]["output"] == "hello"
-    assert gen.update_calls[-1]["usage_details"] == {
-        "input_tokens": 1,
-        "output_tokens": 2,
-        "total_tokens": 3,
-    }
+    assert gen.update_calls[-1]["usage_details"] == expected_usage_details
     assert gen.ended is True
 
 
