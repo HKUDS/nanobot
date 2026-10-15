@@ -9,12 +9,12 @@ export function DiffPair({ added, deleted }: { added: number; deleted: number })
       <DiffValue
         sign="+"
         value={added}
-        className="text-emerald-700 dark:text-emerald-300"
+        className="text-diff-added-foreground"
       />
       <DiffValue
         sign="-"
         value={deleted}
-        className="text-rose-700 dark:text-rose-300"
+        className="text-diff-deleted-foreground"
       />
     </span>
   );

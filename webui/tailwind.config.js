@@ -92,6 +92,14 @@ export default {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        "diff-added": {
+          DEFAULT: "var(--diff-added)",
+          foreground: "var(--diff-added-foreground)",
+        },
+        "diff-deleted": {
+          DEFAULT: "var(--diff-deleted)",
+          foreground: "var(--diff-deleted-foreground)",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

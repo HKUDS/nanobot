@@ -138,8 +138,8 @@ function DiffLineRow({
     <tr
       className={cn(
         "border-0",
-        kind === "add" && "bg-emerald-500/[0.09] dark:bg-emerald-300/[0.11]",
-        kind === "delete" && "bg-rose-500/[0.09] dark:bg-rose-300/[0.11]",
+        kind === "add" && "bg-diff-added",
+        kind === "delete" && "bg-diff-deleted",
       )}
     >
       <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground">
@@ -151,8 +151,8 @@ function DiffLineRow({
       <td
         className={cn(
           "w-5 select-none px-1 text-center",
-          kind === "add" && "text-emerald-700 dark:text-emerald-300",
-          kind === "delete" && "text-rose-700 dark:text-rose-300",
+          kind === "add" && "text-diff-added-foreground",
+          kind === "delete" && "text-diff-deleted-foreground",
           kind === "context" && "text-muted-foreground",
         )}
       >

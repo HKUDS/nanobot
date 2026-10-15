@@ -73,10 +73,10 @@ describe("DiffSyntaxHighlight", () => {
     expect(highlighted).toHaveAttribute("data-language", "typescript");
     expect(screen.getAllByTestId("syntax-token")).toHaveLength(3);
     expect(screen.getByText("return oldValue;", { exact: false }).closest("tr")).toHaveClass(
-      "bg-rose-500/[0.09]",
+      "bg-diff-deleted",
     );
     expect(screen.getByText("return newValue;", { exact: false }).closest("tr")).toHaveClass(
-      "bg-emerald-500/[0.09]",
+      "bg-diff-added",
     );
     expect(screen.getAllByText("5")).toHaveLength(2);
     expect(screen.getAllByTestId("syntax-token").some((node) => node.textContent?.endsWith("\n"))).toBe(false);
