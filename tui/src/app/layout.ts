@@ -128,6 +128,8 @@ export function createAppLayout(
     focusedTextColor: palette.text,
     backgroundColor: composerSurface,
     focusedBackgroundColor: composerSurface,
+    selectionBg: palette.selection.background,
+    selectionFg: palette.selection.foreground,
     cursorColor: palette.accent,
     syntaxStyle: composerSyntax,
     cursorStyle: { style: "line", blinking: false },

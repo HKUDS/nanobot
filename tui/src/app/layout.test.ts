@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { BoxRenderable, CliRenderEvents, StyledText, TextareaRenderable, TextAttributes, TextRenderable } from "@opentui/core"
+import { BoxRenderable, CliRenderEvents, StyledText, TextareaRenderable, TextAttributes, TextRenderable, rgbToHex } from "@opentui/core"
 import { MockTreeSitterClient, TestRecorder, setRendererCapabilities, createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { NanobotTui } from "./app"
 import type { Transcript } from "../rendering/transcript"
@@ -572,6 +572,71 @@ describe("NanobotTui layout and themes", () => {
       expect(ui.composer.plainText).toBe("Draft 中文")
       setup.resize(18, 20)
       await expectCursorCell()
+    },
+  )
+
+  test.each(["light", "dark", "auto"] as const)(
+    "keeps %s conversation selections readable across Markdown blocks",
+    async (theme) => {
+      setup = await createRenderer({ width: 96, height: 48, screenMode: "alternate-screen" })
+      const app = NanobotTui.mount(
+        setup.renderer,
+        { ...options, theme },
+        client(),
+        new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      )
+      const ui = app as unknown as { transcript: Transcript; composer: TextareaRenderable }
+      ui.transcript.user("User selection text")
+      ui.transcript.assistant([
+        "Normal selection text",
+        "**Bold selection text**",
+        "- List selection text",
+        "```text\nCode selection text\n```",
+        "| Heading |\n| --- |\n| Table selection text |",
+      ].join("\n\n"))
+      await setup.flush()
+
+      for (const text of [
+        "User selection text", "Normal selection text", "Bold selection text",
+        "List selection text", "Code selection text", "Table selection text",
+      ]) {
+        setup.renderer.clearSelection()
+        await setup.flush()
+        const lines = setup.captureCharFrame().split("\n")
+        const y = lines.findIndex((line) => line.includes(text))
+        const x = lines[y]!.indexOf(text)
+        await setup.mockMouse.drag(x, y, x + text.length, y)
+        await setup.flush()
+        expect(setup.renderer.getSelection()?.getSelectedText()).toContain(text)
+        const selected = setup.captureSpans().lines[y]!.spans.find((span) => span.text.includes(text))!
+        expect(selected.fg.intent).toBe("rgb")
+        expect(selected.bg.intent).toBe("rgb")
+        expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
+      }
+
+      if (theme === "auto") {
+        for (const mode of ["light", "dark"] as const) {
+          setup.renderer.emit(CliRenderEvents.THEME_MODE, mode)
+          await setup.flush()
+          expect(setup.renderer.getSelection()?.getSelectedText()).toContain("Table selection text")
+          const selected = setup.captureSpans().lines.flatMap((line) => line.spans)
+            .find((span) => span.text.includes("Table selection text"))!
+          expect(selected.fg.intent).toBe("rgb")
+          expect(selected.bg.intent).toBe("rgb")
+          expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+
+      setup.renderer.clearSelection()
+      await setup.mockInput.typeText("Composer selection text")
+      setup.mockInput.pressKey("HOME", { shift: true })
+      await setup.flush()
+      expect(ui.composer.getSelectedText()).toBe("Composer selection text")
+      const selected = setup.captureSpans().lines.flatMap((line) => line.spans)
+        .find((span) => span.text.includes("Composer selection text"))!
+      expect(selected.fg.intent).toBe("rgb")
+      expect(selected.bg.intent).toBe("rgb")
+      expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
     },
   )
 

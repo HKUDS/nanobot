@@ -16,6 +16,7 @@ import type { DiffViewerTheme } from "../views/diff-viewer"
 import type { FooterHintTheme } from "../views/footer-hints"
 import type { RecoveryNoticeTheme } from "../views/recovery-notice"
 import type { UsagePanelTheme } from "../views/usage-panel"
+import type { SelectionColors } from "../platform/selection"
 
 export const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 export const SHIMMER_INTERVAL_MS = 80
@@ -38,6 +39,7 @@ export interface Palette {
   userBackground: ColorInput
   warm: ColorInput
   cool: ColorInput
+  selection: SelectionColors
 }
 
 export const DARK: Palette = {
@@ -56,6 +58,7 @@ export const DARK: Palette = {
   userBackground: "#2B2C2E",
   warm: "#E9965A",
   cool: "#36B8C7",
+  selection: { background: RGBA.fromHex("#3F3F46"), foreground: RGBA.fromHex("#ECEDEE") },
 }
 
 export const LIGHT: Palette = {
@@ -74,6 +77,7 @@ export const LIGHT: Palette = {
   userBackground: "#F0F0F0",
   warm: "#C2410C",
   cool: "#0F766E",
+  selection: { background: RGBA.fromHex("#D4D4D8"), foreground: RGBA.fromHex("#18181B") },
 }
 
 // Until the terminal answers OSC 10/11, its default foreground is the only
@@ -93,6 +97,7 @@ export const TERMINAL: Palette = {
   userBackground: RGBA.defaultBackground(),
   warm: RGBA.defaultForeground(),
   cool: RGBA.defaultForeground(),
+  selection: { background: RGBA.fromHex("#93C5FD"), foreground: RGBA.fromHex("#18181B") },
 }
 
 
@@ -182,8 +187,8 @@ export function diffViewerTheme(palette: Palette, backgroundKnown: boolean): Dif
     error: palette.error,
     addedBackground: backgroundKnown ? light ? "#E7F6EC" : "#142D22" : null,
     removedBackground: backgroundKnown ? light ? "#FCE8EA" : "#352024" : null,
-    selectionBackground: backgroundKnown ? palette.border : "#93C5FD",
-    selectionForeground: backgroundKnown ? palette.text : "#18181B",
+    selectionBackground: palette.selection.background,
+    selectionForeground: palette.selection.foreground,
     syntax: syntaxStyle(palette),
   }
 }
