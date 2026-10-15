@@ -55,12 +55,23 @@ def test_coding_tool_descriptions_steer_discovery() -> None:
 
 
 def test_exec_tool_descriptions_are_concise() -> None:
-    assert ExecTool().description == "Execute a shell command."
+    exec_description = ExecTool().description
+    assert exec_description.startswith("Execute a shell command.")
+    assert "timeout" in exec_description
+    assert "max_runtime" in exec_description
+    assert "mutually exclusive" in exec_description
+    assert len(exec_description) < 160
     assert ExecSessionTool().description == "Manage a session returned by exec."
     assert ListExecSessionsTool().description == "List active exec sessions."
 
     exec_parameters = ExecTool().parameters["properties"]
     assert "omit to wait for exit" in exec_parameters["yield_time_ms"]["description"]
+    runtime_description = exec_parameters["max_runtime"]["description"].lower()
+    assert "hard" in runtime_description
+    assert "seconds" in runtime_description
+    timeout_description = exec_parameters["timeout"]["description"].lower()
+    assert "alias" in timeout_description
+    assert "max_runtime" in timeout_description
 
     session_parameters = ExecSessionTool().parameters["properties"]
     assert set(session_parameters) == {

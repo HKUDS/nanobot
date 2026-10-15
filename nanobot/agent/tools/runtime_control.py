@@ -296,7 +296,11 @@ def _snapshot_web_config(config: WebToolsConfig) -> dict[str, object]:
 def _snapshot_exec_config(config: ExecToolConfig) -> dict[str, object]:
     return {
         "enable": config.enable,
-        "timeout": config.timeout,
+        "max_runtime": config.max_runtime,
+        "max_runtime_limit": config.max_runtime_limit,
+        "idle_timeout": config.idle_timeout,
+        "idle_action": config.idle_action,
+        "timeout": config.max_runtime,
         "path_prepend": config.path_prepend,
         "path_append": config.path_append,
         "sandbox": config.sandbox,

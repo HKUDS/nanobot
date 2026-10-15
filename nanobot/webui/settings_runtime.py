@@ -60,6 +60,9 @@ RUNTIME_CONFIG_PATHS = (
 
 
 def _parent(config: Config, path: str) -> tuple[BaseModel, str]:
+    # Keep the existing WebUI editor on the canonical hard-runtime field.
+    if path == "tools.exec.timeout":
+        path = "tools.exec.max_runtime"
     parent: BaseModel = config
     *parts, leaf = path.split(".")
     for part in parts:
