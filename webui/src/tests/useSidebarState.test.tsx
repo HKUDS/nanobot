@@ -66,4 +66,34 @@ describe("useSidebarState", () => {
       title_overrides: { "websocket:a": "Second" },
     }));
   });
+
+  it("does not persist local mutations when the initial sidebar-state fetch fails", async () => {
+    const setSidebarState = vi.fn().mockImplementation(async (state: SidebarStatePayload) => state);
+    const client = {
+      status: "open" as const,
+      onStatus: () => () => {},
+      onSidebarStateUpdate: () => () => {},
+      setSidebarState,
+    } as unknown as NanobotClient;
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="token">
+        {children}
+      </ClientProvider>
+    );
+    const { result } = renderHook(() => useSidebarState([], false), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      void result.current.update((current) => ({
+        ...current,
+        pinned_keys: ["websocket:a"],
+      }));
+    });
+
+    // Local state updates so the UI stays responsive, but nothing is written
+    // to the server — persisting the degraded default would wipe saved state.
+    expect(result.current.state.pinned_keys).toEqual(["websocket:a"]);
+    expect(setSidebarState).not.toHaveBeenCalled();
+  });
 });

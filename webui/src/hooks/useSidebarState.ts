@@ -147,6 +147,10 @@ export function useSidebarState(
   const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
   const persistenceInFlightRef = useRef(false);
   const flushPersistenceRef = useRef<() => void>(() => {});
+  // Set only once the server state has been successfully loaded (or pushed).
+  // Until then, local mutations must not be persisted: writing the degraded
+  // DEFAULT_SIDEBAR_STATE fallback would wipe the user's saved state (#6008).
+  const initialLoadSucceededRef = useRef(false);
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
   tokenRef.current = token;
@@ -161,6 +165,7 @@ export function useSidebarState(
         if (cancelled) return;
         stateRef.current = loaded;
         setState(loaded);
+        initialLoadSucceededRef.current = true;
       } catch {
         if (cancelled) return;
         stateRef.current = DEFAULT_SIDEBAR_STATE;
@@ -221,6 +226,7 @@ export function useSidebarState(
     const loaded = normalizeSidebarState(incoming);
     stateRef.current = loaded;
     setState(loaded);
+    initialLoadSucceededRef.current = true;
   }), [client]);
 
   const update = useCallback(
@@ -229,7 +235,7 @@ export function useSidebarState(
       if (sameState(next, stateRef.current)) return;
       stateRef.current = next;
       setState(next);
-      persist(next);
+      if (initialLoadSucceededRef.current) persist(next);
     },
     [persist],
   );
