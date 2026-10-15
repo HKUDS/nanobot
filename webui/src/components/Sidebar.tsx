@@ -93,6 +93,7 @@ interface SidebarProps {
   archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
+  loadError?: string | null;
 }
 
 type NavigatorWithUserAgentData = Navigator & {
@@ -196,6 +197,16 @@ export function Sidebar(props: SidebarProps) {
           </div>
         )}
       </div>
+
+      {!collapsed && props.loadError ? (
+        <div
+          data-testid="sidebar-state-load-error"
+          role="status"
+          className="mx-4 mb-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200"
+        >
+          {t("sidebar.sidebarStateLoadError")}
+        </div>
+      ) : null}
 
       <SidebarSelectionHighlight
         targetRef={activeActionRef}

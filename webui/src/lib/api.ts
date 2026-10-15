@@ -1174,6 +1174,29 @@ export async function fetchSidebarState(
   );
 }
 
+export type SidebarStateLoad =
+  | { status: "loaded"; state: SidebarStatePayload }
+  | { status: "missing" }
+  | { status: "unreadable"; message: string };
+
+export async function loadSidebarState(
+  token: string,
+  base: string = "",
+): Promise<SidebarStateLoad> {
+  try {
+    return { status: "loaded", state: await fetchSidebarState(token, base) };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 404) return { status: "missing" };
+      return { status: "unreadable", message: error.message };
+    }
+    return {
+      status: "unreadable",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function modelGenerationSettingsPayload(
   configuration: Pick<
     ModelConfigurationCreate,

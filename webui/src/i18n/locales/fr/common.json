@@ -361,6 +361,7 @@
     "closeAction": "Fermer la discussion temporaire : {{title}}"
   },
   "sidebar": {
+    "sidebarStateLoadError": "Impossible de charger la disposition enregistrée de la barre latérale. Les modifications ne seront pas enregistrées tant qu'elle n'aura pas chargé.",
     "resize": "Redimensionner la barre latérale",
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",

@@ -361,6 +361,7 @@
     "closeAction": "關閉臨時聊天：{{title}}"
   },
   "sidebar": {
+    "sidebarStateLoadError": "無法載入已儲存的側邊欄版面配置，恢復載入前所做的變更將不會被儲存。",
     "resize": "調整側欄寬度",
     "navigation": "側邊欄導覽",
     "collapse": "收合側邊欄",

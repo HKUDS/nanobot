@@ -361,6 +361,7 @@
     "closeAction": "임시 채팅 닫기: {{title}}"
   },
   "sidebar": {
+    "sidebarStateLoadError": "저장된 사이드바 레이아웃을 불러오지 못했습니다. 불러올 때까지의 변경 사항은 저장되지 않습니다.",
     "resize": "사이드바 너비 조절",
     "navigation": "사이드바 탐색",
     "collapse": "사이드바 접기",

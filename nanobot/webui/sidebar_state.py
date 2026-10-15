@@ -233,6 +233,50 @@ def read_webui_sidebar_state() -> dict[str, Any]:
     return normalize_webui_sidebar_state(raw)
 
 
+def load_webui_sidebar_state() -> tuple[dict[str, Any] | None, str | None]:
+    """Load the sidebar state with an explicit missing-file signal.
+
+    Returns ``(state, None)`` when the file exists and parses, and
+    ``(None, "missing")`` when no state file exists yet. Returns
+    ``(None, reason)`` with reason ``"corrupt"``, ``"oversized"``, or
+    ``"unreadable"`` when the file exists but cannot be served, so callers
+    can keep real user data distinct from a fresh install's empty defaults
+    instead of silently treating both as "no saved state".
+    """
+    path = webui_sidebar_state_path()
+    if not path.is_file():
+        return None, "missing"
+    try:
+        if path.stat().st_size > _MAX_STATE_FILE_BYTES:
+            logger.warning("webui sidebar state too large, ignoring: {}", path)
+            return None, "oversized"
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        logger.warning("webui sidebar state is not valid JSON {}: {}", path, e)
+        _quarantine_webui_sidebar_state(path)
+        return None, "corrupt"
+    except OSError as e:
+        logger.warning("read webui sidebar state failed {}: {}", path, e)
+        return None, "unreadable"
+    return normalize_webui_sidebar_state(raw), None
+
+
+def _quarantine_webui_sidebar_state(path: Path) -> None:
+    """Move an unreadable state file aside instead of letting the next
+    write silently replace it, keeping the original bytes inspectable."""
+    stem = f"{path.name}.corrupt-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+    quarantine = path.with_name(stem)
+    counter = 1
+    while quarantine.exists():
+        quarantine = path.with_name(f"{stem}-{counter}")
+        counter += 1
+    try:
+        os.replace(path, quarantine)
+    except OSError as e:
+        logger.warning("could not quarantine webui sidebar state {}: {}", path, e)
+
+
 def write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     with _SIDEBAR_STATE_WRITE_LOCK:
         return _write_webui_sidebar_state(raw)

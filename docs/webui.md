@@ -99,6 +99,8 @@ Returning users may see an illustrated invitation to star nanobot on GitHub. It 
 
 The sidebar is the topic switcher. Each topic keeps its own history, title, workspace selection, and linked automations. Use a new topic when you want a separate context; use fork when you want to continue from an existing point without changing the original thread.
 
+If the saved sidebar layout file exists but cannot be read (for example, it is corrupt), the sidebar shows a notice and does not save changes until a reload succeeds. The unreadable file is moved aside as `sidebar-state.json.corrupt-<timestamp>` next to the original so its contents stay inspectable.
+
 On touch devices, sidebar action buttons stay visible with larger touch areas for topics, conversation groups, panes, and projects. Tap a title to select it or the adjacent action button for its menu. Desktop actions still appear on hover or keyboard focus. Press Escape in an action menu to return focus to its button and continue with Tab, including from the **Move to** submenu. ArrowLeft leaves the submenu and returns to **Move to** without closing the parent menu. Choosing Rename instead moves focus into the dialog; clicking outside a menu keeps focus at the clicked destination.
 
 Drag a topic within its current sidebar group to keep frequently used work in your preferred order. Drag a topic from the sidebar into the composer when you want to reference it in the next message instead of switching to it.

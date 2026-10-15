@@ -361,6 +361,7 @@
     "closeAction": "Fechar chat temporário: {{title}}"
   },
   "sidebar": {
+    "sidebarStateLoadError": "Não foi possível carregar o layout salvo da barra lateral. As alterações não serão salvas até que ele seja carregado.",
     "resize": "Redimensionar a barra lateral",
     "navigation": "Navegação da barra lateral",
     "collapse": "Recolher barra lateral",

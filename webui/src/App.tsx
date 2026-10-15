@@ -1206,6 +1206,7 @@ function Shell({
   const {
     state: sidebarState,
     loading: sidebarStateLoading,
+    loadError: sidebarStateLoadError,
     update: updateSidebarState,
   } =
     useSidebarState(sessions, !loading);
@@ -2918,6 +2919,7 @@ function Shell({
                   {...sidebarProps}
                   collapsed={!hostSidebarOpen}
                   hostChromeInset={showHostChrome}
+                  loadError={sidebarStateLoadError}
                   onExpand={openHostSidebar}
                 />
               </div>
@@ -2956,6 +2958,7 @@ function Shell({
                   {...sidebarProps}
                   onCollapse={closeMobileSidebar}
                   containActionMenus
+                  loadError={sidebarStateLoadError}
                 />
               </SheetContent>
             </Sheet>

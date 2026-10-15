@@ -361,6 +361,7 @@
     "closeAction": "Tutup obrolan sementara: {{title}}"
   },
   "sidebar": {
+    "sidebarStateLoadError": "Tata letak sidebar yang tersimpan gagal dimuat. Perubahan tidak akan disimpan sampai berhasil dimuat.",
     "resize": "Ubah lebar bilah samping",
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",

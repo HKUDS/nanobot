@@ -379,7 +379,8 @@
     "automations": "自动任务",
     "skills": {
       "title": "技能"
-    }
+    },
+    "sidebarStateLoadError": "无法加载已保存的侧边栏布局，恢复加载前所做的更改将不会被保存。"
   },
   "settings": {
     "timezoneNoMatches": "没有匹配的时区。",

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import { normalizeWorkbenchState } from "@/components/workbench/workbench-model";
-import { fetchSidebarState } from "@/lib/api";
+import { loadSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
 const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
@@ -136,6 +136,7 @@ export function useSidebarState(
 ): {
   state: SidebarStatePayload;
   loading: boolean;
+  loadError: string | null;
   update: (
     updater: (state: SidebarStatePayload) => SidebarStatePayload,
   ) => Promise<void>;
@@ -147,8 +148,11 @@ export function useSidebarState(
   const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
   const persistenceInFlightRef = useRef(false);
   const flushPersistenceRef = useRef<() => void>(() => {});
+  const loadFailedRef = useRef(false);
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   tokenRef.current = token;
   stateRef.current = state;
 
@@ -156,23 +160,31 @@ export function useSidebarState(
     let cancelled = false;
     setLoading(true);
     (async () => {
-      try {
-        const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current));
-        if (cancelled) return;
-        stateRef.current = loaded;
-        setState(loaded);
-      } catch {
-        if (cancelled) return;
+      const outcome = await loadSidebarState(tokenRef.current);
+      if (cancelled) return;
+      if (outcome.status === "unreadable") {
+        // The state file exists but could not be read: render defaults but
+        // block persistence until a load succeeds, so a retry can never
+        // overwrite real data with fresh-install defaults.
         stateRef.current = DEFAULT_SIDEBAR_STATE;
         setState(DEFAULT_SIDEBAR_STATE);
-      } finally {
-        if (!cancelled) setLoading(false);
+        loadFailedRef.current = true;
+        setLoadError(outcome.message);
+      } else {
+        const loaded = outcome.status === "loaded"
+          ? normalizeSidebarState(outcome.state)
+          : DEFAULT_SIDEBAR_STATE;
+        stateRef.current = loaded;
+        setState(loaded);
+        loadFailedRef.current = false;
+        setLoadError(null);
       }
+      if (!cancelled) setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadToken]);
 
   const flushPersistence = useCallback(() => {
     if (
@@ -210,7 +222,10 @@ export function useSidebarState(
 
   useEffect(() => client.onStatus((status) => {
     connectionOpenRef.current = status === "open";
-    if (status === "open") flushPersistence();
+    if (status === "open") {
+      if (loadFailedRef.current) setReloadToken((token) => token + 1);
+      flushPersistence();
+    }
   }), [client, flushPersistence]);
 
   useEffect(() => client.onSidebarStateUpdate((incoming) => {
@@ -225,6 +240,7 @@ export function useSidebarState(
 
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
+      if (loadFailedRef.current) return;
       const next = normalizeSidebarState(updater(stateRef.current));
       if (sameState(next, stateRef.current)) return;
       stateRef.current = next;
@@ -244,5 +260,5 @@ export function useSidebarState(
     void update(() => pruned);
   }, [loading, pruned, sessionsLoaded, state, update]);
 
-  return { state, loading, update };
+  return { state, loading, loadError, update };
 }

@@ -109,7 +109,7 @@ from nanobot.webui.session_list_index import (
     list_webui_sessions,
 )
 from nanobot.webui.sidebar_state import (
-    read_webui_sidebar_state,
+    load_webui_sidebar_state,
     write_webui_sidebar_state,
 )
 from nanobot.webui.skills_api import (
@@ -1898,7 +1898,15 @@ class GatewayHTTPHandler:
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        return _http_json_response(read_webui_sidebar_state())
+        state, error = load_webui_sidebar_state()
+        if error == "missing":
+            return _http_error(404, "sidebar state not found")
+        if error is not None:
+            return _http_error(
+                409,
+                f"sidebar state file exists but could not be read ({error})",
+            )
+        return _http_json_response(state)
 
     def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

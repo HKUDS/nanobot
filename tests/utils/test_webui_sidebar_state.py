@@ -1,7 +1,10 @@
 import json
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+import pytest
 
 import nanobot.webui.sidebar_state as sidebar_state
 from nanobot.webui.sidebar_state import (
@@ -181,3 +184,86 @@ def test_sidebar_state_serializes_concurrent_writes(monkeypatch) -> None:
 
     assert results == payloads
     assert peak_writes == 1
+
+
+def test_load_returns_state_when_file_valid(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    path = webui_sidebar_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"pinned_keys": ["websocket:a"]}), encoding="utf-8")
+
+    state, error = sidebar_state.load_webui_sidebar_state()
+
+    assert error is None
+    assert state is not None
+    assert state["pinned_keys"] == ["websocket:a"]
+
+
+def test_load_reports_missing_when_file_absent(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+
+    state, error = sidebar_state.load_webui_sidebar_state()
+
+    assert state is None
+    assert error == "missing"
+
+
+def test_load_quarantines_corrupt_file_instead_of_serving_defaults(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    path = webui_sidebar_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+
+    state, error = sidebar_state.load_webui_sidebar_state()
+
+    assert state is None
+    assert error == "corrupt"
+    assert not path.exists()
+    quarantined = list(path.parent.glob("sidebar-state.json.corrupt-*"))
+    assert len(quarantined) == 1
+    assert quarantined[0].read_text(encoding="utf-8") == "{not valid json"
+
+
+def test_load_quarantines_non_utf8_bytes_as_corrupt(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    path = webui_sidebar_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xff\xfe not utf-8")
+
+    state, error = sidebar_state.load_webui_sidebar_state()
+
+    assert state is None
+    assert error == "corrupt"
+    assert not path.exists()
+    assert list(path.parent.glob("sidebar-state.json.corrupt-*"))
+
+
+def test_load_reports_oversized_file_and_leaves_it_in_place(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    path = webui_sidebar_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    oversized = json.dumps({"pinned_keys": ["websocket:a" * 300_000]})
+    assert len(oversized.encode("utf-8")) > 256 * 1024
+    path.write_text(oversized, encoding="utf-8")
+
+    state, error = sidebar_state.load_webui_sidebar_state()
+
+    assert state is None
+    assert error == "oversized"
+    assert path.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod does not revoke read access on Windows")
+def test_load_reports_unreadable_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    path = webui_sidebar_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"pinned_keys": ["websocket:a"]}), encoding="utf-8")
+    path.chmod(0o000)
+    try:
+        state, error = sidebar_state.load_webui_sidebar_state()
+    finally:
+        path.chmod(0o644)
+
+    assert state is None
+    assert error == "unreadable"

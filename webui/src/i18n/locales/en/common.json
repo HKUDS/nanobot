@@ -379,7 +379,8 @@
     "automations": "Automations",
     "skills": {
       "title": "Skills"
-    }
+    },
+    "sidebarStateLoadError": "Couldn't load your saved sidebar layout. Changes won't be saved until it loads."
   },
   "settings": {
     "timezoneNoMatches": "No matching timezones.",

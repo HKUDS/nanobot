@@ -361,6 +361,7 @@
     "closeAction": "Đóng trò chuyện tạm thời: {{title}}"
   },
   "sidebar": {
+    "sidebarStateLoadError": "Không thể tải bố cục thanh bên đã lưu. Các thay đổi sẽ không được lưu cho đến khi tải thành công.",
     "resize": "Điều chỉnh độ rộng thanh bên",
     "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",
