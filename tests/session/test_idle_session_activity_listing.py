@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -95,7 +96,12 @@ def test_check_expired_uses_activity_listing_not_full_preview():
     sessions.get_or_create.return_value = session
 
     consolidator = MagicMock()
-    ac = AutoCompact(sessions=sessions, consolidator=consolidator, session_ttl_minutes=15)
+    ac = AutoCompact(
+        sessions=sessions,
+        consolidator=consolidator,
+        session_ttl_minutes=15,
+        session_lock=lambda _key: asyncio.Lock(),
+    )
     scheduled: list = []
 
     def schedule(pending):
