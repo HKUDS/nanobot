@@ -15,6 +15,7 @@ from nanobot.pairing import (
     format_pairing_reply,
     generate_code,
     is_approved,
+    record_delivery,
 )
 
 
@@ -284,14 +285,20 @@ class BaseChannel(ABC):
                         "Pairing store unavailable; dropping DM from {}", sender_id
                     )
                     return
-                await self.send(
-                    OutboundMessage(
-                        channel=self.name,
-                        chat_id=str(chat_id),
-                        content=format_pairing_reply(code),
-                        metadata={PAIRING_CODE_META_KEY: code},
+                record_delivery(code, "sending")
+                try:
+                    await self.send(
+                        OutboundMessage(
+                            channel=self.name,
+                            chat_id=str(chat_id),
+                            content=format_pairing_reply(code),
+                            metadata={PAIRING_CODE_META_KEY: code},
+                        )
                     )
-                )
+                except Exception:
+                    record_delivery(code, "failed")
+                    raise
+                record_delivery(code, "sent")
                 self.logger.info(
                     "Sent pairing code {} to sender {} in chat {}",
                     code, sender_id, chat_id,

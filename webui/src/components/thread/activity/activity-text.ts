@@ -56,16 +56,17 @@ export function formatActivityTarget(t: TFunction, action: string, target: strin
     : action;
 }
 
-export function summarizeShellCommand(command: string, t: TFunction): string {
+export function summarizeShellCommand(command: string, t: TFunction): { detail: string; aside?: string } {
   const lines = redactShellCommand(command.replace(/\r\n/g, "\n"))
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
   const firstLine = compactActivityPath(lines[0] || t("message.agentActivity.command"));
   const firstPreview = truncateMiddle(firstLine, 92);
-  return lines.length <= 1
-    ? firstPreview
-    : `${firstPreview} · ${t("message.agentActivity.scriptLines", { count: lines.length })}`;
+  return {
+    detail: firstPreview,
+    ...(lines.length > 1 ? { aside: t("message.agentActivity.scriptLines", { count: lines.length }) } : {}),
+  };
 }
 
 function truncateMiddle(value: string, maxLength: number): string {

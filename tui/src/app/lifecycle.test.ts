@@ -114,7 +114,7 @@ describe("NanobotTui lifecycle", () => {
       attempt: 9,
       elapsedMs: 3_800,
     })
-    expect(ui.status.plainText).toBe("Nanobot unavailable · restart nanobot")
+    expect(ui.status.plainText).toBe("Nanobot unavailable. Restart nanobot.")
     expect(ui.status.plainText).not.toContain("gateway")
     expect(ui.status.plainText).not.toContain("127.0.0.1")
     expect(ui.status.plainText).not.toContain("HTTP")
@@ -328,7 +328,8 @@ describe("NanobotTui lifecycle", () => {
 
       expect(sent).toEqual([])
       expect(composer.plainText).toBe("sent during reconnect")
-      expect(ui.status.plainText).toContain("Not sent · press Enter to retry when ready")
+      expect(ui.status.plainText).toContain("Not sent.")
+      expect(ui.status.plainText).toContain("Press Enter to retry when ready.")
 
       resolveReconnect(new Response(JSON.stringify({
         schemaVersion: 3, projection: "events",
@@ -336,7 +337,7 @@ describe("NanobotTui lifecycle", () => {
         page: { has_more_before: false },
       })))
       await waitUntil(() => ui.ready)
-      expect(ui.status.plainText).toBe("Not sent · press Enter to retry")
+      expect(ui.status.plainText).toBe("Not sent. Press Enter to retry.")
       composer.submit()
       await waitUntil(() => sent.length === 1)
       await setup.flush()

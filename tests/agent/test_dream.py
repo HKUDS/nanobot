@@ -452,6 +452,50 @@ class TestEphemeralDirect:
         assert response.content == "done"
         loop.provider.chat_stream_with_retry.assert_awaited()
 
+    async def test_dream_progress_only_turn_skips_run_transcript_snapshots(self, tmp_path):
+        from copy import deepcopy
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+        from nanobot.providers.base import GenerationSettings
+
+        store = MemoryStore(tmp_path)
+        store.write_memory("# Memory")
+        store.append_history("Dream input")
+        dream_prompt = store.build_dream_prompt()
+        assert dream_prompt is not None
+        prompt, _ = dream_prompt
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = GenerationSettings()
+        provider.estimate_prompt_tokens.return_value = (100, "test")
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+        loop = AgentLoop(
+            bus=MessageBus(), provider=provider, workspace=tmp_path,
+            context_window_tokens=32_000,
+        )
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        with patch("nanobot.agent.runner.deepcopy", wraps=deepcopy) as copy_state:
+            response = await loop.process_direct(
+                prompt, session_key=MemoryStore.dream_session_key(), ephemeral=True,
+                tools=store.build_dream_tools(), on_progress=_silent,
+            )
+
+        assert response is not None
+        assert response.content == "done"
+        assert MemoryStore.dream_run_completed(response) is True
+        provider.chat_stream_with_retry.assert_awaited_once()
+        transcript_copies = [
+            call.args[0] for call in copy_state.call_args_list
+            if call.args[0] and "role" in call.args[0][0]
+        ]
+        assert len(transcript_copies) == 0
+
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
         """Verify that ephemeral=True is forwarded to TurnContext."""
         from unittest.mock import patch

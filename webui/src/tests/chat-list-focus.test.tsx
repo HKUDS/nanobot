@@ -119,7 +119,7 @@ describe("sidebar action focus", () => {
     const move = await screen.findByRole("menuitem", { name: "Move to", exact: true });
     act(() => move.focus());
     await user.keyboard("{ArrowRight}");
-    await screen.findByRole("menuitem", { name: "Group · 2/4" });
+    await screen.findByRole("menuitem", { name: "Group 2/4" });
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     await waitFor(() => expect(trigger).toHaveFocus());
@@ -134,10 +134,10 @@ describe("sidebar action focus", () => {
     const move = await screen.findByRole("menuitem", { name: "Move to", exact: true });
     act(() => move.focus());
     await user.keyboard("{ArrowRight}");
-    await screen.findByRole("menuitem", { name: "Group · 2/4" });
+    await screen.findByRole("menuitem", { name: "Group 2/4" });
     await user.keyboard("{ArrowLeft}");
     await waitFor(() => expect(move).toHaveFocus());
-    expect(screen.queryByRole("menuitem", { name: "Group · 2/4" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Group 2/4" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "Rename", exact: true }));
     const input = await screen.findByPlaceholderText("Topic name");
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());

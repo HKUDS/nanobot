@@ -35,7 +35,7 @@ from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPr
 
 XAI_OAUTH_ISSUER = "https://auth.x.ai"
 XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
-XAI_CLIENT_VERSION = "0.2.109"
+XAI_CLIENT_VERSION = "1.0.13"
 XAI_ALLOWED_CALLBACK_ORIGIN = "https://accounts.x.ai"
 XAI_OAUTH_SCOPES = (
     "openid",

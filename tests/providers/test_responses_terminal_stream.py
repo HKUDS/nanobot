@@ -110,6 +110,64 @@ async def test_transport_failure_before_terminal_is_not_success(transport, tail)
     assert body.closed
 
 
+@pytest.mark.parametrize("transport", ["sse", "sdk"])
+@pytest.mark.parametrize("id_field", ["item_id", "call_id"])
+async def test_interleaved_tool_argument_events_reach_the_correct_call(transport, id_field):
+    items = [
+        {"type": "function_call", "id": "fc_read", "call_id": "call_read",
+         "name": "read_file", "arguments": '{"path":"a.txt"}'},
+        {"type": "function_call", "id": "fc_write", "call_id": "call_write",
+         "name": "write_file", "arguments": '{"path":"b.txt","content":"hi"}'},
+    ]
+    events = [
+        {"type": "response.output_item.added", "output_index": index,
+         "item": {**item, "arguments": ""}}
+        for index, item in enumerate(items)
+    ]
+    chunks = [(1, '{"path":"b.txt",'), (0, '{"path":"a.txt"}'), (1, '"content":"hi"}')]
+    for index, delta in chunks:
+        item = items[index]
+        events.append({
+            "type": "response.function_call_arguments.delta", "output_index": index,
+            id_field: item["id" if id_field == "item_id" else "call_id"], "delta": delta,
+        })
+    for index in (1, 0):
+        item = items[index]
+        events.append({
+            "type": "response.function_call_arguments.done", "output_index": index,
+            id_field: item["id" if id_field == "item_id" else "call_id"],
+            "arguments": item["arguments"],
+        })
+    for index, item in enumerate(items):
+        events.append({"type": "response.output_item.done", "output_index": index, "item": item})
+    events.append({"type": "response.completed", "response": {"status": "completed", "output": items}})
+    for sequence_number, event in enumerate(events):
+        event["sequence_number"] = sequence_number
+    body = _ResponseBody(events, "eof")
+    tool_events = []
+
+    async def on_tool_event(event):
+        tool_events.append(event)
+
+    async with _consume(transport, body) as (consume, stream):
+        _, calls, finish, _, _ = await consume(stream, on_tool_call_delta=on_tool_event)
+
+    assert [(call.name, call.arguments) for call in calls] == [
+        ("read_file", {"path": "a.txt"}),
+        ("write_file", {"path": "b.txt", "content": "hi"}),
+    ]
+    for index, item in enumerate(items):
+        call_events = [event for event in tool_events if event["call_id"] == item["call_id"]]
+        assert all(event["name"] == item["name"] for event in call_events)
+        assert [event["arguments_delta"] for event in call_events if "arguments_delta" in event] == [
+            "", *(delta for chunk_index, delta in chunks if chunk_index == index),
+        ]
+        assert [event["arguments"] for event in call_events if "arguments" in event] == [item["arguments"]]
+    assert [event["call_id"] for event in tool_events if "arguments" in event] == ["call_write", "call_read"]
+    assert finish == "stop"
+    assert body.closed
+
+
 @pytest.mark.parametrize("provider_kind", ["compat", "azure"])
 @pytest.mark.parametrize("tail", ["disconnect", "open"])
 async def test_provider_returns_and_closes_stream_at_terminal(monkeypatch, provider_kind, tail):

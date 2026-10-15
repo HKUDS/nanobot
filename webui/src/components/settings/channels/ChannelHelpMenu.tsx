@@ -2,7 +2,7 @@ import { channelUiContribution } from "@/channel-plugins/registry";
 import { CircleHelp, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelSetup } from "@/components/settings/channels/ChannelIdentity";
-import { docsUrlWithBase } from "@/components/settings/channels/catalog";
+import { docsUrlWithBase } from "@/channel-plugins/catalog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import type { NanobotFeatureInfo } from "@/lib/types";
@@ -27,7 +27,7 @@ export function ChannelHelpMenu({ feature, chatAppsDocsUrl }: {
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button type="button" aria-label={label}
-              className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+              className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
               <CircleHelp className="h-4 w-4" aria-hidden />
             </button>
           </DropdownMenuTrigger>

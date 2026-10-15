@@ -66,6 +66,9 @@ export function client(
       sentOptions.push(messageOptions)
       return "turn"
     },
+    async sendAttachments(content: string, messageOptions: MessageOptions) {
+      return this.send(content, messageOptions)
+    },
     attach(chatId: string) {
       attached.push(chatId)
     },

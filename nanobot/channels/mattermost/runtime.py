@@ -12,6 +12,7 @@ import httpx
 from pydantic import Field, model_validator
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -529,7 +530,7 @@ class MattermostChannel(BaseChannel):
                         file_ids=(file_ids if i == 0 else None) or None,
                     )
 
-            if not meta.get("_progress") and meta.get("message_id"):
+            if not isinstance(msg.event, ProgressEvent) and meta.get("message_id"):
                 try:
                     await self._remove_reaction(meta["message_id"], self.config.react_emoji)
                 except Exception:
@@ -561,9 +562,7 @@ class MattermostChannel(BaseChannel):
             return
 
         meta = metadata or {}
-        stream_id = cast(str, stream_id or meta.get("_stream_id") or chat_id)
-        stream_end = stream_end or bool(meta.get("_stream_end"))
-        resuming = resuming or bool(meta.get("_resuming"))
+        stream_id = stream_id or chat_id
 
         if stream_end:
             committed = self._stream_committed.get(stream_id, "")
@@ -580,7 +579,7 @@ class MattermostChannel(BaseChannel):
                     self._clear_stream_state(stream_id)
                 return
 
-            if final and not meta.get("_progress"):
+            if final:
                 mm_meta = (
                     cast(dict[str, Any], meta.get("mattermost", {}) or {})
                     if isinstance(meta.get("mattermost"), dict)

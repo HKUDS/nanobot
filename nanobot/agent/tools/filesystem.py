@@ -12,6 +12,7 @@ from typing import Any
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates, current_file_states
+from nanobot.agent.tools.filesystem_config import FileToolsConfig
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
     BooleanSchema,
@@ -19,16 +20,9 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
-
-
-class FileToolsConfig(Base):
-    """Filesystem tools configuration."""
-
-    enable: bool = True  # built-in file tools on by default
 
 
 class _FsTool(Tool):
@@ -82,7 +76,7 @@ class _FsTool(Tool):
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 
         agent_workspace = Path(ctx.workspace)
         resolved_agent_workspace = agent_workspace.expanduser().resolve(strict=False)
@@ -233,7 +227,7 @@ def _is_blocked_device(path: str | Path) -> bool:
 
 def _builtin_skill_read_path(path: str) -> Path | None:
     """Map workspace-relative skills/<name>/... reads onto bundled skills."""
-    from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+    from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 
     requested = Path(path)
     if requested.is_absolute():
@@ -565,10 +559,9 @@ class WriteFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Create a new file or intentionally replace an entire file with "
-            "the provided content. Overwrites existing files and creates parent "
-            "directories as needed. For code changes or partial edits, prefer "
-            "apply_patch; use edit_file only for small exact replacements."
+            "Create a file or replace an entire file. "
+            "Overwrites existing files and creates parent directories. "
+            "Prefer apply_patch for partial edits."
         )
 
     async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
@@ -1146,9 +1139,8 @@ class ListDirTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "List the contents of a directory. "
-            "Set recursive=true to explore nested structure. "
-            "Common noise directories (.git, node_modules, __pycache__, etc.) are auto-ignored."
+            "List directory contents, skipping common noise directories "
+            "(.git, node_modules, __pycache__, etc.)."
         )
 
     @property

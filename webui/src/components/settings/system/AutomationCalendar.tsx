@@ -1,7 +1,7 @@
 import { CircleAlert, Loader2, X } from "lucide-react";
-import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { AutomationRunDialog, type AutomationRunRecord } from "@/components/settings/system/AutomationRunDialog";
+import type { AutomationRunRecord } from "@/components/settings/system/AutomationRunDialogView";
 import { Button } from "@/components/ui/button";
 import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -29,13 +29,22 @@ type CalendarCopy = {
   system: string;
 };
 
+export interface AutomationCalendarRunProps {
+  job: SessionAutomationJob;
+  run: AutomationRunRecord;
+  locale: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus: (event: Event) => void;
+}
+
 interface AutomationCalendarProps {
-  token?: string;
   jobs: SessionAutomationJob[];
   month: Date;
   locale: string;
   copy: CalendarCopy;
   onInspect: (job: SessionAutomationJob, trigger: HTMLElement) => void;
+  renderRunDialog: (props: AutomationCalendarRunProps) => ReactNode;
 }
 
 function startOfDay(date: Date): Date {
@@ -217,7 +226,7 @@ function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }:
   );
 }
 
-export function AutomationCalendar({ token = "", jobs, month, locale, copy, onInspect }: AutomationCalendarProps) {
+export function AutomationCalendar({ jobs, month, locale, copy, onInspect, renderRunDialog }: AutomationCalendarProps) {
   const calendarRef = useRef<HTMLElement | null>(null);
   const runTrigger = useRef<HTMLElement | null>(null);
   const [selectedRun, setSelectedRun] = useState<{ job: SessionAutomationJob; run: AutomationRunRecord } | null>(null);
@@ -349,18 +358,17 @@ export function AutomationCalendar({ token = "", jobs, month, locale, copy, onIn
         )}
       </div> : null}
 
-      {selectedRun ? <AutomationRunDialog
-        token={token}
-        job={selectedRun.job} run={selectedRun.run} locale={locale} open={runOpen}
-        onOpenChange={setRunOpen}
-        onCloseAutoFocus={(event) => {
+      {selectedRun ? renderRunDialog({
+        job: selectedRun.job, run: selectedRun.run, locale, open: runOpen,
+        onOpenChange: setRunOpen,
+        onCloseAutoFocus: (event) => {
           event.preventDefault();
           if (runOpen) return;
           setSelectedRun(null);
           const target = runTrigger.current?.isConnected ? runTrigger.current : calendarRef.current;
           target?.focus({ preventScroll: true });
-        }}
-      /> : null}
+        },
+      }) : null}
     </section>
   );
 }

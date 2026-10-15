@@ -44,7 +44,6 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
-from nanobot.session.recovery import RecoveryCoordinator
 from nanobot.session.session_handles import session_handle_for_name
 from nanobot.session.session_messages import (
     SessionMessageEnvelope,
@@ -56,6 +55,7 @@ from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
+from nanobot.webui.recovery import RecoveryCoordinator
 from nanobot.webui.session_identity import is_webui_session_key, webui_session_key
 from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import append_session_message_input

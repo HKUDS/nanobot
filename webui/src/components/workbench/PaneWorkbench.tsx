@@ -31,12 +31,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { HoverHint } from "@/components/ui/tooltip";
 import {
   createWorkbenchLayoutGeometry,
   resizeHandleRatio,
@@ -174,8 +169,7 @@ function HeaderIconButton({
   onClick: () => void;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
+    <HoverHint content={disabled ? disabledLabel ?? label : label} side="bottom">
         <span className="inline-flex">
           <Button
             type="button"
@@ -183,16 +177,13 @@ function HeaderIconButton({
             size="icon"
             disabled={disabled}
             aria-label={label}
-            title={disabled ? disabledLabel : undefined}
             onClick={onClick}
-            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+            className="host-no-drag h-8 w-8 shrink-0 rounded-full text-muted-foreground/85 hover:text-foreground"
           >
             <Icon className="h-4 w-4" aria-hidden />
           </Button>
         </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{disabled ? disabledLabel ?? label : label}</TooltipContent>
-    </Tooltip>
+    </HoverHint>
   );
 }
 
@@ -632,7 +623,7 @@ export function PaneWorkbench({
               aria-label={t("workbench.layout", {
                 defaultValue: "Pane layout",
               })}
-              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+              className="host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:text-foreground"
             >
               <currentLayout.icon className="h-4 w-4" aria-hidden />
             </Button>
@@ -691,7 +682,6 @@ export function PaneWorkbench({
           && "[--thread-header-position:relative]",
       )}
     >
-      <TooltipProvider>
         {chrome ? (
           <header className="pointer-events-none inset-x-0 top-0 z-30 shrink-0 [position:var(--thread-header-position,absolute)]">
             <div
@@ -739,8 +729,13 @@ export function PaneWorkbench({
                     headerActions,
                   })}
                   {chrome && panes.length > 1 && !compact ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+                    <HoverHint
+                      enabled={active}
+                      side="top"
+                      content={t("workbench.movePaneHint", {
+                        defaultValue: "Drag to move, or use the arrow keys.",
+                      })}
+                    >
                         <button
                           type="button"
                           tabIndex={active ? 0 : -1}
@@ -773,15 +768,7 @@ export function PaneWorkbench({
                             )}
                           />
                         </button>
-                      </TooltipTrigger>
-                      {active ? (
-                        <TooltipContent side="top">
-                          {t("workbench.movePaneHint", {
-                            defaultValue: "Drag to move · Arrow keys also work",
-                          })}
-                        </TooltipContent>
-                      ) : null}
-                    </Tooltip>
+                    </HoverHint>
                   ) : null}
                 </section>
               );
@@ -845,7 +832,6 @@ export function PaneWorkbench({
             />
           </footer>
         ) : null}
-      </TooltipProvider>
     </section>
   );
 }

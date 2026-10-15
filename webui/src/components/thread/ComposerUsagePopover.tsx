@@ -14,7 +14,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { formatCompactTokenCount, formatTurnLatency } from "@/lib/format";
+import { formatCompactTokenCount } from "@/lib/format";
+import { formatTurnLatency } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 
 export interface ComposerContextUsage {

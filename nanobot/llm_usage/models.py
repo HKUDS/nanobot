@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from nanobot.llm_usage.context import LLMUsageSource
-from nanobot.providers.base import LLMUsage
+from nanobot.llm_usage.types import LLMUsage
 
 
 @dataclass(frozen=True, slots=True)

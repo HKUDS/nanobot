@@ -16,7 +16,7 @@
       "clientId": {
         "label": "ID klien OAuth",
         "placeholder": "ID klien OAuth Linear",
-        "help": "Salin dari aplikasi OAuth privat di Linear."
+        "help": "Salin dari aplikasi OAuth privat.\n\nSalin dari aplikasi OAuth privat di Linear."
       },
       "clientSecret": {
         "label": "Secret klien OAuth",
@@ -26,12 +26,12 @@
       "webhookSigningSecret": {
         "label": "Secret penandatanganan webhook",
         "placeholder": "••••••",
-        "help": "Digunakan untuk memverifikasi Linear-Signature sebelum isi webhook diurai."
+        "help": "Verifikasi tanda tangan Webhook.\n\nDigunakan untuk memverifikasi Linear-Signature sebelum isi webhook diurai."
       },
       "publicBaseUrl": {
         "label": "URL HTTPS publik",
         "placeholder": "https://nanobot.example.com",
-        "help": "Origin HTTPS stabil yang diarahkan ke listener di bawah; jangan sertakan path."
+        "help": "Masukkan URL HTTPS tanpa path.\n\nOrigin HTTPS stabil yang diarahkan ke listener di bawah; jangan sertakan path."
       },
       "host": {
         "label": "Host listener",
@@ -52,11 +52,11 @@
       "allowFrom": {
         "label": "Pengguna Linear yang diizinkan",
         "placeholder": "ID pengguna Linear, dipisahkan koma",
-        "help": "Biarkan kosong untuk memakai pairing nanobot, atau gunakan * untuk mengizinkan semua pengguna di workspace yang terhubung."
+        "help": "Pilih siapa yang boleh memakai koneksi ini.\n\nBiarkan kosong untuk memakai pairing nanobot, atau gunakan * untuk mengizinkan semua pengguna di workspace yang terhubung."
       },
       "showReasoning": {
         "label": "Tampilkan penalaran",
-        "help": "Kirim penalaran model sebagai aktivitas pemikiran di Linear. Nonaktifkan untuk sesi yang lebih ringkas."
+        "help": "Kirim penalaran sebagai aktivitas berpikir.\n\nKirim penalaran model sebagai aktivitas pemikiran di Linear. Nonaktifkan untuk sesi yang lebih ringkas."
       }
     }
   },
@@ -67,7 +67,7 @@
     "enterSecret": "Masukkan rahasia",
     "secretSaveFailed": "Penyimpanan belum dapat dikonfirmasi. Coba lagi atau batalkan.",
     "authorizeTitle": "Otorisasi di Linear",
-    "authorizeDescription": "Lanjutkan di Linear untuk memilih workspace dan mengizinkan nanobot. Kembali ke sini setelah selesai.",
+    "authorizeDescription": "Otorisasi di Linear, lalu kembali ke sini.\n\nLanjutkan di Linear untuk memilih workspace dan mengizinkan nanobot. Kembali ke sini setelah selesai.",
     "waiting": "Menunggu otorisasi Linear...",
     "connected": "Linear telah terhubung.",
     "stopped": "Otorisasi dihentikan.",
@@ -94,7 +94,7 @@
     "workspaceActions": "Kelola {{name}}",
     "reauthorize": "Otorisasi ulang",
     "disconnectTitle": "Hapus {{name}}?",
-    "disconnectDescription": "Cabut otorisasi ruang kerja ini dan hapus pengaturan akses anggotanya di nanobot. Issue, komentar, dan riwayat nanobot tetap disimpan. Ruang kerja lain tidak terpengaruh. Anda dapat mengotorisasi ulang nanti.",
+    "disconnectDescription": "Hapus akses ruang kerja; simpan riwayat.\n\nCabut otorisasi ruang kerja ini dan hapus pengaturan akses anggotanya di nanobot. Issue, komentar, dan riwayat nanobot tetap disimpan. Ruang kerja lain tidak terpengaruh. Anda dapat mengotorisasi ulang nanti.",
     "disconnectLast": "Ini adalah ruang kerja terakhir yang terhubung, jadi kanal Linear juga akan dinonaktifkan.",
     "disconnecting": "Menghapus…",
     "addWorkspace": "Hubungkan ruang kerja",

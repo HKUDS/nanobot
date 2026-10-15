@@ -252,7 +252,8 @@ def _gemini_provider() -> OpenAICompatProvider:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         return OpenAICompatProvider(
             spec=ProviderSpec(
-                name="gemini", keywords=("gemini",), env_key="GEMINI_API_KEY"
+                name="gemini", keywords=("gemini",), env_key="GEMINI_API_KEY",
+                request_apis=("chat_completions", "responses"),
             )
         )
 

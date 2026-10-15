@@ -195,7 +195,7 @@ async def test_compaction_preserves_parallel_calls_with_reordered_pending_output
 async def test_without_pre_request_compaction_pressure_uses_local_summary(monkeypatch, mode):
     provider = OpenAICodexProvider()
     if mode == "disabled":
-        provider._native_compaction_available = False
+        provider._responses.native_compaction_available = False
     elif mode == "inline_only":
         monkeypatch.setattr(provider, "supports_pre_request_compaction", lambda _model: False)
     else:
@@ -275,7 +275,7 @@ async def test_fallback_cannot_discard_required_compaction(transport, mode):
         "openai-codex/gpt-6-astra" if mode == "incompatible_state" else primary.default_model
     )
     fallback = OpenAICodexProvider(default_model=model)
-    fallback._native_compaction_available = mode != "compaction_unavailable"
+    fallback._responses.native_compaction_available = mode != "compaction_unavailable"
     fallback.chat_with_context = AsyncMock(wraps=fallback.chat_with_context)
     fallback_window = 32_768 if mode == "smaller_window" else 200_000
     provider = FallbackProvider(

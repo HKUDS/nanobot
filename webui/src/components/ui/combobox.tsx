@@ -14,6 +14,11 @@ interface ComboboxNavigationOptions {
   onClose: () => void;
 }
 
+interface ActiveOption {
+  value: string | null;
+  source: "initial" | "keyboard" | "pointer";
+}
+
 export function useComboboxNavigation({
   open,
   values,
@@ -22,17 +27,23 @@ export function useComboboxNavigation({
   onClose,
 }: ComboboxNavigationOptions) {
   const listboxId = React.useId();
-  const [activeValue, setActiveValue] = React.useState<string | null>(null);
+  const [activeOption, setActiveOption] = React.useState<ActiveOption>({ value: null, source: "initial" });
+  const activeValue = !open || (activeOption.source === "pointer" && activeOption.value === null)
+    ? null
+    : activeOption.value && values.includes(activeOption.value)
+      ? activeOption.value
+      : selectedValue && values.includes(selectedValue)
+        ? selectedValue
+        : values[0] ?? null;
 
   React.useEffect(() => {
-    if (!open) {
-      setActiveValue(null);
-      return;
-    }
-    setActiveValue((current) => {
-      if (current && values.includes(current)) return current;
-      if (selectedValue && values.includes(selectedValue)) return selectedValue;
-      return values[0] ?? null;
+    setActiveOption((current) => {
+      if (open && current.value && values.includes(current.value)) return current;
+      const value = open
+        ? selectedValue && values.includes(selectedValue) ? selectedValue : values[0] ?? null
+        : null;
+      return current.value === value && current.source === "initial"
+        ? current : { value, source: "initial" };
     });
   }, [open, selectedValue, values]);
 
@@ -40,17 +51,17 @@ export function useComboboxNavigation({
   const activeOptionId = activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined;
 
   React.useEffect(() => {
-    if (!activeOptionId) return;
+    if (!activeOptionId || activeOption.source !== "keyboard") return;
     const option = document.getElementById(activeOptionId);
     option?.scrollIntoView?.({ block: "nearest" });
-  }, [activeOptionId]);
+  }, [activeOptionId, activeOption.source]);
 
   const move = (offset: number) => {
     if (!values.length) return;
     const nextIndex = activeIndex < 0
       ? offset > 0 ? 0 : values.length - 1
       : (activeIndex + offset + values.length) % values.length;
-    setActiveValue(values[nextIndex]);
+    setActiveOption({ value: values[nextIndex], source: "keyboard" });
   };
 
   const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -102,9 +113,17 @@ export function useComboboxNavigation({
       id: `${listboxId}-option-${index}`,
       role: "option" as const,
       "aria-selected": value === activeValue,
-      "data-highlighted": value === activeValue ? "" : undefined,
+      "data-highlighted": value === activeValue && activeOption.source === "keyboard" ? "" : undefined,
       tabIndex: -1,
-      onPointerMove: () => setActiveValue(value),
+      onPointerMove: (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (event.pointerType === "touch") return;
+        setActiveOption((current) => current.value === value && current.source === "pointer"
+          ? current : { value, source: "pointer" });
+      },
+      onPointerLeave: () => {
+        setActiveOption((current) => current.source === "pointer" && current.value === value
+          ? { value: null, source: "pointer" } : current);
+      },
       onClick: () => onSelect(value),
     };
   };
@@ -122,7 +141,7 @@ const ComboboxOption = React.forwardRef<
     className={cn(
       floatingItemClassName,
       floatingItemFocusClassName,
-      "w-full cursor-default text-left data-[highlighted]:bg-muted/85 data-[highlighted]:text-foreground",
+      "w-full cursor-default text-left settings-hover data-[highlighted]:bg-[var(--control-hover-fill)] data-[highlighted]:text-foreground",
       className,
     )}
     {...props}

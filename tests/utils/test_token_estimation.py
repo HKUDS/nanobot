@@ -1,4 +1,6 @@
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -148,6 +150,32 @@ def test_estimate_prompt_tokens_caches_tools_encoding(monkeypatch) -> None:
     assert first == second
     rendered_tools = "\n" + json.dumps(tools, ensure_ascii=False)
     assert fake_encoding.encoded.count(rendered_tools) == 1
+
+
+def test_concurrent_prompt_estimates_cache_both_tool_separator_counts(monkeypatch) -> None:
+    tools = [{"type": "function", "function": {"name": "demo"}}]
+    rendered = json.dumps(tools, ensure_ascii=False)
+    barrier = threading.Barrier(2)
+    encoded_tools = []
+
+    class Encoding:
+        def encode_ordinary(self, text: str) -> list[int]:
+            if text in (rendered, "\n" + rendered):
+                encoded_tools.append(text)
+                if len(encoded_tools) <= 2:
+                    barrier.wait(timeout=5)
+            return list(text.encode("utf-8"))
+
+    monkeypatch.setattr(helpers, "_get_token_encoding", Encoding)
+    messages = [{"role": "user", "content": "hello"}]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        empty = pool.submit(estimate_prompt_tokens, [], tools)
+        nonempty = pool.submit(estimate_prompt_tokens, messages, tools)
+        assert empty.result(timeout=5) == len(rendered)
+        assert nonempty.result(timeout=5) == len(rendered) + 1 + len("hello") + 4
+    assert estimate_prompt_tokens([], tools) == len(rendered)
+    assert estimate_prompt_tokens(messages, tools) == len(rendered) + 1 + len("hello") + 4
+    assert sorted(encoded_tools) == sorted([rendered, "\n" + rendered])
 
 
 def test_estimate_prompt_tokens_recomputes_when_tool_items_change(monkeypatch) -> None:

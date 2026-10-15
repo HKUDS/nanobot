@@ -31,17 +31,16 @@ if TYPE_CHECKING:
         enum=("create", "send", "cancel", "check"),
     ),
     task=StringSchema("Required for create: the task for the subagent to complete.", min_length=1),
-    label=StringSchema("Optional short label for create (for display)."),
+    label=StringSchema("Display label for create."),
     temperature=NumberSchema(
-        description="Optional sampling temperature for create. Defaults to the parent's model runtime.",
+        description="Sampling temperature for create; inherits the parent's runtime if omitted.",
         minimum=0.0,
         maximum=2.0,
     ),
     wait=BooleanSchema(
         description=(
-            "For create: wait for the result directly when it must inform the current turn. "
-            "Defaults to false for background execution with a completion notification. "
-            "Ephemeral requests and hosts without a background consumer always wait."
+            "For create: true waits for the result; false runs in background with a completion notification. "
+            "Temporary sessions and hosts unable to receive background results always wait."
         ),
         default=False,
     ),
@@ -76,15 +75,10 @@ class SubagentTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Create, message, cancel, or check your session's private subagent tasks. "
-            "Use create for independent work; set wait=true for a blocking consultation. "
-            "Use send for follow-up instructions, cancel to stop one task, and check to read "
-            "progress, message receipts, and results. Check without task_id lists active and recent tasks; "
-            "use a known task_id to read an older result. "
-            "Background results arrive automatically; do not repeatedly poll check while waiting. "
-            "A partial result or iteration limit does not mean the task completed. "
-            "For deliverables or existing projects, inspect the workspace first "
-            "and use a dedicated subdirectory when helpful."
+            "Manage the current session's private subagent tasks. "
+            "Background results arrive automatically; avoid repeated polling. "
+            "Check with a known task_id to read older results. "
+            "Partial results or iteration limits do not mean completion."
         )
 
     @property

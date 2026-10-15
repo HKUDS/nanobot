@@ -27,6 +27,11 @@ from websockets.exceptions import WebSocketException
 from websockets.typing import Origin
 from yarl import URL
 
+from nanobot.channels.websocket.attachment_http import UPLOAD_PATH
+from nanobot.channels.websocket.attachment_policy import (
+    UPLOAD_IDLE_TIMEOUT_SECONDS,
+    UPLOAD_REQUEST_TIMEOUT_SECONDS,
+)
 from nanobot.webui.client_contract import assess_webui_contract, compatibility_error
 from nanobot.webui.local_client_assets import LocalClientAssets
 from nanobot.webui.remote_ssh import (
@@ -71,6 +76,7 @@ class RemoteProxy:
         self._ws_path = "/remote-session/" + secrets.token_urlsafe(18)
         self._api: dict[str, _Grant] = {}
         self._ws: dict[str, _Grant] = {}
+        self._uploads: dict[str, _Grant] = {}
         self._media_cipher = Fernet(Fernet.generate_key())
         self._media_cache: OrderedDict[str, str] = OrderedDict()
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -91,7 +97,9 @@ class RemoteProxy:
         self.port = int(listener.getsockname()[1])
         app = web.Application(client_max_size=_MAX_BYTES)
         app.router.add_route("*", "/{path:.*}", self._handle)
-        self._runner = web.AppRunner(app, access_log=None, handler_cancellation=True)
+        self._runner = web.AppRunner(
+            app, access_log=None, handler_cancellation=True, auto_decompress=False,
+        )
         try:
             await self._runner.setup()
             await web.SockSite(self._runner, listener).start()
@@ -114,6 +122,7 @@ class RemoteProxy:
             self._ws_path = "/remote-session/" + secrets.token_urlsafe(18)
             self._api.clear()
             self._ws.clear()
+            self._uploads.clear()
             self._media_cipher = Fernet(Fernet.generate_key())
             self._media_cache.clear()
         self._remote_secret = secret
@@ -129,6 +138,7 @@ class RemoteProxy:
         await asyncio.gather(*tasks, return_exceptions=True)
         self._api.clear()
         self._ws.clear()
+        self._uploads.clear()
         await self.tunnel.pause()
 
     async def close(self) -> None:
@@ -196,6 +206,8 @@ class RemoteProxy:
                     return await self._bootstrap()
             if path == "/webui/terminal":
                 raise web.HTTPForbidden()
+            if path == UPLOAD_PATH:
+                return await self._upload(request)
             if not path.startswith("/api/"):
                 return self.assets.response(request)
             return await self._http(request, path)
@@ -348,6 +360,52 @@ class RemoteProxy:
                 await result.write_eof()
                 return result
 
+    async def _upload(self, request: web.Request) -> web.Response:
+        if request.method != "POST":
+            raise web.HTTPMethodNotAllowed(request.method, ["POST"])
+        if not request.headers.getall("Authorization", []):
+            raise web.HTTPUnauthorized()
+        grant = self._grant(self._credential(request), self._uploads)
+        if request.headers.get("Content-Encoding") or request.headers.get("Transfer-Encoding"):
+            raise web.HTTPBadRequest(text="Unsupported attachment framing")
+        size = request.content_length
+        if size is None or not 0 < size <= _MAX_BYTES:
+            raise web.HTTPBadRequest(text="Invalid attachment size")
+        headers = self._headers(request)
+        headers["Authorization"] = "Bearer " + grant.remote
+        headers["Content-Length"] = str(size)
+        if "X-Attachment-Name" in request.headers:
+            headers["X-Attachment-Name"] = request.headers["X-Attachment-Name"]
+        # Only this connection-scoped upload route accepts HTTP writes. Stream
+        # the declared bytes without decoding or buffering the browser's file.
+        async def upload_body():
+            iterator = aiter(request.content.iter_chunked(64 * 1024))
+            while True:
+                async with asyncio.timeout(UPLOAD_IDLE_TIMEOUT_SECONDS):
+                    try:
+                        chunk = await anext(iterator)
+                    except StopAsyncIteration:
+                        return
+                yield chunk
+
+        async with asyncio.timeout(UPLOAD_REQUEST_TIMEOUT_SECONDS), httpx.AsyncClient(
+            trust_env=False, timeout=httpx.Timeout(UPLOAD_IDLE_TIMEOUT_SECONDS, connect=20),
+        ) as client:
+            async with client.stream("POST", self._upstream(UPLOAD_PATH), headers=headers,
+                                     content=upload_body()) as upstream:
+                if upstream.is_redirect:
+                    raise web.HTTPBadGateway(text="Unexpected remote redirect")
+                body = bytearray()
+                async for chunk in upstream.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > _MAX_BYTES:
+                        raise ValueError("response too large")
+                return web.Response(body=bytes(body), status=upstream.status_code, headers={
+                    "Content-Type": upstream.headers.get("Content-Type", "application/json"),
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                })
+
     async def _websocket(self, request: web.Request, grant: _Grant) -> web.WebSocketResponse:
         # An already-connected socket fixes the upstream and disables all WS
         # redirects. Its HTTP authority still matches the browser's origin.
@@ -364,15 +422,35 @@ class RemoteProxy:
                                max_size=_MAX_BYTES, open_timeout=20, close_timeout=2) as upstream:
                 browser = web.WebSocketResponse(max_msg_size=_MAX_BYTES, heartbeat=30)
                 await browser.prepare(request)
+                upload_token = ""
 
                 async def receive() -> None:
+                    nonlocal upload_token
                     try:
                         async for message in upstream:
                             if isinstance(message, bytes):
                                 await browser.send_bytes(message)
                             else:
-                                await browser.send_str(json.dumps(self._rewrite(json.loads(message))))
+                                payload: object = json.loads(message)
+                                if isinstance(payload, dict):
+                                    data = cast(dict[str, Any], payload)
+                                    if data.get("event") == "ready":
+                                        self._uploads.pop(upload_token, None)
+                                        upload_token = ""
+                                        upload = data.pop("upload", None)
+                                        if isinstance(upload, dict):
+                                            upload = cast(dict[str, Any], upload)
+                                            if (upload.get("path") == UPLOAD_PATH
+                                                    and isinstance(upload.get("token"), str)
+                                                    and upload["token"]):
+                                                if len(self._uploads) >= _MAX_CAPABILITIES:
+                                                    raise ValueError("too many upload capabilities")
+                                                upload_token = secrets.token_urlsafe(32)
+                                                self._uploads[upload_token] = _Grant(upload["token"], math.inf)
+                                                data["upload"] = {"path": UPLOAD_PATH, "token": upload_token}
+                                await browser.send_str(json.dumps(self._rewrite(payload)))
                     finally:
+                        self._uploads.pop(upload_token, None)
                         await browser.close()
 
                 reader = asyncio.create_task(receive())

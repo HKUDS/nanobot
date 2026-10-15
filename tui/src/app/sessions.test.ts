@@ -628,7 +628,7 @@ describe("NanobotTui session navigation", () => {
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain("⚠ Task interrupted")
     expect(setup.captureCharFrame()).toContain("Tools will not replay automatically")
-    expect(ui.status.plainText).toContain("continue or dismiss")
+    expect(ui.status.plainText).toContain("Continue or dismiss.")
     expect(ui.activeTurn).toBe(false)
     expect(ui.composer.focused).toBe(true)
 
@@ -675,7 +675,7 @@ describe("NanobotTui session navigation", () => {
     const unavailableFrame = setup.captureCharFrame()
     expect(unavailableFrame).toContain("can’t be resumed safely")
     expect(unavailableFrame).not.toContain("Continue")
-    expect(ui.status.plainText).toContain("dismiss to start a new message")
+    expect(ui.status.plainText).toContain("Dismiss to start a new message.")
 
     app.accept({
       event: "recovery_state",
@@ -886,7 +886,7 @@ describe("NanobotTui session navigation", () => {
       expect(ui.runtimeControls.contextText.plainText).toContain("~2.2k ctx")
       const frame = setup.captureCharFrame()
 
-      expect(frame).toContain("~2.2k tokens · 10 replay · 16 archived")
+      expect(frame).toContain("~2.2k tokens  10 replay  16 archived")
       expect(frame).toContain("The earlier turns agreed on a release plan.")
       expect(frame).not.toContain("Agent context")
       expect(frame).not.toContain("summary active")
@@ -966,8 +966,8 @@ describe("NanobotTui session navigation", () => {
     await waitUntil(() => ui.diffViewer.visible)
     await setup.flush()
     let frame = setup.captureCharFrame()
-    expect(frame).toContain("Diff · Last turn · 2 changes · +3 -1")
-    expect(frame).toContain("1/2 · src/first.ts · +2 -1")
+    expect(frame).toContain("Last turn changes  2 changes  +3 -1")
+    expect(frame).toContain("1/2  src/first.ts  +2 -1")
     expect(frame).toContain("const newValue = 2")
     expect(frame).toContain("Diff truncated by the gateway")
     expect(frame).not.toContain("Ask nanobot anything")
@@ -975,7 +975,7 @@ describe("NanobotTui session navigation", () => {
     setup.mockInput.pressArrow("right")
     await setup.flush()
     frame = setup.captureCharFrame()
-    expect(frame).toContain("2/2 · src/second.py · +1 -0")
+    expect(frame).toContain("2/2  src/second.py  +1 -0")
     expect(frame).toContain("print('hello')")
 
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
@@ -985,7 +985,7 @@ describe("NanobotTui session navigation", () => {
 
     setup.resize(52, 18)
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("←/→ file · pgup/pgdn · esc")
+    expect(setup.captureCharFrame()).toContain("←/→ file   pgup/pgdn   esc")
 
     setup.mockInput.pressEscape()
     await waitUntil(() => !ui.diffViewer.visible)

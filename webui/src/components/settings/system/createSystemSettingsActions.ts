@@ -11,6 +11,7 @@ import { DEFAULT_CUSTOM_MCP_FORM } from "@/components/settings/system/AppsSettin
 import type { SystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import {
   cancelMcpOAuth,
+  changeAutomationChat,
   completeMcpOAuth,
   disableNanobotFeature,
   enableNanobotFeature,
@@ -34,6 +35,7 @@ import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type {
   AutomationUpdatePayload,
+  AutomationChatUpdate,
   McpOAuthFlowPayload,
   McpPresetsPayload,
   NanobotFeatureInfo,
@@ -298,6 +300,12 @@ export function createSystemSettingsActions({
     }
   };
 
+  const handleAutomationChat = async (job: SessionAutomationJob, values: AutomationChatUpdate) => {
+    // The dialog owns the draft and error. Publish only the server acknowledgement.
+    const payload = await changeAutomationChat(client, job.id, values);
+    setAutomations(payload);
+  };
+
   const closeMcpOAuthPopup = () => {
     const popup = mcpOAuthPopupRef.current;
     mcpOAuthPopupRef.current = null;
@@ -450,7 +458,11 @@ export function createSystemSettingsActions({
     }
   };
 
-  const handleMcpOAuthConnect = async (name: string, reset = false) => {
+  const handleMcpOAuthConnect = async (
+    name: string,
+    reset = false,
+    values: Record<string, string> = {},
+  ) => {
     openMcpOAuthPopup();
     const key = `oauth:${name}`;
     setMcpPresetAction(key);
@@ -460,7 +472,7 @@ export function createSystemSettingsActions({
     setMcpOAuthCompleting(false);
     setMcpOAuthCallbackError(null);
     try {
-      const flow = await startMcpOAuth(client, name, reset);
+      const flow = await startMcpOAuth(client, name, reset, values);
       mcpOAuthFlowRef.current = flow;
       setMcpOAuthFlow(flow);
       navigateMcpOAuthPopup(flow);
@@ -668,6 +680,7 @@ export function createSystemSettingsActions({
     handleApiServiceAction,
     handleAutomationAction,
     handleAutomationEdit,
+    handleAutomationChat,
     handleCliAppAction,
     handleImportMcpConfig,
     handleMcpOAuthCancel,

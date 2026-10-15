@@ -3,6 +3,7 @@ import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testin
 
 import { CommandMenu, resolveSlashCommandLifecycle } from "./command-menu"
 import type { SlashCommand } from "../client"
+import { LOCAL_COMMANDS } from "../app/commands"
 
 const commands: SlashCommand[] = [
   {
@@ -18,6 +19,14 @@ const commands: SlashCommand[] = [
     title: "History",
     description: "Show recent messages",
     argHint: "[n]",
+    lifecycle: "side_channel",
+    acceptsArgs: true,
+  },
+  {
+    command: "/model",
+    title: "Switch model preset",
+    description: "Show or switch the active model preset.",
+    argHint: "[preset]",
     lifecycle: "side_channel",
     acceptsArgs: true,
   },
@@ -51,6 +60,34 @@ describe("CommandMenu", () => {
     expect(menu.move(1)).toBe(true)
     expect(menu.complete()).toBe("/history ")
     expect(menu.visible).toBe(false)
+  })
+
+  test("prioritizes command prefixes while retaining title discovery and navigation", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new CommandMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+    })
+    setup.renderer.root.add(menu.root)
+    menu.setCommands(commands, LOCAL_COMMANDS)
+    menu.update("/se")
+    await setup.renderOnce()
+
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("› /sessions")
+    expect(frame.indexOf("/sessions")).toBeLessThan(frame.indexOf("/model"))
+    expect(menu.completion("/se")).toBe("/sessions")
+
+    expect(menu.move(1)).toBe(true)
+    menu.update("/se", 1)
+    expect(menu.complete()).toBe("/model ")
+
+    menu.update("/preset")
+    expect(menu.complete()).toBe("/model ")
+
+    menu.update("/")
+    expect(menu.completion("/")).toBe("/branch")
   })
 
   test("hides outside the leading command token", async () => {

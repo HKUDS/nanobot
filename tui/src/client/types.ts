@@ -193,7 +193,7 @@ export type OutboundEvent =
       turn_id: string
       webui: true
       workspace_scope?: WorkspaceScopePayload
-      media?: OutboundMedia[]
+      media?: import("../../../packages/client-events/attachments").AttachmentReference[]
       cli_apps?: Array<{ name: string }>
       mcp_presets?: Array<{ name: string }>
       session_mentions?: SessionMention[]

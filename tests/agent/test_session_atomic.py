@@ -58,10 +58,6 @@ class TestAtomicSave:
             lambda _length: "save-failure",
         )
 
-        class BadMessage:
-            def __init__(self, data):
-                self.data = data
-
         original_dumps = json.dumps
 
         def failing_dumps(obj, **kwargs):

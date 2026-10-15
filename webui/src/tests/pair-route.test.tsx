@@ -6,7 +6,7 @@ import i18n from "@/i18n";
 
 const mocks = vi.hoisted(() => ({ action: vi.fn(), refresh: vi.fn(), config: "" }));
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: { requestMutation: mocks.action } }) }));
-vi.mock("@/components/remote/RemoteInstances", () => ({ useRemoteConnections: () => ({ refresh: mocks.refresh, directory: { profiles: [{ id: "paired", paired: true, ssh_config: mocks.config }, { id: "ssh", name: "Team SSH", paired: false }] } }) }));
+vi.mock("@/components/remote/remote-context", () => ({ useRemoteConnections: () => ({ refresh: mocks.refresh, directory: { profiles: [{ id: "paired", paired: true, ssh_config: mocks.config }, { id: "ssh", name: "Team SSH", paired: false }] } }) }));
 
 beforeEach(async () => { await i18n.changeLanguage("en"); mocks.action.mockReset().mockResolvedValue({}); mocks.refresh.mockReset().mockResolvedValue(undefined); mocks.config = ""; });
 afterEach(cleanup);
@@ -20,14 +20,14 @@ describe("paired network route", () => {
   it("does not mislabel a saved custom route as a direct connection", () => {
     mocks.config = "/private/paired/ssh_route";
     render(<PairRouteSettings id="paired" />);
-    expect(screen.getByRole("combobox")).toHaveTextContent("Saved network route");
+    expect(screen.getByRole("combobox")).toHaveTextContent("Saved route");
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     expect(mocks.action).not.toHaveBeenCalled();
   });
   it("shows direct only when no saved route is configured", () => {
     render(<PairRouteSettings id="paired" />);
     expect(screen.getByRole("combobox")).toHaveTextContent("Direct connection");
-    expect(screen.getByText(i18n.t("remote.pair.routeHint"))).toBeVisible();
+    expect(screen.getByText(i18n.t("remote.pair.routeHint").replace(/\s+/g, " ").trim())).toBeVisible();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
   it("shows saving, then confirms the saved route without connecting", async () => {

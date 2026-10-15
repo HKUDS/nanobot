@@ -12,9 +12,9 @@
         "placeholder": "Channel IDs, comma separated"
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Group rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }
@@ -42,7 +42,7 @@
         "label": "Working emoji"
       },
       "workingEmojiDelay": {
-        "label": "Working emoji delay"
+        "label": "Emoji delay (seconds)"
       },
       "streaming": {
         "label": "Streaming",

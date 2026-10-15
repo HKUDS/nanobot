@@ -148,7 +148,7 @@ export class UsagePanel {
         if (!compact) line("")
         const inputs = rounds.map((round) => round.prompt_tokens ?? 0)
         const max = Math.max(1, ...inputs)
-        if (!tiny) heading(width < 48 ? "Rounds" : "Recent rounds", `Input tokens · max ${formatTokenCount(max)}`)
+        if (!tiny) heading(width < 48 ? "Rounds" : "Recent rounds", `Input tokens (max ${formatTokenCount(max)})`)
         const chartHeight = Math.max(1, Math.min(6, this.height - 18))
         const slot = Math.max(1, Math.floor(width / rounds.length))
         const barWidth = Math.min(3, Math.max(1, slot - 1))
@@ -187,13 +187,13 @@ export class UsagePanel {
         if (round && !tiny) {
           const input = round.prompt_tokens ?? 0
           const count = (value: number | undefined) => known(value) ? value.toLocaleString("en-US") : "?"
-          line(`${width < 48 ? "" : "Round "}${this.selected + 1}/${rounds.length} · In ${count(input)} · Out ${count(round.completion_tokens)}`)
+          line(`${width < 48 ? "" : "Round "}${this.selected + 1}/${rounds.length}  In ${count(input)}  Out ${count(round.completion_tokens)}`)
           const cache = known(round.cached_tokens)
             ? `${Math.round(Math.min(input, round.cached_tokens) / input * 100)}%` : "?"
-          const time = known(round.generation_ms) ? ` · ${(round.generation_ms / 1000).toFixed(1)}s` : ""
+          const time = known(round.generation_ms) ? `  ${(round.generation_ms / 1000).toFixed(1)}s` : ""
           if (!compact) {
             const estimated = known(round.estimated_tokens) && round.estimated_tokens > 0
-            line(`Cache ${cache}${time}${estimated && width >= 48 ? " · includes estimated usage" : ""}`, theme.muted)
+            line(`Cache ${cache}${time}${estimated && width >= 48 ? "  includes estimated usage" : ""}`, theme.muted)
             if (estimated && width < 48) line("Includes estimated usage", theme.muted)
           }
         }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  changeAutomationChat,
   cancelMcpOAuth,
   configureChannel,
   completeMcpOAuth,
@@ -13,6 +14,7 @@ import {
   fetchFilePreview,
   fetchFilePreviewAvailability,
   fetchAutomations,
+  fetchAutomationChats,
   fetchAutomationRunResult,
   fetchApiService,
   fetchCliApps,
@@ -375,6 +377,20 @@ describe("webui API helpers", () => {
       "/api/webui/automations/result?id=task%2Fid&run_at_ms=1234&kind=cron",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it("reads chat choices over HTTP and commits the opaque choice over WebSocket", async () => {
+    const controller = new AbortController();
+    await fetchAutomationChats("tok", "task/id", controller.signal);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/chats?id=task%2Fid",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
+    );
+    vi.mocked(fetch).mockClear();
+    const values = { target_id: "opaque-id", revision: "reviewed-version", message: "Reviewed prompt" };
+    await changeAutomationChat(mutationTransport, "task/id", values);
+    expect(requestMutation).toHaveBeenCalledWith("automation.change_chat", { id: "task/id", values }, 20_000);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("validates channel settings with form values", async () => {
@@ -1169,8 +1185,6 @@ describe("webui API helpers", () => {
       collapsed_groups: {},
       view: {
         density: "compact" as const,
-        show_previews: false,
-        show_timestamps: false,
         show_archived: true,
         sort: "updated_desc" as const,
       },
@@ -1202,7 +1216,6 @@ describe("webui API helpers", () => {
       },
       controls: {
         can_change_project: true,
-        can_use_full_access: true,
       },
     };
     vi.mocked(fetch).mockResolvedValueOnce({

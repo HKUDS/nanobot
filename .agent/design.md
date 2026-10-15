@@ -8,6 +8,18 @@ New capabilities should be added via `channels/`, `tools/`, skills, or MCP serve
 
 Runtime state fan-out follows the same boundary. `MessageBus.publish` awaits local subscribers for turn/run/model/goal state changes; `MessageBus.publish_event` queues routed channel delivery without waiting for network sends. Both carry `AgentEvent` values. Runner hooks publish typed output through the turn's scoped `EventSink`; direct-call callbacks are adapted at the execution boundary. WebUI/WebSocket wire details, title refreshes, and goal-state sync belong in `nanobot.session.webui_turns.WebuiTurnCoordinator` or the relevant channel adapter.
 
+Tools and channels own their configuration, metadata, and activation behavior. Tool configuration models live beside their implementations in `agent/tools/*_config.py`; channel descriptors and configuration stay in their channel packages. The root schema in `config/schema.py` assembles these contracts without importing their runtime implementations. Tool classes expose their configuration through `config_key` and `config_cls()`.
+
+Generic recovery checkpoints belong in `session/recovery.py`; WebUI recovery and turn coordination belong in `webui/recovery.py` and `session/webui_turns.py`. Gateway startup supplies WebUI turn policy. Channels own the pure address contract in `channels/notification_routes.py`, which core turn delivery consumes for default replies and durable notifications without loading channel runtime implementations.
+
+## Executable import boundaries
+
+Core execution, session storage, and security primitives stay independent of API, channel, CLI, and WebUI adapter implementations. Core may consume channel-owned pure address contracts, which must stay independent of runtime implementations. Shared client contracts stay independent of UI implementations, and client initialization dependencies must be acyclic.
+
+Python rules live in [scripts/check_import_boundaries.py](../scripts/check_import_boundaries.py); run `python -m scripts.check_import_boundaries` from the repository root. Client rules live in [scripts/check_client_import_boundaries.mjs](../scripts/check_client_import_boundaries.mjs); run `bun run check:imports` and `bun run test:imports` from `webui/` or `tui/` for that project. These scripts are the source of truth for checked modules, dependency rules, and exceptions.
+
+The checks cover selected direct imports and client initialization dependencies. They do not establish a complete runtime dependency graph; execution, state ownership, and security contracts still require behavioral verification.
+
 ## Prefer duplication over premature abstraction
 
 Channels and providers are allowed to repeat similar logic (send retries, media handling, message splitting). Do not introduce complex base classes or shared helpers just to eliminate duplication across channel files. Each channel file should remain self-contained and readable on its own. The same applies to provider implementations.
@@ -22,4 +34,4 @@ Every new cast must be supported by a boundary check or an invariant established
 
 ## Explicit over magical
 
-Configuration belongs in `config/schema.py` Pydantic models. Provider auto-detection must remain traceable from the factory to the concrete provider class.
+Provider auto-detection must remain traceable from the factory to the concrete provider class.

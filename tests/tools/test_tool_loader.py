@@ -59,7 +59,7 @@ def test_tool_context_has_required_fields():
     required = {
         "config", "workspace", "bus", "subagent_manager",
         "cron_service", "exec_session_manager", "file_state_store",
-        "provider_snapshot_loader", "image_generation_provider_configs", "timezone",
+        "provider_snapshot_loader", "providers_config", "timezone",
         "runtime_control",
     }
     assert required <= field_names
@@ -72,7 +72,7 @@ def test_tool_context_defaults():
     assert ctx.cron_service is None
     assert ctx.exec_session_manager is None
     assert ctx.provider_snapshot_loader is None
-    assert ctx.image_generation_provider_configs is None
+    assert ctx.providers_config is None
     assert ctx.runtime_control is None
     assert ctx.timezone == "UTC"
 
@@ -173,6 +173,23 @@ def test_loader_wires_shared_exec_session_manager(tmp_path):
     }
     assert "exec_session" in definition_names
     assert "write_stdin" not in definition_names
+
+
+def test_loader_preserves_caller_supplied_tool(tmp_path):
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.config.schema import ToolsConfig
+
+    tool = ReadFileTool(workspace=tmp_path / "custom-root")
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    registered = ToolLoader(test_classes=[ReadFileTool]).load(
+        ToolContext(config=ToolsConfig(), workspace=str(tmp_path)), registry,
+    )
+
+    assert registry.get("read_file") is tool
+    assert "read_file" not in registered
 
 
 # --- Task 4: _FsTool.create() ---
@@ -344,9 +361,10 @@ def test_image_gen_tool_config_cls():
 
 def test_image_gen_tool_enabled():
     from nanobot.agent.tools.image_generation import ImageGenerationTool
+    from nanobot.config.schema import ProvidersConfig
     mock_config = MagicMock()
     mock_config.image_generation.enabled = True
-    ctx = ToolContext(config=mock_config, workspace="/tmp")
+    ctx = ToolContext(config=mock_config, workspace="/tmp", providers_config=ProvidersConfig())
     assert ImageGenerationTool.enabled(ctx) is True
     mock_config.image_generation.enabled = False
     assert ImageGenerationTool.enabled(ctx) is False
@@ -354,14 +372,16 @@ def test_image_gen_tool_enabled():
 
 def test_image_gen_tool_create():
     from nanobot.agent.tools.image_generation import ImageGenerationTool
+    from nanobot.config.schema import ProviderConfig, ProvidersConfig
     mock_config = MagicMock()
     mock_config.image_generation = MagicMock()
     ctx = ToolContext(
         config=mock_config, workspace="/tmp",
-        image_generation_provider_configs={"openrouter": MagicMock()},
+        providers_config=ProvidersConfig(openrouter=ProviderConfig(api_key="image-key")),
     )
     tool = ImageGenerationTool.create(ctx)
     assert isinstance(tool, ImageGenerationTool)
+    assert tool.provider_configs["openrouter"].api_key == "image-key"
 
 
 # --- Task 7: MyToolConfig + MCP wrappers ---

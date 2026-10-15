@@ -1,39 +1,16 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Loader2, PlugZap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { groupRemoteProfiles, isCompatibilityError, needsRemoteSetup, type RemoteDirectory } from "@/lib/remote-instances";
+import { groupRemoteProfiles, isCompatibilityError, needsRemoteSetup } from "@/lib/remote-instances";
 import { HostCompatibilityDialog } from "./HostCompatibilityDialog";
 import { RemoteConnectionsPage } from "./RemoteConnectionsPage";
-import type { HostAnchor } from "./host-bridge";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { useHostSessions } from "./useHostSessions";
 import { HostNavigationContext, HostSwitcher, RemoteHostMenu, type HostPicker } from "./HostSwitcher";
 import { useSidebarHostBridge } from "./useSidebarHostBridge";
 import { readPairReturn, subscribePairReturn } from "@/lib/remote-pair-return";
-import type { HostConnectionState } from "./HostConnectionStatus";
-
-const RemoteContext = createContext<{
-  available: boolean;
-  localActive: boolean;
-  activeHostId: string | null;
-  hostStates: Record<string, HostConnectionState>;
-  managing: boolean;
-  embeddedManagement?: boolean;
-  reportManagementSurface?: (rect: HostAnchor, theme: "light" | "dark") => void;
-  closeManagement: () => void;
-  selectLocal: () => void;
-  openHostIds: string[];
-  directory: RemoteDirectory | null;
-  directoryError: boolean;
-  refresh: () => Promise<RemoteDirectory>;
-  rename: (id: string, name: string) => Promise<void>;
-  connect: (id: string, stillWanted?: () => boolean) => Promise<void>;
-  disconnect: (id: string) => Promise<void>;
-  remove: (id: string) => Promise<void>;
-  cancel: () => void;
-} | null>(null);
-export function useRemoteConnections() { return useContext(RemoteContext); }
+import { RemoteContext, type HostConnectionState } from "./remote-context";
 
 /** Keep host views alive; navigation belongs in each view's sidebar, not a second header. */
 export function RemoteInstances({ children }: { children: ReactNode }) {
@@ -134,7 +111,7 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
     manage,
     cancel: hosts.cancel, clearError: hosts.clearError, restoreFocus: () => { if (!managing) restoreFocus(); },
   };
-  useEffect(() => { if (selected) document.title = `${selected.name} · nanobot`; }, [selected]);
+  useEffect(() => { if (selected) document.title = selected.name; }, [selected]);
   useEffect(() => {
     const rememberFocus = (event: FocusEvent) => {
       if (!managementOpen.current && event.target instanceof HTMLElement && localPanel.current?.contains(event.target)
@@ -190,9 +167,10 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
               <RemoteConnectionsPage onBackToChat={() => changeManagement(false)} mainNavigationExpanded={!!bridge.surface?.left} />
             </ThemeProvider>
           </main>}
-          {!managing && selected && (offline || !activeFrame?.loaded) && <div className="absolute inset-0 overflow-y-auto bg-background p-6 text-center"><div className="flex min-h-full flex-col items-center justify-center gap-3">
+          {!managing && selected && (offline || !activeFrame?.loaded) && <div role="region" aria-label={t(offline ? recoveryTitle : "remote.opening")} className="absolute inset-0 overflow-y-auto bg-background p-6 text-center"><div className="flex min-h-full flex-col items-center justify-center gap-3">
             {offline ? <PlugZap className="h-7 w-7 text-muted-foreground" /> : <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />}
-            <p className="max-w-full text-pretty text-xs text-muted-foreground [overflow-wrap:anywhere]">{selected.name} · {selected.hostname}</p>
+            <p className="max-w-full text-pretty text-xs text-muted-foreground [overflow-wrap:anywhere]"><span className="block font-medium">{selected.name}</span>{" "}
+              {selected.hostname !== selected.name ? <span className="block">{selected.hostname}</span> : null}</p>
             <p className="font-medium">{t(offline ? recoveryTitle : "remote.opening")}</p>
             <p className="max-w-sm text-pretty text-sm text-muted-foreground">{recoveryMessage}</p>
             <div className="flex max-w-full flex-wrap items-stretch justify-center gap-2 [&>button]:h-auto [&>button]:min-h-10 [&>button]:min-w-0 [&>button]:max-w-full [&>button]:whitespace-normal">

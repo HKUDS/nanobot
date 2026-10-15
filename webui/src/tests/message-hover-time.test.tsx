@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format-time";
 
 vi.mock("@/components/MarkdownText", () => ({ MarkdownText: ({ content }: { content: string }) => <p>{content}</p> }));
 afterEach(() => { cleanup(); vi.useRealTimers(); });
