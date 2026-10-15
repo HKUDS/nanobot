@@ -528,6 +528,53 @@ describe("NanobotTui layout and themes", () => {
     expect(composerLine).not.toContain("┐")
   })
 
+  test.each(["light", "dark", "auto"] as const)(
+    "keeps the %s composer cursor cell readable at the end of input",
+    async (theme) => {
+      setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+      const app = NanobotTui.mount(
+        setup.renderer,
+        { ...options, theme },
+        client(),
+        new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      )
+      const ui = app as unknown as { ready: boolean; composer: TextareaRenderable }
+      app.accept({ event: "attached", chat_id: "chat" })
+      await waitUntil(() => ui.ready)
+      await setup.mockInput.pressKeys([..."Draft 中文🙂"])
+
+      const expectCursorCell = async () => {
+        await setup!.flush()
+        const cursor = setup!.renderer.getCursorState()
+        const spans = setup!.captureSpans().lines[cursor.y - 1]!.spans
+        let column = 1
+        const cell = spans.find((span) => {
+          const containsCursor = column <= cursor.x && cursor.x < column + span.width
+          column += span.width
+          return containsCursor
+        })!
+        expect(cursor.visible).toBe(true)
+        const buffer = setup!.renderer.currentRenderBuffer
+        expect(buffer.buffers.char[(cursor.y - 1) * buffer.width + cursor.x - 1]).toBe(32)
+        expect(cell.fg.equals(ui.composer.textColor)).toBe(true)
+        expect(cell.bg.equals(ui.composer.backgroundColor)).toBe(true)
+      }
+
+      await expectCursorCell()
+      setup.mockInput.pressKey("HOME")
+      setup.mockInput.pressKey("END")
+      await expectCursorCell()
+      setup.mockInput.pressArrow("left")
+      setup.mockInput.pressArrow("right")
+      await expectCursorCell()
+      setup.mockInput.pressBackspace()
+      await expectCursorCell()
+      expect(ui.composer.plainText).toBe("Draft 中文")
+      setup.resize(18, 20)
+      await expectCursorCell()
+    },
+  )
+
   test("uses asymmetric roles instead of chat bubbles", async () => {
     setup = await createRenderer({ width: 72, height: 24, screenMode: "alternate-screen" })
     const app = NanobotTui.mount(
