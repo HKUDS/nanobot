@@ -30,7 +30,6 @@ from nanobot.agent.goal_permission import GoalInputScope
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
-from nanobot.agent.prompt_worker import copy_messages_on_loop
 from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
@@ -731,7 +730,7 @@ class AgentLoop:
 
     async def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
         assert ctx.session is not None
-        scope = await self.runner.prompt_worker.run(
+        scope = await self.runner.prepare_prompt(
             self.workspace_scopes.for_turn,
             channel=ctx.delivery.route.channel,
             message_metadata=_prompt_scope_metadata(ctx.msg.metadata),
@@ -776,7 +775,7 @@ class AgentLoop:
         ]
         blocks = runtime_context_blocks_from_metadata(request.metadata)
         blocks.extend(await resolve_runtime_context(providers, request))
-        skill_context = await self.runner.prompt_worker.run(
+        skill_context = await self.runner.prepare_prompt(
             self.context.skills.build_explicit_skill_runtime_context,
             request.original_user_text or "",
         )
@@ -1075,7 +1074,7 @@ class AgentLoop:
                     else {}
                 )
                 if pending_msg.is_user_input:
-                    scope = await self.runner.prompt_worker.run(
+                    scope = await self.runner.prepare_prompt(
                         self.workspace_scopes.for_turn,
                         channel=pending_msg.channel,
                         message_metadata=_prompt_scope_metadata(metadata),
@@ -1189,7 +1188,7 @@ class AgentLoop:
         active_session_key = session.key if session else request_ctx.session_key
         consolidation_session_key = active_session_key or "agent:transient"
         request_metadata = request_ctx.metadata
-        effective_scope = await self.runner.prompt_worker.run(
+        effective_scope = await self.runner.prepare_prompt(
             self.workspace_scopes.for_turn,
             channel=request_ctx.channel,
             message_metadata=_prompt_scope_metadata(request_metadata),
@@ -2100,9 +2099,9 @@ class AgentLoop:
         history_records = session.messages[session.last_archived:]
         history_snapshot = Session(
             key=session.key,
-            messages=await copy_messages_on_loop(history_records),
+            messages=await self.runner.copy_messages_on_loop(history_records),
         )
-        ctx.history = await self.runner.prompt_worker.run(
+        ctx.history = await self.runner.prepare_prompt(
             history_snapshot.get_history, extend_to_user=is_subagent,
         )
         stored_state = session.provider_state

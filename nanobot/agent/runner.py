@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ParamSpec, TypeVar, cast
 
 from loguru import logger
 
@@ -23,7 +23,6 @@ from nanobot.agent.context_governance import (
     TranscriptBuilder,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.prompt_worker import PromptWorker, copy_messages_on_loop
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
@@ -81,6 +80,8 @@ _ARREARAGE_ERROR_MESSAGE = (
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
 _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
+_PromptArgs = ParamSpec("_PromptArgs")
+_PromptResult = TypeVar("_PromptResult")
 
 
 def _restore_outer_whitespace(content: str, original: str | None) -> str:
@@ -151,8 +152,24 @@ class AgentRunner:
     """Run a tool-capable LLM loop without product-layer concerns."""
 
     def __init__(self) -> None:
-        self.prompt_worker = PromptWorker()
-        self.context_governor = ContextGovernor(self.prompt_worker)
+        self.context_governor = ContextGovernor()
+
+    async def prepare_prompt(
+        self, operation: Callable[_PromptArgs, _PromptResult],
+        *args: _PromptArgs.args, **kwargs: _PromptArgs.kwargs,
+    ) -> _PromptResult:
+        """Share the bounded worker for read-only prompt preparation."""
+        return await self.context_governor.prepare_in_background(operation, *args, **kwargs)
+
+    @staticmethod
+    async def copy_messages_on_loop(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Detach loop-owned records while yielding between bounded batches."""
+        copied: list[dict[str, Any]] = []
+        memo: dict[int, Any] = {id(messages): copied}
+        for start in range(0, len(messages), 64):
+            copied.extend(deepcopy(message, memo) for message in messages[start:start + 64])
+            await asyncio.sleep(0)
+        return copied
 
     async def _run_context_snapshot(
         self, messages: list[dict[str, Any]],
@@ -162,8 +179,8 @@ class AgentRunner:
         task = asyncio.current_task()
         if task is not None and task.cancelling():
             # Cancellation cleanup must not queue behind its own unfinished worker.
-            return await copy_messages_on_loop(messages)
-        return await self.prompt_worker.run(deepcopy, messages)
+            return await self.copy_messages_on_loop(messages)
+        return await self.prepare_prompt(deepcopy, messages)
 
     @staticmethod
     def _append_injected_messages(
@@ -313,78 +330,64 @@ class AgentRunner:
 
         try:
             try:
-                messages, compaction = await self.prompt_worker.run(self._initial_transcript_and_compaction, spec)
-                context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
-                await hook.before_run(context)
-                result = await self._run_core(spec, hook, messages, compaction)
-            except Exception as exc:
-                context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
-                context.stop_reason = "error"
-                context.error = f"Error: {type(exc).__name__}: {exc}"
+                try:
+                    messages, compaction = await self.prepare_prompt(self._initial_transcript_and_compaction, spec)
+                    context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
+                    await hook.before_run(context)
+                    result = await self._run_core(spec, hook, messages, compaction)
+                except Exception as exc:
+                    context.messages = await self._run_context_snapshot(messages) if has_run_hooks else []
+                    context.stop_reason = "error"
+                    context.error = f"Error: {type(exc).__name__}: {exc}"
+                    context.exception = exc
+                    await hook.on_error(context)
+                    raise
+                else:
+                    context.messages = await self._run_context_snapshot(result.messages) if has_run_hooks else []
+                    context.final_content = result.final_content
+                    context.tools_used = list(result.tools_used)
+                    context.usage = result.usage
+                    context.stop_reason = result.stop_reason
+                    context.error = result.error
+                    context.tool_events = deepcopy(result.tool_events)
+                    context.had_injections = result.had_injections
+                    context.exception = None
+                    if context.error is not None:
+                        await hook.on_error(context)
+                    await hook.after_run(context)
+                    return result
+            except asyncio.CancelledError as exc:
+                context.stop_reason = "cancelled"
+                context.error = None
                 context.exception = exc
-                await hook.on_error(context)
                 raise
-            else:
-                await self._after_run(hook, context, result, has_run_hooks=has_run_hooks)
-                return result
-        except asyncio.CancelledError as exc:
-            self._mark_run_cancelled(context, exc)
-            raise
+            finally:
+                if has_run_hooks:
+                    try:
+                        if isinstance(context.exception, asyncio.CancelledError):
+                            context.messages = await self.copy_messages_on_loop(messages)
+                        else:
+                            context.messages = await self._run_context_snapshot(messages)
+                    except asyncio.CancelledError as exc:
+                        context.stop_reason = "cancelled"
+                        context.error = None
+                        context.exception = exc
+                        context.messages = await self.copy_messages_on_loop(messages)
+                        raise
         finally:
             try:
-                await self._finish_run(hook, context, messages, has_run_hooks=has_run_hooks)
+                if context.exception is None:
+                    await hook.on_finally(context)
+                else:
+                    try:
+                        await hook.on_finally(context)
+                    except Exception:
+                        logger.opt(exception=tool_log_content_allowed()).error(
+                            "AgentHook.on_finally error after {}",
+                            context.stop_reason or "run exception",
+                        )
             finally:
                 reset_llm_usage_source(llm_usage_source_token)
-
-    async def _after_run(
-        self, hook: AgentHook, context: AgentRunHookContext, result: AgentRunResult,
-        *, has_run_hooks: bool,
-    ) -> None:
-        context.messages = await self._run_context_snapshot(result.messages) if has_run_hooks else []
-        context.final_content = result.final_content
-        context.tools_used = list(result.tools_used)
-        context.usage = result.usage
-        context.stop_reason = result.stop_reason
-        context.error = result.error
-        context.tool_events = deepcopy(result.tool_events)
-        context.had_injections = result.had_injections
-        context.exception = None
-        if context.error is not None:
-            await hook.on_error(context)
-        await hook.after_run(context)
-
-    async def _finish_run(
-        self, hook: AgentHook, context: AgentRunHookContext, messages: list[dict[str, Any]],
-        *, has_run_hooks: bool,
-    ) -> None:
-        """Deliver a detached final snapshot even when its background wait is cancelled."""
-        try:
-            if not has_run_hooks:
-                context.messages = []
-            elif isinstance(context.exception, asyncio.CancelledError):
-                context.messages = await copy_messages_on_loop(messages)
-            else:
-                context.messages = await self._run_context_snapshot(messages)
-        except asyncio.CancelledError as exc:
-            self._mark_run_cancelled(context, exc)
-            context.messages = await copy_messages_on_loop(messages)
-            raise
-        finally:
-            try:
-                await hook.on_finally(context)
-            except Exception:
-                if context.exception is None:
-                    raise
-                logger.opt(exception=tool_log_content_allowed()).error(
-                    "AgentHook.on_finally error after {}",
-                    context.stop_reason or "run exception",
-                )
-
-    @staticmethod
-    def _mark_run_cancelled(context: AgentRunHookContext, exc: asyncio.CancelledError) -> None:
-        context.stop_reason = "cancelled"
-        context.error = None
-        context.exception = exc
 
     @staticmethod
     def _initial_transcript_and_compaction(
@@ -504,7 +507,7 @@ class AgentRunner:
             )
             await hook.before_iteration(context)
             request_message_count = len(messages)
-            request_messages = await self.prompt_worker.run(
+            request_messages = await self.prepare_prompt(
                 request_state.compaction.request_messages, messages,
             )
             response, raw_usage = await self._request_model(
@@ -605,7 +608,7 @@ class AgentRunner:
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
                 checkpoint_model_messages = (
-                    await self.prompt_worker.run(
+                    await self.prepare_prompt(
                         self.context_governor.prepare_messages_for_model, governance_config,
                         messages,
                     )
@@ -1221,7 +1224,7 @@ class AgentRunner:
         round_usages: list[LLMUsage],
     ) -> tuple[str | None, LLMUsage | None]:
         compaction = request_state.compaction
-        request_messages = await self.prompt_worker.run(compaction.request_messages, messages)
+        request_messages = await self.prepare_prompt(compaction.request_messages, messages)
         retry_messages = self._budget_exhausted_finalization_messages(request_messages)
         try:
             response = await self._request_no_tools(
@@ -1354,7 +1357,7 @@ class AgentRunner:
         if response.finish_reason != "error" and (
             response.usage is None or response.usage.total_tokens == 0
         ):
-            usage = await self.prompt_worker.run(
+            usage = await self.prepare_prompt(
                 self._usage_or_estimate, spec, state.messages, response,
                 tool_definitions=state.tool_definitions,
             )
