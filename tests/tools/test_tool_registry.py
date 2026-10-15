@@ -289,7 +289,10 @@ async def test_registry_uses_structured_tool_result_for_errors() -> None:
     assert isinstance(error_result, ToolResult)
     assert error_result.is_error
     assert error_result.startswith("Error: real failure")
-    assert "[Analyze the error above" in error_result
+    assert (
+        "[Consider this result in the context of the user's goal "
+        "and decide whether and how to proceed.]"
+    ) in error_result
 
 
 def test_get_definitions_returns_cached_result() -> None:

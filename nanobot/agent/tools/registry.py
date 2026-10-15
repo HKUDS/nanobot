@@ -186,7 +186,10 @@ class ToolRegistry:
 
     async def execute(self, name: str, params: Any) -> Any:
         """Execute a tool by name with given parameters."""
-        hint = "\n\n[Analyze the error above and try a different approach.]"
+        hint = (
+            "\n\n[Consider this result in the context of the user's goal "
+            "and decide whether and how to proceed.]"
+        )
         tool, params, error = self.prepare_call(name, params)
         if error:
             return ToolResult.error(str(error) + hint)
