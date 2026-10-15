@@ -52,6 +52,8 @@ class FakeRuntime:
         self.stop_timeout: int | None = None
         self.follow_tail: int | None = None
         self.validated_configs: list[Config] = []
+        self.runtime_selectors: list[tuple[str | None, str | None]] = []
+        self.config_selectors: list[tuple[str | None, str | None]] = []
 
     def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
         self.started_options = options
@@ -124,8 +126,13 @@ def _test_app(
     ] = []
     prepare_calls: list[tuple[Config, str]] = []
 
-    def load_runtime_config(_config_path: str | None, _workspace: str | None) -> Config:
+    def load_runtime_config(config_path: str | None, workspace: str | None) -> Config:
+        fake_runtime.config_selectors.append((config_path, workspace))
         return config or Config()
+
+    def runtime_factory(*, config: str | None, workspace: str | None) -> FakeRuntime:
+        fake_runtime.runtime_selectors.append((config, workspace))
+        return fake_runtime
 
     def run_gateway(
         config: Config,
@@ -157,7 +164,7 @@ def _test_app(
             validate_startup_config=(
                 validate_startup_config if startup_error is not None else None
             ),
-            runtime_factory=lambda **_kwargs: fake_runtime,
+            runtime_factory=runtime_factory,
             service_factory=lambda: fake_service,
             prepare_webui_bundle=prepare_webui_bundle,
         ),
@@ -338,6 +345,86 @@ def test_gateway_rejects_conflicting_modes(tmp_path):
 
     assert result.exit_code == 1
     assert "--foreground and --background cannot be used together" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["status"],
+        ["logs", "--no-follow"],
+        ["stop"],
+        ["restart"],
+        ["install-service", "--dry-run", "--manager", "systemd"],
+    ],
+    ids=["status", "logs", "stop", "restart", "install-service"],
+)
+@pytest.mark.parametrize("selectors_before_command", [True, False], ids=["parent", "child"])
+def test_gateway_management_uses_instance_selectors(
+    tmp_path: Path,
+    command: list[str],
+    selectors_before_command: bool,
+) -> None:
+    app, runtime, service, _calls, _prepare_calls = _test_app(tmp_path)
+    config_path = str(tmp_path / "custom" / "config.json")
+    workspace = str(tmp_path / "workspace")
+    selectors = ["--config", config_path, "--workspace", workspace]
+    args = ["gateway", *selectors, *command] if selectors_before_command else ["gateway", *command, *selectors]
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0, result.output
+    if command[0] == "install-service":
+        assert service.installed_options is not None
+        start = service.installed_options.start
+    else:
+        assert runtime.runtime_selectors == [(config_path, workspace)]
+        start = runtime.restarted_options
+    if command[0] in {"restart", "install-service"}:
+        assert runtime.config_selectors == [(config_path, workspace)]
+        assert start == GatewayInstance.resolve(
+            config_path=config_path, workspace=workspace,
+        ).start_options(port=18790)
+
+
+def test_gateway_stop_child_config_overrides_parent_and_inherits_workspace(tmp_path: Path) -> None:
+    app, runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+    parent_config = str(tmp_path / "parent" / "config.json")
+    child_config = str(tmp_path / "child" / "config.json")
+    workspace = str(tmp_path / "workspace")
+
+    result = runner.invoke(
+        app,
+        [
+            "gateway", "--config", parent_config, "--workspace", workspace,
+            "stop", "--config", child_config,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert runtime.runtime_selectors == [(child_config, workspace)]
+    assert runtime.stop_timeout == 20
+
+
+def test_gateway_restart_child_workspace_overrides_parent_and_inherits_config(tmp_path: Path) -> None:
+    app, runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+    config_path = str(tmp_path / "config.json")
+    parent_workspace = str(tmp_path / "parent-workspace")
+    child_workspace = str(tmp_path / "child-workspace")
+
+    result = runner.invoke(
+        app,
+        [
+            "gateway", "-c", config_path, "-w", parent_workspace,
+            "restart", "-w", child_workspace,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert runtime.config_selectors == [(config_path, child_workspace)]
+    assert runtime.runtime_selectors == [(config_path, child_workspace)]
+    assert runtime.restarted_options == GatewayInstance.resolve(
+        config_path=config_path, workspace=child_workspace,
+    ).start_options(port=18790)
 
 
 def test_gateway_status_uses_runtime(tmp_path):
