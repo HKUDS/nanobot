@@ -1,6 +1,6 @@
 ---
 name: my
-description: Inspect and optionally adjust the agent's runtime state. Use to check the current model or preset, context window and runtime limits, workspace and tool configuration, and request routing metadata such as channel, chat ID, and sender ID; diagnose unavailable capabilities; change allowed runtime settings; or store temporary session scratchpad values.
+description: Inspect or troubleshoot the agent's runtime state, adjust runtime settings, or keep temporary session notes.
 ---
 
 # Self-Awareness

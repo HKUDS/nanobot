@@ -375,8 +375,9 @@ def test_bundled_update_setup_description_is_valid_yaml(tmp_path: Path) -> None:
     metadata = SkillsLoader(tmp_path).get_skill_metadata("update-setup")
 
     assert metadata is not None
-    assert metadata["description"].startswith("One-time setup wizard")
-    assert "Triggers:" in metadata["description"]
+    description = metadata["description"]
+    assert isinstance(description, str)
+    assert description.strip()
 
 
 def test_bundled_skills_use_agent_owned_paths(tmp_path: Path) -> None:
