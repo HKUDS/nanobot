@@ -435,7 +435,14 @@ class ExecSessionManager:
                 raise RuntimeError("exec session manager is closed")
             self._cleanup_finished_locked()
             if len(self._sessions) + len(self._starting) >= self.max_sessions:
-                raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
+                finished = [
+                    (session.finished_at, session_id)
+                    for session_id, session in self._sessions.items()
+                    if session.finished_at is not None
+                ]
+                if not finished:
+                    raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
+                self._sessions.pop(min(finished)[1])
             session_id = uuid.uuid4().hex[:12]
             launch = asyncio.create_task(self._launch(
                 session_id=session_id, command=command, cwd=cwd, env=env,
