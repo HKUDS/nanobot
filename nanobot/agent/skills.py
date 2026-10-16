@@ -252,7 +252,7 @@ class SkillsLoader:
         workspace: Path | None = None,
     ) -> str:
         """
-        Build a summary of all skills (name, description, path, availability).
+        Build a summary of available skills (name, description, path).
 
         This is used for progressive loading - the agent can read the full
         skill content using read_file when needed.
@@ -268,7 +268,7 @@ class SkillsLoader:
             return self._build_skills_summary(exclude, workspace=workspace)
 
     def _build_skills_summary(self, exclude: set[str] | None, *, workspace: Path | None) -> str:
-        all_skills = self.list_skills(filter_unavailable=False)
+        all_skills = self.list_skills(filter_unavailable=True)
         if not all_skills:
             return ""
 
@@ -300,15 +300,9 @@ class SkillsLoader:
             lines = [f"### {label} (`{display_root}`)"]
             for entry in entries:
                 skill_name = entry["name"]
-                meta = self._get_skill_meta(skill_name)
-                available = self._check_requirements(meta)
                 desc = self.get_skill_description(skill_name)
-                suffix = ""
-                if not available:
-                    missing = self._get_missing_requirements(meta)
-                    suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
                 relative_path = Path(entry["path"]).relative_to(root).as_posix()
-                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{relative_path}`")
+                lines.append(f"- **{skill_name}** — {desc}  `{relative_path}`")
             sections.append("\n".join(lines))
         return "\n\n".join(sections)
 

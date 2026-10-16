@@ -27,6 +27,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.agent.tools.shell_config import ExecToolConfig
+from nanobot.agent.tools.shell_output import ShellOutputFilter
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -285,12 +286,13 @@ class _ExecSession:
         if stream is None:
             return
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        output_filter = ShellOutputFilter()
         try:
             while True:
                 chunk = await stream.read(4096)
                 if chunk:
                     self.last_output_at = time.monotonic()
-                text = decoder.decode(chunk, final=not chunk)
+                text = output_filter.feed(decoder.decode(chunk, final=not chunk))
                 async with self._lock:
                     buffer.append(text)
                 if not chunk:
@@ -433,7 +435,14 @@ class ExecSessionManager:
                 raise RuntimeError("exec session manager is closed")
             self._cleanup_finished_locked()
             if len(self._sessions) + len(self._starting) >= self.max_sessions:
-                raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
+                finished = [
+                    (session.finished_at, session_id)
+                    for session_id, session in self._sessions.items()
+                    if session.finished_at is not None
+                ]
+                if not finished:
+                    raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
+                self._sessions.pop(min(finished)[1])
             session_id = uuid.uuid4().hex[:12]
             launch = asyncio.create_task(self._launch(
                 session_id=session_id, command=command, cwd=cwd, env=env,
