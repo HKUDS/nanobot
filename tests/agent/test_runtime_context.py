@@ -21,7 +21,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.sdk.types import snapshot_from_session
 from nanobot.session.manager import Session, _message_preview_text
-from nanobot.session.webui_turns import _title_inputs
+from nanobot.session.titles import _title_inputs
 from nanobot.webui.transcript import _session_user_event
 
 

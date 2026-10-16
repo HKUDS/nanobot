@@ -83,6 +83,14 @@ class SessionTurnPersisted(AgentEvent):
 
 
 @dataclass(frozen=True)
+class SessionTitleOverridden(AgentEvent):
+    """A chat participant manually renamed the chat topic."""
+
+    context: RuntimeEventContext
+    title: str
+
+
+@dataclass(frozen=True)
 class GoalStateChanged(AgentEvent):
     """A session's sustained-goal state changed."""
 

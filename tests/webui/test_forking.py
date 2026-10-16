@@ -6,7 +6,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock
 import pytest
 
 import nanobot.webui.forking as forking
-from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY
+from nanobot.session.titles import TITLE_METADATA_KEY
 
 
 def test_create_fork_rebuilds_missing_transcript_and_saves_clean_title(
@@ -37,7 +37,7 @@ def test_create_fork_rebuilds_missing_transcript_and_saves_clean_title(
     )
     rebuild.assert_called_once_with("websocket:fork-id", forked.messages)
     marker.assert_called_once_with("websocket:fork-id")
-    assert forked.metadata[WEBUI_TITLE_METADATA_KEY] == "Useful fork"
+    assert forked.metadata[TITLE_METADATA_KEY] == "Useful fork"
     manager.save.assert_called_once_with(forked, fsync=True)
 
 
