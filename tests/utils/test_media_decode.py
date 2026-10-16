@@ -62,6 +62,24 @@ def test_saves_document_with_safe_original_name(tmp_path) -> None:
     assert Path(result).read_bytes() == b"%PDF-1.4"
 
 
+@pytest.mark.parametrize("stem", ["报告" * 40, "📄" * 60], ids=["cjk", "emoji"])
+def test_saves_document_with_long_unicode_name(tmp_path: Path, stem: str) -> None:
+    payload = b"%PDF-1.4"
+    result = save_base64_data_url(
+        _data_url(payload, mime="application/pdf"),
+        tmp_path,
+        filename=f"{stem}.pdf",
+    )
+
+    assert result is not None
+    saved = Path(result)
+    assert saved.parent == tmp_path
+    assert saved.suffix == ".pdf"
+    assert len(saved.name.encode("utf-8")) <= 255
+    assert "�" not in saved.name
+    assert saved.read_bytes() == payload
+
+
 def test_document_filename_cannot_escape_media_dir(tmp_path) -> None:
     result = save_base64_data_url(
         _data_url(b"%PDF-1.4", mime="application/pdf"),
