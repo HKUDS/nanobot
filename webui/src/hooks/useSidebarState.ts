@@ -162,15 +162,16 @@ export function useSidebarState(
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     const load = async () => {
+      if (cancelled || loadedRef.current) return;
       try {
         const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current));
-        if (cancelled) return;
+        if (cancelled || loadedRef.current) return;
         stateRef.current = loaded;
         loadedRef.current = true;
         setState(loaded);
         setLoading(false);
       } catch {
-        if (cancelled) return;
+        if (cancelled || loadedRef.current) return;
         // A failed read is not an empty store. Keep writes blocked until a
         // retry can load the saved state, including after gateway restarts.
         retryTimer = setTimeout(() => void load(), 3_000);
@@ -230,7 +231,9 @@ export function useSidebarState(
     ) return;
     const loaded = normalizeSidebarState(incoming);
     stateRef.current = loaded;
+    loadedRef.current = true;
     setState(loaded);
+    setLoading(false);
   }), [client]);
 
   const update = useCallback(
