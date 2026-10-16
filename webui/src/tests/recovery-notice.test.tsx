@@ -27,18 +27,40 @@ describe("RecoveryNotice", () => {
     expect(onContinue).toHaveBeenCalledOnce();
   });
 
-  it("uses the shared status surface and motion treatment", () => {
-    render(
+  it("keeps an active continuation hidden after remounting", async () => {
+    const onContinue = vi.fn().mockResolvedValue(undefined);
+    const onDismiss = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = render(
+      <RecoveryNotice state={INTERRUPTED} onContinue={onContinue} onDismiss={onDismiss} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    unmount();
+
+    const { container } = render(
       <RecoveryNotice
         state={{ status: "resuming", recovery_id: "recovery-1" }}
+        onContinue={onContinue}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("uses the shared alert surface and motion treatment", () => {
+    render(
+      <RecoveryNotice
+        state={INTERRUPTED}
         onContinue={vi.fn().mockResolvedValue(undefined)}
         onDismiss={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
-    const notice = screen.getByRole("status");
-    expect(notice).toHaveAttribute("data-recovery-status", "resuming");
-    expect(notice).toHaveAttribute("aria-live", "polite");
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveAttribute("data-recovery-status", "awaiting_user");
+    expect(notice).toHaveAttribute("aria-live", "assertive");
     expect(notice).toHaveClass(
       "max-w-[49.5rem]",
       "rounded-control",
@@ -68,36 +90,39 @@ describe("RecoveryNotice", () => {
     });
   });
 
-  it("shows the decision surface again when a continuation is interrupted", async () => {
-    const onContinue = vi.fn().mockResolvedValue(undefined);
-    const { rerender } = render(
-      <RecoveryNotice
-        state={INTERRUPTED}
-        onContinue={onContinue}
-        onDismiss={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
+  it.each(["awaiting_user", "failed"] as const)(
+    "shows the decision surface again when a continuation returns to %s",
+    async (status) => {
+      const onContinue = vi.fn().mockResolvedValue(undefined);
+      const { rerender } = render(
+        <RecoveryNotice
+          state={INTERRUPTED}
+          onContinue={onContinue}
+          onDismiss={vi.fn().mockResolvedValue(undefined)}
+        />,
+      );
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
 
-    rerender(
-      <RecoveryNotice
-        state={{ status: "resuming", recovery_id: "recovery-1" }}
-        onContinue={onContinue}
-        onDismiss={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
-    rerender(
-      <RecoveryNotice
-        state={{ ...INTERRUPTED, reason: "loop_guard" }}
-        onContinue={onContinue}
-        onDismiss={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
+      rerender(
+        <RecoveryNotice
+          state={{ status: "resuming", recovery_id: "recovery-1" }}
+          onContinue={onContinue}
+          onDismiss={vi.fn().mockResolvedValue(undefined)}
+        />,
+      );
+      rerender(
+        <RecoveryNotice
+          state={{ ...INTERRUPTED, status, reason: "loop_guard" }}
+          onContinue={onContinue}
+          onDismiss={vi.fn().mockResolvedValue(undefined)}
+        />,
+      );
 
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
-  });
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    },
+  );
 
   it("does not offer Continue when saved conversation context is unavailable", () => {
     render(

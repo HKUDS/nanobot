@@ -5478,6 +5478,31 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
 
+  it("keeps normal running controls when attaching to a resumed task", async () => {
+    const client = makeClient();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("resuming-chat")}
+        title="Resuming chat"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    await screen.findByLabelText("Message input");
+    act(() => {
+      client._emitChat("resuming-chat", {
+        event: "attached",
+        chat_id: "resuming-chat",
+        recovery_state: { recovery_id: "recovery-1", status: "resuming" },
+      });
+    });
+
+    expect(screen.queryByText("Restoring interrupted task…")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    expect(client.sendMessage).toHaveBeenCalledWith("resuming-chat", "/stop");
+  });
+
   it("allows a new turn after a completed recovery state", async () => {
     const client = makeClient();
     render(wrap(
