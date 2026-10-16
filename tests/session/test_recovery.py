@@ -770,3 +770,93 @@ async def test_bus_remains_quiet_after_recovered_state(tmp_path: Path) -> None:
     await asyncio.sleep(0)
     assert bus.inbound.empty()
     assert bus.outbound.empty()
+
+
+@pytest.mark.asyncio
+async def test_partially_completed_tools_keep_results_and_interrupt_the_rest(
+    tmp_path: Path,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:chat")
+    session.messages.append({"role": "user", "content": "read then send"})
+    session.metadata[PENDING_USER_TURN_KEY] = True
+    session.metadata[RUNTIME_CHECKPOINT_KEY] = {
+        "phase": "awaiting_tools",
+        "assistant_message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call-1", "function": {"name": "read_file"}},
+                {"id": "call-2", "function": {"name": "send_email"}},
+            ],
+        },
+        "completed_tool_results": [
+            {
+                "role": "tool",
+                "tool_call_id": "call-1",
+                "name": "read_file",
+                "content": "saved result",
+            }
+        ],
+        "pending_tool_calls": [{"id": "call-2", "function": {"name": "send_email"}}],
+    }
+    _persist(sessions, session)
+
+    coordinator, bus, restarted = _coordinator(tmp_path)
+    await coordinator.scan()
+
+    # Nothing is replayed: the pending call becomes an interrupted result.
+    assert bus.inbound.empty()
+    restored = restarted.get_or_create("websocket:chat")
+    tool_rows = [m for m in restored.messages if m.get("role") == "tool"]
+    assert [row["tool_call_id"] for row in tool_rows] == ["call-1", "call-2"]
+    assert tool_rows[0]["content"] == "saved result"
+    assert "_recovery_interrupted" not in tool_rows[0]
+    assert tool_rows[1]["_recovery_interrupted"] is True
+    assert RUNTIME_CHECKPOINT_KEY not in restored.metadata
+    assert restored.metadata[RECOVERY_METADATA_KEY]["status"] == "awaiting_user"
+    assert restored.metadata[RECOVERY_METADATA_KEY]["reason"] == "tool_state_unknown"
+
+
+def test_partial_tool_checkpoint_partition_is_validated() -> None:
+    from nanobot.session.recovery import runtime_checkpoint_is_well_formed
+
+    def checkpoint(
+        completed_ids: list[str],
+        pending_ids: list[str],
+        *,
+        phase: str = "awaiting_tools",
+    ) -> dict:
+        return {
+            "phase": phase,
+            "assistant_message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call-1", "function": {"name": "read_file"}},
+                    {"id": "call-2", "function": {"name": "send_email"}},
+                ],
+            },
+            "completed_tool_results": [
+                {"role": "tool", "tool_call_id": call_id, "name": "read_file", "content": "ok"}
+                for call_id in completed_ids
+            ],
+            "pending_tool_calls": [
+                {"id": call_id, "function": {"name": "send_email"}} for call_id in pending_ids
+            ],
+        }
+
+    # Legacy shapes stay valid: everything pending, or everything completed.
+    assert runtime_checkpoint_is_well_formed(checkpoint([], ["call-1", "call-2"]))
+    assert runtime_checkpoint_is_well_formed(
+        checkpoint(["call-1", "call-2"], [], phase="tools_completed")
+    )
+    # A batch boundary partitions the calls between completed and pending.
+    assert runtime_checkpoint_is_well_formed(checkpoint(["call-1"], ["call-2"]))
+    # Overlap, incomplete coverage, duplicates and an all-completed
+    # awaiting_tools checkpoint are rejected.
+    assert not runtime_checkpoint_is_well_formed(checkpoint(["call-1"], ["call-1", "call-2"]))
+    assert not runtime_checkpoint_is_well_formed(checkpoint(["call-1"], []))
+    assert not runtime_checkpoint_is_well_formed(checkpoint([], ["call-2"]))
+    assert not runtime_checkpoint_is_well_formed(checkpoint(["call-1"], ["call-2", "call-2"]))
+    assert not runtime_checkpoint_is_well_formed(checkpoint(["call-1", "call-2"], []))
