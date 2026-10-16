@@ -256,22 +256,34 @@ async def test_partial_stdout_and_stderr_bytes_refresh_idle_without_log_reads(tm
     manager = ExecSessionManager()
     tool = ExecTool(
         working_dir=str(tmp_path), max_runtime=12, max_runtime_limit=12,
-        idle_timeout=2, idle_action="terminate", session_manager=manager,
+        idle_timeout=2, idle_action="report", session_manager=manager,
     )
     session_tool = ExecSessionTool(manager=manager)
+
+    async def wait_for_output_activity(after: float) -> float:
+        async with asyncio.timeout(5):
+            while True:
+                info, = await manager.list()
+                assert info.session_id == sid
+                assert info.returncode is None
+                # This anchor stays fixed between bytes, even if observation is delayed.
+                output_at = info.elapsed_s - info.idle_s
+                if output_at > after:
+                    return output_at
+                await asyncio.sleep(0.02)
+
     try:
         initial = await tool.execute(command=_python(code), yield_time_ms=0)
         sid = _session_id(initial)
         assert await _file_text(ready) == "ready"
-        await asyncio.sleep(1.25)
         stdout_gate.write_text("emit")
         assert await _file_text(stdout_ack) == "stdout"
+        stdout_at = await wait_for_output_activity(0)
 
-        await asyncio.sleep(1.25)
         stderr_gate.write_text("emit")
         assert await _file_text(stderr_ack) == "stderr"
+        await wait_for_output_activity(stdout_at)
 
-        await asyncio.sleep(1.25)
         finish_gate.write_text("finish")
         final = await session_tool.execute(session_id=sid, until_exit=True, timeout_ms=5000)
         assert not is_tool_error_result(final), final
