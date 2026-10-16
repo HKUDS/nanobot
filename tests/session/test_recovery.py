@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from nanobot.session.recovery import (
     pending_followups,
     record_pending_followup,
 )
+from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.webui import session_list_index, transcript
 from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 
@@ -277,11 +279,15 @@ def test_requeued_followup_preserves_its_journal_id(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_completed_tools_wait_for_confirmation_after_restart(tmp_path: Path) -> None:
+@pytest.mark.parametrize("checkpoint_storage", ["session", "sidecar", "sidecar_with_handle"])
+async def test_completed_tools_wait_for_confirmation_after_restart(
+    tmp_path: Path, checkpoint_storage: str,
+) -> None:
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:chat")
     session.messages.append({"role": "user", "content": "inspect"})
     session.metadata[PENDING_USER_TURN_KEY] = True
+    _persist(sessions, session)
     session.metadata[RUNTIME_CHECKPOINT_KEY] = {
         "phase": "tools_completed",
         "assistant_message": {
@@ -299,7 +305,17 @@ async def test_completed_tools_wait_for_confirmation_after_restart(tmp_path: Pat
         ],
         "pending_tool_calls": [],
     }
-    _persist(sessions, session)
+    if checkpoint_storage == "session":
+        sessions.save(session)
+    else:
+        sessions.save_runtime_checkpoint(session)
+        if checkpoint_storage == "sidecar_with_handle":
+            # Give the existing files strictly ordered timestamps without sleeps.
+            # Allocating a handle rewrites metadata while this turn is in flight.
+            os.utime(sessions._get_session_path(session.key), (1_700_000_000, 1_700_000_000))
+            os.utime(sessions._get_runtime_checkpoint_path(session.key), (1_700_000_001, 1_700_000_001))
+            resolver = SessionHandleResolver(SessionManager(tmp_path))
+            assert resolver.handle_for_session(session.key) is not None
 
     coordinator, bus, restarted = _coordinator(tmp_path)
     await coordinator.scan()
