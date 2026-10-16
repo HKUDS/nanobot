@@ -99,158 +99,33 @@ export function SettingsPage({
   const [automationDetailReturn, setAutomationDetailReturn] =
     useState<SessionAutomationJob | null>(null);
   const {
+    modelState,
+    modelActions,
+    capabilityState,
+    capabilityActions,
+    systemState,
+    systemActions,
     activeSection,
-    apiService,
-    apiServiceAction,
-    apiServiceError,
-    apiServiceLoading,
-    appsKindFilter,
-    appsQuery,
-    automationAction,
-    automationPendingDelete,
-    automationPendingEdit,
-    automations,
-    automationsError,
-    automationsFilter,
-    automationsLoading,
-    beginModelPresetCreation,
-    cancelModelPresetCreation,
-    changeModelCallOrder,
-    cliApps,
-    cliAppsAction,
-    cliAppsError,
-    cliAppsFocusName,
-    cliAppsLoading,
-    cliAppsMessage,
     closeProviderOAuthFlow,
-    completeProviderOAuthResponse,
-    createCustomProvider,
-    providerOperation,
-    customMcpForm,
-    editingProviderKeys,
     error,
     featureCatalog,
-    form,
-    handleApiServiceAction,
-    handleAutomationAction,
-    handleAutomationEdit,
-    handleAutomationChat,
-    handleCliAppAction,
-    handleDeleteModelConfiguration,
-    handleImportMcpConfig,
-    handleMcpOAuthCancel,
-    handleMcpOAuthComplete,
-    handleMcpOAuthConnect,
-    handleMcpOAuthOpen,
-    handleMcpPresetAction,
-    handleMcpToolsChange,
-    handleMigrateModelConfigurations,
-    handleNanobotFeatureAction,
-    handleSaveCustomMcp,
-    resetProviderDraft,
-    handleWebSearchProviderChange,
     hostEngineApplying,
     imageGenerationDirty,
-    imageGenerationForm,
-    imageGenerationSaving,
-    installCapabilities,
     loading,
     localPrefs,
-    mcpConfigImport,
-    mcpError,
-    mcpFieldValues,
-    mcpMessage,
-    mcpOAuthCallbackError,
-    mcpOAuthCallbackUrl,
-    mcpOAuthCompleting,
-    mcpOAuthFlow,
-    mcpOAuthPopupBlocked,
-    mcpPresetAction,
-    mcpPresets,
-    mcpPresetsLoading,
-    modelCallOrder,
-    modelCallOrderSaving,
-    modelConfigurationSaving,
     modelDirty,
-    modelMigrationSaving,
-    modelPresetBeforeCreateRef,
-    modelPresetCreating,
-    modelPresetEditingName,
-    modelPresetNameError,
-    modelPresetPendingDelete,
-    nanobotFeatureAction,
-    nanobotFeatureConfirm,
-    nanobotFeatures,
-    nanobotFeaturesError,
-    nanobotFeaturesLoading,
     networkSafetyDirty,
-    networkSafetyForm,
-    networkSafetySaving,
     pendingRestartSections: controllerPendingRestartSections,
-    providerForms,
-    providerOAuthCompleting,
-    providerOAuthDialogError,
-    providerOAuthFlow,
-    providerOAuthResponse,
-    providerSaving,
     remoteBrowserAccess,
-    resetWebSearchDraft,
     restartViaSettingsSurface,
-    runProviderOAuth,
-    saveImageGenerationSettings,
-    saveModelSettings,
-    saveNetworkSafetySettings,
-    saveProvider,
-    saveTranscriptionSettings,
-    saveWebSearch,
-    saving,
     selectSection,
-    setAppsKindFilter,
-    setAppsQuery,
-    setAutomationPendingDelete,
-    setAutomationPendingEdit,
-    setAutomationsFilter,
-    setCliAppsError,
-    setCliAppsMessage,
-    setCustomMcpForm,
-    setForm,
-    setImageGenerationForm,
     setLocalPrefs,
-    setMcpConfigImport,
-    setMcpError,
-    setMcpFieldValues,
-    setMcpMessage,
-    setMcpOAuthCallbackError,
-    setMcpOAuthCallbackUrl,
-    setModelPresetCreating,
-    setModelPresetEditingName,
-    setModelPresetNameError,
-    setModelPresetPendingDelete,
-    setNanobotFeatureConfirm,
-    setNanobotFeatures,
-    setNanobotFeaturesError,
-    setNetworkSafetyForm,
-    setProviderForms,
-    setProviderOAuthDialogError,
-    setProviderOAuthResponse,
-    setTranscriptionForm,
-    setWebSearchForm,
-    setWebSearchKeyEditing,
-    setWebSearchKeyVisible,
     settings,
     t,
-    toggleProviderKeyEditing,
-    toggleProviderKeyVisibility,
     token,
     transcriptionDirty,
-    transcriptionForm,
-    transcriptionSaving,
-    visibleProviderKeys,
-    webSearchForm,
-    webSearchKeyEditing,
-    webSearchKeyVisible,
-    webSearchSaving,
   } = controller;
+  const { providerOAuthFlow } = modelState;
 
   const restartInProgress = isRestarting || hostEngineApplying;
   const requestExit = useCallback<SettingsExitGuard>((leave) => {
@@ -272,13 +147,13 @@ export function SettingsPage({
       remoteBrowserAccess={remoteBrowserAccess}>
       {page === "advanced" ? (
         <AdvancedSettings
-          error={controller.capabilityErrors.safety}
-          form={networkSafetyForm}
+          error={capabilityState.capabilityErrors.safety}
+          form={capabilityState.networkSafetyForm}
           dirty={networkSafetyDirty}
-          saving={networkSafetySaving}
+          saving={capabilityState.networkSafetySaving}
           isNativeHostSurface={(settings.surface ?? settings.runtime_surface) === "native"}
-          onChangeForm={setNetworkSafetyForm}
-          onSave={saveNetworkSafetySettings}
+          onChangeForm={capabilityState.setNetworkSafetyForm}
+          onSave={capabilityActions.saveNetworkSafetySettings}
           onRestart={restartViaSettingsSurface}
           isRestarting={restartInProgress}
           requiresRestartPending={pendingRestartSections.runtime}
@@ -303,23 +178,23 @@ export function SettingsPage({
               {!showSidebar && settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
                 onRestart={restartViaSettingsSurface} isRestarting={restartInProgress} /> : null}
             </div>
-            <SettingsFeature title={t("settings.rows.imageGeneration")} enabled={imageGenerationForm.enabled}
-              error={imageGenerationForm.enabled && !settings.image_generation.providers.find((provider) => provider.name === imageGenerationForm.provider)?.configured
-                ? t("settings.image.missingCredential") : controller.capabilityErrors.image}
-              disabled={restartInProgress || imageGenerationSaving} initialOpen={activeSection === "image"}
-              onChange={(enabled) => setImageGenerationForm((prev) => ({ ...prev, enabled }))}>
+            <SettingsFeature title={t("settings.rows.imageGeneration")} enabled={capabilityState.imageGenerationForm.enabled}
+              error={capabilityState.imageGenerationForm.enabled && !settings.image_generation.providers.find((provider) => provider.name === capabilityState.imageGenerationForm.provider)?.configured
+                ? t("settings.image.missingCredential") : capabilityState.capabilityErrors.image}
+              disabled={restartInProgress || capabilityState.imageGenerationSaving} initialOpen={activeSection === "image"}
+              onChange={(enabled) => capabilityState.setImageGenerationForm((prev) => ({ ...prev, enabled }))}>
               {renderSection("image", true)}
             </SettingsFeature>
-            <SettingsFeature title={t("settings.rows.transcription")} enabled={transcriptionForm.enabled}
-              error={controller.capabilityErrors.voice}
-              disabled={restartInProgress || transcriptionSaving} initialOpen={activeSection === "voice"}
-              onChange={(enabled) => setTranscriptionForm((prev) => ({ ...prev, enabled }))}>
+            <SettingsFeature title={t("settings.rows.transcription")} enabled={capabilityState.transcriptionForm.enabled}
+              error={capabilityState.capabilityErrors.voice}
+              disabled={restartInProgress || capabilityState.transcriptionSaving} initialOpen={activeSection === "voice"}
+              onChange={(enabled) => capabilityState.setTranscriptionForm((prev) => ({ ...prev, enabled }))}>
               {renderSection("voice", true)}
             </SettingsFeature>
             <SettingsFeature title={t("settings.runtimeConfig.groups.web.title")}
               enabled={settings.runtime_config ? state.value("tools.web.enable") === true : settings.web.enable}
               disabled={restartInProgress || state.saving === "web" || !settings.runtime_config}
-              initialOpen={activeSection === "browser"} error={state.errors.web || controller.capabilityErrors.web}
+              initialOpen={activeSection === "browser"} error={state.errors.web || capabilityState.capabilityErrors.web}
               onChange={(enabled) => toggleRuntime("tools.web.enable", enabled)}>
               {renderSection("browser", true)}
             </SettingsFeature>
@@ -355,50 +230,50 @@ export function SettingsPage({
           <div className="settings-stack">
             <ModelsSettings
               token={token}
-              form={form}
-              setForm={setForm}
-              editingPresetName={modelPresetEditingName}
-              presetNameError={modelPresetNameError}
+              form={modelState.form}
+              setForm={modelState.setForm}
+              editingPresetName={modelState.modelPresetEditingName}
+              presetNameError={modelState.modelPresetNameError}
               settings={settings}
               dirty={modelDirty}
-              creating={modelPresetCreating}
-              creatingSaving={modelConfigurationSaving}
-              callOrder={modelCallOrder}
-              saving={saving}
-              orderSaving={modelCallOrderSaving || modelConfigurationSaving}
-              migrationSaving={modelMigrationSaving}
+              creating={modelState.modelPresetCreating}
+              creatingSaving={modelState.modelConfigurationSaving}
+              callOrder={modelState.modelCallOrder}
+              saving={modelState.saving}
+              orderSaving={modelState.modelCallOrderSaving || modelState.modelConfigurationSaving}
+              migrationSaving={modelState.modelMigrationSaving}
               showBrandLogos={localPrefs.brandLogos}
-              providerSaving={providerOperation?.action === "login" ? providerSaving : null}
-              onChangeCallOrder={changeModelCallOrder}
-              onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
+              providerSaving={modelState.providerOperation?.action === "login" ? modelState.providerSaving : null}
+              onChangeCallOrder={modelActions.changeModelCallOrder}
+              onProviderOAuthLogin={(provider) => modelActions.runProviderOAuth(provider, "login")}
               onAddProvider={(trigger, onAdded) => {
                 providerSetupOrigin.current = { trigger, onAdded };
                 setProviderPanel({ kind: "add" });
               }}
               onConfigureProvider={(provider, trigger) => {
                 providerSetupOrigin.current = { trigger };
-                resetProviderDraft(provider);
+                modelActions.resetProviderDraft(provider);
                 setProviderPanel({ kind: "edit", provider });
               }}
               onManageProviders={(trigger) => {
                 providerSetupOrigin.current = { trigger };
                 setProviderPanel({ kind: "manage" });
               }}
-              onSave={saveModelSettings}
-              onSaveRequestSettings={controller.saveModelRequestSettings}
-              onMigrate={handleMigrateModelConfigurations}
-              onBeginCreate={beginModelPresetCreation}
-              onCancelCreate={cancelModelPresetCreation}
-              onClearPresetNameError={() => setModelPresetNameError(null)}
+              onSave={modelActions.saveModelSettings}
+              onSaveRequestSettings={modelActions.saveModelRequestSettings}
+              onMigrate={modelActions.handleMigrateModelConfigurations}
+              onBeginCreate={modelActions.beginModelPresetCreation}
+              onCancelCreate={modelActions.cancelModelPresetCreation}
+              onClearPresetNameError={() => modelState.setModelPresetNameError(null)}
               onSelectConfiguration={(name) => {
-                setModelPresetCreating(false);
-                setModelPresetEditingName(name);
-                setModelPresetNameError(null);
-                modelPresetBeforeCreateRef.current = null;
+                modelState.setModelPresetCreating(false);
+                modelState.setModelPresetEditingName(name);
+                modelState.setModelPresetNameError(null);
+                modelState.modelPresetBeforeCreateRef.current = null;
               }}
               onDeleteConfiguration={(preset, onDeleted) => {
                 presetDeletedCallback.current = onDeleted;
-                setModelPresetPendingDelete(preset);
+                modelState.setModelPresetPendingDelete(preset);
               }}
             />
             {providerPanel ? <ProvidersSettings
@@ -415,22 +290,22 @@ export function SettingsPage({
                 }
               }}
               settings={settings}
-              nanobotFeatures={nanobotFeatures}
-              featureAction={nanobotFeatureAction}
-              capabilityError={nanobotFeaturesError}
-              providerForms={providerForms}
-              visibleProviderKeys={visibleProviderKeys}
-              editingProviderKeys={editingProviderKeys}
-              providerSaving={providerSaving}
+              nanobotFeatures={systemState.nanobotFeatures}
+              featureAction={systemState.nanobotFeatureAction}
+              capabilityError={systemState.nanobotFeaturesError}
+              providerForms={modelState.providerForms}
+              visibleProviderKeys={modelState.visibleProviderKeys}
+              editingProviderKeys={modelState.editingProviderKeys}
+              providerSaving={modelState.providerSaving}
               showBrandLogos={localPrefs.brandLogos}
               remoteBrowserAccess={remoteBrowserAccess}
-              onResetProviderDraft={resetProviderDraft}
-              onToggleProviderKey={toggleProviderKeyVisibility}
-              onToggleProviderKeyEditing={toggleProviderKeyEditing}
+              onResetProviderDraft={modelActions.resetProviderDraft}
+              onToggleProviderKey={modelActions.toggleProviderKeyVisibility}
+              onToggleProviderKeyEditing={modelActions.toggleProviderKeyEditing}
               onChangeProviderForm={(provider, value) => {
                 const row = settings.providers.find((item) => item.name === provider);
                 if (!row) return;
-                setProviderForms((prev) => ({
+                modelState.setProviderForms((prev) => ({
                   ...prev,
                   [provider]: {
                     ...(prev[provider] ?? providerFormFromRow(row)),
@@ -438,11 +313,11 @@ export function SettingsPage({
                   },
                 }));
               }}
-              onSaveProvider={saveProvider}
-              onCreateCustomProvider={createCustomProvider}
-              providerOperation={providerOperation}
-              onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
-              onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
+              onSaveProvider={modelActions.saveProvider}
+              onCreateCustomProvider={modelActions.createCustomProvider}
+              providerOperation={modelState.providerOperation}
+              onProviderOAuthLogin={(provider) => modelActions.runProviderOAuth(provider, "login")}
+              onProviderOAuthLogout={(provider) => modelActions.runProviderOAuth(provider, "logout")}
             /> : null}
           </div>
         );
@@ -450,37 +325,37 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <ImageGenerationSettings
-              error={controller.capabilityErrors.image}
+              error={capabilityState.capabilityErrors.image}
               embedded={embedded}
               token={token}
               settings={settings}
-              form={imageGenerationForm}
+              form={capabilityState.imageGenerationForm}
               dirty={imageGenerationDirty}
-              saving={imageGenerationSaving}
-              onChangeForm={setImageGenerationForm}
-              onSave={saveImageGenerationSettings}
-              onSaveRequestSettings={controller.saveImageRequestSettings}
+              saving={capabilityState.imageGenerationSaving}
+              onChangeForm={capabilityState.setImageGenerationForm}
+              onSave={capabilityActions.saveImageGenerationSettings}
+              onSaveRequestSettings={capabilityActions.saveImageRequestSettings}
               onOpenProviders={() => selectSection("models")}
               showBrandLogos={localPrefs.brandLogos}
               onRestart={restartViaSettingsSurface}
               isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.image}
             >
-              {imageGenerationForm.enabled ? runtimeConfiguration("image") : null}
+              {capabilityState.imageGenerationForm.enabled ? runtimeConfiguration("image") : null}
             </ImageGenerationSettings>
           </div>
         );
       case "voice":
         return (
           <TranscriptionSettings
-            error={controller.capabilityErrors.voice}
+            error={capabilityState.capabilityErrors.voice}
             embedded={embedded}
             settings={settings}
-            form={transcriptionForm}
+            form={capabilityState.transcriptionForm}
             dirty={transcriptionDirty}
-            saving={transcriptionSaving}
-            onChangeForm={setTranscriptionForm}
-            onSave={saveTranscriptionSettings}
+            saving={capabilityState.transcriptionSaving}
+            onChangeForm={capabilityState.setTranscriptionForm}
+            onSave={capabilityActions.saveTranscriptionSettings}
             onOpenProviders={() => selectSection("models")}
             showBrandLogos={localPrefs.brandLogos}
             onRestart={restartViaSettingsSurface}
@@ -493,33 +368,33 @@ export function SettingsPage({
           <div className="settings-stack">
             {!embedded ? runtimeConfiguration("browser") : null}
             <WebSettings
-              error={controller.capabilityErrors.web || controller.runtimeConfigState.errors.web}
+              error={capabilityState.capabilityErrors.web || controller.runtimeConfigState.errors.web}
               embedded={embedded}
               enabled={settings.runtime_config
                 ? controller.runtimeConfigState.value("tools.web.enable") !== false
                 : settings.web.enable}
               settings={settings}
-              form={webSearchForm}
-              keyVisible={webSearchKeyVisible}
-              keyEditing={webSearchKeyEditing}
-              saving={webSearchSaving}
-              onChangeForm={setWebSearchForm}
-              onChangeProvider={handleWebSearchProviderChange}
-              onToggleKey={() => setWebSearchKeyVisible((visible) => !visible)}
+              form={capabilityState.webSearchForm}
+              keyVisible={capabilityState.webSearchKeyVisible}
+              keyEditing={capabilityState.webSearchKeyEditing}
+              saving={capabilityState.webSearchSaving}
+              onChangeForm={capabilityState.setWebSearchForm}
+              onChangeProvider={capabilityActions.handleWebSearchProviderChange}
+              onToggleKey={() => capabilityState.setWebSearchKeyVisible((visible) => !visible)}
               onToggleKeyEditing={() => {
-                setWebSearchKeyEditing((editing) => !editing);
-                setWebSearchKeyVisible(false);
-                setWebSearchForm((prev) => ({ ...prev, apiKey: "" }));
+                capabilityState.setWebSearchKeyEditing((editing) => !editing);
+                capabilityState.setWebSearchKeyVisible(false);
+                capabilityState.setWebSearchForm((prev) => ({ ...prev, apiKey: "" }));
               }}
-              onReset={resetWebSearchDraft}
-              onSave={saveWebSearch}
+              onReset={capabilityActions.resetWebSearchDraft}
+              onSave={capabilityActions.saveWebSearch}
               showBrandLogos={localPrefs.brandLogos}
               onRestart={restartViaSettingsSurface}
               isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.browser}
               olostepFeature={featureCatalog.find((feature) => feature.name === "olostep")}
-              olostepInstalling={nanobotFeatureAction === "enable:olostep"}
-              capabilityError={nanobotFeaturesError}
+              olostepInstalling={systemState.nanobotFeatureAction === "enable:olostep"}
+              capabilityError={systemState.nanobotFeaturesError}
             >
               {settings.runtime_config ? runtimeConfiguration("network") : null}
             </WebSettings>
@@ -530,22 +405,22 @@ export function SettingsPage({
           <ChannelsSettings
             onConfigureMcp={(name) => {
               setMcpSetupName(name);
-              setAppsKindFilter("mcp");
-              setAppsQuery(name);
+              systemState.setAppsKindFilter("mcp");
+              systemState.setAppsQuery(name);
               selectSection("apps");
             }}
             token={token}
-            nanobotFeatures={nanobotFeatures}
-            loading={nanobotFeaturesLoading}
-            actionKey={nanobotFeatureAction}
+            nanobotFeatures={systemState.nanobotFeatures}
+            loading={systemState.nanobotFeaturesLoading}
+            actionKey={systemState.nanobotFeatureAction}
             chatAppsDocsUrl={settings.docs?.chat_apps_url}
             showBrandLogos={localPrefs.brandLogos}
-            error={nanobotFeaturesError}
+            error={systemState.nanobotFeaturesError}
             requiresRestartPending={pendingRestartSections.runtime}
-            onAction={handleNanobotFeatureAction}
-            onFeaturesUpdate={setNanobotFeatures}
+            onAction={systemActions.handleNanobotFeatureAction}
+            onFeaturesUpdate={systemState.setNanobotFeatures}
             onDismissStatus={() => {
-              setNanobotFeaturesError(null);
+              systemState.setNanobotFeaturesError(null);
             }}
             onRestart={restartViaSettingsSurface}
             isRestarting={restartInProgress}
@@ -557,50 +432,50 @@ export function SettingsPage({
             <AppsCatalogSettings
               setupName={mcpSetupName}
               onSetupOpened={() => setMcpSetupName(null)}
-              cliApps={cliApps}
-              mcpPresets={mcpPresets}
-              cliAppsLoading={cliAppsLoading}
-              mcpPresetsLoading={mcpPresetsLoading}
-              query={appsQuery}
-              filter={appsKindFilter}
-              cliActionKey={cliAppsAction}
-              mcpActionKey={mcpPresetAction}
-              mcpOAuthFlow={mcpOAuthFlow}
-              mcpOAuthPopupBlocked={mcpOAuthPopupBlocked}
-              mcpOAuthCallbackUrl={mcpOAuthCallbackUrl}
-              mcpOAuthCompleting={mcpOAuthCompleting}
-              mcpOAuthCallbackError={mcpOAuthCallbackError}
-              cliMessage={cliAppsMessage}
-              cliError={cliAppsError}
-              cliFocusName={cliAppsFocusName}
-              mcpMessage={mcpMessage}
-              mcpError={mcpError}
-              mcpFieldValues={mcpFieldValues}
-              customMcpForm={customMcpForm}
-              mcpConfigImport={mcpConfigImport}
+              cliApps={systemState.cliApps}
+              mcpPresets={systemState.mcpPresets}
+              cliAppsLoading={systemState.cliAppsLoading}
+              mcpPresetsLoading={systemState.mcpPresetsLoading}
+              query={systemState.appsQuery}
+              filter={systemState.appsKindFilter}
+              cliActionKey={systemState.cliAppsAction}
+              mcpActionKey={systemState.mcpPresetAction}
+              mcpOAuthFlow={systemState.mcpOAuthFlow}
+              mcpOAuthPopupBlocked={systemState.mcpOAuthPopupBlocked}
+              mcpOAuthCallbackUrl={systemState.mcpOAuthCallbackUrl}
+              mcpOAuthCompleting={systemState.mcpOAuthCompleting}
+              mcpOAuthCallbackError={systemState.mcpOAuthCallbackError}
+              cliMessage={systemState.cliAppsMessage}
+              cliError={systemState.cliAppsError}
+              cliFocusName={systemState.cliAppsFocusName}
+              mcpMessage={systemState.mcpMessage}
+              mcpError={systemState.mcpError}
+              mcpFieldValues={systemState.mcpFieldValues}
+              customMcpForm={systemState.customMcpForm}
+              mcpConfigImport={systemState.mcpConfigImport}
               showBrandLogos={localPrefs.brandLogos}
               requiresRestartPending={pendingRestartSections.runtime}
-              onQueryChange={setAppsQuery}
-              onFilterChange={setAppsKindFilter}
-              onCliAction={handleCliAppAction}
-              onMcpAction={handleMcpPresetAction}
-              onMcpOAuthConnect={handleMcpOAuthConnect}
-              onMcpOAuthCancel={() => void handleMcpOAuthCancel()}
-              onMcpOAuthOpen={handleMcpOAuthOpen}
+              onQueryChange={systemState.setAppsQuery}
+              onFilterChange={systemState.setAppsKindFilter}
+              onCliAction={systemActions.handleCliAppAction}
+              onMcpAction={systemActions.handleMcpPresetAction}
+              onMcpOAuthConnect={systemActions.handleMcpOAuthConnect}
+              onMcpOAuthCancel={() => void systemActions.handleMcpOAuthCancel()}
+              onMcpOAuthOpen={systemActions.handleMcpOAuthOpen}
               onMcpOAuthCallbackUrlChange={(value) => {
-                setMcpOAuthCallbackUrl(value);
-                setMcpOAuthCallbackError(null);
+                systemState.setMcpOAuthCallbackUrl(value);
+                systemState.setMcpOAuthCallbackError(null);
               }}
-              onMcpOAuthComplete={() => void handleMcpOAuthComplete()}
+              onMcpOAuthComplete={() => void systemActions.handleMcpOAuthComplete()}
               onDismissStatus={() => {
-                setCliAppsMessage(null);
-                setCliAppsError(null);
-                setMcpMessage(null);
-                setMcpError(null);
+                systemState.setCliAppsMessage(null);
+                systemState.setCliAppsError(null);
+                systemState.setMcpMessage(null);
+                systemState.setMcpError(null);
               }}
               onBackToChat={onBackToChat}
               onMcpFieldChange={(presetName, fieldName, value) => {
-                setMcpFieldValues((prev) => ({
+                systemState.setMcpFieldValues((prev) => ({
                   ...prev,
                   [presetName]: {
                     ...(prev[presetName] ?? {}),
@@ -608,11 +483,11 @@ export function SettingsPage({
                   },
                 }));
               }}
-              onCustomMcpFormChange={setCustomMcpForm}
-              onMcpConfigImportChange={setMcpConfigImport}
-              onSaveCustomMcp={handleSaveCustomMcp}
-              onImportMcpConfig={handleImportMcpConfig}
-              onMcpToolsChange={handleMcpToolsChange}
+              onCustomMcpFormChange={systemState.setCustomMcpForm}
+              onMcpConfigImportChange={systemState.setMcpConfigImport}
+              onSaveCustomMcp={systemActions.handleSaveCustomMcp}
+              onImportMcpConfig={systemActions.handleImportMcpConfig}
+              onMcpToolsChange={systemActions.handleMcpToolsChange}
               onRestart={restartViaSettingsSurface}
               isRestarting={restartInProgress}
             />
@@ -623,23 +498,23 @@ export function SettingsPage({
           <div className="settings-stack">
             <AutomationsSettings
               token={token}
-              payload={automations}
+              payload={systemState.automations}
               titleOverrides={titleOverrides}
               sessions={sessions}
               settingsSnapshot={controller.settings}
               onStartChat={onStartAutomationChat}
-              loading={automationsLoading}
-              filter={automationsFilter}
-              actionKey={automationAction}
-              error={automationsError}
-              onFilterChange={setAutomationsFilter}
-              onAction={handleAutomationAction}
+              loading={systemState.automationsLoading}
+              filter={systemState.automationsFilter}
+              actionKey={systemState.automationAction}
+              error={systemState.automationsError}
+              onFilterChange={systemState.setAutomationsFilter}
+              onAction={systemActions.handleAutomationAction}
               onRequestEdit={(job) => {
                 setAutomationDetailReturn(null);
-                setAutomationPendingEdit(job);
+                systemState.setAutomationPendingEdit(job);
               }}
-              onRequestDelete={setAutomationPendingDelete}
-              onChangeChat={handleAutomationChat}
+              onRequestDelete={systemState.setAutomationPendingDelete}
+              onChangeChat={systemActions.handleAutomationChat}
               onManageModels={() => selectSection("models")}
               returnToDetailJob={automationDetailReturn}
               onReturnToDetailHandled={() => setAutomationDetailReturn(null)}
@@ -653,21 +528,21 @@ export function SettingsPage({
           <div className="settings-stack">
             {runtimeConfiguration("runtime")}
             <RuntimeSettings
-              form={form}
+              form={modelState.form}
               settings={settings}
               onRestart={showSidebar ? undefined : restartViaSettingsSurface}
               isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.runtime}
-              apiService={apiService}
-              apiServiceLoading={apiServiceLoading}
-              apiServiceAction={apiServiceAction}
-              apiServiceError={apiServiceError}
+              apiService={systemState.apiService}
+              apiServiceLoading={systemState.apiServiceLoading}
+              apiServiceAction={systemState.apiServiceAction}
+              apiServiceError={systemState.apiServiceError}
               langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
-              capabilitiesLoading={nanobotFeaturesLoading}
-              capabilityAction={nanobotFeatureAction}
-              capabilityError={nanobotFeaturesError}
-              onApiServiceAction={handleApiServiceAction}
-              onInstallCapability={(name) => void installCapabilities([name])}
+              capabilitiesLoading={systemState.nanobotFeaturesLoading}
+              capabilityAction={systemState.nanobotFeatureAction}
+              capabilityError={systemState.nanobotFeaturesError}
+              onApiServiceAction={systemActions.handleApiServiceAction}
+              onInstallCapability={(name) => void systemActions.installCapabilities([name])}
             />
           </div>
         );
@@ -710,16 +585,16 @@ export function SettingsPage({
       ) : null}
 
       <ModelPresetDeleteDialog
-        preset={modelPresetPendingDelete}
-        deleting={saving}
+        preset={modelState.modelPresetPendingDelete}
+        deleting={modelState.saving}
         onOpenChange={(open) => {
           if (!open) {
-            setModelPresetPendingDelete(null);
+            modelState.setModelPresetPendingDelete(null);
             presetDeletedCallback.current = null;
           }
         }}
         onConfirm={async () => {
-          if (await handleDeleteModelConfiguration()) {
+          if (await modelActions.handleDeleteModelConfiguration()) {
             presetDeletedCallback.current?.();
             presetDeletedCallback.current = null;
           }
@@ -734,13 +609,13 @@ export function SettingsPage({
               ?.label ?? providerOAuthFlow.provider
             : ""
         }
-        authorizationResponse={providerOAuthResponse}
-        completing={providerOAuthCompleting}
-        error={providerOAuthDialogError}
+        authorizationResponse={modelState.providerOAuthResponse}
+        completing={modelState.providerOAuthCompleting}
+        error={modelState.providerOAuthDialogError}
         remoteBrowserAccess={remoteBrowserAccess}
         onAuthorizationResponseChange={(value) => {
-          setProviderOAuthResponse(value);
-          setProviderOAuthDialogError(null);
+          modelState.setProviderOAuthResponse(value);
+          modelState.setProviderOAuthDialogError(null);
         }}
         onOpenAuthorization={() => {
           if (!providerOAuthFlow) return;
@@ -751,40 +626,40 @@ export function SettingsPage({
           );
           if (opened) opened.opener = null;
         }}
-        onComplete={() => void completeProviderOAuthResponse()}
+        onComplete={() => void modelActions.completeProviderOAuthResponse()}
         onClose={closeProviderOAuthFlow}
       />
 
       <NanobotFeatureInstallDialog
-        feature={nanobotFeatureConfirm?.feature ?? null}
-        installOnly={nanobotFeatureConfirm?.installOnly ?? false}
-        installing={nanobotFeatureAction === `${nanobotFeatureConfirm?.installOnly ? "install" : "enable"}:${nanobotFeatureConfirm?.feature.name ?? ""}`}
+        feature={systemState.nanobotFeatureConfirm?.feature ?? null}
+        installOnly={systemState.nanobotFeatureConfirm?.installOnly ?? false}
+        installing={systemState.nanobotFeatureAction === `${systemState.nanobotFeatureConfirm?.installOnly ? "install" : "enable"}:${systemState.nanobotFeatureConfirm?.feature.name ?? ""}`}
         onOpenChange={(open) => {
-          if (!open) setNanobotFeatureConfirm(null);
+          if (!open) systemState.setNanobotFeatureConfirm(null);
         }}
-        onConfirm={(feature) => handleNanobotFeatureAction("enable", feature.name, {
+        onConfirm={(feature) => systemActions.handleNanobotFeatureAction("enable", feature.name, {
           confirmed: true,
-          installOnly: nanobotFeatureConfirm?.installOnly,
+          installOnly: systemState.nanobotFeatureConfirm?.installOnly,
         })}
       />
 
       <AutomationDeleteDialog
-        job={automationPendingDelete}
-        deleting={automationAction === `delete:${automationPendingDelete?.id ?? ""}`}
+        job={systemState.automationPendingDelete}
+        deleting={systemState.automationAction === `delete:${systemState.automationPendingDelete?.id ?? ""}`}
         onOpenChange={(open) => {
-          if (!open) setAutomationPendingDelete(null);
+          if (!open) systemState.setAutomationPendingDelete(null);
         }}
-        onConfirm={(job) => handleAutomationAction("delete", job)}
+        onConfirm={(job) => systemActions.handleAutomationAction("delete", job)}
       />
 
       <AutomationEditDialog
-        job={automationPendingEdit}
-        saving={automationAction === `update:${automationPendingEdit?.id ?? ""}`}
+        job={systemState.automationPendingEdit}
+        saving={systemState.automationAction === `update:${systemState.automationPendingEdit?.id ?? ""}`}
         onOpenChange={(open) => {
-          if (!open) setAutomationPendingEdit(null);
+          if (!open) systemState.setAutomationPendingEdit(null);
         }}
         onCancel={(job) => setAutomationDetailReturn(job)}
-        onSave={handleAutomationEdit}
+        onSave={systemActions.handleAutomationEdit}
       />
 
       <div
