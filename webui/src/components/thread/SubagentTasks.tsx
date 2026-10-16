@@ -296,7 +296,7 @@ function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask
     ? t("thread.subagents.progress", { completed: completedCount, total: tasks.length })
     : t("thread.subagents.finished", { count: tasks.length });
   const title = t(unlinked ? "thread.subagents.otherWorkTitle" : "thread.subagents.workTitle");
-  return <section data-subagent-work aria-label={title} className="thread-message-row mt-3">
+  return <section data-subagent-work aria-label={title} className={`thread-message-row mt-3 ${unlinked ? "mb-5" : ""}`}>
     <div className="overflow-hidden rounded-control border border-border/60 bg-muted/15">
       <button type="button" aria-expanded={open} aria-controls={rowsId}
         onClick={() => setExpanded(!open)}
