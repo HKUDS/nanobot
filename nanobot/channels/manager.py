@@ -830,7 +830,17 @@ class ChannelManager:
                         continue
 
                 if isinstance(event, RetryWaitEvent):
-                    continue
+                    # A provider back-off is turn progress, not a reply: deliver it
+                    # the way text progress flows, behind the same per-channel
+                    # ``sendProgress`` gate, so a 60-120 s retry no longer looks like
+                    # a hung turn. Interactive clients already get the sanitized
+                    # ``RetryStatusEvent`` lifecycle instead.
+                    if msg.channel == "websocket" or not self._should_send_progress(
+                        msg.channel, tool_hint=False,
+                    ):
+                        continue
+                    msg = replace_outbound_event(msg, ProgressEvent(content=msg.content))
+                    event = msg.event
 
                 if (
                     isinstance(event, RuntimeModelUpdatedEvent)

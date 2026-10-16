@@ -1671,7 +1671,7 @@ Global settings apply to all channels and have no graphical controls. Configure 
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `sendProgress` | `true` | Stream agent's text progress to the channel |
+| `sendProgress` | `true` | Stream agent's text progress to the channel, including provider retry back-off notices ("Model request failed, retrying in …") |
 | `sendToolHints` | `true` | Stream tool-call hints (e.g. `read_file("…")`) |
 | `showCompactionNotices` | `false` | Post automatic context-compaction lifecycle notices in built-in chat channels. Each channel can override this global default. Does not hide manual `/compact` feedback or WebUI/TUI structured events. |
 | `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix / Mattermost keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
