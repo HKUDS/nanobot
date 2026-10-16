@@ -1282,6 +1282,7 @@ export function ThreadShell({
     const shouldReconcileRun = (
       pendingCanonicalHydrate !== undefined
       && historyVersion > pendingCanonicalHydrate.historyVersion
+      && !hasPendingToolCalls
       && (
         pendingCanonicalHydrate.source === "refresh"
         || (
@@ -1294,18 +1295,17 @@ export function ThreadShell({
     // Completion is a fact about a turn, even when a newer local turn prevents
     // this snapshot from settling the conversation's current run.
     client.fenceCanonicalCompletedTurns(chatId, canonicalCompletedTurnIds);
-    const keepLiveMessages = (current: UIMessage[]) => projectWebuiThreadMessages(
-      replaceCanonicalCompletedTurns(current, normalizedHistory, canonicalCompletedTurnIds),
-    );
+    const keepLiveMessages = (current: UIMessage[]) => {
+      const reconciled = projectWebuiThreadMessages(
+        replaceCanonicalCompletedTurns(current, normalizedHistory, canonicalCompletedTurnIds),
+      );
+      const firstId = reconciled[0]?.id;
+      const prefixLength = normalizedHistory.findIndex((message) => message.id === firstId);
+      return prefixLength > 0
+        ? [...normalizedHistory.slice(0, prefixLength), ...reconciled]
+        : reconciled;
+    };
     if (shouldReconcileRun && pendingCanonicalHydrate) {
-      // Transcript replay strips streaming metadata and uses persisted ids.
-      // Never adopt it while the turn is active: even if no assistant delta
-      // arrived locally yet, the next resumed delta must create/continue the
-      // live cursor rather than append to an immutable replay row.
-      if (hasPendingToolCalls) {
-        setMessages((current) => keepLiveMessages(current));
-        return;
-      }
       const authoritativeReset = (
         pendingCanonicalHydrate.uiLineage !== null
         && historyLineage !== pendingCanonicalHydrate.uiLineage
