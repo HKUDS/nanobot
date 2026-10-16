@@ -157,7 +157,7 @@ def migrate_jsonl(store: SqliteSessionStore, workspace: Path) -> int:
     A malformed or conflicting source aborts the whole import. The committed
     workspace-source manifest lets startup finish isolation after a crash.
     """
-    imported: dict[str, Path] = {}
+    imported: dict[str, tuple[Path, tuple[str, ...]]] = {}
     workspace_sources: list[_WorkspaceSource] = []
     workspace_directory = workspace / "sessions"
     for directory in (store.path.parent, workspace_directory):
@@ -166,13 +166,17 @@ def migrate_jsonl(store: SqliteSessionStore, workspace: Path) -> int:
         for path in sorted(directory.glob("*.jsonl")):
             try:
                 session, files = read_jsonl(path)
+                digests = tuple(source.digest for source in files)
                 prior = imported.get(session.key)
                 if prior is not None:
-                    raise ValueError(f"duplicate JSONL session key: {prior} and {path}")
-                if store.load(session.key) is not None:
-                    raise ValueError(f"session already exists in SQLite: {session.key}")
-                store.save(session)
-                imported[session.key] = path
+                    prior_path, prior_digests = prior
+                    if prior_digests != digests or store.load(session.key) != session:
+                        raise ValueError(f"duplicate JSONL session key: {prior_path} and {path}")
+                else:
+                    if store.load(session.key) is not None:
+                        raise ValueError(f"session already exists in SQLite: {session.key}")
+                    store.save(session)
+                    imported[session.key] = path, digests
                 if directory == workspace_directory:
                     workspace_sources.extend(
                         {"name": source.path.name, "digest": source.digest} for source in files

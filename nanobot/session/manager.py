@@ -125,6 +125,14 @@ class SessionPolicy:
     disabled_tools: frozenset[str] = frozenset()
 
 
+@dataclass(frozen=True)
+class SessionIdentity:
+    """Cached generation and immutable runtime policy for one session."""
+
+    generation: str
+    policy: SessionPolicy
+
+
 @dataclass
 class Session:
     """Message history, runtime state, and metadata for one agent session."""

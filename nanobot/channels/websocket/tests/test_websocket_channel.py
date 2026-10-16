@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -52,7 +53,7 @@ from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import Session, SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.session_handles import session_handle_for_name
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
@@ -2972,6 +2973,56 @@ async def test_stream_transcript_persists_without_subscribers() -> None:
     assert _thread_conversation_events(body)[-1]["role"] == "assistant"
     assert _thread_conversation_events(body)[-1]["content"] == "hello world"
     assert _thread_conversation_events(body)[-1]["latencyMs"] == 42
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("temporary", [False, True])
+async def test_stream_policy_does_not_copy_history_on_runtime_loop(
+    bus, tmp_path, monkeypatch, temporary,
+) -> None:
+    import nanobot.session.state as session_state
+
+    sessions = SessionManager(tmp_path)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    owner = object()
+    chat_id = (
+        await channel.gateway.temporary_chats.create(owner, trusted_webui=True)
+        if temporary else "history-copy"
+    )
+    history = [
+        {"role": "user", "content": f"history {i}"} for i in range(1000)
+    ]
+    draft = await sessions.state.import_messages(f"websocket:{chat_id}", history)
+    await sessions.state.checkpoint_view(draft, {"messages": history})
+    runtime_thread = threading.get_ident()
+    original_copy = session_state.deepcopy
+
+    def copy_off_loop(value, *args, **kwargs):
+        if (
+            isinstance(value, Session) and value.messages
+            or isinstance(value, dict) and "runtime_checkpoint" in value
+        ):
+            assert threading.get_ident() != runtime_thread, "history copied on runtime loop"
+        return original_copy(value, *args, **kwargs)
+
+    monkeypatch.setattr(session_state, "deepcopy", copy_off_loop)
+    append = MagicMock()
+    monkeypatch.setattr("nanobot.webui.transcript.append_transcript_object", append)
+    try:
+        policy = channel.gateway.temporary_chats.message_policy(owner, chat_id, "hello")
+        assert (policy is not None) is temporary
+        await channel.send_delta(chat_id, "one", stream_id="s1")
+        await channel.send_delta(chat_id, " two", stream_id="s1")
+        await channel.send_delta(chat_id, "", stream_id="s1", stream_end=True)
+        await channel.send_reasoning_delta(chat_id, "plan", stream_id="r1")
+        await channel.send_reasoning_end(chat_id, stream_id="r1")
+        assert append.call_count == (0 if temporary else 2)
+    finally:
+        channel.gateway.temporary_chats.close()
+        await sessions.state.aclose()
 
 
 @pytest.mark.asyncio

@@ -100,6 +100,8 @@ from nanobot.session.recovery import (
     restore_pending_interruption,
     restore_runtime_checkpoint,
 )
+from nanobot.session.sqlite_store import SessionConflictError
+from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.session.summary import (
     SessionSummary,
     SessionSummaryCheckpoint,
@@ -1380,11 +1382,14 @@ class AgentLoop:
         if now < self._next_idle_compact_check_at:
             return
         self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
-        await self.auto_compact.check_expired(
-            self.schedule_background,
-            self.runtime_for_session,
-            active_session_keys=self._pending_queues.keys(),
-        )
+        try:
+            await self.auto_compact.check_expired(
+                self.schedule_background,
+                self.runtime_for_session,
+                active_session_keys=self._pending_queues.keys(),
+            )
+        except SessionOperationQueueFullError:
+            logger.debug("Skipping idle archival while session storage is busy")
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -1411,54 +1416,65 @@ class AgentLoop:
                     logger.warning("Error consuming inbound message: {}, continuing...", e)
                     continue
 
-                raw = command_text(msg)
-                effective_key = self._effective_session_key(msg)
-                if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
-                    await self.discard_session(msg.session_key)
-                    continue
-                if (
-                    msg.require_existing_session
-                    and self.sessions.state.peek_header(effective_key) is None
-                ):
-                    continue
-                if msg.is_user_input:
-                    await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
-                if msg.channel != "system" and self.commands.is_priority(raw):
-                    await self._dispatch_command_inline(
-                        msg, effective_key, raw,
-                        self.commands.dispatch_priority,
-                    )
-                    continue
-                routed_msg = msg
-                if effective_key != msg.session_key:
-                    routed_msg = dataclasses.replace(
-                        msg,
-                        session_key_override=effective_key,
-                    )
-                # A newer WebUI message must supersede an explicit recovery
-                # before it is injected into that recovery's pending queue.
-                # Without this admission point, a recovered turn could finish
-                # first and only then observe the user's newer request.
-                if (
-                    effective_key in self._pending_queues
-                    and msg.channel == "websocket"
-                    and self._recovery_admission is not None
-                    and not await self._recovery_admission.admit(routed_msg)
-                ):
-                    continue
-                # If this session already has an active pending queue (i.e. a task
-                # is processing this session), route the message there for mid-turn
-                # injection instead of creating a competing task.
-                if effective_key in self._pending_queues:
-                    if msg.channel != "system" and self.commands.is_dispatchable_command(raw):
-                        await self._dispatch_command_inline(
-                            msg, effective_key, raw,
-                            self.commands.dispatch,
-                        )
-                        continue
-                await self._enqueue_session_message(routed_msg)
+                try:
+                    await self._dispatch_inbound(msg)
+                except (SessionOperationQueueFullError, SessionConflictError) as exc:
+                    key = self._effective_session_key(msg)
+                    logger.warning("Session input rejected for {}: {}", key, exc)
+                    if msg.is_user_input:
+                        delivery = self.turn_delivery_factory.unrouted(msg, key)
+                        await delivery.fail(publish_completion=key not in self._pending_queues)
         finally:
             await self.aclose()
+
+    async def _dispatch_inbound(self, msg: InboundMessage) -> None:
+        """Route one input through command and session admission."""
+        raw = command_text(msg)
+        effective_key = self._effective_session_key(msg)
+        if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
+            await self.discard_session(msg.session_key)
+            return
+        if (
+            msg.require_existing_session
+            and await self.sessions.state.read_metadata(effective_key) is None
+        ):
+            return
+        if msg.is_user_input:
+            await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
+        if msg.channel != "system" and self.commands.is_priority(raw):
+            await self._dispatch_command_inline(
+                msg, effective_key, raw,
+                self.commands.dispatch_priority,
+            )
+            return
+        routed_msg = msg
+        if effective_key != msg.session_key:
+            routed_msg = dataclasses.replace(
+                msg,
+                session_key_override=effective_key,
+            )
+        # A newer WebUI message must supersede an explicit recovery
+        # before it is injected into that recovery's pending queue.
+        # Without this admission point, a recovered turn could finish
+        # first and only then observe the user's newer request.
+        if (
+            effective_key in self._pending_queues
+            and msg.channel == "websocket"
+            and self._recovery_admission is not None
+            and not await self._recovery_admission.admit(routed_msg)
+        ):
+            return
+        # If this session already has an active pending queue (i.e. a task
+        # is processing this session), route the message there for mid-turn
+        # injection instead of creating a competing task.
+        if effective_key in self._pending_queues:
+            if msg.channel != "system" and self.commands.is_dispatchable_command(raw):
+                await self._dispatch_command_inline(
+                    msg, effective_key, raw,
+                    self.commands.dispatch,
+                )
+                return
+        await self._enqueue_session_message(routed_msg)
 
     def preserve_inflight_turns_on_shutdown(self) -> None:
         """Keep durable checkpoints when the owning gateway exits.

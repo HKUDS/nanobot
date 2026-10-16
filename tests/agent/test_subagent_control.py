@@ -28,7 +28,7 @@ from nanobot.bus.runtime_events import TurnRunStatusChanged
 from nanobot.config import Config
 from nanobot.nanobot import Nanobot
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, SessionManager
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -180,7 +180,10 @@ async def test_child_origin_uses_the_channel_turn_identity(loop_factory):
 
 
 @pytest.mark.asyncio
-async def test_default_loop_keeps_slack_thread_for_late_subagent_result(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cache_invalidation", ["handles", "eviction"])
+async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
+    tmp_path, monkeypatch, cache_invalidation,
+):
     monkeypatch.setattr("nanobot.agent.loop._SUBAGENT_TERMINAL_WAIT_SECONDS", 0.01)
     child_started, release_child, parent_idle = (asyncio.Event() for _ in range(3))
 
@@ -244,6 +247,11 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(tmp_path
         saved = SessionManager(workspace, sessions_root=sessions_root).get_existing(session_key)
         assert saved is not None
         saved_route = saved.metadata["_compaction_route"]
+        if cache_invalidation == "handles":
+            await sessions.state.ensure_session_handles()
+        else:
+            for i in range(SESSION_CACHE_MAX_SIZE + 1):
+                await sessions.state.get_header(f"telegram:other-{i}")
         release_child.set()
         late_reply = await next_reply("Late follow-up")
 

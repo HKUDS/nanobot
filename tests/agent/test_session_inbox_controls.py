@@ -1,6 +1,7 @@
 """Independent turns and internal controls retain their session inbox semantics."""
 
 import asyncio
+import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -43,6 +44,95 @@ async def loop(tmp_path):
         yield agent
     finally:
         await agent.aclose()
+
+
+@pytest.mark.parametrize("rejection", ["stop", "followup", "replaced-followup", "idle"])
+async def test_rejected_input_does_not_stop_other_sessions(loop, monkeypatch, rejection):
+    state = loop.sessions.state
+    session = await state.get("websocket:busy")
+    model_started, release_model = asyncio.Event(), asyncio.Event()
+    readers_started, release_readers = threading.Event(), threading.Event()
+    idle_checked = asyncio.Event()
+    active_turn = rejection in {"followup", "replaced-followup"}
+    readers = []
+
+    async def chat(**kwargs):
+        if active_turn and not model_started.is_set():
+            model_started.set()
+            await release_model.wait()
+        return LLMResponse(content="still responsive")
+
+    async def reply(chat_id):
+        async with asyncio.timeout(5):
+            while True:
+                message = await loop.bus.consume_outbound()
+                if message.chat_id == chat_id and message.event is None:
+                    return message
+
+    original_list = loop.sessions._store.list_metadata
+
+    def blocked_list():
+        readers_started.set()
+        assert release_readers.wait(5)
+        return original_list()
+
+    loop.provider.chat_stream_with_retry = chat
+    if rejection == "idle":
+        original_check = loop.auto_compact.check_expired
+
+        async def observed_check(*args, **kwargs):
+            try:
+                await original_check(*args, **kwargs)
+            finally:
+                idle_checked.set()
+
+        monkeypatch.setattr(loop.auto_compact, "check_expired", observed_check)
+        loop._next_idle_compact_check_at = 0
+    run_task = asyncio.create_task(loop.run())
+    try:
+        if active_turn:
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="websocket", sender_id="u", chat_id="busy", content="first",
+                metadata={"webui": True}, session_generation=session.generation,
+            ))
+            await asyncio.wait_for(model_started.wait(), timeout=3)
+        if rejection == "replaced-followup":
+            await state.reset(session.key)
+        else:
+            monkeypatch.setattr(loop.sessions._store, "list_metadata", blocked_list)
+            readers = [asyncio.create_task(state.list_metadata()) for _ in range(64)]
+            assert await asyncio.to_thread(readers_started.wait, 2)
+
+        if rejection == "idle":
+            await asyncio.wait_for(idle_checked.wait(), timeout=3)
+        else:
+            rejected = InboundMessage(
+                channel="telegram" if rejection == "stop" else "websocket",
+                sender_id="u", chat_id="busy",
+                content="/stop" if rejection == "stop" else "rejected follow-up",
+                metadata={"webui": True}, session_generation=session.generation,
+            )
+            await loop.bus.publish_inbound(rejected)
+            assert (await reply("busy")).content == "Sorry, I encountered an error."
+        assert not run_task.done()
+
+        release_readers.set()
+        await asyncio.gather(*readers)
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="telegram", sender_id="u", chat_id="other", content="hello",
+        ))
+        assert (await reply("other")).content == "still responsive"
+        if active_turn:
+            assert not release_model.is_set()
+            assert loop._pending_queues[session.key].empty()
+            saved = await state.read(session.key)
+            assert pending_followups(saved) == []
+    finally:
+        release_readers.set()
+        await asyncio.gather(*readers, return_exceptions=True)
+        loop.stop()
+        run_task.cancel()
+        await asyncio.gather(run_task, return_exceptions=True)
 
 
 def _automation_message(kind: str, name: str) -> InboundMessage:

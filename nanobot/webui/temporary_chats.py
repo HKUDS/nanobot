@@ -80,8 +80,8 @@ class WebUITemporaryChats:
     def _cached_session_is_transient(self, chat_id: str) -> bool:
         if self._sessions is None:
             return False
-        session = self._sessions.state.peek(self._session_key(chat_id))
-        return session is not None and not session.policy.persist
+        identity = self._sessions.state.peek_identity(self._session_key(chat_id))
+        return identity is not None and not identity.policy.persist
 
     async def create(self, owner: object, *, trusted_webui: bool) -> str:
         """Create a server-identified chat owned by one authenticated WebUI connection."""
@@ -116,8 +116,8 @@ class WebUITemporaryChats:
         if self._owners.get(chat_id) is not owner or self._sessions is None:
             raise TemporaryChatError("temporary_chat_unavailable")
 
-        session = self._sessions.state.peek(self._session_key(chat_id))
-        if session is None:
+        identity = self._sessions.state.peek_identity(self._session_key(chat_id))
+        if identity is None:
             raise TemporaryChatError("temporary_chat_unavailable")
 
         command = self._commands.command_name(content)
@@ -126,7 +126,7 @@ class WebUITemporaryChats:
 
         return TemporaryChatMessagePolicy(
             session_key=self._session_key(chat_id),
-            session_generation=session.generation,
+            session_generation=identity.generation,
             workspace_scope=self._workspaces.restricted_default_scope(),
         )
 

@@ -4,6 +4,8 @@ import asyncio
 import signal
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextlib import suppress
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -21,6 +23,8 @@ from nanobot.agent.tools.image_generation import (
 )
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.cli import terminal as cli_terminal
 from nanobot.cli.runtime_config import _migrate_cron_store
 from nanobot.cli.webui_support import (
@@ -44,7 +48,9 @@ from nanobot.session.keys import (
     HEARTBEAT_SESSION_KEY,
     UNIFIED_SESSION_KEY,
     last_channel_from_metadata,
+    session_key_for_channel,
 )
+from nanobot.session.manager import SessionManager
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.token_encoding import warmup_token_encoding
@@ -55,6 +61,48 @@ from nanobot.webui.sidebar_state import read_webui_sidebar_state
 __all__ = ["_run_gateway"]
 
 console = Console()
+
+
+async def _deliver_to_channel(
+    msg: OutboundMessage,
+    *,
+    bus: MessageBus,
+    session_manager: SessionManager,
+    unified_session: bool = False,
+    record: bool = False,
+    session_key: str | None = None,
+    session_generation: str | None = None,
+) -> None:
+    """Publish a user-visible message and mirror it into its admitted session."""
+    metadata = dict(msg.metadata or {})
+    record = record or bool(metadata.pop("_record_channel_delivery", False))
+    raw_key = metadata.pop("_session_key", None)
+    raw_generation = metadata.pop("_session_generation", None)
+    expected_generation = (
+        session_generation
+        if session_generation is not None
+        else raw_generation if isinstance(raw_generation, str) else None
+    )
+    if metadata != (msg.metadata or {}):
+        msg = replace(msg, metadata=metadata)
+    if record and msg.channel != "cli" and msg.content.strip():
+        key = session_key or (raw_key if isinstance(raw_key, str) else None)
+        if key is None:
+            key = session_key_for_channel(
+                msg.channel, msg.chat_id, unified_session=unified_session,
+            )
+        if expected_generation is None:
+            # Cross-target sends admit their target before recording; subsequent
+            # deletion or reset must still revoke this delivery's generation.
+            target = await session_manager.state.get_header(key)
+            expected_generation = target.generation
+        extra: dict[str, Any] = {"_channel_delivery": True}
+        if msg.media:
+            extra["media"] = list(msg.media)
+        await session_manager.state.record_delivery(
+            key, msg.content, extra, expected_generation=expected_generation,
+        )
+    await bus.publish_outbound(msg)
 
 
 class _MCPReadinessHook(AgentHook):
@@ -519,9 +567,6 @@ def _run_gateway(
         schedule_background=_schedule_webui_background,
         recovery=recovery,
     )
-    from nanobot.bus.events import OutboundMessage
-    from nanobot.session.keys import session_key_for_channel
-
     def _channel_session_key(channel: str, chat_id: str) -> str:
         return session_key_for_channel(
             channel,
@@ -529,59 +574,16 @@ def _run_gateway(
             unified_session=config.agents.defaults.unified_session,
         )
 
-    async def _deliver_to_channel(
-        msg: OutboundMessage,
-        *,
-        record: bool = False,
-        session_key: str | None = None,
-        session_generation: str | None = None,
-    ) -> None:
-        """Publish a user-visible message and mirror it into that channel's session."""
-        metadata = dict(msg.metadata or {})
-        record = record or bool(metadata.pop("_record_channel_delivery", False))
-        raw_generation = metadata.pop("_session_generation", None)
-        expected_generation = (
-            session_generation
-            if session_generation is not None
-            else raw_generation if isinstance(raw_generation, str) else None
-        )
-        if metadata != (msg.metadata or {}):
-            msg = OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=msg.content,
-                reply_to=msg.reply_to,
-                media=msg.media,
-                metadata=metadata,
-                buttons=msg.buttons,
-            )
-        if (
-            record
-            and msg.channel != "cli"
-            and msg.content.strip()
-        ):
-            key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            if expected_generation is None:
-                # A cross-channel send selects its target when delivery begins.
-                # Turn-bound sends and heartbeat results carry their original identity.
-                target = await session_manager.state.read(key)
-                if target is None:
-                    raise RuntimeError("delivery target session does not exist")
-                expected_generation = target.generation
-            extra: dict[str, Any] = {"_channel_delivery": True}
-            if msg.media:
-                extra["media"] = list(msg.media)
-            await session_manager.state.record_delivery(
-                key,
-                msg.content,
-                extra,
-                expected_generation=expected_generation,
-            )
-        await bus.publish_outbound(msg)
+    deliver_to_channel = partial(
+        _deliver_to_channel,
+        bus=bus,
+        session_manager=session_manager,
+        unified_session=config.agents.defaults.unified_session,
+    )
 
     message_tool = agent.tools.get("message")
     if isinstance(message_tool, MessageTool):
-        message_tool.set_send_callback(_deliver_to_channel)
+        message_tool.set_send_callback(deliver_to_channel)
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | CronRunResult | None:
@@ -712,7 +714,7 @@ def _run_gateway(
 
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")
-                await _deliver_to_channel(
+                await deliver_to_channel(
                     OutboundMessage(channel=channel, chat_id=chat_id, content=response),
                     record=True,
                     session_key=delivery_key,

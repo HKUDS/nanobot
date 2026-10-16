@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 
 import pytest
 
@@ -28,6 +30,31 @@ def _handle(manager: SessionManager, key: str) -> SessionHandle:
     handle = SessionHandleResolver(manager).handle_for_session(key)
     assert handle is not None
     return handle
+
+
+@pytest.mark.parametrize("raw", [None, []], ids=["missing", "empty"])
+async def test_empty_mentions_do_not_wait_for_unrelated_storage(tmp_path, monkeypatch, raw):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    await state.get("websocket:busy")
+    started, release = threading.Event(), threading.Event()
+    original = manager._store.replace_metadata
+
+    def blocked(key, metadata, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return original(key, metadata, **kwargs)
+
+    monkeypatch.setattr(manager._store, "replace_metadata", blocked)
+    busy = asyncio.create_task(state.update_metadata("websocket:busy", {"title": "busy"}))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        assert await asyncio.wait_for(WebuiSessionAccess(manager).normalize_mentions(raw), 1) == []
+        assert not busy.done()
+    finally:
+        release.set()
+        await busy
+        await state.aclose()
 
 
 @pytest.mark.asyncio

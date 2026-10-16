@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -524,6 +525,38 @@ def test_second_provider_state_aborts_migration(tmp_path):
 
     with pytest.raises(RuntimeError, match="migration failed"):
         SessionManager(workspace, sessions_root=tmp_path / "root")
+
+
+@pytest.mark.parametrize("with_checkpoint", [False, True])
+def test_identical_migration_copies_are_imported_once_and_cleaned_up(tmp_path, with_checkpoint):
+    workspace = tmp_path / "workspace"
+    root = tmp_path / "root"
+    source = legacy(workspace, key="chat:a")
+    sources = [source]
+    if with_checkpoint:
+        checkpoint = source.with_suffix(".checkpoint.json")
+        checkpoint.write_text(json.dumps({
+            "version": 1, "session_key": "chat:a", "base_message_count": 1,
+            "base_updated_at": "2026-01-01T00:00:00",
+            "checkpoint": {"messages": [{"role": "assistant", "content": "partial"}]},
+        }))
+        sources.append(checkpoint)
+    location = SessionLocation(workspace, sessions_root=root)
+    originals = {path.name: path.read_bytes() for path in sources}
+    for path in sources:
+        shutil.copy2(path, location.sessions_dir / path.name)
+
+    for _ in range(2):
+        manager = SessionManager(workspace, sessions_root=root)
+        assert len(manager.list_sessions()) == 1
+        session = manager.read_session_snapshot("chat:a")
+        assert [message["content"] for message in session.messages] == ["hello"]
+        if with_checkpoint:
+            assert session.metadata["runtime_checkpoint"]["messages"][0]["content"] == "partial"
+    for path in sources:
+        assert not path.exists()
+        assert (location.sessions_dir / path.name).read_bytes() == originals[path.name]
+        assert (location.sessions_dir / WORKSPACE_BACKUP_DIR / path.name).read_bytes() == originals[path.name]
 
 
 def test_duplicate_sources_with_different_timestamps_abort_migration(tmp_path):

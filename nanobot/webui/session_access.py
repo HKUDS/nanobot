@@ -57,11 +57,14 @@ class WebuiSessionAccess:
         *,
         exclude_session_key: str | None = None,
     ) -> list[SessionMention]:
+        mentions = normalize_session_mentions_metadata(raw)
+        if not mentions:
+            return []
         normalized: list[SessionMention] = []
         seen_keys: set[str] = set()
         seen_names: set[str] = set()
         handles = await self._handles.alist_all_by_key()
-        for raw_mention in normalize_session_mentions_metadata(raw):
+        for raw_mention in mentions:
             mention = raw_mention
             key = mention["session_key"]
             payload = (

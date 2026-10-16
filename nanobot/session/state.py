@@ -15,7 +15,7 @@ from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
 from nanobot.session.keys import is_dream_session
-from nanobot.session.manager import Session, SessionPolicy, fork_session
+from nanobot.session.manager import Session, SessionIdentity, SessionPolicy, fork_session
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
 from nanobot.session.types import PARENT_SESSION_KEY, SessionTypes
@@ -356,6 +356,12 @@ class SessionState:
         with self._cache_lock:
             session = self._transients.get(key) or self._snapshots.get(key)
         return deepcopy(session.metadata) if session is not None else None
+
+    def peek_identity(self, key: str) -> SessionIdentity | None:
+        """Read immutable identity and policy without copying history or checkpoints."""
+        with self._cache_lock:
+            session = self._transients.get(key) or self._snapshots.get(key)
+            return SessionIdentity(session.generation, session.policy) if session is not None else None
 
     def peek_header(self, key: str) -> Session | None:
         """Read cached policy and metadata without detaching message history."""
