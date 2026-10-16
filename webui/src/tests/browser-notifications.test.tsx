@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BrowserNotificationSettings } from "@/components/settings/overview/BrowserNotificationSettings";
+import { BrowserNotificationSettings } from "@/components/settings/notifications/BrowserNotificationSettings";
 import { BrowserNotifications } from "@/components/BrowserNotifications";
 import { enableBrowserNotifications, NOTIFICATION_OPEN_EVENT, notificationChatUrl, notificationProblem, showBrowserNotification, taskNoticeKey } from "@/lib/browser-notifications";
 import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
@@ -12,7 +12,6 @@ const requestPermission = vi.fn();
 const postMessage = vi.fn();
 const worker = { postMessage };
 const getRegistration = vi.fn();
-let receive: ((event: MessageEvent) => void) | null;
 
 function Harness({ enabled = false }: { enabled?: boolean }) {
   const [preferences, setPreferences] = useState({ ...DEFAULT_LOCAL_PREFS, browserNotifications: enabled });
@@ -24,13 +23,15 @@ beforeEach(() => {
   vi.stubGlobal("Notification", { permission: "default", requestPermission });
   vi.stubGlobal("MessageChannel", class {
     port1 = { onmessage: null as ((event: MessageEvent) => void) | null, close: vi.fn() };
-    port2 = {};
-    constructor() { queueMicrotask(() => { receive = this.port1.onmessage; }); }
+    port2 = { reply: (data: unknown) => this.port1.onmessage?.({ data } as MessageEvent) };
   });
   Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: Object.assign(new EventTarget(), { getRegistration, controller: worker }) });
   getRegistration.mockResolvedValue({ active: worker });
-  postMessage.mockImplementation(() => { setTimeout(() => receive?.({ data: "submitted" } as MessageEvent), 0); });
-  requestPermission.mockResolvedValue("granted");
+  postMessage.mockImplementation((data, ports) => { queueMicrotask(() => ports[0].reply(data.type === "nanobot:notification-probe" ? "ready" : "submitted")); });
+  requestPermission.mockImplementation(() => {
+    vi.stubGlobal("Notification", { permission: "granted", requestPermission });
+    return Promise.resolve("granted");
+  });
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
   writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, browserNotifications: true });
 });
@@ -87,7 +88,17 @@ describe("notification permission and delivery boundary", () => {
     postMessage.mockImplementation(() => {});
     const showing = showBrowserNotification("Task completed", { key: "one", url: notificationChatUrl("one", false) });
     await vi.advanceTimersByTimeAsync(5_001);
-    expect(await showing).toBe("displayFailed");
+    expect(await showing).toBe("workerUnavailable");
+  });
+
+  it("reports an older active worker that does not understand the notification protocol", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("Notification", { permission: "granted" });
+    postMessage.mockImplementation(() => {});
+    const enabling = enableBrowserNotifications();
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(await enabling).toBe("workerUnavailable");
+    expect(requestPermission).not.toHaveBeenCalled();
   });
 
   it("uses the worker without constructing Notification, and isolates a post failure", async () => {
@@ -97,7 +108,7 @@ describe("notification permission and delivery boundary", () => {
     expect(await showBrowserNotification("Task completed", options)).toBe("submitted");
     expect(constructor).not.toHaveBeenCalled();
     postMessage.mockImplementation(() => { throw new Error("worker stopped"); });
-    expect(await showBrowserNotification("Task completed", options)).toBe("displayFailed");
+    expect(await showBrowserNotification("Task completed", options)).toBe("workerUnavailable");
   });
 
   it("does not notify while visible, disabled, or disabled during a lookup", async () => {
@@ -144,21 +155,42 @@ describe("notification settings", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false");
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Test notification" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Test notification" }));
-    await screen.findByText(/Sent to the browser/);
+    await screen.findByText(/Submitted to the browser/);
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
   });
 
-  it("updates revoked permission on return and still allows opt-out", () => {
+  it("turns the preference off when permission is revoked on return", async () => {
     vi.stubGlobal("Notification", { permission: "granted" });
     render(<Harness enabled />);
     vi.stubGlobal("Notification", { permission: "denied" });
     fireEvent.focus(window);
-    expect(screen.getByRole("status")).toHaveTextContent("Notifications are blocked");
-    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Notification permission was revoked");
+    expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    vi.stubGlobal("Notification", { permission: "granted", requestPermission });
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(screen.getByRole("switch")).toBeEnabled();
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
     fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true"));
+  });
+
+  it("allows opt-out and an explicit readiness retry when the worker is unavailable", async () => {
+    vi.stubGlobal("Notification", { permission: "granted" });
+    getRegistration.mockResolvedValue(null);
+    render(<Harness enabled />);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("notification service is not ready"));
+    fireEvent.click(screen.getByRole("switch"));
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    getRegistration.mockResolvedValue({ active: worker });
+    const retry = screen.getByRole("button", { name: "Check again" });
+    await waitFor(() => expect(retry).toBeEnabled());
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Check again" })).not.toBeInTheDocument());
     expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
   });
 

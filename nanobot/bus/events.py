@@ -16,9 +16,10 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 # services. Never accept these keys verbatim from an untrusted client.
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 INBOUND_META_USER_SHELL = "_user_shell"
-RUNTIME_CONTROL_ACK = "_ack"
-RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD = "image_generation_reload"
 RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
+
+# Transport-provided turn correlation; the persisted spelling is retained for clients.
+INBOUND_META_TURN_ID = "webui_turn_id"
 
 
 @dataclass
@@ -35,6 +36,7 @@ class InboundMessage:
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
     require_existing_session: bool = False
     input_role: Literal["user", "system"] | None = None
+    session_generation: str | None = None  # Trusted identity assigned at session admission
 
     @property
     def session_key(self) -> str:

@@ -488,7 +488,7 @@ describe("Linear channel UI", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(await screen.findByText("Authorization stopped.")).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toBeEnabled());
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.connect.cancel", { channel: "linear", session_id: "linear-oauth" }, 20_000,
     );

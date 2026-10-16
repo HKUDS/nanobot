@@ -45,7 +45,18 @@ The result should start with `Python 3.11` or a newer number. If the command is 
 
 ## 2. Prepare Your Model Details
 
-nanobot does not create an AI provider account for you. Before setup, have these details nearby:
+A chat website account is not automatically an API credential. nanobot needs a supported provider connection: an API key, a supported sign-in flow, or a local model server. Check the chosen service's billing and available models before using it.
+
+If you do not have a provider yet, here is one API-based example:
+
+1. Create an account at [OpenRouter](https://openrouter.ai/).
+2. Open its [API keys page](https://openrouter.ai/settings/keys) and create a key. Keep it private; you will paste it into nanobot's provider form.
+3. Choose a model from the [model catalog](https://openrouter.ai/models), check its price and account requirements, and copy its model ID. For file/tool tasks, choose a model that supports tool calling. See the [official quickstart](https://openrouter.ai/docs/quickstart).
+4. In step 4 below, add the built-in **OpenRouter** provider with that key, keep its default endpoint, and select the model you chose. This is one option, not a required provider.
+
+For a model running on your own computer, use the [Ollama setup recipe](./provider-cookbook.md#recipe-ollama-local-model) instead. For a company-managed service, ask your administrator for the connection details.
+
+If you already have a provider, have these details nearby:
 
 1. The provider or company endpoint name.
 2. Its API key, if it requires one.
@@ -97,7 +108,7 @@ On SSH, a computer without a desktop, an existing configuration, or an older nan
 
 ## 5. Get the First Reply
 
-Leave the WebUI terminal open. If the browser did not open automatically, visit `http://127.0.0.1:8765`.
+Leave the WebUI terminal open. If the browser did not open automatically, copy the complete login link printed in that terminal, including everything after `#`, into your browser. The bare `http://127.0.0.1:8765` address does not sign a new browser in. Keep the login link private: it contains a credential.
 
 Send this message:
 
@@ -111,22 +122,34 @@ The first-run address is local to your computer. It is not automatically availab
 
 ## 6. Add One Thing at a Time
 
-Do not configure every feature immediately. Choose one next goal:
+Choose one next goal and ask nanobot in your current chat. For example: "I am already using the WebUI. Help me connect Telegram and allow only my account." When the built-in `nanobot-document` skill is available and enabled, nanobot can use its bundled documentation to guide you. See [Continue with nanobot](./quick-start.md#continue-with-nanobot) for how to request the skill directly.
+
+You can also follow the steps yourself using the controls and guides below. Add one capability and test it before moving on:
 
 | Goal | What to do |
 |---|---|
 | Change the AI model | Open **Settings → Models** |
-| Add a provider credential | Open **Settings → Models → Manage providers** |
-| Connect Telegram, Discord, Slack, Feishu, WeChat, or another chat app | Open **Settings → Channels**, choose the platform, and follow its connection steps |
+| Add a provider credential | Open **Settings → Models → Provider → Add provider** |
+| Connect Telegram, Discord, Slack, Feishu, WeChat, or another chat app | Open **Channels**, choose the platform, and follow its connection steps |
 | Add a tool integration | Open **Apps** and choose an App or MCP integration |
 | Schedule a reminder or recurring task | Ask nanobot in the target chat, then manage it in **Automations** |
-| Work with project files | Start a new chat, choose the project workspace, and review the access setting before sending the task |
+| Work with project files | Follow [Your first file task](#your-first-file-task), then see [Workspace and Access](./webui.md#workspace-and-access) |
 
-Repository docs show the current development version. If your stable package does not yet show **Settings → Channels**, use the [Chat Apps guide](./chat-apps.md) or update to a release that includes it.
+Repository docs show the current development version. If your stable package does not yet show **Channels**, use the [Chat Apps guide](./chat-apps.md) or update to a release that includes it.
 
 Some runtime changes ask you to restart nanobot. Use the restart action shown by the WebUI, or return to the terminal, press `Ctrl+C`, and run `nanobot webui` again.
 
 For a chat platform's account, bot, token, or permission prerequisites, use the [Chat Apps guide](./chat-apps.md). For local models and provider-specific recipes, use the [Provider Cookbook](./provider-cookbook.md).
+
+## Your First File Task
+
+1. Create a practice folder, for example `Documents/nanobot-practice`, and put a copy of a short text file in it. Keep originals elsewhere for this first task.
+2. Start a new topic in the WebUI. Open the workspace folder selector, choose that folder, and select **Confirm**. Choose **Restricted** access.
+3. Ask: "Read notes.txt and write a short summary to summary.md in this folder." Replace `notes.txt` with your file's name, then open `summary.md` in the selected folder.
+
+The workspace selects the folder the agent works in on the machine running nanobot. Attaching a file sends that file to the conversation; it does not change the workspace. For PDF and Office files, see [File tools](./webui.md#apps).
+
+Return to the saved topic to continue later. A new topic or a different project folder does not create separate long-term memory. For clients whose preferences must stay separate, use [separate instances](./multiple-instances.md).
 
 ## If Something Fails
 
@@ -143,7 +166,7 @@ nanobot agent -m "Hello!"
 | `nanobot: command not found` | Reuse the exact nanobot command printed by the installer; it points to the isolated environment that contains the package |
 | `401`, unauthorized, or invalid API key | The key is wrong, expired, or belongs to a different provider |
 | Model not found | The model ID is misspelled or unavailable to your provider account |
-| Browser does not open | Open `http://127.0.0.1:8765` yourself and keep the terminal running |
+| Browser does not open | Copy the complete login link printed by the launcher, including the fragment after `#`, and keep the terminal running |
 | Browser opens but messages fail | Test `nanobot agent -m "Hello!"` to separate a model problem from a WebUI problem |
 | A change was saved but nothing changed | Restart nanobot so the running process reloads the config |
 

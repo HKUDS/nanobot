@@ -13,14 +13,13 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
-from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
 )
 
-_RETRY_HINT = "\n\n[Analyze the error above and try a different approach.]"
 # SSRF is a hard security block at the tool boundary, but the agent turn
 # should recover conversationally instead of aborting the runtime.
 _SSRF_MARKERS: tuple[str, ...] = (
@@ -45,13 +44,6 @@ _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
     "path outside working dir",
     "path traversal detected",
 )
-
-
-def _with_retry_hint(payload: str) -> str:
-    """Append the recovery hint exactly once."""
-    if payload.endswith(_RETRY_HINT):
-        return payload
-    return payload + _RETRY_HINT
 
 
 async def execute_tool_calls(
@@ -132,7 +124,7 @@ async def _execute_tool_call(
             "status": "error",
             "detail": "repeated external lookup blocked",
         }
-        return _with_retry_hint(lookup_error), event
+        return with_tool_error_hint(lookup_error), event
 
     prepare_call = cast(
         Callable[[str, Any], object] | None,
@@ -146,7 +138,7 @@ async def _execute_tool_call(
             if len(prepared_tuple) == 3:
                 tool, params, prep_error = cast(tuple[Any, Any, str | None], prepared_tuple)
     if prep_error:
-        payload = _with_retry_hint(prep_error)
+        payload = with_tool_error_hint(prep_error)
         event = {
             "name": tool_call.name,
             "status": "error",
@@ -182,7 +174,7 @@ async def _execute_tool_call(
             "status": "error",
             "detail": str(exc),
         }
-        payload = _with_retry_hint(f"Error: {type(exc).__name__}: {exc}")
+        payload = with_tool_error_hint(f"Error: {type(exc).__name__}: {exc}")
         handled = _classify_violation(
             raw_text=str(exc),
             soft_payload=payload,
@@ -196,7 +188,7 @@ async def _execute_tool_call(
 
     if is_tool_error_result(result):
         await hook.on_execute_tool_error(context, tool_call, tool, params, result)
-        payload = _with_retry_hint(result)
+        payload = with_tool_error_hint(result)
         event = {
             "name": tool_call.name,
             "status": "error",

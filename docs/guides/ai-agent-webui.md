@@ -13,13 +13,9 @@ nanobot includes a browser WebUI for persistent chat sessions, visible agent act
 
 Use the WebUI when you want a local AI agent interface that is easier to operate than a terminal, especially for project work, file attachments, model switching, workspace selection, Apps, Skills, and scheduled automations.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
-```
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 The published wheel already includes the WebUI bundle. You only need the `webui/` source directory when changing the frontend.
 
@@ -35,12 +31,19 @@ When nanobot edits a file, the WebUI activity timeline can show the changed line
 
 ## Browser notifications
 
-In **Settings → Appearance**, enable **Browser notifications** and allow the
+In **Settings → Notifications**, enable **Browser notifications** and allow the
 browser's permission request. Notifications are off by default and saved in
 this browser, separately from the completion sound. Use **Test notification**
 to check delivery; a successful submission does not prove that the operating
 system displayed it. Check system notification and Do Not Disturb settings if
-nothing appears.
+nothing appears. **Completion sound** is a separate page chime in the same
+section; changing one channel does not enable or disable the other. The browser
+and operating system control the sound of system notifications.
+
+If permission is revoked, the browser notification preference turns off. Allow
+notifications in the browser's site settings, check again, and explicitly enable
+them here. A missing or older worker has a retry/reload message rather than an
+unresponsive switch.
 
 Notifications require HTTPS (or localhost), notification permission, and an
 active service worker. On iPhone or iPad, use the web app from the Home Screen;

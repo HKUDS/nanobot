@@ -153,119 +153,60 @@ def _select_with_back(
         The selected choice string if user confirmed
         None if user cancelled (Ctrl+C)
     """
-    import shutil
-
-    from prompt_toolkit.application import Application
-    from prompt_toolkit.keys import Keys
-    from prompt_toolkit.layout import Layout
-    from prompt_toolkit.layout.containers import HSplit, Window
+    from prompt_toolkit.key_binding import merge_key_bindings
+    from prompt_toolkit.layout.containers import Window
     from prompt_toolkit.layout.controls import FormattedTextControl
-    from prompt_toolkit.styles import Style
 
-    # Validate choices
     if not choices:
         logger.warning("Empty choices list provided to _select_with_back")
         return None
 
-    # Find default index
-    selected_index = 0
-    if default and default in choices:
-        selected_index = choices.index(default)
+    bindings = _input_back_key_bindings()
 
-    # State holder for the result
-    state: dict[str, str | None | object] = {"result": None}
-    terminal_lines = shutil.get_terminal_size((80, 24)).lines
-    visible_count = min(len(choices), max(1, terminal_lines - 3))
-
-    # Build menu items (uses closure over selected_index)
-    def get_menu_text() -> list[tuple[str, str]]:
-        items: list[tuple[str, str]] = []
-        start, end = _choice_viewport(selected_index, len(choices), visible_count)
-        for i in range(start, end):
-            choice = choices[i]
-            if i == selected_index:
-                items.append(("class:selected", f"> {choice}\n"))
-            else:
-                items.append(("", f"  {choice}\n"))
-        return items
-
-    # Create layout
-    menu_control = FormattedTextControl(cast(Any, get_menu_text), show_cursor=False)
-    menu_window = Window(content=menu_control, height=visible_count, always_hide_cursor=True)
-
-    def get_prompt_text() -> list[tuple[str, str]]:
-        suffix = f" ({selected_index + 1}/{len(choices)})" if len(choices) > visible_count else ""
-        return [("class:question", f"{prompt}{suffix}")]
-
-    prompt_control = FormattedTextControl(cast(Any, get_prompt_text), show_cursor=False)
-    prompt_window = Window(content=prompt_control, height=1, always_hide_cursor=True)
-
-    layout = Layout(HSplit([prompt_window, menu_window]))
-
-    # Key bindings
-    bindings = KeyBindings()
-
-    # KeyBindings consumes these handlers through decorator registration.
-    @bindings.add(Keys.Up)
-    def _up(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        nonlocal selected_index
-        selected_index = (selected_index - 1) % len(choices)
-        event.app.invalidate()
-
-    @bindings.add(Keys.Down)
-    def _down(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        nonlocal selected_index
-        selected_index = (selected_index + 1) % len(choices)
-        event.app.invalidate()
-
-    @bindings.add(Keys.Enter)
-    def _enter(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        state["result"] = choices[selected_index]
-        event.app.exit()
-
-    @bindings.add("escape")
-    def _escape(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        state["result"] = _BACK_PRESSED
-        event.app.exit()
-
-    @bindings.add(Keys.Left)
+    @bindings.add("left")
     def _left(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        state["result"] = _BACK_PRESSED
-        event.app.exit()
+        event.app.exit(result=_BACK_PRESSED)
 
-    @bindings.add(Keys.ControlC)
-    def _ctrl_c(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        state["result"] = None
-        event.app.exit()
+    @bindings.add("c-c", eager=True)
+    def _cancel(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        event.app.exit(result=None)
 
-    # Style
-    style = Style.from_dict({
-        "selected": f"fg:{_UI_ACCENT} bold",
-        "question": f"fg:{_UI_TEXT}",
-    })
+    q = _get_questionary()
+    from questionary.prompts.common import InquirerControl
 
-    app = Application[object](layout=layout, key_bindings=bindings, style=style)
-    app.ttimeoutlen = 0.05
-    app.timeoutlen = 0.05
+    question = q.select(
+        prompt,
+        choices=choices,
+        default=default if default in choices else choices[0],
+        qmark="",
+        pointer=">",
+        instruction=" ",
+        use_jk_keys=False,
+        use_emacs_keys=False,
+        style=q.Style([
+            ("question", f"fg:{_UI_TEXT} nobold"),
+            ("pointer", f"fg:{_UI_ACCENT} bold"),
+            ("highlighted", f"fg:{_UI_ACCENT} bold noreverse"),
+            ("selected", f"fg:{_UI_ACCENT} bold noreverse"),
+            ("answer", f"fg:{_UI_ACCENT} bold"),
+        ]),
+    )
+    control = next(
+        c for c in question.application.layout.find_all_controls() if isinstance(c, InquirerControl)
+    )
+    question.application.layout.container.children.insert(1, Window(
+        FormattedTextControl(lambda: f"({control.pointed_at + 1}/{len(choices)})"),
+        height=1,
+        style=f"fg:{_UI_TEXT}",
+    ))
+    question.application.key_bindings = merge_key_bindings([
+        question.application.key_bindings, bindings,
+    ])
     try:
-        app.run()
+        return _ask_prompt(question)
     except Exception:
         logger.exception("Error in select prompt")
         return None
-
-    return state["result"]
-
-
-def _choice_viewport(selected_index: int, total: int, visible_count: int) -> tuple[int, int]:
-    """Return the visible slice for a long terminal menu."""
-    if total <= 0:
-        return 0, 0
-    visible_count = max(1, min(visible_count, total))
-    selected_index = max(0, min(selected_index, total - 1))
-    half = visible_count // 2
-    start = selected_index - half
-    start = max(0, min(start, total - visible_count))
-    return start, start + visible_count
 
 # --- Type Introspection ---
 

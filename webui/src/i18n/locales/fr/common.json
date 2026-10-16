@@ -339,6 +339,9 @@
       "description": "Interface web nanobot — discutez avec votre espace de travail nanobot."
     },
     "pairing": {
+      "haveCode": "Vous avez déjà reçu un code ?",
+      "deliveryFailed": "Impossible d’envoyer le code. Vérifiez les autorisations d’envoi du bot et les journaux de la passerelle, puis envoyez-lui un autre message privé pour réessayer.",
+      "deliverySending": "Envoi du code dans votre conversation. Si vous ne le recevez pas, envoyez un autre message privé au bot pour réessayer.",
       "title": "Associer un compte",
       "description": "Saisissez le code d’association reçu dans la discussion.",
       "code": "Code d’association",
@@ -388,6 +391,13 @@
     },
     "runtimeConfig": {
       "apiSaved": "Enregistré. Redémarrez le service API pour appliquer les modifications.",
+      "commandRuntime": {
+        "custom": "Personnalisée (secondes)",
+        "customLabel": "Durée personnalisée (secondes)",
+        "noLimit": "Sans limite de temps",
+        "limit": "Durée limitée : jusqu’à {{duration}}",
+        "rangeError": "Saisissez un nombre entier de secondes entre 1 et {{max}}, ou choisissez Sans limite de temps."
+      },
       "fields": {
         "agents_defaults_timezone_mode": {"label": "Fuseau système", "help": "Désactivez pour choisir un fuseau horaire.\n\nDésactivez pour choisir le fuseau horaire manuellement."},
         "agents_defaults_timezone": {"label": "Fuseau horaire", "help": "Les décalages UTC utilisent la date actuelle.\n\nChoisissez un fuseau horaire. Le décalage UTC correspond à la date actuelle."},
@@ -407,7 +417,7 @@
         "tools_cli_apps_enable": {"label": "Applications CLI", "help": "Autorisez l’installation, la gestion et l’exécution d’applications CLI.\n\nAutorise l’agent à gérer et à exécuter ces applications."},
         "tools_my_enable": {"label": "Voir la configuration", "help": "Autorisez l’agent à consulter sa configuration.\n\nAutorise l’agent à consulter sa configuration."},
         "tools_my_allow_set": {"label": "Modifier la configuration", "help": "Autorisez l’agent à modifier sa configuration.\n\nAutorise l’outil d’autogestion à modifier la configuration."},
-        "tools_exec_timeout": {"label": "Délai des commandes", "help": "Arrêtez les commandes après ce nombre de secondes ; 0 signifie sans limite.\n\nDurée maximale d’une commande shell. 0 signifie aucune limite."},
+        "tools_exec_timeout": {"label": "Durée des commandes", "help": "Durée maximale par défaut des commandes shell.\n\nNi la sortie des commandes ni l’attente ne prolongent cette limite. Choisissez Sans limite de temps pour supprimer la limite de durée."},
         "tools_exec_path_prepend": {"label": "Priorité PATH", "help": "Recherchez d’abord dans ces dossiers.\n\nDossiers à placer au début de PATH. Séparez-les par un point-virgule sous Windows ou par deux-points sous macOS et Linux."},
         "tools_exec_path_append": {"label": "Ajouts au PATH", "help": "Recherchez dans ces dossiers en dernier.\n\nDossiers à placer à la fin de PATH. Séparez-les par un point-virgule sous Windows ou par deux-points sous macOS et Linux."},
         "tools_exec_sandbox": {"label": "Bac à sable des commandes", "help": "Isolez les processus de commande ; nécessite une prise en charge système.\n\nUtilisez bwrap sous Linux ou Seatbelt sous macOS. Les contrôles de l’espace de travail seuls n’isolent pas les processus."},
@@ -416,7 +426,7 @@
         "tools_exec_allowed_env_keys": {"label": "Variables d’environnement", "help": "Variables supplémentaires transmises aux commandes, un nom par ligne.\n\nVariables supplémentaires à transmettre aux commandes, une par ligne. Les variables nécessaires au fonctionnement restent disponibles."},
         "tools_exec_allow_patterns": {"label": "Commandes autorisées", "help": "Exécutez seulement les commandes correspondant entièrement aux règles d’autorisation.\n\nUne expression régulière par ligne. Si cette liste est renseignée, chaque segment de commande doit correspondre entièrement à une règle. Les commandes autorisées échappent aux règles de blocage intégrées et personnalisées, mais restent soumises aux restrictions réseau et d’espace de travail."},
         "tools_exec_deny_patterns": {"label": "Commandes bloquées", "help": "Bloquez les commandes correspondant à ces règles.\n\nExpressions régulières de blocage supplémentaires, une par ligne. Les règles d’autorisation explicites ont priorité sur ces règles et sur les protections intégrées."},
-        "tools_web_proxy": {"label": "Proxy web", "help": "URL du proxy ; laissez vide pour le réseau par défaut.\n\nURL du proxy des outils web. Laissez vide pour utiliser le réseau par défaut."},
+        "tools_web_proxy": {"label": "Proxy web", "help": "Utilisé pour la recherche web et la lecture de pages par l’agent. Laissez vide pour utiliser le réseau par défaut, y compris les variables d’environnement du proxy.\n\n127.0.0.1 désigne la machine qui exécute nanobot. Ce réglage ne change pas les connexions des modèles, de MCP ou du navigateur."},
         "tools_web_user_agent": {"label": "En-tête User-Agent", "help": "User-Agent des requêtes web ; laissez vide pour la valeur par défaut.\n\nEn-tête User-Agent personnalisé. Laissez vide pour utiliser la valeur par défaut."},
         "tools_restrict_to_workspace": {"label": "Restriction de l’espace", "help": "Limites globales de l’espace ; les permissions WebUI sont réglées séparément.\n\nRègle globale des outils. Les autorisations de chaque conversation WebUI sont distinctes."},
         "tools_ssrf_whitelist": {"label": "IP autorisées", "help": "IP ou plages CIDR autorisées, une par ligne.\n\nAdresses IP ou plages CIDR exemptées de la protection des requêtes sortantes, une par ligne."},
@@ -469,6 +479,7 @@
       "byok": "BYOK",
       "overview": "Vue d’ensemble",
       "appearance": "Apparence",
+      "notifications": "Notifications",
       "models": "Modèles",
       "providers": "Fournisseurs",
       "image": "Images",
@@ -507,17 +518,32 @@
       "voiceInput": "Transcription"
     },
     "notifications": {
+      "scope": "Ce navigateur",
+      "intro": "Choisissez comment recevoir une alerte à la fin d’une tâche.",
+      "pageRequired": "Gardez cette page ouverte et connectée. Les pages fermées ou suspendues ne peuvent pas recevoir de nouvelles alertes concernant les tâches.",
+      "privacy": "Les notifications du navigateur affichent l’état de la tâche, sans le contenu de la conversation ni les détails des erreurs.",
+      "revoked": "L’autorisation d’afficher des notifications a été révoquée. Les notifications sont désormais désactivées. Autorisez-les dans les paramètres du navigateur pour ce site, puis activez-les ici.",
+      "retry": "Vérifier à nouveau",
+      "statusOff": "Désactivées",
+      "statusPermission": "Autorisation requise",
+      "statusOn": "Activées",
+      "statusBlocked": "Bloquées",
+      "statusRevoked": "Autorisation révoquée",
+      "statusUnavailable": "Indisponibles",
+      "statusWorker": "Pas prêt",
+      "statusBusy": "Vérification…",
+      "statusError": "Échec de l’envoi",
       "test": "Tester les notifications",
       "testBody": "Ceci est une notification de test de nanobot.",
       "waiting": "En attente du navigateur…",
       "insecure": "Ouvrez nanobot via HTTPS ou localhost pour utiliser les notifications.",
       "unsupported": "Ce navigateur ne prend pas en charge les notifications. Essayez un navigateur compatible. Sur iPhone ou iPad, ouvrez nanobot depuis l’écran d’accueil.",
-      "denied": "Les notifications sont bloquées. Autorisez-les dans les paramètres du site, puis réessayez.",
+      "denied": "Les notifications sont bloquées. Autorisez-les dans les paramètres du navigateur pour ce site, puis activez-les ici.",
       "dismissed": "L’autorisation n’a pas été accordée. Activez les notifications et choisissez Autoriser.",
       "permissionFailed": "Impossible de demander l’autorisation. Réessayez dans un navigateur compatible.",
-      "workerUnavailable": "Le service de notifications n’est pas prêt. Rechargez la page et réessayez.",
+      "workerUnavailable": "Le service de notifications n’est pas prêt. Vérifiez à nouveau ou rechargez cette page.",
       "displayFailed": "Le navigateur n’a pas pu envoyer la notification. Vérifiez les autorisations du site, puis réessayez.",
-      "submitted": "Envoyée au navigateur. Si rien ne s’affiche, vérifiez les notifications système et le mode Ne pas déranger.",
+      "submitted": "Transmise au navigateur, mais cela ne confirme pas son affichage par le système. Si aucune notification ne s’affiche, vérifiez les notifications système et le mode Ne pas déranger.",
       "completed": "Tâche terminée. Ouvrez nanobot pour voir le résultat.",
       "failed": "La tâche a échoué. Ouvrez nanobot pour les détails.",
       "interrupted": "La tâche demande votre attention. Ouvrez nanobot pour continuer."
@@ -600,8 +626,8 @@
       "selectedModelProvider": "Défini par le modèle sélectionné.",
       "selectedModelValue": "Défini par le modèle sélectionné.",
       "brandLogos": "Affichez les logos des fournisseurs et applications dans les réglages.\n\nAffiche les logos de fournisseurs tiers et CLI dans les Réglages.",
-      "browserNotifications": "Recevez une alerte à la fin d’une tâche ou si elle demande votre attention, lorsque cette page est en arrière-plan. Gardez-la ouverte : une page fermée ou suspendue ne reçoit plus d’alertes.",
-      "notificationSound": "Émettez un son à la fin des réponses. Désactivé par défaut.\n\nJoue un bref carillon lorsqu’un tour se termine, même si cette page est en arrière-plan. Désactivé par défaut.",
+      "browserNotifications": "Affiche une notification système à la fin d’une tâche lorsque nanobot est en arrière-plan.",
+      "notificationSound": "Joue un bref carillon lorsqu’un tour se termine, même si cette page est en arrière-plan. Désactivé par défaut.",
       "cliAppsCatalog": "Installez des outils CLI pour nanobot ; les applications de bureau restent inchangées.\n\nInstalle les outils en ligne de commande que nanobot peut utiliser sur cette machine. Les applications de bureau ne sont pas modifiées.",
       "cliAppsFilter": "Recherchez par nom, catégorie ou fonction.",
       "logs": "Ouvrez le dossier des journaux du moteur de l’application de bureau.",
@@ -782,6 +808,12 @@
       "configureProvider": "Configurer {{provider}}…",
       "sharedProviderHelp": "Les modifications s’appliquent à tous les préréglages qui utilisent ce fournisseur.",
       "parameterCount": "{{count}} entrées",
+      "useProviderSettings": "Utiliser les réglages du fournisseur",
+      "applyToDraft": "Ajouter au préréglage",
+      "draftHint": "Enregistrez le nouveau préréglage pour appliquer ces réglages.",
+      "invalidObject": "Saisissez un objet JSON, par exemple : {\"key\":\"value\"}.",
+      "stringValuesRequired": "Utilisez des valeurs textuelles pour les en-têtes et les paramètres de requête.",
+      "maskedSecretMissing": "Aucun secret enregistré ne correspond à ce masque. Saisissez la valeur réelle ou supprimez l’entrée.",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
       "providerGroupLocal": "Local",
@@ -818,6 +850,8 @@
       "capabilityOpenAISearchHelp": "Les modèles compatibles peuvent rechercher sur le web.\n\nPermet aux modèles compatibles avec l’API Responses de rechercher sur le web. L’activité de recherche apparaît dans le chat."
     },
     "image": {
+      "imagesApiHint": "Utilise OpenAI Images API à l’URL de cette connexion. Vérifiez que ce point d’accès accepte les images.",
+      "requestOverridesHint": "Uniquement pour les images. Les champs vides utilisent les réglages du fournisseur. Changer de fournisseur efface ces valeurs.",
       "selectProvider": "Choisir un fournisseur",
       "selectAspect": "Choisir un ratio",
       "selectSize": "Choisir une taille",
@@ -835,6 +869,7 @@
       "installing": "Installation des dépendances…"
     },
     "models": {
+      "requestOverridesHint": "Laissez les champs vides pour utiliser les réglages du fournisseur. Changer de fournisseur efface ces valeurs.",
       "otherPresets": "Préréglages de secours",
       "catalogAuthRequired": "L’autorisation a expiré. Veuillez vous reconnecter.",
       "catalogUnavailable": "Actualisation impossible. Cliquez pour réessayer",
@@ -1623,7 +1658,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Impossible de charger les sous-tâches.",
       "stopFailed": "Impossible d’arrêter cette tâche.",
       "stopTask": "Arrêter {{label}}",
       "receiptHelp": "Livré signifie que le message a été inclus dans la prochaine requête du sous-agent, sans confirmer son exécution.",
@@ -2284,6 +2318,7 @@
     }
   },
   "common": {
+    "retry": "Réessayer",
     "dismiss": "Fermer",
     "close": "Fermer",
     "current": "Actuel",

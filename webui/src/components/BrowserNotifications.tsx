@@ -23,11 +23,14 @@ export function BrowserNotifications({ client }: { client: Pick<NanobotClient, "
     const navigate = (event: MessageEvent<unknown>) => {
       const data = event.data as { type?: string; url?: unknown } | null;
       if (event.source !== navigator.serviceWorker.controller || data?.type !== "nanobot:notification-click" || typeof data.url !== "string") return;
-      const url = new URL(data.url);
-      if (url.origin === window.location.origin) {
-        window.location.hash = url.hash;
-        window.dispatchEvent(new Event(NOTIFICATION_OPEN_EVENT));
-      }
+      let url: URL;
+      try { url = new URL(data.url); } catch { return; }
+      if (url.origin !== window.location.origin || url.username || url.password || url.search || url.pathname !== "/") return;
+      if (!/^#\/(?:chat|temporary)\/[^?]+$/.test(url.hash)
+        && url.hash !== "#/settings?section=notifications"
+        && url.hash !== "#/settings?section=appearance") return;
+      window.location.hash = url.hash;
+      window.dispatchEvent(new Event(NOTIFICATION_OPEN_EVENT));
     };
     navigator.serviceWorker.addEventListener("message", navigate);
     return () => navigator.serviceWorker.removeEventListener("message", navigate);

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { modelAPIConfigurable, preferredModelAPI, REQUEST_API_LABELS } from "@/components/settings/models/modelAPI";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";

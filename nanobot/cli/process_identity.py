@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from pathlib import Path
 from typing import Final
 
@@ -11,9 +12,8 @@ _ROLES: Final = {"agent", "gateway", "webui"}
 
 
 def _set_process_title(title: str) -> None:
-    # Process titles are short; do not trade Linux /proc environment visibility for
-    # extra title storage. setproctitle reads this switch when it is imported.
-    os.environ.setdefault("SPT_NOENV", "1")
+    if sys.platform == "linux":
+        os.environ.setdefault("SPT_NOENV", "1")
     from setproctitle import setproctitle
 
     setproctitle(title)

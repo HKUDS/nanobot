@@ -21,7 +21,7 @@ from nanobot.providers.base import (
     LLMUsage,
     ToolCallRequest,
 )
-from nanobot.providers.oauth_model_catalog import (
+from nanobot.providers.oauth_catalog_cache import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,

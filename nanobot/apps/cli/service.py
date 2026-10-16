@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
-from nanobot.agent.skills import parse_skill_metadata, valid_skill_metadata
+from nanobot.agent.skill_metadata import parse_skill_metadata, valid_skill_metadata
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.security.workspace_policy import is_path_within

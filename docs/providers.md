@@ -2,7 +2,7 @@
 
 Use this page when the first reply fails because of provider/model mismatch, or when you want to adapt the concrete setup example to a different provider. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
 
-For normal local setup, open **Settings → Models → New preset**. Select your provider, or choose **Add provider** from the **Provider** menu. See [Configure Your Model](./quick-start.md#2-configure-your-model) for the steps. Use the JSON below for manual deployments, local endpoints, provider-specific fields, or diagnosis.
+For normal local setup, open **Settings → Models → New preset**. Select your provider, or choose **Add provider** from the **Provider** menu. See [Configure Your Model](./quick-start.md#2-configure-your-model) for the steps. Enter local endpoints and provider-specific connection fields in that editor; expand **Advanced options** when needed. Expand **Manual configuration** below for headless deployments, config-file management, or diagnosis.
 
 The model picker fetches online catalogs for OpenAI Codex, xAI Grok, and GitHub Copilot. An explicit authorization failure hides the picker’s search and model list and offers **Sign in again** using the existing provider login flow. Successful WebUI sign-in clears the catalog cache and restores model selection. Existing presets, selected models, and unsaved preset details are preserved. Network, rate-limit, and service failures instead keep cached or built-in lists available, label them as potentially out of date, and offer **Refresh failed. Click to retry**. Manual model IDs remain available for these temporary failures. A successful chat may have used a fallback preset and does not prove that the selected provider's authorization is still valid. When a live chat uses a fallback model, a dismissible notice above the composer names that model and links to model settings. If the provider explicitly rejected OAuth credentials, the notice instead names the provider that needs a new login, with fallback completion as secondary information. Network errors, ordinary permission denials, and rate limits do not request reauthentication. The notice does not change your selected preset.
 
@@ -12,7 +12,7 @@ For every setup, answer three questions:
 2. What model name does that provider expect?
 3. Does the provider need `apiKey`, `apiBase`, OAuth login, cloud credentials, or only a local server URL?
 
-Prefer a named `modelPresets` entry for the model/provider pair, then select it with `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but presets make runtime `/model` switching and fallback chains clearer. Pin `provider` inside the preset while setting up; you can switch back to `"auto"` later.
+Prefer a named preset created in **Settings → Models**, then select it in the chat composer. Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but presets make runtime `/model` switching and fallback chains clearer. Pin `provider` inside the preset while setting up; you can switch back to `"auto"` later.
 
 ## Choose a Provider Without Guessing
 
@@ -24,10 +24,15 @@ The docs show concrete provider names so the JSON is copyable, not because nanob
 | An OpenCode Zen or Go key | `providers.opencodeZen.apiKey` or `providers.opencodeGo.apiKey`, then a preset with `provider: "opencode_zen"` or `provider: "opencode_go"`. |
 | A company proxy or regional endpoint | The matching provider block plus `apiBase` if the proxy gives you a URL. |
 | A local OpenAI-compatible server | A local provider block such as `ollama`, `vllm`, `lmStudio`, or `custom`, usually with `apiBase`. |
-| An OAuth-based account | Run the matching `nanobot provider login ...` command, then select that provider explicitly in a preset. |
-| No provider yet | Pick one outside nanobot based on account access, pricing, regional availability, privacy requirements, and the model IDs you need. Then come back with its key and model ID. |
+| An OAuth-based account | Choose the provider in **Settings → Models**, complete its sign-in flow, and select it explicitly in a preset. |
+| No provider yet | Follow [Prepare your model details](./start-without-technical-background.md#2-prepare-your-model-details) for an API account example, or the [Ollama recipe](./provider-cookbook.md#recipe-ollama-local-model) for local models. Check account access, pricing, regional availability, and privacy requirements before choosing. |
 
 ## Minimal Shape
+
+Create and select a preset through **Settings → Models** as described above. The JSON alternative shows where those values are stored.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -52,6 +57,8 @@ The docs show concrete provider names so the JSON is copyable, not because nanob
   }
 }
 ```
+
+</details>
 
 The provider config gives nanobot credentials and endpoint details. The model preset names the provider/model pair. The agent defaults choose which named preset to use for normal turns. Replace the example provider and model together; mixing an API key from one provider with a model ID from another is the most common first-run failure.
 
@@ -83,6 +90,9 @@ Preparation preserves each adapter's model and API capability rules. When automa
 
 Gateway-style setup for model IDs served through OpenRouter.
 
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "providers": {
@@ -106,9 +116,14 @@ Gateway-style setup for model IDs served through OpenRouter.
 }
 ```
 
+</details>
+
 Use the model ID exactly as OpenRouter lists it.
 
 To opt into OpenRouter server-managed search and fetch, add:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -125,11 +140,16 @@ To opt into OpenRouter server-managed search and fetch, add:
 }
 ```
 
+</details>
+
 Chat Completions-compatible OpenRouter [server tools](https://openrouter.ai/docs/guides/features/server-tools), such as those above, are appended to nanobot's generated functions. This keeps unrelated local tools such as `write_file` available in the same request. Responses-only server tools require an API surface that the OpenRouter provider does not currently enable.
 
 ### OrcaRouter Gateway
 
 [OrcaRouter](https://www.orcarouter.ai) is an OpenAI-compatible model routing gateway. Configure the built-in `orcarouter` provider and use a model ID from OrcaRouter's catalog:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -154,11 +174,16 @@ Chat Completions-compatible OpenRouter [server tools](https://openrouter.ai/docs
 }
 ```
 
+</details>
+
 Use the model ID exactly as OrcaRouter lists it. `orcarouter/auto` routes to a suitable upstream automatically; explicit IDs such as `anthropic/claude-sonnet-4.6` or `openai/gpt-5` are also accepted. OrcaRouter API keys start with `sk-orca-`. The WebUI can load the account's model catalog after the API key is saved under **Settings → Models**.
 
 ### Eden AI Gateway
 
 Eden AI exposes an OpenAI-compatible chat-completions endpoint at `https://api.edenai.run/v3`. Configure the built-in `edenai` provider and use the full `provider/model` identifier listed by Eden AI:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -182,11 +207,16 @@ Eden AI exposes an OpenAI-compatible chat-completions endpoint at `https://api.e
 }
 ```
 
+</details>
+
 Nanobot sends the model ID unchanged, including its provider prefix. Use Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models) to choose a currently available model. The WebUI can also load that catalog after the Eden AI API key is saved under **Settings → Models**.
 
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models. They share `OPENCODE_API_KEY`, but use separate provider config keys and default base URLs in nanobot.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -211,7 +241,12 @@ OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent mode
 }
 ```
 
+</details>
+
 For OpenCode Go, switch the provider block and preset:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -231,9 +266,14 @@ For OpenCode Go, switch the provider block and preset:
 }
 ```
 
+</details>
+
 OpenCode documents model IDs with `opencode/<model-id>` for Zen and `opencode-go/<model-id>` for Go. nanobot accepts those prefixes and strips them before sending the request to OpenCode. Use model IDs that OpenCode lists under the `chat/completions` endpoint; models listed only under `responses`, `messages`, or provider-specific endpoints are not handled by this OpenAI-compatible provider path.
 
 ### Anthropic Direct
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -258,9 +298,14 @@ OpenCode documents model IDs with `opencode/<model-id>` for Zen and `opencode-go
 }
 ```
 
+</details>
+
 Anthropic direct uses the native Anthropic provider. Do not use an OpenRouter model ID unless the provider is OpenRouter.
 
 If you use an Anthropic-compatible proxy, keep the provider as `anthropic` and override `apiBase`:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -279,9 +324,14 @@ If you use an Anthropic-compatible proxy, keep the provider as `anthropic` and o
 }
 ```
 
+</details>
+
 For a named custom provider serving Anthropic Messages, set `providers.<name>.api.supportedApis` to `["anthropic_messages"]`. Auto presets then use Messages with that connection's credentials and endpoint.
 
 ### OpenAI Direct
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -306,6 +356,8 @@ For a named custom provider serving Anthropic Messages, set `providers.<name>.ap
 }
 ```
 
+</details>
+
 Replace the model with a model ID available to your account. Leave API selection on Auto unless you need to choose Chat Completions or Responses in the preset's **Advanced options**. See [preset API settings](./configuration.md#preset-request-api) for WebUI and JSON configuration. `providers.openai.api` sets the connection default; explicit presets override it. If your configuration still uses `apiType`, follow the [migration instructions](./configuration.md#legacy-openai-api-selector-migration).
 
 Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models can retain server-provided conversation state; [native context compaction](./configuration.md#responses-state-and-compaction) depends on provider support. The WebUI offers switches for OpenAI web search, Codex Fast mode, and Grok X Search.
@@ -317,6 +369,9 @@ The `deepseek-flash` alias uses Responses automatically at `https://api.deepseek
 ### Custom OpenAI-Compatible Endpoint
 
 The `custom` provider fits one OpenAI-compatible endpoint that is not represented by a named provider.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -342,9 +397,14 @@ The `custom` provider fits one OpenAI-compatible endpoint that is not represente
 }
 ```
 
+</details>
+
 `custom` does not infer a default base URL. Set `apiBase`.
 
 If you have more than one custom OpenAI-compatible endpoint, give each endpoint its own provider key under `providers` and use that same key in the model preset. The key can be a name that makes sense in your environment, such as `companyProxy`, `tenant-a`, or `dev-local`.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -379,6 +439,8 @@ If you have more than one custom OpenAI-compatible endpoint, give each endpoint 
 }
 ```
 
+</details>
+
 Custom provider keys define direct connections. Without an API declaration, they use OpenAI-compatible Chat Completions. `apiBase` is required because nanobot cannot know the endpoint URL. `apiKey` is optional for local servers or private proxies that do not require one. Choose a name that does not conflict with a built-in provider name or alias, such as `openai`, `openai-codex`, `github-copilot`, or `lm-studio`. Declare the accepted protocols under `api` as described in [connection request APIs](./configuration.md#custom-connection-apis).
 
 If your custom endpoint documents a nonstandard thinking toggle, set `providers.<name>.thinkingStyle` to `thinking_type`, `enable_thinking`, or `reasoning_split`; nanobot then maps `reasoningEffort` onto that provider-specific request body. Leave it unset for ordinary OpenAI-compatible endpoints.
@@ -388,6 +450,9 @@ If your custom endpoint documents a nonstandard thinking toggle, set `providers.
 ModelScope (魔搭社区) exposes an OpenAI-compatible LLM endpoint plus a separate async image generation API. Both are covered by the built-in `modelscope` provider.
 
 Create a ModelScope [access token](https://modelscope.cn/my/myaccesstoken), then choose a model whose page exposes API-Inference. The example below uses [`Qwen/Qwen3-32B`](https://modelscope.cn/models/Qwen/Qwen3-32B); hosted availability and quotas are controlled by ModelScope. See the official [API-Inference guide](https://modelscope.cn/docs/model-service/API-Inference/intro) for current service details.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -412,9 +477,14 @@ Create a ModelScope [access token](https://modelscope.cn/my/myaccesstoken), then
 }
 ```
 
+</details>
+
 Use an inference-enabled model ID exactly as ModelScope publishes it (usually `Namespace/model-name`). The default base URL is `https://api-inference.modelscope.cn/v1`; override `providers.modelscope.apiBase` only if your account routes through a different host. Chat model IDs may optionally be prefixed with `modelscope/`; nanobot strips that routing prefix before sending the request.
 
 ModelScope image generation reuses the same provider key but is configured under `tools.imageGeneration`, not in a model preset:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -428,11 +498,16 @@ ModelScope image generation reuses the same provider key but is configured under
 }
 ```
 
+</details>
+
 Use the image model's exact ModelScope ID without a leading `modelscope/`; the image client sends this value unchanged and handles ModelScope's async submit/poll flow. The example uses [`Qwen/Qwen-Image-2512`](https://modelscope.cn/models/Qwen/Qwen-Image-2512). See [Image Generation](./image-generation.md#modelscope) for supported sizes, aspect ratios, and the complete provider configuration.
 
 ### Ollama
 
-Start Ollama separately, then point nanobot at the OpenAI-compatible endpoint.
+Prepare Ollama using the [local model recipe](./provider-cookbook.md#recipe-ollama-local-model), then point nanobot at its OpenAI-compatible endpoint.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -457,11 +532,16 @@ Start Ollama separately, then point nanobot at the OpenAI-compatible endpoint.
 }
 ```
 
+</details>
+
 Most Ollama setups do not require an API key.
 
 Ollama renders the OpenAI-compatible messages and tools through each model's chat template. If ordinary model responses are fast but tool-using turns show low prompt cache reuse, diagnose the rendered template before changing nanobot's context or memory settings. The [Ollama prompt-cache guide](./guides/configure-ollama-prompt-cache.md) explains the log pattern and a tested `llama3.1:8b` workaround.
 
 ### vLLM or Other Local OpenAI-Compatible Server
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -487,9 +567,14 @@ Ollama renders the OpenAI-compatible messages and tools through each model's cha
 }
 ```
 
+</details>
+
 Some OpenAI-compatible local servers require any non-empty API key even when they do not validate it.
 
 ### LM Studio
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -514,11 +599,16 @@ Some OpenAI-compatible local servers require any non-empty API key even when the
 }
 ```
 
+</details>
+
 Config keys may be camelCase or snake_case. Provider names in model presets should use the registry name, such as `lm_studio`.
 
 ### AWS Bedrock
 
 Bedrock can use the AWS credential chain, profile, region, or Bedrock bearer token depending on your AWS setup.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -543,6 +633,8 @@ Bedrock can use the AWS credential chain, profile, region, or Bedrock bearer tok
   }
 }
 ```
+
+</details>
 
 See [`configuration.md#providers`](./configuration.md#providers) for Bedrock-specific notes.
 
@@ -612,6 +704,9 @@ Pin `provider` in presets when using gateway catalog IDs such as `anthropic/clau
 
 Model presets are the recommended model configuration surface. Use them when you want named model choices, runtime `/model` switching, or reusable fallback targets.
 
+<details>
+<summary>Manual configuration</summary>
+
 ```json
 {
   "modelPresets": {
@@ -638,11 +733,16 @@ Model presets are the recommended model configuration surface. Use them when you
 }
 ```
 
+</details>
+
 The preset name `default` is reserved for the implicit `agents.defaults` settings. Do not define `modelPresets.default`; use `/model default` to return to the direct `agents.defaults.*` fields in older configs.
 
 ## Fallback Models
 
 Fallbacks are useful for transient provider failures, rate limits, or model availability issues. Keep fallbacks compatible with the task size and tool use. Prefer fallback presets so each candidate has a name and a complete provider, model, generation, and context-window configuration.
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -678,9 +778,14 @@ Fallbacks are useful for transient provider failures, rate limits, or model avai
 }
 ```
 
+</details>
+
 String entries in `fallbackModels` are preset names, not raw model names. nanobot tries them in order after the active preset. Each fallback preset uses its own `provider`, `model`, `maxTokens`, `contextWindowTokens`, `temperature`, and optional `reasoningEffort`.
 
 Use inline fallback objects only when a model is not worth naming as a preset:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -707,6 +812,8 @@ Use inline fallback objects only when a model is not worth naming as a preset:
   }
 }
 ```
+
+</details>
 
 `fallbackModels` belongs under `agents.defaults`, not inside each preset. If fallback candidates use smaller context windows, nanobot builds context using the smallest window in the active chain so every candidate can receive the same prompt. See [`configuration.md#model-fallbacks`](./configuration.md#model-fallbacks) for failure conditions.
 

@@ -11,6 +11,7 @@ import {
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
+import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import { readReloadSessions, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
@@ -22,7 +23,6 @@ import type {
 } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
-const INITIAL_HISTORY_PAGE_LIMIT = 40;
 const OLDER_HISTORY_PAGE_LIMIT = 120;
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
@@ -123,11 +123,16 @@ function hasPendingToolCallsFromThread(
 function completedTurnIdsFromThread(
   body: Awaited<ReturnType<typeof fetchWebuiThread>>,
 ): string[] {
-  if (!Array.isArray(body?.completed_turn_ids)) return [];
+  if (Array.isArray(body?.completed_turn_ids)) {
+    return Array.from(new Set(body.completed_turn_ids.filter(
+      (turnId) => typeof turnId === "string" && turnId.length > 0,
+    )));
+  }
+  if (body?.has_pending_tool_calls !== false || body.active_turn_id) return [];
   return Array.from(new Set(
-    body.completed_turn_ids.filter(
-      (turnId): turnId is string => typeof turnId === "string" && turnId.length > 0,
-    ),
+    body.events.flatMap((event) => (
+      event.event === "turn_end" && event.turn_id ? [event.turn_id] : []
+    )),
   ));
 }
 
@@ -140,6 +145,7 @@ interface SessionHistoryState {
   error: string | null;
   hasPendingToolCalls: boolean;
   completedTurnIds: string[];
+  completionIdsProvided: boolean;
   forkBoundaryMessageCount: number | null;
   beforeCursor: string | null;
   hasMoreBefore: boolean;
@@ -160,6 +166,7 @@ function emptyHistoryState(key: string | null, loading = false): SessionHistoryS
     error: null,
     hasPendingToolCalls: false,
     completedTurnIds: [],
+    completionIdsProvided: false,
     forkBoundaryMessageCount: null,
     beforeCursor: null,
     hasMoreBefore: false,
@@ -187,6 +194,7 @@ function cachedHistoryState(
     error: null,
     hasPendingToolCalls: hasPendingToolCallsFromThread(body, messages),
     completedTurnIds: completedTurnIdsFromThread(body),
+    completionIdsProvided: Array.isArray(body.completed_turn_ids),
     forkBoundaryMessageCount: projected.forkBoundaryMessageCount,
     beforeCursor: body.page?.before_cursor ?? null,
     hasMoreBefore: body.page?.has_more_before === true,
@@ -397,6 +405,8 @@ export function useSessionHistory(key: string | null): {
   hasPendingToolCalls: boolean;
   /** Turn identities backed by explicit persisted completion events. */
   completedTurnIds: string[];
+  /** A supplied list is authoritative even when empty (unfinished transcripts). */
+  completionIdsProvided: boolean;
   /** Relationship between the latest canonical page and its predecessor. */
   continuity: SessionHistoryContinuity;
   /** Stable across overlapping latest pages; changes on initial load or reset. */
@@ -404,7 +414,7 @@ export function useSessionHistory(key: string | null): {
   /** Exact active turn when supplied by a current gateway. */
   activeTurnId: string | null;
 } {
-  const { getToken } = useClient();
+  const { client, getToken } = useClient();
   const loadingOlderRef = useRef(false);
   const olderRequestAbortRef = useRef<AbortController | null>(null);
   const historyVersionRef = useRef(0);
@@ -452,77 +462,84 @@ export function useSessionHistory(key: string | null): {
       : cachedBody
         ? cachedHistoryState(key, cachedBody, cachedVersion)
         : emptyHistoryState(key, true));
+    const adoptBody = (body: WebuiThreadPersistedPayload | null) => {
+      historyVersionRef.current += 1;
+      const responseVersion = historyVersionRef.current;
+      const completedTurnIds = completedTurnIdsFromThread(body);
+      const projected = projectPersistedThread(body);
+      const ui = projected.messages;
+      const hasPending = hasPendingToolCallsFromThread(body, ui);
+      const forkBoundary = projected.forkBoundaryMessageCount;
+      setState((prev) => {
+        const merged = prev.key === key
+          ? mergeLatestHistory(prev.messages, ui, prev.lineage === 0)
+          : mergeLatestHistory([], ui, true);
+        const retainedPrefix = merged.retainedPrefixLength > 0;
+        const retainedForkBoundary = (
+          retainedPrefix
+          && prev.forkBoundaryMessageCount !== null
+          && prev.forkBoundaryMessageCount <= merged.retainedPrefixLength
+        )
+          ? prev.forkBoundaryMessageCount
+          : null;
+        return {
+          key,
+          messages: merged.messages,
+          loading: false,
+          loadingOlder: false,
+          olderError: merged.continuity === "overlap"
+            && (retainedPrefix || prev.beforeCursor === body?.page?.before_cursor)
+            ? prev.olderError
+            : null,
+          error: null,
+          hasPendingToolCalls: hasPending,
+          completedTurnIds,
+          completionIdsProvided: Array.isArray(body?.completed_turn_ids),
+          forkBoundaryMessageCount: forkBoundary === null
+            ? retainedForkBoundary
+            : forkBoundary + merged.retainedPrefixLength,
+          beforeCursor: retainedPrefix
+            ? prev.beforeCursor
+            : body?.page?.before_cursor ?? null,
+          hasMoreBefore: retainedPrefix
+            ? prev.hasMoreBefore
+            : body?.page?.has_more_before === true,
+          userMessageOffset: retainedPrefix
+            ? prev.userMessageOffset
+            : Math.max(0, body?.page?.user_message_offset ?? 0),
+          version: responseVersion,
+          continuity: merged.continuity,
+          lineage: merged.continuity === "overlap"
+            ? prev.lineage
+            : responseVersion,
+          activeTurnId: typeof body?.active_turn_id === "string"
+            ? body.active_turn_id
+            : null,
+        };
+      });
+    };
+    let publishingBody = false;
+    const unsubscribeCache = webuiThreadCache.subscribe(key, (body) => {
+      if (publishingBody) return;
+      // A reconnect read can finish before this thread's older HTTP request.
+      // Adopt that published page now and prevent the older response from
+      // overwriting its completed content or lifecycle facts.
+      cancelled = true;
+      controller.abort();
+      olderRequestAbortRef.current?.abort();
+      olderRequestAbortRef.current = null;
+      loadingOlderRef.current = false;
+      adoptBody(body);
+    });
     (async () => {
       try {
-        const body = await fetchWebuiThread(getToken(), key, {
-          limit: INITIAL_HISTORY_PAGE_LIMIT,
-          direction: "latest",
-          signal: controller.signal,
-          revision: cachedBody?.revision,
-          cached: cachedBody,
-        });
+        const body = await fetchLatestWebuiThread(client, getToken(), key, controller.signal);
         if (cancelled) return;
-        if (body === cachedBody && cachedBody !== undefined) {
-          setState((prev) => prev.key === key
-            ? { ...prev, loading: false, error: null }
-            : prev);
-          return;
-        }
+        publishingBody = true;
         if (body) webuiThreadCache.set(key, body);
         else webuiThreadCache.delete(key);
-        historyVersionRef.current += 1;
-        const responseVersion = historyVersionRef.current;
-        const completedTurnIds = completedTurnIdsFromThread(body);
-        const projected = projectPersistedThread(body);
-        const ui = projected.messages;
-        const hasPending = hasPendingToolCallsFromThread(body, ui);
-        const forkBoundary = projected.forkBoundaryMessageCount;
-        setState((prev) => {
-          const merged = prev.key === key
-            ? mergeLatestHistory(prev.messages, ui, prev.lineage === 0)
-            : mergeLatestHistory([], ui, true);
-          const retainedPrefix = merged.retainedPrefixLength > 0;
-          const retainedForkBoundary = (
-            retainedPrefix
-            && prev.forkBoundaryMessageCount !== null
-            && prev.forkBoundaryMessageCount <= merged.retainedPrefixLength
-          )
-            ? prev.forkBoundaryMessageCount
-            : null;
-          return {
-            key,
-            messages: merged.messages,
-            loading: false,
-            loadingOlder: false,
-            olderError: merged.continuity === "overlap"
-              && (retainedPrefix || prev.beforeCursor === body?.page?.before_cursor)
-              ? prev.olderError
-              : null,
-            error: null,
-            hasPendingToolCalls: hasPending,
-            completedTurnIds,
-            forkBoundaryMessageCount: forkBoundary === null
-              ? retainedForkBoundary
-              : forkBoundary + merged.retainedPrefixLength,
-            beforeCursor: retainedPrefix
-              ? prev.beforeCursor
-              : body?.page?.before_cursor ?? null,
-            hasMoreBefore: retainedPrefix
-              ? prev.hasMoreBefore
-              : body?.page?.has_more_before === true,
-            userMessageOffset: retainedPrefix
-              ? prev.userMessageOffset
-              : Math.max(0, body?.page?.user_message_offset ?? 0),
-            version: responseVersion,
-            continuity: merged.continuity,
-            lineage: merged.continuity === "overlap"
-              ? prev.lineage
-              : responseVersion,
-            activeTurnId: typeof body?.active_turn_id === "string"
-              ? body.active_turn_id
-              : null,
-          };
-        });
+        publishingBody = false;
+        adoptBody(body);
       } catch (e) {
         if (cancelled || isAbortError(e)) return;
         if (e instanceof ApiError && e.status === 404) {
@@ -534,22 +551,10 @@ export function useSessionHistory(key: string | null): {
               ? "reset"
               : "initial";
             return {
-              key,
-              messages: [],
-              loading: false,
-              loadingOlder: false,
-              olderError: null,
-              error: null,
-              hasPendingToolCalls: false,
-              completedTurnIds: [],
-              forkBoundaryMessageCount: null,
-              beforeCursor: null,
-              hasMoreBefore: false,
-              userMessageOffset: 0,
+              ...emptyHistoryState(key),
               version: responseVersion,
               continuity,
               lineage: responseVersion,
-              activeTurnId: null,
             };
           });
         } else {
@@ -562,8 +567,9 @@ export function useSessionHistory(key: string | null): {
     return () => {
       cancelled = true;
       controller.abort();
+      unsubscribeCache();
     };
-  }, [getToken, key, refreshSeq]);
+  }, [client, getToken, key, refreshSeq]);
 
   const loadOlder = useCallback(async () => {
     if (!key || loadingOlderRef.current) return;
@@ -657,6 +663,7 @@ export function useSessionHistory(key: string | null): {
       forkBoundaryMessageCount: null,
       hasPendingToolCalls: false,
       completedTurnIds: [],
+      completionIdsProvided: false,
       continuity: "initial",
       lineage: 0,
       activeTurnId: null,
@@ -680,6 +687,7 @@ export function useSessionHistory(key: string | null): {
       forkBoundaryMessageCount: null,
       hasPendingToolCalls: false,
       completedTurnIds: [],
+      completionIdsProvided: false,
       continuity: "initial",
       lineage: 0,
       activeTurnId: null,
@@ -700,6 +708,7 @@ export function useSessionHistory(key: string | null): {
     forkBoundaryMessageCount: state.forkBoundaryMessageCount,
     hasPendingToolCalls: state.hasPendingToolCalls,
     completedTurnIds: state.completedTurnIds,
+    completionIdsProvided: state.completionIdsProvided,
     continuity: state.continuity,
     lineage: state.lineage,
     activeTurnId: state.activeTurnId,

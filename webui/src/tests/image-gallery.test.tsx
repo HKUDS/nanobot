@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+
+import { preloadMarkdownText } from "@/components/MarkdownText";
 
 import { ImageGallery } from "@/components/ImageGallery";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -13,6 +15,8 @@ const message: UIMessage = { id: "images", role: "assistant", content: "", creat
   media: [{ kind: "image", url: "/api/media/sign/chart", name: "chart.png" }] };
 
 describe("image presentation", () => {
+  beforeAll(preloadMarkdownText);
+
   it("bounds a large collection to four thumbnails and keeps every image in the viewer", async () => {
     const user = userEvent.setup();
     const { container } = render(<ImageGallery images={images} />);

@@ -24,3 +24,6 @@ These skills are adapted from [OpenClaw](https://github.com/openclaw/openclaw)'s
 | `tmux` | Remote-control tmux sessions |
 | `clawhub` | Search and install skills from ClawHub registry |
 | `skill-creator` | Create new skills |
+| `nanobot-document` | Explain nanobot usage, configuration, and troubleshooting from bundled docs |
+
+`nanobot-document/references/` is generated from the root `docs/` directory by the Hatch build hook for wheels, source distributions, and editable installs. Edit `docs/` rather than the generated copies; rerun the build or editable install to refresh them. Source distributions also include `docs/` so wheels built from them retain the same documentation.

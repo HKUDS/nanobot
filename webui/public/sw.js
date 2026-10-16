@@ -26,7 +26,8 @@ function notificationTarget(value) {
     const url = new URL(value);
     if (url.origin !== self.location.origin || url.username || url.password || url.search || url.pathname !== "/") return null;
     return /^#\/(?:chat|temporary)\/[^?]+$/.test(url.hash)
-      || url.hash === "#/settings?section=appearance" ? url.href : null;
+      || url.hash === "#/settings?section=appearance"
+      || url.hash === "#/settings?section=notifications" ? url.href : null;
   } catch { return null; }
 }
 
@@ -59,8 +60,12 @@ async function notifyClient(source, data) {
 }
 
 self.addEventListener("message", (event) => {
-  if (event.data?.type !== "nanobot:notify" || !event.source?.url
-    || new URL(event.source.url).origin !== self.location.origin) return;
+  if (!event.source?.url || new URL(event.source.url).origin !== self.location.origin) return;
+  if (event.data?.type === "nanobot:notification-probe") {
+    event.ports[0]?.postMessage(typeof self.registration.showNotification === "function" ? "ready" : "workerUnavailable");
+    return;
+  }
+  if (event.data?.type !== "nanobot:notify") return;
   const work = noticeQueue.then(() => notifyClient(event.source, event.data));
   noticeQueue = work.then(() => undefined, () => undefined);
   event.waitUntil(work.then(
@@ -77,11 +82,12 @@ self.addEventListener("notificationclick", (event) => {
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const source = windows.find((client) => client.id === event.notification.data.clientId);
     const temporary = new URL(url).hash.startsWith("#/temporary/");
-    const target = source || (!temporary && windows.find((client) => client.frameType === "top-level"));
-    if (target) {
-      target.postMessage({ type: "nanobot:notification-click", url });
-      await target.focus();
+    if (source) {
+      source.postMessage({ type: "nanobot:notification-click", url });
+      await source.focus();
     } else {
+      // Other tabs may run older code without the click receiver. Open the
+      // destination normally instead of silently focusing an unrelated page.
       // Temporary chats belong to their original connection, not another tab.
       await self.clients.openWindow(temporary ? "/#/new" : url);
     }

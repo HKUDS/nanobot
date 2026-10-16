@@ -53,6 +53,7 @@ class GatewayServices:
     local_trigger_store: LocalTriggerStore | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    unified_session: bool = False
 
 
 def build_gateway_services(
@@ -63,6 +64,7 @@ def build_gateway_services(
     static_dist_path: Path | None,
     workspace_path: Path,
     default_restrict_to_workspace: bool,
+    unified_session: bool = False,
     config_path: Path | None = None,
     runtime_model_name: Callable[[], str | None] | None,
     refresh_runtime_config: Callable[[], None] | None = None,
@@ -77,6 +79,7 @@ def build_gateway_services(
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
     mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+    image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     skill_state_action: Callable[[set[str]], None] | None = None,
     recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     subagent_manager: SubagentManager | None = None,
@@ -145,6 +148,7 @@ def build_gateway_services(
         channel_runtime_status=channel_runtime_status,
         mcp_runtime_status=mcp_runtime_status,
         mcp_reload=mcp_reload,
+        image_generation_reload=image_generation_reload,
         skill_state_action=skill_state_action,
         recovery_action=recovery_action,
         subagent_manager=subagent_manager,
@@ -169,4 +173,5 @@ def build_gateway_services(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        unified_session=unified_session,
     )

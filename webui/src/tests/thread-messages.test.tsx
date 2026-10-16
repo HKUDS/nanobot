@@ -765,7 +765,7 @@ describe("ThreadMessages", () => {
     const timestamp = menu.querySelector<HTMLElement>("[data-message-timestamp]")!;
     expect(timestamp).toBeInTheDocument();
     expect(timestamp).toHaveClass("min-h-[var(--message-block-control-size)]");
-    expect(timestamp.parentElement).toHaveClass("border-t", "text-muted-foreground/45");
+    expect(timestamp.parentElement).toHaveClass("border-t", "text-muted-foreground");
     expect(toolbar).not.toContainElement(timestamp);
     expect(timestamp).not.toHaveAttribute("tabindex");
     expect(timestamp.querySelector("svg")).not.toBeInTheDocument();

@@ -6,7 +6,7 @@ import i18n from "@/i18n";
 
 const mocks = vi.hoisted(() => ({ action: vi.fn(), refresh: vi.fn(), config: "" }));
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: { requestMutation: mocks.action } }) }));
-vi.mock("@/components/remote/RemoteInstances", () => ({ useRemoteConnections: () => ({ refresh: mocks.refresh, directory: { profiles: [{ id: "paired", paired: true, ssh_config: mocks.config }, { id: "ssh", name: "Team SSH", paired: false }] } }) }));
+vi.mock("@/components/remote/remote-context", () => ({ useRemoteConnections: () => ({ refresh: mocks.refresh, directory: { profiles: [{ id: "paired", paired: true, ssh_config: mocks.config }, { id: "ssh", name: "Team SSH", paired: false }] } }) }));
 
 beforeEach(async () => { await i18n.changeLanguage("en"); mocks.action.mockReset().mockResolvedValue({}); mocks.refresh.mockReset().mockResolvedValue(undefined); mocks.config = ""; });
 afterEach(cleanup);

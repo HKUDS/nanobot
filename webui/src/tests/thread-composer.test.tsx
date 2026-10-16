@@ -17,7 +17,7 @@ function workspacePickerProps(scope: WorkspaceScopePayload) {
       default_scope: scope,
       recent_projects: [],
       favorite_projects: [],
-      controls: { can_change_project: true, can_use_full_access: true },
+      controls: { can_change_project: true },
     }),
     onBrowseWorkspaceDirectories: async (path: string) => ({
       path: resolvePath(path), parent: null, entries: [], partial: false,
@@ -1415,10 +1415,10 @@ describe("ThreadComposer", () => {
       project_path: "/tmp/project", project_name: "project",
       access_mode: "restricted", restrict_to_workspace: true,
     };
-    const composer = (workspaceScope: WorkspaceScopePayload, canUseFullAccess = true) => (
+    const composer = (workspaceScope: WorkspaceScopePayload) => (
       <ThreadComposer onSend={vi.fn()} placeholder="Type your message..."
         workspaceScope={workspaceScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: canUseFullAccess }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={onWorkspaceScopeChange} />
     );
     const { rerender } = render(composer(restricted));
@@ -1434,11 +1434,10 @@ describe("ThreadComposer", () => {
     expect(access).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(restricted);
-    rerender(composer(restricted, false));
-    expect(access).toBeDisabled();
-    onWorkspaceScopeChange.mockClear();
+    rerender(composer(restricted));
+    expect(access).toBeEnabled();
     await user.click(access);
-    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
+    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(full);
   });
 
   it("exposes full and compact workspace labels for container-driven compression", () => {
@@ -1453,7 +1452,7 @@ describe("ThreadComposer", () => {
           access_mode: "full",
           restrict_to_workspace: false,
         }}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={vi.fn()}
       />,
     );
@@ -1490,7 +1489,7 @@ describe("ThreadComposer", () => {
         }}
         workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true, can_browse_directories: true, can_resolve_project: true }}
+        workspaceControls={{ can_change_project: true, can_browse_directories: true, can_resolve_project: true }}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
@@ -1555,7 +1554,7 @@ describe("ThreadComposer", () => {
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
@@ -1584,7 +1583,7 @@ describe("ThreadComposer", () => {
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={vi.fn()}
       />
     );
@@ -1663,7 +1662,6 @@ describe("ThreadComposer", () => {
         {...workspacePickerProps(defaultScope)}
         workspaceControls={{
           can_change_project: true,
-          can_use_full_access: true,
           can_browse_directories: true,
           can_resolve_project: true,
         }}
@@ -1689,7 +1687,7 @@ describe("ThreadComposer", () => {
     }));
   });
 
-  it("selects an entered host path in Restricted mode when Full Access is unavailable", async () => {
+  it("preserves Full Access when selecting an entered host path", async () => {
     const user = userEvent.setup();
     const onWorkspaceScopeChange = vi.fn();
     const defaultScope = {
@@ -1708,7 +1706,6 @@ describe("ThreadComposer", () => {
         {...workspacePickerProps(defaultScope)}
         workspaceControls={{
           can_change_project: true,
-          can_use_full_access: false,
         }}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
@@ -1726,8 +1723,8 @@ describe("ThreadComposer", () => {
 
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
       project_path: "/srv/nas-project",
-      access_mode: "restricted",
-      restrict_to_workspace: true,
+      access_mode: "full",
+      restrict_to_workspace: false,
     }));
   });
 
@@ -2509,8 +2506,8 @@ describe("ThreadComposer", () => {
     expect(token.className).not.toContain("zoom-in");
     expect(token.className).not.toContain("px-");
     expect(token.className).not.toContain("mx-");
-    expect(token.getAttribute("style")).toContain("color: #5C5543");
-    expect(token.getAttribute("style")).not.toContain("text-shadow");
+    expect(token).toHaveClass("text-foreground");
+    expect(token.style.textShadow).toBe("");
     expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     const logo = screen.getByTestId("composer-cli-mention-logo-gimp");
     expect(logo.className).toContain("top-1/2");
@@ -2546,7 +2543,7 @@ describe("ThreadComposer", () => {
     expect(name).toHaveClass("[-webkit-text-stroke:0.4px_currentColor]");
   });
 
-  it("uses the shared accent when an installed CLI app has no brand metadata", () => {
+  it("uses the theme foreground when an installed CLI app has no brand metadata", () => {
     const mention = "@obsidian-agent-cli";
     const app: CliAppInfo = {
       name: "obsidian-agent-cli",
@@ -2578,8 +2575,7 @@ describe("ThreadComposer", () => {
     });
 
     const token = screen.getByTestId("composer-cli-mention-obsidian-agent-cli");
-    expect(token.getAttribute("style")).toContain("var(--inline-token-highlight)");
-    expect(token.getAttribute("style")).not.toContain("var(--primary)");
+    expect(token).toHaveClass("text-foreground");
   });
 
   it.each([
@@ -3854,6 +3850,144 @@ describe("ThreadComposer", () => {
     await waitFor(() => {
       expect(screen.queryByText("remember this edited follow-up")).not.toBeInTheDocument();
     });
+  });
+
+  it("resumes a restored queue only after its waiting turn is confirmed complete", async () => {
+    let acceptDelivery!: (accepted: boolean) => void;
+    const delivery = new Promise<boolean>((resolve) => { acceptDelivery = resolve; });
+    const onSend = vi.fn().mockReturnValueOnce(delivery);
+    const first = render(
+      <ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />,
+    );
+    const input = screen.getByLabelText("Message input");
+    for (const text of ["first follow-up", "second follow-up"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    first.unmount();
+    const otherSend = vi.fn();
+    const other = render(
+      <ThreadComposer onSend={otherSend} pendingQueueKey="chat-b" completedTurnIds={["turn-a"]} />,
+    );
+    expect(otherSend).not.toHaveBeenCalled();
+    expect(screen.queryByText("first follow-up")).not.toBeInTheDocument();
+    other.unmount();
+
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={[]} />,
+    );
+    expect(screen.getByText("first follow-up")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-other"]} />,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("first follow-up"));
+    for (let update = 0; update < 3; update += 1) {
+      returned.rerender(
+        <ThreadComposer onSend={(...args) => onSend(...args)} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+      );
+    }
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("second follow-up")).toBeInTheDocument();
+    await act(async () => { acceptDelivery(true); await delivery; });
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-next" completedTurnIds={["turn-a"]} />,
+    );
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(onSend).toHaveBeenCalledTimes(1);
+    returned.unmount();
+    render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-next"]} />,
+    );
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("second follow-up"));
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+  });
+
+  it.each(["button", "palette"])("keeps queued messages manual after stopping through %s and remounting", (entrypoint) => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const view = render(
+      <ThreadComposer onSend={onSend} onStop={onStop} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" slashCommands={COMMANDS} />,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep for later" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    if (entrypoint === "button") fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    else {
+      fireEvent.change(input, { target: { value: "/sto" } });
+      fireEvent.mouseDown(screen.getByRole("option", { name: /\/stop/i }));
+    }
+    expect(onStop).toHaveBeenCalledTimes(1);
+    view.unmount();
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(screen.getByText("keep for later")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    // A run started in another pane must not re-arm a queue the user stopped.
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-other-pane" completedTurnIds={["turn-a"]} />,
+    );
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-other-pane"]} />,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith("keep for later", undefined, undefined);
+  });
+
+  it("retains a rejected queued attachment for manual retry after remounting", async () => {
+    mockBlobUrls();
+    let rejectDelivery!: (error: Error) => void;
+    const delivery = new Promise<boolean>((_resolve, reject) => { rejectDelivery = reject; });
+    const onSend = vi.fn().mockReturnValue(delivery);
+    const first = render(
+      <ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />,
+    );
+    fireEvent.change(first.container.querySelector<HTMLInputElement>('input[type="file"]')!, {
+      target: { files: [new File(["image"], "queued.png", { type: "image/png" })] },
+    });
+    await screen.findByText("queued.png");
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "queued attachment" } });
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    first.unmount();
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await act(async () => { rejectDelivery(new Error("Attachment upload interrupted")); });
+    expect(screen.getByText("queued attachment")).toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    returned.unmount();
+    render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(screen.getByText("queued attachment")).toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    onSend.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend.mock.calls[1][1]).toEqual([expect.objectContaining({ media: expect.objectContaining({ name: "queued.png" }) })]);
+  });
+
+  it("retains legacy queued drafts for manual sending when mounted idle", () => {
+    window.localStorage.setItem("nanobot.webui.composerQueuedGuidance.v1:chat-a", JSON.stringify([
+      { id: "legacy-draft", text: "legacy follow-up" },
+    ]));
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["old-turn"]} />);
+    expect(screen.getByText("legacy follow-up")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledWith("legacy follow-up", undefined, undefined);
   });
 
   it("keeps temporary chat guidance in memory only", async () => {

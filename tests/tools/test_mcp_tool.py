@@ -626,7 +626,7 @@ async def test_execute_contains_malformed_success_result() -> None:
 
 
 @pytest.mark.asyncio
-async def test_registry_adds_retry_hint_to_malformed_mcp_result() -> None:
+async def test_registry_adds_error_hint_to_malformed_mcp_result() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(content=None)
 
@@ -638,7 +638,10 @@ async def test_registry_adds_retry_hint_to_malformed_mcp_result() -> None:
 
     assert is_tool_error_result(result)
     assert "MCP tool returned malformed content" in result
-    assert "Analyze the error above and try a different approach" in result
+    assert (
+        "[Consider this result in the context of the user's goal "
+        "and decide whether and how to proceed.]"
+    ) in result
 
 
 @pytest.mark.asyncio

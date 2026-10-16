@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
@@ -6,7 +7,8 @@ import { DEFAULT_AGENT_SETTINGS_DRAFT } from "@/components/settings/models/Model
 import { installSettingsViewTestHooks, jsonResponse, renderSettingsView, requestMutationMock, settingsPayload } from "@/tests/settings-test-utils";
 
 function runtimeSettings() {
-  return { ...settingsPayload(), runtime_config: {
+  const payload = settingsPayload();
+  return { ...payload, advanced: { ...payload.advanced, exec_max_runtime_limit: 86400 }, runtime_config: {
     "agents.defaults.bot_name": "nanobot",
     "agents.defaults.bot_icon": "🐈",
     "agents.defaults.timezone_mode": "auto",
@@ -142,17 +144,39 @@ describe("Runtime configuration settings", () => {
     requestMutationMock.mockResolvedValue({ ...payload, requires_restart: true,
       runtime_config: { ...payload.runtime_config, "tools.exec.timeout": 90 } });
     renderSettingsView({ initialSection: "advanced", initialSettings: payload });
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Command timeout" }), { target: { value: "90" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" }), { target: { value: "90" } });
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: { "tools.exec.timeout": 90 } }, 20_000,
     ));
     expect(await screen.findByText("Saved. Restart to apply changes.")).toBeInTheDocument();
   });
 
+  it("keeps a loaded custom runtime editable when typing through a preset", async () => {
+    const payload = runtimeSettings();
+    requestMutationMock.mockResolvedValue({ ...payload, runtime_config: {
+      ...payload.runtime_config, "tools.exec.timeout": 9000,
+    } });
+    const user = userEvent.setup();
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    const field = screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" });
+
+    await user.clear(field);
+    await user.type(field, "900");
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue(900);
+    await user.type(field, "0");
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue(9000);
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.exec.timeout": 9000 } }, 20_000,
+    ));
+  });
+
   it("validates numbers and keeps a failed draft editable", async () => {
     requestMutationMock.mockRejectedValue(new Error("Could not save settings"));
     renderSettingsView({ initialSection: "advanced", initialSettings: runtimeSettings() });
-    const field = screen.getByRole("spinbutton", { name: "Command timeout" });
+    const field = screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" });
     fireEvent.change(field, { target: { value: "-1" } });
     await waitFor(() => expect(field).toHaveFocus());
     expect(field).toHaveAttribute("aria-invalid", "true");
@@ -162,12 +186,117 @@ describe("Runtime configuration settings", () => {
     expect(field).toHaveValue(17);
   });
 
+  it.each([
+    ["24 hours", 86400],
+    ["No time limit", 0],
+  ])("saves the %s command runtime preset in seconds", async (label, seconds) => {
+    const payload = runtimeSettings();
+    payload.runtime_config["tools.exec.timeout"] = 3600;
+    requestMutationMock.mockResolvedValue({ ...payload, runtime_config: {
+      ...payload.runtime_config, "tools.exec.timeout": seconds,
+    } });
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+
+    const control = screen.getByRole("combobox", { name: "Command runtime" });
+    expect(control).toHaveTextContent("1 hour");
+    expect(screen.getByText("Timed runs: up to 24 hours")).toBeVisible();
+    fireEvent.click(control);
+    fireEvent.click(screen.getByRole("option", { name: label, exact: true }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.exec.timeout": seconds } }, 20_000,
+    ));
+  });
+
+  it("rejects over-limit custom input without clamping or saving it", async () => {
+    const payload = runtimeSettings();
+    payload.runtime_config["tools.exec.timeout"] = 3600;
+    requestMutationMock.mockResolvedValue({ ...payload, runtime_config: {
+      ...payload.runtime_config, "tools.exec.timeout": 86400,
+    } });
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    fireEvent.click(screen.getByRole("combobox", { name: "Command runtime" }));
+    fireEvent.click(screen.getByRole("option", { name: "Custom (seconds)", exact: true }));
+    const field = screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" });
+    expect(field).toHaveAttribute("max", "86400");
+    fireEvent.change(field, { target: { value: "86401" } });
+
+    expect(field).toHaveValue(3600);
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("1 to 86,400");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: "86400" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.exec.timeout": 86400 } }, 20_000,
+    ));
+    await screen.findByText("Saved.", { exact: true });
+    fireEvent.change(field, { target: { value: "86401" } });
+    expect(field).toHaveValue(86400);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByText("Saved.", { exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "System", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced", exact: true }));
+    expect(screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" })).toHaveValue(86400);
+    expect(screen.getByRole("alert")).toHaveTextContent("1 to 86,400");
+  });
+
+  it("starts a custom duration from No time limit without saving an empty value", async () => {
+    const payload = runtimeSettings();
+    payload.runtime_config["tools.exec.timeout"] = 0;
+    requestMutationMock.mockResolvedValue({ ...payload, runtime_config: {
+      ...payload.runtime_config, "tools.exec.timeout": 120,
+    } });
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    fireEvent.click(screen.getByRole("combobox", { name: "Command runtime" }));
+    fireEvent.click(screen.getByRole("option", { name: "Custom (seconds)", exact: true }));
+    const field = screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" });
+    expect(field).toHaveValue(null);
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: "120" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.exec.timeout": 120 } }, 20_000,
+    ));
+  });
+
+  it("uses the gateway's configured runtime limit for presets and custom input", () => {
+    const payload = runtimeSettings();
+    payload.advanced.exec_max_runtime_limit = 7200;
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    expect(screen.getByText("Timed runs: up to 2 hours")).toBeVisible();
+    expect(screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" })).toHaveAttribute("max", "7200");
+    fireEvent.click(screen.getByRole("combobox", { name: "Command runtime" }));
+    expect(screen.getByRole("option", { name: "2 hours", exact: true })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "24 hours", exact: true })).not.toBeInTheDocument();
+  });
+
+  it("keeps runtime editing available on a host without limit metadata", async () => {
+    const payload = runtimeSettings();
+    requestMutationMock.mockResolvedValue({ ...payload, runtime_config: {
+      ...payload.runtime_config, "tools.exec.timeout": 90,
+    } });
+    renderSettingsView({ initialSection: "advanced", initialSettings: {
+      ...payload, advanced: settingsPayload().advanced,
+    } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" }), { target: { value: "90" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.exec.timeout": 90 } }, 20_000,
+    ));
+  });
+
   it("preserves drafts when navigating away and supports explicit clearing", async () => {
-    renderSettingsView({ initialSection: "advanced", initialSettings: runtimeSettings() });
+    renderSettingsView({ initialSection: "capabilities", initialSettings: runtimeSettings() });
+    const openWebSettings = () => {
+      fireEvent.click(within(screen.getByRole("region", { name: "Web access" })).getByRole("button", { name: "Configure" }));
+      fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    };
+    openWebSettings();
     const proxy = screen.getByRole("textbox", { name: "Web proxy" });
     fireEvent.change(proxy, { target: { value: "" } });
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "System" }));
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
+    openWebSettings();
     expect(screen.getByRole("textbox", { name: "Web proxy" })).toHaveValue("");
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: { "tools.web.proxy": null } }, 20_000,

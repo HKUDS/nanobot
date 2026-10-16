@@ -51,7 +51,6 @@ import {
   SIDEBAR_SELECTION_ITEM_CLASS,
   SidebarSelectionHighlight,
 } from "@/components/SidebarSelectionHighlight";
-import { relativeTime, visibleSessionPreview } from "@/lib/format";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
   displayTitle,
@@ -253,8 +252,6 @@ interface ChatListProps {
   updatedChatIds?: string[];
   recoveryChatIds?: string[];
   density?: SidebarDensity;
-  showPreviews?: boolean;
-  showTimestamps?: boolean;
   sort?: SidebarSortMode;
   showArchived?: boolean;
   defaultWorkspacePath?: string | null;
@@ -296,8 +293,6 @@ export const ChatList = memo(function ChatList({
   updatedChatIds = [],
   recoveryChatIds = [],
   density = "comfortable",
-  showPreviews = false,
-  showTimestamps = false,
   sort = "updated_desc",
   showArchived = false,
   defaultWorkspacePath,
@@ -766,7 +761,6 @@ export const ChatList = memo(function ChatList({
                           : undefined
                       }
                       actionMenuPortalContainer={actionMenuPortalContainer}
-                      updatedAt={showTimestamps ? group.updatedAt : null}
                     />
                   ) : (
                     <ChatsGroupHeader label={group.label} />
@@ -934,11 +928,6 @@ export const ChatList = memo(function ChatList({
 
                     const isPinned = pinned.has(s.key);
                     const isArchived = archived.has(s.key);
-                    const preview = visibleSessionPreview(s.preview);
-                    const showPreview = showPreviews && preview && preview !== title;
-                    const timestamp = showTimestamps
-                      ? relativeTime(s.updatedAt ?? s.createdAt)
-                      : "";
                     const activityState = running.has(s.chatId)
                       ? "running"
                       : recovery.has(s.chatId)
@@ -1012,41 +1001,15 @@ export const ChatList = memo(function ChatList({
                                   partial={tabPartiallySelected}
                                 />
                               ) : null}
-                                <span className="min-w-0 flex-1 overflow-hidden">
-                                  {projectMode ? (
-                                    <span className="relative flex w-full min-w-0 items-center gap-2">
-                                      <SidebarSessionHandle handle={s.handle} />
-                                      <span className="min-w-0 flex-1 truncate font-normal leading-5">
-                                        {title}
-                                      </span>
-                                      {isPinned ? <PinnedChatIndicator /> : null}
-                                    {timestamp ? (
-                                      <span className="shrink-0 text-[11.5px] font-medium text-sidebar-muted-foreground">
-                                        {timestamp}
-                                      </span>
-                                    ) : null}
-
-                                  </span>
-                                ) : (
-                                  <span className="relative flex w-full min-w-0 items-center gap-1.5">
-                                    <SidebarSessionHandle handle={s.handle} />
-                                    <span className="min-w-0 flex-1 truncate font-normal leading-5">
-                                      {title}
-                                    </span>
-                                    {isPinned ? <PinnedChatIndicator /> : null}
-
-                                  </span>
-                                )}
-                                {showPreview ? (
-                                  <span className="block w-full truncate text-[11.5px] leading-4 text-sidebar-muted-foreground">
-                                    {preview}
-                                  </span>
-                                ) : null}
-                                {timestamp && !projectMode ? (
-                                  <span className="block w-full truncate text-[11px] leading-4 text-sidebar-muted-foreground">
-                                    {timestamp}
-                                  </span>
-                                ) : null}
+                              <span className={cn(
+                                "relative flex min-w-0 flex-1 items-center overflow-hidden",
+                                projectMode ? "gap-2" : "gap-1.5",
+                              )}>
+                                <SidebarSessionHandle handle={s.handle} />
+                                <span className="min-w-0 flex-1 truncate font-normal leading-5">
+                                  {title}
+                                </span>
+                                {isPinned ? <PinnedChatIndicator /> : null}
                               </span>
                           </button>
                           <SessionActivityIndicator state={activityState} />
@@ -1709,7 +1672,6 @@ function ProjectGroupHeader({
   onRequestRename,
   onNewChat,
   actionMenuPortalContainer,
-  updatedAt,
 }: {
   active: boolean;
   label: string;
@@ -1721,7 +1683,6 @@ function ProjectGroupHeader({
   onRequestRename?: () => void;
   onNewChat?: () => void;
   actionMenuPortalContainer?: HTMLElement | null;
-  updatedAt?: string | null;
 }) {
   const { t } = useTranslation();
   const projectButton = (
@@ -1775,11 +1736,6 @@ function ProjectGroupHeader({
             {projectButton}
           </HoverHint>
         ) : projectButton}
-        {updatedAt ? (
-          <span className="shrink-0 text-[11px] text-sidebar-muted-foreground">
-            {relativeTime(updatedAt)}
-          </span>
-        ) : null}
         {onRequestRename || onNewChat ? (
           <DropdownMenu
             modal={false}

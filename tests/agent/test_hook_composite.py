@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import mock_session_manager
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hook import (
     AgentHook,
@@ -13,8 +14,12 @@ from nanobot.agent.hook import (
     AgentRunHookContext,
     AgentTurnHookContext,
     CompositeHook,
+    SDKCaptureHook,
 )
+from nanobot.agent.hooks.file_edit_activity import FileEditActivityHook
+from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.tools.context import RequestContext
+from nanobot.events import NO_EVENTS
 from nanobot.utils.progress_events import output_events
 
 
@@ -351,6 +356,19 @@ def test_composite_wants_streaming_empty():
     assert hook.wants_streaming() is False
 
 
+def test_builtin_hooks_detect_run_snapshot_consumers():
+    assert AgentHook().has_run_hooks() is False
+    assert AgentProgressHook().has_run_hooks() is False
+    assert SDKCaptureHook().has_run_hooks() is True
+    assert FileEditActivityHook(events=NO_EVENTS, workspace=None).has_run_hooks() is True
+
+
+def test_composite_detects_nested_run_snapshot_consumers():
+    progress = AgentProgressHook()
+    assert CompositeHook([AgentHook(), CompositeHook([progress])]).has_run_hooks() is False
+    assert CompositeHook([progress, CompositeHook([SDKCaptureHook()])]).has_run_hooks() is True
+
+
 # ---------------------------------------------------------------------------
 # Empty hooks list: behaves like no-op AgentHook
 # ---------------------------------------------------------------------------
@@ -359,6 +377,7 @@ def test_composite_wants_streaming_empty():
 @pytest.mark.asyncio
 async def test_composite_empty_hooks_no_ops():
     hook = CompositeHook([])
+    assert hook.has_run_hooks() is False
     ctx = _ctx()
     run_ctx = _run_ctx()
     await hook.before_run(run_ctx)
@@ -420,7 +439,7 @@ def _make_loop(tmp_path, hooks=None, hook_factories=None):
     provider.generation.max_tokens = 4096
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr, \
          patch("nanobot.agent.loop.Consolidator"):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)

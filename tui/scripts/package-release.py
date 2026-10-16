@@ -62,6 +62,8 @@ def _source_archive(root: Path) -> bytes:
             archive.add(path, arcname=Path("nanobot-tui-source/tui") / relative)
         archive.add(root.parent / "packages/client-events",
                     arcname="nanobot-tui-source/packages/client-events")
+        for name in ("check_client_import_boundaries.mjs", "check_client_import_boundaries.test.mjs"):
+            archive.add(root.parent / "scripts" / name, arcname=f"nanobot-tui-source/scripts/{name}")
         archive.add(root.parent / "LICENSE", arcname="nanobot-tui-source/LICENSE")
     return output.getvalue()
 

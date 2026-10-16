@@ -1000,11 +1000,12 @@ export async function startMcpOAuth(
   transport: WebUIMutationTransport,
   name: string,
   reset: boolean = false,
+  values: Record<string, string> = {},
 ): Promise<McpOAuthFlowPayload> {
   return mutation<McpOAuthFlowPayload>(
     transport,
     "settings.mcp.oauth_start",
-    { name, ...(reset ? { reset: true } : {}) },
+    { ...values, name, ...(reset ? { reset: true } : {}) },
     30_000,
   );
 }
@@ -1176,7 +1177,7 @@ export async function fetchSidebarState(
 function modelGenerationSettingsPayload(
   configuration: Pick<
     ModelConfigurationCreate,
-    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort" | "api"
+    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort" | "api" | "extraHeaders" | "extraQuery" | "extraBody"
   >,
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
@@ -1194,6 +1195,11 @@ function modelGenerationSettingsPayload(
   }
   if (configuration.api !== undefined) {
     payload.api = configuration.api;
+  }
+  for (const [key, field] of [
+    ["extraHeaders", "extra_headers"], ["extraQuery", "extra_query"], ["extraBody", "extra_body"],
+  ] as const) {
+    if (configuration[key] !== undefined) payload[field] = configuration[key];
   }
   return payload;
 }
@@ -1363,6 +1369,8 @@ export async function updateImageGenerationSettings(
       default_aspect_ratio: update.defaultAspectRatio,
       default_image_size: update.defaultImageSize,
       max_images_per_turn: update.maxImagesPerTurn,
+      ...(update.extraHeaders !== undefined ? { extra_headers: update.extraHeaders } : {}),
+      ...(update.extraBody !== undefined ? { extra_body: update.extraBody } : {}),
     },
   );
 }

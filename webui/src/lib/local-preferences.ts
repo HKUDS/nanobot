@@ -27,7 +27,7 @@ export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   fileEditDisplayMode: "summary",
 };
 
-export function normalizeFileEditDisplayMode(value: unknown): FileEditDisplayMode {
+function normalizeFileEditDisplayMode(value: unknown): FileEditDisplayMode {
   return value === "diff" || value === "collapsed_diff" ? value : "summary";
 }
 

@@ -16,6 +16,8 @@ Nanobot can act as a WebSocket server, allowing external clients (web apps, CLIs
 
 ### 1. Configure
 
+For normal browser setup, run `nanobot webui`; the launcher prepares the local channel and opens the WebUI. Configure models in **Settings → Models**. The listener and protocol fields below are for custom clients and deployments and have no graphical editor.
+
 The WebSocket channel is enabled by default. Add only the fields you want to override under `channels.websocket`:
 
 ```json
@@ -25,6 +27,7 @@ The WebSocket channel is enabled by default. Add only the fields you want to ove
       "host": "127.0.0.1",
       "port": 8765,
       "path": "/",
+      "tokenIssuePath": "/auth/token",
       "tokenIssueSecret": "your-webui-password",
       "websocketRequiresToken": true,
       "allowFrom": ["*"],
@@ -34,34 +37,58 @@ The WebSocket channel is enabled by default. Add only the fields you want to ove
 }
 ```
 
-### 2. Start nanobot
+### 2. Apply the configuration
+
+Replace `your-webui-password` with a private secret before using the configuration. Restart the gateway that owns this config if it is already running. If none is running, start it with the same installation and config:
 
 ```bash
 nanobot gateway
 ```
 
-You should see:
+Keep it running while connecting clients from another terminal.
 
-```text
-WebSocket server listening on ws://127.0.0.1:8765/
-```
+### 3. Obtain a token and connect
 
-### 3. Connect a client
+The secret above authorizes token issuance; it is not itself an issued connection token. Each WebSocket connection needs a new single-use token. Choose either client below. Both use the `/auth/token` path configured in step 1.
+
+With `curl` and `websocat` installed:
 
 ```bash
-# Using websocat
-websocat ws://127.0.0.1:8765/?client_id=alice
+# Replace the example secret with the value saved in your config.
+curl --fail -H "Authorization: Bearer your-webui-password" http://127.0.0.1:8765/auth/token
+# Copy the returned token into the URL; keep the whole URL quoted.
+websocat "ws://127.0.0.1:8765/?client_id=alice&token=TOKEN_FROM_RESPONSE"
+```
 
-# Using Python
-import asyncio, json, websockets
+After the `ready` event, send `{"content":"Hello nanobot!"}`. Obtain another token before reconnecting. Do not share the secret or the token URL.
+
+Alternatively, save and run this Python example in an environment with `websockets` installed. It asks for the configured secret, obtains its own token, and prints server events until you press Ctrl+C:
+
+```python
+import asyncio
+import json
+from getpass import getpass
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+import websockets
+
+request = Request(
+    "http://127.0.0.1:8765/auth/token",
+    headers={"Authorization": "Bearer " + getpass("WebSocket token-issue secret: ")},
+)
+with urlopen(request, timeout=10) as response:
+    token = json.load(response)["token"]
+
 
 async def main():
-    async with websockets.connect("ws://127.0.0.1:8765/?client_id=alice") as ws:
-        ready = json.loads(await ws.recv())
-        print(ready)  # {"event": "ready", "chat_id": "...", "client_id": "alice"}
+    query = urlencode({"client_id": "alice", "token": token})
+    async with websockets.connect("ws://127.0.0.1:8765/?" + query) as ws:
+        print(json.loads(await ws.recv()))  # ready event
         await ws.send(json.dumps({"content": "Hello nanobot!"}))
-        reply = json.loads(await ws.recv())
-        print(reply["text"])
+        async for frame in ws:
+            print(json.loads(frame))
+
 
 asyncio.run(main())
 ```
@@ -216,7 +243,7 @@ The upload path accepts the existing image, document, and video MIME whitelist. 
 
 Update WebUI and TUI together with the gateway. Existing messages and attachments remain available without a history migration. Clients must use HTTP uploads; `media.data_url` message uploads are no longer accepted. Local previews and the separate audio transcription protocol are unchanged.
 
-Reverse proxies must forward `POST /api/attachments` (including its authorization header) to the gateway and permit the configured file sizes. Do not enable public CORS for this capability endpoint.
+Reverse proxies must forward `POST /api/attachments` (including its authorization header) to the gateway and permit the configured file sizes. Same-origin browser uploads include origin cookies for edge authentication; cross-origin uploads do not send cookies. Do not enable public CORS for this capability endpoint.
 
 For a remote host opened through the local WebUI, update the local installation and the remote gateway together to use binary attachments. An older host's text chats and HTTP reads remain available.
 
@@ -394,7 +421,7 @@ Legacy clients that only send plain text or `{"content": ...}` keep working unch
 
 ### Security boundary
 
-`chat_id` is a *capability*: anyone holding a valid WebSocket auth credential and the chat_id can attach to that conversation and see its output. This is safe for nanobot's local, single-user model. Multi-tenant deployments should namespace chat_ids per user (or introduce a per-tenant auth gate) — nanobot does not do this today.
+`chat_id` is a *capability*: anyone holding a valid WebSocket auth credential and the chat_id can attach to that conversation and see its output. This is safe for nanobot's local, single-user model. Namespacing chat IDs alone does not enforce ownership. An application serving multiple users must authorize access before forwarding requests; separate instances and appropriate host permissions are needed when workspace files, memory, and tools must also be isolated. Nanobot does not provide per-user WebSocket authorization.
 
 ## Security Notes
 
@@ -402,7 +429,7 @@ Legacy clients that only send plain text or `{"content": ...}` keep working unch
 - **Defense in depth**: `allowFrom` is checked at both the HTTP handshake level and the message level.
 - **chat_id as capability**: see [Multi-chat multiplexing](#multi-chat-multiplexing). Auth on the WebSocket handshake is the single line of defense; callers who pass it can attach to any chat_id they know.
 - **TLS enforcement**: When SSL is enabled, TLSv1.2 is the minimum allowed version.
-- **Default-secure**: `websocketRequiresToken` defaults to `true`. Explicitly set it to `false` only on trusted networks.
+- **Default-secure**: `websocketRequiresToken` defaults to `true`. Use `false` only for deliberate loopback-only development without authentication, as shown below.
 
 ## Media Files
 
@@ -413,13 +440,15 @@ Outbound `message` events may include a `media` field containing local filesyste
 
 ## Common Patterns
 
-### Trusted local network (no auth)
+### Loopback-only development (no auth)
+
+Use this only for local clients on the same trusted machine, without forwarding the port. Remove any existing static token, token-issue secret, or trusted-proxy authentication settings if deliberately switching to this mode. Binding all interfaces (`0.0.0.0` or `::`) requires configured authentication and is rejected without it.
 
 ```json
 {
   "channels": {
     "websocket": {
-      "host": "0.0.0.0",
+      "host": "127.0.0.1",
       "port": 8765,
       "websocketRequiresToken": false,
       "allowFrom": ["*"],

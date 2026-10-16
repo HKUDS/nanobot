@@ -13,13 +13,9 @@ nanobot can run as a self-hosted chatbot or AI agent in Telegram, Discord, Slack
 
 Use chat apps when the agent should live where users already communicate: private DMs, team channels, group chats, email threads, or bot workspaces.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot webui
-```
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
 Send `Hello!` in the WebUI before adding a channel. Then choose one platform guide for the bot/account prerequisites:
 
@@ -38,14 +34,14 @@ Send `Hello!` in the WebUI before adding a channel. Then choose one platform gui
 Use the guided channel setup:
 
 1. Get the platform token, login state, webhook, or mailbox credentials.
-2. Open **Settings → Channels** in the WebUI.
+2. Open **Channels** in the WebUI.
 3. Choose the platform and open its setup panel.
 4. Complete the credential or QR flow and install optional support if prompted.
 5. Restart when the WebUI requests it.
 6. Send a private test message.
 7. Approve the pairing request in the WebUI when a DM-capable channel asks for one.
 
-If your installed release does not show **Settings → Channels**, use the full [Chat Apps reference](../chat-apps.md#manual-setup-pattern) to configure the channel manually.
+If your installed release does not show **Channels**, use the full [Chat Apps reference](../chat-apps.md#manual-setup-pattern) to configure the channel manually.
 
 Check status from the terminal when you need a lower-level confirmation:
 
@@ -78,7 +74,7 @@ Use the full [Chat Apps reference](../chat-apps.md) when you manage `config.json
 
 - If `nanobot channels status` does not show the channel, the config key or optional dependency is likely missing.
 - If the first DM returns a pairing code, approve the pending request in the WebUI or use `/pairing approve <code>` from an authorized chat.
-- If messages do not arrive, run `nanobot gateway --verbose` and compare platform credentials, event permissions, and allow lists.
+- If messages do not arrive, inspect the running gateway logs and compare platform credentials, event permissions, and allow lists. Use `--verbose` when restarting that gateway for diagnosis.
 - If group replies are unexpected, review that channel's group policy.
 
 ## Related nanobot docs

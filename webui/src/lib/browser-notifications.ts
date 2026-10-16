@@ -12,8 +12,9 @@ export function lastNotificationProblem() { return lastProblem; }
 // Do not infer browser support from its user agent (including embedded browsers).
 export function notificationProblem(): NotificationProblem | null {
   if (!window.isSecureContext) return "insecure";
-  if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return "unsupported";
+  if (typeof Notification === "undefined") return "unsupported";
   if (Notification.permission === "denied") return "denied";
+  if (!("serviceWorker" in navigator)) return "workerUnavailable";
   return null;
 }
 
@@ -31,6 +32,24 @@ async function activeWorker(): Promise<ServiceWorker | null> {
   return registration?.active ?? null;
 }
 
+async function workerRequest(worker: ServiceWorker, message: object): Promise<unknown> {
+  const channel = new MessageChannel();
+  try {
+    return await bounded(new Promise<unknown>((resolve) => {
+      channel.port1.onmessage = ({ data }: MessageEvent<unknown>) => resolve(data);
+      worker.postMessage(message, [channel.port2]);
+    }));
+  } finally { channel.port1.close(); }
+}
+
+export async function notificationWorkerProblem(): Promise<"workerUnavailable" | null> {
+  try {
+    const worker = await activeWorker();
+    return worker && await workerRequest(worker, { type: "nanobot:notification-probe" }) === "ready"
+      ? null : "workerUnavailable";
+  } catch { return "workerUnavailable"; }
+}
+
 export async function enableBrowserNotifications(): Promise<NotificationProblem | null> {
   const problem = notificationProblem();
   if (problem) return problem;
@@ -40,8 +59,9 @@ export async function enableBrowserNotifications(): Promise<NotificationProblem 
       ? "granted" : await bounded(Notification.requestPermission(), 60_000);
     if (permission !== "granted") return permission === "denied" ? "denied" : "dismissed";
   } catch { return "permissionFailed"; }
-  try { return await activeWorker() ? null : "workerUnavailable"; }
-  catch { return "workerUnavailable"; }
+  const workerProblem = await notificationWorkerProblem();
+  if (!workerProblem) lastProblem = null;
+  return workerProblem;
 }
 
 export function taskNoticeKey(notice: TaskNotice): string | null {
@@ -84,14 +104,8 @@ async function submitNotification(body: string, options: { key: string; url: str
   catch { return "workerUnavailable"; }
   if (!worker) return "workerUnavailable";
   if (!eligible()) return "skipped";
-  const channel = new MessageChannel();
   try {
-    return await bounded(new Promise<NotificationResult>((resolve) => {
-      channel.port1.onmessage = ({ data }: MessageEvent<unknown>) => {
-        resolve(data === "submitted" || data === "skipped" ? data : "displayFailed");
-      };
-      worker.postMessage({ type: "nanobot:notify", body, ...options }, [channel.port2]);
-    }));
-  } catch { return "displayFailed"; }
-  finally { channel.port1.close(); }
+    const data = await workerRequest(worker, { type: "nanobot:notify", body, ...options });
+    return data === "submitted" || data === "skipped" ? data : "displayFailed";
+  } catch { return "workerUnavailable"; }
 }

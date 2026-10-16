@@ -119,6 +119,39 @@ async function openPresetAdvancedOptions() {
 describe("Settings models", () => {
   installSettingsViewTestHooks();
 
+  it("saves request overrides in a preset and restores inheritance when cleared", async () => {
+    const payload = settingsPayload();
+    payload.model_request_overrides_supported = true;
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true, advanced_fields: ["extra_headers", "extra_body", "extra_query"] }];
+    payload.model_presets[0].provider = "openai";
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    requestMutationMock.mockImplementation(async (_action, args) => {
+      if (args.extra_headers !== undefined) payload.model_presets[0].extra_headers = args.extra_headers ? JSON.parse(args.extra_headers) : null;
+      return structuredClone(payload);
+    });
+    requestMutationMock.mockRejectedValueOnce(new Error("Could not save. Try again."));
+    renderSettingsView({ initialSection: "models" });
+    await openPresetAdvancedOptions();
+    fireEvent.click(screen.getByRole("button", { name: "Headers Use provider settings Edit" }));
+    let editor = screen.getByRole("dialog", { name: "Headers", exact: true });
+    fireEvent.change(within(editor).getByRole("textbox", { name: "Headers" }), { target: { value: '{"X-Route":"preset"}' } });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    expect(await within(editor).findByRole("alert")).toHaveTextContent("Could not save. Try again.");
+    expect(within(editor).getByRole("textbox")).toHaveValue('{"X-Route":"preset"}');
+    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { name: "primary", extra_headers: '{"X-Route":"preset"}' }, 20_000,
+    ));
+    fireEvent.click(await screen.findByRole("button", { name: "Headers Entries: 1 Edit" }));
+    editor = screen.getByRole("dialog", { name: "Headers", exact: true });
+    fireEvent.change(within(editor).getByRole("textbox", { name: "Headers" }), { target: { value: "" } });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", { name: "primary", extra_headers: "" }, 20_000,
+    ));
+    expect(await screen.findByRole("button", { name: "Headers Use provider settings Edit" })).toBeEnabled();
+  });
+
   it.each(["legacy", "declaration"])("saves and restores a preset API declaration, then returns to automatic (%s host)", async (host) => {
     let payload = settingsPayload();
     const provider: SettingsPayload["providers"][number] = {

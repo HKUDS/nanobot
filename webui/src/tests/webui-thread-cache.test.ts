@@ -25,10 +25,17 @@ describe("WebuiThreadCache", () => {
     expect(cache.get("c")?.revision).toBe("rev-c");
   });
 
-  it("does not retain a payload larger than the byte budget", () => {
+  it("publishes payloads to mounted threads even when they exceed the byte budget", () => {
     const cache = new WebuiThreadCache(64, 2);
-    cache.set("large", payload("x".repeat(100)));
+    const published: WebuiThreadPersistedPayload[] = [];
+    const unsubscribe = cache.subscribe("large", (body) => published.push(body));
+    const large = payload("x".repeat(100));
+    cache.set("large", large);
 
     expect(cache.get("large")).toBeUndefined();
+    expect(published).toEqual([large]);
+    unsubscribe();
+    cache.set("large", large);
+    expect(published).toHaveLength(1);
   });
 });

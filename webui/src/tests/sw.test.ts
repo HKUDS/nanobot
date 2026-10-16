@@ -152,6 +152,23 @@ describe("browser notification worker", () => {
     return reply;
   }
 
+  it("confirms notification support without displaying a test notification", async () => {
+    const sw = loadSw();
+    const reply = await send(sw, { type: "nanobot:notification-probe" });
+    expect(reply).toHaveBeenCalledWith("ready");
+    expect(sw.showNotification).not.toHaveBeenCalled();
+  });
+
+  it("returns test clicks to notification settings, including a still-open older page", async () => {
+    const sw = loadSw();
+    for (const section of ["notifications", "appearance"]) {
+      const target = `${ORIGIN}/#/settings?section=${section}`;
+      expect(await send(sw, { test: true, key: section, url: target })).toHaveBeenCalledWith("submitted");
+      await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: target } } });
+      expect(sw.openWindow).toHaveBeenLastCalledWith(target);
+    }
+  });
+
   it("deduplicates concurrent tabs, dismissed notifications, and worker restarts", async () => {
     const sw = loadSw();
     const replies = await Promise.all([send(sw), send(sw)]);
@@ -199,6 +216,16 @@ describe("browser notification worker", () => {
     expect(tab.postMessage).toHaveBeenCalledWith({ type: "nanobot:notification-click", url });
     expect(tab.focus).toHaveBeenCalledOnce();
     expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("opens the destination when the source closed, even if an older page is still open", async () => {
+    const sw = loadSw();
+    const oldTab = { id: "old-page", frameType: "top-level", postMessage: vi.fn(), focus: vi.fn() };
+    sw.matchClients.mockResolvedValue([oldTab]);
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenCalledWith(url);
+    expect(oldTab.postMessage).not.toHaveBeenCalled();
+    expect(oldTab.focus).not.toHaveBeenCalled();
   });
 
   it("opens the same host with ordinary auth, but cannot restore a closed temporary chat", async () => {

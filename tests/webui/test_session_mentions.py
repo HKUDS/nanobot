@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+
+import pytest
 
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import (
@@ -28,7 +32,33 @@ def _handle(manager: SessionManager, key: str) -> SessionHandle:
     return handle
 
 
-def test_normalize_session_mentions_keeps_only_existing_distinct_other_targets(
+@pytest.mark.parametrize("raw", [None, []], ids=["missing", "empty"])
+async def test_empty_mentions_do_not_wait_for_unrelated_storage(tmp_path, monkeypatch, raw):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    await state.get("websocket:busy")
+    started, release = threading.Event(), threading.Event()
+    original = manager._store.replace_metadata
+
+    def blocked(key, metadata, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return original(key, metadata, **kwargs)
+
+    monkeypatch.setattr(manager._store, "replace_metadata", blocked)
+    busy = asyncio.create_task(state.update_metadata("websocket:busy", {"title": "busy"}))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        assert await asyncio.wait_for(WebuiSessionAccess(manager).normalize_mentions(raw), 1) == []
+        assert not busy.done()
+    finally:
+        release.set()
+        await busy
+        await state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_normalize_session_mentions_keeps_only_existing_distinct_other_targets(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -39,7 +69,7 @@ def test_normalize_session_mentions_keeps_only_existing_distinct_other_targets(
     _save_session(manager, "websocket:street", "Straße")
     _save_session(manager, "websocket:upper", "STRASSE")
     _save_session(manager, "telegram:history", "Telegram history")
-    mentions = WebuiSessionAccess(manager).normalize_mentions(
+    mentions = await WebuiSessionAccess(manager).normalize_mentions(
         [
             {
                 "name": "pricing",
@@ -57,6 +87,7 @@ def test_normalize_session_mentions_keeps_only_existing_distinct_other_targets(
         exclude_session_key="websocket:current",
     )
 
+    handles = await SessionHandleResolver(manager).alist_all_by_key()
     assert mentions == [
         {
             "id": handle.id,
@@ -71,7 +102,7 @@ def test_normalize_session_mentions_keeps_only_existing_distinct_other_targets(
             ("websocket:upper", "STRASSE"),
             ("telegram:history", "Telegram history"),
         )
-        for handle in (_handle(manager, key),)
+        for handle in (handles[key],)
     ]
 
 
@@ -91,7 +122,11 @@ def test_session_mention_context_treats_titles_as_data() -> None:
     assert json.loads(block.content.splitlines()[2])[0]["session_key"] == "websocket:history"
 
 
-def test_session_mentions_do_not_isolate_workspaces(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_session_mentions_do_not_isolate_workspaces(tmp_path, monkeypatch) -> None:
+    webui_dir = tmp_path / "webui"
+    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
     manager = SessionManager(tmp_path)
     project_b = tmp_path / "b"
     project_b.mkdir()
@@ -106,12 +141,13 @@ def test_session_mentions_do_not_isolate_workspaces(tmp_path) -> None:
     manager.save(session)
 
     access = WebuiSessionAccess(manager)
-    mentions = access.normalize_mentions(
+    mentions = await access.normalize_mentions(
         [{"name": "other", "session_key": "websocket:other"}],
         exclude_session_key="websocket:current",
     )
 
-    handle = _handle(manager, "websocket:other")
+    handle = await SessionHandleResolver(manager).ahandle_for_session("websocket:other")
+    assert handle is not None
     assert mentions == [{
         "id": handle.id,
         "name": handle.name,

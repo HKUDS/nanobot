@@ -73,6 +73,7 @@
     }
   },
   "custom": {
+    "addAssistant": "다른 어시스턴트 추가",
     "toggleAssistant": "{{name}} 어시스턴트 활성화",
     "configured": "연결됨",
     "needsSetup": "인증 필요",

@@ -1,10 +1,12 @@
 """A restarted host replays task observations without recovering execution."""
 
 import asyncio
+import hashlib
 import json
 import subprocess
 import sys
 import textwrap
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote
@@ -20,6 +22,7 @@ from nanobot.agent.subagent_sessions import SUBAGENT, TASK_METADATA_KEY, Subagen
 from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
 from nanobot.agent.tools.session_messages import ListSessionsTool, SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
+from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
@@ -30,6 +33,8 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
+from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
+from nanobot.session.location import SessionLocation
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
@@ -60,6 +65,57 @@ def gateway_for(manager, sessions, workspace):
     )
     token = gateway.tokens.issue_api_token(60)
     return gateway, SimpleNamespace(remote_address=("127.0.0.1", 12345)), Headers({"Authorization": f"Bearer {token}"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wait", [False, True])
+async def test_cancelled_task_creation_removes_committed_child(tmp_path, monkeypatch, wait):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    owner = "websocket:parent"
+    await sessions.state.get(owner)
+    entered, release = asyncio.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    save = sessions._store.save
+    children = []
+
+    def blocked_save(session, **kwargs):
+        save(session, **kwargs)
+        if session.key.startswith("subagent:"):
+            children.append(session.key)
+            loop.call_soon_threadsafe(entered.set)
+            assert release.wait(5), "test did not release child persistence"
+
+    monkeypatch.setattr(sessions._store, "save", blocked_save)
+    manager.runner.run = AsyncMock()
+
+    async def create():
+        with request_context(RequestContext(
+            channel="websocket", chat_id="parent", session_key=owner,
+            runtime=runtime, can_receive_background_results=True,
+        )):
+            return await SubagentTool(manager).execute(action="create", task="Inspect config", wait=wait)
+
+    task = asyncio.create_task(create())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+        assert len(children) == 1
+        assert await sessions.state.read(children[0]) is None
+        assert sessions.child_session_keys(owner) == []
+        assert manager.statuses_for_session(owner) == {}
+        assert manager.get_running_count() == 0
+        manager.runner.run.assert_not_awaited()
+        assert await sessions.state.read(owner) is not None
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await manager.close()
+        await sessions.state.aclose()
 
 
 @pytest.mark.asyncio
@@ -162,7 +218,8 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
     workspace.mkdir()
     (workspace / "example.txt").write_text("before\n", encoding="utf-8")
     manager, sessions, runtime = manager_with_storage(workspace, root)
-    entered, release = asyncio.Event(), asyncio.Event()
+    model_requests = asyncio.Queue()
+    release = asyncio.Event()
     responses = iter([
         LLMResponse(content="Read the file", tool_calls=[
             ToolCallRequest("read", "read_file", {"path": "example.txt"}),
@@ -181,9 +238,9 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
         for message in kwargs["messages"]:
             assert not ({"tool_events", "file_edit_events"} & message.keys())
         response = next(responses, None)
+        model_requests.put_nowait(None)
         if response is not None:
             return response
-        entered.set()
         await release.wait()
         return LLMResponse(content="Edited the file; the other file does not exist.")
 
@@ -191,8 +248,26 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
     gateway, connection, headers = gateway_for(manager, sessions, workspace)
     try:
         await manager.spawn("Edit and inspect files", session_key="websocket:parent", runtime=runtime)
-        await asyncio.wait_for(entered.wait(), 5)
         task_id, = manager.statuses_for_session("websocket:parent")
+        task = manager._running_tasks[task_id]
+        # Each tool's persisted activity completes before the next model request.
+        for _ in range(4):
+            request = asyncio.create_task(model_requests.get())
+            try:
+                done, _ = await asyncio.wait(
+                    (request, task), timeout=5, return_when=asyncio.FIRST_COMPLETED,
+                )
+                if task in done:
+                    result = task.result()
+                    status = manager.check(task_id, "websocket:parent")
+                    pytest.fail(
+                        "subagent ended before its activity was ready: "
+                        f"state={status.state}, error={status.error!r}, result={result!r}"
+                    )
+                assert request in done, "subagent made no progress to its next model request"
+            finally:
+                request.cancel()
+                await asyncio.gather(request, return_exceptions=True)
         path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
 
         async def assert_activity(gateway, connection, headers):
@@ -320,9 +395,9 @@ async def test_task_changes_use_parent_chat_events_and_saved_child_observations(
                 await asyncio.wait_for(entered.get(), 2)
             first, sibling = manager.statuses_for_session("websocket:parent")
             foreign, = manager.statuses_for_session("websocket:other")
-            parent = sessions.get_existing("websocket:parent")
+            parent = await sessions.state.read("websocket:parent")
             parent.add_message("assistant", "Parent reply already delivered")
-            sessions.save(parent)
+            await sessions.state.finish_turn(parent)
             original_messages = parent.messages.copy()
             routed = await deliver()
             assert {payload["task"]["task_id"] for conn, payload in routed if conn is parent_connection} == {first, sibling}
@@ -358,7 +433,7 @@ async def test_task_changes_use_parent_chat_events_and_saved_child_observations(
             )
             await manager.bus.drain()
             assert manager.bus.outbound_size > 0
-            sessions.delete_session("websocket:parent")
+            await sessions.state.delete("websocket:parent")
             assert await deliver() == []
     finally:
         await manager.close()
@@ -390,7 +465,7 @@ async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pen
             sessions = SessionManager(workspace, sessions_root=Path(sys.argv[2]))
             parent = sessions.get_or_create("websocket:parent")
             parent.add_message("user", "Delegate the inspection", webui_turn_id="turn-1")
-            sessions.save(parent, fsync=True)
+            sessions.save(parent)
             manager = SubagentManager(workspace=workspace, bus=MessageBus(), max_tool_result_chars=16000,
                 max_concurrent_subagents=1, consolidator=MagicMock(spec=Consolidator), session_manager=sessions)
             provider = MagicMock(spec=LLMProvider)
@@ -410,7 +485,7 @@ async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pen
             await manager.spawn("queued", session_key=parent.key, origin_turn_id="turn-1", runtime=runtime)
             statuses = manager.statuses_for_session(parent.key)
             ids = {status.task_description: task_id for task_id, status in statuses.items()}
-            manager.send(ids["running"], parent.key, "Not yet delivered")
+            await manager.send(ids["running"], parent.key, "Not yet delivered")
             Path(sys.argv[3]).write_text(json.dumps(ids))
             os._exit(0)
         asyncio.run(main())
@@ -420,7 +495,7 @@ async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pen
     manager, sessions, _ = manager_with_storage(workspace, sessions_root)
     manager.runner.run = AsyncMock()
     assert manager.check(ids["running"], "websocket:parent").state == "running"
-    manager.recover_interrupted()
+    await manager.recover_interrupted()
     gateway, connection, headers = gateway_for(manager, sessions, workspace)
     path = f"/api/sessions/{quote('websocket:parent', safe='')}/subagents"
     try:
@@ -449,7 +524,7 @@ async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pen
         assert {row["key"] for row in sessions.list_sessions()} == {
             "websocket:parent", *(SubagentSessions.key(task_id) for task_id in ids.values()),
         }
-        assert [handle.session_key for handle in SessionHandleResolver(sessions).list_all()] == ["websocket:parent"]
+        assert [handle.session_key for handle in await SessionHandleResolver(sessions).alist_all()] == ["websocket:parent"]
         assert not list(sessions.sessions_dir.glob("*.subagents.json"))
         with pytest.raises(SubagentControlError, match="task unavailable"):
             manager.check(ids["completed"], "websocket:other")
@@ -514,7 +589,7 @@ async def test_child_is_unavailable_to_public_session_tools(tmp_path):
         await manager.run_inline("Private investigation", session_key="websocket:parent", runtime=runtime)
         task_id, = manager.statuses_for_session("websocket:parent")
         child_key = SubagentSessions.key(task_id)
-        public_handle = SessionHandleResolver(sessions).handle_for_session("websocket:other")
+        public_handle = await SessionHandleResolver(sessions).ahandle_for_session("websocket:other")
         sender = SendSessionMessageTool(sessions=sessions, bus=manager.bus)
         with request_context(RequestContext(channel="websocket", chat_id="other", session_key="websocket:other")):
             assert json.loads(await SearchSessionsTool(sessions).execute(query="Private investigation"))["results"] == []
@@ -546,16 +621,16 @@ async def test_constructing_another_reader_does_not_interrupt_running_work(tmp_p
         await manager.spawn("inspect", session_key="websocket:parent", runtime=runtime)
         await entered.wait()
         task_id, = manager.statuses_for_session("websocket:parent")
-        receipt = manager.send(task_id, "websocket:parent", "Follow-up")
-        path = sessions._get_session_path(SubagentSessions.key(task_id))
-        before = path.read_bytes()
+        receipt = await manager.send(task_id, "websocket:parent", "Follow-up")
+        child_key = SubagentSessions.key(task_id)
+        before = sessions.read_session_file(child_key)
         reader, _, _ = manager_with_storage(workspace, root)
         observed = reader.check(task_id, "websocket:parent")
         assert observed.state == "running"
         assert observed.receipts[receipt["message_id"]] == "accepted"
-        assert path.read_bytes() == before
+        assert sessions.read_session_file(child_key) == before
         await reader.close()
-        assert path.read_bytes() == before
+        assert sessions.read_session_file(child_key) == before
     finally:
         release.set()
         await manager.close()
@@ -611,19 +686,19 @@ async def test_history_outlives_the_runtime_cache_and_follows_parent_deletion(tm
         assert len(manager.statuses_for_session("websocket:parent", include_history=False)) == 1
         first = next(status for status in tasks.values() if status.task_description == "first")
         assert manager.check(first.task_id, "websocket:parent").result == "Verified"
-        fork = sessions.fork_session_before_user_index("websocket:parent", "websocket:fork", 0)
+        fork = await sessions.state.fork("websocket:parent", "websocket:fork", 0)
         assert TASK_METADATA_KEY not in fork.metadata
         assert sessions.child_session_keys(fork.key) == []
-        child_paths = [sessions._get_session_path(SubagentSessions.key(task_id)) for task_id in tasks]
-        assert all(path.exists() for path in child_paths)
-        assert sessions.delete_session("websocket:parent")
-        assert not any(path.exists() for path in child_paths)
+        child_keys = [SubagentSessions.key(task_id) for task_id in tasks]
+        assert all(sessions.read_session_file(key) is not None for key in child_keys)
+        assert await sessions.state.delete("websocket:parent")
+        assert all(sessions.read_session_file(key) is None for key in child_keys)
         assert manager.statuses_for_session("websocket:parent") == {}
         with pytest.raises(SubagentControlError):
             manager.check(first.task_id, "websocket:parent")
-        manager.sessions.save(first)
+        assert not await manager.sessions.save(first)
         assert sessions.read_session_file("websocket:parent") is None
-        assert not any(path.exists() for path in child_paths)
+        assert all(sessions.read_session_file(key) is None for key in child_keys)
     finally:
         await manager.close()
 
@@ -634,23 +709,17 @@ async def test_task_progress_does_not_rewrite_parent_history_or_invalidate_check
     parent = sessions.get_or_create("websocket:parent")
     parent.add_message("user", "Inspect config", webui_turn_id="turn-1")
     sessions.save(parent)
-    path = sessions._get_session_path(parent.key)
-    before, stamp = path.read_bytes(), path.stat()
-    parent.metadata["runtime_checkpoint"] = {"phase": "tools_completed"}
+    parent = await sessions.state.read(parent.key)
     parent.provider_state = ProviderConversationState(
         kind="openai_responses", provider="openai:test", model="test", version=1,
         payload={"response_id": "private-response"},
     )
-    sessions.save_runtime_checkpoint(parent)
-    checkpoint_path = sessions._get_runtime_checkpoint_path(parent.key)
-    checkpoint = checkpoint_path.read_bytes()
+    await sessions.state.checkpoint_view(parent, {"phase": "tools_completed"})
+    before = sessions.read_session_file(parent.key)
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Verified"))
     try:
         await manager.run_inline("check", session_key=parent.key, runtime=runtime)
-        assert path.read_bytes() == before
-        assert path.stat().st_ino == stamp.st_ino
-        assert path.stat().st_mtime_ns == stamp.st_mtime_ns
-        assert checkpoint_path.read_bytes() == checkpoint
+        assert sessions.read_session_file(parent.key) == before
         restored = SessionManager(tmp_path / "agent", sessions_root=tmp_path / "sessions").get_or_create(parent.key)
         assert restored.metadata["runtime_checkpoint"]["phase"] == "tools_completed"
         assert restored.provider_state.payload == {"response_id": "private-response"}
@@ -660,9 +729,99 @@ async def test_task_progress_does_not_rewrite_parent_history_or_invalidate_check
 
 
 @pytest.mark.asyncio
-async def test_temporary_parent_never_persists_task_content(tmp_path):
+async def test_task_control_and_panel_do_not_read_parent_or_child_history(tmp_path, monkeypatch):
     manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
-    parent = sessions.get_or_create_transient("websocket:temporary")
+    parent = sessions.get_or_create("websocket:parent")
+    parent.add_message("user", "Inspect configuration.")
+    sessions.save(parent)
+    await sessions.state.read(parent.key)
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Verified"))
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    try:
+        assert await manager.run_inline("check", session_key=parent.key, runtime=runtime) == "Verified"
+        status, = manager.statuses_for_session(parent.key).values()
+
+        def history_unavailable(*_args, **_kwargs):
+            pytest.fail("task ownership and status reads must not request conversation history")
+
+        def all_sessions_unavailable(*_args, **_kwargs):
+            pytest.fail("task panels must query their own child metadata directly")
+
+        monkeypatch.setattr(sessions, "get_cached", history_unavailable)
+        monkeypatch.setattr(sessions._store, "list_metadata", all_sessions_unavailable)
+        assert manager.sessions.exists(parent.key)
+        assert manager.sessions.contains(status.task_id, parent.key)
+        assert not manager.sessions.contains(status.task_id, "websocket:other")
+        metadata = sessions.get_cached_metadata(SubagentSessions.key(status.task_id))
+        assert metadata[TASK_METADATA_KEY]["state"] == "done"
+        assert metadata[TASK_METADATA_KEY]["revision"] == status.revision
+        assert manager.check(status.task_id, parent.key).result == "Verified"
+        response = await gateway.http.dispatch(
+            connection, Request("/api/sessions/websocket%3Aparent/subagents", headers),
+        )
+        assert response.status_code == 200
+        assert [task["task_id"] for task in json.loads(response.body)["tasks"]] == [status.task_id]
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_task_panel_reads_storage_off_loop_and_keeps_newer_completion(tmp_path, monkeypatch):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    runner_entered, finish_task = asyncio.Event(), asyncio.Event()
+    history_entered = asyncio.Event()
+    release_history = threading.Event()
+    loop = asyncio.get_running_loop()
+    owner_thread = threading.get_ident()
+    original_load = manager.sessions.load
+    request_task = None
+
+    async def run(_spec):
+        runner_entered.set()
+        await finish_task.wait()
+        return AgentRunResult(messages=[], final_content="Verified")
+
+    def paused_history(owner):
+        assert threading.get_ident() != owner_thread, "task panel storage reads must leave the event loop"
+        loop.call_soon_threadsafe(history_entered.set)
+        assert release_history.wait(5), "task panel history read was not released"
+        return original_load(owner)
+
+    manager.runner.run = run
+    try:
+        await manager.spawn("check", session_key="websocket:parent", runtime=runtime)
+        await asyncio.wait_for(runner_entered.wait(), 5)
+        task_id, = manager.statuses_for_session("websocket:parent")
+        previous_revision = manager.check(task_id, "websocket:parent").revision
+        execution = manager._running_tasks[task_id]
+        monkeypatch.setattr(manager.sessions, "load", paused_history)
+        request_task = asyncio.create_task(gateway.http.dispatch(
+            connection, Request("/api/sessions/websocket%3Aparent/subagents", headers),
+        ))
+        await asyncio.wait_for(history_entered.wait(), 5)
+        finish_task.set()
+        await asyncio.wait_for(execution, 5)
+        release_history.set()
+
+        response = await asyncio.wait_for(request_task, 5)
+        assert response.status_code == 200
+        task, = json.loads(response.body)["tasks"]
+        assert task["task_id"] == task_id and task["state"] == "done"
+        assert task["revision"] > previous_revision
+    finally:
+        release_history.set()
+        finish_task.set()
+        if request_task is not None:
+            request_task.cancel()
+            await asyncio.gather(request_task, return_exceptions=True)
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_temporary_parent_never_persists_task_content(tmp_path, monkeypatch):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    parent = await sessions.state.register_transient("websocket:temporary")
     async def run(_spec):
         assert current_request_context().log_content is False
         return AgentRunResult(messages=[], final_content="Private findings")
@@ -676,6 +835,14 @@ async def test_temporary_parent_never_persists_task_content(tmp_path):
         child = sessions.get_cached(SubagentSessions.key(task_id))
         assert child is not None and not child.policy.persist
         assert sessions.read_session_file(child.key) is None
+
+        def history_unavailable(*_args, **_kwargs):
+            pytest.fail("temporary task control must not request conversation history")
+
+        monkeypatch.setattr(sessions, "get_cached", history_unavailable)
+        assert sessions.get_cached_metadata(child.key)[TASK_METADATA_KEY]["state"] == "done"
+        assert manager.check(task_id, parent.key).result == "Private findings"
+        assert len(manager.statuses_for_session(parent.key)) == 1
         reopened, _, _ = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
         assert reopened.statuses_for_session(parent.key) == {}
         await reopened.close()
@@ -684,30 +851,60 @@ async def test_temporary_parent_never_persists_task_content(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_child_sessions_use_common_restore_and_migration(tmp_path):
+async def test_child_sessions_migrate_from_legacy_jsonl_and_reopen(tmp_path):
     workspace, root = tmp_path / "agent", tmp_path / "sessions"
-    manager, sessions, runtime = manager_with_storage(workspace, root)
-    parent = sessions.get_or_create("websocket:parent")
-    parent.add_message("user", "Inspect config")
-    sessions.save(parent)
-    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Verified"))
-    try:
-        await manager.run_inline("inspect", session_key=parent.key, runtime=runtime)
-        task_id, = manager.statuses_for_session(parent.key)
-        child_key = SubagentSessions.key(task_id)
-        paths = [sessions._get_session_path(key) for key in (parent.key, child_key)]
-        result = sessions.restore_sessions_to_workspace()
-        assert result.restored == 2 and result.conflicts == ()
-        for path in paths:
-            assert (workspace / "sessions" / path.name).read_bytes() == path.read_bytes()
-            path.unlink()
-        reopened, migrated, _ = manager_with_storage(workspace, root)
-        assert migrated.child_session_keys(parent.key) == [child_key]
-        assert reopened.check(task_id, parent.key).result == "Verified"
-        assert not list((workspace / "sessions").glob("*.jsonl"))
-        await reopened.close()
-    finally:
-        await manager.close()
+    parent_key, task_id = "websocket:parent", "legacy-inspection"
+    child_key = SubagentSessions.key(task_id)
+    task_metadata = {
+        "task_id": task_id, "owner": parent_key, "revision": 3,
+        "label": "inspect", "task_description": "inspect", "state": "done", "phase": "done",
+        "created_at": 1767225600.0, "completed_at": 1767225601.2, "elapsed_seconds": 1.2,
+        "origin_turn_id": "turn-1", "iteration": 1, "result": "Verified", "stop_reason": "stop",
+    }
+    fixtures = {
+        parent_key: [
+            {"_type": "metadata", "key": parent_key, "metadata": {"webui": True},
+             "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00",
+             "last_archived": 0},
+            {"role": "user", "content": "Inspect config"},
+        ],
+        child_key: [
+            {"_type": "metadata", "key": child_key,
+             "metadata": {SESSION_TYPE_KEY: SUBAGENT.name, PARENT_SESSION_KEY: parent_key,
+                          TASK_METADATA_KEY: task_metadata},
+             "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:01.200000",
+             "last_archived": 0},
+            {"role": "user", "content": "inspect"},
+            {"role": "assistant", "content": "Verified"},
+        ],
+    }
+    legacy = workspace / "sessions"
+    legacy.mkdir(parents=True)
+    for key, records in fixtures.items():
+        (legacy / f"{SessionLocation.storage_key(key)}.jsonl").write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8",
+        )
+    source_hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in legacy.glob("*.jsonl")}
+
+    for _ in range(2):
+        manager, sessions, _ = manager_with_storage(workspace, root)
+        try:
+            assert {row["key"] for row in sessions.list_sessions()} == set(fixtures)
+            assert sessions.child_session_keys(parent_key) == [child_key]
+            status = manager.check(task_id, parent_key)
+            assert status.state == "done" and status.result == "Verified"
+            assert status.origin_turn_id == "turn-1"
+            assert manager.get_running_count() == 0
+            for key, records in fixtures.items():
+                restored = sessions.read_session_file(key)
+                assert restored["metadata"] == records[0]["metadata"]
+                assert restored["messages"] == records[1:]
+            assert list(legacy.glob("*.jsonl")) == []
+            backups = sessions.sessions_dir / WORKSPACE_BACKUP_DIR
+            assert {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in backups.glob("*.jsonl")} == source_hashes
+        finally:
+            await manager.close()
 
 
 @pytest.mark.asyncio
@@ -720,7 +917,7 @@ async def test_unreadable_task_history_is_not_an_empty_list(tmp_path):
     task_id, = manager.statuses_for_session(parent.key)
     child = sessions.get_existing(SubagentSessions.key(task_id))
     child.metadata[TASK_METADATA_KEY] = "damaged"
-    sessions.save(child)
+    await sessions.state.update_metadata(child.key, {TASK_METADATA_KEY: "damaged"})
     gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
     try:
         path = f"/api/sessions/{quote(parent.key, safe='')}/subagents"

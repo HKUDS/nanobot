@@ -76,7 +76,7 @@ def test_docs_version_uses_released_versions_and_falls_back_for_dev() -> None:
 
 
 def test_kimi_k3_only_offers_supported_reasoning_effort_values() -> None:
-    assert _reasoning_effort_values_for("moonshot", "kimi-k3") == ["", "max"]
+    assert _reasoning_effort_values_for("moonshot", "kimi-k3") == ["", "low", "high", "max"]
 
 
 def test_settings_payload_includes_versioned_docs(

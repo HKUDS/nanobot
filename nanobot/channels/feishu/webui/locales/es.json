@@ -73,6 +73,7 @@
     }
   },
   "custom": {
+    "addAssistant": "Añadir otro asistente",
     "toggleAssistant": "Activar el asistente {{name}}",
     "configured": "Conectado",
     "needsSetup": "Necesita autorización",

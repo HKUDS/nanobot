@@ -2,9 +2,11 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { expect, it, vi } from "vitest";
 import { HostNavigationContext } from "@/components/remote/HostSwitcher";
 import { AboutSettings } from "@/components/settings/overview/OverviewSettings";
+import { VersionCheckRowView } from "@/components/settings/overview/VersionCheckRowView";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
+import { DEFAULT_LOCAL_PREFS, readLocalPreferences, writeLocalPreferences } from "@/lib/local-preferences";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
   const thirdPartyBrandNotice =
@@ -12,6 +14,27 @@ import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewT
 
 describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
+
+  it("displays a caller-owned version result and delegates checking without a client provider", () => {
+    const check = vi.fn();
+    render(<VersionCheckRowView currentVersion="0.3.5" checking={false}
+      result={{ type: "update", latestVersion: "0.3.6", pypiUrl: "https://pypi.org/project/nanobot-ai/" }} onCheck={check} />);
+    expect(screen.getByText("Update available v0.3.6")).toBeVisible();
+    expect(screen.getByRole("link", { name: "PyPI" })).toHaveAttribute("href", "https://pypi.org/project/nanobot-ai/");
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the notifications section and preserves independent browser-local channel preferences", () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload(), showSidebar: true });
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByRole("switch", { name: "Browser notifications" })).toHaveAttribute("aria-checked", "false");
+    const sound = screen.getByRole("switch", { name: "Completion sound" });
+    expect(sound).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(sound);
+    expect(readLocalPreferences()).toMatchObject({ browserNotifications: false, notificationSound: false });
+  });
 
 
   it("links the host's short commit beside its version", () => {

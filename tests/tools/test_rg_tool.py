@@ -182,7 +182,8 @@ async def test_direct_process_timeout(tmp_path):
     result = await ExecTool(working_dir=str(tmp_path)).execute(
         command=[sys.executable, "-c", "import time; time.sleep(20)"], timeout=1,
     )
-    assert "timed out after 1 seconds" in result
+    assert "Reason: max_runtime" in result
+    assert "Exit code:" in result
 
 
 async def test_direct_process_cancellation_reaps_child(tmp_path, monkeypatch):

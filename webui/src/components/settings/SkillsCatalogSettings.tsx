@@ -32,7 +32,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
 import { notifySkillsChanged, requestSkillsRefresh } from "@/lib/skill-events";
 import type { SkillDetail, SkillSummary } from "@/lib/types";

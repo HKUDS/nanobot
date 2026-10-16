@@ -73,6 +73,7 @@
     }
   },
   "custom": {
+    "addAssistant": "Tambahkan asisten lain",
     "toggleAssistant": "Aktifkan asisten {{name}}",
     "configured": "Terhubung",
     "needsSetup": "Perlu otorisasi",

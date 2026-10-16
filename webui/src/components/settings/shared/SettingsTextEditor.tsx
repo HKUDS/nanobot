@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { SquarePen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { HoverHint } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
-export function SettingsTextEditor({ id, title, description, value, placeholder, disabled, trigger, onSave }: {
+export function SettingsTextEditor({ id, title, description, value, placeholder, disabled, trigger, onSave, saveLabel }: {
   id?: string;
   title: string;
   description?: string;
@@ -15,6 +15,7 @@ export function SettingsTextEditor({ id, title, description, value, placeholder,
   disabled?: boolean;
   trigger?: ReactElement;
   onSave: (value: string) => void | Promise<void>;
+  saveLabel?: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -24,6 +25,9 @@ export function SettingsTextEditor({ id, title, description, value, placeholder,
   const editor = useRef<HTMLTextAreaElement>(null);
   const help = description?.trim();
   const hasDescription = !!help && help !== title.trim();
+  useEffect(() => {
+    if (error && !saving) editor.current?.focus();
+  }, [error, saving]);
   const save = async () => {
     setSaving(true);
     setError("");
@@ -32,7 +36,6 @@ export function SettingsTextEditor({ id, title, description, value, placeholder,
       setOpen(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
-      editor.current?.focus();
     } finally {
       setSaving(false);
     }
@@ -66,7 +69,7 @@ export function SettingsTextEditor({ id, title, description, value, placeholder,
       {error && <p role="alert" className="break-words text-[13px] text-destructive">{error}</p>}
       <DialogFooter>
         <Button type="button" variant="outline" disabled={saving} onClick={() => setOpen(false)}>{t("settings.actions.cancel")}</Button>
-        <Button type="button" disabled={saving} onClick={() => void save()}>{t(saving ? "settings.actions.saving" : "settings.actions.save")}</Button>
+        <Button type="button" disabled={saving} onClick={() => void save()}>{saving ? t("settings.actions.saving") : saveLabel ?? t("settings.actions.save")}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>;

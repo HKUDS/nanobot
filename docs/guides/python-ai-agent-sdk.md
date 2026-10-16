@@ -14,13 +14,9 @@ Use the Python SDK for notebooks, evals, product backends, local scripts, workfl
 
 Use the OpenAI-compatible API instead when another language or process should call nanobot over HTTP.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
-```
+Use an installation with a configured model that has already returned a reply. If this is your first setup, follow [Quick Start](../quick-start.md), then return here. Existing WebUI users can continue in the current instance.
 
 ## Minimal working example
 
@@ -42,9 +38,10 @@ asyncio.run(main())
 ## Production notes
 
 - Reuse one `Nanobot` instance for related work.
-- Pass `session_key` when a user, job, or eval case needs persistent history.
+- Pass `session_key` when a job or eval case needs persistent history. Different keys share workspace files and long-term memory.
 - Use `bot.stream(...)` when the caller needs live text, tool, or failure events.
 - Use hooks for audit logs or custom observability.
+- For short-lived scripts, see [Persist memory](../python-sdk.md#persist-memory-in-a-short-lived-script): closing the SDK does not run Dream.
 
 ## Security notes
 

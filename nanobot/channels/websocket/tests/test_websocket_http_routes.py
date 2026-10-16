@@ -7,12 +7,14 @@ import socket
 import time
 from contextlib import suppress
 from pathlib import Path
+from threading import Event
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
+from nanobot.agent.skills import SkillsLoader
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
@@ -311,7 +313,7 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
         key,
         {"event": "message", "chat_id": "restored-history", "text": "original answer"},
     )
-    assert not sm._get_session_path(key).exists()
+    assert sm.read_session_snapshot(key) is None
 
     port = _free_port()
     channel = _ch(bus, session_manager=sm, port=port)
@@ -342,7 +344,7 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
             "original question",
             "original answer",
         ]
-        assert not sm._get_session_path(key).exists()
+        assert sm.read_session_snapshot(key) is None
     finally:
         await channel.stop()
         await server_task
@@ -606,6 +608,60 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         }
         assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
     finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "/workspace-skill"], ids=["list", "detail"])
+async def test_webui_skill_reads_do_not_block_other_http_routes(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+) -> None:
+    skill_dir = tmp_path / "skills" / "workspace-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: workspace-skill\ndescription: Workspace skill.\n---\n",
+        encoding="utf-8",
+    )
+    entered = asyncio.Event()
+    release = Event()
+    loop = asyncio.get_running_loop()
+    discover = SkillsLoader._discover_skills
+
+    def slow_discovery(loader: SkillsLoader) -> list[dict[str, str]]:
+        loop.call_soon_threadsafe(entered.set)
+        if not release.wait(3.0):
+            raise TimeoutError("skill scan was not released")
+        return discover(loader)
+
+    monkeypatch.setattr(SkillsLoader, "_discover_skills", slow_discovery)
+    port = _free_port()
+    channel = _ch(
+        bus, session_manager=_seed_session(tmp_path), workspace_path=tmp_path, port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    token = channel.gateway.tokens.issue_api_token(300)
+    auth = {"Authorization": f"Bearer {token}"}
+    skills_task = asyncio.create_task(
+        _http_get(f"http://127.0.0.1:{port}/api/webui/skills{suffix}", headers=auth)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 2.0)
+        workspaces = await asyncio.wait_for(
+            _http_get(f"http://127.0.0.1:{port}/api/workspaces", headers=auth), 1.0,
+        )
+        assert workspaces.status_code == 200
+        assert not skills_task.done()
+
+        release.set()
+        skills = await skills_task
+        assert skills.status_code == 200
+    finally:
+        release.set()
+        await asyncio.gather(skills_task, return_exceptions=True)
         await channel.stop()
         await server_task
 
@@ -2250,7 +2306,7 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         rows = {row["key"]: row for row in sessions}
         handles = {
             handle.session_key: handle
-            for handle in SessionHandleResolver(sm).list_all()
+            for handle in await SessionHandleResolver(sm).alist_all()
         }
         assert rows["websocket:alpha"]["handle"] == handles[
             "websocket:alpha"
@@ -2329,8 +2385,8 @@ async def test_session_delete_removes_file(
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:doomed")
-        assert path.exists()
+        session_key = "websocket:doomed"
+        assert sm.read_session_snapshot(session_key) is not None
         webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
         assert webui_path.is_file()
         resp = await _webui_mutate(
@@ -2340,7 +2396,7 @@ async def test_session_delete_removes_file(
         )
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
-        assert not path.exists()
+        assert sm.read_session_snapshot(session_key) is None
         assert not webui_path.exists()
     finally:
         await channel.stop()
@@ -2360,7 +2416,7 @@ async def test_session_delete_removes_transcript_without_canonical_file(
         key,
         {"event": "user", "chat_id": "transcript-only", "text": "recover me"},
     )
-    assert not sm._get_session_path(key).exists()
+    assert sm.read_session_snapshot(key) is None
     webui_path = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
     assert webui_path.is_file()
 
@@ -2531,7 +2587,7 @@ async def test_webui_automation_result_is_authenticated_and_returns_only_selecte
 
 
 @pytest.mark.asyncio
-async def test_remote_new_chat_accepts_server_project_path_but_rejects_remote_full_access(
+async def test_remote_new_chat_accepts_server_project_path_and_full_access(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     project = tmp_path / "remote-project"
@@ -2585,18 +2641,15 @@ async def test_remote_new_chat_accepts_server_project_path_but_rejects_remote_fu
         },
     )
 
-    rejected = [
-        json.loads(call.args[0])
-        for call in connection.send.await_args_list
-        if json.loads(call.args[0]).get("event") == "error"
-    ]
-    assert rejected == [
-        {
-            "event": "error",
-            "detail": "workspace_scope_rejected",
-            "reason": "full workspace access is unavailable for this connection",
-        }
-    ]
+    attached = next(
+        json.loads(call.args[0]) for call in connection.send.await_args_list
+        if json.loads(call.args[0]).get("event") == "attached"
+    )
+    scope = channel.gateway.workspaces.scope_for_session_key(
+        f"websocket:{attached['chat_id']}"
+    )
+    assert scope.project_path == other_project.resolve()
+    assert scope.access_mode == "full"
 
 
 @pytest.mark.asyncio
@@ -2945,7 +2998,7 @@ async def test_session_delete_blocks_when_bound_automation_exists(
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29915)
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:doomed")
+        session_key = "websocket:doomed"
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -2957,7 +3010,7 @@ async def test_session_delete_blocks_when_bound_automation_exists(
         assert body["deleted"] is False
         assert body["blocked_by_automations"] is True
         assert [job["name"] for job in body["automations"]] == ["Daily check"]
-        assert path.exists()
+        assert sm.read_session_snapshot(session_key) is not None
         assert cron.list_bound_cron_jobs_for_session("websocket:doomed")
     finally:
         await channel.stop()
@@ -3033,7 +3086,7 @@ async def test_session_delete_can_cascade_bound_automations(
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29916)
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:doomed")
+        session_key = "websocket:doomed"
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -3042,7 +3095,7 @@ async def test_session_delete_can_cascade_bound_automations(
 
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
-        assert not path.exists()
+        assert sm.read_session_snapshot(session_key) is None
         assert cron.list_bound_cron_jobs_for_session("websocket:doomed") == []
         assert cron.list_jobs(include_disabled=True) == []
     finally:
@@ -3073,7 +3126,7 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
     )
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:doomed")
+        session_key = "websocket:doomed"
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -3085,7 +3138,7 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
         assert body["deleted"] is False
         assert body["blocked_by_automations"] is True
         assert [job["name"] for job in body["automations"]] == ["Chat daily check"]
-        assert path.exists()
+        assert sm.read_session_snapshot(session_key) is not None
         assert [job.name for job in cron.list_bound_cron_jobs_for_session("websocket:doomed")] == [
             "Chat daily check"
         ]
@@ -3102,8 +3155,8 @@ async def test_session_delete_action_accepts_websocket_keys(
     channel = _ch(bus, session_manager=sm, port=29910)
     server_task = asyncio.create_task(channel.start())
     try:
-        path = sm._get_session_path("websocket:encoded-key")
-        assert path.exists()
+        session_key = "websocket:encoded-key"
+        assert sm.read_session_snapshot(session_key) is not None
         deleted = await _webui_mutate(
             channel,
             "session.delete",
@@ -3111,7 +3164,7 @@ async def test_session_delete_action_accepts_websocket_keys(
         )
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
-        assert not path.exists()
+        assert sm.read_session_snapshot(session_key) is None
     finally:
         await channel.stop()
         await server_task
@@ -3458,8 +3511,8 @@ async def test_session_delete_rejects_non_websocket_keys(
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
-        doomed = sm._get_session_path("slack:C123")
-        assert doomed.exists()
+        session_key = "slack:C123"
+        assert sm.read_session_snapshot(session_key) is not None
         get_delete = await _http_get(
             "http://127.0.0.1:29909/api/sessions/slack:C123/delete",
             headers=auth,
@@ -3472,7 +3525,7 @@ async def test_session_delete_rejects_non_websocket_keys(
             {"key": "slack:C123"},
         )
         assert deny_delete.status_code == 404
-        assert doomed.exists()
+        assert sm.read_session_snapshot(session_key) is not None
     finally:
         await channel.stop()
         await server_task
@@ -3656,18 +3709,17 @@ async def test_recovery_mutation_uses_authenticated_websocket_action(bus: MagicM
 
 
 @pytest.mark.parametrize(
-    ("connection", "headers", "can_use_full_access"),
+    ("connection", "headers"),
     [
-        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, False),
-        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}, False),
-        (_LOCAL, {"Host": "127.0.0.1:8765"}, True),
+        (_REMOTE, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}),
+        (_LOCAL, {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"}),
+        (_LOCAL, {"Host": "127.0.0.1:8765"}),
     ],
 )
-def test_workspace_payload_separates_remote_project_selection_from_full_access(
+def test_workspace_payload_allows_access_selection_for_local_and_remote_clients(
     bus: MagicMock,
     connection: _FakeConn,
     headers: dict[str, str],
-    can_use_full_access: bool,
 ) -> None:
     channel = _ch(bus)
     token = channel.gateway.tokens.issue_api_token(300)
@@ -3681,7 +3733,6 @@ def test_workspace_payload_separates_remote_project_selection_from_full_access(
     assert response.status_code == 200
     controls = json.loads(response.body.decode())["controls"]
     assert controls["can_change_project"] is True
-    assert controls["can_use_full_access"] is can_use_full_access
     assert controls["can_browse_directories"] is True
     assert controls["can_resolve_project"] is True
     assert controls["can_manage_favorites"] is True
@@ -4178,11 +4229,11 @@ async def test_project_selection_remembers_resolved_path_without_changing_access
     assert response.status_code == 200
     assert response.json() == {"name": "project", "path": str(project)}
     assert channel.gateway.workspaces.default_scope() == scope
-    payload = channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)
+    payload = channel.gateway.workspaces.payload(can_change_project=True)
     assert payload["recent_projects"] == [{"name": "project", "path": str(project)}]
     rejected = await _webui_mutate(channel, "workspace.resolve_project", {"path": str(tmp_path / "missing")}, connection=connection)
     assert rejected.status_code == 400
-    assert channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)["recent_projects"] == payload["recent_projects"]
+    assert channel.gateway.workspaces.payload(can_change_project=True)["recent_projects"] == payload["recent_projects"]
 
 
 @pytest.mark.asyncio
@@ -4196,10 +4247,49 @@ async def test_project_favorites_mutation_persists_without_selecting_project(
     response = await _webui_mutate(channel, "workspace.favorite", {"path": str(project), "pinned": True}, connection=connection)
     assert response.status_code == 200
     assert response.json() == {"favorite_projects": [{"name": "pinned", "path": str(project)}]}
-    payload = channel.gateway.workspaces.payload(can_change_project=True, can_use_full_access=False)
+    payload = channel.gateway.workspaces.payload(can_change_project=True)
     assert payload["favorite_projects"] == response.json()["favorite_projects"]
     assert payload["recent_projects"] == []
     assert payload["default_scope"]["project_path"] == str(tmp_path)
     response = await _webui_mutate(channel, "workspace.favorite", {"path": str(project), "pinned": False}, connection=connection)
     assert response.status_code == 200
     assert response.json() == {"favorite_projects": []}
+
+
+@pytest.mark.asyncio
+async def test_session_delete_waiting_on_sqlite_does_not_block_event_loop(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    sm = _seed_session(tmp_path, key="websocket:locked-delete")
+    channel = _ch(bus, session_manager=sm, port=_free_port())
+    blocker = sqlite3.connect(sm._store.path, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        deletion = asyncio.create_task(
+            _webui_mutate(
+                channel,
+                "session.delete",
+                {"key": "websocket:locked-delete"},
+            )
+        )
+        ticked = False
+
+        async def tick() -> None:
+            nonlocal ticked
+            await asyncio.sleep(0.05)
+            ticked = True
+
+        await asyncio.wait_for(tick(), timeout=0.25)
+        assert ticked
+        assert not deletion.done()
+        blocker.rollback()
+        response = await asyncio.wait_for(deletion, timeout=2)
+        assert response.status_code == 200
+        assert sm.read_session_snapshot("websocket:locked-delete") is None
+    finally:
+        if blocker.in_transaction:
+            blocker.rollback()
+        blocker.close()

@@ -13,13 +13,12 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 from urllib.parse import unquote
 
 from loguru import logger
-from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
@@ -38,8 +37,8 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.agent.tools.shell_config import ExecToolConfig
 from nanobot.config.paths import get_media_dir
-from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
@@ -91,20 +90,6 @@ _WORKSPACE_BOUNDARY_NOTE = (
 )
 
 
-class ExecToolConfig(Base):
-    """Shell exec tool configuration."""
-    enable: bool = True
-    timeout: int = Field(default=60, ge=0)  # Hard timeout (s); 0 = no limit. Not capped by the per-call max.
-    path_prepend: str = ""
-    path_append: str = ""
-    sandbox: str = ""
-    sandbox_ro_binds: list[str] = Field(default_factory=list)
-    sandbox_rw_binds: list[str] = Field(default_factory=list)
-    allowed_env_keys: list[str] = Field(default_factory=list)
-    allow_patterns: list[str] = Field(default_factory=list)
-    deny_patterns: list[str] = Field(default_factory=list)
-
-
 @dataclass(slots=True)
 class _PreparedCommand:
     command: str | list[str]
@@ -115,16 +100,26 @@ class _PreparedCommand:
     login: bool
 
 
-@tool_parameters(
-    tool_parameters_schema(
+def _exec_parameters(config: ExecToolConfig) -> dict[str, Any]:
+    return tool_parameters_schema(
         command=StringSchema("The shell command to execute"),
         cmd=StringSchema("Compatibility alias for command"),
         working_dir=StringSchema("Optional working directory for the command"),
         workdir=StringSchema("Compatibility alias for working_dir"),
-        timeout=IntegerSchema(
-            description="Hard timeout in seconds (default 60, max 600).",
+        max_runtime=IntegerSchema(
+            description=(
+                "Hard runtime budget in seconds. Omit for the configured default "
+                f"({'unlimited' if config.max_runtime == 0 else str(config.max_runtime) + 's'}). "
+                f"Explicit requests must not exceed {config.max_runtime_limit}s. "
+                "Output does not extend the budget."
+            ),
             minimum=1,
-            maximum=600,
+            maximum=config.max_runtime_limit,
+        ),
+        timeout=IntegerSchema(
+            description="Compatibility alias for max_runtime; cannot be combined with it.",
+            minimum=1,
+            maximum=config.max_runtime_limit,
         ),
         shell=StringSchema(
             (
@@ -158,7 +153,8 @@ class _PreparedCommand:
             nullable=True,
         ),
     )
-)
+
+
 class ExecTool(Tool):
     """Tool to execute shell commands."""
     _scopes = {"core", "subagent"}
@@ -178,7 +174,10 @@ class ExecTool(Tool):
         cfg = ctx.config.exec
         return cls(
             working_dir=ctx.workspace,
-            timeout=cfg.timeout,
+            max_runtime=cfg.max_runtime,
+            max_runtime_limit=cfg.max_runtime_limit,
+            idle_timeout=cfg.idle_timeout,
+            idle_action=cfg.idle_action,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             webui_allow_local_service_access=ctx.config.webui_allow_local_service_access,
             sandbox=cfg.sandbox,
@@ -194,7 +193,7 @@ class ExecTool(Tool):
 
     def __init__(
         self,
-        timeout: int = 60,
+        timeout: int | None = None,
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
@@ -208,8 +207,20 @@ class ExecTool(Tool):
         sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
         session_manager: ExecSessionManager | None = None,
+        *,
+        max_runtime: int | None = None,
+        max_runtime_limit: int | None = None,
+        idle_timeout: int = 300,
+        idle_action: Literal["report", "terminate"] = "report",
     ):
-        self.timeout = timeout
+        if timeout is not None and max_runtime is not None:
+            raise ValueError("timeout and max_runtime are mutually exclusive")
+        values: dict[str, Any] = {"idle_timeout": idle_timeout, "idle_action": idle_action}
+        if (runtime := max_runtime if max_runtime is not None else timeout) is not None:
+            values["max_runtime"] = runtime
+        if max_runtime_limit is not None:
+            values["max_runtime_limit"] = max_runtime_limit
+        self._exec_config = ExecToolConfig.model_validate(values)
         self.working_dir = working_dir
         self.sandbox = sandbox
         self.deny_patterns = (deny_patterns or []) + [
@@ -247,8 +258,13 @@ class ExecTool(Tool):
     def name(self) -> str:
         return "exec"
 
-    _MAX_TIMEOUT = 600
-    _MAX_OUTPUT = 10_000
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return _exec_parameters(self._exec_config)
+
+    @property
+    def timeout(self) -> int:
+        return self._exec_config.max_runtime
 
     # Kernel device files safe as stdio redirect targets (#3599).
     _BENIGN_DEVICE_PATHS: frozenset[str] = frozenset({
@@ -265,7 +281,7 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Execute a shell command."
+        return "Execute a shell command. timeout and max_runtime are mutually exclusive."
 
     @property
     def exclusive(self) -> bool:
@@ -278,6 +294,7 @@ class ExecTool(Tool):
         login: bool | None = None, yield_time_ms: int | None = None,
         max_output_chars: int | None = None,
         max_output_tokens: int | None = None,
+        max_runtime: int | None = None,
         **kwargs: Any,
     ) -> str:
         command = command or cmd
@@ -287,73 +304,18 @@ class ExecTool(Tool):
         if max_output_chars is None:
             max_output_chars = max_output_tokens
 
-        prepared = self._prepare_command(command, working_dir, timeout, shell, login)
+        if timeout is not None and max_runtime is not None:
+            return ToolResult.error("Error: timeout and max_runtime are mutually exclusive.")
+        try:
+            prepared = self._prepare_command(
+                command, working_dir, max_runtime if max_runtime is not None else timeout,
+                shell, login,
+            )
+        except ValueError as exc:
+            return ToolResult.error(f"Error: {exc}")
         if isinstance(prepared, str):
             return prepared
-
-        if yield_time_ms is not None:
-            return await self._execute_session(prepared, yield_time_ms, max_output_chars)
-
-        process: asyncio.subprocess.Process | None = None
-        try:
-            process = await self._spawn(
-                prepared.command,
-                prepared.cwd,
-                prepared.env,
-                prepared.shell_program,
-                prepared.login,
-                process_tree=True,
-            )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=prepared.timeout,
-                )
-            except asyncio.TimeoutError:
-                await self._kill_process_tree(process)
-                return ToolResult.error(f"Error: Command timed out after {prepared.timeout} seconds")
-            except asyncio.CancelledError:
-                await self._kill_process_tree(process)
-                raise
-
-            # Safety-net reap: asyncio *should* have reaped the child via
-            # communicate(), but in containers the child-watcher sometimes
-            # misses it, leaving a zombie.
-            _reap_pid(process.pid)
-
-            output_parts: list[str] = []
-
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-
-            output_parts.append(f"\nExit code: {process.returncode}")
-
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-
-            max_len = clamp_session_int(max_output_chars, self._MAX_OUTPUT, 1000, MAX_OUTPUT_CHARS)
-            if len(result) > max_len:
-                half = max_len // 2
-                result = (
-                    result[:half]
-                    + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
-                    + result[-half:]
-                )
-
-            self._release_process_tree(process)
-            return result
-
-        except Exception as e:
-            # Kill and reap the child if it was spawned but an unexpected
-            # error prevented communicate() from completing.
-            if process is not None:
-                await self._kill_process_tree(process)
-            return ToolResult.error(f"Error executing command: {str(e)}")
+        return await self._execute_session(prepared, yield_time_ms, max_output_chars)
 
     async def _execute_session(
         self,
@@ -369,7 +331,14 @@ class ExecTool(Tool):
                 timeout=prepared.timeout,
                 shell_program=prepared.shell_program,
                 login=prepared.login,
-                yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
+                yield_time_ms=(
+                    0 if yield_time_ms is None
+                    else clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS)
+                ),
+                until_exit=yield_time_ms is None,
+                stdin=(asyncio.subprocess.DEVNULL if yield_time_ms is None else asyncio.subprocess.PIPE),
+                idle_timeout=self._exec_config.idle_timeout,
+                idle_action=self._exec_config.idle_action,
                 owner_session_key=current_request_session_key(),
                 max_output_chars=clamp_session_int(
                     max_output_chars,
@@ -379,23 +348,23 @@ class ExecTool(Tool):
                 ),
             )
             result = format_session_poll(session_id, poll)
-            return ToolResult.error(result) if poll.timed_out else result
+            if not poll.done and yield_time_ms is not None:
+                result += "\nInitial wait ended; session remains active."
+            return ToolResult.error(result) if poll.failed else result
         except Exception as exc:
             return ToolResult.error(f"Error executing command: {exc}")
 
-    def _resolve_timeout(self, timeout: int | None) -> int | None:
-        """Resolve the effective hard timeout in seconds (None = no limit).
-
-        A per-call timeout supplied by the model stays capped at _MAX_TIMEOUT so
-        the LLM cannot request unbounded execution. The config-level default
-        (self.timeout) may exceed that cap, and 0 disables the limit entirely
-        for trusted long-running tasks (#3595).
-        """
-        if timeout:
-            return min(timeout, self._MAX_TIMEOUT)
-        if self.timeout and self.timeout > 0:
-            return self.timeout
-        return None
+    def _resolve_timeout(self, timeout: object) -> int | None:
+        """Resolve a hard budget without changing the caller's requested duration."""
+        if timeout is not None:
+            if isinstance(timeout, bool) or not isinstance(timeout, int):
+                raise ValueError("max_runtime must be an integer number of seconds")
+            if not 1 <= timeout <= self._exec_config.max_runtime_limit:
+                raise ValueError(
+                    f"max_runtime must be between 1 and {self._exec_config.max_runtime_limit} seconds"
+                )
+            return timeout
+        return self.timeout or None
 
     def _prepare_command(
         self,
@@ -749,17 +718,16 @@ class ExecTool(Tool):
             else:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
+                except ProcessLookupError:
                     pass
 
             if process.returncode is None:
                 with suppress(ProcessLookupError):
                     process.kill()
-            with suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-        finally:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
             if owner is not None:
                 ExecTool._drop_process_tree_owner(process)
+        finally:
             _reap_pid(process.pid)
 
     @staticmethod
@@ -912,7 +880,15 @@ class ExecTool(Tool):
                             + _WORKSPACE_BOUNDARY_NOTE
                         )
                     else:
-                        p = Path(expanded).expanduser().resolve()
+                        try:
+                            home_path = Path(expanded).expanduser()
+                        except RuntimeError:
+                            return ToolResult.error(
+                                "Error: Command blocked by safety guard "
+                                "(path outside working dir)"
+                                + _WORKSPACE_BOUNDARY_NOTE
+                            )
+                        p = home_path.resolve()
                     # Match against the un-resolved path first.  On Linux,
                     # /dev/stderr is a symlink to /proc/self/fd/2 and
                     # ``Path.resolve()`` would mask the device-file intent.

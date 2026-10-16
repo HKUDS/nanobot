@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Window as HappyWindow } from "happy-dom";
 
 import i18n from "@/i18n";
+import { useSessions } from "@/hooks/useSessions";
+import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
   ConnectionStatus,
@@ -27,6 +29,8 @@ const requestMutationSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
 const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
 const sendMessageSpy = vi.fn();
+const sendSystemCommandSpy = vi.fn().mockResolvedValue(undefined);
+let mockDefaultChatId: string | null = null;
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 const sessionUpdateHandlers = new Set<(
@@ -59,6 +63,7 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const route = routes[String(input)]
+        ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
         ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(String(input)) ? { tasks: [] } : undefined);
       const body =
         typeof route === "function"
@@ -167,7 +172,7 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useSessions")>();
   return {
     ...actual,
-    useSessions: () => {
+    useSessions: vi.fn(function useMockSessions() {
       const [sessions, setSessions] = React.useState(mockSessions);
       return {
         sessions,
@@ -201,7 +206,7 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
           return { deleted: true };
         },
       };
-    },
+    }),
   };
 });
 
@@ -243,7 +248,8 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   class MockClient {
     onTaskNotice = () => () => {};
     status = "idle" as const;
-    defaultChatId: string | null = null;
+    defaultChatId = mockDefaultChatId;
+    sendSystemCommand = sendSystemCommandSpy;
     connect = connectSpy;
     onStatus = (handler: (status: ConnectionStatus) => void) => {
       statusHandlers.add(handler);
@@ -268,8 +274,14 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       runStatusHandlers.add(handler);
       return () => runStatusHandlers.delete(handler);
     };
+    onRunCompletion = () => () => {};
     getRunStartedAt = () => null;
     getRunTurnId = () => null;
+    getUnsettledRunChatIds = () => [];
+    getRunGeneration = () => 0;
+    hasUnsettledRun = () => false;
+    canReconcileCanonicalCompletion = () => true;
+    reconcileCanonicalCompletion = () => true;
     fenceCanonicalCompletedTurns = vi.fn();
     getGoalState = () => undefined;
     sendMessage = sendMessageSpy;
@@ -295,11 +307,15 @@ import {
 import App from "@/App";
 import { mockBrowserFocus } from "./browser-focus";
 
+const defaultUseSessions = vi.mocked(useSessions).getMockImplementation()!;
+
 describe("App layout", () => {
   let restoreBrowserFocus: (() => void) | undefined;
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     mockSessions = [];
+    vi.mocked(useSessions).mockImplementation(defaultUseSessions);
+    clearReloadCache();
     connectSpy.mockClear();
     updateUrlSpy.mockClear();
     refreshSpy.mockReset();
@@ -318,6 +334,8 @@ describe("App layout", () => {
       `00000000-0000-4000-8000-${String(++temporaryChatCounter).padStart(12, "0")}`
     ));
     sendMessageSpy.mockReset();
+    sendSystemCommandSpy.mockReset().mockResolvedValue(undefined);
+    mockDefaultChatId = null;
     statusHandlers.clear();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
@@ -1078,7 +1096,7 @@ describe("App layout", () => {
         schema_version: 1,
         default_access_mode: "full",
         default_scope: { ...projectScope, project_path: "/tmp/workspace", project_name: "workspace" },
-        controls: { can_change_project: true, can_use_full_access: true },
+        controls: { can_change_project: true },
       },
     });
     window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
@@ -1109,7 +1127,7 @@ describe("App layout", () => {
           access_mode: "full",
           restrict_to_workspace: false,
         },
-        controls: { can_change_project: true, can_use_full_access: true },
+        controls: { can_change_project: true },
       },
     });
     render(<App />);
@@ -1163,7 +1181,7 @@ describe("App layout", () => {
           access_mode: "restricted",
           restrict_to_workspace: true,
         },
-        controls: { can_change_project: true, can_use_full_access: true, can_browse_directories: true, can_resolve_project: true },
+        controls: { can_change_project: true, can_browse_directories: true, can_resolve_project: true },
       },
       [directoryUrl("C:\\workspace")]: directory("C:\\workspace"),
       [directoryUrl("C:\\workspace\\")]: directory("C:\\workspace"),
@@ -1237,6 +1255,24 @@ describe("App layout", () => {
     ).toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Channels" })).toHaveAttribute("aria-current", "page");
     expect(window.location.hash).toBe("#/settings?section=channels");
+  });
+
+  it.each(["before disconnect", "after disconnect"])("finishes a requested restart when another tab clears its marker %s", async (clearWhen) => {
+    mockDefaultChatId = "restart-fixture";
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restart", exact: true }));
+    expect(sendSystemCommandSpy).toHaveBeenCalledWith("restart-fixture", "/restart");
+    expect(screen.getByRole("button", { name: "Restarting...", exact: true })).toBeDisabled();
+    act(() => {
+      if (clearWhen === "before disconnect") localStorage.removeItem("nanobot-webui.restartStartedAt");
+      for (const handler of statusHandlers) handler("reconnecting");
+      localStorage.removeItem("nanobot-webui.restartStartedAt");
+      for (const handler of statusHandlers) handler("open");
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restart", exact: true })).toBeEnabled());
+    expect(createChatSpy).not.toHaveBeenCalled();
   });
 
   it("refreshes settings after the browser reconnects from a restart", async () => {
@@ -1833,8 +1869,7 @@ describe("App layout", () => {
       schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [],
       title_overrides: { [key]: "推特大战场" }, project_name_overrides: {},
       tags_by_key: {}, collapsed_groups: {}, workbench: { version: 1, tabs: {} },
-      view: { density: "comfortable", show_previews: false, show_timestamps: false,
-        show_archived: false, sort: "updated_desc" },
+      view: { density: "comfortable", show_archived: false, sort: "updated_desc" },
     };
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
@@ -2541,7 +2576,7 @@ describe("App layout", () => {
     );
   }, 15_000);
 
-  it("applies persisted sidebar workspace state from the gateway", async () => {
+  it("retries a failed sidebar read before enabling edits without losing saved state", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -2569,18 +2604,18 @@ describe("App layout", () => {
       collapsed_groups: {},
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "updated_desc",
       },
       updated_at: null,
     };
+    let sidebarReads = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url: string | URL | Request) => {
         const href = String(url);
         if (href === "/api/webui/sidebar-state") {
+          if (++sidebarReads === 1) throw new Error("Gateway restarting");
           return { ok: true, json: async () => initialState };
         }
         return { ok: false, status: 404 };
@@ -2594,8 +2629,11 @@ describe("App layout", () => {
       statusHandlers.forEach((handler) => handler("open"));
     });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByText("Loading…")).toBeInTheDocument();
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(within(sidebar).getByText("Pinned")).toBeInTheDocument(),
+      { timeout: 5_000 },
     );
     expect(within(sidebar).getByRole("button", { name: /^Roadmap$/ })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
@@ -2607,12 +2645,120 @@ describe("App layout", () => {
     expect(within(sidebar).getByRole("button", { name: /^First chat$/ })).toBeInTheDocument();
     expect(setSidebarStateSpy).toHaveBeenCalledWith(
       expect.objectContaining({
+        pinned_keys: initialState.pinned_keys,
+        archived_keys: initialState.archived_keys,
+        title_overrides: initialState.title_overrides,
         view: expect.objectContaining({ show_archived: true }),
       }),
     );
 
     expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
-  });
+  }, 10_000);
+
+  it.each([false, true])("preserves sidebar metadata and panes after both reads fail with partial cache: %s", async (cached) => {
+    const actual = await vi.importActual<typeof import("@/hooks/useSessions")>("@/hooks/useSessions");
+    vi.mocked(useSessions).mockImplementation(actual.useSessions);
+    const sessions: ChatSummary[] = ["a", "b"].map((id) => ({
+      key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
+      createdAt: null, updatedAt: null, preview: "",
+    }));
+    if (cached) {
+      activateReloadCache("ws://test");
+      writeReloadCache("sessions", sessions.slice(0, 1));
+    }
+    const saved = {
+      schema_version: 1,
+      pinned_keys: ["websocket:chat-b", "websocket:deleted"],
+      archived_keys: ["websocket:deleted"],
+      session_order: ["websocket:chat-a", "websocket:chat-b", "websocket:deleted"],
+      title_overrides: {
+        "websocket:chat-a": "Saved A", "websocket:chat-b": "Saved B", "websocket:deleted": "Old topic",
+      },
+      project_name_overrides: {},
+      tags_by_key: { "websocket:chat-b": ["important"], "websocket:deleted": ["old"] },
+      collapsed_groups: {},
+      workbench: {
+        version: 1,
+        tabs: {
+          "tab:saved": {
+            explicit: true, title: "Saved group",
+            paneKeys: ["websocket:chat-a", "websocket:chat-b", "websocket:deleted"],
+            layoutPaneKeys: ["websocket:chat-b", "websocket:chat-a", "websocket:deleted"],
+            layout: "columns", splitRatios: [0.4, 0.6],
+          },
+        },
+      },
+      view: {
+        density: "comfortable", show_archived: false, sort: "updated_desc",
+      },
+      updated_at: null,
+    };
+    let sidebarReads = 0;
+    let sessionsFail = true;
+    let serverSessions = sessions;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/sessions") {
+        return sessionsFail
+          ? Response.json({}, { status: 503 })
+          : jsonResponse({ sessions: serverSessions });
+      }
+      if (String(input) === "/api/webui/sidebar-state") {
+        return ++sidebarReads === 1
+          ? Response.json({}, { status: 503 })
+          : jsonResponse(saved);
+      }
+      return Response.json({}, { status: 404 });
+    }));
+
+    const markersKey = "nanobot-webui.sidebar.session-updates.v1";
+    localStorage.setItem(markersKey, JSON.stringify(["chat-b", "deleted"]));
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByText("Loading…")).toBeInTheDocument();
+    await waitFor(() => expect(sidebarReads).toBe(2), { timeout: 5_000 });
+    await act(async () => {});
+    expect(within(sidebar).queryByText("Loading…")).not.toBeInTheDocument();
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual(["chat-b", "deleted"]);
+
+    // A successful full list can authorize removal; the failed read and cache cannot.
+    sessionsFail = false;
+    act(() => sessionUpdateHandlers.forEach((handler) => handler("chat-a")));
+    await within(sidebar).findByRole("button", { name: "Group: Saved group" });
+    expect(await within(sidebar).findByRole("button", { name: "Saved B", exact: true })).toBeInTheDocument();
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
+      ...saved,
+      view: expect.objectContaining(saved.view),
+      pinned_keys: ["websocket:chat-b"],
+      archived_keys: [],
+      session_order: ["websocket:chat-a", "websocket:chat-b"],
+      title_overrides: { "websocket:chat-a": "Saved A", "websocket:chat-b": "Saved B" },
+      tags_by_key: { "websocket:chat-b": ["important"] },
+      workbench: {
+        version: 1,
+        tabs: {
+          "tab:saved": {
+            ...saved.workbench.tabs["tab:saved"],
+            paneKeys: ["websocket:chat-a", "websocket:chat-b"],
+            layoutPaneKeys: ["websocket:chat-b", "websocket:chat-a"],
+            splitRatios: [],
+          },
+        },
+      },
+    }));
+
+    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual(["chat-b"]);
+    serverSessions = [];
+    act(() => sessionUpdateHandlers.forEach((handler) => handler("chat-a")));
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
+      ...saved, view: expect.objectContaining(saved.view),
+      pinned_keys: [], archived_keys: [], session_order: [],
+      title_overrides: {}, tags_by_key: {}, workbench: { version: 1, tabs: {} },
+    }));
+    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual([]);
+  }, 10_000);
 
   it("sorts chats by displayed title when A-Z is persisted", async () => {
     mockSessions = [
@@ -2652,8 +2798,6 @@ describe("App layout", () => {
       collapsed_groups: {},
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "title_asc",
       },
@@ -2833,7 +2977,7 @@ describe("App layout", () => {
       .not.toBeInTheDocument();
   });
 
-  it("restores sidebar run indicators after a page reload", async () => {
+  it("restores sidebar runs from lifecycle replay without reviving them from stale session rows", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -2858,15 +3002,23 @@ describe("App layout", () => {
       JSON.stringify(["chat-b"]),
     );
 
-    render(<App />);
+    const { rerender } = render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    await waitFor(() =>
-      expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(attachSpy).toHaveBeenCalledWith("chat-a"));
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+    });
+    expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
-    expect(attachSpy).toHaveBeenCalledWith("chat-a");
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", null);
+    });
+    mockSessions = mockSessions.map((session) => ({ ...session }));
+    rerender(<App />);
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
   });
 
   it("restores the active chat from the URL hash after a page reload", async () => {
@@ -4039,6 +4191,82 @@ describe("App layout", () => {
     expect(fetchBootstrap).toHaveBeenCalledTimes(2);
     expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=tok-2");
     unmount();
+  });
+
+  it.each(["sending", "failed"])("explains an undelivered pairing reply (%s) without empty code slots", async (delivery_status) => {
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status,
+    }] } });
+    render(<App />);
+    const popup = await screen.findByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByText("Already received a code?").closest("details")).not.toHaveAttribute("open");
+    expect(within(popup).getByText(/another private message to retry/)).toBeVisible();
+    if (delivery_status === "failed") expect(within(popup).getByRole("alert")).toBeVisible();
+    fireEvent.click(within(popup).getByText("Already received a code?"));
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(requestMutationSpy).not.toHaveBeenCalledWith("settings.pairing.approve", expect.anything(), expect.anything());
+  });
+
+  it.each([undefined, "sent"])("keeps legacy/delivered pairing usable behind a failed request (%s)", async (delivery_status) => {
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [
+      { code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "failed" },
+      { code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", delivery_status },
+    ] } });
+    render(<App />);
+    const popup = await screen.findByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(popup).getByText("2 pending")).toBeVisible();
+  });
+
+  it("shows a recovered pairing reply even after its failure notice was dismissed", async () => {
+    vi.useFakeTimers();
+    let delivery_status = "failed";
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status,
+    }] }) });
+    render(<App />);
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Pair account" }))
+      .getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+    delivery_status = "sent";
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed pairing approval idle until the user retries", async () => {
+    vi.useFakeTimers();
+    let requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent" }];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    requestMutationSpy
+      .mockRejectedValueOnce(new Error("Approval unavailable"))
+      // Bound the old automatic retry loop while reproducing it.
+      .mockImplementation(() => new Promise(() => {}));
+    render(<App />);
+    await act(async () => {});
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    fireEvent.change(within(popup).getByRole("textbox", { name: "Pairing code" }), {
+      target: { value: "ABCD-EFGH" },
+    });
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(requestMutationSpy).toHaveBeenCalledTimes(1);
+    expect(within(popup).getByText("Approval unavailable")).toBeVisible();
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+
+    requests = [];
+    requestMutationSpy.mockResolvedValueOnce({ requests });
+    fireEvent.click(within(popup).getByRole("button", { name: "Retry" }));
+    await act(async () => {});
+    expect(requestMutationSpy).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
   });
 
   it("reuses an in-flight pairing poll when the page becomes visible again", async () => {

@@ -6,7 +6,7 @@ import sys
 from importlib import import_module
 from types import ModuleType
 
-from nanobot.utils.helpers import ensure_dir
+from nanobot.utils.file_io import ensure_dir
 from nanobot.utils.path import abbreviate_path
 
 __all__ = ["ensure_dir", "abbreviate_path"]

@@ -732,11 +732,6 @@ class TestReadOnlyMode:
         tool = self._make_readonly_tool()
         assert "READ-ONLY MODE" in tool.description
 
-    def test_description_shows_warning_when_modify_allowed(self):
-        tool = _make_tool()
-        assert "IMPORTANT" in tool.description
-        assert "READ-ONLY" not in tool.description
-
 
 # ---------------------------------------------------------------------------
 # scratchpad inspection

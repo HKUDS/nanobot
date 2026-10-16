@@ -20,7 +20,7 @@ import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { ProviderSearchList } from "@/components/settings/models/ProviderSearchList";
 export { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { CapabilityInstallNotice } from "@/components/settings/shared/SettingsControls";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
 import { Button } from "@/components/ui/button";
@@ -54,7 +54,6 @@ import {
   type ProviderAdvancedField,
   type ProviderForm,
 } from "@/components/settings/models/providerForm";
-export { CUSTOM_PROVIDER_CREATION_KEY, providerFormFromRow } from "@/components/settings/models/providerForm";
 export type { CustomProviderDraft, ProviderForm } from "@/components/settings/models/providerForm";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";

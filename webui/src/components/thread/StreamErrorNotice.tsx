@@ -38,7 +38,7 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
       />
       <div className="flex-1">
         <p className="font-medium">{title}</p>
-        <p className="mt-0.5 text-destructive/80">{body}</p>
+        <p className="mt-0.5 text-destructive">{body}</p>
       </div>
       <Button
         variant="ghost"

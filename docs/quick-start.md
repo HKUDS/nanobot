@@ -114,14 +114,26 @@ nanobot
 
 In interactive mode, `Enter` sends and `Shift+Enter` inserts a newline (`Ctrl+J` is the universal fallback). While nanobot is working, `Enter` sends immediately, `Tab` waits until the current response is finished, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) edits the latest waiting message. Exit with `exit`, `/exit`, `:q`, or `Ctrl+D`.
 
-## Choose One Next Step
+## Continue with nanobot
 
-After the first reply works, add one capability and test again:
+After the first reply works, describe one next goal in the same chat. With the built-in `nanobot-document` skill, nanobot can consult documentation bundled with your installation to explain features, guide configuration, and troubleshoot. Include where you are using nanobot and what already works, for example:
+
+- "I am already using the WebUI. Help me connect Telegram and allow only my account."
+- "Explain what is shared when I start a new topic or choose a different project."
+- "A second model preset returns an authentication error. Help me find which setting to check."
+
+To explicitly request the documentation skill, send:
+
+```text
+$nanobot-document Explain how sessions, workspaces, and memory relate in this installation.
+```
+
+This requires a model that supports tools and an enabled `nanobot-document` skill under **Skills → Installed**. Enter credentials in the relevant settings forms when needed. If your installed release does not include the skill, or you prefer to read the steps yourself, choose a guide below. Add one capability and test it before moving on:
 
 | Goal | Recommended path |
 |---|---|
 | Learn sessions, workspaces, tools, and access modes | [WebUI guide](./webui.md) |
-| Connect a chat platform | Open **Settings → Channels**, then use [Chat Apps](./chat-apps.md) for platform prerequisites |
+| Connect a chat platform | Open **Channels**, then use [Chat Apps](./chat-apps.md) for platform prerequisites |
 | Change or add a model | Open **Settings → Models**; use the [Provider Cookbook](./provider-cookbook.md) for a recipe |
 | Add web search, voice, or image generation | Use the matching WebUI Settings page, then consult [Configuration](./configuration.md) for advanced fields |
 | Add an App or MCP integration | Open **Apps** or follow [Configure MCP Tools](./guides/configure-mcp-tools.md) |
@@ -180,6 +192,9 @@ On Windows, the managed-environment form is `& "$HOME\.nanobot\venv\Scripts\pyth
 
 ## Manual Configuration Fallback
 
+<details>
+<summary>Manual configuration</summary>
+
 Use this only when the wizard is unavailable or you intentionally manage JSON. First run `nanobot onboard`, then merge a provider and a named model preset into `~/.nanobot/config.json`.
 
 A generic OpenAI-compatible setup has this shape:
@@ -207,6 +222,8 @@ A generic OpenAI-compatible setup has this shape:
 ```
 
 Replace the provider, endpoint, and model together. Do not pair a credential from one service with a model ID from another. See [Provider Cookbook](./provider-cookbook.md) for hosted, OAuth, company, and local examples, and [Configuration](./configuration.md) for exact fields.
+
+</details>
 
 ## Updating
 
@@ -248,6 +265,6 @@ nanobot agent -m "Hello!"
 | `401` or invalid API key | Verify the selected provider owns that key and remove accidental spaces |
 | Model not found | Use a model ID available from the provider selected in the active preset |
 | CLI works but WebUI does not open | Use port `8765`, not gateway health port `18790` |
-| WebUI works but a chat app does not | Check **Settings → Channels**, then run `nanobot channels status` |
+| WebUI works but a chat app does not | Check **Channels**, then run `nanobot channels status` |
 
 Continue with the ordered [Troubleshooting guide](./troubleshooting.md) if the cause is still unclear.

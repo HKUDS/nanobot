@@ -12,24 +12,9 @@ The nanobot gateway is the long-running self-hosted AI agent process that keeps 
 
 Use this when nanobot should keep running after a single CLI turn. Chat apps, browser sessions, background automations, local triggers, and server-side integrations all depend on a live gateway.
 
-## Install
+## Start from your current setup
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot status
-nanobot agent -m "Hello!"
-```
-
-## Minimal working example
-
-Run the gateway in the foreground:
-
-```bash
-nanobot gateway
-```
-
-For WebUI background usage:
+If nanobot already replies in the WebUI, its gateway is already running. To keep it alive after closing the launcher, close the foreground launcher and start the same instance in background mode:
 
 ```bash
 nanobot gateway --background
@@ -37,7 +22,22 @@ nanobot gateway status
 nanobot gateway logs
 ```
 
-Open the configured WebUI URL in a browser, or run `nanobot webui` as a foreground client.
+Run `nanobot webui` when you need to return to the browser; it attaches to the running gateway. Do not run a second foreground gateway for the same instance.
+
+For a new host, choose one setup path:
+
+- **Docker:** follow [container initialization and verification](../deployment.md#docker-compose). It creates the config and checks the model inside the container; a host nanobot installation is unnecessary.
+- **Host installation:** follow the [quick start](../quick-start.md). On a headless machine, use `nanobot onboard --wizard`, then `nanobot agent -m "Hello!"` to check the selected model.
+
+## Keep the gateway running
+
+Background mode keeps the current process alive; for automatic startup after reboot and restart on failure, choose [Docker Compose](../deployment.md#docker-compose), a [systemd user service](../deployment.md#linux-service), or a [macOS LaunchAgent](../deployment.md#macos-launchagent). Use the same config and workspace as the successful model check. Stop a manually managed gateway before starting a service for that instance.
+
+For foreground diagnosis only:
+
+```bash
+nanobot gateway --verbose
+```
 
 ## Production notes
 
@@ -50,7 +50,7 @@ Open the configured WebUI URL in a browser, or run `nanobot webui` as a foregrou
 ## Security notes
 
 - Plan ports before exposing services. Gateway health defaults to `18790`, WebUI/WebSocket defaults to `8765`, and `nanobot serve` defaults to `8900`.
-- Bind externally only when you have configured tokens or API keys.
+- Protect WebUI and API network listeners with their respective token or key settings. The health endpoint has no authentication; keep its published port on loopback or behind a restricted monitoring interface.
 - Keep chat access control intentional before deploying.
 - Use Docker or Linux sandboxing when shell tools are enabled for unattended work.
 

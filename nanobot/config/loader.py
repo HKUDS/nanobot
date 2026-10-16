@@ -11,15 +11,11 @@ from pydantic_settings import SettingsError
 
 from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
 from nanobot.config.home import get_home_path
-from nanobot.config.schema import (
-    Config,
-    _resolve_tool_config_refs,  # pyright: ignore[reportPrivateUsage]
-)
-from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPrivateUsage]
+from nanobot.config.schema import Config
+from nanobot.utils.file_io import write_text_atomic
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
-_schema_refs_ready = False
 
 
 def _as_config_object(value: object) -> dict[str, Any] | None:
@@ -50,11 +46,6 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-    global _schema_refs_ready
-    if not _schema_refs_ready:
-        _resolve_tool_config_refs()
-        _schema_refs_ready = True
-
     path = config_path or get_config_path()
 
     if not path.exists():
@@ -172,7 +163,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
             data.setdefault("providers", {})[alias] = settings
 
     # Temp + replace so a crash mid-write cannot leave a truncated config.json.
-    _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
+    write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def merge_missing_defaults(existing: object, defaults: object) -> object:

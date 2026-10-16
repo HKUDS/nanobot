@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LinearResetConnection } from "../../../nanobot/channels/linear/webui/LinearResetConnection";
-import type { ChannelConfigField } from "@/components/settings/channels/catalog";
+import type { ChannelConfigField } from "@/channel-plugins/catalog";
 
 const { requestMutation } = vi.hoisted(() => ({ requestMutation: vi.fn() }));
 vi.mock("@/providers/ClientProvider", () => ({

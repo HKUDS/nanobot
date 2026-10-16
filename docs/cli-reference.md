@@ -111,17 +111,13 @@ Status does not send a model request. On success, run the printed `nanobot agent
 
 Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved conversation, and `/context` explains the compacted summary and raw session suffix available to the next agent turn. `/branch` forks a saved conversation from a completed reply, and `/diff` opens the latest turn's file changes as a full-screen unified diff. `PageUp` loads older transcript pages when you reach the top. By default, each launch starts a new session using the launch directory as its workspace. `--session` selects a specific existing session, and `--workspace` overrides the launch directory. When the TUI exits, it prints a ready-to-run `nanobot agent --session ...` command for the current session.
 
-## Session Storage and Rollback
+## Session Storage
 
-Session JSONL files live under `<config-dir>/sessions/<workspace-id>/`, outside the agent-readable workspace. On the first upgraded start, nanobot safely migrates existing `<workspace>/sessions/*.jsonl` files after verifying an atomic copy. Stop every old nanobot process that uses the workspace before upgrading; old and new binaries must not write the same session concurrently.
+Session state lives in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. Existing JSONL conversations are imported on the first startup. JSONL migration is available from 0.3.6 through 0.4.x and is removed in **0.5.0**; installations with only JSONL data must upgrade through that window before using 0.5.0.
 
-To prepare a downgrade, stop nanobot and copy the current sessions back to the path understood by older releases:
+After a successful import, JSONL files and their checkpoints from `<workspace>/sessions/` move to `<config-dir>/sessions/<workspace-id>/jsonl-backup/`, preserving their contents outside the agent-readable workspace. JSONL files already in the private session directory remain there. An interrupted migration resumes on startup before nanobot serves conversations; failed imports leave their source files unchanged.
 
-```bash
-nanobot sessions restore-workspace --config ./bot-a/config.json --workspace ./bot-a/workspace
-```
-
-The command never deletes the external store and refuses to overwrite a different existing workspace file. Back up both the config directory and workspace before changing versions.
+Before changing versions, stop nanobot gracefully and back up both the config directory and workspace. To downgrade, restore a backup compatible with the older release. Copying only `sessions.sqlite3` while nanobot is running can miss recent messages still held in its WAL file.
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. `/detach` promotes the shared gateway to persistent background mode before closing the TUI, so active agent work continues without a connected client. An explicit `nanobot gateway --background` starts or promotes the gateway the same way before opening a client. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 
@@ -151,7 +147,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
-`--dev` is a foreground source-checkout workflow. Persistent gateway lifecycle is deliberately owned only by `nanobot gateway --background`; `nanobot webui --background` prints migration guidance instead of silently changing process ownership. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it.
+`--dev` is a foreground source-checkout workflow. For shell-based lifecycle management, use `nanobot gateway --background` (or `/detach` from an interactive TUI); `nanobot webui --background` prints migration guidance instead of silently changing process ownership. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it.
 
 ## Gateway
 
@@ -174,7 +170,7 @@ First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration 
 | `nanobot gateway install-service --dry-run` | Preview the generated service file and system commands |
 | `nanobot gateway uninstall-service` | Remove the installed system service |
 
-For custom instances, pass the same selector flags to management commands:
+For custom instances, pass the same selector flags after the management subcommand, as shown below. `--config` and `--workspace` before a management subcommand are rejected with a usage error; they are not inherited.
 
 ```bash
 nanobot gateway --background --config ./bot-a/config.json --workspace ./bot-a/workspace
@@ -294,7 +290,7 @@ The `plugins` command name is retained for compatibility, but these entries are 
 | `api` | Dependencies required by the OpenAI-compatible `nanobot serve` process |
 | `azure` | Azure identity support for Azure-hosted models |
 | `bedrock` | AWS Bedrock model provider support |
-| `langfuse` | Langfuse tracing support for OpenAI-compatible providers |
+| `langfuse` | Langfuse tracing support for OpenAI-compatible providers and the Codex OAuth provider |
 | `olostep` | Olostep web search provider support |
 | A channel name such as `telegram` or `slack` | The connector package and saved channel enablement |
 

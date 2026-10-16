@@ -1,4 +1,10 @@
-import type { CapabilityMentionSegment } from "@/components/CliAppMentionText";
+import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
+
+export type CapabilityMentionSegment =
+  | { kind: "text"; text: string }
+  | { kind: "cli"; text: string; app: CliAppInfo }
+  | { kind: "mcp"; text: string; preset: McpPresetInfo }
+  | { kind: "session"; text: string; mention: SessionMention };
 
 export function composerMentionLabel(segment: CapabilityMentionSegment): string {
   const app = segment.kind === "cli" ? segment.app : segment.kind === "mcp" ? segment.preset : null;

@@ -8,17 +8,19 @@ import json
 import os
 import re
 import shutil
-import stat
 import time
 import uuid
 from collections.abc import Iterable
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from loguru import logger
 
+from nanobot.utils.file_io import ensure_dir as ensure_dir
+from nanobot.utils.file_io import write_text_atomic as _write_text_atomic
 from nanobot.utils.token_encoding import get_token_encoding as _get_token_encoding
 
 if TYPE_CHECKING:
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
+_TOOLS_TOKEN_CACHE_LOCK = Lock()
 _T = TypeVar("_T")
 
 
@@ -111,12 +114,16 @@ def _cache_tools_token_count(
     fingerprint: tuple[int, ...],
     counts: dict[bool, int],
 ) -> None:
-    if (
-        tools_id not in _TOOLS_TOKEN_CACHE
-        and len(_TOOLS_TOKEN_CACHE) >= _TOOLS_TOKEN_CACHE_MAX_ENTRIES
-    ):
-        _TOOLS_TOKEN_CACHE.pop(next(iter(_TOOLS_TOKEN_CACHE)))
-    _TOOLS_TOKEN_CACHE[tools_id] = (fingerprint, counts)
+    with _TOOLS_TOKEN_CACHE_LOCK:
+        cached = _TOOLS_TOKEN_CACHE.get(tools_id)
+        if cached is not None and cached[0] == fingerprint:
+            counts = {**cached[1], **counts}
+        if (
+            tools_id not in _TOOLS_TOKEN_CACHE
+            and len(_TOOLS_TOKEN_CACHE) >= _TOOLS_TOKEN_CACHE_MAX_ENTRIES
+        ):
+            _TOOLS_TOKEN_CACHE.pop(next(iter(_TOOLS_TOKEN_CACHE)))
+        _TOOLS_TOKEN_CACHE[tools_id] = (fingerprint, counts)
 
 
 def _estimate_tools_tokens(
@@ -129,14 +136,15 @@ def _estimate_tools_tokens(
     # ToolRegistry keeps the returned definitions list alive until the registry changes.
     tools_id = id(tools)
     fingerprint = tuple(id(tool) for tool in tools)
-    cached = _TOOLS_TOKEN_CACHE.get(tools_id)
-    if cached and cached[0] == fingerprint:
-        token_count = cached[1].get(leading_separator)
-        if token_count is not None:
-            return token_count
-        counts = cached[1]
-    else:
-        counts = {}
+    with _TOOLS_TOKEN_CACHE_LOCK:
+        cached = _TOOLS_TOKEN_CACHE.get(tools_id)
+        if cached and cached[0] == fingerprint:
+            token_count = cached[1].get(leading_separator)
+            if token_count is not None:
+                return token_count
+            counts = dict(cached[1])
+        else:
+            counts = {}
 
     rendered = json.dumps(tools, ensure_ascii=False)
     if leading_separator:
@@ -351,12 +359,6 @@ def build_image_content_blocks(
     ]
 
 
-def ensure_dir(path: Path) -> Path:
-    """Ensure directory exists, return it."""
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()
@@ -552,6 +554,22 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def atomic_write_text(path: Path, content: str) -> None:
+    """Create parent directories and durably replace *path* with UTF-8 text."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        _fsync_directory_after_replace(path.parent)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def atomic_write_lines(path: Path, lines: Iterable[str], *, fsync: bool = True) -> None:
     """Atomically replace *path* with already-serialized record lines.
 
@@ -595,30 +613,6 @@ def _fsync_directory_after_replace(directory: Path) -> None:
                     raise
         finally:
             os.close(fd)
-
-
-def _write_text_atomic(path: Path, content: str) -> None:
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    existing_mode: int | None = None
-    with suppress(OSError):
-        existing_mode = stat.S_IMODE(path.stat().st_mode)
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            if existing_mode is not None:
-                os.chmod(tmp, existing_mode)
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
-        with suppress(OSError, NotImplementedError):
-            dfd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
 
 
 def maybe_persist_tool_result(

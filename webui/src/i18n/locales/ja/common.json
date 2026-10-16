@@ -339,6 +339,9 @@
       "description": "nanobot Web UI — nanobot ワークスペースと会話します。"
     },
     "pairing": {
+      "haveCode": "コードを受け取りましたか？",
+      "deliveryFailed": "ペアリングコードを送信できませんでした。ボットのメッセージ送信権限とゲートウェイのログを確認し、もう一度ボットにダイレクトメッセージを送ってください。",
+      "deliverySending": "チャットにペアリングコードを送信しています。届かない場合は、もう一度ボットにダイレクトメッセージを送ってください。",
       "title": "アカウント連携",
       "description": "チャットで受け取った連携コードを入力します。",
       "code": "ペアリングコード",
@@ -388,6 +391,13 @@
     },
     "runtimeConfig": {
       "apiSaved": "保存しました。API サービスを再起動すると反映されます。",
+      "commandRuntime": {
+        "custom": "カスタム（秒）",
+        "customLabel": "カスタム実行時間（秒）",
+        "noLimit": "時間制限なし",
+        "limit": "時間制限あり：最大 {{duration}}",
+        "rangeError": "1 から {{max}} までの整数で秒数を入力するか、「時間制限なし」を選んでください。"
+      },
       "fields": {
         "agents_defaults_timezone_mode": {"label": "システムの時間帯", "help": "オフにすると時間帯を指定できます。\n\nオフにすると手動でタイムゾーンを選択できます。"},
         "agents_defaults_timezone": {"label": "タイムゾーン", "help": "UTC オフセットは今日の日付に基づきます。\n\nタイムゾーンを選択します。UTC との時差は現在の日付に基づきます。"},
@@ -407,7 +417,7 @@
         "tools_cli_apps_enable": {"label": "CLI アプリ", "help": "CLI アプリのインストール・管理・実行を許可します。\n\nエージェントによる CLI アプリの管理と実行を許可します。"},
         "tools_my_enable": {"label": "設定を確認", "help": "エージェントによる自身の設定の確認を許可します。\n\nエージェントが自身の設定を確認できるようにします。"},
         "tools_my_allow_set": {"label": "設定を変更", "help": "エージェントによる自身の設定の変更を許可します。\n\n自己管理ツールによる設定の更新を許可します。"},
-        "tools_exec_timeout": {"label": "コマンドの制限時間", "help": "この秒数でコマンドを停止します。0 は無制限です。\n\nシェルコマンドの実行時間の上限。0 は無制限です。"},
+        "tools_exec_timeout": {"label": "コマンドの実行時間", "help": "シェルコマンドの既定の実行時間上限です。\n\n出力や待機によって上限は延長されません。「時間制限なし」を選ぶと実行時間の上限がなくなります。"},
         "tools_exec_path_prepend": {"label": "PATH の優先検索", "help": "これらのディレクトリを先に検索します。\n\nPATH の先頭に追加するディレクトリです。Windows ではセミコロン、macOS と Linux ではコロンで区切ります。"},
         "tools_exec_path_append": {"label": "PATH の末尾追加", "help": "これらのディレクトリを最後に検索します。\n\nPATH の末尾に追加するディレクトリです。Windows ではセミコロン、macOS と Linux ではコロンで区切ります。"},
         "tools_exec_sandbox": {"label": "コマンドサンドボックス", "help": "コマンドのプロセスを隔離します。システムの対応が必要です。\n\nLinux では bwrap、macOS では Seatbelt を使用します。ワークスペースの検査だけではプロセスは隔離されません。"},
@@ -416,7 +426,7 @@
         "tools_exec_allowed_env_keys": {"label": "環境変数", "help": "コマンドに追加で渡す変数名を1行に1つ指定します。\n\nコマンドに渡す環境変数を追加します。1 行に 1 つ指定してください。動作に必要な基本の環境変数は引き続き渡されます。"},
         "tools_exec_allow_patterns": {"label": "許可コマンド", "help": "許可ルールに完全一致するコマンドのみ実行します。\n\n1 行に 1 つ正規表現を指定します。設定すると、コマンドの各部分がいずれかのルールに完全一致する場合のみ実行できます。許可されたコマンドには組み込み・追加の禁止ルールを適用しませんが、ネットワークとワークスペースの制限は適用されます。"},
         "tools_exec_deny_patterns": {"label": "禁止コマンド", "help": "これらのルールに一致するコマンドを禁止します。\n\n追加の禁止ルールを正規表現で 1 行に 1 つ指定します。明示的な許可ルールは、組み込み・追加の禁止ルールより優先されます。"},
-        "tools_web_proxy": {"label": "ウェブプロキシ", "help": "プロキシの URL です。空欄では既定のネットワークを使います。\n\nウェブツール用のプロキシ URL。空欄の場合は既定のネットワークを使用します。"},
+        "tools_web_proxy": {"label": "ウェブプロキシ", "help": "エージェントのウェブ検索とページ読み取りに使用します。空欄では、プロキシ環境変数を含む既定のネットワーク設定を使用します。\n\n127.0.0.1 は nanobot を実行するマシンです。モデル、MCP、ブラウザーの接続には影響しません。"},
         "tools_web_user_agent": {"label": "User-Agent ヘッダー", "help": "ウェブ要求の User-Agent です。空欄では既定値を使います。\n\nカスタムの User-Agent ヘッダー。空欄の場合は既定値を使用します。"},
         "tools_restrict_to_workspace": {"label": "ワークスペース制限", "help": "ワークスペースの全体制限です。WebUI のチャット権限は別に設定します。\n\nツール全体のアクセス方針です。WebUI の会話ごとの権限は別途設定します。"},
         "tools_ssrf_whitelist": {"label": "許可 IP", "help": "許可する IP または CIDR を1行に1つ指定します。\n\n送信リクエストの保護から除外する IP/CIDR 範囲。1 行に 1 つ指定します。"},
@@ -469,6 +479,7 @@
       "byok": "BYOK",
       "overview": "概要",
       "appearance": "外観",
+      "notifications": "通知",
       "models": "モデル",
       "providers": "プロバイダー",
       "image": "画像",
@@ -507,17 +518,32 @@
       "voiceInput": "音声の文字起こし"
     },
     "notifications": {
+      "scope": "このブラウザー",
+      "intro": "タスク終了時の通知方法を選んでください。",
+      "pageRequired": "このページを開いたまま、接続を維持してください。閉じたり休止したりすると、新しいタスク通知を受け取れません。",
+      "privacy": "ブラウザー通知にはタスクの状態のみが表示され、会話の内容やエラーの詳細は含まれません。",
+      "revoked": "通知の許可が取り消されたため、通知をオフにしました。このブラウザーのサイト設定で通知を許可してから、ここでオンにしてください。",
+      "retry": "再確認",
+      "statusOff": "オフ",
+      "statusPermission": "許可が必要",
+      "statusOn": "オン",
+      "statusBlocked": "ブロック中",
+      "statusRevoked": "許可が取り消されました",
+      "statusUnavailable": "利用不可",
+      "statusWorker": "準備未完了",
+      "statusBusy": "確認中…",
+      "statusError": "送信失敗",
       "test": "通知をテスト",
       "testBody": "nanobot からのテスト通知です。",
       "waiting": "ブラウザーの応答を待っています…",
       "insecure": "通知を使うには、HTTPS または localhost で nanobot を開いてください。",
       "unsupported": "このブラウザーは通知に対応していません。対応ブラウザーをお使いください。iPhone や iPad ではホーム画面から nanobot を開いてください。",
-      "denied": "通知がブロックされています。ブラウザーのサイト設定で通知を許可してから再試行してください。",
+      "denied": "通知がブロックされています。このブラウザーのサイト設定で通知を許可してから、ここでオンにしてください。",
       "dismissed": "通知が許可されていません。通知を有効にして「許可」を選んでください。",
       "permissionFailed": "通知の許可を要求できませんでした。対応ブラウザーで再試行してください。",
-      "workerUnavailable": "通知サービスの準備ができていません。ページを再読み込みして再試行してください。",
+      "workerUnavailable": "通知サービスの準備ができていません。再確認するか、このページを再読み込みしてください。",
       "displayFailed": "通知を送信できませんでした。サイトの通知権限を確認して再試行してください。",
-      "submitted": "ブラウザーに送信しました。表示されない場合は、システムの通知とおやすみモードを確認してください。",
+      "submitted": "ブラウザーに送信しましたが、システムに表示されたとは限りません。通知が表示されない場合は、システムの通知とおやすみモードを確認してください。",
       "completed": "タスクが完了しました。nanobot で結果を確認してください。",
       "failed": "タスクが失敗しました。nanobot で詳細を確認してください。",
       "interrupted": "対応が必要です。nanobot を開いて続行してください。"
@@ -600,8 +626,8 @@
       "selectedModelProvider": "選択したモデルによって設定されます。",
       "selectedModelValue": "選択したモデルによって設定されます。",
       "brandLogos": "設定画面にプロバイダーとアプリのロゴを表示します。\n\n設定で第三者プロバイダーと CLI のロゴを表示します。",
-      "browserNotifications": "ページがバックグラウンドにあるとき、タスクの終了や対応が必要な状態を通知します。ページを開いたままにしてください。閉じたり休止したりすると新しい通知は届きません。",
-      "notificationSound": "返信完了時に音を鳴らします。既定はオフです。\n\nターンが完了したら、ページがバックグラウンドにあっても短いチャイムを再生します。既定ではオフです。",
+      "browserNotifications": "nanobot がバックグラウンドにあるとき、タスクが終了するとシステム通知でお知らせします。",
+      "notificationSound": "ターンが完了したら、ページがバックグラウンドにあっても短いチャイムを再生します。既定ではオフです。",
       "cliAppsCatalog": "nanobot 用の CLI ツールをインストールします。デスクトップアプリは変わりません。\n\nnanobot がこのマシンで使用できるコマンドラインツールをインストールします。デスクトップアプリは変更しません。",
       "cliAppsFilter": "名前、分類、機能で検索します。",
       "logs": "デスクトップアプリのエンジンログを開きます。",
@@ -782,6 +808,12 @@
       "configureProvider": "{{provider}} を設定…",
       "sharedProviderHelp": "変更はこのプロバイダーを使用するすべてのプリセットに適用されます。",
       "parameterCount": "{{count}} 項目",
+      "useProviderSettings": "プロバイダー設定を使用",
+      "applyToDraft": "プリセットに追加",
+      "draftHint": "新しいプリセットを保存すると、この設定が適用されます。",
+      "invalidObject": "JSON オブジェクトを入力してください。例：{\"key\":\"value\"}。",
+      "stringValuesRequired": "ヘッダーとクエリパラメーターの値には文字列を使用してください。",
+      "maskedSecretMissing": "このマスクに対応する保存済みのシークレットがありません。実際の値を入力するか、この項目を削除してください。",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
       "providerGroupLocal": "ローカル",
@@ -818,6 +850,8 @@
       "capabilityOpenAISearchHelp": "対応するモデルがウェブ検索を使えます。\n\nResponses API 対応モデルがウェブを検索できるようにします。検索状況はチャットに表示されます。"
     },
     "image": {
+      "imagesApiHint": "この接続先で OpenAI Images API を使います。画像生成に対応していることを確認してください。",
+      "requestOverridesHint": "画像専用です。空欄はプロバイダー設定を使用します。プロバイダーを変更すると、ここに入力した値は消去されます。",
       "selectProvider": "プロバイダーを選択",
       "selectAspect": "比率を選択",
       "selectSize": "サイズを選択",
@@ -835,6 +869,7 @@
       "installing": "必要なパッケージをインストール中…"
     },
     "models": {
+      "requestOverridesHint": "空欄はプロバイダー設定を使用します。プロバイダーを変更すると、ここに入力した値は消去されます。",
       "otherPresets": "フォールバックプリセット",
       "catalogAuthRequired": "認証が失効しました。再度ログインしてください。",
       "catalogUnavailable": "更新できません。クリックして再試行",
@@ -1623,7 +1658,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "サブタスクを読み込めませんでした。",
       "stopFailed": "このタスクを停止できませんでした。",
       "stopTask": "{{label}} を停止",
       "receiptHelp": "配信済みは子タスクの次のモデルリクエストにメッセージが含まれたことを示し、実行完了を意味しません。",
@@ -2284,6 +2318,7 @@
     }
   },
   "common": {
+    "retry": "再試行",
     "dismiss": "閉じる",
     "close": "閉じる",
     "current": "現在",

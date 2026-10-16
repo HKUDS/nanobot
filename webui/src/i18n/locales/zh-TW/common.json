@@ -339,6 +339,9 @@
       "description": "nanobot Web UI —— 與你的 nanobot 工作區對話。"
     },
     "pairing": {
+      "haveCode": "已收到配對碼？",
+      "deliveryFailed": "配對碼傳送失敗。請檢查此機器人的訊息傳送權限和閘道日誌，再傳一則私訊給它以重試。",
+      "deliverySending": "正在向聊天傳送配對碼。如果沒有收到，請再傳一則私訊給機器人以重試。",
       "title": "賬號配對",
       "description": "輸入聊天平臺收到的配對碼",
       "code": "配對碼",
@@ -388,6 +391,13 @@
     },
     "runtimeConfig": {
       "apiSaved": "已儲存，重新啟動 API 服務後生效。",
+      "commandRuntime": {
+        "custom": "自訂（秒）",
+        "customLabel": "自訂執行時間（秒）",
+        "noLimit": "不限時",
+        "limit": "限時最長 {{duration}}",
+        "rangeError": "請輸入 1 到 {{max}} 之間的整數秒，或選擇「不限時」。"
+      },
       "fields": {
         "agents_defaults_timezone_mode": {"label": "系統時區", "help": "關閉後可手動指定時區"},
         "agents_defaults_timezone": {"label": "時區", "help": "UTC 偏移按當前日期顯示"},
@@ -407,7 +417,7 @@
         "tools_cli_apps_enable": {"label": "CLI 應用", "help": "允許安裝、管理和執行 CLI 應用"},
         "tools_my_enable": {"label": "檢視配置", "help": "允許智慧體檢視自身配置"},
         "tools_my_allow_set": {"label": "修改配置", "help": "允許智慧體修改自身配置"},
-        "tools_exec_timeout": {"label": "執行超時", "help": "執行超時即停止；0 為不限，單位秒\n\n超過此時長後終止命令。設為 0 表示不限制執行時長。"},
+        "tools_exec_timeout": {"label": "執行上限", "help": "Shell 命令的預設執行上限\n\n命令輸出或繼續等待都不會延長此上限。選擇「不限時」可取消執行時限。"},
         "tools_exec_path_prepend": {"label": "優先目錄", "help": "優先查詢命令的目錄\n\n新增到 PATH 開頭。多個目錄在 Windows 上用分號分隔，在 Linux 和 macOS 上用冒號分隔。"},
         "tools_exec_path_append": {"label": "追加目錄", "help": "最後查詢命令的目錄\n\n新增到 PATH 末尾。多個目錄在 Windows 上用分號分隔，在 Linux 和 macOS 上用冒號分隔。"},
         "tools_exec_sandbox": {"label": "命令沙箱", "help": "隔離命令程序，需系統支援\n\nLinux 使用 bwrap，macOS 使用 Seatbelt。工作區路徑限制本身不提供程序隔離。"},
@@ -416,7 +426,7 @@
         "tools_exec_allowed_env_keys": {"label": "環境變數", "help": "額外傳給命令的變數名，每行一個\n\n除必需變數外，還要從主機傳遞給命令的環境變數名稱，每行一個。"},
         "tools_exec_allow_patterns": {"label": "允許命令", "help": "只允許完整匹配規則的命令\n\n每行一個正規表示式。填寫後，只允許每段命令都完整匹配規則的命令執行，且優先於內建和自定義拒絕規則；工作區和網路限制仍生效。"},
         "tools_exec_deny_patterns": {"label": "禁止命令", "help": "阻止匹配規則的命令\n\n每行一個正規表示式，與內建拒絕規則一同檢查。完整匹配允許規則的命令會跳過這些檢查。"},
-        "tools_web_proxy": {"label": "網頁代理", "help": "網頁代理地址，留空用預設網路\n\n網頁搜尋和讀取使用的代理地址，留空使用預設網路設定。"},
+        "tools_web_proxy": {"label": "網頁代理", "help": "用於智慧體搜尋和讀取網頁。留空使用預設網路設定，包括環境變數中的代理。\n\n127.0.0.1 指執行 nanobot 的機器，不是開啟網頁的手機。本設定不影響模型、MCP 或瀏覽器的連線。"},
         "tools_web_user_agent": {"label": "User-Agent", "help": "網頁請求標識，留空使用預設值\n\n網頁請求使用的 User-Agent 標識，留空使用預設值。"},
         "tools_restrict_to_workspace": {"label": "目錄限制", "help": "全域性目錄限制，WebUI 許可權另設\n\n設定全域性工作區訪問限制；WebUI 中每個對話的許可權單獨設定。"},
         "tools_ssrf_whitelist": {"label": "允許 IP", "help": "允許訪問的 IP 或 CIDR，每行一項\n\n允許網頁等出站請求訪問這些受限地址。每行填寫一個 IP 地址或 CIDR 網段。"},
@@ -469,6 +479,7 @@
       "byok": "BYOK",
       "overview": "總覽",
       "appearance": "外觀",
+      "notifications": "通知",
       "models": "模型",
       "providers": "供應商",
       "image": "圖片",
@@ -507,17 +518,32 @@
       "voiceInput": "語音轉寫"
     },
     "notifications": {
+      "scope": "此瀏覽器",
+      "intro": "選擇任務結束時的提醒方式。",
+      "pageRequired": "請保持頁面開啟並維持連線。頁面關閉或暫停後無法接收新的任務提醒。",
+      "privacy": "瀏覽器通知僅顯示任務狀態，不包含對話內容或錯誤詳情。",
+      "revoked": "通知權限已撤銷，已關閉提醒。請先在瀏覽器的網站設定中允許通知，再於此處開啟。",
+      "retry": "重新檢查",
+      "statusOff": "未開啟",
+      "statusPermission": "需要授權",
+      "statusOn": "已開啟",
+      "statusBlocked": "已遭封鎖",
+      "statusRevoked": "權限已撤銷",
+      "statusUnavailable": "無法使用",
+      "statusWorker": "尚未就緒",
+      "statusBusy": "檢查中…",
+      "statusError": "傳送失敗",
       "test": "測試通知",
       "testBody": "這是一則 nanobot 測試通知。",
       "waiting": "等待瀏覽器回應…",
       "insecure": "請透過 HTTPS 或 localhost 開啟 nanobot，再啟用通知。",
       "unsupported": "此瀏覽器不支援通知，請換用支援的瀏覽器。iPhone 或 iPad 需從主畫面開啟 nanobot。",
-      "denied": "通知已被瀏覽器封鎖。請在本站的瀏覽器設定中允許通知，再重試。",
+      "denied": "通知已被瀏覽器封鎖。請先在瀏覽器的網站設定中允許通知，再於此處開啟。",
       "dismissed": "尚未取得通知權限。請重新啟用，並選擇「允許」。",
       "permissionFailed": "無法要求通知權限，請在支援的瀏覽器中重試。",
-      "workerUnavailable": "通知服務尚未就緒，請重新整理頁面後重試。",
+      "workerUnavailable": "通知服務尚未就緒，請重新檢查或重新整理頁面。",
       "displayFailed": "瀏覽器未能傳送通知，請檢查本站的通知權限後重試。",
-      "submitted": "已提交給瀏覽器。如未看到通知，請檢查系統通知和勿擾設定。",
+      "submitted": "已提交給瀏覽器，但不代表系統已顯示通知。如未看到通知，請檢查系統通知和勿擾設定。",
       "completed": "任務已完成，開啟 nanobot 查看結果。",
       "failed": "任務未完成，開啟 nanobot 查看詳情。",
       "interrupted": "任務需要處理，開啟 nanobot 繼續。"
@@ -600,8 +626,8 @@
       "selectedModelProvider": "由選取的模型決定。",
       "selectedModelValue": "由選取的模型決定。",
       "brandLogos": "在設定中顯示提供商與應用圖示\n\n在設定中顯示提供商和命令列應用的品牌圖示。",
-      "browserNotifications": "網頁在背景時，提醒任務結束或需要處理。請保持網頁開啟；關閉或暫停後無法接收新通知。",
-      "notificationSound": "回覆結束播放提示音，預設關閉\n\n回合結束時播放短促提示音，頁面在後臺時也會播放。預設關閉。",
+      "browserNotifications": "nanobot 在背景執行時，透過系統通知提醒任務狀態。",
+      "notificationSound": "回合結束時播放短促提示音，頁面在後臺時也會播放。預設關閉。",
       "cliAppsCatalog": "安裝 CLI 工具，不改桌面應用\n\n安裝供 nanobot 使用的命令列工具，不會安裝或修改對應的桌面應用。",
       "cliAppsFilter": "按名稱、分類或功能搜尋",
       "logs": "開啟桌面應用的引擎日誌資料夾",
@@ -782,6 +808,12 @@
       "configureProvider": "設定 {{provider}}…",
       "sharedProviderHelp": "變更會影響使用此提供商的所有預設。",
       "parameterCount": "{{count}} 項",
+      "useProviderSettings": "使用供應商設定",
+      "applyToDraft": "加入預設",
+      "draftHint": "儲存新預設後，這些設定才會生效。",
+      "invalidObject": "請輸入 JSON 物件，例如：{\"key\":\"value\"}。",
+      "stringValuesRequired": "請求標頭和查詢參數的值須使用文字。",
+      "maskedSecretMissing": "遮罩沒有對應的已儲存金鑰。請輸入實際值，或刪除該項。",
       "providerGroupOAuth": "OAuth",
       "providerGroupApiKey": "API Key",
       "providerGroupLocal": "本地",
@@ -818,6 +850,8 @@
       "capabilityOpenAISearchHelp": "支援的模型可聯網搜尋"
     },
     "image": {
+      "imagesApiHint": "透過此連線的網址呼叫 OpenAI Images API。請確認該介面支援生圖。",
+      "requestOverridesHint": "僅用於生圖。留空時使用供應商設定，更換供應商會清空這裡填寫的值。",
       "selectProvider": "選擇供應商",
       "selectAspect": "選擇比例",
       "selectSize": "選擇尺寸",
@@ -835,6 +869,7 @@
       "installing": "正在安裝所需套件…"
     },
     "models": {
+      "requestOverridesHint": "留空時使用供應商設定。更換供應商會清空這裡填寫的值。",
       "otherPresets": "備用預設",
       "catalogAuthRequired": "授權已失效，請重新登入。",
       "catalogUnavailable": "更新失敗，點擊重試",
@@ -1623,7 +1658,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "無法載入子任務。",
       "stopFailed": "無法停止此任務。",
       "stopTask": "停止 {{label}}",
       "receiptHelp": "已送達表示訊息已進入子任務的下一次模型請求，不代表已執行完成。",
@@ -2284,6 +2318,7 @@
     }
   },
   "common": {
+    "retry": "重試",
     "dismiss": "關閉",
     "close": "關閉",
     "current": "目前",

@@ -49,6 +49,8 @@ Keep unrelated local changes out of the topic branch. If your checkout already h
 
 ## Development Setup
 
+For React/TypeScript work, follow the [WebUI development guide](webui/README.md) for HMR, source layout, and frontend checks. Channel-owned frontend code lives beside its channel; the guide covers those tests too.
+
 Keep setup boring and reliable. The goal is to get you into the code quickly:
 
 ```bash

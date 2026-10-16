@@ -596,10 +596,10 @@ class TestToolEventProgress:
             calls += 1
             if calls == 1:
                 await on_content_delta("old partial")
-                loop._enqueue_session_message(InboundMessage(
+                (await loop._enqueue_session_message(InboundMessage(
                     channel="websocket", sender_id="u", chat_id="test", content="new question",
                     metadata={"_wants_stream": True},
-                ))
+                )))
                 return LLMResponse(content="old partial", finish_reason="length")
             has_followup = any(
                 "new question" in str(message.get("content", ""))
@@ -869,7 +869,7 @@ class TestToolEventProgress:
         session.add_message("user", "Run this in the background")
         session.metadata.update({"webui": True, "title": "Existing title"})
         loop.sessions.save(session)
-        save_completed_subagent(loop, "sub-1", session_key)
+        await save_completed_subagent(loop, "sub-1", session_key)
         dispatch = asyncio.create_task(run_session(loop, InboundMessage(
             channel="system",
             sender_id="subagent",

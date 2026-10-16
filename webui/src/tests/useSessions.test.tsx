@@ -35,6 +35,7 @@ function fakeClient() {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
+    onRunCompletion: () => () => {},
     onError: () => () => {},
     onChat: () => () => {},
     getRunStartedAt: () => null,
@@ -684,6 +685,78 @@ describe("useSessions", () => {
     second.unmount();
   });
 
+  it("reconciles a cached 304 response as a new successful latest-page observation", async () => {
+    const cached = canonicalThreadPayload({
+      schemaVersion: 3,
+      revision: "rev-not-modified",
+      has_pending_tool_calls: false,
+      completed_turn_ids: ["completed-turn"],
+      messages: [{
+        id: "completed-answer", role: "assistant", content: "complete answer",
+        createdAt: 1, turnId: "completed-turn",
+      }],
+    })!;
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(cached);
+    const { result, unmount } = renderHook(() => useSessionHistory("websocket:unchanged"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const previousVersion = result.current.version;
+    const lineage = result.current.lineage;
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.version).toBeGreaterThan(previousVersion));
+    expect(result.current.lineage).toBe(lineage);
+    expect(result.current.completedTurnIds).toEqual(["completed-turn"]);
+    expect(result.current.messages[0]?.content).toBe("complete answer");
+    unmount();
+  });
+
+  it("publishes canonical reconnect history to both mounted readers and ignores their older responses", async () => {
+    const requests: Array<{
+      resolve: (body: Awaited<ReturnType<typeof api.fetchWebuiThread>>) => void;
+      signal: AbortSignal | undefined;
+    }> = [];
+    vi.mocked(api.fetchWebuiThread).mockImplementation((_token, _key, options) => new Promise((resolve) => {
+      requests.push({ resolve, signal: options?.signal });
+    }));
+    const first = renderHook(() => useSessionHistory("websocket:shared-reconnect"), {
+      wrapper: wrap(fakeClient()),
+    });
+    const second = renderHook(() => useSessionHistory("websocket:shared-reconnect"), {
+      wrapper: wrap(fakeClient()),
+    });
+    const completed = canonicalThreadPayload({
+      schemaVersion: 3, revision: "completed-response", has_pending_tool_calls: false,
+      completed_turn_ids: ["completed-turn"],
+      messages: [{
+        id: "answer", role: "assistant", content: "published complete answer",
+        turnId: "completed-turn", createdAt: 1,
+      }],
+    })!;
+    act(() => webuiThreadCache.set("websocket:shared-reconnect", completed));
+    expect(first.result.current.messages[0]?.content).toBe("published complete answer");
+    expect(second.result.current.messages[0]?.content).toBe("published complete answer");
+    expect(requests.every((request) => request.signal?.aborted)).toBe(true);
+    const active = canonicalThreadPayload({
+      schemaVersion: 3, revision: "older-active-response", has_pending_tool_calls: true,
+      completed_turn_ids: [], active_turn_id: "completed-turn",
+      messages: [{
+        id: "answer", role: "assistant", content: "older prefix", turnId: "completed-turn", createdAt: 1,
+      }],
+    })!;
+    await act(async () => {
+      for (const request of requests) request.resolve(active);
+      await Promise.resolve();
+    });
+    expect(first.result.current.messages[0]?.content).toBe("published complete answer");
+    expect(second.result.current.messages[0]?.content).toBe("published complete answer");
+    expect(first.result.current.hasPendingToolCalls).toBe(false);
+    expect(second.result.current.hasPendingToolCalls).toBe(false);
+    expect(webuiThreadCache.get("websocket:shared-reconnect")).toBe(completed);
+    first.unmount();
+    second.unmount();
+  });
+
   it("keeps rendered history visible when its LRU entry was evicted before refresh", async () => {
     const loaded = {
       schemaVersion: 3,
@@ -770,21 +843,18 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
-  it("exposes turn ids backed by persisted completion events", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+  it("exposes valid completion ids from parsed persisted history", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(api.parseWebuiThreadPayload({
       schemaVersion: 3,
+      projection: "events",
       has_pending_tool_calls: false,
-      completed_turn_ids: ["turn-empty", "", "turn-empty"],
-      messages: [
+      completed_turn_ids: ["turn-empty", "", null, "turn-empty"],
+      events: [
         {
-          id: "u1",
-          role: "user",
-          content: "stop",
-          turnId: "turn-empty",
-          createdAt: 1,
+          event: "user_message", chat_id: "chat-empty", text: "stop", turn_id: "turn-empty", starts_turn: true,
         },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-empty"), {
       wrapper: wrap(fakeClient()),
@@ -792,8 +862,31 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages[0]?.content).toBe("stop");
     expect(result.current.completedTurnIds).toEqual(["turn-empty"]);
     expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
+  it("respects an explicit empty completion list for an incomplete persisted transcript", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      projection: "events",
+      has_pending_tool_calls: true,
+      active_turn_id: "incomplete-turn",
+      completed_turn_ids: [],
+      events: [
+        { event: "user_message", chat_id: "incomplete", text: "question", turn_id: "incomplete-turn" },
+        { event: "turn_end", chat_id: "incomplete", turn_id: "incomplete-turn" },
+      ],
+    });
+    const { result } = renderHook(() => useSessionHistory("websocket:incomplete"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.completedTurnIds).toEqual([]);
+    expect(result.current.completionIdsProvided).toBe(true);
+    expect(result.current.hasPendingToolCalls).toBe(true);
   });
 
   it("does not flag transcript as pending when last row is not a trace", async () => {

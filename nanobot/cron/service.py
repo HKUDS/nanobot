@@ -1,9 +1,7 @@
 """Cron service for scheduling agent tasks."""
 
 import asyncio
-import errno
 import json
-import os
 import time
 import uuid
 from contextlib import suppress
@@ -29,6 +27,7 @@ from nanobot.cron.types import (
     CronStore,
 )
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
+from nanobot.utils.helpers import atomic_write_text
 from nanobot.utils.run_records import (
     write_run_record as write_automation_run_record,
 )
@@ -447,40 +446,8 @@ class CronService:
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
-        """Write *content* to *path* atomically with fsync.
-
-        Uses a temp-file + ``os.replace`` + ``fsync`` pattern so a crash or
-        SIGKILL mid-write cannot leave the destination truncated or invalid.
-        Mirrors ``nanobot.session.manager.SessionManager.save`` (see
-        commit 512bf59, ``fix(session): fsync sessions on graceful shutdown
-        to prevent data loss``).  Without this, ``jobs.json`` could be
-        corrupted on container shutdown and silently re-created empty on
-        next start, wiping every scheduled job.
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, path)
-            # fsync the parent directory so the rename itself is durable.
-            # Skip on Windows where opening a directory raises PermissionError;
-            # some shared filesystems reject directory fsync with EINVAL.
-            with suppress(PermissionError):
-                fd = os.open(str(path.parent), os.O_RDONLY)
-                try:
-                    try:
-                        os.fsync(fd)
-                    except OSError as exc:
-                        if exc.errno != errno.EINVAL:
-                            raise
-                finally:
-                    os.close(fd)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        """Durably replace the job store without exposing a partial write."""
+        atomic_write_text(path, content)
 
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
         """Write an internal audit record for one cron execution."""

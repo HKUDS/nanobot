@@ -11,23 +11,23 @@ This guide connects nanobot to QQ through the official `qq` channel. The officia
 
 ## Prerequisites
 
-- A working local nanobot reply:
-
-```bash
-nanobot agent -m "Hello!"
-```
+- A normal reply in your existing nanobot WebUI or CLI. If you have not reached that point, complete [Quick Start](../quick-start.md) first.
 
 - Access to the QQ Open Platform.
 - A QQ account added to the bot sandbox for testing.
 
-## Install nanobot
+## Continue from your running instance
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-```
+If you are already chatting in the WebUI, keep it open and continue below. It has already started the gateway. To reopen it later, use the same installation's `nanobot webui` command; there is no need to install nanobot again.
+
+For terminal or server setup, use the manual configuration section below. Reuse the config/home and executable from your working instance. Docker users should use the [container commands](../deployment.md#docker-compose).
 
 ## Enable the QQ channel
+
+Create a QQ bot application, copy its AppID and AppSecret, and add your account to the sandbox members. In **Channels → QQ**, enter those credentials, enable the channel, and save. Follow any installation or restart prompt.
+
+<details>
+<summary>Manual configuration</summary>
 
 Install the optional channel dependency:
 
@@ -52,20 +52,30 @@ In the QQ Open Platform, create a bot application and copy the AppID and AppSecr
 
 Omitting `allowFrom` enables pairing-only mode. A new private sender should get a pairing code before normal agent access.
 
-## Run nanobot gateway
+</details>
 
-```bash
-nanobot channels status
-nanobot gateway
-```
+## Apply the settings
+
+In the WebUI, follow any restart prompt and keep the launcher running for the first test. You do not need to start another gateway. For unattended operation afterward, use [background or service mode](../cli-reference.md#gateway).
+
+For manual config changes, restart the existing gateway through its owning terminal, `nanobot gateway restart` for background mode, or its service/container supervisor. If none is running, start `nanobot gateway` and leave it running. Run diagnostic CLI commands in a separate terminal using the same installation and config.
 
 ## Test a message
 
-Send the QQ bot a private message from a sandbox account. It should return a pairing code. Approve it from a trusted local surface:
+Send the QQ bot a private message from a sandbox account. It should return a pairing code. Return to the WebUI pairing prompt and enter the code from your own private chat. Only a matching pending code is approved; do not enter another person's code. Then send your message again.
+
+<details>
+<summary>Terminal-only pairing</summary>
+
+In a separate local terminal, using the same instance:
 
 ```bash
 nanobot agent -m "/pairing approve ABCD-EFGH"
 ```
+
+Replace the example code with your actual code.
+
+</details>
 
 Send the message again after approval.
 

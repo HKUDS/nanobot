@@ -49,6 +49,7 @@ const SETTINGS_NAV_KEYS = [
   "advanced",
 ];
 const LOCALIZED_SETTINGS_COPY_KEYS = [
+  "settings.providers.maskedSecretMissing",
   "settings.backToChat",
   "settings.sidebar.title",
   "settings.sidebar.ariaLabel",
@@ -175,6 +176,22 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.help.codeWrap",
   "settings.help.brandLogos",
   "settings.help.browserNotifications",
+  "settings.nav.notifications",
+  "settings.notifications.scope",
+  "settings.notifications.intro",
+  "settings.notifications.pageRequired",
+  "settings.notifications.privacy",
+  "settings.notifications.revoked",
+  "settings.notifications.retry",
+  "settings.notifications.statusOff",
+  "settings.notifications.statusPermission",
+  "settings.notifications.statusOn",
+  "settings.notifications.statusBlocked",
+  "settings.notifications.statusRevoked",
+  "settings.notifications.statusUnavailable",
+  "settings.notifications.statusWorker",
+  "settings.notifications.statusBusy",
+  "settings.notifications.statusError",
   "settings.notifications.test",
   "settings.notifications.testBody",
   "settings.notifications.waiting",
@@ -661,7 +678,9 @@ describe("webui i18n", () => {
         ...LOCALIZED_CHANNEL_SHELL_KEYS,
         ...LOCALIZED_NEW_SURFACE_KEYS,
       ].filter(
-        (key) => current.get(key) === english.get(key),
+        // “Notifications” is also the native French label.
+        (key) => current.get(key) === english.get(key)
+          && !(locale === "fr" && key === "settings.nav.notifications"),
       );
 
       expect({ locale, leaked }).toEqual({ locale, leaked: [] });

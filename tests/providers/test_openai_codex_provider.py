@@ -159,6 +159,7 @@ async def test_codex_title_omits_effort_even_with_high_chat_reasoning(monkeypatc
     session = sessions.get_or_create("websocket:default-effort-title")
     session.metadata["webui"] = True
     session.add_message("user", "Explain context compaction.")
+    sessions.save(session)
 
     assert await maybe_generate_webui_title(
         sessions=sessions, session_key=session.key,
@@ -166,7 +167,9 @@ async def test_codex_title_omits_effort_even_with_high_chat_reasoning(monkeypatc
     )
     assert len(requests) == 1
     assert "effort" not in requests[0].get("reasoning", {})
-    assert session.metadata["title"] == "Context Compaction"
+    persisted = await sessions.state.read(session.key)
+    assert persisted is not None
+    assert persisted.metadata["title"] == "Context Compaction"
     assert provider.generation.reasoning_effort == "high"
 
 
@@ -207,6 +210,7 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
     session = sessions.get_or_create("websocket:diagnostic-title")
     session.metadata["webui"] = True
     session.add_message("user", "PRIVATE PROMPT MUST NOT APPEAR")
+    sessions.save(session)
     sink = io.StringIO()
     logger.enable("nanobot")
     handler_id = add_console_log_sink(sink)
@@ -221,7 +225,9 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
         logger.remove(handler_id)
 
     assert generated is False
-    assert "title" not in session.metadata
+    persisted = await sessions.state.read(session.key)
+    assert persisted is not None
+    assert "title" not in persisted.metadata
     log, outside_log = sink.getvalue().splitlines()
     assert "purpose=webui_title" not in outside_log
     assert f"session={session.key}" not in outside_log

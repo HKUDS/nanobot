@@ -35,7 +35,7 @@ Automatic compaction does not post lifecycle notices to built-in chat channels b
 
 This file is:
 
-- append-only
+- appended to as conversations are compacted
 - cursor-based
 - optimized for machine consumption first, human inspection second
 
@@ -45,11 +45,13 @@ Each line is a JSON object:
 {"cursor": 42, "timestamp": "2026-04-03 00:02", "content": "- User prefers dark mode\n- Decided to use PostgreSQL"}
 ```
 
+After scheduled or manual Dream runs, nanobot can prune the oldest entries already processed by Dream and atomically rewrite the file. The default retention target is 1000 entries; entries Dream has not processed are retained even when this exceeds the target. The journal is therefore not a permanent archive of every summary.
+
 It is not the final memory. It is the material from which final memory is shaped.
 
 ### Stage 2: Dream
 
-`Dream` is the slower, more thoughtful layer. It runs on a cron schedule by default and can also be triggered manually.
+`Dream` is the slower, more thoughtful layer. It runs on a cron schedule while the gateway is running and Dream is enabled, and can also be triggered manually. A standalone Python SDK instance does not start this scheduler.
 
 Dream reads:
 
@@ -76,12 +78,12 @@ workspace/
 │   └── dream.md         # Optional instructions for how Dream organizes memory
 └── memory/
     ├── MEMORY.md        # Project facts, decisions, and durable context
-    ├── history.jsonl    # Append-only history summaries
+    ├── history.jsonl    # History summaries with bounded retention after Dream
     ├── .cursor          # Consolidator write cursor
     └── .dream_cursor    # Dream consumption cursor
 ```
 
-A selected project may provide its own `AGENTS.md`, but project-local `SOUL.md`, `USER.md`, and `memory/` do not replace the agent-owned files above. This keeps one agent's profile and memory continuous while it works across projects. Use a separate configured agent workspace when identity or memory must be isolated.
+A selected project may provide its own `AGENTS.md`, but project-local `SOUL.md`, `USER.md`, and `memory/` do not replace the agent-owned files above. This keeps one agent's profile and memory continuous while it works across projects. Use a [separate configured agent workspace](multiple-instances.md) when identity or memory must be isolated. A new chat, SDK `session_key`, or selected project does not create separate long-term memory.
 
 These files play different roles:
 
@@ -149,6 +151,22 @@ Memory is not hidden behind the curtain. Users can inspect and guide it.
 
 These commands exist for a reason: automatic memory is powerful, but users should always retain the right to inspect, understand, and restore it.
 
+## Save and Check a Preference
+
+In your existing WebUI or TUI chat, send a specific preference, for example:
+
+```text
+For Acme release notes, use concise bullet points and British spelling.
+```
+
+To consolidate it now, send `/compact` and wait for its completion, then send `/dream` and wait for the completion message. Dream reads compacted history, so running `/dream` immediately after a short conversation without compaction may find nothing new. Model-based consolidation may decide that no durable change is needed.
+
+Use `/dream-log` to review what changed. Inspect `USER.md` and `memory/MEMORY.md` in the configured agent workspace with your local editor, or select that workspace before asking the agent to read them. A Restricted chat in another project may not have permission to read these files directly. A conversational acknowledgement alone does not confirm that a durable file changed. Start a new chat in the same instance and ask which release-note style is saved to check reuse.
+
+To correct a preference, state what should replace the old value, then repeat compaction, Dream, and inspection. You can also edit the durable files directly; review unprocessed history for old conflicting instructions. `/dream-restore` lists versions, and `/dream-restore <sha>` restores the memory state before that change, including other changes made in that version.
+
+For separate clients with private context, create separate [instances](multiple-instances.md). Labelling a fact with a client name helps organization but does not isolate access.
+
 ## Versioned Memory
 
 After Dream changes long-term memory files, nanobot can record that change with `GitStore`.
@@ -184,6 +202,8 @@ To return to nanobot's default behavior, delete `prompts/dream.md` or leave it e
 Each workspace has its own guide. Changing this file does not affect other nanobot workspaces.
 
 ## Configuration
+
+Enable or disable Dream through **Settings → Capabilities → Memory consolidation**. Its frequency, cron override, and model override have no graphical controls; configure those fields directly below.
 
 Dream is configured under `agents.defaults.dream`:
 

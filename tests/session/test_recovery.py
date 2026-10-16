@@ -14,13 +14,12 @@ from nanobot.session.recovery import (
     PENDING_USER_TURN_KEY,
     RECOVERY_METADATA_KEY,
     RUNTIME_CHECKPOINT_KEY,
-    RecoveryActionError,
-    RecoveryCoordinator,
     acknowledge_pending_followups,
     pending_followups,
     record_pending_followup,
 )
 from nanobot.webui import session_list_index, transcript
+from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 
 
 def _persist(manager: SessionManager, session: Session) -> None:
@@ -178,13 +177,13 @@ async def test_scan_loads_only_sessions_that_need_webui_recovery(
 
     coordinator, _, restarted = _coordinator(tmp_path)
     loaded: list[str] = []
-    get_or_create = restarted.get_or_create
+    get_or_create = restarted.state.get
 
-    def tracked_get_or_create(key: str) -> Session:
+    async def tracked_get_or_create(key: str) -> Session:
         loaded.append(key)
-        return get_or_create(key)
+        return await get_or_create(key)
 
-    monkeypatch.setattr(restarted, "get_or_create", tracked_get_or_create)
+    monkeypatch.setattr(restarted.state, "get", tracked_get_or_create)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
         lambda _key: False,

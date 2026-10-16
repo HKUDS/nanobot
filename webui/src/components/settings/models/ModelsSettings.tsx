@@ -4,7 +4,7 @@ import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticM
 import { useModelPresetDrag } from "@/components/settings/models/useModelPresetDrag";
 import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
@@ -48,6 +48,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
+import { ProviderParameterFields, type RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
+import { providerJsonValue } from "@/components/settings/models/providerForm";
 
 export interface AgentSettingsDraft {
   model: string;
@@ -58,6 +60,9 @@ export interface AgentSettingsDraft {
   temperature: number;
   reasoningEffort: string;
   api: ModelAPIConfig | null;
+  extraHeaders: string;
+  extraQuery: string;
+  extraBody: string;
   timezone: string;
   toolHintMaxLength: number;
 }
@@ -99,6 +104,9 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   temperature: 0.1,
   reasoningEffort: "",
   api: null,
+  extraHeaders: "",
+  extraQuery: "",
+  extraBody: "",
   timezone: "UTC",
   toolHintMaxLength: 40,
 };
@@ -123,6 +131,9 @@ export function agentDraftFromPayload(
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
     api: activePreset ? activePreset.api ?? null : payload.agent.api ?? null,
+    extraHeaders: providerJsonValue(activePreset?.extra_headers),
+    extraQuery: providerJsonValue(activePreset?.extra_query),
+    extraBody: providerJsonValue(activePreset?.extra_body),
     timezone: payload.agent.timezone,
     toolHintMaxLength: payload.agent.tool_hint_max_length,
   };
@@ -207,6 +218,7 @@ export function ModelsSettings({
   onConfigureProvider,
   onManageProviders,
   onSave,
+  onSaveRequestSettings,
   onMigrate,
   onBeginCreate,
   onCancelCreate,
@@ -235,6 +247,7 @@ export function ModelsSettings({
   onConfigureProvider: (provider: string, trigger: HTMLButtonElement | null) => void;
   onManageProviders: (trigger: HTMLButtonElement) => void;
   onSave: () => void;
+  onSaveRequestSettings: (values: Partial<RequestParameterDraft>) => Promise<void>;
   onMigrate: () => void;
   onBeginCreate: () => void;
   onCancelCreate: () => void;
@@ -329,6 +342,9 @@ export function ModelsSettings({
       provider,
       model: provider === prev.provider ? prev.model : "",
       api: provider === prev.provider ? prev.api : null,
+      extraHeaders: provider === prev.provider ? prev.extraHeaders : "",
+      extraQuery: provider === prev.provider ? prev.extraQuery : "",
+      extraBody: provider === prev.provider ? prev.extraBody : "",
       modelPreset: clearSuggestedName ? "" : prev.modelPreset,
     }));
   };
@@ -382,6 +398,9 @@ export function ModelsSettings({
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
       api: preset.api ?? null,
+      extraHeaders: providerJsonValue(preset.extra_headers),
+      extraQuery: providerJsonValue(preset.extra_query),
+      extraBody: providerJsonValue(preset.extra_body),
     }));
     setEditorRowKey(rowKey);
     setEditorOpen(true);
@@ -576,6 +595,22 @@ export function ModelsSettings({
                 setForm((prev) => ({ ...prev, ...value }));
               }}
             />
+            {settings.model_request_overrides_supported && (
+              <div className="settings-list-inset space-y-3 py-3">
+                <p className="text-[13px] text-muted-foreground">{t("settings.models.requestOverridesHint")}</p>
+                <ProviderParameterFields
+                  inherit
+                  draft={creating}
+                  disabled={saving || (!creating && dirty)}
+                  onSave={creating ? undefined : onSaveRequestSettings}
+                  fields={(selectedProvider ?? settings.providers.find(
+                    (provider) => provider.name === (resolvedAutomaticAPI?.provider ?? selectedPreset?.resolved_provider),
+                  ))?.advanced_fields ?? []}
+                  form={form}
+                  onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
+                />
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

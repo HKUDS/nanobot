@@ -1,6 +1,6 @@
 """Test websocket subscribe hydration only replays known active turns."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,7 +15,7 @@ async def test_hydrate_after_subscribe_is_quiet_when_no_turn_active():
     channel = WebSocketChannel.__new__(WebSocketChannel)
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
-    channel.gateway.session_manager.read_session_metadata = MagicMock(return_value={})
+    channel.gateway.session_manager.state.read_metadata = AsyncMock(return_value={})
     channel._session_projection = WebUISessionProjection(channel.gateway.session_manager)
     channel._outbound = WebUIOutboundProjector(channel, channel._session_projection)
     channel._turn_models = {}
@@ -43,7 +43,7 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
     channel = WebSocketChannel.__new__(WebSocketChannel)
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
-    channel.gateway.session_manager.read_session_metadata = MagicMock(return_value={})
+    channel.gateway.session_manager.state.read_metadata = AsyncMock(return_value={})
     channel._session_projection = WebUISessionProjection(channel.gateway.session_manager)
     channel._outbound = WebUIOutboundProjector(channel, channel._session_projection)
     channel._turn_models = {}

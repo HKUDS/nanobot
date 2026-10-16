@@ -34,8 +34,8 @@ from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.security.workspace_access import WorkspaceScope, WorkspaceScopeError
 from nanobot.session.manager import SessionManager
-from nanobot.session.recovery import RecoveryActionError
 from nanobot.session.session_handles import (
+    SessionHandle,
     SessionHandleResolver,
 )
 from nanobot.triggers.local_types import LocalTrigger
@@ -95,6 +95,7 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.recovery import RecoveryActionError
 from nanobot.webui.session_automations import (
     all_automations_payload,
     serialize_automation_jobs,
@@ -376,6 +377,7 @@ class GatewayHTTPHandler:
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
         recovery_action: (
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
@@ -434,6 +436,7 @@ class GatewayHTTPHandler:
             channel_runtime_status=channel_runtime_status,
             mcp_runtime_status=mcp_runtime_status,
             mcp_reload=mcp_reload,
+            image_generation_reload=image_generation_reload,
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 
@@ -445,26 +448,6 @@ class GatewayHTTPHandler:
         so remote clients can use the manual server-path picker as well.
         """
         return True
-
-    def workspace_full_access_available(
-        self,
-        connection: Any,
-        headers: Any | None = None,
-    ) -> bool:
-        """Return whether this request may opt into Full Access.
-
-        A reverse proxy can make a remote browser look like a localhost TCP
-        peer. Inspect the original browser headers before granting this
-        capability so proxy-local requests keep the remote restriction.
-        """
-        if self._runtime_surface == "native":
-            return True
-        if headers is None:
-            request = getattr(connection, "request", None)
-            headers = getattr(request, "headers", None)
-        if not isinstance(headers, Mapping):
-            return False
-        return _is_local_browser_request(connection, headers)
 
     # -- Token management ---------------------------------------------------
 
@@ -855,7 +838,7 @@ class GatewayHTTPHandler:
 
         m = re.fullmatch(r"/api/sessions/([^/]+)/subagents", got)
         if m:
-            return self._handle_subagents_get(request, m.group(1))
+            return await self._handle_subagents_get(request, m.group(1))
 
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
@@ -884,7 +867,7 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, str(exc))
         return _http_json_response(result)
 
-    def _handle_subagents_get(self, request: WsRequest, key: str) -> Response:
+    async def _handle_subagents_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         session_key = _decode_api_key(key)
@@ -895,7 +878,7 @@ class GatewayHTTPHandler:
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
         try:
-            statuses = self.subagent_manager.statuses_for_session(session_key)
+            statuses = await self.subagent_manager.read_statuses_for_session(session_key)
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response({
@@ -976,20 +959,47 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
-        payload = await asyncio.to_thread(self._sessions_list_payload)
-        return _http_json_response(
-            payload,
-            accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
-        )
+        accept_encoding = _combined_list_header(request.headers, "Accept-Encoding")
 
-    def _sessions_list_payload(self) -> dict[str, Any]:
+        def render(stored: list[dict[str, Any]]) -> Response | None:
+            payload = self._sessions_list_from_snapshot(stored)
+            if payload is None:
+                return None
+            return _http_json_response(payload, accept_encoding=accept_encoding)
+
+        response = await self.session_manager.state.query_metadata(render)
+        if response is None:
+            handles = await SessionHandleResolver(self.session_manager).alist_all_by_key()
+
+            def render_allocated(stored: list[dict[str, Any]]) -> Response:
+                return _http_json_response(
+                    self._sessions_list_payload(handles, stored), accept_encoding=accept_encoding,
+                )
+
+            response = await self.session_manager.state.query_metadata(render_allocated)
+        return response
+
+    def _sessions_list_from_snapshot(
+        self, stored_sessions: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        assert self.session_manager is not None
+        handles = SessionHandleResolver(self.session_manager).handles_from_metadata(stored_sessions)
+        if handles is None:
+            return None
+        return self._sessions_list_payload(handles, stored_sessions)
+
+    def _sessions_list_payload(
+        self,
+        handles: dict[str, SessionHandle],
+        stored_sessions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         assert self.session_manager is not None
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
-        sessions = list_webui_sessions(self.session_manager)
-        handles = SessionHandleResolver(self.session_manager).list_all_by_key()
+        sessions = list_webui_sessions(self.session_manager, stored_sessions)
         cleaned: list[dict[str, Any]] = []
         default_scope: WorkspaceScope | None = None
+        scopes: dict[str, WorkspaceScope] = {}
         for s in sessions:
             key = s.get("key")
             if not (isinstance(key, str) and is_webui_session_key(key)):
@@ -1010,11 +1020,16 @@ class GatewayHTTPHandler:
             if default_scope is None:
                 default_scope = self.workspaces.default_scope()
             scope_present, raw_scope = indexed_workspace_scope(s)
-            scope = self.workspaces.scope_for_indexed_metadata(
-                raw_scope,
-                scope_present=scope_present,
-                default_scope=default_scope,
-            )
+            if scope_present:
+                scope_key = json.dumps(raw_scope, ensure_ascii=False, sort_keys=True)
+                scope = scopes.get(scope_key)
+                if scope is None:
+                    scope = self.workspaces.scope_for_indexed_metadata(
+                        raw_scope, scope_present=True, default_scope=default_scope,
+                    )
+                    scopes[scope_key] = scope
+            else:
+                scope = default_scope
             row["workspace_scope"] = scope.payload()
             handle = handles.get(key)
             if handle is not None:
@@ -1325,7 +1340,7 @@ class GatewayHTTPHandler:
             for job in automation_jobs:
                 if isinstance(job, LocalTrigger):
                     if self.local_trigger_store is not None:
-                        self.local_trigger_store.delete(job.id)
+                        await asyncio.to_thread(self.local_trigger_store.delete, job.id)
                 elif self.cron_service is not None:
                     self.cron_service.remove_job(job.id)
         draft_deleted = self.workspaces.discard_draft_scope(decoded_key)
@@ -1333,8 +1348,8 @@ class GatewayHTTPHandler:
             await self.discard_session(decoded_key)
         elif self.subagent_manager is not None:
             await self.subagent_manager.cancel_by_session(decoded_key)
-        session_deleted = self.session_manager.delete_session(decoded_key)
-        transcript_deleted = delete_webui_thread(decoded_key)
+        session_deleted = await self.session_manager.state.delete(decoded_key)
+        transcript_deleted = await asyncio.to_thread(delete_webui_thread, decoded_key)
         return _http_json_response(
             {"deleted": bool(draft_deleted or session_deleted or transcript_deleted)}
         )
@@ -1351,7 +1366,7 @@ class GatewayHTTPHandler:
         if got == "/api/webui/automations/result":
             return await self._handle_webui_automation_result(request)
         if got == "/api/webui/automations/chats":
-            return self._handle_webui_automation_chats(request)
+            return await self._handle_webui_automation_chats(request)
         m = re.match(r"^/api/webui/automations/(enable|disable|delete|run|update|change-chat)$", got)
         if m:
             return await self._handle_webui_automation_action(request, m.group(1))
@@ -1403,22 +1418,22 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _automation_chats(self, job: CronJob) -> list[AutomationChat]:
+    async def _automation_chats(self, job: CronJob) -> list[AutomationChat]:
         if self.session_manager is None:
             return []
-        return automation_chats(
+        return await automation_chats(
             job, self.session_manager, self.workspaces,
             self.channel_runtime_status() if self.channel_runtime_status else {},
         )
 
-    def _handle_webui_automation_chats(self, request: WsRequest) -> Response:
+    async def _handle_webui_automation_chats(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         job_id = _query_first(_request_query(request), "id") or ""
         job = self.cron_service.get_job(job_id) if self.cron_service else None
         if job is None or not is_bound_cron_job(job):
             return _http_error(404, "automation has no movable chat")
-        chats = self._automation_chats(job)
+        chats = await self._automation_chats(job)
         current = next((chat for chat in chats
                         if chat.binding.session_key == job.payload.session_key), None)
         return _http_json_response({
@@ -1522,7 +1537,7 @@ class GatewayHTTPHandler:
                 return _http_error(400, "invalid automation chat payload")
             if job.id in self._pending_cron_job_ids_for_all():
                 return _http_error(409, "automation_chat_busy")
-            target = next((chat for chat in self._automation_chats(job)
+            target = next((chat for chat in await self._automation_chats(job)
                            if chat.id == values["target_id"]), None)
             if target is None or not target.available:
                 return _http_error(409, "automation_chat_unavailable")
@@ -1645,14 +1660,14 @@ class GatewayHTTPHandler:
         if got == "/api/webui/skills/install":
             return await self._handle_webui_skill_install(connection, request)
         if got == "/api/webui/skills/update":
-            return self._handle_webui_skill_update(request)
+            return await self._handle_webui_skill_update(request)
         if got == "/api/webui/skills/delete":
-            return self._handle_webui_skill_delete(connection, request)
+            return await self._handle_webui_skill_delete(connection, request)
         if got == "/api/webui/skills":
-            return self._handle_webui_skills(request)
+            return await self._handle_webui_skills(request)
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
         if m:
-            return self._handle_webui_skill_detail(request, m.group(1))
+            return await self._handle_webui_skill_detail(request, m.group(1))
         if got in {"/api/webui/star-prompt/claim", "/api/webui/star-prompt/dismiss"}:
             if not self.check_api_token(request):
                 return _http_error(401, "Unauthorized")
@@ -1679,10 +1694,6 @@ class GatewayHTTPHandler:
         return _http_json_response(
             self.workspaces.payload(
                 can_change_project=self.workspace_project_selection_available(connection),
-                can_use_full_access=self.workspace_full_access_available(
-                    connection,
-                    request.headers,
-                ),
             )
         )
 
@@ -1731,15 +1742,17 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, exc.message)
         return _http_json_response(dict(payload))
 
-    def _handle_webui_skills(self, request: WsRequest) -> Response:
+    async def _load_webui_skills(self) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            webui_skills_payload,
+            self.skills_workspace_path,
+            disabled_skills=set(self.disabled_skills),
+        )
+
+    async def _handle_webui_skills(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        return _http_json_response(
-            webui_skills_payload(
-                self.skills_workspace_path,
-                disabled_skills=self.disabled_skills,
-            )
-        )
+        return _http_json_response(await self._load_webui_skills())
 
     async def _handle_webui_skills_search(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
@@ -1819,10 +1832,7 @@ class GatewayHTTPHandler:
                 self._log.exception("skill installation failed")
                 return _http_error(500, "skill installation failed")
         return _http_json_response({
-            **webui_skills_payload(
-                self.skills_workspace_path,
-                disabled_skills=self.disabled_skills,
-            ),
+            **(await self._load_webui_skills()),
             "last_action": action,
         })
 
@@ -1837,7 +1847,7 @@ class GatewayHTTPHandler:
             self._log.exception("failed to load remote package install policy")
             return False
 
-    def _handle_webui_skill_update(self, request: WsRequest) -> Response:
+    async def _handle_webui_skill_update(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         query = _request_query(request)
@@ -1859,14 +1869,11 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, exc.message)
         self._apply_skill_state()
         return _http_json_response({
-            **webui_skills_payload(
-                self.skills_workspace_path,
-                disabled_skills=self.disabled_skills,
-            ),
+            **(await self._load_webui_skills()),
             "last_action": action,
         })
 
-    def _handle_webui_skill_delete(
+    async def _handle_webui_skill_delete(
         self,
         connection: Any,
         request: WsRequest,
@@ -1889,10 +1896,7 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, exc.message)
         self._apply_skill_state()
         return _http_json_response({
-            **webui_skills_payload(
-                self.skills_workspace_path,
-                disabled_skills=self.disabled_skills,
-            ),
+            **(await self._load_webui_skills()),
             "last_action": action,
         })
 
@@ -1900,7 +1904,7 @@ class GatewayHTTPHandler:
         if self.skill_state_action is not None:
             self.skill_state_action(set(self.disabled_skills))
 
-    def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
+    async def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         from urllib.parse import unquote
@@ -1908,10 +1912,11 @@ class GatewayHTTPHandler:
         name = unquote(raw_name)
         if not name or "/" in name or "\\" in name:
             return _http_error(400, "invalid skill name")
-        payload = webui_skill_detail_payload(
+        payload = await asyncio.to_thread(
+            webui_skill_detail_payload,
             self.skills_workspace_path,
             name,
-            disabled_skills=self.disabled_skills,
+            disabled_skills=set(self.disabled_skills),
         )
         if payload is None:
             return _http_error(404, "skill not found")

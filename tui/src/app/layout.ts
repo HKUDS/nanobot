@@ -1,7 +1,6 @@
 import {
   BoxRenderable,
   RGBA,
-  TextareaRenderable,
   TextRenderable,
   type CliRenderer,
   type PasteEvent,
@@ -9,6 +8,7 @@ import {
 } from "@opentui/core"
 
 import type { QueuePreview } from "../composer/queue-preview"
+import { ComposerTextarea } from "../composer/textarea"
 import type { BranchMenu } from "../menus/branch-menu"
 import type { CommandMenu } from "../menus/command-menu"
 import type { MentionMenu } from "../menus/mention-menu"
@@ -57,7 +57,7 @@ export interface AppLayout {
   shell: BoxRenderable
   title: BoxRenderable
   composerFrame: BoxRenderable
-  composer: TextareaRenderable
+  composer: ComposerTextarea
   status: TextRenderable
   meta: TextRenderable
 }
@@ -116,7 +116,7 @@ export function createAppLayout(
     paddingRight: 1,
     backgroundColor: composerSurface,
   })
-  const composer = new TextareaRenderable(renderer, {
+  const composer = new ComposerTextarea(renderer, {
     id: "nanobot-tui-composer",
     width: "100%",
     minHeight: 1,
@@ -128,10 +128,10 @@ export function createAppLayout(
     focusedTextColor: palette.text,
     backgroundColor: composerSurface,
     focusedBackgroundColor: composerSurface,
+    selectionBg: palette.selection.background,
+    selectionFg: palette.selection.foreground,
     cursorColor: palette.accent,
     syntaxStyle: composerSyntax,
-    // A steady line cursor avoids the block-cell trails produced by some
-    // terminals when a retained full-screen UI redraws around the composer.
     cursorStyle: { style: "line", blinking: false },
     showCursor: true,
     keyBindings: [

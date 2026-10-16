@@ -6,6 +6,7 @@ export type SettingsSectionKey =
   | "overview"
   | "about"
   | "appearance"
+  | "notifications"
   | "models"
   | "capabilities"
   | "image"

@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager
@@ -23,8 +24,11 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import TurnRunStatusChanged
+from nanobot.config import Config
 from nanobot.nanobot import Nanobot
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, SessionManager
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -97,7 +101,7 @@ async def test_sdk_ephemeral_delegation_never_persists_on_later_flush(
     if existing_parent:
         parent.add_message("user", "Earlier durable question")
         loop.sessions.save(parent)
-    before = {path.name: path.read_bytes() for path in loop.sessions.sessions_dir.glob("*.jsonl")}
+    before = loop.sessions.read_session_file(key)
     secret = "private-delegation-marker"
     source = loop.workspace / f"{secret}.txt"
     source.write_text(secret * 1000, encoding="utf-8")
@@ -134,19 +138,18 @@ async def test_sdk_ephemeral_delegation_never_persists_on_later_flush(
         assert result.content == f"Parent conclusion: {secret}"
         assert all(ctx is not None and not ctx.log_content and not ctx.persist_session for ctx in requests)
         assert secret not in "\n".join(logs)
-        assert {path.name: path.read_bytes() for path in loop.sessions.sessions_dir.glob("*.jsonl")} == before
+        assert loop.sessions.read_session_file(key) == before
         assert not list(loop.sessions.sessions_dir.glob("*.checkpoint.json"))
         assert not (loop.workspace / ".nanobot" / "tool-results").exists()
         assert loop.bus.inbound_size == 0
 
         loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Durable answer"))
         await bot.run("Durable follow-up", session_key=key)
-        bot.sessions.flush()
-        saved = "\n".join(path.read_text() for path in loop.sessions.sessions_dir.glob("*.jsonl"))
+        saved = json.dumps(loop.sessions.read_session_file(key))
         assert "Durable answer" in saved
         assert ("Earlier durable question" in saved) is existing_parent
         assert secret not in saved
-        assert len(list(loop.sessions.sessions_dir.glob("*.jsonl"))) == 1
+        assert [row["key"] for row in loop.sessions.list_sessions()] == [key]
     finally:
         loop.stop()
         await asyncio.wait_for(consumer, timeout=2)
@@ -177,11 +180,99 @@ async def test_child_origin_uses_the_channel_turn_identity(loop_factory):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cache_invalidation", ["handles", "eviction"])
+async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
+    tmp_path, monkeypatch, cache_invalidation,
+):
+    monkeypatch.setattr("nanobot.agent.loop._SUBAGENT_TERMINAL_WAIT_SECONDS", 0.01)
+    child_started, release_child, parent_idle = (asyncio.Event() for _ in range(3))
+
+    class Provider(LLMProvider):
+        def __init__(self):
+            super().__init__(provider_name="test")
+            self.parent_calls = 0
+
+        async def chat(self, messages, tools=None, **kwargs):
+            if not any(tool.get("function", {}).get("name") == "subagent" for tool in tools or []):
+                child_started.set()
+                await release_child.wait()
+                return LLMResponse(content="Child findings")
+            self.parent_calls += 1
+            if self.parent_calls == 1:
+                return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                    id="delegate", name="subagent",
+                    arguments={"action": "create", "task": "Inspect config", "wait": False},
+                )])
+            return LLMResponse(content="Parent reply" if self.parent_calls == 2 else "Late follow-up")
+
+        def get_default_model(self):
+            return "test-model"
+
+    workspace = tmp_path / "workspace"
+    sessions_root = tmp_path / "sessions"
+    sessions = SessionManager(workspace, sessions_root=sessions_root)
+    config = Config.model_validate({"agents": {"defaults": {
+        "workspace": str(workspace), "model": "test-model", "sessionTtlMinutes": 0,
+    }}})
+    bus = MessageBus()
+    loop = AgentLoop.from_config(
+        config, bus, provider=Provider(), session_manager=sessions, tool_registry=ToolRegistry(),
+    )
+    session_key = "slack:C1:1234.5678"
+    slack_route = {"thread_ts": "1234.5678", "channel_type": "channel"}
+    thread_metadata = {"slack": {"thread_ts": "1234.5678"}}
+
+    def observe_idle(event):
+        if event.context.session_key == session_key and event.status == "idle":
+            parent_idle.set()
+
+    unsubscribe = bus.subscribe(observe_idle, TurnRunStatusChanged)
+
+    async def next_reply(content):
+        async with asyncio.timeout(5):
+            while True:
+                message = await bus.consume_outbound()
+                if message.content == content and message.event is None:
+                    return message
+
+    consumer = asyncio.create_task(loop.run())
+    try:
+        await bus.publish_inbound(InboundMessage(
+            channel="slack", sender_id="U1", chat_id="C1", content="Delegate this inspection",
+            metadata={"slack": slack_route}, session_key_override=session_key,
+        ))
+        initial_reply = await next_reply("Parent reply")
+        await asyncio.wait_for(child_started.wait(), timeout=5)
+        await asyncio.wait_for(parent_idle.wait(), timeout=5)
+        saved = SessionManager(workspace, sessions_root=sessions_root).get_existing(session_key)
+        assert saved is not None
+        saved_route = saved.metadata["_compaction_route"]
+        if cache_invalidation == "handles":
+            await sessions.state.ensure_session_handles()
+        else:
+            for i in range(SESSION_CACHE_MAX_SIZE + 1):
+                await sessions.state.get_header(f"telegram:other-{i}")
+        release_child.set()
+        late_reply = await next_reply("Late follow-up")
+
+        assert (initial_reply.channel, initial_reply.chat_id) == ("slack", "C1")
+        assert initial_reply.metadata["slack"] == slack_route
+        assert saved_route == {"channel": "slack", "chat_id": "C1", "metadata": thread_metadata}
+        assert (late_reply.channel, late_reply.chat_id) == ("slack", "C1")
+        assert late_reply.metadata == thread_metadata
+    finally:
+        release_child.set()
+        loop.stop()
+        await asyncio.wait_for(consumer, timeout=2)
+        unsubscribe()
+
+
+@pytest.mark.asyncio
 async def test_owner_canonical_fallback_and_absent_context(tmp_path):
     manager, _, ctx = setup(tmp_path)
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="private"))
     task_id = await spawn(manager, ctx)
-    receipt = manager.send(task_id, "owner", "follow-up")
+    receipt = await manager.send(task_id, "owner", "follow-up")
     snapshot = manager.statuses_for_session("owner")[task_id]
     snapshot.state = "cancelled"
     snapshot.owner = "other"
