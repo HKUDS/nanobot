@@ -262,6 +262,10 @@ class TestCmdNewUnifiedSession:
             _cancel_active_tasks=AsyncMock(return_value=0),
             discard_session_file_state=file_state_store.discard,
             llm_runtime=MagicMock(return_value=MagicMock()),
+            # No compact preset configured: the helper must return the fallback.
+            compact_runtime_for_session=MagicMock(
+                side_effect=lambda session, *, fallback=None: fallback
+            ),
             schedule_background=lambda coro: asyncio.ensure_future(coro),
         )
 
@@ -317,7 +321,7 @@ class TestCmdNewUnifiedSession:
             consolidator=SimpleNamespace(archive_session=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
             discard_session_file_state=MagicMock(),
-            runtime_for_session=MagicMock(return_value=MagicMock()),
+            compact_runtime_for_session=MagicMock(return_value=MagicMock()),
             schedule_background=lambda coro: asyncio.ensure_future(coro),
         )
 
