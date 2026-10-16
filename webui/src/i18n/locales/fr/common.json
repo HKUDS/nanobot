@@ -520,8 +520,7 @@
     "notifications": {
       "scope": "Ce navigateur",
       "intro": "Choisissez comment recevoir une alerte à la fin d’une tâche.",
-      "pageRequired": "Gardez cette page ouverte et connectée. Les pages fermées ou suspendues ne peuvent pas recevoir de nouvelles alertes concernant les tâches.",
-      "privacy": "Les notifications du navigateur affichent l’état de la tâche, sans le contenu de la conversation ni les détails des erreurs.",
+      "pageRequired": "Aucune nouvelle alerte si cette page est fermée, suspendue ou déconnectée.",
       "revoked": "L’autorisation d’afficher des notifications a été révoquée. Les notifications sont désormais désactivées. Autorisez-les dans les paramètres du navigateur pour ce site, puis activez-les ici.",
       "retry": "Vérifier à nouveau",
       "statusOff": "Désactivées",

@@ -775,8 +775,7 @@
     "notifications": {
       "scope": "This browser",
       "intro": "Choose how to be notified when a task finishes.",
-      "pageRequired": "Keep this page open and connected. Closed or suspended pages cannot receive new task alerts.",
-      "privacy": "Browser notifications show task status, not conversation content or error details.",
+      "pageRequired": "No new alerts when this page is closed, suspended, or disconnected.",
       "revoked": "Notification permission was revoked. Notifications are now off. Allow notifications in this browser’s site settings, then turn them on here.",
       "retry": "Check again",
       "statusOff": "Off",

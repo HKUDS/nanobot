@@ -13,27 +13,22 @@ export function NotificationSettings({ localPrefs, onChangeLocalPrefs }: {
   return (
     <div className="settings-stack">
       <section>
-        <div className="settings-section-heading flex flex-wrap items-center justify-between gap-2">
-          <SettingsSectionTitle>{t("settings.nav.notifications")}</SettingsSectionTitle>
-          <span className="text-[12px] text-muted-foreground">{t("settings.notifications.scope")}</span>
-        </div>
-        <p className="settings-list-inset mb-3 text-[13px] leading-5 text-muted-foreground">{t("settings.notifications.intro")}</p>
+        <SettingsSectionTitle>{t("settings.notifications.scope")}</SettingsSectionTitle>
         <SettingsGroup>
           <BrowserNotificationSettings localPrefs={localPrefs} onChangeLocalPrefs={onChangeLocalPrefs} />
-          <div>
-            <SettingsRow title={t("settings.rows.notificationSound")}>
-              <ToggleButton checked={localPrefs.notificationSound}
-                onChange={(notificationSound) => onChangeLocalPrefs((previous) => ({ ...previous, notificationSound }))}
-                ariaLabel={t("settings.rows.notificationSound")}
-                label={t(localPrefs.notificationSound ? "settings.values.on" : "settings.values.off")} />
-            </SettingsRow>
-            <p className="settings-list-inset pb-4 text-[12px] leading-5 text-muted-foreground">{t("settings.help.notificationSound")}</p>
+          <div className="settings-list-inset" aria-hidden="true">
+            <div className="border-t border-border/40" />
           </div>
+          <SettingsRow title={t("settings.rows.notificationSound")} description={t("settings.help.notificationSound")}>
+            <ToggleButton checked={localPrefs.notificationSound}
+              onChange={(notificationSound) => onChangeLocalPrefs((previous) => ({ ...previous, notificationSound }))}
+              ariaLabel={t("settings.rows.notificationSound")}
+              label={t(localPrefs.notificationSound ? "settings.values.on" : "settings.values.off")} />
+          </SettingsRow>
         </SettingsGroup>
-        <div className="settings-list-inset mt-4 space-y-1 text-[12px] leading-5 text-muted-foreground">
-          <p>{t("settings.notifications.pageRequired")}</p>
-          <p>{t("settings.notifications.privacy")}</p>
-        </div>
+        <p className="settings-list-inset mt-3 text-[12px] leading-5 text-muted-foreground">
+          {t("settings.notifications.pageRequired")}
+        </p>
       </section>
     </div>
   );

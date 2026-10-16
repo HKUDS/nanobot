@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserNotificationSettings } from "@/components/settings/notifications/BrowserNotificationSettings";
+import { NotificationSettings } from "@/components/settings/notifications/NotificationSettings";
 import { BrowserNotifications } from "@/components/BrowserNotifications";
 import { enableBrowserNotifications, NOTIFICATION_OPEN_EVENT, notificationChatUrl, notificationProblem, showBrowserNotification, taskNoticeKey } from "@/lib/browser-notifications";
 import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
@@ -136,6 +137,21 @@ describe("notification permission and delivery boundary", () => {
 });
 
 describe("notification settings", () => {
+  it("keeps completion sound independent when browser notifications are unavailable", () => {
+    vi.stubGlobal("Notification", undefined);
+    function Page() {
+      const [preferences, setPreferences] = useState(DEFAULT_LOCAL_PREFS);
+      return <NotificationSettings localPrefs={preferences} onChangeLocalPrefs={setPreferences} />;
+    }
+    render(<Page />);
+    expect(screen.getByRole("switch", { name: "Browser notifications" })).toBeDisabled();
+    const sound = screen.getByRole("switch", { name: "Completion sound" });
+    expect(sound).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(sound);
+    expect(sound).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Browser notifications" })).toHaveAttribute("aria-checked", "false");
+  });
+
   it("explains unavailable notification support beside a disabled switch", () => {
     vi.stubGlobal("Notification", undefined);
     render(<Harness />);
@@ -160,7 +176,7 @@ describe("notification settings", () => {
     await screen.findByText(/Submitted to the browser/);
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
   });
 
   it("turns the preference off when permission is revoked on return", async () => {
@@ -169,7 +185,7 @@ describe("notification settings", () => {
     vi.stubGlobal("Notification", { permission: "denied" });
     fireEvent.focus(window);
     expect(screen.getByRole("status")).toHaveTextContent("Notification permission was revoked");
-    expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
     expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
     vi.stubGlobal("Notification", { permission: "granted", requestPermission });
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));

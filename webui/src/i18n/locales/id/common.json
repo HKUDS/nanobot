@@ -520,8 +520,7 @@
     "notifications": {
       "scope": "Browser ini",
       "intro": "Pilih cara menerima notifikasi saat tugas selesai.",
-      "pageRequired": "Biarkan halaman ini terbuka dan tetap terhubung. Halaman yang ditutup atau ditangguhkan tidak dapat menerima notifikasi baru tentang tugas.",
-      "privacy": "Notifikasi browser hanya menampilkan status tugas, bukan isi percakapan atau detail kesalahan.",
+      "pageRequired": "Notifikasi baru tidak diterima jika halaman ditutup, ditangguhkan, atau terputus.",
       "revoked": "Izin notifikasi telah dicabut. Notifikasi kini dinonaktifkan. Izinkan notifikasi di pengaturan situs pada browser ini, lalu aktifkan di sini.",
       "retry": "Periksa lagi",
       "statusOff": "Nonaktif",

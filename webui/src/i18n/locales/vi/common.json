@@ -520,8 +520,7 @@
     "notifications": {
       "scope": "Trình duyệt này",
       "intro": "Chọn cách nhận thông báo khi tác vụ kết thúc.",
-      "pageRequired": "Giữ trang này mở và duy trì kết nối. Trang đã đóng hoặc tạm ngưng không thể nhận thông báo mới về tác vụ.",
-      "privacy": "Thông báo của trình duyệt chỉ hiển thị trạng thái tác vụ, không chứa nội dung hội thoại hay chi tiết lỗi.",
+      "pageRequired": "Không nhận được thông báo mới khi trang này bị đóng, tạm ngưng hoặc mất kết nối.",
       "revoked": "Quyền thông báo đã bị thu hồi. Thông báo hiện đã tắt. Hãy cho phép thông báo trong cài đặt trang web của trình duyệt này, rồi bật tại đây.",
       "retry": "Kiểm tra lại",
       "statusOff": "Đã tắt",

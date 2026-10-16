@@ -589,8 +589,7 @@
     "notifications": {
       "scope": "Este navegador",
       "intro": "Escolha como receber um aviso quando uma tarefa terminar.",
-      "pageRequired": "Mantenha esta página aberta e conectada. Páginas fechadas ou suspensas não podem receber novos avisos de tarefas.",
-      "privacy": "As notificações do navegador mostram o status da tarefa, sem o conteúdo da conversa nem os detalhes de erros.",
+      "pageRequired": "Sem novos alertas se esta página estiver fechada, suspensa ou desconectada.",
       "revoked": "A permissão para notificações foi revogada. Os avisos agora estão desativados. Permita notificações nas configurações deste site no navegador e depois ative-as aqui.",
       "retry": "Verificar novamente",
       "statusOff": "Desativadas",

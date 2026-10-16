@@ -180,7 +180,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.notifications.scope",
   "settings.notifications.intro",
   "settings.notifications.pageRequired",
-  "settings.notifications.privacy",
   "settings.notifications.revoked",
   "settings.notifications.retry",
   "settings.notifications.statusOff",
