@@ -1324,7 +1324,8 @@ describe("ThreadComposer", () => {
     width = 800;
     fireEvent(window, new Event("resize"));
     expect(form).not.toHaveAttribute("data-compact-controls");
-    expect(container.querySelector(".thread-composer-meta")).not.toBeInTheDocument();
+    expect(container.querySelector(".thread-composer-meta")).toBe(meta);
+    expect(meta).toContainElement(access);
     expect(screen.getByRole("textbox")).toBe(input);
     expect(input).toHaveValue("keep this draft");
     expect(container.querySelector(".thread-composer-footer-actions")).toContainElement(screen.getByLabelText("codex"));
@@ -1570,40 +1571,61 @@ describe("ThreadComposer", () => {
     await waitFor(() => expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({ project_path: selectedPath })));
   });
 
-  it("groups the directory and access beside attachments and hides them with workspace controls", () => {
+  it("keeps the directory as read-only context in a thread while access remains editable", async () => {
+    const user = userEvent.setup();
+    const onWorkspaceScopeChange = vi.fn();
     const defaultScope = {
       project_path: "/Users/test/.nanobot/workspace",
       project_name: "workspace",
       access_mode: "full" as const,
       restrict_to_workspace: false,
     };
-    const composer = (workspaceControlsHidden: boolean) => (
+    const composer = (workspaceControlsHidden: boolean, variant: "hero" | "thread" = "hero") => (
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Ask anything..."
-        variant="hero"
+        variant={variant}
         workspaceControlsHidden={workspaceControlsHidden}
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)}
         workspaceControls={{ can_change_project: true }}
-        onWorkspaceScopeChange={vi.fn()}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
       />
     );
     const { container, rerender } = render(composer(false));
     const trigger = screen.getByRole("button", { name: "Switch directory" });
     expect(trigger).toHaveTextContent("workspace");
-    expect(trigger.closest(".thread-composer-footer-primary")).not.toBeNull();
-    expect(trigger.closest(".thread-composer-workspace-group")).toContainElement(screen.getByRole("button", { name: "Workspace access mode: Full Access" }));
-    expect(container.querySelector("[data-composer-workspace-drawer]")).not.toBeInTheDocument();
+    const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
+    const meta = container.querySelector(".thread-composer-meta")!;
+    expect(meta).toContainElement(trigger);
+    expect(meta).toContainElement(access);
+    expect(Array.from(meta.querySelectorAll("button"))).toEqual([access, trigger]);
+    expect(container.querySelector(".thread-composer-surface")!.nextElementSibling).toBe(meta);
     rerender(composer(true));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Workspace access mode: Full Access" })).not.toBeInTheDocument();
     rerender(composer(false));
     expect(screen.getByRole("button", { name: "Switch directory" })).toBeEnabled();
+    rerender(composer(false, "thread"));
+    expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
+    const directoryName = screen.getByText("workspace");
+    expect(container.querySelector(".thread-composer-meta")).toContainElement(directoryName);
+    expect(directoryName.closest("button")).toBeNull();
+    await user.hover(directoryName);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(defaultScope.project_path);
+    await user.click(directoryName);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Workspace access mode: Full Access" }));
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith({
+      ...defaultScope, access_mode: "restricted", restrict_to_workspace: true,
+    });
+    rerender(composer(true, "thread"));
+    expect(screen.queryByText("workspace")).not.toBeInTheDocument();
   });
 
-  it("places the directory left and access right on narrow composers, moving them into the toolbar on desktop", () => {
+  it("keeps workspace controls below the input across composer widths without remounting them", () => {
     let width = 390;
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(() => rect({ width, height: 160 }));
     const defaultScope = { project_path: "/srv/workspace", project_name: "workspace", access_mode: "full" as const };
@@ -1611,19 +1633,16 @@ describe("ThreadComposer", () => {
       workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)} workspaceControls={{ can_change_project: true }} onWorkspaceScopeChange={vi.fn()} />);
     const input = screen.getByRole("textbox");
-    const row = container.querySelector(".thread-composer-workspace-row")!;
+    const row = container.querySelector(".thread-composer-meta")!;
     const trigger = screen.getByRole("button", { name: "Switch directory" });
-    expect(row).toContainElement(trigger);
-    expect(trigger.closest(".ml-auto")).toBeNull();
     const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
-    expect(row).toContainElement(access);
-    expect(access.closest(".ml-auto")).not.toBeNull();
+    expect(Array.from(row.querySelectorAll(".thread-composer-workspace-group button"))).toEqual([access, trigger]);
     width = 800;
     fireEvent(window, new Event("resize"));
-    expect(screen.getByRole("button", { name: "Switch directory" }).closest(".thread-composer-footer-primary")).not.toBeNull();
-    expect(container.querySelector("[data-composer-workspace-drawer]")).not.toBeInTheDocument();
+    expect(container.querySelector(".thread-composer-meta")).toBe(row);
+    expect(screen.getByRole("button", { name: "Switch directory" })).toBe(trigger);
+    expect(screen.getByRole("button", { name: "Workspace access mode: Full Access" })).toBe(access);
     expect(screen.getByRole("textbox")).toBe(input);
-    expect(screen.getAllByRole("button", { name: "Switch directory" })).toHaveLength(1);
   });
 
   it("browses and selects the connected host's project in one dialog on a native client", async () => {

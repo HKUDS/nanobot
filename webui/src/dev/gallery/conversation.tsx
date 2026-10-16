@@ -121,10 +121,10 @@ function WorkspacePreview() {
   const [mode, setMode] = useState<"ready" | "disabled">("ready");
   return <div className="space-y-4">
     <StatePicker label={g("previews.workspace.state")} value={mode} options={["ready", "disabled"]} onChange={setMode} />
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
+      <WorkspaceAccessToggle scope={scope} disabled={mode === "disabled"} onChange={setScope} />
       <WorkspaceProjectPicker isHero scope={scope} defaultScope={projectScope} controls={workspaceCatalog.controls}
         disabled={mode === "disabled"} onLoadProjects={loadExampleProjects} onChange={setScope} />
-      <WorkspaceAccessToggle scope={scope} isHero disabled={mode === "disabled"} onChange={setScope} />
     </div>
     <p role="status" className="text-sm text-muted-foreground">{scope.project_path} · {t(scope.access_mode === "full" ? "thread.composer.workspace.full" : "thread.composer.workspace.default")}</p>
   </div>;
@@ -309,7 +309,7 @@ export const conversationExamples: ComponentExample[] = [
     code: '<ComposerUsagePopover context={{ contextTokens: 18500, contextWindowTokens: 200000 }} rounds={rounds} showLabel />' },
   { title: "previews.workspace.title", files: ["thread/WorkspaceControls"], Preview: WorkspacePreview,
     description: "previews.workspace.description", options: "previews.workspace.options",
-    code: '<WorkspaceProjectPicker isHero scope={scope} defaultScope={defaultScope} controls={controls} onLoadProjects={loadProjects} onChange={setScope} />\n<WorkspaceAccessToggle scope={scope} isHero onChange={setScope} />' },
+    code: '<WorkspaceAccessToggle scope={scope} onChange={setScope} />\n<WorkspaceProjectPicker isHero scope={scope} defaultScope={defaultScope} controls={controls} onLoadProjects={loadProjects} onChange={setScope} />' },
   { title: "previews.navigator.title", files: ["thread/PromptNavigator"], Preview: NavigatorPreview,
     description: "previews.navigator.description", options: "previews.navigator.options",
     code: '<PromptNavigator messages={messages} onJumpToPrompt={jumpToPrompt} />' },
