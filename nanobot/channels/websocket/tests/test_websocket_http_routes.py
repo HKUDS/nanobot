@@ -2374,6 +2374,36 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 
 
 @pytest.mark.asyncio
+async def test_webui_sidebar_state_get_quarantines_unreadable_file(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = _seed_session(tmp_path, key="websocket:sidebar-corrupt")
+    channel = _ch(bus, session_manager=sm, port=29912)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+        state_path = tmp_path / "webui" / "sidebar-state.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text("{not valid json", encoding="utf-8")
+
+        response = await _http_get(
+            "http://127.0.0.1:29912/api/webui/sidebar-state",
+            headers=auth,
+        )
+        assert response.status_code == 409
+        assert "corrupt" in response.text
+        assert not state_path.exists()
+        quarantined = list(state_path.parent.glob("sidebar-state.json.corrupt-*"))
+        assert len(quarantined) == 1
+        assert quarantined[0].read_text(encoding="utf-8") == "{not valid json"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_delete_removes_file(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

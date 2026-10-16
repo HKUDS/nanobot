@@ -233,6 +233,72 @@ def read_webui_sidebar_state() -> dict[str, Any]:
     return normalize_webui_sidebar_state(raw)
 
 
+def load_webui_sidebar_state() -> tuple[dict[str, Any], str | None]:
+    """Serve the persisted sidebar state with an unreadable-file signal.
+
+    Returns ``(state, None)`` whenever the state can be served — including
+    the fresh-install case with no state file, preserving the established
+    empty-store contract. Returns ``(default_webui_sidebar_state(), reason)``
+    with reason ``"corrupt"``, ``"oversized"``, or ``"unreadable"`` when the
+    file exists but cannot be served, so callers can respond with an
+    explicit error instead of silently treating real user data as "no
+    saved state". A corrupt file is quarantined, keeping its bytes
+    inspectable and letting the next successful write start a clean store.
+    """
+    path = webui_sidebar_state_path()
+    if not path.is_file():
+        return default_webui_sidebar_state(), None
+    try:
+        if path.stat().st_size > _MAX_STATE_FILE_BYTES:
+            logger.warning("webui sidebar state too large, ignoring: {}", path)
+            return default_webui_sidebar_state(), "oversized"
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        logger.warning("webui sidebar state is not valid JSON {}: {}", path, e)
+        _quarantine_webui_sidebar_state(path)
+        return default_webui_sidebar_state(), "corrupt"
+    except OSError as e:
+        logger.warning("read webui sidebar state failed {}: {}", path, e)
+        return default_webui_sidebar_state(), "unreadable"
+    return normalize_webui_sidebar_state(raw), None
+
+
+def _quarantine_webui_sidebar_state(path: Path) -> None:
+    """Move an unreadable state file aside instead of letting the next
+    write silently replace it, keeping the original bytes inspectable."""
+    stem = f"{path.name}.corrupt-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+    quarantine = path.with_name(stem)
+    counter = 1
+    while quarantine.exists():
+        quarantine = path.with_name(f"{stem}-{counter}")
+        counter += 1
+    try:
+        os.replace(path, quarantine)
+    except OSError as e:
+        logger.warning("could not quarantine webui sidebar state {}: {}", path, e)
+
+
+def _quarantine_unparseable_webui_sidebar_state(path: Path) -> None:
+    """Preserve an unparseable state file before a write replaces it.
+
+    A write is authorized to replace saved state, but not to silently
+    destroy data that exists yet cannot be read: the unreadable file is
+    moved aside first. Files that cannot be opened at all are left in
+    place; the replace below proceeds either way.
+    """
+    if not path.is_file():
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.warning("webui sidebar state is not valid JSON {}, quarantining before write", path)
+        _quarantine_webui_sidebar_state(path)
+    except OSError:
+        pass
+
+
 def write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     with _SIDEBAR_STATE_WRITE_LOCK:
         return _write_webui_sidebar_state(raw)
@@ -252,6 +318,7 @@ def _write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     path = webui_sidebar_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    _quarantine_unparseable_webui_sidebar_state(path)
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "wb") as f:
         f.write(encoded)
