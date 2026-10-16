@@ -716,7 +716,7 @@
     }
   }
   /* Split content leaves no margin for floating conversation controls. */
-  .thread-workspace:has([data-file-preview-panel]) > * {
+  .thread-preview-layout[data-preview-open] > .thread-conversation {
     --thread-header-position: relative;
   }
   /* Keep room for the 49.5rem message column and controls in the side margin. */
