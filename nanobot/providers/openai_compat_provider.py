@@ -1466,145 +1466,95 @@ class OpenAICompatProvider(LLMProvider):
             return LLMResponse(content=response, finish_reason="stop")
 
         response_map = self._maybe_mapping(response)
-        if response_map is not None:
-            choices = cast(
-                list[object],
-                response_map.get("choices") or [],
+        if response_map is None:
+            raise TypeError(f"Unsupported chat response type: {type(response).__name__}")
+        choices = cast(
+            list[object],
+            response_map.get("choices") or [],
+        )
+        if not choices:
+            content = self._extract_text_content(
+                response_map.get("content") or response_map.get("output_text")
             )
-            if not choices:
-                content = self._extract_text_content(
-                    response_map.get("content") or response_map.get("output_text")
-                )
-                reasoning_content = self._extract_text_content(
-                    response_map.get("reasoning_content")
-                )
-                if content is not None:
-                    return LLMResponse(
-                        content=content,
-                        reasoning_content=reasoning_content,
-                        finish_reason=str(response_map.get("finish_reason") or "stop"),
-                        usage=self._extract_usage(response_map),
-                    )
+            reasoning_content = self._extract_text_content(
+                response_map.get("reasoning_content")
+            )
+            if content is not None:
                 return LLMResponse(
-                    content="Error: API returned empty choices.",
-                    finish_reason="error",
-                    error_kind="empty",
+                    content=content,
+                    reasoning_content=reasoning_content,
+                    finish_reason=str(response_map.get("finish_reason") or "stop"),
+                    usage=self._extract_usage(response_map),
                 )
-
-            choice0 = self._maybe_mapping(choices[0]) or {}
-            msg0 = self._maybe_mapping(choice0.get("message")) or {}
-            content = self._extract_text_content(msg0.get("content"))
-            finish_reason = str(choice0.get("finish_reason") or "stop")
-
-            raw_tool_calls: list[object] = []
-            # StepFun: fallback to reasoning field when content is empty
-            if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
-                content = self._extract_text_content(msg0.get("reasoning"))
-            reasoning_content = msg0.get("reasoning_content")
-            if reasoning_content is None and msg0.get("reasoning"):
-                reasoning_content = self._extract_text_content(msg0.get("reasoning"))
-            # Mistral reasoning models return thinking text inside the content
-            # array; lift it into reasoning_content so the runner records it
-            # under the reasoning trace.
-            spec = getattr(self, "_spec", None)
-            if reasoning_content is None and getattr(spec, "extract_thinking_blocks", False):
-                reasoning_content = self._extract_thinking_content(msg0.get("content"))
-            for ch in choices:
-                ch_map = self._maybe_mapping(ch) or {}
-                m = self._maybe_mapping(ch_map.get("message")) or {}
-                message_tool_calls = cast(object, m.get("tool_calls"))
-                if isinstance(message_tool_calls, list) and message_tool_calls:
-                    raw_tool_calls.extend(
-                        cast(list[object], message_tool_calls)
-                    )
-                    if ch_map.get("finish_reason") in ("tool_calls", "stop"):
-                        finish_reason = str(ch_map["finish_reason"])
-                if not content:
-                    content = self._extract_text_content(m.get("content"))
-                if reasoning_content is None:
-                    reasoning_content = m.get("reasoning_content")
-
-            # Deduplicate tool call IDs (same pattern as streaming path)
-            # Some providers reuse the same ID for parallel tool calls.
-            _seen_tc_ids: set[str] = set()
-            parsed_tool_calls: list[ToolCallRequest] = []
-            for tc in raw_tool_calls:
-                tc_map = self._maybe_mapping(tc) or {}
-                fn = self._maybe_mapping(tc_map.get("function")) or {}
-                args = parse_tool_arguments(fn.get("arguments", {}))
-                ec, prov, fn_prov = _extract_tc_extras(tc)
-                raw_id = str(tc_map.get("id") or _short_tool_id())
-                if not raw_id or raw_id in _seen_tc_ids:
-                    raw_id = _short_tool_id()
-                _seen_tc_ids.add(raw_id)
-                parsed_tool_calls.append(ToolCallRequest(
-                    id=raw_id,
-                    name=str(fn.get("name") or ""),
-                    arguments=args,
-                    extra_content=ec,
-                    provider_specific_fields=prov,
-                    function_provider_specific_fields=fn_prov,
-                ))
-            if not parsed_tool_calls:
-                content, parsed_tool_calls = _extract_text_tool_calls(content)
-
-            return LLMResponse(
-                content=content,
-                tool_calls=parsed_tool_calls,
-                finish_reason=finish_reason,
-                usage=self._extract_usage(response_map),
-                reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
-            )
-
-        if not response.choices:
             return LLMResponse(
                 content="Error: API returned empty choices.",
                 finish_reason="error",
                 error_kind="empty",
             )
 
-        choice = response.choices[0]
-        msg = choice.message
-        content = msg.content
-        finish_reason = choice.finish_reason
+        choice0 = self._maybe_mapping(choices[0]) or {}
+        msg0 = self._maybe_mapping(choice0.get("message")) or {}
+        content = self._extract_text_content(msg0.get("content"))
+        finish_reason = str(choice0.get("finish_reason") or "stop")
 
-        raw_sdk_tool_calls: list[Any] = []
-        for ch in response.choices:
-            m = ch.message
-            if hasattr(m, "tool_calls") and m.tool_calls:
-                raw_sdk_tool_calls.extend(m.tool_calls)
-                if ch.finish_reason in ("tool_calls", "stop"):
-                    finish_reason = ch.finish_reason
-            if not content and m.content:
-                content = m.content
-            if not content and getattr(m, "reasoning", None) and self._spec and self._spec.reasoning_as_content:
-                content = m.reasoning
+        raw_tool_calls: list[object] = []
+        # StepFun: fallback to reasoning field when content is empty
+        if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
+            content = self._extract_text_content(msg0.get("reasoning"))
+        reasoning_content = msg0.get("reasoning_content")
+        if reasoning_content is None and msg0.get("reasoning"):
+            reasoning_content = self._extract_text_content(msg0.get("reasoning"))
+        # Mistral reasoning models return thinking text inside the content
+        # array; lift it into reasoning_content so the runner records it
+        # under the reasoning trace.
+        spec = getattr(self, "_spec", None)
+        if reasoning_content is None and getattr(spec, "extract_thinking_blocks", False):
+            reasoning_content = self._extract_thinking_content(msg0.get("content"))
+        for ch in choices:
+            ch_map = self._maybe_mapping(ch) or {}
+            m = self._maybe_mapping(ch_map.get("message")) or {}
+            message_tool_calls = cast(object, m.get("tool_calls"))
+            if isinstance(message_tool_calls, list) and message_tool_calls:
+                raw_tool_calls.extend(
+                    cast(list[object], message_tool_calls)
+                )
+                if ch_map.get("finish_reason") in ("tool_calls", "stop"):
+                    finish_reason = str(ch_map["finish_reason"])
+            if not content:
+                content = self._extract_text_content(m.get("content"))
+            if reasoning_content is None:
+                reasoning_content = m.get("reasoning_content")
 
-        tool_calls: list[ToolCallRequest] = []
-        for tc in raw_sdk_tool_calls:
-            args = parse_tool_arguments(tc.function.arguments)
+        # Deduplicate tool call IDs (same pattern as streaming path)
+        # Some providers reuse the same ID for parallel tool calls.
+        _seen_tc_ids: set[str] = set()
+        parsed_tool_calls: list[ToolCallRequest] = []
+        for tc in raw_tool_calls:
+            tc_map = self._maybe_mapping(tc) or {}
+            fn = self._maybe_mapping(tc_map.get("function")) or {}
+            args = parse_tool_arguments(fn.get("arguments", {}))
             ec, prov, fn_prov = _extract_tc_extras(tc)
-            tool_calls.append(ToolCallRequest(
-                id=str(getattr(tc, "id", None) or _short_tool_id()),
-                name=tc.function.name,
+            raw_id = str(tc_map.get("id") or _short_tool_id())
+            if not raw_id or raw_id in _seen_tc_ids:
+                raw_id = _short_tool_id()
+            _seen_tc_ids.add(raw_id)
+            parsed_tool_calls.append(ToolCallRequest(
+                id=raw_id,
+                name=str(fn.get("name") or ""),
                 arguments=args,
                 extra_content=ec,
                 provider_specific_fields=prov,
                 function_provider_specific_fields=fn_prov,
             ))
-        if not tool_calls:
-            content, tool_calls = _extract_text_tool_calls(content)
-
-        reasoning_content = getattr(msg, "reasoning_content", None)
-        if reasoning_content is None and getattr(msg, "reasoning", None):
-            reasoning_content = msg.reasoning
+        if not parsed_tool_calls:
+            content, parsed_tool_calls = _extract_text_tool_calls(content)
 
         return LLMResponse(
             content=content,
-            tool_calls=tool_calls,
-            finish_reason=finish_reason or "stop",
-            usage=self._extract_usage(response),
-            reasoning_content=reasoning_content,
+            tool_calls=parsed_tool_calls,
+            finish_reason=finish_reason,
+            usage=self._extract_usage(response_map),
+            reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
         )
 
     @classmethod
@@ -1662,78 +1612,46 @@ class OpenAICompatProvider(LLMProvider):
                 continue
 
             chunk_map = cls._maybe_mapping(chunk)
-            if chunk_map is not None:
-                choices = cast(
-                    list[object],
-                    chunk_map.get("choices") or [],
-                )
-                if not choices:
-                    usage = cls._extract_usage(chunk_map) or usage
-                    text = cls._extract_text_content(
-                        chunk_map.get("content") or chunk_map.get("output_text")
-                    )
-                    if text:
-                        content_parts.append(text)
-                    continue
-                choice = cls._maybe_mapping(choices[0]) or {}
-                if choice.get("finish_reason"):
-                    finish_reason = str(choice["finish_reason"])
-                delta = cls._maybe_mapping(choice.get("delta")) or {}
-                raw_delta_content = delta.get("content")
-                text = cls._extract_text_content(raw_delta_content)
-                if text:
-                    content_parts.append(text)
-                text = cls._extract_text_content(delta.get("reasoning_content"))
-                if not text:
-                    text = cls._extract_text_content(delta.get("reasoning"))
-                if not text:
-                    # Mistral streams thinking inside the content array as
-                    # {"type":"thinking", thinking:[{"type":"text", ...}]}.
-                    text = cls._extract_thinking_content(raw_delta_content)
-                if text:
-                    reasoning_parts.append(text)
-                for idx, tc in enumerate(
-                    cast(
-                        Iterable[object],
-                        delta.get("tool_calls") or [],
-                    )
-                ):
-                    _accum_tc(tc, idx)
-                _accum_legacy_function_call(delta.get("function_call"))
-                usage = cls._extract_usage(chunk_map) or usage
-                continue
-
-            if not chunk.choices:
-                usage = cls._extract_usage(chunk) or usage
-                continue
-            choice = chunk.choices[0]
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
-            delta = choice.delta
-            if delta and delta.content:
-                text = cls._extract_text_content(delta.content)
-                if text:
-                    content_parts.append(text)
-                thinking_text = cls._extract_thinking_content(delta.content)
-                if thinking_text:
-                    reasoning_parts.append(thinking_text)
-            if delta:
-                reasoning = getattr(delta, "reasoning_content", None)
-                if not reasoning:
-                    reasoning = getattr(delta, "reasoning", None)
-                if reasoning:
-                    text = cls._extract_text_content(reasoning)
-                    if text:
-                        reasoning_parts.append(text)
-            delta_tool_calls = (
-                cast(Iterable[object], getattr(delta, "tool_calls", None) or [])
-                if delta
-                else ()
+            if chunk_map is None:
+                raise TypeError(f"Unsupported chat chunk type: {type(chunk).__name__}")
+            choices = cast(
+                list[object],
+                chunk_map.get("choices") or [],
             )
-            for tc in delta_tool_calls:
-                _accum_tc(tc, getattr(tc, "index", 0))
-            if delta:
-                _accum_legacy_function_call(getattr(delta, "function_call", None))
+            if not choices:
+                usage = cls._extract_usage(chunk_map) or usage
+                text = cls._extract_text_content(
+                    chunk_map.get("content") or chunk_map.get("output_text")
+                )
+                if text:
+                    content_parts.append(text)
+                continue
+            choice = cls._maybe_mapping(choices[0]) or {}
+            if choice.get("finish_reason"):
+                finish_reason = str(choice["finish_reason"])
+            delta = cls._maybe_mapping(choice.get("delta")) or {}
+            raw_delta_content = delta.get("content")
+            text = cls._extract_text_content(raw_delta_content)
+            if text:
+                content_parts.append(text)
+            text = cls._extract_text_content(delta.get("reasoning_content"))
+            if not text:
+                text = cls._extract_text_content(delta.get("reasoning"))
+            if not text:
+                # Mistral streams thinking inside the content array as
+                # {"type":"thinking", thinking:[{"type":"text", ...}]}.
+                text = cls._extract_thinking_content(raw_delta_content)
+            if text:
+                reasoning_parts.append(text)
+            for idx, tc in enumerate(
+                cast(
+                    Iterable[object],
+                    delta.get("tool_calls") or [],
+                )
+            ):
+                _accum_tc(tc, idx)
+            _accum_legacy_function_call(delta.get("function_call"))
+            usage = cls._extract_usage(chunk_map) or usage
 
         # Some providers (e.g. Zhipu/GLM) reuse the same tool_call id for
         # parallel tool calls in streaming mode. Deduplicate before building

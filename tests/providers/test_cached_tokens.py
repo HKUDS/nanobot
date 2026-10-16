@@ -2,50 +2,40 @@
 
 from __future__ import annotations
 
+import pytest
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
+
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 
 class FakeUsage:
-    """Mimics an OpenAI SDK usage object (has attributes, not dict keys)."""
+    """Attribute-based fixture for the Anthropic response tests."""
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
 
-class FakePromptDetails:
-    """Mimics prompt_tokens_details sub-object."""
-    def __init__(self, cached_tokens=0, cache_write_tokens=None):
-        self.cached_tokens = cached_tokens
-        self.cache_write_tokens = cache_write_tokens
-
-
-class _FakeSpec:
-    supports_prompt_caching = False
-    model_id_prefix = None
-    strip_model_prefix = False
-    max_completion_tokens = False
-    reasoning_effort = None
-
-
-def _provider():
-    from unittest.mock import MagicMock
-    p = OpenAICompatProvider.__new__(OpenAICompatProvider)
-    p.client = MagicMock()
-    p.spec = _FakeSpec()
-    return p
+def _provider() -> OpenAICompatProvider:
+    return OpenAICompatProvider(api_key="test-key")
 
 
 # Minimal valid choice so _parse reaches _extract_usage.
 _DICT_CHOICE = {"message": {"content": "Hello"}}
 
-class _FakeMessage:
-    content = "Hello"
-    tool_calls = None
 
-
-class _FakeChoice:
-    message = _FakeMessage()
-    finish_reason = "stop"
+def _sdk_response(usage) -> ChatCompletion:
+    return ChatCompletion.model_validate({
+        "id": "chatcmpl-usage",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": "Hello"},
+        }],
+        "usage": usage,
+    })
 
 
 # --- dict-based response (raw JSON / mapping) ---
@@ -152,32 +142,32 @@ def test_extract_usage_missing_is_none():
 
 # --- object-based response (OpenAI SDK Pydantic model) ---
 
-def test_extract_usage_openai_cached_tokens_obj():
-    """prompt_tokens_details.cached_tokens from an SDK object response."""
+@pytest.mark.parametrize("cache_read, cache_write", [(1200, None), (0, 0)])
+def test_extract_usage_openai_cached_tokens_obj(cache_read, cache_write):
+    """SDK prompt token details preserve cache counts, including explicit zero."""
     p = _provider()
-    usage_obj = FakeUsage(
-        prompt_tokens=2000,
-        completion_tokens=300,
-        total_tokens=2300,
-        prompt_tokens_details=FakePromptDetails(cached_tokens=1200),
-    )
-    response = FakeUsage(choices=[_FakeChoice()], usage=usage_obj)
+    response = _sdk_response({
+        "prompt_tokens": 2000,
+        "completion_tokens": 300,
+        "total_tokens": 2300,
+        "prompt_tokens_details": {
+            "cached_tokens": cache_read,
+            "cache_write_tokens": cache_write,
+        },
+    })
     result = p._parse(response)
     assert result.usage is not None
-    assert result.usage.cache_read_tokens == 1200
+    assert result.usage.cache_read_tokens == cache_read
+    assert result.usage.cache_write_tokens == cache_write
 
 
 def test_extract_usage_preserves_reported_total_and_cache_write_obj():
-    usage_obj = FakeUsage(
-        prompt_tokens=15,
-        completion_tokens=18,
-        total_tokens=175,
-        prompt_tokens_details=FakePromptDetails(
-            cached_tokens=0,
-            cache_write_tokens=7,
-        ),
-    )
-    response = FakeUsage(choices=[_FakeChoice()], usage=usage_obj)
+    response = _sdk_response({
+        "prompt_tokens": 15,
+        "completion_tokens": 18,
+        "total_tokens": 175,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 7},
+    })
 
     result = _provider()._parse(response)
 
@@ -191,13 +181,12 @@ def test_extract_usage_preserves_reported_total_and_cache_write_obj():
 def test_extract_usage_deepseek_cached_tokens_obj():
     """prompt_cache_hit_tokens from a DeepSeek SDK object response."""
     p = _provider()
-    usage_obj = FakeUsage(
-        prompt_tokens=1500,
-        completion_tokens=200,
-        total_tokens=1700,
-        prompt_cache_hit_tokens=1200,
-    )
-    response = FakeUsage(choices=[_FakeChoice()], usage=usage_obj)
+    response = _sdk_response({
+        "prompt_tokens": 1500,
+        "completion_tokens": 200,
+        "total_tokens": 1700,
+        "prompt_cache_hit_tokens": 1200,
+    })
     result = p._parse(response)
     assert result.usage is not None
     assert result.usage.cache_read_tokens == 1200
@@ -223,13 +212,12 @@ def test_extract_usage_stepfun_top_level_cached_tokens_dict():
 def test_extract_usage_stepfun_top_level_cached_tokens_obj():
     """StepFun/Moonshot: usage.cached_tokens as SDK object attribute."""
     p = _provider()
-    usage_obj = FakeUsage(
-        prompt_tokens=591,
-        completion_tokens=120,
-        total_tokens=711,
-        cached_tokens=512,
-    )
-    response = FakeUsage(choices=[_FakeChoice()], usage=usage_obj)
+    response = _sdk_response({
+        "prompt_tokens": 591,
+        "completion_tokens": 120,
+        "total_tokens": 711,
+        "cached_tokens": 512,
+    })
     result = p._parse(response)
     assert result.usage is not None
     assert result.usage.cache_read_tokens == 512
@@ -251,6 +239,42 @@ def test_extract_usage_priority_nested_over_top_level_dict():
     result = p._parse(response)
     assert result.usage is not None
     assert result.usage.cache_read_tokens == 100
+
+
+@pytest.mark.parametrize("as_sdk", [False, True], ids=["dict", "sdk"])
+def test_parse_chunks_preserves_usage_only_chunk(as_sdk: bool) -> None:
+    chunks = [
+        {"choices": [{"index": 0, "delta": {"content": "Hello"}, "finish_reason": "stop"}]},
+        {
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 15,
+                "completion_tokens": 18,
+                "total_tokens": 175,
+                "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+            },
+        },
+    ]
+    if as_sdk:
+        chunks = [ChatCompletionChunk.model_validate({
+            "id": "chatcmpl-usage",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "test-model",
+            **chunk,
+        }) for chunk in chunks]
+
+    result = OpenAICompatProvider._parse_chunks(chunks)
+
+    assert result.content == "Hello"
+    assert result.finish_reason == "stop"
+    assert result.usage is not None
+    assert result.usage.input_tokens == 15
+    assert result.usage.output_tokens == 18
+    assert result.usage.total_tokens == 175
+    assert result.usage.reported_tokens == 175
+    assert result.usage.cache_read_tokens == 0
+    assert result.usage.cache_write_tokens == 0
 
 
 def test_anthropic_adds_native_cache_fields_to_logical_input():

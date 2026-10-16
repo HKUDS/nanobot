@@ -5,6 +5,8 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from openai.types.chat import ChatCompletionChunk
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 
 from nanobot.config.schema import ProvidersConfig
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -263,32 +265,29 @@ def test_streaming_thinking_chunks_become_reasoning() -> None:
 
 
 def test_streaming_thinking_chunks_via_sdk_path() -> None:
-    """The SDK-style branch must coerce list-shaped delta.content to text.
+    """SDK chunks with list-shaped delta.content keep text and thinking separate.
 
-    Regression: Mistral's vibe-cli/medium-3-5 streamed delta.content as a
-    list, which was previously appended verbatim to content_parts and blew
-    up later with "can only concatenate str (not list) to str".
+    Mistral's vibe-cli/medium-3-5 streams content as a list. The SDK accepts
+    it through non-strict construction even though its schema declares str.
     """
 
-    class _Delta:
-        def __init__(self, content):
-            self.content = content
-            self.tool_calls = None
-            self.function_call = None
-
-    class _Choice:
-        def __init__(self, content, finish=None):
-            self.delta = _Delta(content)
-            self.finish_reason = finish
-
-    class _Chunk:
-        def __init__(self, content, finish=None):
-            self.choices = [_Choice(content, finish)]
+    def chunk(content, finish=None) -> ChatCompletionChunk:
+        return ChatCompletionChunk(
+            id="chatcmpl-mistral",
+            object="chat.completion.chunk",
+            created=0,
+            model="mistral-medium-3-5",
+            choices=[Choice(
+                index=0,
+                delta=ChoiceDelta.model_construct(content=content),
+                finish_reason=finish,
+            )],
+        )
 
     chunks = [
-        _Chunk([{"type": "thinking", "thinking": [{"type": "text", "text": "ponder"}]}]),
-        _Chunk([{"type": "text", "text": "Hello "}]),
-        _Chunk("world.", finish="stop"),
+        chunk([{"type": "thinking", "thinking": [{"type": "text", "text": "ponder"}]}]),
+        chunk([{"type": "text", "text": "Hello "}]),
+        chunk("world.", finish="stop"),
     ]
     parsed = OpenAICompatProvider._parse_chunks(chunks)
     assert parsed.content == "Hello world."

@@ -13,55 +13,79 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 
 
-def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
+def _fake_chat_response(content: str = "ok") -> ChatCompletion:
     """Build a minimal OpenAI chat completion response."""
-    message = SimpleNamespace(
-        content=content,
-        tool_calls=None,
-        reasoning_content=None,
-    )
-    choice = SimpleNamespace(message=message, finish_reason="stop")
-    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
-    return SimpleNamespace(choices=[choice], usage=usage)
+    return ChatCompletion.model_validate({
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": content},
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    })
 
 
-def _fake_tool_call_response() -> SimpleNamespace:
+def _fake_tool_call_response() -> ChatCompletion:
     """Build a minimal chat response that includes Gemini-style extra_content."""
-    function = SimpleNamespace(
-        name="exec",
-        arguments='{"cmd":"ls"}',
-        provider_specific_fields={"inner": "value"},
-    )
-    tool_call = SimpleNamespace(
-        id="call_123",
-        index=0,
-        type="function",
-        function=function,
-        extra_content={"google": {"thought_signature": "signed-token"}},
-    )
-    message = SimpleNamespace(
-        content=None,
-        tool_calls=[tool_call],
-        reasoning_content=None,
-    )
-    choice = SimpleNamespace(message=message, finish_reason="tool_calls")
-    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
-    return SimpleNamespace(choices=[choice], usage=usage)
+    return ChatCompletion.model_validate({
+        "id": "chatcmpl-tools",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {
+                        "name": "exec",
+                        "arguments": '{"cmd":"ls"}',
+                        "inner": "value",
+                    },
+                    "extra_content": {"google": {"thought_signature": "signed-token"}},
+                }],
+            },
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    })
 
 
-def _fake_tool_call_response_with_arguments(arguments) -> SimpleNamespace:
+def _fake_tool_call_response_with_arguments(arguments: str) -> ChatCompletion:
     """Build a minimal chat response with caller-supplied tool arguments."""
-    function = SimpleNamespace(name="optional_tool", arguments=arguments)
-    tool_call = SimpleNamespace(id="call_123", type="function", function=function)
-    message = SimpleNamespace(content=None, tool_calls=[tool_call], reasoning_content=None)
-    choice = SimpleNamespace(message=message, finish_reason="tool_calls")
-    return SimpleNamespace(choices=[choice], usage=SimpleNamespace())
+    return ChatCompletion.model_validate({
+        "id": "chatcmpl-arguments",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "optional_tool", "arguments": arguments},
+                }],
+            },
+        }],
+    })
 
 
 def _fake_responses_response(content: str = "ok") -> MagicMock:
@@ -94,16 +118,23 @@ def _fake_responses_stream(text: str = "ok"):
     return _stream()
 
 
+def _chat_chunk(delta, finish=None, usage=None) -> ChatCompletionChunk:
+    return ChatCompletionChunk.model_validate({
+        "id": "chatcmpl-stream",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{"index": 0, "finish_reason": finish, "delta": delta}],
+        "usage": usage,
+    })
+
+
 def _fake_chat_stream(text: str = "ok"):
     async def _stream():
-        yield SimpleNamespace(
-            choices=[SimpleNamespace(finish_reason=None, delta=SimpleNamespace(content=text, reasoning_content=None, tool_calls=None))],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[SimpleNamespace(finish_reason="stop", delta=SimpleNamespace(content=None, reasoning_content=None, tool_calls=None))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
+        yield _chat_chunk({"content": text})
+        yield _chat_chunk({}, finish="stop", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })
 
     return _stream()
 
@@ -112,64 +143,12 @@ def _fake_chat_stream_reasoning_chunks():
     """Mimic DeepSeek-style ``chat.completions`` stream: ``reasoning_content`` then ``content``."""
 
     async def _stream():
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content="step1",
-                        reasoning=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content="step2",
-                        reasoning=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content="answer",
-                        reasoning_content=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason="stop",
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=SimpleNamespace(
-                prompt_tokens=10,
-                completion_tokens=5,
-                total_tokens=15,
-            ),
-        )
+        yield _chat_chunk({"reasoning_content": "step1"})
+        yield _chat_chunk({"reasoning_content": "step2"})
+        yield _chat_chunk({"content": "answer"})
+        yield _chat_chunk({}, finish="stop", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })
 
     return _stream()
 
@@ -178,63 +157,19 @@ def _fake_chat_stream_tool_call_chunks():
     """Mimic OpenAI-compatible streaming tool-call argument deltas."""
 
     async def _stream():
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=[
-                            SimpleNamespace(
-                                index=0,
-                                id="call_write",
-                                function=SimpleNamespace(
-                                    name="write_file",
-                                    arguments='{"path":"notes.md","content":"',
-                                ),
-                            )
-                        ],
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=[
-                            SimpleNamespace(
-                                index=0,
-                                id=None,
-                                function=SimpleNamespace(name=None, arguments='line\\n"}'),
-                            )
-                        ],
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason="tool_calls",
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
+        yield _chat_chunk({"tool_calls": [{
+            "index": 0,
+            "id": "call_write",
+            "type": "function",
+            "function": {"name": "write_file", "arguments": '{"path":"notes.md","content":"'},
+        }]})
+        yield _chat_chunk({"tool_calls": [{
+            "index": 0,
+            "function": {"arguments": 'line\\n"}'},
+        }]})
+        yield _chat_chunk({}, finish="tool_calls", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })
 
     return _stream()
 
@@ -243,57 +178,13 @@ def _fake_chat_stream_legacy_function_call_chunks():
     """Mimic older OpenAI-compatible ``delta.function_call`` chunks."""
 
     async def _stream():
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=None,
-                        function_call=SimpleNamespace(
-                            name="write_file",
-                            arguments='{"path":"notes.md","content":"',
-                        ),
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=None,
-                        function_call=SimpleNamespace(
-                            name=None,
-                            arguments='line\\n"}',
-                        ),
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason="function_call",
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=None,
-                        function_call=None,
-                    ),
-                ),
-            ],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
+        yield _chat_chunk({"function_call": {
+            "name": "write_file", "arguments": '{"path":"notes.md","content":"',
+        }})
+        yield _chat_chunk({"function_call": {"arguments": 'line\\n"}'}})
+        yield _chat_chunk({}, finish="function_call", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })
 
     return _stream()
 
