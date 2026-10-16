@@ -100,13 +100,7 @@ def _request_extends_measured(
     measured: list[dict[str, Any]],
     current: list[dict[str, Any]],
 ) -> bool:
-    """Whether the current request still contains every measured message.
-
-    Append-only growth means the request behind a reported usage is a prefix of
-    the next one, so that usage lower-bounds the next request's real prompt
-    size. Any local rewrite (compaction, merge, normalization) breaks the
-    prefix and invalidates the floor.
-    """
+    """Return whether measured messages are an unchanged prefix of the request."""
     return len(current) >= len(measured) and all(
         current[index] == measured[index] for index in range(len(measured))
     )
@@ -492,9 +486,6 @@ class ContextGovernor:
                 messages,
                 tool_definitions,
             )
-            # Local estimators can undershoot the provider's real count. When
-            # the measured request is still contained in this one, its reported
-            # usage is a floor the estimate must not undercut.
             if (
                 usage_prefixes_messages
                 and usage is not None

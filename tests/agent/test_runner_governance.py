@@ -726,7 +726,6 @@ async def test_changed_messages_use_local_estimate_after_reported_usage(monkeypa
 
 
 async def test_reported_usage_floor_triggers_pressure_despite_low_estimate(monkeypatch):
-    """A reported over-budget context must trigger compaction even when tiktoken undershoots."""
     provider = MagicMock(spec=LLMProvider)
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -874,8 +873,6 @@ async def test_reported_usage_floor_stays_idle_below_budget(monkeypatch):
 
 
 async def test_estimated_usage_does_not_apply_reported_floor(monkeypatch):
-    """Only provider-reported usage floors the estimate; locally estimated
-    usage must not, even when its recorded context exceeds the budget."""
     provider = MagicMock(spec=LLMProvider)
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -963,7 +960,6 @@ async def test_estimated_usage_does_not_apply_reported_floor(monkeypatch):
     ],
 )
 def test_request_extends_measured_prefix_cases(measured, current, expected):
-    """Equal, shorter, extended, and diverged payloads are classified exactly."""
     assert _request_extends_measured(measured, current) is expected
 
 
