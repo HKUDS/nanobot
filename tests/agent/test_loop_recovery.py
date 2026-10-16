@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import (
     RECOVERY_METADATA_KEY,
 )
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
+from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 from nanobot.webui.recovery import RecoveryCoordinator
 
 
@@ -64,3 +66,87 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
     await loop._dispatch_one(continuation, asyncio.Queue())
 
     process_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recovery_preserves_request_origin_until_the_next_user_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: tmp_path / "webui")
+    bus = MessageBus()
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    entered = asyncio.Event()
+
+    async def interrupted(**kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=interrupted)
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.turn_delivery_factory = TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(loop.sessions))
+    coordinator = WebuiTurnCoordinator(bus, loop.sessions, loop.schedule_background)
+    request = InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="Inspect configuration",
+        metadata={"webui": True, "webui_turn_id": "user-request", "message_id": "user-message"},
+    )
+    loop.sessions.get_or_create(request.session_key).metadata["title"] = "Configuration"
+    with coordinator.connected():
+        task = asyncio.create_task(loop._process_message(request))
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await loop.aclose()
+
+    bus = MessageBus()
+    sessions = SessionManager(tmp_path)
+    recovery = RecoveryCoordinator(sessions, bus)
+    await recovery.scan()
+    state = sessions.get_or_create(request.session_key).metadata[RECOVERY_METADATA_KEY]
+    assert state["status"] == "awaiting_user"
+    await recovery.handle_action("continue", {"chat_id": "chat", "recovery_id": state["recovery_id"]})
+    continuation = bus.inbound.get_nowait()
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            "delegate", "subagent", {"action": "create", "task": "Inspect configuration", "wait": True},
+        )]),
+        LLMResponse(content="Configuration verified"),
+        LLMResponse(content="Inspection complete"),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            "delegate-next", "subagent", {"action": "create", "task": "Inspect logs", "wait": True},
+        )]),
+        LLMResponse(content="Logs verified"),
+        LLMResponse(content="Log inspection complete"),
+    ])
+    loop = AgentLoop(
+        bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+        session_manager=sessions, recovery_admission=recovery,
+    )
+    loop.turn_delivery_factory = TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(sessions))
+    coordinator = WebuiTurnCoordinator(bus, sessions, loop.schedule_background, recovery=recovery)
+    try:
+        with coordinator.connected():
+            await loop._dispatch_one(continuation, asyncio.Queue())
+        statuses = loop.subagents.statuses_for_session(request.session_key)
+        assert len(statuses) == 1
+        child = next(iter(statuses.values()))
+        assert child.state == "done"
+        assert child.origin_message_id == "user-message"
+        assert child.origin_turn_id == "user-request"
+        assert continuation.metadata["webui_turn_id"] == f"recovery:{state['recovery_id']}"
+        assert sessions.get_or_create(request.session_key).metadata[RECOVERY_METADATA_KEY]["status"] == "recovered"
+        with coordinator.connected():
+            await loop._dispatch_one(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="chat", content="Inspect logs",
+                metadata={"webui": True, "webui_turn_id": "next-request", "message_id": "next-message"},
+            ), asyncio.Queue())
+        statuses = loop.subagents.statuses_for_session(request.session_key)
+        assert {(status.origin_message_id, status.origin_turn_id) for status in statuses.values()} == {
+            ("user-message", "user-request"), ("next-message", "next-request"),
+        }
+    finally:
+        await loop.aclose()

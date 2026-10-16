@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Iterable, Mapping
 from datetime import datetime
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, TypedDict, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -16,6 +16,7 @@ from nanobot.session.manager import Session
 
 RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 PENDING_USER_TURN_KEY = "pending_user_turn"
+REQUEST_ORIGIN_METADATA_KEY = "request_origin"
 RECOVERY_METADATA_KEY = "webui_recovery"
 RECOVERY_INBOUND_METADATA_KEY = "_webui_recovery_id"
 PENDING_FOLLOWUPS_KEY = "pending_user_followups"
@@ -28,6 +29,26 @@ UNCERTAIN_TOOL_PHASES = frozenset({"awaiting_tools"})
 KNOWN_CHECKPOINT_PHASES = frozenset(
     {"final_response", "tools_completed", "awaiting_tools", "error"}
 )
+
+
+class RequestOrigin(TypedDict):
+    message_id: str | None
+    turn_id: str
+
+
+def request_origin_from_metadata(metadata: Mapping[str, Any]) -> RequestOrigin | None:
+    """Read the user request identity retained across internal continuations."""
+    value = metadata.get(REQUEST_ORIGIN_METADATA_KEY)
+    if not isinstance(value, dict):
+        return None
+    origin = cast(dict[str, object], value)
+    message_id = origin.get("message_id")
+    turn_id = origin.get("turn_id")
+    if message_id is not None and not isinstance(message_id, str):
+        return None
+    if not isinstance(turn_id, str) or not turn_id:
+        return None
+    return {"message_id": message_id, "turn_id": turn_id}
 
 
 class RecoveryAdmission(Protocol):

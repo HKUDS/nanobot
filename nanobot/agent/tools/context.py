@@ -37,6 +37,7 @@ class RequestContext:
     runtime: LLMRuntime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     sender_id: str | None = None
+    # The owning request; an internal continuation has its own delivery turn.
     turn_id: str | None = None
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)

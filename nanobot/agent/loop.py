@@ -92,10 +92,13 @@ from nanobot.session.model_selection import (
 from nanobot.session.recovery import (
     PENDING_FOLLOWUP_ID_KEY,
     RECOVERY_INBOUND_METADATA_KEY,
+    REQUEST_ORIGIN_METADATA_KEY,
     RecoveryAdmission,
+    RequestOrigin,
     acknowledge_pending_followups,
     pending_followups,
     record_pending_followup,
+    request_origin_from_metadata,
     restore_pending_interruption,
     restore_runtime_checkpoint,
 )
@@ -730,6 +733,14 @@ class AgentLoop:
 
     async def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
         assert ctx.session is not None
+        origin: RequestOrigin = {
+            "message_id": ctx.msg.metadata.get("message_id"),
+            "turn_id": ctx.delivery.route.turn_id or ctx.turn_id,
+        }
+        if turn_continuation.internal_continuation_inbound(ctx.msg.metadata):
+            origin = request_origin_from_metadata(ctx.session.metadata) or origin
+        elif ctx.original_user_text is not None:
+            ctx.session.metadata[REQUEST_ORIGIN_METADATA_KEY] = origin
         scope = await self.runner.prepare_prompt(
             self.workspace_scopes.for_turn,
             channel=ctx.delivery.route.channel,
@@ -739,14 +750,14 @@ class AgentLoop:
         return RequestContext(
             channel=ctx.delivery.route.channel,
             chat_id=ctx.delivery.route.chat_id,
-            message_id=ctx.msg.metadata.get("message_id"),
+            message_id=origin["message_id"],
             session_key=ctx.session_key,
             original_user_text=ctx.original_user_text,
             runtime=ctx.runtime,
             metadata=dict(ctx.msg.metadata or {}),
             attributes=dict(ctx.attributes),
             sender_id=ctx.msg.sender_id,
-            turn_id=ctx.delivery.route.turn_id or ctx.turn_id,
+            turn_id=origin["turn_id"],
             workspace=scope.project_path,
             workspace_scope=scope,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
