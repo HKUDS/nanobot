@@ -158,6 +158,20 @@ async def test_registry_executes_decorated_tool_end_to_end() -> None:
     assert "Invalid parameters" in err
 
 
+@pytest.mark.parametrize("schema_type", ["integer", ["integer", "null"], ["integer", "string"]])
+def test_integer_schema_accepts_integral_json_numbers(schema_type) -> None:
+    assert Schema.validate_json_schema_value(3.0, {"type": schema_type}) == []
+
+
+async def test_registry_casts_integral_json_number_to_integer() -> None:
+    reg = ToolRegistry()
+    reg.register(DecoratedSampleTool())
+
+    result = await reg.execute("decorated_sample", {"query": "hello", "count": 3.0})
+
+    assert result == "ok:3"
+
+
 def test_validate_params_missing_required() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi"})
