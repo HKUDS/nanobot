@@ -324,6 +324,7 @@ class LLMResponse:
     error_code: str | None = None  # Provider/code semantic, e.g. rate_limit_exceeded.
     error_retry_after_s: float | None = None
     error_should_retry: bool | None = None
+    is_fallback: bool = field(default=False, repr=False)
 
     @property
     def has_tool_calls(self) -> bool:

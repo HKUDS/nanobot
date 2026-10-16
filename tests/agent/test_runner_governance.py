@@ -19,9 +19,10 @@ from nanobot.agent.context_governance import (
     _request_extends_measured,
 )
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
+    GenerationSettings,
     LLMProvider,
     LLMResponse,
     LLMUsage,
@@ -29,6 +30,7 @@ from nanobot.providers.base import (
     ToolCallRequest,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
+from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.runtime_context import public_history_message
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
@@ -767,6 +769,62 @@ async def test_reported_usage_floor_triggers_pressure_despite_low_estimate(monke
     estimate.assert_called_once()
     assert exc_info.value.estimated_tokens == 900
     assert exc_info.value.source == "prior provider usage plus pending messages"
+
+
+async def test_runner_does_not_compact_primary_request_from_fallback_usage(monkeypatch):
+    primary = MagicMock(spec=LLMProvider)
+    primary.provider_name = "primary"
+    primary.generation = GenerationSettings(max_tokens=100)
+    primary.supports_native_compaction.return_value = False
+    primary.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="unavailable", finish_reason="error", error_status_code=503),
+        LLMResponse(content="done", usage=LLMUsage.reported(input_tokens=100, output_tokens=10)),
+    ])
+    fallback = MagicMock(spec=LLMProvider)
+    fallback.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content=None,
+        tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
+        finish_reason="tool_calls",
+        usage=LLMUsage.reported(input_tokens=600, output_tokens=10),
+    ))
+    provider = FallbackProvider(
+        primary=primary,
+        fallback_presets=[ModelPresetConfig(model="backup", max_tokens=100)],
+        provider_factory=lambda _preset: fallback,
+    )
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{
+        "type": "function",
+        "function": {
+            "name": "inspect",
+            "description": "Inspect the project.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }]
+    tools.execute = AsyncMock(return_value="inspection complete")
+    consolidate = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "inspect the project"}],
+        tools=tools,
+        model="primary",
+        context_window_tokens=1_624,
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidate_history=consolidate,
+    ))
+
+    assert result.final_content == "done"
+    assert result.tools_used == ["inspect"]
+    consolidate.assert_not_awaited()
+    assert [usage.input_tokens for usage in result.round_usages] == [600, 100]
+    assert result.usage is not None
+    assert result.usage.input_tokens == 700
 
 
 async def test_reported_usage_floor_stays_idle_below_budget(monkeypatch):

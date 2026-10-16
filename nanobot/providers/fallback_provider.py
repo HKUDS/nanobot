@@ -621,6 +621,7 @@ class FallbackProvider(LLMProvider):
                 )
             finally:
                 await fallback_provider.aclose()
+            fallback_response.is_fallback = True
             if fallback_exception is not None:
                 logger.warning(
                     "Fallback '{}' raised {}",
