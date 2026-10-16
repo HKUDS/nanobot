@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
@@ -148,6 +149,28 @@ describe("Runtime configuration settings", () => {
       "settings.runtime_config.update", { values: { "tools.exec.timeout": 90 } }, 20_000,
     ));
     expect(await screen.findByText("Saved. Restart to apply changes.")).toBeInTheDocument();
+  });
+
+  it("keeps a loaded custom runtime editable when typing through a preset", async () => {
+    const payload = runtimeSettings();
+    requestMutationMock.mockResolvedValue({ ...payload, runtime_config: {
+      ...payload.runtime_config, "tools.exec.timeout": 9000,
+    } });
+    const user = userEvent.setup();
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    const field = screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" });
+
+    await user.clear(field);
+    await user.type(field, "900");
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue(900);
+    await user.type(field, "0");
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue(9000);
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.exec.timeout": 9000 } }, 20_000,
+    ));
   });
 
   it("validates numbers and keeps a failed draft editable", async () => {

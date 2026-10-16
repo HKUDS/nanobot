@@ -67,6 +67,7 @@ export function ShellRuntimeControl({
                 : t("settings.runtimeConfig.commandRuntime.rangeError", { max: maximum.toLocaleString(i18n.language) }));
               return;
             }
+            setCustomSelected(true);
             onChange(next);
           }} />
         <span aria-hidden className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[12px] text-muted-foreground">{unit}</span>
