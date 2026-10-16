@@ -413,6 +413,11 @@ class AgentLoop:
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
         self._pending_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
+        # Sessions with a turn running through process_direct(). Those turns
+        # bypass the bus, so they never appear in _pending_queues above --
+        # without this set the idle-compaction guard would see them as idle
+        # and archive a turn that is still running.
+        self._direct_turn_sessions: set[str] = set()
         self._preserve_inflight_turns_on_shutdown = False
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
@@ -1334,8 +1339,20 @@ class AgentLoop:
         self.auto_compact.check_expired(
             self.schedule_background,
             self.runtime_for_session,
-            active_session_keys=self._pending_queues.keys(),
+            # Direct turns (API, SDK, one-shot CLI, commands) run under the
+            # session lock but never enter _pending_queues, so they have to be
+            # reported here or a long turn gets archived out from under itself.
+            active_session_keys=self._active_session_keys(),
         )
+
+    def _active_session_keys(self) -> set[str]:
+        """Sessions with an in-flight turn, on any admission path.
+
+        Bus turns register in ``_pending_queues``; direct turns
+        (``process_direct``) register in ``_direct_turn_sessions``. Both mean
+        "a turn is running", which is what the idle-compaction guard needs.
+        """
+        return set(self._pending_queues) | getattr(self, "_direct_turn_sessions", ())
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -2552,6 +2569,13 @@ class AgentLoop:
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._get_session_lock(session_key)
+        # Several unit tests build AgentLoop via __new__ and attach only the
+        # attributes the method under test needs, so tolerate a missing set
+        # rather than making this a new hard dependency of process_direct().
+        in_flight = getattr(self, "_direct_turn_sessions", None)
+        if in_flight is None:
+            in_flight = self._direct_turn_sessions = set()
+        in_flight.add(session_key)
         try:
             async with lock:
                 kwargs: dict[str, Any] = {
@@ -2590,6 +2614,8 @@ class AgentLoop:
                     **kwargs,
                 )
         finally:
+            self._direct_turn_sessions = getattr(self, "_direct_turn_sessions", set())
+            self._direct_turn_sessions.discard(session_key)
             await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
             self.runtime_event_publisher.clear_turn(session_key)
 

@@ -932,6 +932,114 @@ class TestProactiveAutoCompact:
         await loop.aclose()
 
     @pytest.mark.asyncio
+    async def test_direct_turn_is_reported_as_active(self, tmp_path):
+        """A turn running through process_direct is not in _pending_queues, but
+        the guard must still see it as active (#6214).
+
+        process_direct is the admission path for the API server, the SDK,
+        one-shot CLI and builtin commands. It takes the session lock and never
+        enqueues, so registering it there is what keeps a long turn from being
+        archived out from under itself.
+        """
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 6, prefix="old")
+        # Past the TTL on purpose: the only thing standing between this
+        # session and an archive is "is a turn running?".
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _blocking_chat(*args, **kwargs):
+            entered.set()
+            await release.wait()
+            return LLMResponse(content="ok", tool_calls=[])
+
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=_blocking_chat)
+        _fake_compact = _make_fake_compact(loop)
+        loop.consolidator.compact_idle_session = _fake_compact
+
+        turn = asyncio.create_task(
+            loop.process_direct("still running", session_key="cli:test")
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+
+            # The direct turn bypasses the bus, so it is not in _pending_queues.
+            assert "cli:test" not in loop._pending_queues
+            assert "cli:test" in loop._active_session_keys()
+
+            await self._run_check_expired(
+                loop, active_session_keys=loop._active_session_keys()
+            )
+            assert _fake_compact.state["count"] == 0
+            # Nothing archived: the 12 seeded turns plus this turn's own user
+            # message are all still there, and no summary checkpoint was added.
+            assert len(loop.sessions.get_or_create("cli:test").messages) == 13
+            assert "_last_summary" not in loop.sessions.get_or_create("cli:test").metadata
+        finally:
+            release.set()
+            await turn
+            await loop.aclose()
+
+    @pytest.mark.asyncio
+    async def test_direct_turn_archives_after_it_completes(self, tmp_path):
+        """Registration is released on completion, so the next idle tick can
+        archive the session normally.
+
+        The direct turn itself is not used to build the expired state — it
+        persists a user message, which refreshes ``updated_at`` and would make
+        the session no longer expired. The release is what is under test.
+        """
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 6, prefix="old")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        _fake_compact = _make_fake_compact(loop)
+        loop.consolidator.compact_idle_session = _fake_compact
+
+        await loop.process_direct("done", session_key="cli:test")
+        assert "cli:test" not in loop._direct_turn_sessions
+        assert "cli:test" not in loop._active_session_keys()
+
+        # The turn refreshed updated_at, so push it back past the TTL to leave
+        # only one question on the table: is the session still registered?
+        session = loop.sessions.get_or_create("cli:test")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        await self._run_check_expired(
+            loop, active_session_keys=loop._active_session_keys()
+        )
+        assert _fake_compact.state["count"] == 1
+        await loop.aclose()
+
+    @pytest.mark.asyncio
+    async def test_direct_turn_released_after_failure(self, tmp_path):
+        """A failed direct turn must not leave the session registered forever.
+
+        A stale entry would disable idle compaction for that session for the
+        lifetime of the process.
+        """
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 2, prefix="old")
+        loop.sessions.save(session)
+
+        loop.provider.chat_stream_with_retry = AsyncMock(
+            side_effect=RuntimeError("provider exploded")
+        )
+        with pytest.raises(RuntimeError, match="provider exploded"):
+            await loop.process_direct("boom", session_key="cli:test")
+
+        assert "cli:test" not in loop._direct_turn_sessions
+        await loop.aclose()
+
+    @pytest.mark.asyncio
     async def test_skip_expired_session_with_active_agent_task(self, tmp_path):
         """Expired session with an active agent task should NOT be archived."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
