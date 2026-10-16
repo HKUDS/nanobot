@@ -14,6 +14,10 @@ import type {
   WorkspaceScopePayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
+import { ClientRunLedger } from "./client-run-ledger";
+import type { CanonicalRunSnapshot, RunEffect, RunObservation } from "./client-run-ledger";
+
+export type { CanonicalRunSnapshot } from "./client-run-ledger";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -165,24 +169,31 @@ export interface NanobotClientOptions {
   maxBackoffMs?: number;
 }
 
-export interface CanonicalRunSnapshot {
-  /** User turn ids present in the canonical transcript page. */
-  observedTurnIds: readonly string[];
-  /** Whether the server still considers the transcript tail active. */
-  hasPendingToolCalls: boolean;
-  /** Exact active turn when supplied by a current gateway. */
-  activeTurnId?: string | null;
-  /** Supplied completion identities are authoritative for lifecycle turns. */
-  completionIdsProvided?: boolean;
-}
-
-type PendingMessageState = "queued" | "sent" | "unknown" | "accepted";
-
-interface PendingMessageSend {
-  chatId: string;
-  turnId: string;
-  startsNewRun: boolean;
-  state: PendingMessageState;
+function runObservation(event: InboundEvent): RunObservation | null {
+  if (!("chat_id" in event) || !event.chat_id) return null;
+  const turnId = "turn_id" in event && typeof event.turn_id === "string" ? event.turn_id : null;
+  const base = { chatId: event.chat_id, turnId, systemCommand: isSystemCommandTurnId(turnId) };
+  switch (event.event) {
+    case "message_accepted":
+    case "user_message": {
+      const activeTurnId = event.active_turn_id ?? (event.starts_turn ? event.turn_id : undefined);
+      return {
+        ...base,
+        kind: event.event === "message_accepted" ? "admission" : "input",
+        ...(activeTurnId ? { owner: { turnId: activeTurnId, startedAt: event.started_at } } : {}),
+      };
+    }
+    case "goal_status":
+      return { ...base, kind: "status", activity: event.status, startedAt: event.started_at };
+    case "turn_end":
+      return { ...base, kind: "completed" };
+    case "error":
+      return { ...base, kind: "rejection" };
+    case "message":
+      return { ...base, kind: "message" };
+    default:
+      return { ...base, kind: "progress" };
+  }
 }
 
 /**
@@ -212,27 +223,9 @@ export class NanobotClient {
   private knownChats = new Set<string>();
   /** Temporary chats are connection-owned and intentionally not reattached. */
   private temporaryChatIds = new Set<string>();
-  /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
-  private runStartedAtByChatId = new Map<string, number>();
-  /** Per-turn clocks let a rejected newer turn fall back without borrowing its timer. */
-  private runStartedAtByTurnKey = new Map<string, number>();
-  /** Monotonic per-chat generation for local sends and observed backend runs. */
-  private runGenerationByChatId = new Map<string, number>();
-  /** Turn associated with the latest generation, retained after idle for reconciliation. */
-  private latestRunTurnIdByChatId = new Map<string, string>();
-  /** Submitted or running turns not yet closed by lifecycle or canonical state. */
-  private unsettledRunTurnIdsByChatId = new Map<string, Set<string>>();
-  /** Correlated WebUI sends retained until protocol/canonical disposition. */
-  private pendingMessageSends = new Map<string, PendingMessageSend>();
-  /** Message sends written to the current socket but not yet acknowledged. */
-  private socketPendingMessageSendKeys = new Set<string>();
-  /** Last application frame written, used only for conservative 1009 attribution. */
-  private lastSocketMessageSendKey: string | null = null;
-  /** Canonically completed turns whose delayed websocket frames must be ignored. */
-  private canonicalCompletedTurnIdsByChatId = new Map<string, Set<string>>();
-  /** Closed run identities; output/ACKs can still arrive after idle or local stop. */
-  private closedRunTurnIdsByChatId = new Map<string, Set<string>>();
-  private static readonly COMPLETED_TURN_FENCE_MAX = 256;
+  private readonly runs = new ClientRunLedger();
+  /** Last tracked application frame written, for conservative transport-error attribution. */
+  private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingChatRequest | null = null;
@@ -309,7 +302,7 @@ export class NanobotClient {
 
   onRunStatus(handler: RunStatusHandler): Unsubscribe {
     this.runStatusHandlers.add(handler);
-    for (const [chatId, startedAt] of this.runStartedAtByChatId) {
+    for (const { chatId, startedAt } of this.runs.activeClocks()) {
       handler(chatId, startedAt);
     }
     return () => {
@@ -327,61 +320,42 @@ export class NanobotClient {
 
   /** Last ``goal_status`` ``started_at`` (unix sec) for *chatId*, if the turn is running. */
   getRunStartedAt(chatId: string): number | null {
-    const v = this.runStartedAtByChatId.get(chatId);
-    return v === undefined ? null : v;
+    return this.runs.view(chatId).startedAt;
   }
 
-  /** Canonical lifecycle turn currently owning the run for *chatId*, if known. */
+  /** Canonical lifecycle turn currently owning the run, retained after completion. */
   getRunTurnId(chatId: string): string | null {
-    return this.latestRunTurnIdByChatId.get(chatId) ?? null;
+    return this.runs.view(chatId).latestTurnId;
   }
 
-  /** Whether a turn has a terminal wire, canonical, or local stop disposition. */
   isRunCompleted(chatId: string, turnId: string): boolean {
-    return this.closedRunTurnIdsByChatId.get(chatId)?.has(turnId) === true
-      || this.canonicalCompletedTurnIdsByChatId.get(chatId)?.has(turnId) === true;
+    return this.runs.isCompleted({ chatId, turnId });
   }
 
-  /** Clear the optimistic run state immediately after the user stops a turn. */
+  /** End the local optimistic run without confirming gateway cancellation. */
   finishRunLocally(chatId: string): void {
-    const unsettled = [...(this.unsettledRunTurnIdsByChatId.get(chatId) ?? [])];
-    const latestTurnId = this.latestRunTurnIdByChatId.get(chatId);
-    if (latestTurnId) this.rememberRunCompletion(chatId, latestTurnId);
-    for (const turnId of unsettled) this.rememberRunCompletion(chatId, turnId);
-    for (const turnId of unsettled) this.settleRunTurn(chatId, turnId);
-    this.latestRunTurnIdByChatId.delete(chatId);
-    if (this.runStartedAtByChatId.delete(chatId)) {
-      this.emitRunStatus(chatId, null);
-    }
+    this.applyRunEffects(this.runs.transition({ kind: "local-stop", chatId }));
   }
 
-  /** Refresh transport policy after bootstrap token renewal. */
   updateMaxFrameBytes(maxFrameBytes?: number): void {
     this.maxFrameBytes = this.normalizeMaxFrameBytes(maxFrameBytes);
   }
 
-  /** Generation captured when an HTTP thread reconciliation starts. */
   getRunGeneration(chatId: string): number {
-    return this.runGenerationByChatId.get(chatId) ?? 0;
+    return this.runs.view(chatId).generation;
   }
 
-  /** Whether a locally submitted lifecycle turn still lacks a terminal disposition. */
   hasUnsettledRun(chatId: string): boolean {
-    return (this.unsettledRunTurnIdsByChatId.get(chatId)?.size ?? 0) > 0;
+    return this.runs.view(chatId).unsettled;
   }
 
-  /** Observe terminal wire facts without subscribing to or attaching a chat. */
   onRunCompletion(handler: RunCompletionHandler): Unsubscribe {
     this.runCompletionHandlers.add(handler);
     return () => this.runCompletionHandlers.delete(handler);
   }
 
-  /** Durable runs that need a canonical disposition after transport recovery. */
   getUnsettledRunChatIds(): string[] {
-    return Array.from(new Set([
-      ...this.unsettledRunTurnIdsByChatId.keys(),
-      ...this.runStartedAtByChatId.keys(),
-    ])).filter((chatId) => !this.temporaryChatIds.has(chatId));
+    return this.runs.unresolvedChatIds().filter((chatId) => !this.temporaryChatIds.has(chatId));
   }
 
   private normalizeMaxFrameBytes(value: number | undefined): number | undefined {
@@ -391,327 +365,39 @@ export class NanobotClient {
     return Math.floor(value);
   }
 
-  private canonicalTurnWillSettle(
-    chatId: string,
-    turnId: string,
-    completed: ReadonlySet<string>,
-    observed: ReadonlySet<string>,
-    snapshot?: CanonicalRunSnapshot,
-  ): boolean {
-    if (completed.has(turnId)) return true;
-    const pending = this.pendingMessageSends.get(this.runSendKey(chatId, turnId));
-    if (snapshot?.completionIdsProvided && pending?.startsNewRun !== false) return false;
-    if (!snapshot || snapshot.activeTurnId === turnId) return false;
-    if (snapshot.hasPendingToolCalls) return false;
-    if (observed.has(turnId)) return true;
-    return pending?.state === "unknown" || pending?.state === "accepted";
-  }
-
-  private settleNonLifecycleCanonicalSends(
-    chatId: string,
-    completed: ReadonlySet<string>,
-    observed: ReadonlySet<string>,
-    snapshot?: CanonicalRunSnapshot,
-  ): void {
-    for (const pending of [...this.pendingMessageSends.values()]) {
-      if (pending.chatId !== chatId || pending.startsNewRun) continue;
-      if (!this.canonicalTurnWillSettle(
-        chatId,
-        pending.turnId,
-        completed,
-        observed,
-        snapshot,
-      )) continue;
-      this.clearPendingMessageSend(chatId, pending.turnId);
-    }
-  }
-
-  private prunePendingInboundTurn(chatId: string, turnId: string): void {
-    const pending = this.pendingInboundByChat.get(chatId);
-    if (!pending) return;
-    const remaining = pending.filter((event) => (
-      !("turn_id" in event)
-      || event.turn_id !== turnId
-    ));
-    if (remaining.length > 0) this.pendingInboundByChat.set(chatId, remaining);
-    else this.pendingInboundByChat.delete(chatId);
-  }
-
-  /**
-   * Pure preflight for canonical reconciliation.
-   *
-   * Unlike ``reconcileCanonicalCompletion``, this does not add completion
-   * fences, prune queued frames, settle turns, or emit run-status updates.
-   */
+  /** Pure preflight; it neither settles runs nor prunes queued frames. */
   canReconcileCanonicalCompletion(
     chatId: string,
     expectedRunGeneration: number,
     completedTurnIds: readonly string[],
     snapshot?: CanonicalRunSnapshot,
   ): boolean {
-    const completed = new Set(this.canonicalCompletedTurnIdsByChatId.get(chatId));
-    for (const turnId of completedTurnIds) {
-      if (turnId) completed.add(turnId);
-    }
-    const observed = new Set(
-      snapshot?.observedTurnIds.filter((turnId) => turnId.length > 0) ?? [],
-    );
-    const willSettle = (turnId: string): boolean => this.canonicalTurnWillSettle(
-      chatId,
-      turnId,
-      completed,
-      observed,
-      snapshot,
-    );
-    const latestRunTurnId = this.latestRunTurnIdByChatId.get(chatId);
-    const latestRunIsRepresented = (
-      typeof latestRunTurnId === "string"
-      && (
-        completed.has(latestRunTurnId)
-        || (
-          observed.has(latestRunTurnId)
-          && willSettle(latestRunTurnId)
-        )
-      )
-    );
-    const unsettledTurnIds = this.unsettledRunTurnIdsByChatId.get(chatId);
-    const hasUnrepresentedTurn = (
-      unsettledTurnIds !== undefined
-      && Array.from(unsettledTurnIds).some((turnId) => !willSettle(turnId))
-    );
-    const hasUnidentifiedActiveRun = (
-      this.runStartedAtByChatId.has(chatId)
-      && latestRunTurnId === undefined
-      && (snapshot === undefined || snapshot.hasPendingToolCalls)
-    );
-    if (hasUnrepresentedTurn || hasUnidentifiedActiveRun) return false;
-    return (
-      this.getRunGeneration(chatId) === expectedRunGeneration
-      || latestRunIsRepresented
-    );
+    return this.runs.canApplyCanonical({
+      chatId, generation: expectedRunGeneration, completedTurnIds, snapshot,
+    });
   }
 
-  /**
-   * Atomically accept an HTTP snapshot as completed if no unrepresented run
-   * started while the request was in flight.
-   *
-   * Completed turn ids are fenced even when the snapshot loses the generation
-   * race: delayed websocket frames for older turns must never mutate newer UI.
-   */
+  /** Preserve explicit completion fences even when a newer run prevents adoption. */
   reconcileCanonicalCompletion(
     chatId: string,
     expectedRunGeneration: number,
     completedTurnIds: readonly string[],
     snapshot?: CanonicalRunSnapshot,
   ): boolean {
-    this.fenceCanonicalCompletedTurns(chatId, completedTurnIds);
-    const fences = this.canonicalCompletedTurnIdsByChatId.get(chatId) ?? new Set<string>();
-
-    if (!this.canReconcileCanonicalCompletion(
-      chatId,
-      expectedRunGeneration,
-      [],
-      snapshot,
-    )) {
-      return false;
-    }
-
-    const completed = new Set(fences);
-    const observed = new Set(
-      snapshot?.observedTurnIds.filter((turnId) => turnId.length > 0) ?? [],
-    );
-    const unsettledTurnIds = this.unsettledRunTurnIdsByChatId.get(chatId);
-    if (unsettledTurnIds) {
-      for (const turnId of [...unsettledTurnIds]) {
-        if (!this.canonicalTurnWillSettle(
-          chatId,
-          turnId,
-          completed,
-          observed,
-          snapshot,
-        )) continue;
-        this.rememberRunCompletion(chatId, turnId);
-        unsettledTurnIds.delete(turnId);
-        this.clearPendingMessageSend(chatId, turnId);
-        this.runStartedAtByTurnKey.delete(this.runSendKey(chatId, turnId));
-      }
-      if (unsettledTurnIds.size === 0) this.unsettledRunTurnIdsByChatId.delete(chatId);
-    }
-    this.settleNonLifecycleCanonicalSends(chatId, completed, observed, snapshot);
-    if (this.runStartedAtByChatId.delete(chatId)) {
-      this.emitRunStatus(chatId, null);
-    }
-    return true;
+    const result = this.runs.applyCanonical({
+      chatId, generation: expectedRunGeneration, completedTurnIds, snapshot,
+    });
+    this.applyRunEffects(result.effects);
+    return result.accepted;
   }
 
-  /** Remember explicit terminal facts even when a history snapshot cannot replace live UI. */
   fenceCanonicalCompletedTurns(chatId: string, completedTurnIds: readonly string[]): void {
-    const fences = this.canonicalCompletedTurnIdsByChatId.get(chatId) ?? new Set<string>();
-    for (const turnId of completedTurnIds) {
-      if (!turnId) continue;
-      fences.add(turnId);
-    }
-    while (fences.size > NanobotClient.COMPLETED_TURN_FENCE_MAX) {
-      const oldest = fences.values().next().value;
-      if (typeof oldest !== "string") break;
-      fences.delete(oldest);
-    }
-    if (fences.size > 0) this.canonicalCompletedTurnIdsByChatId.set(chatId, fences);
-    const pendingInbound = this.pendingInboundByChat.get(chatId);
-    if (pendingInbound) {
-      const remaining = pendingInbound.filter((event) => {
-        const turnId = "turn_id" in event && typeof event.turn_id === "string"
-          ? event.turn_id
-          : null;
-        return turnId === null || !fences.has(turnId);
-      });
-      if (remaining.length > 0) this.pendingInboundByChat.set(chatId, remaining);
-      else this.pendingInboundByChat.delete(chatId);
-    }
+    this.applyRunEffects(this.runs.transition({ kind: "fence", chatId, completedTurnIds }));
   }
 
   /** Last ``goal_state`` payload for *chatId*, if any frame has arrived this connection. */
   getGoalState(chatId: string): GoalStateWsPayload | undefined {
     return this.goalStateByChatId.get(chatId);
-  }
-
-  private advanceRunGeneration(chatId: string, turnId?: string): void {
-    this.runGenerationByChatId.set(chatId, this.getRunGeneration(chatId) + 1);
-    if (turnId) {
-      this.latestRunTurnIdByChatId.set(chatId, turnId);
-      const unsettled = this.unsettledRunTurnIdsByChatId.get(chatId) ?? new Set<string>();
-      unsettled.add(turnId);
-      this.unsettledRunTurnIdsByChatId.set(chatId, unsettled);
-    } else {
-      this.latestRunTurnIdByChatId.delete(chatId);
-    }
-  }
-
-  private settleRunTurn(chatId: string, turnId?: string): void {
-    if (!turnId) return;
-    this.clearPendingMessageSend(chatId, turnId);
-    this.runStartedAtByTurnKey.delete(this.runSendKey(chatId, turnId));
-    const unsettled = this.unsettledRunTurnIdsByChatId.get(chatId);
-    if (!unsettled) return;
-    unsettled.delete(turnId);
-    if (unsettled.size === 0) this.unsettledRunTurnIdsByChatId.delete(chatId);
-  }
-
-  private runSendKey(chatId: string, turnId: string): string {
-    return `${chatId}\u0000${turnId}`;
-  }
-
-  private trackPendingMessageSend(
-    chatId: string,
-    turnId: string,
-    startsNewRun: boolean,
-  ): void {
-    const key = this.runSendKey(chatId, turnId);
-    this.pendingMessageSends.set(key, {
-      chatId,
-      turnId,
-      startsNewRun,
-      state: "queued",
-    });
-  }
-
-  private clearPendingMessageSend(chatId: string, turnId: string): void {
-    const key = this.runSendKey(chatId, turnId);
-    this.pendingMessageSends.delete(key);
-    this.socketPendingMessageSendKeys.delete(key);
-    this.sendQueue = this.sendQueue.filter((frame) => !(
-      frame.type === "message"
-      && frame.chat_id === chatId
-      && frame.turn_id === turnId
-    ));
-  }
-
-  private recordRunAcceptance(chatId: string, turnId?: string): void {
-    if (!turnId) return;
-    const key = this.runSendKey(chatId, turnId);
-    const pending = this.pendingMessageSends.get(key);
-    if (!pending) return;
-    this.socketPendingMessageSendKeys.delete(key);
-    if (!pending.startsNewRun) {
-      this.pendingMessageSends.delete(key);
-      return;
-    }
-    pending.state = "accepted";
-  }
-
-  private recordCanonicalTurnOwnership(
-    ev: Extract<InboundEvent, { event: "message_accepted" | "user_message" }>,
-  ): Extract<InboundEvent, { event: "message_accepted" | "user_message" }> {
-    const activeTurnId = ev.active_turn_id ?? (ev.starts_turn ? ev.turn_id : undefined);
-    if (!activeTurnId) return ev;
-
-    if (this.isRunCompleted(ev.chat_id, activeTurnId)) {
-      // The input is still valid, but its admission-time owner is already closed.
-      // Undo a local new-run guess when this input was actually steering that owner.
-      const pending = ev.turn_id
-        ? this.pendingMessageSends.get(this.runSendKey(ev.chat_id, ev.turn_id))
-        : undefined;
-      if (pending?.startsNewRun && ev.turn_id !== activeTurnId) {
-        this.recordRunRejection(ev.chat_id, ev.turn_id);
-        if (!this.hasUnsettledRun(ev.chat_id)) this.emitRunStatus(ev.chat_id, null);
-      }
-      return { ...ev, active_turn_id: undefined, started_at: undefined, starts_turn: false };
-    }
-
-    // Two clients can optimistically submit while the chat still looks idle.
-    // The gateway admits exactly one owner and classifies the other message as
-    // steering. Replace the local guess before its ACK can preserve the wrong
-    // run identity.
-    if (ev.turn_id && ev.turn_id !== activeTurnId) {
-      const pending = this.pendingMessageSends.get(this.runSendKey(ev.chat_id, ev.turn_id));
-      if (pending?.startsNewRun) this.settleRunTurn(ev.chat_id, ev.turn_id);
-    }
-    if (this.latestRunTurnIdByChatId.get(ev.chat_id) !== activeTurnId) {
-      this.advanceRunGeneration(ev.chat_id, activeTurnId);
-    }
-    if (typeof ev.started_at === "number") {
-      this.runStartedAtByTurnKey.set(
-        this.runSendKey(ev.chat_id, activeTurnId),
-        ev.started_at,
-      );
-      const previous = this.runStartedAtByChatId.get(ev.chat_id);
-      this.runStartedAtByChatId.set(ev.chat_id, ev.started_at);
-      if (previous !== ev.started_at) this.emitRunStatus(ev.chat_id, ev.started_at);
-    }
-    return ev;
-  }
-
-  private recordRunRejection(chatId: string, turnId?: string): void {
-    if (!turnId) return;
-    const rejectedLatest = this.latestRunTurnIdByChatId.get(chatId) === turnId;
-    this.settleRunTurn(chatId, turnId);
-    this.prunePendingInboundTurn(chatId, turnId);
-    if (!rejectedLatest) return;
-
-    const unsettled = this.unsettledRunTurnIdsByChatId.get(chatId);
-    const previousTurnId = unsettled ? Array.from(unsettled).at(-1) : undefined;
-    if (previousTurnId) {
-      this.latestRunTurnIdByChatId.set(chatId, previousTurnId);
-      const previousStartedAt = this.runStartedAtByTurnKey.get(
-        this.runSendKey(chatId, previousTurnId),
-      );
-      const currentStartedAt = this.runStartedAtByChatId.get(chatId);
-      if (previousStartedAt === undefined) {
-        if (this.runStartedAtByChatId.delete(chatId)) {
-          this.emitRunStatus(chatId, null);
-        }
-      } else {
-        this.runStartedAtByChatId.set(chatId, previousStartedAt);
-        if (currentStartedAt !== previousStartedAt) {
-          this.emitRunStatus(chatId, previousStartedAt);
-        }
-      }
-      return;
-    }
-    this.latestRunTurnIdByChatId.delete(chatId);
-    if (this.runStartedAtByChatId.delete(chatId)) {
-      this.emitRunStatus(chatId, null);
-    }
   }
 
   private legacyRejectionTarget(ev: Extract<InboundEvent, { event: "error" }>): {
@@ -724,94 +410,43 @@ export class NanobotClient {
       && ev.chat_id === undefined
       && this.pendingNewChat
     ) return null;
-    const candidates = [...this.pendingMessageSends.values()].filter((pending) => (
-      // A legacy error can only reject a frame currently awaiting its first
-      // server disposition. Accepted or prior-connection unknown sends are
-      // not safe candidates for an uncorrelated frame.
-      pending.state === "sent"
-      && (ev.chat_id === undefined || pending.chatId === ev.chat_id)
-    ));
-    if (candidates.length !== 1) return null;
-    const [candidate] = candidates;
-    if (
-      this.lastSocketMessageSendKey
-      !== this.runSendKey(candidate.chatId, candidate.turnId)
-    ) return null;
-    return { chatId: candidate.chatId, turnId: candidate.turnId };
+    return this.runs.soleSentTurn(this.lastSocketMessageSend, ev.chat_id);
   }
 
-  private uniqueUnsettledTurnId(chatId: string): string | null {
-    const unsettled = this.unsettledRunTurnIdsByChatId.get(chatId);
-    if (!unsettled || unsettled.size !== 1) return null;
-    return unsettled.values().next().value ?? null;
-  }
-
-  private isCanonicalCompletedTurnEvent(chatId: string, ev: InboundEvent): boolean {
-    const turnId = "turn_id" in ev && typeof ev.turn_id === "string" ? ev.turn_id : null;
-    return (
-      turnId !== null
-      && this.canonicalCompletedTurnIdsByChatId.get(chatId)?.has(turnId) === true
-    );
-  }
-
-  private rememberRunCompletion(chatId: string, turnId: string): void {
-    const closed = this.closedRunTurnIdsByChatId.get(chatId) ?? new Set<string>();
-    closed.add(turnId);
-    while (closed.size > NanobotClient.COMPLETED_TURN_FENCE_MAX) {
-      const oldest = closed.values().next().value;
-      if (typeof oldest !== "string") break;
-      closed.delete(oldest);
-    }
-    this.closedRunTurnIdsByChatId.set(chatId, closed);
-  }
-
-  private isSupersededRunCompletion(chatId: string, ev: InboundEvent): boolean {
-    if (
-      ev.event !== "turn_end"
-      && !(ev.event === "goal_status" && ev.status === "idle")
-    ) {
-      return false;
-    }
-    const turnId = "turn_id" in ev && typeof ev.turn_id === "string" ? ev.turn_id : undefined;
-    const latestRunTurnId = this.latestRunTurnIdByChatId.get(chatId);
-    if (turnId === undefined && latestRunTurnId !== undefined) return true;
-    return (
-      turnId !== undefined
-      && latestRunTurnId !== undefined
-      && turnId !== latestRunTurnId
-    );
-  }
-
-  private recordRunCompletion(chatId: string, turnId?: string): void {
-    if (turnId) this.rememberRunCompletion(chatId, turnId);
-    this.settleRunTurn(chatId, turnId);
-    const latestRunTurnId = this.latestRunTurnIdByChatId.get(chatId);
-    const closesCurrentRun = latestRunTurnId === undefined || turnId === latestRunTurnId;
-    if (closesCurrentRun && this.runStartedAtByChatId.delete(chatId)) {
-      this.emitRunStatus(chatId, null);
-    }
-    for (const handler of this.runCompletionHandlers) handler(chatId);
-  }
-
-  private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {
-    if (ev.event === "turn_end") {
-      this.recordRunCompletion(chatId, ev.turn_id);
-      return;
-    }
-    if (ev.event !== "goal_status") return;
-    if (ev.status === "running" && typeof ev.started_at === "number") {
-      this.advanceRunGeneration(chatId, ev.turn_id);
-      if (ev.turn_id) {
-        this.runStartedAtByTurnKey.set(
-          this.runSendKey(chatId, ev.turn_id),
-          ev.started_at,
-        );
+  private applyRunEffects(effects: readonly RunEffect[]): void {
+    for (const effect of effects) {
+      switch (effect.kind) {
+        case "run-status":
+          this.emitRunStatus(effect.chatId, effect.startedAt);
+          break;
+        case "completion":
+          for (const handler of this.runCompletionHandlers) handler(effect.chatId);
+          break;
+        case "discard-send":
+          this.sendQueue = this.sendQueue.filter((frame) => !(
+            frame.type === "message"
+            && frame.chat_id === effect.chatId
+            && frame.turn_id === effect.turnId
+          ));
+          break;
+        case "prune-inbound": {
+          const pending = this.pendingInboundByChat.get(effect.chatId);
+          if (!pending) break;
+          const turnIds = new Set(effect.turnIds);
+          const remaining = pending.filter((event) => (
+            !("turn_id" in event)
+            || typeof event.turn_id !== "string"
+            || !turnIds.has(event.turn_id)
+          ));
+          if (remaining.length > 0) this.pendingInboundByChat.set(effect.chatId, remaining);
+          else this.pendingInboundByChat.delete(effect.chatId);
+          break;
+        }
+        default: {
+          const exhaustive: never = effect;
+          return exhaustive;
+        }
       }
-      const previous = this.runStartedAtByChatId.get(chatId);
-      this.runStartedAtByChatId.set(chatId, ev.started_at);
-      if (previous !== ev.started_at) this.emitRunStatus(chatId, ev.started_at);
-    } else {
-      this.recordRunCompletion(chatId, ev.turn_id);
     }
   }
 
@@ -1110,9 +745,12 @@ export class NanobotClient {
       return false;
     }
     if (options?.turnId && !isSystemCommandTurnId(options.turnId)) {
-      const startsNewRun = options.startsNewRun !== false;
-      if (startsNewRun) this.advanceRunGeneration(chatId, options.turnId);
-      this.trackPendingMessageSend(chatId, options.turnId, startsNewRun);
+      this.applyRunEffects(this.runs.transition({
+        kind: "submit",
+        chatId,
+        turnId: options.turnId,
+        role: options.startsNewRun === false ? "supplement" : "candidate-owner",
+      }));
     }
     this.queueSend(frame);
     return true;
@@ -1219,7 +857,7 @@ export class NanobotClient {
       (parsed.event === "goal_status" || parsed.event === "turn_end")
       && !parsed.turn_id
     ) {
-      const fallbackTurnId = this.uniqueUnsettledTurnId(parsed.chat_id);
+      const fallbackTurnId = this.runs.soleUnsettledTurn(parsed.chat_id);
       if (fallbackTurnId) parsed = { ...parsed, turn_id: fallbackTurnId };
     }
 
@@ -1227,20 +865,20 @@ export class NanobotClient {
     const turnId = "turn_id" in parsed && typeof parsed.turn_id === "string"
       ? parsed.turn_id
       : null;
-    const correlatedChatId = (parsed as { chat_id?: string }).chat_id;
-    // Fence before ownership, clocks, acceptance, or subscribers can mutate state.
-    if (correlatedChatId && this.isCanonicalCompletedTurnEvent(correlatedChatId, parsed)) return;
-    if (
-      correlatedChatId && turnId && this.isRunCompleted(correlatedChatId, turnId)
-      && parsed.event !== "message_accepted" && parsed.event !== "user_message"
-      && parsed.event !== "message" && parsed.event !== "turn_end"
-      && !(parsed.event === "goal_status" && parsed.status === "idle")
-    ) return;
-    if (parsed.event === "message_accepted" || parsed.event === "user_message") {
-      parsed = this.recordCanonicalTurnOwnership(parsed);
+    const correlatedChatId = "chat_id" in parsed ? parsed.chat_id : undefined;
+    const observation = runObservation(parsed);
+    if (observation) {
+      const result = this.runs.observe(observation);
+      this.applyRunEffects(result.effects);
+      if (result.forward === "drop") return;
+      if (
+        result.forward === "without-owner"
+        && (parsed.event === "message_accepted" || parsed.event === "user_message")
+      ) {
+        parsed = { ...parsed, active_turn_id: undefined, started_at: undefined, starts_turn: false };
+      }
     }
     if (parsed.event === "message_accepted") {
-      this.recordRunAcceptance(parsed.chat_id, parsed.turn_id);
       if (!isSystemCommandTurnId(turnId)) {
         this.dispatch(parsed.chat_id, parsed);
       }
@@ -1259,7 +897,6 @@ export class NanobotClient {
     }
 
     if (parsed.event === "error" && correlatedChatId && turnId) {
-      this.recordRunRejection(correlatedChatId, turnId);
       if (parsed.detail !== "workspace_scope_rejected") {
         this.emitError({
           kind: "turn_rejected",
@@ -1269,10 +906,6 @@ export class NanobotClient {
           turnId,
         });
       }
-    } else if (parsed.event !== "error" && correlatedChatId && turnId) {
-      // Lifecycle traffic is also an implicit acceptance signal for clients
-      // connected to an older gateway that doesn't emit message_accepted.
-      this.recordRunAcceptance(correlatedChatId, turnId);
     }
 
     if (parsed.event === "ready") {
@@ -1347,13 +980,9 @@ export class NanobotClient {
       this.pendingNewChat = null;
     }
 
-    const chatId = (parsed as { chat_id?: string }).chat_id;
-    if (chatId) {
-      const supersededRunCompletion = this.isSupersededRunCompletion(chatId, parsed);
-      this.recordGoalStatusForRunStrip(chatId, parsed);
-      if (supersededRunCompletion) return;
-      this.recordGoalStateSnapshot(chatId, parsed);
-      this.dispatch(chatId, parsed);
+    if (correlatedChatId) {
+      this.recordGoalStateSnapshot(correlatedChatId, parsed);
+      this.dispatch(correlatedChatId, parsed);
     }
   }
 
@@ -1439,24 +1068,11 @@ export class NanobotClient {
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;
     // 1009 = Message Too Big (server's max frame guard).
-    const unacknowledged = Array.from(this.socketPendingMessageSendKeys)
-      .map((key) => this.pendingMessageSends.get(key))
-      .filter((pending): pending is PendingMessageSend => pending !== undefined);
     if (event?.code === 1009) {
-      const soleKey = unacknowledged.length === 1
-        ? this.runSendKey(unacknowledged[0].chatId, unacknowledged[0].turnId)
-        : null;
-      if (
-        unacknowledged.length === 1
-        && this.lastSocketMessageSendKey === soleKey
-      ) {
-        const [rejected] = unacknowledged;
-        this.recordRunRejection(rejected.chatId, rejected.turnId);
-        this.emitError({
-          kind: "message_too_big",
-          chatId: rejected.chatId,
-          turnId: rejected.turnId,
-        });
+      const rejected = this.runs.soleSentTurn(this.lastSocketMessageSend);
+      if (rejected) {
+        this.applyRunEffects(this.runs.transition({ kind: "reject", ...rejected }));
+        this.emitError({ kind: "message_too_big", ...rejected });
         this.dispatch(rejected.chatId, {
           event: "error",
           detail: "message_too_big",
@@ -1464,19 +1080,12 @@ export class NanobotClient {
           turn_id: rejected.turnId,
         });
       } else {
-        // A close frame identifies no offending application message. Never
-        // roll back multiple chats merely because they shared one socket.
+        // A close frame cannot identify one message among multiplexed sends.
         this.emitError({ kind: "message_too_big" });
       }
     }
-    for (const pending of unacknowledged) {
-      const current = this.pendingMessageSends.get(
-        this.runSendKey(pending.chatId, pending.turnId),
-      );
-      if (current?.state === "sent") current.state = "unknown";
-    }
-    this.socketPendingMessageSendKeys.clear();
-    this.lastSocketMessageSendKey = null;
+    this.applyRunEffects(this.runs.transition({ kind: "transport-lost" }));
+    this.lastSocketMessageSend = null;
     if (!willReconnect) {
       this.setStatus("closed");
       return;
@@ -1580,28 +1189,13 @@ export class NanobotClient {
     this.knownChats.delete(chatId);
     this.chatHandlers.delete(chatId);
     this.pendingInboundByChat.delete(chatId);
-    const wasRunning = this.runStartedAtByChatId.delete(chatId);
-    this.runGenerationByChatId.delete(chatId);
-    this.latestRunTurnIdByChatId.delete(chatId);
-    this.unsettledRunTurnIdsByChatId.delete(chatId);
-    this.canonicalCompletedTurnIdsByChatId.delete(chatId);
-    this.closedRunTurnIdsByChatId.delete(chatId);
+    const effects = this.runs.transition({ kind: "forget", chatId });
     this.goalStateByChatId.delete(chatId);
-    for (const key of [...this.runStartedAtByTurnKey.keys()]) {
-      if (key.startsWith(`${chatId}\u0000`)) this.runStartedAtByTurnKey.delete(key);
-    }
-    for (const [key, pending] of [...this.pendingMessageSends]) {
-      if (pending.chatId !== chatId) continue;
-      this.pendingMessageSends.delete(key);
-      this.socketPendingMessageSendKeys.delete(key);
-    }
     this.sendQueue = this.sendQueue.filter((frame) => (
       !("chat_id" in frame) || frame.chat_id !== chatId
     ));
-    if (this.lastSocketMessageSendKey?.startsWith(`${chatId}\u0000`)) {
-      this.lastSocketMessageSendKey = null;
-    }
-    if (wasRunning) this.emitRunStatus(chatId, null);
+    if (this.lastSocketMessageSend?.chatId === chatId) this.lastSocketMessageSend = null;
+    this.applyRunEffects(effects);
   }
 
   private frameFitsTransport(frame: Outbound): boolean {
@@ -1613,14 +1207,12 @@ export class NanobotClient {
     if (!this.socket) return;
     try {
       this.socket.send(JSON.stringify(frame));
-      this.lastSocketMessageSendKey = null;
+      this.lastSocketMessageSend = null;
       if (frame.type === "message" && frame.turn_id) {
-        const key = this.runSendKey(frame.chat_id, frame.turn_id);
-        const pending = this.pendingMessageSends.get(key);
-        if (pending) {
-          pending.state = "sent";
-          this.socketPendingMessageSendKeys.add(key);
-          this.lastSocketMessageSendKey = key;
+        const ref = { chatId: frame.chat_id, turnId: frame.turn_id };
+        if (this.runs.hasPendingSend(ref)) {
+          this.applyRunEffects(this.runs.transition({ kind: "written", ...ref }));
+          this.lastSocketMessageSend = ref;
         }
       }
     } catch {

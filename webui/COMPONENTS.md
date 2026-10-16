@@ -45,6 +45,8 @@ Channel fixture fields, defaults, and requirements come from the Python channel 
 
 Supporting hooks and display-model helpers stay near the feature that owns them. Common theme tokens and reusable CSS treatments live in `src/globals.css`, `tailwind.config.js`, and the relevant `ui/` modules. The component inventory lists `.tsx` modules; pure `.ts` helpers remain discoverable through their callers and source imports.
 
+`NanobotClient` adapts WebSocket frames into observations for its `ClientRunLedger`. The ledger owns each chat's message delivery, run identities, clocks, and completion records, and returns effects for the client to apply to its queues and subscribers. A dropped connection makes unconfirmed delivery unknown while durable runs remain unresolved. Wire completion still permits late final messages; canonical completion records suppress matching top-level turn events. `useNanobotStream` owns message projection and render batching, while `ThreadShell` adopts canonical history and confirms completion after the messages commit.
+
 ## Choose an existing component
 
 - Check the gallery and current callers before creating a control. Different labels, colors, or sizes usually call for an existing component's options. `Button` already has appearance and size variants; `Input` and `SearchInput` share the input implementation.

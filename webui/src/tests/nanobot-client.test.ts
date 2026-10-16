@@ -1511,6 +1511,60 @@ describe("NanobotClient", () => {
     await expect(pending).rejects.toThrow("message_rejected:invalid_command");
   });
 
+  it.each(["progress", "tool_hint", "reasoning"] as const)(
+    "delivers a delayed %s message after completion without reopening the turn",
+    (kind) => {
+      const client = new NanobotClient({
+        url: "ws://test", reconnect: false,
+        socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+      });
+      const handler = vi.fn();
+      client.onChat("chat-late", handler);
+      client.connect();
+      const socket = lastSocket();
+      socket.fakeOpen();
+      socket.fakeMessage({
+        event: "goal_status", chat_id: "chat-late", turn_id: "turn-late",
+        status: "running", started_at: 123,
+      });
+      expect(client.getRunStartedAt("chat-late")).toBe(123);
+      socket.fakeMessage({ event: "turn_end", chat_id: "chat-late", turn_id: "turn-late" });
+      const message = {
+        event: "message", chat_id: "chat-late", turn_id: "turn-late", kind, text: "Late detail",
+      };
+      socket.fakeMessage(message);
+
+      expect(handler).toHaveBeenLastCalledWith(message);
+      expect(client.isRunCompleted("chat-late", "turn-late")).toBe(true);
+      expect(client.getRunStartedAt("chat-late")).toBeNull();
+      expect(client.hasUnsettledRun("chat-late")).toBe(false);
+      client.close();
+    },
+  );
+
+  it("settles running status without a start timestamp", () => {
+    const client = new NanobotClient({
+      url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    client.sendMessage("chat-legacy", "task", undefined, { turnId: "turn-legacy" });
+    expect(client.hasUnsettledRun("chat-legacy")).toBe(true);
+    const completed = vi.fn();
+    client.onRunCompletion(completed);
+    socket.fakeMessage({
+      event: "goal_status", chat_id: "chat-legacy", turn_id: "turn-legacy", status: "running",
+    });
+
+    expect(completed).toHaveBeenCalledWith("chat-legacy");
+    expect(client.isRunCompleted("chat-legacy", "turn-legacy")).toBe(true);
+    expect(client.hasUnsettledRun("chat-legacy")).toBe(false);
+    expect(client.getRunTurnId("chat-legacy")).toBe("turn-legacy");
+    client.close();
+  });
+
   it("ignores a delayed idle event from an older turn after a new run starts", () => {
     const client = new NanobotClient({
       url: "ws://test",
