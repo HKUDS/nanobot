@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent import autocompact
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
@@ -14,7 +15,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.events import NO_EVENTS
-from nanobot.providers.base import LLMResponse
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.runtime_context import public_history_message
 from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 
@@ -150,6 +151,86 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
     assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
     assert loop.bus.outbound.empty()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_tool", [False, True])
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_idle_scan_skips_direct_turn_until_dispatch_lock_released(
+    tmp_path, monkeypatch, with_tool, cancel,
+):
+    loop = _make_loop(tmp_path)
+    key = "cli:direct-idle"
+    session = loop.sessions.get_or_create(key)
+    _add_turns(session, 1)
+    loop.sessions.save(session)
+    sample = tmp_path / "sample.txt"
+    sample.write_text("tool result fixture", encoding="utf-8")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def chat(**kwargs):
+        nonlocal calls
+        calls += 1
+        if with_tool and calls == 1:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(
+                id="read-idle", name="read_file", arguments={"path": str(sample)},
+            )])
+        entered.set()
+        await release.wait()
+        return LLMResponse(content="final answer", tool_calls=[])
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=chat)
+    loop.consolidator.archive_session = AsyncMock(return_value="Idle summary.")
+    clock_now = datetime.now()
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock_now
+
+    monkeypatch.setattr(autocompact, "datetime", Clock)
+    task = asyncio.create_task(loop.process_direct("new user", session_key=key))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        # Advance only the idle scanner's clock; checkpointing and saves remain real.
+        clock_now += timedelta(minutes=16)
+        loop._next_idle_compact_check_at = 0
+        loop._check_expired_sessions_if_due()
+        await _drain_background_tasks(loop)
+        loop.consolidator.archive_session.assert_not_awaited()
+
+        if cancel:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            release.set()
+            await asyncio.wait_for(task, timeout=5)
+            persisted = loop.sessions.get_or_create(key)
+            assert any(m.get("content") == "final answer" for m in persisted.messages)
+            if with_tool:
+                assert any(
+                    m["role"] == "tool" and "tool result fixture" in m.get("content", "")
+                    for m in persisted.messages
+                )
+
+        clock_now += timedelta(minutes=16)
+        loop._next_idle_compact_check_at = 0
+        loop._check_expired_sessions_if_due()
+        await _drain_background_tasks(loop)
+        loop.consolidator.archive_session.assert_awaited_once()
+        loop.sessions.invalidate(key)
+        persisted = loop.sessions.get_or_create(key)
+        assert persisted.last_archived > 0
+        assert persisted.metadata["_last_summary"]["text"] == "Idle summary."
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await loop.aclose()
 
 
 class TestSessionTTLConfig:
