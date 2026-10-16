@@ -67,6 +67,61 @@ describe("useSidebarState", () => {
     }));
   });
 
+  it.each([
+    { outcome: "fails", status: 503 },
+    { outcome: "returns an older snapshot", status: 200 },
+  ])("preserves pushed state when the initial fetch $outcome", async ({ status }) => {
+    let resolveInitialFetch!: (response: Response) => void;
+    const initialFetch = new Promise<Response>((resolve) => {
+      resolveInitialFetch = resolve;
+    });
+    let sidebarStateUpdateHandler: ((state: SidebarStatePayload) => void) | null = null;
+    const setSidebarState = vi.fn().mockImplementation(async (state: SidebarStatePayload) => state);
+    const client = {
+      status: "open" as const,
+      onStatus: () => () => {},
+      onSidebarStateUpdate: (handler: (state: SidebarStatePayload) => void) => {
+        sidebarStateUpdateHandler = handler;
+        return () => {
+          sidebarStateUpdateHandler = null;
+        };
+      },
+      setSidebarState,
+    } as unknown as NanobotClient;
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(initialFetch));
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="token">
+        {children}
+      </ClientProvider>
+    );
+    const { result } = renderHook(() => useSidebarState([], false), { wrapper });
+    const pushed: SidebarStatePayload = {
+      ...result.current.state,
+      pinned_keys: ["websocket:saved"],
+      archived_keys: ["websocket:archived"],
+      title_overrides: { "websocket:saved": "Saved title" },
+      tags_by_key: { "websocket:saved": ["saved-tag"] },
+    };
+
+    act(() => sidebarStateUpdateHandler?.(pushed));
+    act(() => resolveInitialFetch(Response.json({}, { status })));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.state).toEqual(pushed);
+
+    act(() => {
+      void result.current.update((current) => ({
+        ...current,
+        pinned_keys: [...current.pinned_keys, "websocket:new"],
+      }));
+    });
+
+    await waitFor(() => expect(setSidebarState).toHaveBeenCalledTimes(1));
+    expect(setSidebarState).toHaveBeenCalledWith({
+      ...pushed,
+      pinned_keys: ["websocket:saved", "websocket:new"],
+    });
+  });
+
   it("does not persist local mutations when the initial sidebar-state fetch fails", async () => {
     const setSidebarState = vi.fn().mockImplementation(async (state: SidebarStatePayload) => state);
     const client = {

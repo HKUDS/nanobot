@@ -164,12 +164,12 @@ export function useSidebarState(
     (async () => {
       try {
         const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current));
-        if (cancelled) return;
+        if (cancelled || initialLoadSucceededRef.current) return;
         stateRef.current = loaded;
         setState(loaded);
         initialLoadSucceededRef.current = true;
       } catch (error) {
-        if (cancelled) return;
+        if (cancelled || initialLoadSucceededRef.current) return;
         stateRef.current = DEFAULT_SIDEBAR_STATE;
         setState(DEFAULT_SIDEBAR_STATE);
         // A 404 means the server has no saved state yet — persisting is safe.
