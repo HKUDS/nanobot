@@ -1,14 +1,13 @@
-"""Unit tests for onboard core logic functions.
-
-These tests focus on the business logic behind the onboard wizard,
-without testing the interactive UI components.
-"""
+"""Tests for onboard logic and prompt keyboard behavior."""
 
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard as onboard_wizard
@@ -850,24 +849,67 @@ class TestApiServerRegistration:
         assert config.api.api_key == "secret"
 
 
+@pytest.fixture
+def prompt_input():
+    with create_pipe_input() as pipe:
+        with create_app_session(input=pipe, output=DummyOutput()):
+            yield pipe
+
+
+class TestSelectWithBack:
+    def test_empty_choices_cancel(self):
+        assert onboard_wizard._select_with_back("Choose", []) is None
+
+    @pytest.mark.parametrize(
+        "default, keys, expected",
+        [
+            pytest.param(None, "\r", "one", id="first-by-default"),
+            pytest.param("two", "\r", "two", id="confirm-default"),
+            pytest.param("missing", "\r", "one", id="invalid-default"),
+            pytest.param("one", "\x1b[A\r", "three", id="up-wraps"),
+            pytest.param("three", "\x1b[B\r", "one", id="down-wraps"),
+            pytest.param(None, "\x1b", _BACK_PRESSED, id="escape-goes-back"),
+            pytest.param(None, "\x1b[D", _BACK_PRESSED, id="left-goes-back"),
+            pytest.param(None, "\x03", None, id="ctrl-c-cancels"),
+        ],
+    )
+    def test_keyboard_navigation(self, prompt_input, default, keys, expected):
+        prompt_input.send_text(keys)
+
+        result = onboard_wizard._select_with_back("Choose", ["one", "two", "three"], default)
+
+        assert result == expected
+
+    @pytest.mark.parametrize("index", range(40))
+    def test_every_long_menu_choice_is_reachable(self, prompt_input, index):
+        choices = [f"Provider {i}" for i in range(40)]
+        prompt_input.send_text("\x1b[B" * index + "\r")
+
+        assert onboard_wizard._select_with_back("Provider", choices) == f"Provider {index}"
+
+    @pytest.mark.parametrize("exit_key", ["\x1b", "\x1b[D", "\x03"])
+    def test_section_keyboard_exit_preserves_back_vs_cancel(self, monkeypatch, prompt_input, exit_key):
+        model = _SimpleDraftModel()
+        answers = iter(["\r", "draft-key\r", exit_key])
+        ask_prompt = onboard_wizard._ask_prompt
+
+        def ask_with_input(prompt):
+            prompt_input.send_text(next(answers))
+            return ask_prompt(prompt)
+
+        monkeypatch.setattr(onboard_wizard, "_ask_prompt", ask_with_input)
+
+        updated = _configure_pydantic_model(model, "Draft")
+
+        if exit_key == "\x03":
+            assert updated is None
+        else:
+            assert updated.api_key == "draft-key"
+        assert model.api_key == ""
+
+
 class TestMainMenuInteraction:
     """Main menu navigation, save actions, and terminal input behavior."""
-
-    def test_choice_viewport_keeps_long_menus_within_terminal_height(self):
-        """Long provider menus should render as a bounded scrolling slice."""
-        assert onboard_wizard._choice_viewport(selected_index=0, total=20, visible_count=5) == (0, 5)
-        assert onboard_wizard._choice_viewport(selected_index=10, total=20, visible_count=5) == (
-            8,
-            13,
-        )
-        assert onboard_wizard._choice_viewport(selected_index=19, total=20, visible_count=5) == (
-            15,
-            20,
-        )
-
-    def test_choice_viewport_handles_tiny_terminals(self):
-        """A one-row menu is still usable instead of failing as window-too-small."""
-        assert onboard_wizard._choice_viewport(selected_index=3, total=5, visible_count=0) == (3, 4)
 
     def test_main_menu_hides_save_actions_until_needed(self):
         """The first screen should not show save or summary actions before edits."""
