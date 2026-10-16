@@ -27,6 +27,12 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 }
 
 
+def _is_json_integer(value: object) -> bool:
+    return not isinstance(value, bool) and (
+        isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+    )
+
+
 class Schema(ABC):
     """Abstract base for JSON Schema fragments describing tool parameters.
 
@@ -51,6 +57,8 @@ class Schema(ABC):
                 continue
             if t in ("integer", "number") and isinstance(val, bool):
                 continue
+            if t == "integer" and _is_json_integer(val):
+                return t
             if isinstance(val, _JSON_TYPE_MAP[t]):
                 return t
         return None
@@ -87,7 +95,7 @@ class Schema(ABC):
                 t = Schema.match_json_schema_type(val, types)
                 if t is None:
                     return [f"{label} should match one of the types {types}"]
-        if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
+        if t == "integer" and not _is_json_integer(val):
             return [f"{label} should be integer"]
         if t == "number" and (
             not isinstance(val, _JSON_TYPE_MAP["number"]) or isinstance(val, bool)
@@ -297,8 +305,8 @@ class Tool(ABC):
 
         if t == "boolean" and isinstance(val, bool):
             return val
-        if t == "integer" and isinstance(val, int) and not isinstance(val, bool):
-            return val
+        if t == "integer" and _is_json_integer(val):
+            return int(val) if isinstance(val, float) else val
         if t in self._TYPE_MAP and t not in ("boolean", "integer", "array", "object"):
             expected = self._TYPE_MAP[t]
             if isinstance(val, expected):
