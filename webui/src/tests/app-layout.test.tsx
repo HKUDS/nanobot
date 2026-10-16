@@ -61,6 +61,7 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const route = routes[String(input)]
+        ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
         ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(String(input)) ? { tasks: [] } : undefined);
       const body =
         typeof route === "function"
@@ -3253,6 +3254,54 @@ describe("App layout", () => {
 
     await waitFor(() => expect(document.title).toBe("nanobot"));
     expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+  });
+
+  it("offers retry instead of editable topics until sidebar preferences load", async () => {
+    mockSessions = ["saved", "archived", "target"].map((chatId) => ({
+      key: `websocket:${chatId}`,
+      channel: "websocket",
+      chatId,
+      createdAt: null,
+      updatedAt: null,
+      title: chatId,
+      preview: "",
+    }));
+    const saved = {
+      pinned_keys: ["websocket:saved"],
+      archived_keys: ["websocket:archived"],
+      title_overrides: { "websocket:saved": "Saved title" },
+      tags_by_key: { "websocket:saved": ["saved-tag"] },
+    };
+    let reads = 0;
+    mockFetchRoutes({
+      "/api/webui/sidebar-state": () => {
+        if (++reads < 3) throw new Error("Sidebar unavailable");
+        return saved;
+      },
+    });
+    render(<App />);
+
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    expect(await within(sidebar).findByRole("alert")).toHaveTextContent("Couldn't load sidebar preferences.");
+    expect(within(sidebar).queryByRole("button", { name: /Topic actions for/ })).not.toBeInTheDocument();
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Retry", exact: true }));
+    await waitFor(() => expect(reads).toBe(2));
+    expect(await within(sidebar).findByRole("alert")).toHaveTextContent("Couldn't load sidebar preferences.");
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Retry", exact: true }));
+
+    const actions = await within(sidebar).findByRole("button", { name: "Topic actions for target" });
+    expect(within(sidebar).getByText("Saved title")).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("alert")).not.toBeInTheDocument();
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.pointerDown(actions, { button: 0, pointerType: "mouse", ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Pin", exact: true }));
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      ...saved,
+      pinned_keys: ["websocket:saved", "websocket:target"],
+    })));
   });
 
   it("filters sessions in the centered search dialog", async () => {

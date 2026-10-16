@@ -361,6 +361,7 @@
     "closeAction": "Fermer la discussion temporaire : {{title}}"
   },
   "sidebar": {
+    "loadError": "Impossible de charger les préférences de la barre latérale.",
     "resize": "Redimensionner la barre latérale",
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",

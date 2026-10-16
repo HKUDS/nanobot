@@ -361,6 +361,7 @@
     "closeAction": "关闭临时聊天：{{title}}"
   },
   "sidebar": {
+    "loadError": "无法加载侧栏设置。",
     "resize": "调整侧栏宽度",
     "navigation": "侧边栏导航",
     "collapse": "收起侧边栏",

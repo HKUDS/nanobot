@@ -361,6 +361,7 @@
     "closeAction": "一時チャット「{{title}}」を閉じる"
   },
   "sidebar": {
+    "loadError": "サイドバーの設定を読み込めませんでした。",
     "resize": "サイドバーの幅を変更",
     "navigation": "サイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",

@@ -361,6 +361,7 @@
     "closeAction": "Fechar chat temporário: {{title}}"
   },
   "sidebar": {
+    "loadError": "Não foi possível carregar as preferências da barra lateral.",
     "resize": "Redimensionar a barra lateral",
     "navigation": "Navegação da barra lateral",
     "collapse": "Recolher barra lateral",

@@ -361,6 +361,7 @@
     "closeAction": "임시 채팅 닫기: {{title}}"
   },
   "sidebar": {
+    "loadError": "사이드바 설정을 불러오지 못했습니다.",
     "resize": "사이드바 너비 조절",
     "navigation": "사이드바 탐색",
     "collapse": "사이드바 접기",

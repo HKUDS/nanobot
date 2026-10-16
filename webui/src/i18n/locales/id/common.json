@@ -361,6 +361,7 @@
     "closeAction": "Tutup obrolan sementara: {{title}}"
   },
   "sidebar": {
+    "loadError": "Preferensi bilah samping tidak dapat dimuat.",
     "resize": "Ubah lebar bilah samping",
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",

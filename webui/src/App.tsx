@@ -1206,6 +1206,8 @@ function Shell({
   const {
     state: sidebarState,
     loading: sidebarStateLoading,
+    loadFailed: sidebarStateLoadFailed,
+    retry: retrySidebarState,
     update: updateSidebarState,
   } =
     useSidebarState(sessions, !loading);
@@ -1612,7 +1614,7 @@ function Shell({
   }, [loading, sessions]);
 
   useEffect(() => {
-    if (loading || sidebarStateLoading) return;
+    if (loading || sidebarStateLoading || sidebarStateLoadFailed) return;
     const validKeys = new Set(sessions.map((session) => session.key));
     updateWorkbenchState((current) => {
       return reconcileWorkbench(current, validKeys);
@@ -1620,6 +1622,7 @@ function Shell({
   }, [
     loading,
     sidebarStateLoading,
+    sidebarStateLoadFailed,
     sessions,
     updateWorkbenchState,
   ]);
@@ -2803,6 +2806,9 @@ function Shell({
       ? (temporaryChatActive ? activeKey : activeSidebarKey)
       : null,
     loading,
+    stateLoading: sidebarStateLoading,
+    stateLoadFailed: sidebarStateLoadFailed,
+    onRetryStateLoad: retrySidebarState,
     newChatActive: !managingConnections && view === "chat" && activeKey === null,
     onNewChat,
     onSelect: onSelectSidebarItem,

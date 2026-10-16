@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { useSidebarState } from "@/hooks/useSidebarState";
 import type { NanobotClient } from "@/lib/nanobot-client";
-import type { SidebarStatePayload } from "@/lib/types";
+import type { ConnectionStatus, SidebarStatePayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 describe("useSidebarState", () => {
@@ -122,7 +122,81 @@ describe("useSidebarState", () => {
     });
   });
 
-  it("does not persist local mutations when the initial sidebar-state fetch fails", async () => {
+  it.each(["retry", "reconnect"] as const)("recovers a failed load on %s without accepting edits to unknown state", async (recovery) => {
+    let statusHandler: ((status: ConnectionStatus) => void) | null = null;
+    let resolveRecovery!: (response: Response) => void;
+    const recoveryFetch = new Promise<Response>((resolve) => {
+      resolveRecovery = resolve;
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({}, { status: 503 }))
+      .mockReturnValueOnce(recoveryFetch);
+    const setSidebarState = vi.fn().mockImplementation(async (state: SidebarStatePayload) => state);
+    const client = {
+      status: "open" as const,
+      onStatus: (handler: (status: ConnectionStatus) => void) => {
+        statusHandler = handler;
+        handler("open");
+        return () => { statusHandler = null; };
+      },
+      onSidebarStateUpdate: () => () => {},
+      setSidebarState,
+    } as unknown as NanobotClient;
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="token">
+        {children}
+      </ClientProvider>
+    );
+    const { result } = renderHook(() => useSidebarState([], false), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.loadFailed).toBe(true);
+
+    act(() => {
+      void result.current.update((current) => ({
+        ...current,
+        pinned_keys: ["websocket:new"],
+      }));
+    });
+    expect(result.current.state.pinned_keys).toEqual([]);
+    expect(setSidebarState).not.toHaveBeenCalled();
+
+    act(() => {
+      if (recovery === "retry") result.current.retry();
+      else {
+        statusHandler?.("reconnecting");
+        statusHandler?.("open");
+      }
+      result.current.retry();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.loading).toBe(true);
+    const saved: SidebarStatePayload = {
+      ...result.current.state,
+      pinned_keys: ["websocket:saved"],
+      archived_keys: ["websocket:archived"],
+      title_overrides: { "websocket:saved": "Saved title" },
+      tags_by_key: { "websocket:saved": ["saved-tag"] },
+    };
+    act(() => resolveRecovery(Response.json(saved)));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.loadFailed).toBe(false);
+    expect(result.current.state).toEqual(saved);
+    expect(setSidebarState).not.toHaveBeenCalled();
+
+    act(() => {
+      void result.current.update((current) => ({
+        ...current,
+        title_overrides: { ...current.title_overrides, "websocket:new": "New title" },
+      }));
+    });
+    await waitFor(() => expect(setSidebarState).toHaveBeenCalledWith({
+      ...saved,
+      title_overrides: { ...saved.title_overrides, "websocket:new": "New title" },
+    }));
+  });
+
+  it("does not accept local mutations when the initial sidebar-state fetch fails", async () => {
     const setSidebarState = vi.fn().mockImplementation(async (state: SidebarStatePayload) => state);
     const client = {
       status: "open" as const,
@@ -146,13 +220,12 @@ describe("useSidebarState", () => {
       }));
     });
 
-    // Local state updates so the UI stays responsive, but nothing is written
-    // to the server — persisting the degraded default would wipe saved state.
-    expect(result.current.state.pinned_keys).toEqual(["websocket:a"]);
+    expect(result.current.loadFailed).toBe(true);
+    expect(result.current.state.pinned_keys).toEqual([]);
     expect(setSidebarState).not.toHaveBeenCalled();
   });
 
-  it("persists local mutations when the initial fetch returns 404 (no saved state)", async () => {
+  it("persists local mutations when the server returns an empty saved state", async () => {
     const setSidebarState = vi.fn().mockImplementation(async (state: SidebarStatePayload) => state);
     const client = {
       status: "open" as const,
@@ -161,11 +234,9 @@ describe("useSidebarState", () => {
       setSidebarState,
     } as unknown as NanobotClient;
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
+      ok: true,
+      status: 200,
       json: async () => ({}),
-      text: async () => "",
-      headers: { get: () => null },
     }));
     const wrapper = ({ children }: { children: ReactNode }) => (
       <ClientProvider client={client} token="token">

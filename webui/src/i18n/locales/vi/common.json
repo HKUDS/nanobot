@@ -361,6 +361,7 @@
     "closeAction": "Đóng trò chuyện tạm thời: {{title}}"
   },
   "sidebar": {
+    "loadError": "Không thể tải tùy chọn thanh bên.",
     "resize": "Điều chỉnh độ rộng thanh bên",
     "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",

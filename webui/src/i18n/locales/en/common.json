@@ -361,6 +361,7 @@
     "closeAction": "Close temporary chat: {{title}}"
   },
   "sidebar": {
+    "loadError": "Couldn't load sidebar preferences.",
     "resize": "Resize sidebar",
     "navigation": "Sidebar navigation",
     "collapse": "Collapse sidebar",

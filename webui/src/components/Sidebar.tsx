@@ -42,6 +42,9 @@ interface SidebarProps {
   temporarySessions?: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
+  stateLoading?: boolean;
+  stateLoadFailed?: boolean;
+  onRetryStateLoad?: () => void;
   newChatActive: boolean;
   onNewChat: () => void;
   onSelect: (key: string) => void;
@@ -266,7 +269,16 @@ export function Sidebar(props: SidebarProps) {
           collapsed && "pointer-events-none opacity-0",
         )}
       >
-        {!collapsed && (
+        {!collapsed && (props.stateLoadFailed ? (
+          <div role="alert" className="space-y-2 px-4 py-3 text-sm text-muted-foreground">
+            <p>{t("sidebar.loadError")}</p>
+            <Button type="button" variant="outline" size="sm" onClick={props.onRetryStateLoad}>
+              {t("common.retry")}
+            </Button>
+          </div>
+        ) : props.stateLoading ? (
+          <p role="status" className="px-4 py-3 text-sm text-muted-foreground">{t("chat.loading")}</p>
+        ) : (
           <ChatList
             sessions={props.sessions}
             temporarySessions={props.temporarySessions}
@@ -309,7 +321,7 @@ export function Sidebar(props: SidebarProps) {
               props.containActionMenus ? menuPortalContainer : undefined
             }
           />
-        )}
+        ))}
       </div>
       <div
         className={cn(

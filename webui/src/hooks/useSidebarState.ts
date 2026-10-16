@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import { normalizeWorkbenchState } from "@/components/workbench/workbench-model";
-import { ApiError, fetchSidebarState } from "@/lib/api";
+import { fetchSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
 const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
@@ -136,6 +136,8 @@ export function useSidebarState(
 ): {
   state: SidebarStatePayload;
   loading: boolean;
+  loadFailed: boolean;
+  retry: () => void;
   update: (
     updater: (state: SidebarStatePayload) => SidebarStatePayload,
   ) => Promise<void>;
@@ -147,44 +149,13 @@ export function useSidebarState(
   const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
   const persistenceInFlightRef = useRef(false);
   const flushPersistenceRef = useRef<() => void>(() => {});
-  // Set once we know the server's state (or that it has none). Until then,
-  // local mutations must not be persisted: writing the degraded
-  // DEFAULT_SIDEBAR_STATE fallback after a failed load would wipe the user's
-  // saved state (#6008). A 404 means the server has no saved state, so it is
-  // safe to persist; other failures (network, 5xx, timeout) do not.
+  // Full-state writes require a server snapshot, not defaults from a failed read.
   const initialLoadSucceededRef = useRef(false);
+  const retryRef = useRef<() => void>(() => {});
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
-  const [loading, setLoading] = useState(true);
+  const [loadStatus, setLoadStatus] = useState<"loading" | "failed" | "ready">("loading");
   tokenRef.current = token;
   stateRef.current = state;
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    (async () => {
-      try {
-        const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current));
-        if (cancelled || initialLoadSucceededRef.current) return;
-        stateRef.current = loaded;
-        setState(loaded);
-        initialLoadSucceededRef.current = true;
-      } catch (error) {
-        if (cancelled || initialLoadSucceededRef.current) return;
-        stateRef.current = DEFAULT_SIDEBAR_STATE;
-        setState(DEFAULT_SIDEBAR_STATE);
-        // A 404 means the server has no saved state yet — persisting is safe.
-        // Any other failure leaves the flag unset to avoid wiping server state.
-        if (error instanceof ApiError && error.status === 404) {
-          initialLoadSucceededRef.current = true;
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const flushPersistence = useCallback(() => {
     if (
@@ -220,42 +191,83 @@ export function useSidebarState(
     flushPersistence();
   }, [flushPersistence]);
 
-  useEffect(() => client.onStatus((status) => {
-    connectionOpenRef.current = status === "open";
-    if (status === "open") flushPersistence();
-  }), [client, flushPersistence]);
+  const retry = useCallback(() => retryRef.current(), []);
 
-  useEffect(() => client.onSidebarStateUpdate((incoming) => {
-    if (
-      persistenceInFlightRef.current
-      || pendingPersistenceRef.current !== null
-    ) return;
-    const loaded = normalizeSidebarState(incoming);
-    stateRef.current = loaded;
-    setState(loaded);
-    initialLoadSucceededRef.current = true;
-  }), [client]);
+  useEffect(() => {
+    let cancelled = false;
+    let loadInFlight = false;
+    const load = async () => {
+      if (cancelled || loadInFlight || initialLoadSucceededRef.current) return;
+      loadInFlight = true;
+      setLoadStatus("loading");
+      try {
+        const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current));
+        if (cancelled || initialLoadSucceededRef.current) return;
+        stateRef.current = loaded;
+        initialLoadSucceededRef.current = true;
+        setState(loaded);
+        setLoadStatus("ready");
+      } catch {
+        if (!cancelled && !initialLoadSucceededRef.current) setLoadStatus("failed");
+      } finally {
+        loadInFlight = false;
+      }
+    };
+    retryRef.current = () => { void load(); };
+    void load();
+    const unsubscribeStatus = client.onStatus((status) => {
+      connectionOpenRef.current = status === "open";
+      if (status === "open") {
+        void load();
+        flushPersistenceRef.current();
+      }
+    });
+    const unsubscribeSidebar = client.onSidebarStateUpdate((incoming) => {
+      if (
+        persistenceInFlightRef.current
+        || pendingPersistenceRef.current !== null
+      ) return;
+      const loaded = normalizeSidebarState(incoming);
+      stateRef.current = loaded;
+      initialLoadSucceededRef.current = true;
+      setState(loaded);
+      setLoadStatus("ready");
+    });
+    return () => {
+      cancelled = true;
+      retryRef.current = () => {};
+      unsubscribeStatus();
+      unsubscribeSidebar();
+    };
+  }, [client]);
 
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
+      if (!initialLoadSucceededRef.current) return;
       const next = normalizeSidebarState(updater(stateRef.current));
       if (sameState(next, stateRef.current)) return;
       stateRef.current = next;
       setState(next);
-      if (initialLoadSucceededRef.current) persist(next);
+      persist(next);
     },
     [persist],
   );
 
   const pruned = useMemo(() => {
-    if (!sessionsLoaded || loading) return state;
+    if (!sessionsLoaded || loadStatus !== "ready") return state;
     return pruneMissingSessions(state, sessions);
-  }, [loading, sessions, sessionsLoaded, state]);
+  }, [loadStatus, sessions, sessionsLoaded, state]);
 
   useEffect(() => {
-    if (!sessionsLoaded || loading || sameState(pruned, state)) return;
+    if (!sessionsLoaded || loadStatus !== "ready" || sameState(pruned, state)) return;
     void update(() => pruned);
-  }, [loading, pruned, sessionsLoaded, state, update]);
+  }, [loadStatus, pruned, sessionsLoaded, state, update]);
 
-  return { state, loading, update };
+  return {
+    state,
+    loading: loadStatus === "loading",
+    loadFailed: loadStatus === "failed",
+    retry,
+    update,
+  };
 }
