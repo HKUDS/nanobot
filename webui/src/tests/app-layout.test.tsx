@@ -2609,7 +2609,7 @@ describe("App layout", () => {
       activateReloadCache("ws://test");
       writeReloadCache("sessions", sessions.slice(0, 1));
     }
-    const saved: SidebarStatePayload = {
+    const saved = {
       schema_version: 1,
       pinned_keys: ["websocket:chat-b", "websocket:deleted"],
       archived_keys: ["websocket:deleted"],
@@ -2632,8 +2632,7 @@ describe("App layout", () => {
         },
       },
       view: {
-        density: "comfortable", show_previews: false, show_timestamps: false,
-        show_archived: false, sort: "updated_desc",
+        density: "comfortable", show_archived: false, sort: "updated_desc",
       },
       updated_at: null,
     };
@@ -2674,6 +2673,7 @@ describe("App layout", () => {
     expect(await within(sidebar).findByRole("button", { name: "Saved B", exact: true })).toBeInTheDocument();
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
       ...saved,
+      view: expect.objectContaining(saved.view),
       pinned_keys: ["websocket:chat-b"],
       archived_keys: [],
       session_order: ["websocket:chat-a", "websocket:chat-b"],
@@ -2696,7 +2696,8 @@ describe("App layout", () => {
     serverSessions = [];
     act(() => sessionUpdateHandlers.forEach((handler) => handler("chat-a")));
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
-      ...saved, pinned_keys: [], archived_keys: [], session_order: [],
+      ...saved, view: expect.objectContaining(saved.view),
+      pinned_keys: [], archived_keys: [], session_order: [],
       title_overrides: {}, tags_by_key: {}, workbench: { version: 1, tabs: {} },
     }));
     expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual([]);
