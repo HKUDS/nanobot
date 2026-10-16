@@ -249,10 +249,20 @@ class Session:
         if start:
             sliced = sliced[start:]
 
+        # Past-turn reasoning is token-heavy and only needed on the wire within
+        # the turn that produced it: replay ``reasoning_content`` and
+        # ``thinking_blocks`` for the current turn (the rows after the last
+        # user message) and drop them, together with reasoning-only rows,
+        # from earlier turns.  Without a user boundary nothing is dropped.
+        current_turn_start = next(
+            (i for i in range(len(sliced) - 1, -1, -1) if sliced[i].get("role") == "user"),
+            None,
+        )
         out: list[dict[str, Any]] = []
-        for message in sliced:
+        for index, message in enumerate(sliced):
             if message.get("_command") or is_summary_checkpoint(message):
                 continue
+            replay_reasoning = current_turn_start is None or index >= current_turn_start
             has_persisted_runtime_context = isinstance(
                 message.get(RUNTIME_CONTEXT_HISTORY_META),
                 dict,
@@ -300,11 +310,14 @@ class Session:
                 if cli_lines:
                     breadcrumbs = "\n".join(cli_lines)
                     content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            replay_keys: tuple[str, ...] = ("tool_calls", "tool_call_id", "name")
+            if replay_reasoning:
+                replay_keys += ("reasoning_content", "thinking_blocks")
             if role == "assistant" and isinstance(content, str) and not content.strip():
-                if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
+                if not any(key in message for key in replay_keys if key != "name"):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
-            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
+            for key in replay_keys:
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
