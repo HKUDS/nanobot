@@ -3852,6 +3852,144 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("resumes a restored queue only after its waiting turn is confirmed complete", async () => {
+    let acceptDelivery!: (accepted: boolean) => void;
+    const delivery = new Promise<boolean>((resolve) => { acceptDelivery = resolve; });
+    const onSend = vi.fn().mockReturnValueOnce(delivery);
+    const first = render(
+      <ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />,
+    );
+    const input = screen.getByLabelText("Message input");
+    for (const text of ["first follow-up", "second follow-up"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    first.unmount();
+    const otherSend = vi.fn();
+    const other = render(
+      <ThreadComposer onSend={otherSend} pendingQueueKey="chat-b" completedTurnIds={["turn-a"]} />,
+    );
+    expect(otherSend).not.toHaveBeenCalled();
+    expect(screen.queryByText("first follow-up")).not.toBeInTheDocument();
+    other.unmount();
+
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={[]} />,
+    );
+    expect(screen.getByText("first follow-up")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-other"]} />,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("first follow-up"));
+    for (let update = 0; update < 3; update += 1) {
+      returned.rerender(
+        <ThreadComposer onSend={(...args) => onSend(...args)} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+      );
+    }
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("second follow-up")).toBeInTheDocument();
+    await act(async () => { acceptDelivery(true); await delivery; });
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-next" completedTurnIds={["turn-a"]} />,
+    );
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(onSend).toHaveBeenCalledTimes(1);
+    returned.unmount();
+    render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-next"]} />,
+    );
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("second follow-up"));
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+  });
+
+  it.each(["button", "palette"])("keeps queued messages manual after stopping through %s and remounting", (entrypoint) => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const view = render(
+      <ThreadComposer onSend={onSend} onStop={onStop} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" slashCommands={COMMANDS} />,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep for later" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    if (entrypoint === "button") fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    else {
+      fireEvent.change(input, { target: { value: "/sto" } });
+      fireEvent.mouseDown(screen.getByRole("option", { name: /\/stop/i }));
+    }
+    expect(onStop).toHaveBeenCalledTimes(1);
+    view.unmount();
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(screen.getByText("keep for later")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    // A run started in another pane must not re-arm a queue the user stopped.
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-other-pane" completedTurnIds={["turn-a"]} />,
+    );
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-other-pane"]} />,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith("keep for later", undefined, undefined);
+  });
+
+  it("retains a rejected queued attachment for manual retry after remounting", async () => {
+    mockBlobUrls();
+    let rejectDelivery!: (error: Error) => void;
+    const delivery = new Promise<boolean>((_resolve, reject) => { rejectDelivery = reject; });
+    const onSend = vi.fn().mockReturnValue(delivery);
+    const first = render(
+      <ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />,
+    );
+    fireEvent.change(first.container.querySelector<HTMLInputElement>('input[type="file"]')!, {
+      target: { files: [new File(["image"], "queued.png", { type: "image/png" })] },
+    });
+    await screen.findByText("queued.png");
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "queued attachment" } });
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    first.unmount();
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await act(async () => { rejectDelivery(new Error("Attachment upload interrupted")); });
+    expect(screen.getByText("queued attachment")).toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    returned.unmount();
+    render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(screen.getByText("queued attachment")).toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    onSend.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend.mock.calls[1][1]).toEqual([expect.objectContaining({ media: expect.objectContaining({ name: "queued.png" }) })]);
+  });
+
+  it("retains legacy queued drafts for manual sending when mounted idle", () => {
+    window.localStorage.setItem("nanobot.webui.composerQueuedGuidance.v1:chat-a", JSON.stringify([
+      { id: "legacy-draft", text: "legacy follow-up" },
+    ]));
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["old-turn"]} />);
+    expect(screen.getByText("legacy follow-up")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledWith("legacy follow-up", undefined, undefined);
+  });
+
   it("keeps temporary chat guidance in memory only", async () => {
     const onSend = vi.fn();
     const view = render(

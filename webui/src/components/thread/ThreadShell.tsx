@@ -1259,6 +1259,13 @@ export function ThreadShell({
     // its history response can race with another send or running event.
   }, [chatId, client, historyKey]);
 
+  const canonicalCompletedTurnIds = useMemo(() => Array.from(new Set([
+    ...completedTurnIds,
+    ...(!completionIdsProvided && !hasPendingToolCalls && historyActiveTurnId === null
+      ? completedAssistantTurnIds(projectWebuiThreadMessages(historical))
+      : []),
+  ])), [completedTurnIds, completionIdsProvided, hasPendingToolCalls, historical, historyActiveTurnId]);
+
   useEffect(() => {
     if (!historyKey || !chatId || loading) return;
     const pendingCanonicalHydrate = pendingCanonicalHydrateRef.current.get(chatId);
@@ -1274,12 +1281,6 @@ export function ThreadShell({
       )
     );
     const normalizedHistory = projectWebuiThreadMessages(historical);
-    const canonicalCompletedTurnIds = Array.from(new Set([
-      ...completedTurnIds,
-      ...(!completionIdsProvided && !hasPendingToolCalls && historyActiveTurnId === null
-        ? completedAssistantTurnIds(normalizedHistory)
-        : []),
-    ]));
     // Completion is a fact about a turn, even when a newer local turn prevents
     // this snapshot from settling the conversation's current run.
     client.fenceCanonicalCompletedTurns(chatId, canonicalCompletedTurnIds);
@@ -1386,6 +1387,7 @@ export function ThreadShell({
     chatId,
     client,
     completedTurnIds,
+    canonicalCompletedTurnIds,
     completionIdsProvided,
     historical,
     historyVersion,
@@ -1874,6 +1876,9 @@ export function ThreadShell({
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
+          activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) ?? historyActiveTurnId : null}
+          completedTurnIds={messagesReady && !recoveryNeedsDecision && !hasPendingToolCalls
+            && chatId && !client.hasUnsettledRun(chatId) ? canonicalCompletedTurnIds : undefined}
           placeholder={
             composerVariant === "hero"
               ? t("thread.composer.placeholderHero")
