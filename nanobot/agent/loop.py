@@ -739,13 +739,11 @@ class AgentLoop:
         }
         if turn_continuation.internal_continuation_inbound(ctx.msg.metadata):
             origin = request_origin_from_metadata(ctx.msg.metadata) or origin
-            if origin != request_origin_from_metadata(ctx.session.metadata):
-                # A queued slice can resume after a newer request. Persist its
-                # owner before model execution can be interrupted again.
-                ctx.session.metadata[REQUEST_ORIGIN_METADATA_KEY] = origin
-                self.sessions.save(ctx.session)
-        elif ctx.original_user_text is not None:
+        if origin != request_origin_from_metadata(ctx.session.metadata):
             ctx.session.metadata[REQUEST_ORIGIN_METADATA_KEY] = origin
+            if ctx.original_user_text is None:
+                # No new user row will persist this turn's owner before execution.
+                self.sessions.save(ctx.session)
         scope = await self.runner.prepare_prompt(
             self.workspace_scopes.for_turn,
             channel=ctx.delivery.route.channel,
