@@ -1351,8 +1351,13 @@ class AgentRunner:
             usage = self._usage_or_estimate(
                 spec, state.messages, response, tool_definitions=state.tool_definitions,
             )
-        state.usage = usage
-        return state.usage
+        if response.provider_compaction_applied:
+            # The provider replaced this request's input, so the reported
+            # usage no longer bounds any future request's prompt size.
+            state.usage = None
+        else:
+            state.usage = usage
+        return usage
 
     def _estimate_response_usage(
         self,
