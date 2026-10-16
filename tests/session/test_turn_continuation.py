@@ -7,12 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.events import InboundMessage
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     explicit_goal_requested,
     sustained_goal_turn,
 )
+from nanobot.session.recovery import REQUEST_ORIGIN_METADATA_KEY
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_KIND_META,
     INTERNAL_CONTINUATION_META,
@@ -60,6 +62,9 @@ async def test_maybe_continue_turn_queues_internal_message():
             },
         ),
         session_key="feishu:c1",
+        request_context=RequestContext(
+            channel="feishu", chat_id="c1", message_id="msg-1", turn_id="turn-1",
+        ),
         pending_queue=pending,
         stop_reason="max_iterations",
         final_content="paused",
@@ -80,6 +85,10 @@ async def test_maybe_continue_turn_queues_internal_message():
     assert internal_continuation_pending(ctx.msg.metadata)
     assert queued.metadata["webui"] is True
     assert queued.metadata["message_id"] == "msg-1"
+    assert queued.metadata[REQUEST_ORIGIN_METADATA_KEY] == {
+        "message_id": "msg-1", "turn_id": "turn-1",
+    }
+    assert REQUEST_ORIGIN_METADATA_KEY not in ctx.msg.metadata
     assert queued.metadata["origin_message_id"] == "msg-0"
     assert queued.metadata["_wants_stream"] is True
     assert not explicit_goal_requested(queued.metadata)

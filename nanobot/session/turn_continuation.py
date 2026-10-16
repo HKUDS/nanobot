@@ -17,6 +17,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
     sustained_goal_turn,
 )
+from nanobot.session.recovery import REQUEST_ORIGIN_METADATA_KEY
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import TurnContext
@@ -129,6 +130,12 @@ async def maybe_continue_turn(ctx: TurnContext) -> bool:
         ctx.msg.metadata,
         run_started_at=ctx.visible_run_started_at,
     )
+    request = ctx.request_context
+    assert request is not None and request.turn_id is not None
+    metadata[REQUEST_ORIGIN_METADATA_KEY] = {
+        "message_id": request.message_id,
+        "turn_id": request.turn_id,
+    }
     content = _goal_continuation_prompt(ctx.session.metadata)
     messages = _strip_terminal_assistant(ctx.all_messages, ctx.final_content)
     _increment_goal_continuation_round(ctx.session.metadata)
