@@ -1627,14 +1627,14 @@ class GatewayHTTPHandler:
         if got == "/api/webui/skills/install":
             return await self._handle_webui_skill_install(connection, request)
         if got == "/api/webui/skills/update":
-            return self._handle_webui_skill_update(request)
+            return await self._handle_webui_skill_update(request)
         if got == "/api/webui/skills/delete":
-            return self._handle_webui_skill_delete(connection, request)
+            return await self._handle_webui_skill_delete(connection, request)
         if got == "/api/webui/skills":
-            return self._handle_webui_skills(request)
+            return await self._handle_webui_skills(request)
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
         if m:
-            return self._handle_webui_skill_detail(request, m.group(1))
+            return await self._handle_webui_skill_detail(request, m.group(1))
         if got in {"/api/webui/star-prompt/claim", "/api/webui/star-prompt/dismiss"}:
             if not self.check_api_token(request):
                 return _http_error(401, "Unauthorized")
@@ -1709,15 +1709,17 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, exc.message)
         return _http_json_response(dict(payload))
 
-    def _handle_webui_skills(self, request: WsRequest) -> Response:
+    async def _load_webui_skills(self) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            webui_skills_payload,
+            self.skills_workspace_path,
+            disabled_skills=set(self.disabled_skills),
+        )
+
+    async def _handle_webui_skills(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        return _http_json_response(
-            webui_skills_payload(
-                self.skills_workspace_path,
-                disabled_skills=self.disabled_skills,
-            )
-        )
+        return _http_json_response(await self._load_webui_skills())
 
     async def _handle_webui_skills_search(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
@@ -1797,10 +1799,7 @@ class GatewayHTTPHandler:
                 self._log.exception("skill installation failed")
                 return _http_error(500, "skill installation failed")
         return _http_json_response({
-            **webui_skills_payload(
-                self.skills_workspace_path,
-                disabled_skills=self.disabled_skills,
-            ),
+            **(await self._load_webui_skills()),
             "last_action": action,
         })
 
@@ -1815,7 +1814,7 @@ class GatewayHTTPHandler:
             self._log.exception("failed to load remote package install policy")
             return False
 
-    def _handle_webui_skill_update(self, request: WsRequest) -> Response:
+    async def _handle_webui_skill_update(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         query = _request_query(request)
@@ -1837,14 +1836,11 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, exc.message)
         self._apply_skill_state()
         return _http_json_response({
-            **webui_skills_payload(
-                self.skills_workspace_path,
-                disabled_skills=self.disabled_skills,
-            ),
+            **(await self._load_webui_skills()),
             "last_action": action,
         })
 
-    def _handle_webui_skill_delete(
+    async def _handle_webui_skill_delete(
         self,
         connection: Any,
         request: WsRequest,
@@ -1867,10 +1863,7 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, exc.message)
         self._apply_skill_state()
         return _http_json_response({
-            **webui_skills_payload(
-                self.skills_workspace_path,
-                disabled_skills=self.disabled_skills,
-            ),
+            **(await self._load_webui_skills()),
             "last_action": action,
         })
 
@@ -1878,7 +1871,7 @@ class GatewayHTTPHandler:
         if self.skill_state_action is not None:
             self.skill_state_action(set(self.disabled_skills))
 
-    def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
+    async def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         from urllib.parse import unquote
@@ -1886,10 +1879,11 @@ class GatewayHTTPHandler:
         name = unquote(raw_name)
         if not name or "/" in name or "\\" in name:
             return _http_error(400, "invalid skill name")
-        payload = webui_skill_detail_payload(
+        payload = await asyncio.to_thread(
+            webui_skill_detail_payload,
             self.skills_workspace_path,
             name,
-            disabled_skills=self.disabled_skills,
+            disabled_skills=set(self.disabled_skills),
         )
         if payload is None:
             return _http_error(404, "skill not found")

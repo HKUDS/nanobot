@@ -7,12 +7,14 @@ import socket
 import time
 from contextlib import suppress
 from pathlib import Path
+from threading import Event
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
+from nanobot.agent.skills import SkillsLoader
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
@@ -606,6 +608,60 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         }
         assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
     finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "/workspace-skill"], ids=["list", "detail"])
+async def test_webui_skill_reads_do_not_block_other_http_routes(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+) -> None:
+    skill_dir = tmp_path / "skills" / "workspace-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: workspace-skill\ndescription: Workspace skill.\n---\n",
+        encoding="utf-8",
+    )
+    entered = asyncio.Event()
+    release = Event()
+    loop = asyncio.get_running_loop()
+    discover = SkillsLoader._discover_skills
+
+    def slow_discovery(loader: SkillsLoader) -> list[dict[str, str]]:
+        loop.call_soon_threadsafe(entered.set)
+        if not release.wait(3.0):
+            raise TimeoutError("skill scan was not released")
+        return discover(loader)
+
+    monkeypatch.setattr(SkillsLoader, "_discover_skills", slow_discovery)
+    port = _free_port()
+    channel = _ch(
+        bus, session_manager=_seed_session(tmp_path), workspace_path=tmp_path, port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    token = channel.gateway.tokens.issue_api_token(300)
+    auth = {"Authorization": f"Bearer {token}"}
+    skills_task = asyncio.create_task(
+        _http_get(f"http://127.0.0.1:{port}/api/webui/skills{suffix}", headers=auth)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 2.0)
+        workspaces = await asyncio.wait_for(
+            _http_get(f"http://127.0.0.1:{port}/api/workspaces", headers=auth), 1.0,
+        )
+        assert workspaces.status_code == 200
+        assert not skills_task.done()
+
+        release.set()
+        skills = await skills_task
+        assert skills.status_code == 200
+    finally:
+        release.set()
+        await asyncio.gather(skills_task, return_exceptions=True)
         await channel.stop()
         await server_task
 
