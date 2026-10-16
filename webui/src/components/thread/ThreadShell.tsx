@@ -1266,6 +1266,16 @@ export function ThreadShell({
       : []),
   ])), [completedTurnIds, completionIdsProvided, hasPendingToolCalls, historical, historyActiveTurnId]);
 
+  const lastRunTurnId = chatId ? client.getRunTurnId(chatId) : null;
+  const completedRunTurnId = chatId && lastRunTurnId && client.isRunCompleted(chatId, lastRunTurnId)
+    ? lastRunTurnId : null;
+  const queueCompletedTurnIds = useMemo(() => {
+    const canonical = hasPendingToolCalls ? [] : canonicalCompletedTurnIds;
+    // Live terminal facts can release the queue before the history refresh finishes.
+    return completedRunTurnId && !canonical.includes(completedRunTurnId)
+      ? [...canonical, completedRunTurnId] : canonical;
+  }, [canonicalCompletedTurnIds, completedRunTurnId, hasPendingToolCalls]);
+
   useEffect(() => {
     if (!historyKey || !chatId || loading) return;
     const pendingCanonicalHydrate = pendingCanonicalHydrateRef.current.get(chatId);
@@ -1877,8 +1887,8 @@ export function ThreadShell({
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
           activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) ?? historyActiveTurnId : null}
-          completedTurnIds={messagesReady && !recoveryNeedsDecision && !hasPendingToolCalls
-            && chatId && !client.hasUnsettledRun(chatId) ? canonicalCompletedTurnIds : undefined}
+          completedTurnIds={messagesReady && !recoveryNeedsDecision
+            && chatId && !client.hasUnsettledRun(chatId) ? queueCompletedTurnIds : undefined}
           placeholder={
             composerVariant === "hero"
               ? t("thread.composer.placeholderHero")

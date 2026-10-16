@@ -336,6 +336,12 @@ export class NanobotClient {
     return this.latestRunTurnIdByChatId.get(chatId) ?? null;
   }
 
+  /** Whether a turn has a terminal wire, canonical, or local stop disposition. */
+  isRunCompleted(chatId: string, turnId: string): boolean {
+    return this.closedRunTurnIdsByChatId.get(chatId)?.has(turnId) === true
+      || this.canonicalCompletedTurnIdsByChatId.get(chatId)?.has(turnId) === true;
+  }
+
   /** Clear the optimistic run state immediately after the user stops a turn. */
   finishRunLocally(chatId: string): void {
     const unsettled = [...(this.unsettledRunTurnIdsByChatId.get(chatId) ?? [])];
@@ -746,11 +752,6 @@ export class NanobotClient {
       turnId !== null
       && this.canonicalCompletedTurnIdsByChatId.get(chatId)?.has(turnId) === true
     );
-  }
-
-  private isRunCompleted(chatId: string, turnId: string): boolean {
-    return this.closedRunTurnIdsByChatId.get(chatId)?.has(turnId) === true
-      || this.canonicalCompletedTurnIdsByChatId.get(chatId)?.has(turnId) === true;
   }
 
   private rememberRunCompletion(chatId: string, turnId: string): void {

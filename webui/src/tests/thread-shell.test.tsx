@@ -44,6 +44,7 @@ function makeClient() {
   const runStartedAtByChatId = new Map<string, number>();
   const runGenerationByChatId = new Map<string, number>();
   const latestRunTurnIdByChatId = new Map<string, string>();
+  const closedRunTurnIdsByChatId = new Map<string, Set<string>>();
   const completedTurnIdsByChatId = new Map<string, Set<string>>();
   const goalStateByChatId = new Map<string, import("@/lib/types").GoalStateWsPayload>();
   let status: ConnectionStatus = "open";
@@ -140,6 +141,10 @@ function makeClient() {
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
     getRunTurnId: (chatId: string) => latestRunTurnIdByChatId.get(chatId) ?? null,
+    isRunCompleted: (chatId: string, turnId: string) => (
+      closedRunTurnIdsByChatId.get(chatId)?.has(turnId) === true
+      || completedTurnIdsByChatId.get(chatId)?.has(turnId) === true
+    ),
     finishRunLocally: vi.fn((chatId: string) => {
       runStartedAtByChatId.delete(chatId);
       latestRunTurnIdByChatId.delete(chatId);
@@ -199,6 +204,11 @@ function makeClient() {
         (ev.event === "goal_status" && ev.status === "idle")
         || ev.event === "turn_end"
       ) {
+        if (turnId) {
+          const closed = closedRunTurnIdsByChatId.get(chatId) ?? new Set<string>();
+          closed.add(turnId);
+          closedRunTurnIdsByChatId.set(chatId, closed);
+        }
         runStartedAtByChatId.delete(chatId);
         for (const h of runStatusHandlers) h(chatId, null);
         for (const h of runCompletionHandlers) h(chatId);
@@ -1671,6 +1681,61 @@ describe("ThreadShell", () => {
     });
 
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
+  });
+
+  it.each([false, true])("drains persisted follow-ups before history refresh resolves (pending tools=%s)", async (pendingTools) => {
+    const client = makeClient();
+    const chatId = "queued-live-completion";
+    const owner = "queued-owner";
+    const initialHistory = httpJson({
+      ...transcriptFromSimpleMessages([{ role: "user", content: "Initial question", turnId: owner }]),
+      has_pending_tool_calls: pendingTools,
+      active_turn_id: owner,
+      completed_turn_ids: [],
+    });
+    vi.mocked(fetch).mockImplementation(async (input) => (
+      String(input).includes("/webui-thread") ? initialHistory
+        : { ok: false, status: 404, json: async () => ({}) }
+    ) as Response);
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Queued chat" onToggleSidebar={() => {}} />));
+    await screen.findByText("Initial question");
+    act(() => client._emitChat(chatId, {
+      event: "goal_status", chat_id: chatId, turn_id: owner,
+      status: "running", started_at: 1_000,
+    }));
+    const input = screen.getByLabelText("Message input");
+    for (const text of ["first persisted follow-up", "second persisted follow-up"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    let finishRefresh!: (response: Response) => void;
+    const refresh = new Promise<Response>((resolve) => { finishRefresh = resolve; });
+    let refreshStarted = false;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input).includes("/webui-thread")) {
+        refreshStarted = true;
+        return refresh;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    act(() => client._emitSessionUpdate(chatId, "thread"));
+    await waitFor(() => expect(refreshStarted).toBe(true));
+    try {
+      act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: owner }));
+      await waitFor(() => expectSendMessageWithTurn(client, chatId, "first persisted follow-up"));
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
+      const nextTurnId = client.sendMessage.mock.calls[0][3]!.turnId!;
+      act(() => client._emitChat(chatId, {
+        event: "goal_status", chat_id: chatId, turn_id: nextTurnId,
+        status: "running", started_at: 2_000,
+      }));
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
+      act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: nextTurnId }));
+      await waitFor(() => expectSendMessageWithTurn(client, chatId, "second persisted follow-up"));
+      expect(client.sendMessage).toHaveBeenCalledTimes(2);
+    } finally {
+      await act(async () => { finishRefresh(initialHistory as Response); });
+    }
   });
 
   it("drains temporary follow-ups once per live completed turn without persisted history", async () => {

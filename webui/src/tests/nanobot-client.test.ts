@@ -582,6 +582,7 @@ describe("NanobotClient", () => {
 
     expect(client.getRunStartedAt("chat-stop")).toBeNull();
     expect(client.hasUnsettledRun("chat-stop")).toBe(false);
+    expect(client.isRunCompleted("chat-stop", "turn-stop")).toBe(true);
     expect(handler).toHaveBeenLastCalledWith("chat-stop", null);
   });
 
@@ -609,6 +610,7 @@ describe("NanobotClient", () => {
     expect(client.status).toBe("reconnecting");
     expect(client.getRunStartedAt("chat-strip")).toBe(12_345);
     expect(client.getRunTurnId("chat-strip")).toBe("turn-strip");
+    expect(client.isRunCompleted("chat-strip", "turn-strip")).toBe(false);
     expect(client.getUnsettledRunChatIds()).toEqual(["chat-strip"]);
     expect(handler).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(20);
@@ -621,6 +623,8 @@ describe("NanobotClient", () => {
     });
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
     expect(client.getUnsettledRunChatIds()).toEqual([]);
+    expect(client.isRunCompleted("chat-strip", "turn-strip")).toBe(true);
+    expect(client.isRunCompleted("another-chat", "turn-strip")).toBe(false);
     expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
     client.close();
   });
