@@ -2103,12 +2103,12 @@ export function ThreadComposer({
     if (isStreaming || interactionDisabled || queuedPrompts.length === 0) return;
     const first = queuedPrompts[0];
     if (first.autoPaused) return;
-    const waitingTurnCompleted = first.autoAfterTurnId !== undefined
+    const waitingTurnCompleted = queuedPromptStorageKey !== null && first.autoAfterTurnId !== undefined
       ? completedTurnIds.includes(first.autoAfterTurnId)
       : previous.isStreaming;
     if (!waitingTurnCompleted) return;
     sendNextQueuedPrompt();
-  }, [completedTurnIds, interactionDisabled, sendNextQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompts]);
+  }, [completedTurnIds, interactionDisabled, sendNextQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompts, queuedPromptStorageKey]);
 
   const submit = useCallback(() => {
     if (modelNeedsSetup) {

@@ -1673,6 +1673,47 @@ describe("ThreadShell", () => {
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
   });
 
+  it("drains temporary follow-ups once per live completed turn without persisted history", async () => {
+    const client = makeClient();
+    const chatId = "temporary-queued-follow-ups";
+    render(wrap(client, <ThreadShell
+      session={session(chatId)} title="Temporary chat" temporary
+      temporaryChatIds={[chatId]} onToggleSidebar={() => {}}
+    />));
+    act(() => client._emitChat(chatId, {
+      event: "goal_status", chat_id: chatId, turn_id: "temporary-owner",
+      status: "running", started_at: 1_000,
+    }));
+    const input = screen.getByLabelText("Message input");
+    for (const text of ["first temporary follow-up", "second temporary follow-up"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    act(() => client._emitChat(chatId, {
+      event: "turn_end", chat_id: chatId, turn_id: "temporary-owner",
+    }));
+    await waitFor(() => expectSendMessageWithTurn(client, chatId, "first temporary follow-up"));
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("second temporary follow-up")).toBeInTheDocument();
+    const nextTurnId = client.sendMessage.mock.calls[0][3]!.turnId!;
+    act(() => client._emitChat(chatId, {
+      event: "goal_status", chat_id: chatId, turn_id: nextTurnId,
+      status: "running", started_at: 2_000,
+    }));
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+
+    act(() => client._emitChat(chatId, {
+      event: "turn_end", chat_id: chatId, turn_id: nextTurnId,
+    }));
+    await waitFor(() => expectSendMessageWithTurn(client, chatId, "second temporary follow-up"));
+    expect(client.sendMessage).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/webui-thread"))).toBe(false);
+    expect(window.localStorage.getItem(`nanobot.webui.composerQueuedGuidance.v1:${chatId}`)).toBeNull();
+  });
+
   it("keeps temporary messages across navigation and drops them after clear", async () => {
     const client = makeClient();
     const view = (
