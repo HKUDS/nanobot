@@ -37,7 +37,7 @@ class RequestOrigin(TypedDict):
 
 
 def request_origin_from_metadata(metadata: Mapping[str, Any]) -> RequestOrigin | None:
-    """Read the user request identity retained across internal continuations."""
+    """Read the request identity carried by continuation or recovery metadata."""
     value = metadata.get(REQUEST_ORIGIN_METADATA_KEY)
     if not isinstance(value, dict):
         return None

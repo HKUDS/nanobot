@@ -27,12 +27,14 @@ from nanobot.session.recovery import (
     PENDING_USER_TURN_KEY,
     RECOVERY_INBOUND_METADATA_KEY,
     RECOVERY_METADATA_KEY,
+    REQUEST_ORIGIN_METADATA_KEY,
     RUNTIME_CHECKPOINT_KEY,
     UNCERTAIN_TOOL_PHASES,
     append_recovery_interruption,
     discard_runtime_checkpoint,
     pending_followups,
     recovery_state_from_metadata,
+    request_origin_from_metadata,
     restore_pending_interruption,
     restore_runtime_checkpoint,
     runtime_checkpoint_is_well_formed,
@@ -389,6 +391,7 @@ class RecoveryCoordinator:
         state: Mapping[str, Any],
     ) -> None:
         recovery_id = cast(str, state["recovery_id"])
+        origin = request_origin_from_metadata(session.metadata)
         await self.bus.publish_inbound(
             InboundMessage(
                 channel="websocket",
@@ -405,6 +408,7 @@ class RecoveryCoordinator:
                     RECOVERY_INBOUND_METADATA_KEY: recovery_id,
                     turn_continuation.INTERNAL_CONTINUATION_META: True,
                     turn_continuation.SKIP_USER_PERSIST_META: True,
+                    **({REQUEST_ORIGIN_METADATA_KEY: origin} if origin is not None else {}),
                 },
                 session_key_override=session.key,
                 require_existing_session=True,

@@ -21,6 +21,7 @@ from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import (
     PENDING_FOLLOWUPS_KEY,
+    REQUEST_ORIGIN_METADATA_KEY,
     pending_followups,
     record_pending_followup,
 )
@@ -556,3 +557,63 @@ async def test_goal_continuation_after_followup_keeps_control_identity(loop, com
     finally:
         loop.stop()
         await asyncio.wait_for(run_task, timeout=3)
+
+
+async def test_queued_continuation_keeps_its_origin_after_another_chat_runs(loop):
+    loop._unified_session = True
+    loop.max_iterations = 1
+    loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
+    loop.tools.execute = AsyncMock(return_value="ok")
+    key = "unified:default"
+    session = loop.sessions.get_or_create(key)
+    session.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Finish the goal"}
+    loop.sessions.save(session)
+    requests = []
+    persisted_origin = None
+
+    async def chat(**kwargs):
+        nonlocal persisted_origin
+        context = current_request_context()
+        requests.append((context.chat_id, context.message_id, context.turn_id))
+        if len(requests) == 1:
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="feishu", sender_id="user", chat_id="chat-b", content="Inspect B first",
+                metadata={"message_id": "message-b"},
+            ))
+            async with asyncio.timeout(3):
+                while loop._pending_queues[key].empty():
+                    await asyncio.sleep(0)
+        elif len(requests) == 3:
+            persisted = SessionManager(loop.workspace).get_or_create(key)
+            persisted_origin = persisted.metadata[REQUEST_ORIGIN_METADATA_KEY]
+            await loop.tools.get("message").execute(content="Continuation reply")
+            session.metadata[GOAL_STATE_KEY]["status"] = "complete"
+            return LLMResponse(content="done")
+        return LLMResponse(content="working", finish_reason="tool_calls", tool_calls=[
+            ToolCallRequest(id=f"call-{len(requests)}", name="noop", arguments={}),
+        ])
+
+    loop.provider.chat_stream_with_retry = chat
+    worker = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="feishu", sender_id="user", chat_id="chat-a", content="Start the goal",
+            metadata={"message_id": "message-a"},
+        ))
+        async with asyncio.timeout(5):
+            while not requests or key in loop._pending_queues:
+                await asyncio.sleep(0.01)
+        assert [request[:2] for request in requests] == [
+            ("chat-a", "message-a"), ("chat-b", "message-b"), ("chat-a", "message-a"),
+        ]
+        assert requests[2][2] == requests[0][2]
+        assert persisted_origin == {"message_id": "message-a", "turn_id": requests[0][2]}
+        replies = []
+        while not loop.bus.outbound.empty():
+            reply = loop.bus.outbound.get_nowait()
+            if reply.content == "Continuation reply":
+                replies.append((reply.chat_id, reply.metadata.get("message_id")))
+        assert replies == [("chat-a", "message-a")]
+    finally:
+        loop.stop()
+        await asyncio.wait_for(worker, timeout=3)
