@@ -674,7 +674,9 @@ async def test_queued_continuation_keeps_its_origin_after_another_chat_runs(loop
             persisted = SessionManager(loop.workspace).get_or_create(key)
             persisted_origin = persisted.metadata[REQUEST_ORIGIN_METADATA_KEY]
             await loop.tools.get("message").execute(content="Continuation reply")
-            session.metadata[GOAL_STATE_KEY]["status"] = "complete"
+            await loop.sessions.state.mutate_metadata(
+                key, lambda metadata: metadata[GOAL_STATE_KEY].update(status="complete"),
+            )
             return LLMResponse(content="done")
         return LLMResponse(content="working", finish_reason="tool_calls", tool_calls=[
             ToolCallRequest(id=f"call-{len(requests)}", name="noop", arguments={}),

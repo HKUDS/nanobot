@@ -108,7 +108,8 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         channel="websocket", sender_id="user", chat_id="chat", content="Inspect configuration",
         metadata={"webui": True, "webui_turn_id": "user-request", "message_id": "user-message"},
     )
-    loop.sessions.get_or_create(request.session_key).metadata["title"] = "Configuration"
+    await loop.sessions.state.get(request.session_key)
+    await loop.sessions.state.update_metadata(request.session_key, {"title": "Configuration"})
     with coordinator.connected():
         if late_result:
             provider.chat_stream_with_retry = AsyncMock(side_effect=[
@@ -119,7 +120,7 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
                 channel="websocket", sender_id="user", chat_id="chat", content="New request B",
                 metadata={"webui": True, "webui_turn_id": "request-b", "message_id": "message-b"},
             ), asyncio.Queue())
-            save_completed_subagent(loop, "task-a", request.session_key)
+            await save_completed_subagent(loop, "task-a", request.session_key)
             request = InboundMessage(
                 channel="system", sender_id="subagent", chat_id=request.session_key,
                 content="Background check for the original request completed",

@@ -762,7 +762,11 @@ class AgentLoop:
             ctx.session.metadata[REQUEST_ORIGIN_METADATA_KEY] = origin
             if ctx.original_user_text is None:
                 # No new user row will persist this turn's owner before execution.
-                self.sessions.save(ctx.session)
+                await self.sessions.state.update_metadata(
+                    ctx.session.key,
+                    {REQUEST_ORIGIN_METADATA_KEY: origin},
+                    expected_generation=ctx.session.generation,
+                )
         scope = await self.runner.prepare_prompt(
             self.workspace_scopes.for_turn,
             channel=ctx.delivery.route.channel,
