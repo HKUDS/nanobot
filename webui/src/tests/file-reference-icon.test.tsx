@@ -63,6 +63,19 @@ describe("shared file icons", () => {
     },
   );
 
+  it("keeps iconless activity references named and keyboard-operable", () => {
+    const open = vi.fn();
+    render(<FileReferenceChip path="src/app.tsx" previewPath="/repo/src/app.tsx"
+      display="path" showIcon={false} onOpen={open} />);
+
+    const reference = screen.getByRole("button", { name: "src/app.tsx" });
+    expect(reference).toHaveTextContent("src/app.tsx");
+    expect(reference.querySelector("svg")).toBeNull();
+    expect(reference).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(reference, { key: "Enter" });
+    expect(open).toHaveBeenCalledWith("/repo/src/app.tsx");
+  });
+
   it.each(["image", "video"] as const)("retains %s identity when its attachment is unavailable", (kind) => {
     const { container } = render(<AttachmentTile attachment={{ kind, name: "Unavailable" }} />);
     expect(container.querySelector("svg")).toHaveClass(kind === "image" ? "lucide-file-image" : "lucide-file-video2");

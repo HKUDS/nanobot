@@ -86,7 +86,7 @@ describe("ThreadMessages", () => {
         const assertIndependentDiff = () => {
           const diff = screen.getByTestId("file-edit-diff");
           expect(diff).toBeVisible();
-          expect(screen.getByText("Edited")).toBeInTheDocument();
+          expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
           expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
             .toBeNull();
           expect(screen.getByText("File updated")).toBeVisible();

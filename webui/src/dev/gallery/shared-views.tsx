@@ -73,14 +73,21 @@ function ActivityPreview() {
 
 function FilesPreview() {
   const [state, setState] = useState<"done" | "editing" | "error">("done");
+  const [operation, setOperation] = useState<"create" | "edit" | "delete">("edit");
   const [display, setDisplay] = useState<"summary" | "diff" | "collapsed_diff">("diff");
   const [opened, setOpened] = useState("");
+  const diffs = {
+    create: '@@ -0,0 +1 @@\n+export const greeting = "Hello, Nanobot";\n',
+    edit: '@@ -1,2 +1,2 @@\n-export const greeting = "Hello";\n+export const greeting = "Hello, Nanobot";\n export const ready = true;\n',
+    delete: '@@ -1 +0,0 @@\n-export const greeting = "Hello";\n',
+  };
   const edit: FileEditSummary = {
-    key: "example-edit", path: "src/greeting.ts", added: 1, deleted: 1, approximate: false, binary: false,
-    status: state, pending: state === "editing", operation: "edit", error: state === "error" ? "Example edit could not be applied." : undefined,
-    diff: { format: "unified", text: '@@ -1,2 +1,2 @@\n-export const greeting = "Hello";\n+export const greeting = "Hello, Nanobot";\n export const ready = true;\n' },
+    key: "example-edit", path: "src/greeting.ts", added: operation === "delete" ? 0 : 1, deleted: operation === "create" ? 0 : 1, approximate: false, binary: false,
+    status: state, pending: state === "editing", operation, error: state === "error" ? "Example edit could not be applied." : undefined,
+    diff: { format: "unified", text: diffs[operation] },
   };
   return <><StatePicker label="File edit state" value={state} options={["done", "editing", "error"]} onChange={setState} />
+    <StatePicker label="File operation" value={operation} options={["create", "edit", "delete"]} onChange={setOperation} />
     <StatePicker label="Diff display" value={display} options={["summary", "diff", "collapsed_diff"]} onChange={setDisplay} />
     <FileEditGroup edits={[edit]} displayMode={display} onOpenFilePreview={setOpened} />
     <p role="status" className="mt-4 text-xs text-muted-foreground">{opened ? `Selected file: ${opened}` : "Select a file reference to exercise its callback."}</p></>;

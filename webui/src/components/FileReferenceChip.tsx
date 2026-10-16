@@ -31,6 +31,7 @@ interface FileReferenceChipProps {
   path: string;
   tooltipPath?: string;
   display?: "name" | "path";
+  showIcon?: boolean;
   active?: boolean;
   className?: string;
   textClassName?: string;
@@ -43,6 +44,7 @@ export function FileReferenceChip({
   path,
   tooltipPath,
   display = "name",
+  showIcon = true,
   active = false,
   className,
   textClassName,
@@ -97,7 +99,7 @@ export function FileReferenceChip({
                 ],
               )}
             >
-              <FileReferenceIcon kind={kind} className="translate-y-[0.12em]" />
+              {showIcon ? <FileReferenceIcon kind={kind} className="translate-y-[0.12em]" /> : null}
               <span
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
@@ -257,6 +259,10 @@ const FILE_ICONS = {
   typescript: FileCode2,
   video: FileVideo2,
 } satisfies Record<FileReferenceKind, LucideIcon>;
+
+export function fileIconForPath(path: string): LucideIcon {
+  return FILE_ICONS[fileKindForPath(path)];
+}
 
 /** The same file silhouette and stroke in replies, tabs, and attachment tiles. */
 export function FileReferenceIcon({ kind, className }: { kind: FileReferenceKind; className?: string }) {
