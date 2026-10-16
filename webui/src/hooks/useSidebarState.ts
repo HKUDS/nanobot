@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import { normalizeWorkbenchState } from "@/components/workbench/workbench-model";
-import { fetchSidebarState } from "@/lib/api";
+import { ApiError, fetchSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
 const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
@@ -207,8 +207,16 @@ export function useSidebarState(
         initialLoadSucceededRef.current = true;
         setState(loaded);
         setLoadStatus("ready");
-      } catch {
-        if (!cancelled && !initialLoadSucceededRef.current) setLoadStatus("failed");
+      } catch (error) {
+        if (cancelled || initialLoadSucceededRef.current) return;
+        // A 404 means the server has no saved state yet — that is a normal
+        // empty state, not a failure. Anything else surfaces the retry UI.
+        if (error instanceof ApiError && error.status === 404) {
+          initialLoadSucceededRef.current = true;
+          setLoadStatus("ready");
+        } else {
+          setLoadStatus("failed");
+        }
       } finally {
         loadInFlight = false;
       }
