@@ -1,7 +1,7 @@
 """Execution configuration shared by shell/session tools and the root schema."""
 
 from collections.abc import Mapping
-from typing import Literal, Self, cast
+from typing import Literal, cast
 
 from pydantic import AliasChoices, Field, model_validator
 
@@ -35,15 +35,6 @@ class ExecToolConfig(Base):
             if "timeout" in value and ("maxRuntime" in value or "max_runtime" in value):
                 raise ValueError("Use maxRuntime or legacy timeout, not both")
         return value
-
-    @model_validator(mode="after")
-    def _validate_runtime_limit(self) -> Self:
-        if "max_runtime_limit" not in self.model_fields_set:
-            # Keep explicitly configured long-running commands valid on load.
-            self.max_runtime_limit = max(86400, self.max_runtime)
-        elif self.max_runtime > self.max_runtime_limit:
-            raise ValueError("maxRuntimeLimit must be greater than or equal to maxRuntime")
-        return self
 
     @property
     def timeout(self) -> int:

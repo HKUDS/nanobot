@@ -1,7 +1,7 @@
 export interface RuntimeConfigField {
   group: string;
   path: string;
-  kind: "toggle" | "text" | "nullable" | "number" | "boolean" | "select" | "list" | "preset";
+  kind: "toggle" | "text" | "nullable" | "number" | "duration" | "boolean" | "select" | "list" | "preset";
   options?: string[];
   when?: { path: string; value: string | boolean | string[] };
   manual?: boolean;
@@ -44,7 +44,7 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "web", path: "tools.web.enable", kind: "boolean" },
   { group: "tools", path: "tools.my.enable", kind: "boolean" },
   { group: "tools", path: "tools.my.allow_set", kind: "boolean", when: { path: "tools.my.enable", value: true } },
-  { group: "shell", path: "tools.exec.timeout", kind: "number", min: 0 },
+  { group: "shell", path: "tools.exec.timeout", kind: "duration", min: 0 },
   { group: "shell", path: "tools.exec.path_prepend", kind: "text" },
   { group: "shell", path: "tools.exec.path_append", kind: "text" },
   { group: "shell", path: "tools.exec.sandbox", kind: "select", options: ["", "bwrap", "seatbelt"] },

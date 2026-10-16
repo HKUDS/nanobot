@@ -391,6 +391,13 @@
     },
     "runtimeConfig": {
       "apiSaved": "Salvo. Reinicie o serviço de API para aplicar as alterações.",
+      "commandRuntime": {
+        "custom": "Personalizada (segundos)",
+        "customLabel": "Duração personalizada (segundos)",
+        "noLimit": "Sem limite de tempo",
+        "limit": "Com limite: até {{duration}}",
+        "rangeError": "Digite um número inteiro de segundos de 1 a {{max}}, ou escolha Sem limite de tempo."
+      },
       "fields": {
         "agents_defaults_timezone_mode": {"label": "Fuso do sistema", "help": "Desative para escolher um fuso horário.\n\nDesative para escolher o fuso horário manualmente."},
         "agents_defaults_timezone": {"label": "Fuso horário", "help": "Os deslocamentos UTC usam a data atual.\n\nEscolha um fuso horário. A diferença em relação ao UTC considera a data atual."},
@@ -410,7 +417,7 @@
         "tools_cli_apps_enable": {"label": "Apps CLI", "help": "Permita instalar, gerenciar e executar apps CLI.\n\nPermite que o agente gerencie e execute aplicativos de linha de comando."},
         "tools_my_enable": {"label": "Ver configuração", "help": "Permita que o agente consulte sua configuração.\n\nPermite que o agente consulte sua própria configuração."},
         "tools_my_allow_set": {"label": "Editar configuração", "help": "Permita que o agente altere sua configuração.\n\nPermite que a ferramenta de autogerenciamento atualize a configuração."},
-        "tools_exec_timeout": {"label": "Tempo limite de comandos", "help": "Pare os comandos após este número de segundos; 0 significa sem limite.\n\nDuração máxima dos comandos de shell. 0 significa sem limite."},
+        "tools_exec_timeout": {"label": "Duração dos comandos", "help": "Limite padrão de duração dos comandos de shell.\n\nA saída e a espera não prolongam esse limite. Escolha Sem limite de tempo para remover o limite de duração."},
         "tools_exec_path_prepend": {"label": "Prioridade no PATH", "help": "Pesquise primeiro nestas pastas.\n\nDiretórios adicionados ao início de PATH. Separe-os com ponto e vírgula no Windows ou com dois-pontos no macOS e no Linux."},
         "tools_exec_path_append": {"label": "Adições ao PATH", "help": "Pesquise nestas pastas por último.\n\nDiretórios adicionados ao final de PATH. Separe-os com ponto e vírgula no Windows ou com dois-pontos no macOS e no Linux."},
         "tools_exec_sandbox": {"label": "Sandbox de comandos", "help": "Isole os processos de comandos; requer suporte do sistema.\n\nUse bwrap no Linux ou Seatbelt no macOS. As verificações do espaço de trabalho, por si só, não isolam processos."},

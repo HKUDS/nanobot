@@ -6,6 +6,7 @@ import { SettingsGroup, SettingsRow, SettingsSectionTitle, RestartRequiredNotice
 import { ProviderPicker } from "@/components/settings/shared/ModelControls";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
+import { ShellRuntimeControl } from "@/components/settings/system/ShellRuntimeControl";
 import { Input } from "@/components/ui/input";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigField, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { updateRuntimeConfigSettings } from "@/lib/api";
@@ -59,6 +60,11 @@ export function useRuntimeConfigSettings(
     setErrors((prev) => ({ ...prev, [field.group]: "" }));
     setInvalidField(null);
   };
+  const reject = (field: RuntimeConfigField, message: string) => {
+    setSaved((prev) => ({ ...prev, [field.group]: false }));
+    setErrors((prev) => ({ ...prev, [field.group]: message }));
+    setInvalidField(field.path);
+  };
   const save = async (group: string) => {
     if (!settings?.runtime_config) return;
     if (saving) {
@@ -70,12 +76,13 @@ export function useRuntimeConfigSettings(
     const values: Record<string, RuntimeConfigValue> = {};
     for (const field of changed) {
       const raw = value(field.path);
-      if (field.kind === "number") {
+      if (field.kind === "number" || field.kind === "duration") {
+        const maximum = field.kind === "duration" ? settings.advanced.exec_max_runtime_limit : field.max;
         const parsed = Number(raw);
         if (String(raw).trim() === "" || !Number.isFinite(parsed)
           || (field.path !== "api.timeout" && !Number.isInteger(parsed))
           || (field.min !== undefined && parsed < field.min)
-          || (field.max !== undefined && parsed > field.max)) {
+          || (maximum !== undefined && parsed > maximum)) {
           setErrors((prev) => ({ ...prev, [group]: t("settings.runtimeConfig.numberError") }));
           setInvalidField(field.path);
           return;
@@ -124,7 +131,7 @@ export function useRuntimeConfigSettings(
     applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
     setSaved((prev) => ({ ...prev, [field.group]: true }));
   };
-  return { value, visible, dirty, discard, change, save, saveList, saving, errors, invalidField, saved };
+  return { value, visible, dirty, discard, change, reject, save, saveList, saving, errors, invalidField, saved };
 }
 
 export type RuntimeConfigController = ReturnType<typeof useRuntimeConfigSettings>;
@@ -160,6 +167,7 @@ export function RuntimeConfigSettings({
         const dirty = fields.filter(state.visible).some(state.dirty);
         const title = tr(`groups.${group.id}.title`);
         const errorId = `runtime-error-${group.id}`;
+        const inlineError = fields.some((field) => field.kind === "duration" && state.invalidField === field.path);
         const section = (
           <section key={group.id} aria-label={title}>
             <SettingsSectionTitle>{title}</SettingsSectionTitle>
@@ -195,6 +203,13 @@ export function RuntimeConfigSettings({
                           <div className="w-full">
                             {field.path === "agents.defaults.timezone" ? (
                               <TimezonePicker {...common} value={String(current)} onChange={(next) => state.change(field, next)} />
+                            ) : field.kind === "duration" ? (
+                              <ShellRuntimeControl value={String(current)} maximum={settings.advanced.exec_max_runtime_limit}
+                                controlProps={{ ...common, disabled: disabled || state.saving === group.id || isRestarting }}
+                                onChange={(next) => state.change(field, next)}
+                                error={state.invalidField === field.path && state.errors[group.id]
+                                  ? { id: errorId, message: state.errors[group.id] } : undefined}
+                                onReject={(message) => state.reject(field, message)} />
                             ) : field.kind === "list" ? (
                               <SettingsTextEditor id={id} title={text} description={help} value={String(current)}
                                 disabled={disabled || state.saving !== null || isRestarting}
@@ -227,7 +242,7 @@ export function RuntimeConfigSettings({
                     onRestart={onRestart} isRestarting={isRestarting} />
                 </SettingsGroup>
               </fieldset>
-              {state.errors[group.id] ? <p id={errorId} role="alert" className="mt-2 break-words px-1 text-[12px] text-destructive">{state.errors[group.id]}</p> : null}
+              {state.errors[group.id] && !inlineError ? <p id={errorId} role="alert" className="mt-2 break-words px-1 text-[12px] text-destructive">{state.errors[group.id]}</p> : null}
             </form>
           </section>
         );

@@ -110,7 +110,8 @@ def _exec_parameters(config: ExecToolConfig) -> dict[str, Any]:
             description=(
                 "Hard runtime budget in seconds. Omit for the configured default "
                 f"({'unlimited' if config.max_runtime == 0 else str(config.max_runtime) + 's'}). "
-                f"Maximum {config.max_runtime_limit}s; output does not extend it."
+                f"Explicit requests must not exceed {config.max_runtime_limit}s. "
+                "Output does not extend the budget."
             ),
             minimum=1,
             maximum=config.max_runtime_limit,

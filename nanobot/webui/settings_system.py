@@ -144,6 +144,7 @@ def system_settings_payload(
             **network_safety_payload(config),
             "mcp_server_count": len(config.tools.mcp_servers),
             "exec_enabled": exec_config.enable,
+            "exec_max_runtime_limit": exec_config.max_runtime_limit,
             "exec_sandbox": exec_config.sandbox or None,
             "exec_path_prepend_set": bool(exec_config.path_prepend),
             "exec_path_append_set": bool(exec_config.path_append),

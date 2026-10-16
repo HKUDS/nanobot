@@ -936,7 +936,7 @@ async def test_exec_runtime_rejects_out_of_range(
     """Invalid budgets fail before spawning instead of being clamped."""
     spawn = AsyncMock(side_effect=AssertionError("Invalid runtime must not start a process"))
     monkeypatch.setattr(ExecTool, "_spawn", spawn)
-    tool = ExecTool(max_runtime=60, max_runtime_limit=300)
+    tool = ExecTool(max_runtime=301, max_runtime_limit=300)
 
     result = await tool.execute(command="echo ok", **{runtime_parameter: runtime})
 
@@ -970,8 +970,6 @@ def test_exec_config_runtime_defaults_and_timeout_alias() -> None:
     assert ExecToolConfig(timeout=0).max_runtime == 0
     with pytest.raises(ValidationError):
         ExecToolConfig(timeout=-1)
-    with pytest.raises(ValidationError):
-        ExecToolConfig(timeout=121, max_runtime_limit=120)
 
 
 def test_exec_config_accepts_bwrap_bind_aliases() -> None:
@@ -993,7 +991,7 @@ def test_exec_config_accepts_bwrap_bind_aliases() -> None:
 def test_resolve_timeout_uses_configured_hard_budget() -> None:
     assert ExecTool()._resolve_timeout(None) == 3600
     assert ExecTool(timeout=5)._resolve_timeout(None) == 5
-    assert ExecTool(max_runtime=3600)._resolve_timeout(None) == 3600
+    assert ExecTool(max_runtime=172800, max_runtime_limit=60)._resolve_timeout(None) == 172800
 
 
 def test_resolve_timeout_respects_configured_limit_without_clamping() -> None:
@@ -1009,10 +1007,11 @@ def test_resolve_timeout_respects_configured_limit_without_clamping() -> None:
 @pytest.mark.parametrize("limit", [60, 1200, 86400])
 @pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
 def test_exec_runtime_schema_matches_configured_limit(limit, runtime_parameter) -> None:
-    tool = ExecTool(max_runtime=30, max_runtime_limit=limit)
+    tool = ExecTool(max_runtime=limit + 1, max_runtime_limit=limit)
     runtime_schema = tool.parameters["properties"][runtime_parameter]
     assert runtime_schema["minimum"] == 1
     assert runtime_schema["maximum"] == limit
+    assert tool.validate_params({"command": "echo ok"}) == []
     for runtime in (1, limit):
         assert tool.validate_params({"command": "echo ok", runtime_parameter: runtime}) == []
     for runtime in (0, -1, limit + 1):

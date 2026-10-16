@@ -20,19 +20,19 @@ def test_exec_timing_defaults() -> None:
 
 
 @pytest.mark.parametrize("values", [
-    {"maxRuntime": 7200, "maxRuntimeLimit": 14400, "idleTimeout": 90, "idleAction": "terminate"},
-    {"max_runtime": 7200, "max_runtime_limit": 14400, "idle_timeout": 90, "idle_action": "terminate"},
-    {"timeout": 7200, "maxRuntimeLimit": 14400, "idleTimeout": 90, "idleAction": "terminate"},
+    {"maxRuntime": 172800, "maxRuntimeLimit": 14400, "idleTimeout": 90, "idleAction": "terminate"},
+    {"max_runtime": 172800, "max_runtime_limit": 14400, "idle_timeout": 90, "idle_action": "terminate"},
+    {"timeout": 172800, "maxRuntimeLimit": 14400, "idleTimeout": 90, "idleAction": "terminate"},
 ])
 def test_exec_timing_aliases_and_serialization(values) -> None:
     config = ExecToolConfig.model_validate(values)
     dumped = config.model_dump(by_alias=True)
 
-    assert config.max_runtime == 7200
+    assert config.max_runtime == 172800
     assert config.max_runtime_limit == 14400
     assert config.idle_timeout == 90
     assert config.idle_action == "terminate"
-    assert dumped["maxRuntime"] == 7200
+    assert dumped["maxRuntime"] == 172800
     assert dumped["maxRuntimeLimit"] == 14400
     assert dumped["idleTimeout"] == 90
     assert dumped["idleAction"] == "terminate"
@@ -42,12 +42,12 @@ def test_exec_timing_aliases_and_serialization(values) -> None:
 
 @pytest.mark.parametrize("name", ["timeout", "maxRuntime", "max_runtime"])
 @pytest.mark.parametrize("runtime", [0, 60, 3600, 172800])
-def test_exec_omitted_limit_preserves_configured_runtime(name: str, runtime: int) -> None:
+def test_exec_runtime_does_not_raise_default_model_limit(name: str, runtime: int) -> None:
     config = ExecToolConfig.model_validate({name: runtime})
 
     assert config.max_runtime == runtime
     assert config.timeout == runtime
-    assert config.max_runtime_limit == max(86400, runtime)
+    assert config.max_runtime_limit == 86400
 
 
 @pytest.mark.parametrize("name", ["maxRuntime", "max_runtime"])
@@ -64,9 +64,6 @@ def test_exec_rejects_simultaneous_legacy_and_canonical_runtime(name: str) -> No
     {"idleTimeout": 1.5},
     {"maxRuntimeLimit": 0},
     {"maxRuntimeLimit": -1},
-    {"maxRuntimeLimit": 3599},
-    {"maxRuntime": 172800, "maxRuntimeLimit": 86400},
-    {"timeout": 172800, "maxRuntimeLimit": 86400},
     {"idleAction": "ignore"},
 ])
 def test_exec_rejects_invalid_timing_configuration(values) -> None:
@@ -104,15 +101,15 @@ def test_legacy_exec_config_loads_and_saves_canonical_fields(tmp_path) -> None:
     saved = json.loads(path.read_text(encoding="utf-8"))["tools"]["exec"]
 
     assert restored.max_runtime == 172800
-    assert restored.max_runtime_limit == 172800
+    assert restored.max_runtime_limit == 86400
     assert saved["maxRuntime"] == 172800
-    assert saved["maxRuntimeLimit"] == 172800
+    assert saved["maxRuntimeLimit"] == 86400
     assert saved["idleTimeout"] == 300
     assert saved["idleAction"] == "report"
     assert "timeout" not in saved
 
 
-@pytest.mark.parametrize("runtime", [0, 42])
+@pytest.mark.parametrize("runtime", [0, 42, 14400])
 def test_legacy_webui_timeout_editor_updates_canonical_runtime(tmp_path, runtime: int) -> None:
     from nanobot.webui.settings_api import update_runtime_config_settings
 
@@ -156,7 +153,7 @@ async def test_my_exec_config_reports_configured_timing(tmp_path) -> None:
     assert isinstance(tool, MyTool)
 
     expected = {
-        "max_runtime": 172800, "max_runtime_limit": 172800,
+        "max_runtime": 172800, "max_runtime_limit": 86400,
         "idle_timeout": 0, "idle_action": "terminate", "timeout": 172800,
     }
     for key, value in expected.items():

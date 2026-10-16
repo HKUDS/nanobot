@@ -957,6 +957,7 @@ export interface SettingsPayload {
     private_service_protection_enabled: boolean;
     mcp_server_count: number;
     exec_enabled: boolean;
+    exec_max_runtime_limit?: number;
     exec_sandbox?: string | null;
     exec_path_prepend_set: boolean;
     exec_path_append_set: boolean;

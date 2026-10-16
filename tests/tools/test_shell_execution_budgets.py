@@ -128,6 +128,23 @@ def _waiting_tree(parent_pidfile: Path, child_pidfile: Path) -> str:
     )
 
 
+async def test_trusted_default_runtime_can_exceed_model_request_limit():
+    manager = ExecSessionManager()
+    tool = ExecTool(
+        max_runtime=12, max_runtime_limit=1, idle_timeout=0, session_manager=manager,
+    )
+    try:
+        result = await tool.execute(command=_python(
+            "import time; time.sleep(1.2); print('trusted default completed')"
+        ))
+
+        assert not is_tool_error_result(result), result
+        assert "trusted default completed" in result
+        assert _exit_code(result) == 0
+    finally:
+        await manager.close_all()
+
+
 async def test_wait_timeout_leaves_stdin_gated_work_alive(tmp_path):
     ready = tmp_path / "ready"
     done = tmp_path / "done"
