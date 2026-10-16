@@ -227,7 +227,7 @@ def read_webui_sidebar_state() -> dict[str, Any]:
             return default_webui_sidebar_state()
         with open(path, encoding="utf-8") as f:
             raw = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
         logger.warning("read webui sidebar state failed {}: {}", path, e)
         return default_webui_sidebar_state()
     return normalize_webui_sidebar_state(raw)
@@ -244,7 +244,15 @@ def load_webui_sidebar_state() -> tuple[dict[str, Any], str | None]:
     explicit error instead of silently treating real user data as "no
     saved state". A corrupt file is quarantined, keeping its bytes
     inspectable and letting the next successful write start a clean store.
+    Serializes with writers on the state write lock, so a quarantine
+    decision can never race a concurrent save and move a freshly written
+    file aside.
     """
+    with _SIDEBAR_STATE_WRITE_LOCK:
+        return _load_webui_sidebar_state_locked()
+
+
+def _load_webui_sidebar_state_locked() -> tuple[dict[str, Any], str | None]:
     path = webui_sidebar_state_path()
     if not path.is_file():
         return default_webui_sidebar_state(), None

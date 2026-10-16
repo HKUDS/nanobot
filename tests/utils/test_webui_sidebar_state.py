@@ -273,6 +273,25 @@ def test_load_reports_unreadable_file(tmp_path, monkeypatch) -> None:
     assert state == default_webui_sidebar_state()
 
 
+def test_load_serializes_with_writers(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    path = webui_sidebar_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+
+    with sidebar_state._SIDEBAR_STATE_WRITE_LOCK:
+        results: list[tuple[dict[str, Any], str | None]] = []
+        thread = threading.Thread(
+            target=lambda: results.append(load_webui_sidebar_state())
+        )
+        thread.start()
+        thread.join(timeout=0.5)
+        assert thread.is_alive()  # blocked while a writer holds the lock
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert results[0][1] == "corrupt"
+
+
 def test_write_quarantines_unparseable_existing_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     path = webui_sidebar_state_path()
