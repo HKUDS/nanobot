@@ -74,9 +74,6 @@ PLACEHOLDER_TEXTS = frozenset({
 _PreparationArgs = ParamSpec("_PreparationArgs")
 _PreparationResult = TypeVar("_PreparationResult")
 
-_PreparationArgs = ParamSpec("_PreparationArgs")
-_PreparationResult = TypeVar("_PreparationResult")
-
 
 class ContextWindowExceededError(RuntimeError):
     """Raised before a request that exceeds its local context budget."""

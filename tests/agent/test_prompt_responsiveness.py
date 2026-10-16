@@ -211,7 +211,7 @@ async def test_cancellation_during_run_cleanup_delivers_finally_once(
     loop.sessions.save(session)
     runtime_loop = asyncio.get_running_loop()
     entered = asyncio.Event()
-    hook_returned = asyncio.Event()
+    snapshot_entered = asyncio.Event()
     worker_finished = asyncio.Event()
     release = threading.Event()
     events = []
@@ -225,7 +225,6 @@ async def test_cancellation_during_run_cleanup_delivers_finally_once(
                 loop.process_direct("Blocked", session_key="cli:blocker"),
             ))
             await asyncio.wait_for(entered.wait(), 5)
-            hook_returned.set()
 
         async def before_run(self, context):
             events.append("before_run")
@@ -264,10 +263,22 @@ async def test_cancellation_during_run_cleanup_delivers_finally_once(
         return original_read(path, *args, **kwargs)
 
     monkeypatch.setattr(type(prompt_file), "read_text", read_text)
+    original_snapshot = loop.runner._run_context_snapshot
+    snapshot_paused = False
+
+    async def snapshot(hook, messages):
+        nonlocal snapshot_paused
+        boundary = "after_iteration" if phase == "success_snapshot" else "after_run"
+        if events and events[-1] == boundary and not snapshot_paused:
+            snapshot_paused = True
+            snapshot_entered.set()
+            await asyncio.Event().wait()
+        return await original_snapshot(hook, messages)
+
+    monkeypatch.setattr(loop.runner, "_run_context_snapshot", snapshot)
     first = asyncio.create_task(loop.process_direct("First", session_key="cli:first", hooks=[Lifecycle()]))
     try:
-        await asyncio.wait_for(hook_returned.wait(), 5)
-        await asyncio.sleep(0)
+        await asyncio.wait_for(snapshot_entered.wait(), 5)
         first.cancel()
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(first, 0.5)

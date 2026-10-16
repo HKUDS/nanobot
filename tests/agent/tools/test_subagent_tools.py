@@ -1,6 +1,7 @@
 """Tests for subagent tool registration and wiring."""
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
