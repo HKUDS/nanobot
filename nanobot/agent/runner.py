@@ -875,24 +875,35 @@ class AgentRunner:
             provider_compaction_applied=request_state.provider_compaction_applied,
         )
 
-    def _build_request_kwargs(
+    async def _prepare_model_request(
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None,
-    ) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
+        request_state: ModelRequestState,
+        transcript: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        messages, provider_context = await self.context_governor.prepare_request(
+            request_state,
+            messages,
+            tool_definitions=tools,
+            transcript=transcript,
+        )
+        generation = spec.runtime.generation
+        return messages, {
             "messages": messages,
             "tools": tools,
             "model": spec.runtime.model,
             "retry_mode": spec.provider_retry_mode,
+            "temperature": generation.temperature,
+            "max_tokens": generation.max_tokens,
+            "reasoning_effort": generation.reasoning_effort,
+            "provider_context": replace(
+                provider_context or ProviderCallContext(),
+                response_preset=spec.runtime.model_preset or "",
+            ),
         }
-        generation = spec.runtime.generation
-        kwargs["temperature"] = generation.temperature
-        kwargs["max_tokens"] = generation.max_tokens
-        kwargs["reasoning_effort"] = generation.reasoning_effort
-        return kwargs
 
     async def _request_model(
         self,
@@ -906,25 +917,15 @@ class AgentRunner:
         transcript: list[dict[str, Any]] | None,
     ) -> tuple[LLMResponse, LLMUsage]:
         _raise_if_cancelling()
-        tool_definitions = spec.tools.get_definitions()
-        messages, provider_context = await self.context_governor.prepare_request(
-            request_state,
-            messages,
-            tool_definitions=tool_definitions,
-            transcript=transcript,
-        )
-
-        kwargs = self._build_request_kwargs(
+        messages, kwargs = await self._prepare_model_request(
             spec,
             messages,
-            tools=tool_definitions,
+            tools=spec.tools.get_definitions(),
+            request_state=request_state,
+            transcript=transcript,
         )
         _raise_if_cancelling()
         wants_streaming = hook.wants_streaming()
-        provider_context = replace(
-            provider_context or ProviderCallContext(),
-            response_preset=spec.runtime.model_preset or "",
-        )
 
         active_hosted_tools: dict[str, dict[str, Any]] = {}
         native_reasoning_open = False
@@ -1019,19 +1020,13 @@ class AgentRunner:
                 await _close_native_reasoning()
                 await hook.on_stream_end(context, resuming=True)
 
-            coro = spec.runtime.provider.chat_stream_with_retry(
-                **kwargs,
-                provider_context=provider_context,
+            kwargs.update(
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
                 on_tool_call_delta=_provider_tool_event,
                 on_stream_recover=_stream_recover,
             )
-        else:
-            coro = spec.runtime.provider.chat_stream_with_retry(
-                **kwargs,
-                provider_context=provider_context,
-            )
+        coro = spec.runtime.provider.chat_stream_with_retry(**kwargs)
 
         # Providers bound the wait for each stream event, including reasoning and tool deltas.
         request_started_at = time.perf_counter()
@@ -1260,25 +1255,15 @@ class AgentRunner:
         transcript: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         _raise_if_cancelling()
-        messages, provider_context = await self.context_governor.prepare_request(
-            request_state,
-            messages,
-            tool_definitions=None,
-            transcript=transcript,
-        )
-        kwargs = self._build_request_kwargs(
+        _, kwargs = await self._prepare_model_request(
             spec,
             messages,
             tools=None,
+            request_state=request_state,
+            transcript=transcript,
         )
         _raise_if_cancelling()
-        response = await spec.runtime.provider.chat_stream_with_retry(
-            **kwargs,
-            provider_context=replace(
-                provider_context or ProviderCallContext(),
-                response_preset=spec.runtime.model_preset or "",
-            ),
-        )
+        response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)
         _raise_if_cancelling()
         await self.context_governor.summarize_provider_compaction(
             request_state,
