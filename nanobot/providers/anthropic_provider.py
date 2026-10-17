@@ -326,6 +326,11 @@ class AnthropicProvider(LLMProvider):
                         "thinking": thinking_block.get("thinking", ""),
                         "signature": thinking_block.get("signature", ""),
                     })
+                elif thinking_block.get("type") == "redacted_thinking":
+                    # Bedrock-recorded blocks carry redactedContent* instead of data.
+                    data = thinking_block.get("data")
+                    if data:
+                        blocks.append({"type": "redacted_thinking", "data": data})
 
         if isinstance(content, str) and content:
             blocks.append({"type": "text", "text": content})
@@ -707,6 +712,8 @@ class AnthropicProvider(LLMProvider):
                     "thinking": block.thinking,
                     "signature": getattr(block, "signature", ""),
                 })
+            elif block.type == "redacted_thinking":
+                thinking_blocks.append({"type": "redacted_thinking", "data": block.data})
 
         stop_map = {"tool_use": "tool_calls", "end_turn": "stop", "max_tokens": "length"}
         finish_reason = stop_map.get(response.stop_reason or "", response.stop_reason or "stop")
