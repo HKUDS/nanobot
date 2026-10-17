@@ -386,6 +386,7 @@ async def test_exec_rejects_home_path_without_home_directory(tmp_path, monkeypat
     monkeypatch.setattr(ExecTool, "_spawn", spawn)
     result = await ExecTool(
         working_dir=str(tmp_path), restrict_to_workspace=True,
+        media_root=tmp_path / "media",
     ).execute(command="cat ~/file.txt")
 
     assert result.startswith("Error: Command blocked by safety guard (path outside working dir)")
@@ -456,15 +457,13 @@ def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
     assert "hard policy boundary" in error
 
 
-def test_exec_guard_allows_media_path_outside_workspace(tmp_path, monkeypatch) -> None:
+def test_exec_guard_allows_media_path_outside_workspace(tmp_path) -> None:
     media_dir = tmp_path / "media"
     media_dir.mkdir()
     media_file = media_dir / "photo.jpg"
     media_file.write_text("ok", encoding="utf-8")
 
-    monkeypatch.setattr("nanobot.agent.tools.shell.get_media_dir", lambda: media_dir)
-
-    tool = ExecTool(restrict_to_workspace=True)
+    tool = ExecTool(restrict_to_workspace=True, media_root=media_dir)
     error = tool._guard_command(f'cat "{media_file}"', str(tmp_path / "workspace"))
     assert error is None
 
@@ -1143,7 +1142,7 @@ def test_exec_guard_rejects_unresolvable_home_path(tmp_path, monkeypatch, comman
         return original(path)
 
     monkeypatch.setattr(Path, "expanduser", expanduser)
-    tool = ExecTool(restrict_to_workspace=True)
+    tool = ExecTool(restrict_to_workspace=True, media_root=tmp_path / "media")
     error = tool._guard_command(command, str(tmp_path))
     assert error is not None
     assert error.startswith("Error: Command blocked by safety guard (path outside working dir)")

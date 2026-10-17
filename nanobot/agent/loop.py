@@ -60,6 +60,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.command.router import command_text
+from nanobot.config.paths import get_media_root
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
@@ -314,6 +315,7 @@ class AgentLoop:
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
         plugins: AgentPlugins | None = None,
+        media_root: Path | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -336,6 +338,7 @@ class AgentLoop:
 
             plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
         self.plugins = plugins
+        self.media_root = media_root if media_root is not None else get_media_root()
         self.workspace = workspace
         initial_model = model or provider.get_default_model()
         self.max_iterations = (
@@ -387,6 +390,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(
             workspace, timezone=timezone, disabled_skills=disabled_skills, plugins=self.plugins,
+            media_root=self.media_root,
         )
         self.sessions = session_manager or SessionManager(workspace)
         # One file-read/write tracker per logical session. The tool registry is
@@ -412,6 +416,7 @@ class AgentLoop:
         self.subagents = SubagentManager(
             workspace=workspace,
             plugins=self.plugins,
+            media_root=self.media_root,
             bus=bus,
             tools_config=_tc,
             max_tool_result_chars=self.max_tool_result_chars,
@@ -493,6 +498,8 @@ class AgentLoop:
         if bus is None:
             bus = MessageBus()
         defaults = config.agents.defaults
+        if "media_root" not in extra:
+            extra["media_root"] = get_media_root(config.runtime_data_dir)
         if "plugins" not in extra:
             from nanobot.config.loader import get_config_path
 
@@ -673,6 +680,7 @@ class AgentLoop:
             config=self.tools_config,
             workspace=str(self.workspace),
             plugins=self.plugins,
+            media_root=self.media_root,
             bus=self.bus,
             subagent_manager=self.subagents,
             cron_service=self.cron_service,

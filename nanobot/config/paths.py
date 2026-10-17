@@ -34,6 +34,12 @@ def get_media_dir(channel: str | None = None) -> Path:
     return ensure_dir(base / channel) if channel else base
 
 
+def get_media_root(data_dir: Path | None = None) -> Path:
+    """Return the media read root without creating storage directories."""
+    root = data_dir if data_dir is not None else get_config_path().parent
+    return root.expanduser().resolve(strict=False) / "media"
+
+
 def get_cron_dir() -> Path:
     """Return the cron storage directory."""
     return get_runtime_subdir("cron")

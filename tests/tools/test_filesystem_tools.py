@@ -411,7 +411,7 @@ class TestWorkspaceRestriction:
         assert "Error" not in result
 
     @pytest.mark.asyncio
-    async def test_read_allowed_in_media_dir(self, tmp_path, monkeypatch):
+    async def test_read_allowed_in_media_dir(self, tmp_path):
         workspace = tmp_path / "ws"
         workspace.mkdir()
         media_dir = tmp_path / "media"
@@ -419,23 +419,19 @@ class TestWorkspaceRestriction:
         media_file = media_dir / "photo.txt"
         media_file.write_text("shared media", encoding="utf-8")
 
-        monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
-
-        tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+        tool = ReadFileTool(workspace=workspace, allowed_dir=workspace, media_root=media_dir)
         result = await tool.execute(path=str(media_file))
         assert "shared media" in result
         assert "Error" not in result
 
     @pytest.mark.asyncio
-    async def test_write_blocked_in_media_dir_by_default(self, tmp_path, monkeypatch):
+    async def test_write_blocked_in_media_dir_by_default(self, tmp_path):
         workspace = tmp_path / "ws"
         workspace.mkdir()
         media_dir = tmp_path / "media"
         media_dir.mkdir()
 
-        monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
-
-        tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
+        tool = WriteFileTool(workspace=workspace, allowed_dir=workspace, media_root=media_dir)
         result = await tool.execute(path=str(media_dir / "hack.txt"), content="pwned")
         assert "Error" in result
         assert "outside" in result.lower()

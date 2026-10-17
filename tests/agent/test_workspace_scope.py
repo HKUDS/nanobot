@@ -9,16 +9,19 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.cli_apps import CliAppsTool
 from nanobot.agent.tools.context import RequestContext, ToolContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import Config, ImageGenerationToolConfig, ProviderConfig, ToolsConfig
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
@@ -54,6 +57,87 @@ def _make_directory_link(link: Path, target: Path) -> None:
         link.symlink_to(target, target_is_directory=True)
     except (NotImplementedError, OSError) as exc:
         pytest.skip(f"directory symlink unavailable: {exc}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", ["config", "ambient", "explicit"])
+async def test_runtime_media_root_stays_bound_across_config_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str,
+) -> None:
+    agent_workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    project.mkdir()
+    config_path = tmp_path / "instance" / "config.json"
+    ambient_config = tmp_path / "ambient" / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    config = Config.model_validate({
+        "agents": {"defaults": {"workspace": str(agent_workspace)}},
+        "tools": {"restrictToWorkspace": True},
+    })
+    if selection != "ambient":
+        config.bind_source_path(config_path)
+        monkeypatch.setattr("nanobot.config.loader._current_config_path", ambient_config)
+    media_root = tmp_path / "uploads" if selection == "explicit" else config_path.parent / "media"
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop.from_config(
+        config,
+        bus=MessageBus(),
+        tool_registry=ToolRegistry(),
+        provider=provider,
+        **({"media_root": media_root} if selection == "explicit" else {}),
+    )
+    assert not media_root.exists()
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", ambient_config)
+    media_root.mkdir(parents=True)
+    media = media_root / "attachment.txt"
+    media.write_text("bound attachment", encoding="utf-8")
+    other_attachment = project.parent / "private.txt"
+    other_attachment.write_text("private", encoding="utf-8")
+    tools = [loop.tools, loop.context.memory.build_dream_tools(), loop.subagents._build_tools(project)]
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+    token = bind_workspace_scope(scope)
+    try:
+        for registry in tools:
+            read = registry.get("read_file")
+            write = registry.get("write_file")
+            assert read is not None and write is not None
+            assert "bound attachment" in await read.execute(path=str(media))
+            assert "outside allowed directory" in await read.execute(path=str(other_attachment))
+            assert "outside allowed directory" in await write.execute(path=str(media), content="changed")
+        message = loop.tools.get("message")
+        assert isinstance(message, MessageTool)
+        assert message._resolve_media([str(media)]) == [str(media)]
+        shell = loop.tools.get("exec")
+        assert isinstance(shell, ExecTool)
+        assert shell._guard_command(f'cat "{media}"', str(project)) is None
+        assert shell._guard_command(f'cat "{other_attachment}"', str(project)) is not None
+    finally:
+        reset_workspace_scope(token)
+    assert media.read_text(encoding="utf-8") == "bound attachment"
+    assert not ambient_config.parent.exists()
+
+
+@pytest.mark.asyncio
+async def test_explicit_media_root_cannot_follow_a_link_outside_read_capability(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    media = tmp_path / "uploads"
+    private = tmp_path / "private"
+    workspace.mkdir()
+    media.mkdir()
+    private.mkdir()
+    secret = private / "secret.txt"
+    secret.write_text("private", encoding="utf-8")
+    _make_directory_link(media / "escape", private)
+    tool = ReadFileTool(workspace=workspace, allowed_dir=workspace, media_root=media)
+
+    result = await tool.execute(path=str(media / "escape" / "secret.txt"))
+
+    assert "outside allowed directory" in result
 
 
 def test_workspace_scope_defaults_match_legacy_config(tmp_path: Path) -> None:

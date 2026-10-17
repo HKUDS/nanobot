@@ -86,13 +86,14 @@ class ContextBuilder:
         disabled_skills: list[str] | None = None,
         *,
         plugins: AgentPlugins | None = None,
+        media_root: Path | None = None,
     ):
         self.workspace = workspace
         self.timezone = timezone
         self.skills = SkillsLoader(
             workspace, disabled_skills=set(disabled_skills) if disabled_skills else None, plugins=plugins,
         )
-        self.memory = MemoryStore(workspace, plugins=self.skills.plugins)
+        self.memory = MemoryStore(workspace, plugins=self.skills.plugins, media_root=media_root)
 
     def build_system_prompt(
         self,

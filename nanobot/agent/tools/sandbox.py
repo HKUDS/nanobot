@@ -1,16 +1,13 @@
 """Sandbox backends for shell command execution.
 
-To add a backend, match the callable signature of _bwrap and _seatbelt,
-including keyword-only sandbox_ro_binds and sandbox_rw_binds, and register
-it in _BACKENDS below.
+To add a backend, match the callable signature of _bwrap and _seatbelt
+and register it in _BACKENDS below.
 """
 
 import os
 import shlex
 from pathlib import Path
 from typing import Iterable
-
-from nanobot.config.paths import get_media_dir
 
 
 def _normalize_bind_paths(
@@ -52,6 +49,7 @@ def _bwrap(
     *,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
+    media_root: Path | None = None,
 ) -> str:
     """Wrap command in a bubblewrap sandbox (requires bwrap in container).
 
@@ -61,7 +59,6 @@ def _bwrap(
     roots, respectively.
     """
     ws = Path(workspace).resolve()
-    media = get_media_dir().resolve()
 
     try:
         sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
@@ -92,8 +89,10 @@ def _bwrap(
         "--tmpfs", str(ws.parent),        # mask config dir
         "--dir", str(ws),                 # recreate workspace mount point
         "--bind", str(ws), str(ws),
-        "--ro-bind-try", str(media), str(media),  # read-only access to media
     ]
+    if media_root is not None:
+        media = media_root.resolve()
+        args += ["--ro-bind-try", str(media), str(media)]
     for p in _normalize_bind_paths(sandbox_ro_binds, workspace=ws):
         args += ["--ro-bind-try", p, p]
     for p in _normalize_bind_paths(sandbox_rw_binds, workspace=ws):
@@ -189,6 +188,7 @@ def _seatbelt(
     *,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
+    media_root: Path | None = None,
 ) -> str:
     """Wrap command in a macOS Seatbelt sandbox (requires sandbox-exec(1)).
 
@@ -207,7 +207,7 @@ def _seatbelt(
     ``--unshare-net``).
     """
     ws = Path(workspace).resolve()
-    media = get_media_dir().resolve()
+    media_roots = [media_root.resolve()] if media_root is not None else []
 
     try:
         sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
@@ -248,7 +248,7 @@ def _seatbelt(
     # Keep every ancestor of an allowed path searchable, including the masked
     # parent: metadata only, so it cannot be listed or read.
     traversable = _seatbelt_ancestors(
-        ws, media, *(Path(p) for p in ro_binds), *(Path(p) for p in rw_binds),
+        ws, *media_roots, *(Path(p) for p in ro_binds), *(Path(p) for p in rw_binds),
         *(Path(p) for p in _SEATBELT_SYSTEM_READ_SUBPATHS),
         *(Path(p) for p in _SEATBELT_SYSTEM_READ_LITERALS),
     )
@@ -263,8 +263,9 @@ def _seatbelt(
     )
 
     rules.append(f"(allow file-read* file-write* (subpath {_sbpl_quote(str(ws))}))")
-    rules.append(f"(allow file-read* (subpath {_sbpl_quote(str(media))}))")
-    rules.append(f"(deny file-write* (subpath {_sbpl_quote(str(media))}))")
+    for media in media_roots:
+        rules.append(f"(allow file-read* (subpath {_sbpl_quote(str(media))}))")
+        rules.append(f"(deny file-write* (subpath {_sbpl_quote(str(media))}))")
 
     for p in ro_binds:
         rules.append(f"(allow file-read* (subpath {_sbpl_quote(p)}))")
@@ -279,7 +280,7 @@ def _seatbelt(
     # a writable descendant must not unlock the rest of the read-only tree.
     writable_roots = [Path(p) for p in rw_binds]
     protected_roots = [
-        root for root in (media, *(Path(p) for p in ro_binds))
+        root for root in (*media_roots, *(Path(p) for p in ro_binds))
         if not any(_seatbelt_is_within(root, writable) for writable in writable_roots)
     ]
     ancestors = _seatbelt_ancestors(*protected_roots)
@@ -318,6 +319,7 @@ def wrap_command(
     *,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
+    media_root: Path | None = None,
 ) -> str:
     """Wrap *command* using the named sandbox backend."""
     if backend := _BACKENDS.get(sandbox):
@@ -327,5 +329,6 @@ def wrap_command(
             cwd,
             sandbox_ro_binds=sandbox_ro_binds,
             sandbox_rw_binds=sandbox_rw_binds,
+            media_root=media_root,
         )
     raise ValueError(f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}")

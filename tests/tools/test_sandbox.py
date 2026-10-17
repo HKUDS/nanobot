@@ -135,16 +135,12 @@ class TestBwrapBackend:
         assert "/bin" in try_targets
         assert "/etc/ssl/certs" in try_targets
 
-    def test_media_dir_ro_bind(self, tmp_path, monkeypatch):
+    def test_media_dir_ro_bind(self, tmp_path):
         """Media directory should be read-only mounted inside the sandbox."""
         fake_media = tmp_path / "media"
         fake_media.mkdir()
-        monkeypatch.setattr(
-            "nanobot.agent.tools.sandbox.get_media_dir",
-            lambda: fake_media,
-        )
         ws = str(tmp_path / "project")
-        result = wrap_command("bwrap", "ls", ws, ws)
+        result = wrap_command("bwrap", "ls", ws, ws, media_root=fake_media)
         tokens = _parse(result)
 
         try_indices = [i for i, t in enumerate(tokens) if t == "--ro-bind-try"]
@@ -340,15 +336,13 @@ class TestSeatbeltBackend:
         profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
         assert "(allow network*)" in profile
 
-    def test_media_dir_read_only(self, tmp_path, monkeypatch):
+    def test_media_dir_read_only(self, tmp_path):
         fake_media = (tmp_path / "media").resolve()
         fake_media.mkdir()
-        monkeypatch.setattr(
-            "nanobot.agent.tools.sandbox.get_media_dir",
-            lambda: fake_media,
-        )
         ws = (tmp_path / "project").resolve()
-        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+        profile = self._profile(wrap_command(
+            "seatbelt", "ls", str(ws), str(ws), media_root=fake_media,
+        ))
 
         assert f"(allow file-read* (subpath {self._quote(fake_media)}))" in profile
         assert f"(deny file-write* (subpath {self._quote(fake_media)}))" in profile
@@ -392,14 +386,14 @@ class TestSeatbeltBackend:
         )
 
     @pytest.mark.parametrize("source", ["bind", "media"])
-    def test_readonly_ancestors_cannot_be_unlinked(self, tmp_path, monkeypatch, source):
+    def test_readonly_ancestors_cannot_be_unlinked(self, tmp_path, source):
         ws = (tmp_path / "workspace").resolve()
         ro = ws / 'tree with "quotes' / "branch" / "readonly"
         media = ro if source == "media" else tmp_path / "media"
-        monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: media)
         profile = self._profile(wrap_command(
             "seatbelt", "ls", str(ws), str(ws),
             sandbox_ro_binds=[str(ro)] if source == "bind" else [],
+            media_root=media,
         ))
 
         rule = profile.splitlines()[-1]
@@ -409,14 +403,14 @@ class TestSeatbeltBackend:
         assert "subpath" not in rule
 
     @pytest.mark.parametrize("override", ["root", "parent", "child"])
-    def test_rw_override_only_unlocks_fully_covered_roots(self, tmp_path, monkeypatch, override):
+    def test_rw_override_only_unlocks_fully_covered_roots(self, tmp_path, override):
         ws = (tmp_path / "workspace").resolve()
         ro = ws / "tree" / "readonly"
         rw = {"root": ro, "parent": ro.parent, "child": ro / "cache"}[override]
-        monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: ro)
         profile = self._profile(wrap_command(
             "seatbelt", "ls", str(ws), str(ws),
             sandbox_ro_binds=[str(ro)], sandbox_rw_binds=[str(rw)],
+            media_root=ro,
         ))
 
         if override == "child":

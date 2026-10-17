@@ -38,7 +38,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.agent.tools.shell_config import ExecToolConfig
-from nanobot.config.paths import get_media_dir
+from nanobot.config.paths import get_media_root
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
@@ -189,6 +189,7 @@ class ExecTool(Tool):
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
             session_manager=ctx.exec_session_manager,
+            media_root=ctx.media_root,
         )
 
     def __init__(
@@ -212,6 +213,7 @@ class ExecTool(Tool):
         max_runtime_limit: int | None = None,
         idle_timeout: int = 300,
         idle_action: Literal["report", "terminate"] = "report",
+        media_root: Path | None = None,
     ):
         if timeout is not None and max_runtime is not None:
             raise ValueError("timeout and max_runtime are mutually exclusive")
@@ -222,6 +224,7 @@ class ExecTool(Tool):
             values["max_runtime_limit"] = max_runtime_limit
         self._exec_config = ExecToolConfig.model_validate(values)
         self.working_dir = working_dir
+        self._media_root = (media_root if media_root is not None else get_media_root()).resolve()
         self.sandbox = sandbox
         self.deny_patterns = (deny_patterns or []) + [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
@@ -437,6 +440,7 @@ class ExecTool(Tool):
                     cwd,
                     sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
                     sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                    media_root=self._media_root,
                 )
                 command = shlex.split(wrapped) if isinstance(command, list) else wrapped
                 cwd = str(Path(workspace).resolve())
@@ -900,10 +904,9 @@ class ExecTool(Tool):
                 if self._is_benign_device_path(str(p)):
                     continue
 
-                media_path = get_media_dir().resolve()
                 allowed = (
                     is_path_within(p, cwd_path)
-                    or is_path_within(p, media_path)
+                    or is_path_within(p, self._media_root)
                 )
                 if not allowed and resolved_workspace is not None:
                     allowed = is_path_within(p, resolved_workspace)

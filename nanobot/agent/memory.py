@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from nanobot.config.paths import get_media_root
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
@@ -76,6 +77,7 @@ class MemoryStore:
         max_history_entries: int = _DEFAULT_MAX_HISTORY,
         *,
         plugins: AgentPlugins | None = None,
+        media_root: Path | None = None,
     ):
         if plugins is None:
             from nanobot.agent.plugins import AgentPlugins
@@ -83,6 +85,7 @@ class MemoryStore:
 
             plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
         self.plugins = plugins
+        self.media_root = media_root if media_root is not None else get_media_root()
         self.workspace = workspace
         self.max_history_entries = max_history_entries
         self.memory_dir = ensure_dir(workspace / "memory")
@@ -588,6 +591,7 @@ class MemoryStore:
         tools.register(ReadFileTool(
             workspace=workspace,
             plugins=self.plugins,
+            media_root=self.media_root,
             allowed_dir=workspace,
             extra_read_allowed_dirs=extra_read,
             file_states=file_states,
@@ -595,6 +599,7 @@ class MemoryStore:
         tools.register(EditFileTool(
             workspace=workspace,
             plugins=self.plugins,
+            media_root=self.media_root,
             allowed_dir=skills_dir,
             extra_write_allowed_files=editable_files,
             file_states=file_states,
@@ -602,6 +607,7 @@ class MemoryStore:
         tools.register(ApplyPatchTool(
             workspace=workspace,
             plugins=self.plugins,
+            media_root=self.media_root,
             allowed_dir=skills_dir,
             extra_write_allowed_files=editable_files,
             file_states=file_states,
@@ -609,6 +615,7 @@ class MemoryStore:
         tools.register(WriteFileTool(
             workspace=workspace,
             plugins=self.plugins,
+            media_root=self.media_root,
             allowed_dir=skills_dir,
             extra_write_allowed_files=editable_files,
             file_states=file_states,

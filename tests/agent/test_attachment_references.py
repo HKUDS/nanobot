@@ -48,7 +48,6 @@ def _turn_context(loop: AgentLoop, msg: InboundMessage) -> TurnContext:
 @pytest.mark.parametrize("extract_document_text", [True, False])
 async def test_document_attachment_is_referenced_and_read_on_demand(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     extract_document_text: bool,
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -57,7 +56,6 @@ async def test_document_attachment_is_referenced_and_read_on_demand(
     media_dir.mkdir()
     csv_path = media_dir / "report.csv"
     csv_path.write_text("name,value\nnanobot,1", encoding="utf-8")
-    monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
 
     loop = _make_loop(
         workspace,
@@ -78,7 +76,7 @@ async def test_document_attachment_is_referenced_and_read_on_demand(
     assert "name,value" not in ctx.msg.content
     assert ctx.msg.media == []
 
-    read_tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+    read_tool = ReadFileTool(workspace=workspace, allowed_dir=workspace, media_root=media_dir)
     result = await read_tool.execute(path=str(csv_path))
 
     assert "1| name,value" in result

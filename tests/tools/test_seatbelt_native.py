@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def layout(tmp_path, monkeypatch):
+def layout(tmp_path):
     root = tmp_path.resolve()
     # A separate host /tmp root must not inherit the workspace-parent deny.
     with tempfile.TemporaryDirectory(prefix="nanobot-seatbelt-peer-", dir="/tmp") as peer:
@@ -44,7 +44,6 @@ def layout(tmp_path, monkeypatch):
             (paths[name] / "sentinel").write_text("synthetic-data")
         paths["link"] = paths["workspace"] / "outside-link"
         paths["link"].symlink_to(paths["peer"], target_is_directory=True)
-        monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: paths["media"])
         yield paths
 
 
@@ -54,6 +53,7 @@ async def run_script(paths, script):
     tool = ExecTool(
         working_dir=str(workspace), sandbox="seatbelt",
         sandbox_ro_binds=[str(paths["ro"])], sandbox_rw_binds=[str(paths["rw"])],
+        media_root=paths["media"],
     )
     # Scripts are legitimate exec input; the kernel must enforce their effects.
     return str(await tool.execute(command="sh probe.sh", timeout=5))
@@ -114,6 +114,7 @@ async def test_native_launcher_cannot_be_shadowed_by_project_path(layout):
     impostor.chmod(0o700)
     tool = ExecTool(
         working_dir=str(workspace), sandbox="seatbelt", path_prepend=str(workspace),
+        media_root=layout["media"],
     )
     result = str(await tool.execute(command="printf real-sandbox", timeout=5))
     assert result == "real-sandbox\n\nExit code: 0"
@@ -209,7 +210,7 @@ async def test_native_failed_cwd_does_not_execute_shell_list(layout, cwd_kind, s
     cwd = workspace / "unusable"
     if cwd_kind == "file":
         cwd.write_text("not-a-directory")
-    tool = ExecTool(working_dir=str(workspace), sandbox="seatbelt")
+    tool = ExecTool(working_dir=str(workspace), sandbox="seatbelt", media_root=layout["media"])
 
     result = str(await tool.execute(
         command=f"printf first > first{separator}printf second > second",
@@ -226,7 +227,7 @@ async def test_native_nested_cwd_runs_complete_shell_list(layout):
     workspace = layout["workspace"]
     cwd = workspace / "nested 'directory"
     cwd.mkdir()
-    tool = ExecTool(working_dir=str(workspace), sandbox="seatbelt")
+    tool = ExecTool(working_dir=str(workspace), sandbox="seatbelt", media_root=layout["media"])
 
     result = str(await tool.execute(
         command="printf first > first; printf second > second",

@@ -114,6 +114,11 @@ IMPORT_RULES = (
         (*_ADAPTERS, "nanobot.agent", "nanobot.apps", "nanobot.session", "nanobot.config"),
     ),
     ImportRule(
+        "explicit-tool-read-roots",
+        ("nanobot.agent.tools.path_utils", "nanobot.agent.tools.sandbox"),
+        ("nanobot.config",),
+    ),
+    ImportRule(
         "oauth-catalog-cache",
         ("nanobot.providers.oauth_catalog_cache",),
         ("nanobot.providers.oauth_model_catalog", "nanobot.providers.openai_codex_provider",

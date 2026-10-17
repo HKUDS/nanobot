@@ -16,7 +16,7 @@ from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.delivery import DeliveryRequest
 from nanobot.bus.events import OutboundMessage
-from nanobot.config.paths import get_workspace_path
+from nanobot.config.paths import get_media_root, get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
 
 _CURRENT_MESSAGE_SENDS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
@@ -74,12 +74,14 @@ class MessageTool(Tool):
         default_message_id: str | None = None,
         workspace: str | Path | None = None,
         restrict_to_workspace: bool = False,
+        media_root: Path | None = None,
     ):
         self._send_callback = send_callback
         self._workspace = (
             Path(workspace).expanduser() if workspace is not None else get_workspace_path()
         )
         self._restrict_to_workspace = restrict_to_workspace
+        self._media_root = media_root if media_root is not None else get_media_root()
         self._fallback_channel = default_channel
         self._fallback_chat_id = default_chat_id
         self._fallback_message_id = default_message_id
@@ -96,6 +98,7 @@ class MessageTool(Tool):
             send_callback=send_callback,
             workspace=ctx.workspace,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
+            media_root=ctx.media_root,
         )
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
@@ -138,7 +141,9 @@ class MessageTool(Tool):
                 path = Path(p).expanduser()
                 resolved.append(p if path.is_absolute() else str(workspace / path))
             else:
-                resolved.append(str(resolve_workspace_path(p, workspace, access.allowed_root)))
+                resolved.append(str(resolve_workspace_path(
+                    p, workspace, access.allowed_root, media_root=self._media_root,
+                )))
         return resolved
 
     async def execute(

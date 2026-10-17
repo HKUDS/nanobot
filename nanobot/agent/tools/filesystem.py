@@ -21,6 +21,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.config.paths import get_media_root
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
@@ -52,12 +53,14 @@ class _FsTool(Tool):
         sandbox_restricts_workspace: bool = False,
         extra_read_allowed_files: list[Path] | None = None,
         plugins: AgentPlugins | None = None,
+        media_root: Path | None = None,
     ):
         if plugins is None and workspace is not None:
             from nanobot.config.loader import get_config_path
 
             plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
         self._plugins = plugins
+        self._media_root = media_root if media_root is not None else get_media_root()
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         # Legacy alias: extra_allowed_dirs is read-only. Write-capable tools
@@ -98,6 +101,7 @@ class _FsTool(Tool):
         return cls(
             workspace=agent_workspace,
             plugins=ctx.plugins,
+            media_root=ctx.media_root,
             allowed_dir=allowed_dir,
             extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, resolved_agent_workspace / "skills"],
             extra_read_allowed_files=[resolved_agent_workspace / "memory" / "history.jsonl"],
@@ -130,7 +134,7 @@ class _FsTool(Tool):
         extra_allowed_dirs: list[Path] | None,
         extra_allowed_files: list[Path] | None,
         *,
-        include_media_dir: bool,
+        media_root: Path | None = None,
         extra_files_require_allowed_root: bool = False,
     ) -> Path:
         access = current_tool_workspace(
@@ -147,7 +151,7 @@ class _FsTool(Tool):
             allowed_root,
             extra_allowed_dirs,
             extra_allowed_files,
-            include_media_dir=include_media_dir,
+            media_root=media_root,
         )
 
     def _resolve_read(self, path: str) -> Path:
@@ -174,7 +178,7 @@ class _FsTool(Tool):
             path,
             [*self._extra_read_allowed_dirs, *plugin_skill_dirs],
             self._extra_read_allowed_files,
-            include_media_dir=True,
+            media_root=self._media_root,
             extra_files_require_allowed_root=True,
         )
 
@@ -183,7 +187,6 @@ class _FsTool(Tool):
             path,
             self._extra_write_allowed_dirs,
             self._extra_write_allowed_files,
-            include_media_dir=False,
         )
 
     def _resolve(self, path: str) -> Path:

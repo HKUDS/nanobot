@@ -227,6 +227,16 @@ def test_existing_runtime_and_composition_dependencies_remain_allowed(
             "tool-configuration-contracts", "nanobot.config.schema.Config", 1,
         ),
         (
+            "nanobot/agent/tools/path_utils.py",
+            "from nanobot.config.paths import get_media_dir",
+            "explicit-tool-read-roots", "nanobot.config.paths.get_media_dir", 1,
+        ),
+        (
+            "nanobot/agent/tools/sandbox.py",
+            "from nanobot.config.paths import get_media_dir",
+            "explicit-tool-read-roots", "nanobot.config.paths.get_media_dir", 1,
+        ),
+        (
             "nanobot/providers/oauth_catalog_cache.py",
             "from nanobot.providers import openai_codex_provider",
             "oauth-catalog-cache", "nanobot.providers.openai_codex_provider", 1,

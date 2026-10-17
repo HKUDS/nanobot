@@ -7,8 +7,13 @@ from typing import Any
 import httpx
 import pytest
 
-from nanobot.agent.tools.image_generation import ImageGenerationTool, ImageGenerationToolConfig
-from nanobot.config.loader import set_config_path
+from nanobot.agent.tools.image_generation import (
+    ImageGenerationTool,
+    ImageGenerationToolConfig,
+    reload_image_generation_tool,
+)
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.loader import save_config, set_config_path
 from nanobot.config.schema import Config, ProviderConfig
 from nanobot.providers.image_generation import GeneratedImageResponse, image_gen_provider_configs
 
@@ -22,6 +27,34 @@ PNG_DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+
+
+@pytest.mark.asyncio
+async def test_image_tool_reload_keeps_config_owned_media_read_root(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    config = Config.model_validate({
+        "tools": {"imageGeneration": {"enabled": True, "provider": "openrouter"}},
+    })
+    save_config(config, config_path)
+    ambient_config = tmp_path / "other" / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", ambient_config)
+    registry = ToolRegistry()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    result = await reload_image_generation_tool(
+        config_path=config_path, workspace=workspace, registry=registry,
+    )
+    media = config_path.parent / "media"
+    assert result["ok"] is True
+    assert not media.exists()
+    media.mkdir()
+    reference = media / "reference.png"
+    reference.write_bytes(PNG_BYTES)
+    tool = registry.get("generate_image")
+    assert isinstance(tool, ImageGenerationTool)
+    assert tool._resolve_reference_image(str(reference)) == str(reference.resolve())
+    assert not ambient_config.parent.exists()
 
 
 async def test_dynamic_image_connection_and_overrides_reach_images_api(tmp_path):

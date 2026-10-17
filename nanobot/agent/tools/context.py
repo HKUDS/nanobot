@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
+from nanobot.config.paths import get_media_root
+
 if TYPE_CHECKING:
     from nanobot.agent.plugins import AgentPlugins
     from nanobot.agent.subagent import SubagentManager
@@ -105,3 +107,4 @@ class ToolContext:
     workspace_sandbox: WorkspaceSandboxStatus | None = None
     runtime_control: RuntimeControl | None = None
     plugins: AgentPlugins | None = None
+    media_root: Path = field(default_factory=get_media_root, kw_only=True)

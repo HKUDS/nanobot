@@ -39,6 +39,7 @@ from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, SubagentTaskChanged
+from nanobot.config.paths import get_media_root
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.events import AgentEvent, EventSink
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
@@ -223,6 +224,7 @@ class SubagentManager:
         consolidator: Consolidator,
         session_manager: SessionManager | None = None,
         plugins: AgentPlugins | None = None,
+        media_root: Path | None = None,
     ):
         if cast(object, consolidator) is None:
             raise TypeError("SubagentManager requires a consolidator")
@@ -256,6 +258,7 @@ class SubagentManager:
 
             plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
         self.plugins = plugins
+        self.media_root = media_root if media_root is not None else get_media_root()
         self.workspace = workspace
         self.bus = bus
         self.tools_config = tools_config or ToolsConfig()
@@ -535,6 +538,7 @@ class SubagentManager:
             config=cfg,
             workspace=str(root.resolve()),
             plugins=self.plugins,
+            media_root=self.media_root,
             exec_session_manager=exec_manager or self._exec_session_manager,
             file_state_store=FileStates(),
             workspace_sandbox=workspace_sandbox_status(

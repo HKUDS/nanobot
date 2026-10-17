@@ -108,12 +108,12 @@ class TestBuildEnvWindows:
         for v in env.values():
             assert "secret" not in v.lower()
 
-    def test_path_has_sensible_default(self):
+    def test_path_has_sensible_default(self, tmp_path):
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch.dict("os.environ", {}, clear=True),
         ):
-            env = ExecTool()._build_env()
+            env = ExecTool(media_root=tmp_path / "media")._build_env()
         assert "system32" in env["PATH"].lower()
 
     def test_systemroot_forwarded(self, monkeypatch):
@@ -129,7 +129,7 @@ class TestBuildEnvWindows:
 
 class TestArgumentVectorPath:
 
-    def test_uses_parent_path_for_executable_lookup(self):
+    def test_uses_parent_path_for_executable_lookup(self, tmp_path):
         parent_path = os.pathsep.join(("parent-bin", "system-bin"))
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
@@ -139,7 +139,7 @@ class TestArgumentVectorPath:
                 clear=True,
             ),
         ):
-            prepared = ExecTool()._prepare_command(["rg", "--version"])
+            prepared = ExecTool(media_root=tmp_path / "media")._prepare_command(["rg", "--version"])
 
         assert not isinstance(prepared, str)
         assert prepared.env["PATH"] == parent_path

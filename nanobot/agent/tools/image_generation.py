@@ -17,7 +17,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config.paths import get_media_dir
+from nanobot.config.paths import get_media_root
 from nanobot.providers.image_generation import (
     ImageGenerationError,
     ImageGenerationProvider,
@@ -81,6 +81,7 @@ class ImageGenerationTool(Tool):
             workspace=ctx.workspace,
             config=ctx.config.image_generation,
             provider_configs=image_gen_provider_configs(ctx.providers_config),
+            media_root=ctx.media_root,
         )
 
     def __init__(
@@ -90,8 +91,10 @@ class ImageGenerationTool(Tool):
         config: ImageGenerationToolConfig,
         provider_config: ProviderConfig | None = None,
         provider_configs: dict[str, ProviderConfig] | None = None,
+        media_root: Path | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser()
+        self._media_root = media_root if media_root is not None else get_media_root()
         self.config = config
         self.provider_configs = dict(provider_configs or {})
         if provider_config is not None and "openrouter" not in self.provider_configs:
@@ -138,7 +141,7 @@ class ImageGenerationTool(Tool):
                 value,
                 workspace=workspace,
                 allowed_root=access.allowed_root,
-                extra_allowed_roots=[get_media_dir()] if access.allowed_root is not None else None,
+                extra_allowed_roots=[self._media_root] if access.allowed_root is not None else None,
                 strict=True,
             )
         except WorkspaceBoundaryError as exc:
@@ -220,6 +223,7 @@ def register_image_generation_tool(
         config=config.tools,
         workspace=str(workspace),
         providers_config=config.providers,
+        media_root=get_media_root(config.runtime_data_dir),
     )
     if ImageGenerationTool.enabled(ctx):
         registry.register(ImageGenerationTool.create(ctx))
