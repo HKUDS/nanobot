@@ -531,3 +531,111 @@ async def test_runner_blocks_repeated_external_fetches(urls, expected_fetches):
         assert "repeated external lookup blocked" in blocked_tool_message["content"]
     else:
         assert blocked_tool_message["content"] == "page content"
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_reports_completed_batches_before_pending_work():
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool("read_a", delay=0, read_only=True, shared_events=shared_events))
+    tools.register(_DelayTool("read_b", delay=0, read_only=True, shared_events=shared_events))
+    tools.register(_DelayTool("write_a", delay=0, read_only=False, shared_events=shared_events))
+    calls = [
+        ToolCallRequest(id="ro1", name="read_a", arguments={}),
+        ToolCallRequest(id="ro2", name="read_b", arguments={}),
+        ToolCallRequest(id="rw1", name="write_a", arguments={}),
+    ]
+    boundaries: list[tuple[list[tuple[str, Any]], list[str]]] = []
+
+    async def on_batch_complete(completed, remaining):
+        boundaries.append((
+            [(tool_call.id, result) for tool_call, result in completed],
+            [tool_call.id for tool_call in remaining],
+        ))
+
+    await execute_tool_calls(
+        tools,
+        calls,
+        concurrent=True,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=AgentHook(),
+        context=AgentHookContext(iteration=0, messages=[]),
+        on_batch_complete=on_batch_complete,
+    )
+    # One boundary: after the read-only batch, before the exclusive write.
+    # Nothing is reported after the last batch; the caller owns that checkpoint.
+    assert boundaries == [([("ro1", "read_a"), ("ro2", "read_b")], ["rw1"])]
+
+    boundaries.clear()
+    await execute_tool_calls(
+        tools,
+        calls,
+        concurrent=False,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=AgentHook(),
+        context=AgentHookContext(iteration=0, messages=[]),
+        on_batch_complete=on_batch_complete,
+    )
+    assert boundaries == [
+        ([("ro1", "read_a")], ["ro2", "rw1"]),
+        ([("ro1", "read_a"), ("ro2", "read_b")], ["rw1"]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_checkpoints_each_completed_tool_batch():
+    provider = MagicMock()
+    calls = {"n": 0}
+
+    async def chat_stream_with_retry(*, messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return LLMResponse(
+                content=None,
+                tool_calls=[
+                    ToolCallRequest(id="ro1", name="read_a", arguments={}),
+                    ToolCallRequest(id="rw1", name="write_a", arguments={}),
+                ],
+            )
+        return LLMResponse(content="done", tool_calls=[], usage=None)
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool("read_a", delay=0, read_only=True, shared_events=shared_events))
+    tools.register(_DelayTool("write_a", delay=0, read_only=False, shared_events=shared_events))
+    checkpoints: list[dict] = []
+
+    async def checkpoint(payload: dict) -> None:
+        checkpoints.append(payload)
+
+    await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "read then write"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        checkpoint_callback=checkpoint,
+    ))
+
+    phases = [cp["phase"] for cp in checkpoints]
+    assert phases == ["awaiting_tools", "awaiting_tools", "tools_completed", "final_response"]
+
+    all_pending, partial, completed = checkpoints[0], checkpoints[1], checkpoints[2]
+    assert all_pending["completed_tool_results"] == []
+    assert [tc["id"] for tc in all_pending["pending_tool_calls"]] == ["ro1", "rw1"]
+
+    # After read_a finished and before write_a ran, the checkpoint keeps the
+    # real result of read_a and leaves only write_a pending.
+    assert [row["tool_call_id"] for row in partial["completed_tool_results"]] == ["ro1"]
+    assert partial["completed_tool_results"][0]["content"] == "read_a"
+    assert [tc["id"] for tc in partial["pending_tool_calls"]] == ["rw1"]
+    assert partial["assistant_message"] is all_pending["assistant_message"]
+    assert "provider_state" not in partial
+
+    assert [row["tool_call_id"] for row in completed["completed_tool_results"]] == ["ro1", "rw1"]
+    assert completed["pending_tool_calls"] == []
+    assert shared_events.index("end:read_a") < shared_events.index("start:write_a")

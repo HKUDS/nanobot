@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from functools import cache
 from typing import Any, cast
@@ -46,6 +46,12 @@ _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
 )
 
 
+BatchCompleteCallback = Callable[
+    [list[tuple[ToolCallRequest, Any]], list[ToolCallRequest]],
+    Awaitable[None],
+]
+
+
 async def execute_tool_calls(
     tools: ToolRegistry,
     tool_calls: list[ToolCallRequest],
@@ -57,8 +63,15 @@ async def execute_tool_calls(
     context: AgentHookContext,
     model_messages: list[dict[str, Any]] | None = None,
     compacted_tool_results: set[str] | None = None,
+    on_batch_complete: BatchCompleteCallback | None = None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
-    """Execute one model response's tool calls in stable result order."""
+    """Execute one model response's tool calls in stable result order.
+
+    ``on_batch_complete`` is awaited after every execution batch that leaves
+    further calls pending.  It receives the ``(tool_call, result)`` pairs
+    completed so far and the calls that have not started yet, so the caller
+    can persist a durable checkpoint at the batch boundary.
+    """
     @cache
     def read_results() -> dict[str, str]:
         """Index once, on the first read-dedup check in this batch."""
@@ -71,7 +84,8 @@ async def execute_tool_calls(
             and message["tool_call_id"] not in (compacted_tool_results or ())
         }
     tool_results: list[tuple[Any, dict[str, str]]] = []
-    for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
+    batches = _partition_tool_batches(tools, tool_calls, concurrent=concurrent)
+    for batch_index, batch in enumerate(batches):
         if concurrent and len(batch) > 1:
             batch_results = await asyncio.gather(*(
                 _execute_tool_call(
@@ -98,6 +112,13 @@ async def execute_tool_calls(
                     read_results,
                 )
                 tool_results.append(result)
+        remaining = [call for later in batches[batch_index + 1 :] for call in later]
+        if on_batch_complete is not None and remaining:
+            completed = [
+                (tool_call, result)
+                for tool_call, (result, _event) in zip(tool_calls, tool_results)
+            ]
+            await on_batch_complete(completed, remaining)
 
     results = [result for result, _event in tool_results]
     events = [event for _result, event in tool_results]

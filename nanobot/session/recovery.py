@@ -251,11 +251,16 @@ def runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
             and not pending_ids
         )
     if phase == "awaiting_tools":
+        # Tool calls may be partially done: the runner checkpoints at every
+        # completed execution batch.  Completed and pending rows must then
+        # partition the assistant's tool calls exactly, with at least one
+        # call still pending (an all-completed turn is `tools_completed`).
         return (
             bool(assistant_call_ids)
-            and not completed_ids
-            and len(assistant_call_ids) == len(pending_ids)
-            and set(assistant_call_ids) == set(pending_ids)
+            and bool(pending_ids)
+            and not set(completed_ids) & set(pending_ids)
+            and len(completed_ids) + len(pending_ids) == len(assistant_call_ids)
+            and set(completed_ids) | set(pending_ids) == set(assistant_call_ids)
         )
     if phase == "tools_completed":
         return (
