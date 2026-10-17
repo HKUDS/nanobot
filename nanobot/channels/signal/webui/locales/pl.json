@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji Signal",
+    "officialLabel": "Otwórz poradnik signal-cli",
+    "fields": {
+      "phoneNumber": {
+        "label": "Numer telefonu",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "Host demona",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "Port demona",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "Dozwoleni nadawcy wiadomości prywatnych",
+        "placeholder": "Numery telefonów lub UUID"
+      },
+      "group_allowFrom": {
+        "label": "Dozwolone grupy",
+        "placeholder": "Identyfikatory grup"
+      },
+      "groupMessageBufferSize": {
+        "label": "Wiadomości kontekstu grupy"
+      },
+      "attachmentsDir": {
+        "label": "Katalog załączników"
+      },
+      "dm_enabled": {
+        "label": "Włącz wiadomości prywatne",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "dm_policy": {
+        "label": "Dostęp do wiadomości prywatnych",
+        "choices": {
+          "allowlist": "Lista dozwolonych",
+          "open": "Otwarty"
+        }
+      },
+      "group_enabled": {
+        "label": "Włącz grupy",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "group_policy": {
+        "label": "Dostęp do grup",
+        "choices": {
+          "allowlist": "Lista dozwolonych",
+          "open": "Otwarty"
+        }
+      },
+      "group_requireMention": {
+        "label": "Wymagaj wzmianki w grupach",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      }
+    }
+  }
+}
