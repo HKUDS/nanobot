@@ -845,8 +845,13 @@ class EmailChannel(BaseChannel):
         if msg.is_multipart():
             plain_parts: list[str] = []
             html_parts: list[str] = []
-            for part in msg.walk():
+            parts = [msg]
+            while parts:
+                part = parts.pop()
                 if part.get_content_disposition() == "attachment":
+                    continue
+                if part.is_multipart():
+                    parts.extend(reversed(part.get_payload()))
                     continue
                 content_type = part.get_content_type()
                 try:
