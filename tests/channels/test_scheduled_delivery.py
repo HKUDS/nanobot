@@ -11,6 +11,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.delivery import (
     DELIVERY_RUN_META,
@@ -61,8 +62,11 @@ async def drain(manager):
             await asyncio.sleep(0.01)
 
 
-@pytest.mark.parametrize("legacy_message,one_shot", [(False, False), (True, False), (True, True)])
-async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, legacy_message, one_shot):
+@pytest.mark.parametrize("legacy_message,one_shot,origin", [
+    (False, False, "whatsapp"), (True, False, "whatsapp"), (True, True, "whatsapp"),
+    (True, False, "websocket"),
+])
+async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, legacy_message, one_shot, origin):
     monkeypatch.setattr(outbox_module, "RETRY_SECONDS", 0)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -80,8 +84,11 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
     async def reply(**kwargs):
         calls.append(kwargs)
         if legacy_message and len(calls) == 1:
+            arguments = {"content": "Diagnostic result"}
+            if origin == "websocket":
+                arguments.update(channel="whatsapp", chat_id="synthetic")
             return LLMResponse(content=None, tool_calls=[ToolCallRequest(
-                id="send", name="message", arguments={"content": "Diagnostic result"},
+                id="send", name="message", arguments=arguments,
             )], finish_reason="tool_calls")
         return LLMResponse(content="Diagnostic result")
 
@@ -98,13 +105,30 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
     monkeypatch.setattr(channel, "_build_jid", lambda value: value)
     monkeypatch.setattr(channel, "stop", AsyncMock())
     manager.channels["whatsapp"] = channel
+    if origin == "websocket":
+        manager.channels["websocket"] = MagicMock(spec=BaseChannel, send=AsyncMock(), stop=AsyncMock())
     manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
     # Legacy channel/to fields still normalize through the existing binding migration.
     schedule = CronSchedule(kind="at", at_ms=4102444800000) if one_shot else CronSchedule(kind="every", every_ms=86400000)
-    job = cron.add_job("Reminder", schedule,
-                       "Use message to send Diagnostic result" if legacy_message else "Return Diagnostic result",
-                       deliver=True, channel="whatsapp", to="synthetic", delete_after_run=one_shot,
-                       channel_meta={"_wants_stream": True})
+    if origin == "websocket":
+        # A WebUI-created task remains in its source chat even when its instructions
+        # explicitly request a separate send. Recovery must keep that send's target.
+        with request_context(RequestContext("websocket", "source", session_key="websocket:source",
+                                            metadata={"webui": True, "_wants_stream": True})):
+            await CronTool(cron).execute(action="add", name="Reminder", every_seconds=86400,
+                message="Use message to send Diagnostic result to whatsapp:synthetic")
+        job = cron.list_jobs()[0]
+        assert job.payload.session_key == "websocket:source"
+        assert job.payload.origin_channel == "websocket"
+    else:
+        job = cron.add_job("Reminder", schedule,
+                           "Use message to send Diagnostic result" if legacy_message else "Return Diagnostic result",
+                           deliver=True, channel="whatsapp", to="synthetic", delete_after_run=one_shot,
+                           channel_meta={"_wants_stream": True})
+
+    def whatsapp_rows():
+        return [row for row in rows(manager._outbox) if row["channel"] == "whatsapp"]
+
     try:
         assert await asyncio.wait_for(cron.run_job(job.id), 15)
         await drain(manager)
@@ -112,8 +136,12 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
             assert cron.list_jobs() == []
         else:
             assert cron.list_jobs()[0].state.last_status == "ok"
-        assert len(rows(manager._outbox)) == 1
-        assert rows(manager._outbox)[0]["status"] == "pending"
+        assert len(whatsapp_rows()) == 1
+        assert whatsapp_rows()[0]["status"] == "pending"
+        if origin == "websocket":
+            saved = json.loads(whatsapp_rows()[0]["payload"])
+            assert saved["delivery"]["session_key"] == "websocket:source"
+            assert saved["metadata"] == {}
         channel._client.send_message.assert_not_called()
         count = len(calls)
         assert count == (2 if legacy_message else 1)
@@ -127,8 +155,8 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         await manager._recover_scheduled()
         await drain(manager)
         channel._client.send_message.assert_awaited_once_with("synthetic", "Diagnostic result")
-        assert rows(manager._outbox)[0]["status"] == "sent"
-        assert rows(manager._outbox)[0]["payload"] is None
+        assert whatsapp_rows()[0]["status"] == "sent"
+        assert whatsapp_rows()[0]["payload"] is None
         again = make_manager(tmp_path, sessions)
         again.channels["whatsapp"] = channel
         await again._recover_scheduled()

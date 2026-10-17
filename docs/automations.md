@@ -46,6 +46,11 @@ Write what the task should do, such as "Remind me to drink water". nanobot sends
 
 For separate sends, specify the recipients in the instructions. The agent can still use `message` to send to other chats, send to several recipients, or attach files. Existing tasks that explicitly request this tool remain supported.
 
+Writing "send to WhatsApp" in a task's instructions does not change its saved chat. If you create
+the task in a WebUI chat, its normal reply still returns there. A separate WhatsApp send requires
+the agent to call `message` with that destination. To make WhatsApp the normal reply destination,
+create the task in that WhatsApp chat, or change its saved chat in Automations.
+
 ### Scheduled Result Delivery
 
 Task completion and message delivery are separate. `Turn completed` and a successful task run
@@ -55,6 +60,8 @@ The gateway saves final scheduled messages before it accepts them into the outgo
 This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery
 record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and
 saved chat history keep their existing behavior.
+The queue cannot recover a send that the agent never requested. If an expected recipient has no
+delivery record, check the task's saved chat and the run's `message` tool calls first.
 External channels receive one final scheduled reply instead of a streamed reply. Ordinary chat
 streaming is unchanged.
 
