@@ -7,7 +7,7 @@ import socket
 import time
 from contextlib import suppress
 from pathlib import Path
-from threading import Event
+from threading import Event, Timer
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -2030,49 +2030,89 @@ async def test_nanobot_feature_remote_disable_does_not_need_install_policy(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("installed_only", [False, True])
 async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
     bus: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    installed_only: bool,
 ) -> None:
-    entered = asyncio.Event()
-    release = asyncio.Event()
+    from nanobot.apps.cli import service as cli_service
+    from nanobot.config import loader
+    from nanobot.config.schema import Config
 
-    async def slow_payload(
-        *,
-        installed_only: bool = False,
-        config_path: Path | None = None,
-    ) -> dict[str, Any]:
-        assert installed_only is False
-        entered.set()
-        with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(release.wait(), 2.0)
-        return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
-
-    monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", slow_payload)
-    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29935)
-    server_task = asyncio.create_task(channel.start())
-    try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        auth = {"Authorization": f"Bearer {token}"}
-
-        catalog_task = asyncio.create_task(
-            _http_get("http://127.0.0.1:29935/api/settings/cli-apps", headers=auth)
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+    config_path = tmp_path / "config.json"
+    loader.save_config(config, config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    manager = cli_service.CliAppManager(workspace=workspace)
+    app = {"name": "blocked", "entry_point": "nanobot-blocked-cli", "package_manager": "bundled"}
+    for source, *_ in cli_service._CATALOG_SOURCES:
+        manager._cache_path(source).write_text(
+            json.dumps({"_cached_at": time.time(), "data": {"clis": [app]}}),
+            encoding="utf-8",
         )
+    manager._save_installed({"blocked": {"entry_point": app["entry_point"], "strategy": "bundled"}})
+
+    loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
+    release = Event()
+    watchdog_fired = Event()
+    native_which = cli_service.shutil.which
+
+    def slow_which(command: str, *args: Any, **kwargs: Any) -> str | None:
+        if command == app["entry_point"]:
+            loop.call_soon_threadsafe(entered.set)
+            release.wait()
+        return native_which(command, *args, **kwargs)
+
+    def unblock() -> None:
+        watchdog_fired.set()
+        release.set()
+
+    monkeypatch.setattr(cli_service.shutil, "which", slow_which)
+    watchdog = Timer(5.0, unblock)
+    watchdog.daemon = True
+    port = _free_port()
+    cfg = {"host": "127.0.0.1", "port": port, "allowFrom": ["*"], "websocketRequiresToken": False}
+    gateway = _make_handler(cfg, bus, session_manager=_seed_session(workspace), workspace_path=workspace)
+    channel = WebSocketChannel(cfg, bus, gateway=gateway)
+    server_task = asyncio.create_task(channel.start())
+    catalog_task = None
+    try:
+        token = gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+        url = f"http://127.0.0.1:{port}"
+        assert (await _http_get(f"{url}/api/workspaces", headers=auth)).status_code == 200
+        watchdog.start()
+        query = "?installed_only=1" if installed_only else ""
+        catalog_task = asyncio.create_task(_http_get(f"{url}/api/settings/cli-apps{query}", headers=auth))
         assert await asyncio.wait_for(entered.wait(), 2.0)
         assert not catalog_task.done()
 
-        workspaces_started = time.perf_counter()
-        workspaces = await _http_get("http://127.0.0.1:29935/api/workspaces", headers=auth)
-        assert time.perf_counter() - workspaces_started < 1.0
+        workspaces = await asyncio.wait_for(_http_get(f"{url}/api/workspaces", headers=auth), 2.0)
         assert workspaces.status_code == 200
+        assert not release.is_set(), "the watchdog released a probe blocking the event loop"
+        assert not watchdog_fired.is_set()
 
         release.set()
-        catalog = await catalog_task
+        catalog = await asyncio.wait_for(catalog_task, 2.0)
         assert catalog.status_code == 200
-        assert catalog.json()["apps"] == []
+        payload = catalog.json()
+        assert payload["apps"][0]["name"] == "blocked"
+        assert payload["apps"][0]["status"] == "missing"
+        assert ("catalog_refresh_pending" in payload) is not installed_only
     finally:
         release.set()
+        watchdog.cancel()
+        if watchdog.ident is not None:
+            watchdog.join()
+        if catalog_task is not None:
+            with suppress(Exception, asyncio.CancelledError):
+                await asyncio.wait_for(catalog_task, 5.0)
         await channel.stop()
         await server_task
 
