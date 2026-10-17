@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 import { CapabilityMentionToken } from "@/components/CliAppMentionText";
 import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
@@ -7,7 +8,7 @@ import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { FileActions } from "@/components/FileActions";
 import { InlineTokenHighlight, INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import { MessageLinksMenu, useMessageWebLinks } from "@/components/MessageLinksMenu";
-import { RenameChatDialog } from "@/components/RenameChatDialog";
+import { RenameDialog } from "@/components/RenameDialog";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { StartupShell } from "@/components/StartupShell";
@@ -43,12 +44,17 @@ const sessionMention: SessionMention = {
 };
 
 function RenamePreview() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("组件设计");
   return <div className="space-y-4">
     <p className="text-sm">{title}</p>
-    <Button variant="outline" onClick={() => setOpen(true)}>重命名会话</Button>
-    <RenameChatDialog open={open} title={title} onCancel={() => setOpen(false)}
+    <Button variant="outline" onClick={() => setOpen(true)}>重命名分组</Button>
+    <RenameDialog open={open} title={title}
+      dialogTitle={t("workbench.renameGroupTitle")}
+      description={t("workbench.renameGroupDescription")}
+      placeholder={t("workbench.renameGroupPlaceholder")}
+      onCancel={() => setOpen(false)}
       onConfirm={(next) => { setTitle(next); setOpen(false); }} />
     <p role="status" className="text-xs text-muted-foreground">保存后更新上方标题。</p>
   </div>;
@@ -244,9 +250,9 @@ function CompatibilityPreview() {
 
 const components = "webui/src/components/";
 export const shellExamples: ComponentExample[] = [
-  { title: "RenameChatDialog · 重命名", files: ["RenameChatDialog"], Preview: RenamePreview,
-    description: "打开真实重命名对话框，编辑标题并保存。", options: "open 控制显示，title 设置初值，onConfirm 接收去除两端空白的标题。空标题无法保存。",
-    code: '<RenameChatDialog open={open} title={title} onCancel={close} onConfirm={rename} />' },
+  { title: "RenameDialog · 分组与项目改名", files: ["RenameDialog"], Preview: RenamePreview,
+    description: "预览分组和项目使用的改名弹窗；话题在会话列表中行内改名。", options: "调用方提供 dialogTitle、description 和 placeholder。title 设置初值，onConfirm 接收去除两端空白的标题。空标题无法保存。",
+    code: '<RenameDialog open={open} title={title} dialogTitle="Rename group" description="Give this group a name." placeholder="Group name" onCancel={close} onConfirm={rename} />' },
   { title: "DeleteConfirm · 删除确认", files: ["DeleteConfirm"], Preview: DeletePreview,
     description: "切换单个、批量和关联自动任务的删除确认。", options: "count 控制批量文案；automations 展示关联任务、计划与下次运行时间。确认按钮调用 onConfirm。",
     code: '<DeleteConfirm open={open} title="组件设计" count={1} automations={jobs} onCancel={close} onConfirm={remove} />' },

@@ -1563,8 +1563,6 @@
     "pin": "Sematkan",
     "unpin": "Lepas sematan",
     "rename": "Ganti nama",
-    "renameTitle": "Ubah nama topik",
-    "renameDescription": "Ubah nama tampilan topik di WebUI.",
     "renamePlaceholder": "Nama topik",
     "renameProjectTitle": "Ubah nama proyek",
     "renameProjectDescription": "Ubah hanya nama proyek di sidebar WebUI.",

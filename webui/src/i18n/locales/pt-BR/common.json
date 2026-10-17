@@ -1577,8 +1577,6 @@
     "pin": "Fixar",
     "unpin": "Desafixar",
     "rename": "Renomear",
-    "renameTitle": "Renomear tópico",
-    "renameDescription": "Altere o nome do tópico exibido no WebUI.",
     "renamePlaceholder": "Nome do tópico",
     "renameProjectTitle": "Renomear projeto",
     "renameProjectDescription": "Altere apenas o nome do projeto na barra lateral WebUI.",

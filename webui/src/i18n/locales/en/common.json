@@ -1763,8 +1763,6 @@
     "pin": "Pin",
     "unpin": "Unpin",
     "rename": "Rename",
-    "renameTitle": "Rename topic",
-    "renameDescription": "Change the topic's display name in WebUI.",
     "renamePlaceholder": "Topic name",
     "renameProjectTitle": "Rename project",
     "renameProjectDescription": "Change only this project's name in the WebUI sidebar.",

@@ -12,17 +12,17 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
-interface RenameChatDialogProps {
+interface RenameDialogProps {
   open: boolean;
   title: string;
-  dialogTitle?: string;
-  description?: string;
-  placeholder?: string;
+  dialogTitle: string;
+  description: string;
+  placeholder: string;
   onCancel: () => void;
   onConfirm: (title: string) => void;
 }
 
-export function RenameChatDialog({
+export function RenameDialog({
   open,
   title,
   dialogTitle,
@@ -30,7 +30,7 @@ export function RenameChatDialog({
   placeholder,
   onCancel,
   onConfirm,
-}: RenameChatDialogProps) {
+}: RenameDialogProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState(title);
 
@@ -54,15 +54,13 @@ export function RenameChatDialog({
           }}
         >
           <DialogHeader className="text-left">
-            <DialogTitle>{dialogTitle ?? t("chat.renameTitle")}</DialogTitle>
-            <DialogDescription>
-              {description ?? t("chat.renameDescription")}
-            </DialogDescription>
+            <DialogTitle>{dialogTitle}</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           <Input
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder={placeholder ?? t("chat.renamePlaceholder")}
+            placeholder={placeholder}
             autoFocus
             maxLength={160}
           />

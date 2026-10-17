@@ -165,9 +165,9 @@ const DeleteConfirm = lazy(async () => {
   const module = await import("@/components/DeleteConfirm");
   return { default: module.DeleteConfirm };
 });
-const RenameChatDialog = lazy(async () => {
-  const module = await import("@/components/RenameChatDialog");
-  return { default: module.RenameChatDialog };
+const RenameDialog = lazy(async () => {
+  const module = await import("@/components/RenameDialog");
+  return { default: module.RenameDialog };
 });
 
 function SurfaceLoadingFallback({ label }: { label?: string }) {
@@ -3156,7 +3156,7 @@ function Shell({
         ) : null}
         {pendingTabRename ? (
           <Suspense fallback={null}>
-            <RenameChatDialog
+            <RenameDialog
               open
               title={pendingTabRename.label}
               dialogTitle={t("workbench.renameGroupTitle")}
@@ -3169,7 +3169,7 @@ function Shell({
         ) : null}
         {pendingProjectRename ? (
           <Suspense fallback={null}>
-            <RenameChatDialog
+            <RenameDialog
               open
               title={pendingProjectRename.label}
               dialogTitle={t("chat.renameProjectTitle")}

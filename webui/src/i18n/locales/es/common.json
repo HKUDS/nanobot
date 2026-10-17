@@ -1564,8 +1564,6 @@
     "pin": "Fijar",
     "unpin": "Desfijar",
     "rename": "Renombrar",
-    "renameTitle": "Renombrar tema",
-    "renameDescription": "Cambia el nombre del tema en WebUI.",
     "renamePlaceholder": "Nombre del tema",
     "renameProjectTitle": "Renombrar proyecto",
     "renameProjectDescription": "Cambia solo el nombre del proyecto en la barra lateral WebUI.",

@@ -1763,8 +1763,6 @@
     "pin": "置顶",
     "unpin": "取消置顶",
     "rename": "重命名",
-    "renameTitle": "话题改名",
-    "renameDescription": "修改 WebUI 中显示的话题名称",
     "renamePlaceholder": "话题名称",
     "renameProjectTitle": "项目改名",
     "renameProjectDescription": "仅修改 WebUI 侧栏中的项目名称",

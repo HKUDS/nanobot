@@ -1563,8 +1563,6 @@
     "pin": "고정",
     "unpin": "고정 해제",
     "rename": "이름 변경",
-    "renameTitle": "주제 이름 변경",
-    "renameDescription": "WebUI에 표시되는 주제 이름을 변경하세요.",
     "renamePlaceholder": "주제 이름",
     "renameProjectTitle": "프로젝트 이름 변경",
     "renameProjectDescription": "WebUI 사이드바의 프로젝트 이름만 변경하세요.",

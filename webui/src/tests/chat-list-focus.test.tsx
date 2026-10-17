@@ -1,10 +1,8 @@
-import { useState } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
-import { RenameChatDialog } from "@/components/RenameChatDialog";
 import type { ChatSummary } from "@/lib/types";
 import { mockBrowserFocus } from "./browser-focus";
 
@@ -15,7 +13,6 @@ const topic: ChatSummary = {
 };
 
 function SidebarFocusCase() {
-  const [rename, setRename] = useState<string | null>(null);
   return <>
     <ChatList
       sessions={[topic, {
@@ -44,12 +41,10 @@ function SidebarFocusCase() {
       onToggleArchive={vi.fn()}
       onAttachPane={vi.fn()}
       onRequestRename={vi.fn().mockResolvedValue(undefined)}
-      onRequestRenameTab={(_key, title) => setRename(title)}
-      onRequestRenameProject={(_key, title) => setRename(title)}
+      onRequestRenameTab={vi.fn()}
+      onRequestRenameProject={vi.fn()}
     />
     <button>Outside destination</button>
-    <RenameChatDialog open={rename !== null} title={rename ?? ""}
-      onCancel={() => setRename(null)} onConfirm={() => setRename(null)} />
   </>;
 }
 

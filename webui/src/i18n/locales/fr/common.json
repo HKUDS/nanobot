@@ -1563,8 +1563,6 @@
     "pin": "Épingler",
     "unpin": "Désépingler",
     "rename": "Renommer",
-    "renameTitle": "Renommer le sujet",
-    "renameDescription": "Changez le nom du sujet affiché dans WebUI.",
     "renamePlaceholder": "Nom du sujet",
     "renameProjectTitle": "Renommer le projet",
     "renameProjectDescription": "Changez seulement le nom du projet dans la barre latérale WebUI.",

@@ -1563,8 +1563,6 @@
     "pin": "ピン留め",
     "unpin": "ピン留めを解除",
     "rename": "名前を変更",
-    "renameTitle": "トピック名を変更",
-    "renameDescription": "WebUI に表示するトピック名を変更します。",
     "renamePlaceholder": "トピック名",
     "renameProjectTitle": "プロジェクト名を変更",
     "renameProjectDescription": "WebUI のサイドバーに表示するプロジェクト名だけを変更します。",

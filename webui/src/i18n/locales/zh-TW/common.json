@@ -1563,8 +1563,6 @@
     "pin": "置頂",
     "unpin": "取消置頂",
     "rename": "重新命名",
-    "renameTitle": "話題改名",
-    "renameDescription": "修改 WebUI 中顯示的話題名稱",
     "renamePlaceholder": "話題名稱",
     "renameProjectTitle": "專案改名",
     "renameProjectDescription": "僅修改 WebUI 側欄中的專案名稱",
