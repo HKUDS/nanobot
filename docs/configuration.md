@@ -2417,10 +2417,17 @@ The gateway can run a protected heartbeat cron job that periodically checks `HEA
 
 ```json
 {
+  "modelPresets": {
+    "fast": {
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openai"
+    }
+  },
   "gateway": {
     "heartbeat": {
       "enabled": true,
-      "intervalS": 1800
+      "intervalS": 1800,
+      "evaluatorModelPreset": "fast"
     }
   }
 }
@@ -2436,6 +2443,7 @@ The heartbeat appears as `heartbeat` when you list cron jobs, but cannot be remo
 |--------|---------|-------------|
 | `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
+| `gateway.heartbeat.evaluatorModelPreset` | unset | Optional `modelPresets` name used only for post-run notification evaluation. When unset, it uses the active agent provider/model; it does not change heartbeat execution or evaluator request controls. |
 | `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
 
 ### Custom heartbeat evaluator prompt
