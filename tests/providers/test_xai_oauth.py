@@ -156,9 +156,11 @@ def test_login_uses_random_loopback_callback_and_saves_separate_credentials(
     assert get_xai_oauth_login_status() == token
 
 
+@pytest.mark.parametrize("paste_callback_url", [False, True])
 def test_pending_login_accepts_authorization_code_from_remote_browser(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    paste_callback_url: bool,
 ) -> None:
     _use_temp_credentials(monkeypatch, tmp_path)
     discovery = _Discovery(
@@ -180,7 +182,21 @@ def test_pending_login_accepts_authorization_code_from_remote_browser(
         params = parse_qs(urlsplit(flow.authorization_url).query)
         callback_url = params["redirect_uri"][0]
 
-        token = complete_xai_oauth_login(flow, "remote-code")
+        pasted = (
+            f"{callback_url}?{urlencode({'code': 'remote-code', 'state': params['state'][0]})}"
+            if paste_callback_url else "remote-code"
+        )
+        if paste_callback_url:
+            for invalid in (
+                f"{callback_url}?code=remote-code",
+                f"{callback_url}?code=remote-code&state=wrong",
+            ):
+                with pytest.raises(XAIOAuthError, match="state did not match"):
+                    complete_xai_oauth_login(flow, invalid)
+            with pytest.raises(XAIOAuthError, match="callback URL for this"):
+                complete_xai_oauth_login(flow, pasted.replace("/callback?", "/wrong?"))
+            assert not exchanged
+        token = complete_xai_oauth_login(flow, pasted)
     finally:
         flow.cancel()
 
