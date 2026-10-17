@@ -830,7 +830,7 @@ function ActivityTraceRow({
       tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
       label={trace.kind === "search" ? trace.label : formatActivityTarget(t, trace.label, trace.detail)}
       detail={trace.kind === "search" ? trace.detail : trace.aside}
-      detailClassName={trace.kind === "search" ? "whitespace-pre-line" : undefined}
+      labelClassName={trace.kind === "search" && trace.detail ? "max-w-[50%]" : undefined}
     />
   );
 }
