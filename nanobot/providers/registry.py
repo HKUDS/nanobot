@@ -39,6 +39,11 @@ class ProviderModelSpec:
     reasoning_efforts: tuple[str, ...] = ()
     supports_backend_search: bool = False
     api: ModelAPICapabilities | None = None
+    aliases: tuple[str, ...] = ()
+    max_output_tokens: int | None = None
+    input_modalities: tuple[str, ...] = ()
+    output_modalities: tuple[str, ...] = ()
+    default_reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +166,14 @@ class ProviderSpec:
             return routed_model
         return model
 
+    def model_metadata(self, model: str) -> ProviderModelSpec | None:
+        """Look up curated metadata without rewriting configured or wire model IDs."""
+        model_id = model.rsplit("/", 1)[-1].lower()
+        return next((
+            entry for entry in self.builtin_models
+            if model_id == entry.id or model_id in entry.aliases
+        ), None)
+
     def default_model_api(
         self,
         model: str,
@@ -196,6 +209,8 @@ class ProviderSpec:
 # ---------------------------------------------------------------------------
 # PROVIDERS — the registry. Order = priority. Copy any entry as template.
 # ---------------------------------------------------------------------------
+
+_DEEPSEEK_REASONING_EFFORTS = ("none", "low", "high", "max")
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
     # === Custom (direct OpenAI-compatible endpoint) ========================
@@ -621,6 +636,27 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
+        builtin_models=(
+            ProviderModelSpec(
+                id="deepseek-flash",
+                aliases=("deepseek-v4-flash", "deepseek-v4-flash-vision-exp"),
+                context_window=1_000_000,
+                max_output_tokens=393_216,
+                input_modalities=("text", "image"),
+                output_modalities=("text",),
+                reasoning_efforts=_DEEPSEEK_REASONING_EFFORTS,
+                default_reasoning_effort="high",
+            ),
+            ProviderModelSpec(
+                id="deepseek-v4-pro",
+                context_window=1_000_000,
+                max_output_tokens=393_216,
+                input_modalities=("text",),
+                output_modalities=("text",),
+                reasoning_efforts=_DEEPSEEK_REASONING_EFFORTS,
+                default_reasoning_effort="high",
+            ),
+        ),
         responses=ResponsesCapabilities(
             models=(
                 "deepseek-v4-flash",

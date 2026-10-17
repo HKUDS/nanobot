@@ -1700,6 +1700,7 @@ def test_deepseek_coerces_list_content_to_string() -> None:
 
 @pytest.mark.parametrize("model", [
     "deepseek-flash",
+    "deepseek-v4-flash",
     "deepseek-v4-flash-vision-exp",
 ])
 @pytest.mark.parametrize("prefixed", [False, True])
@@ -1741,6 +1742,28 @@ def test_deepseek_vision_preserves_multimodal_content(
         assert kw["input"] == [{"role": "user", "content": expected}]
     else:
         assert kw["messages"][0]["content"] == content
+
+
+@pytest.mark.parametrize("responses", [False, True])
+def test_deepseek_pro_remains_text_only(responses: bool) -> None:
+    provider = OpenAICompatProvider(
+        api_key="k", default_model="deepseek-v4-pro", spec=find_by_name("deepseek"),
+    )
+    build_request = provider._build_responses_body if responses else provider._build_kwargs
+    body = build_request(
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": "describe the image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+        ]}],
+        tools=None, model="deepseek-v4-pro", max_tokens=1024,
+        temperature=0.7, reasoning_effort=None, tool_choice=None,
+    )
+    if responses:
+        assert body["input"] == [{
+            "role": "user", "content": [{"type": "input_text", "text": "describe the image"}],
+        }]
+    else:
+        assert body["messages"] == [{"role": "user", "content": "describe the image"}]
 
 
 def test_non_deepseek_keeps_list_content() -> None:
