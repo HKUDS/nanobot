@@ -441,6 +441,8 @@ def test_gateway_missing_provider_managed_start_for_webui_setup(
             GatewayStartOptions(
                 port=18790,
                 config_path=str(config_path.resolve()),
+                    home=str(config_path.parent.resolve()),
+                    workspace=str(workspace.resolve()),
             ),
         )
     ]

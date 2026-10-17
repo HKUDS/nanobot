@@ -45,7 +45,11 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self, workspace: Path, builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None, *, home: Path | None = None,
+    ):
+        self._home = home
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
@@ -123,7 +127,7 @@ class SkillsLoader:
     def _discover_skills(self) -> list[dict[str, str]]:
         from nanobot.agent.plugins import enabled_agent_plugin_skill_documents
 
-        plugin_skills = enabled_agent_plugin_skill_documents(self.workspace)
+        plugin_skills = enabled_agent_plugin_skill_documents(self.workspace, home=self._home)
         disabled = set(self.disabled_skills)
         if disabled:
             for legacy, canonical in self._skill_aliases().items():

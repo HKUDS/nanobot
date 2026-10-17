@@ -1084,23 +1084,32 @@ class TestMainMenuInteraction:
         assert onboard_wizard._configure_quick_start_provider(config) is False
         assert "primary" not in config.model_presets
 
-    def test_quick_start_openai_codex_login_reuses_existing_token(self, monkeypatch):
+    def test_quick_start_openai_codex_login_reuses_existing_token(self, tmp_path, monkeypatch):
         """Quick Start should not open a new login flow when Codex is already authenticated."""
         import oauth_cli_kit
 
-        config = Config()
+        from nanobot.config.loader import load_config
+
+        home = tmp_path / "instance"
+        config = load_config(tmp_path / "external.json", home=home)
+        monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "other")
         config.providers.openai.api_key = "${UNRELATED_MISSING_KEY}"
         config.providers.openai_codex.proxy = "${CODEX_PROXY}"
         token = SimpleNamespace(access="existing-token", account_id="account-123")
         token_proxies: list[str | None] = []
         login_calls: list[object] = []
+        token_paths = []
 
         monkeypatch.setenv("CODEX_PROXY", "http://127.0.0.1:8080")
         monkeypatch.delenv("UNRELATED_MISSING_KEY", raising=False)
         monkeypatch.setattr(
             oauth_cli_kit,
             "get_token",
-            lambda **kwargs: token_proxies.append(kwargs.get("proxy")) or token,
+            lambda **kwargs: (
+                token_paths.append(kwargs["storage"].get_token_path()),
+                token_proxies.append(kwargs.get("proxy")),
+                token,
+            )[-1],
         )
         monkeypatch.setattr(
             oauth_cli_kit,
@@ -1112,6 +1121,7 @@ class TestMainMenuInteraction:
         assert onboard_wizard._quick_start_oauth_login(config, "openai_codex") is True
         assert token_proxies == ["http://127.0.0.1:8080"]
         assert login_calls == []
+        assert token_paths == [home / "auth" / "codex.json"]
         assert config.providers.openai.api_key == "${UNRELATED_MISSING_KEY}"
         assert config.providers.openai_codex.proxy == "${CODEX_PROXY}"
 

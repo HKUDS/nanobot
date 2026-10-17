@@ -163,7 +163,7 @@ def bus() -> MagicMock:
 
 
 def _seed_session(workspace: Path, key: str = "websocket:test") -> SessionManager:
-    sm = SessionManager(workspace)
+    sm = SessionManager(workspace / "workspace")
     s = Session(key=key)
     s.add_message("user", "hi")
     s.add_message("assistant", "hello back")
@@ -172,7 +172,7 @@ def _seed_session(workspace: Path, key: str = "websocket:test") -> SessionManage
 
 
 def _seed_many(workspace: Path, keys: list[str]) -> SessionManager:
-    sm = SessionManager(workspace)
+    sm = SessionManager(workspace / "workspace")
     for k in keys:
         s = Session(key=k)
         s.add_message("user", f"hi from {k}")
@@ -686,6 +686,7 @@ async def test_webui_skill_management_routes(
         enabled: bool,
         disabled_skills: set[str],
         config_path: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         assert workspace == tmp_path
         assert name == "custom-skill"
@@ -699,6 +700,7 @@ async def test_webui_skill_management_routes(
         *,
         disabled_skills: set[str],
         config_path: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         assert workspace == tmp_path
         assert name == "custom-skill"
@@ -798,6 +800,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         *,
         provider: str,
         version: str,
+        home: Path,
     ) -> dict[str, Any]:
         assert source == "acme/agent-skills"
         assert skill_id == "react-testing"
@@ -840,7 +843,9 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         )
         assert search_response.status_code == 200
         assert search_response.json()["skills"][0]["skill_id"] == "react-testing"
-        search.assert_awaited_once_with("react", tmp_path, provider="all")
+        search.assert_awaited_once_with(
+            "react", tmp_path, provider="all", home=channel.gateway.settings.config.instance_home,
+        )
 
         trending_response = await _http_get(
             f"http://127.0.0.1:{port}/api/webui/skills/trending",
@@ -848,7 +853,9 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         )
         assert trending_response.status_code == 200
         assert trending_response.json()["period"] == "24h"
-        trending.assert_awaited_once_with(tmp_path, provider="all")
+        trending.assert_awaited_once_with(
+            tmp_path, provider="all", home=channel.gateway.settings.config.instance_home,
+        )
 
         trends_response = await _http_get(
             f"http://127.0.0.1:{port}/api/webui/skills/trends"
@@ -899,6 +906,7 @@ async def test_webui_skill_install_rejects_overlapping_requests(
         *,
         provider: str,
         version: str,
+        home: Path,
     ) -> dict[str, Any]:
         started.set()
         await finish.wait()
@@ -984,6 +992,7 @@ async def test_webui_skill_install_honors_remote_install_opt_in(
         *,
         provider: str,
         version: str,
+        home: Path,
     ) -> dict[str, Any]:
         skill_dir = workspace / "skills" / skill_id
         skill_dir.mkdir(parents=True)
@@ -1027,6 +1036,7 @@ async def test_cli_apps_routes_require_token_and_return_payload(
         *,
         installed_only: bool = False,
         config_path: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         return {
             "apps": [
@@ -1057,7 +1067,7 @@ async def test_cli_apps_routes_require_token_and_return_payload(
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.cli_apps_action",
-        lambda action, query, *, config_path=None: {
+        lambda action, query, *, config_path=None, home=None: {
             "apps": [],
             "installed_count": 1,
             "catalog_updated_at": "2026-04-18",
@@ -1421,6 +1431,7 @@ async def test_nanobot_feature_install_only_does_not_start_channel(
         *,
         allow_install: bool,
         config_path: Path,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         assert action == "enable"
         assert query == {"name": ["whatsapp"], "install_only": ["true"]}
@@ -1543,7 +1554,7 @@ async def test_feishu_connect_routes_write_config_and_hot_reload(
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.nanobot_features_action",
-        lambda _action, _query, *, allow_install=True, config_path=None: {
+        lambda _action, _query, *, allow_install=True, config_path=None, home=None: {
             "features": [{
                 "name": "feishu",
                 "display_name": "Feishu",
@@ -1712,6 +1723,7 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
         *,
         allow_install: bool = True,
         config_path: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         assert action == "enable"
         assert query == {"name": ["discord"], "instance_id": ["default"]}
@@ -2042,6 +2054,7 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
         *,
         installed_only: bool = False,
         config_path: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         assert installed_only is False
         entered.set()
@@ -2089,6 +2102,7 @@ async def test_cli_apps_route_supports_installed_only_payload(
         *,
         installed_only: bool = False,
         config_path: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         calls.append(installed_only)
         return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
@@ -2154,6 +2168,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         query: dict[str, list[str]],
         *,
         config_path: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         preset_queries.append((action, query))
         return {
@@ -2168,6 +2183,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         query: dict[str, list[str]],
         *,
         config_path: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, Any]:
         custom_queries.append((action, query))
         return {
@@ -3176,17 +3192,12 @@ async def test_webui_thread_resigns_assistant_media_urls(
 ) -> None:
     from nanobot.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path)
     media_root = tmp_path / "media"
     websocket_media = media_root / "websocket"
     websocket_media.mkdir(parents=True)
     external = tmp_path / "clip.mp4"
     external.write_bytes(b"video")
-
-    def fake_media_dir(channel: str | None = None) -> Path:
-        return websocket_media if channel == "websocket" else media_root
-
-    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
 
     append_transcript_object(
         "websocket:video-replay",

@@ -174,6 +174,7 @@ class ExecTool(Tool):
         cfg = ctx.config.exec
         return cls(
             working_dir=ctx.workspace,
+            home=ctx.instance_home,
             max_runtime=cfg.max_runtime,
             max_runtime_limit=cfg.max_runtime_limit,
             idle_timeout=cfg.idle_timeout,
@@ -208,6 +209,7 @@ class ExecTool(Tool):
         allowed_env_keys: list[str] | None = None,
         session_manager: ExecSessionManager | None = None,
         *,
+        home: Path | None = None,
         max_runtime: int | None = None,
         max_runtime_limit: int | None = None,
         idle_timeout: int = 300,
@@ -221,6 +223,7 @@ class ExecTool(Tool):
         if max_runtime_limit is not None:
             values["max_runtime_limit"] = max_runtime_limit
         self._exec_config = ExecToolConfig.model_validate(values)
+        self._home = home
         self.working_dir = working_dir
         self.sandbox = sandbox
         self.deny_patterns = (deny_patterns or []) + [
@@ -437,6 +440,7 @@ class ExecTool(Tool):
                     cwd,
                     sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
                     sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                    home=self._home,
                 )
                 command = shlex.split(wrapped) if isinstance(command, list) else wrapped
                 cwd = str(Path(workspace).resolve())
@@ -900,7 +904,7 @@ class ExecTool(Tool):
                 if self._is_benign_device_path(str(p)):
                     continue
 
-                media_path = get_media_dir().resolve()
+                media_path = (self._home / "media" if self._home is not None else get_media_dir()).resolve()
                 allowed = (
                     is_path_within(p, cwd_path)
                     or is_path_within(p, media_path)

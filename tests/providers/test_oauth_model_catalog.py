@@ -98,11 +98,11 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
 
     monkeypatch.setattr(
         "nanobot.providers.xai_grok_provider.get_xai_oauth_storage_path",
-        lambda: tmp_path / "auth" / "xai.json",
+        lambda home=None: tmp_path / "auth" / "xai.json",
     )
     monkeypatch.setattr(
         "nanobot.providers.xai_grok_provider.get_xai_oauth_login_status",
-        lambda: token,
+        lambda **_kwargs: token,
     )
     monkeypatch.setattr(
         "nanobot.providers.xai_grok_provider.get_xai_oauth_token",
@@ -208,8 +208,8 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
             return tmp_path / "auth" / "openai-codex.json"
 
     monkeypatch.setattr(
-        "nanobot.providers.openai_codex_provider.FileTokenStorage",
-        lambda **_kwargs: Storage(),
+        "nanobot.providers.openai_codex_provider.codex_token_storage",
+        lambda home=None: Storage(),
     )
     monkeypatch.setattr(
         "nanobot.providers.openai_codex_provider.get_codex_token",
@@ -335,7 +335,7 @@ def test_github_copilot_catalog_routes_advertised_model_apis(
 
     monkeypatch.setattr(
         "nanobot.providers.github_copilot_provider.get_storage",
-        lambda: Storage(),
+        lambda home=None: Storage(),
     )
     monkeypatch.setattr("nanobot.providers.github_copilot_provider.httpx.Client", fake_client)
 

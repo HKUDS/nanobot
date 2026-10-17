@@ -23,6 +23,7 @@ from nanobot.cli.runtime_config import (
     _print_runtime_config_validation_error,
     _provider_setup_error,
 )
+from nanobot.config.home import get_instance_paths
 from nanobot.config.schema import Config
 from nanobot.security.network import is_loopback_host
 from nanobot.webui.build import (
@@ -236,7 +237,7 @@ def _resolve_webui_config_path(config: str | None) -> Path:
 
 def _load_webui_setup_config(config_path: Path) -> Config:
     """Load config for first-run mutation without resolving env-var placeholders."""
-    return _load_config_for_cli(config_path)
+    return _load_config_for_cli(config_path, home=get_instance_paths().home)
 
 
 def _webui_config_dict(config: Config) -> dict[str, Any]:
@@ -573,7 +574,7 @@ def _print_webui_ready(
     console.print()
     console.print(Text(f"Config: {config_path}", style="dim"), soft_wrap=True)
     console.print()
-    log_command = _gateway_instance_command("logs", config_path=config_path, workspace=workspace)
+    log_command = _gateway_instance_command("logs", home=config.instance_home)
     console.print(Text(f"Logs: {log_command}", style="dim"), soft_wrap=True)
     if managed:
         lifecycle = "Keep this terminal open while using WebUI.\n"
@@ -701,14 +702,10 @@ def _attach_to_background_gateway(
 def _gateway_instance_command(
     subcommand: str,
     *,
-    config_path: Path,
-    workspace: str | None,
+    home: Path,
 ) -> str:
-    """Return a copyable gateway command for the same config/workspace instance."""
+    """Return a copyable gateway command for the selected home."""
     import shlex
 
-    parts = ["nanobot", "gateway", subcommand, "--config", str(config_path)]
-    if workspace:
-        workspace_path = str(Path(workspace).expanduser().resolve(strict=False))
-        parts.extend(["--workspace", workspace_path])
+    parts = ["nanobot", "--home", str(home), "gateway", subcommand]
     return " ".join(shlex.quote(part) for part in parts)

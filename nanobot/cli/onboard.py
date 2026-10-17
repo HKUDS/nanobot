@@ -1628,9 +1628,12 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
         console.print(f"[red]{escape(str(exc))}[/red]")
         return False
 
+    from nanobot.providers.oauth_storage import codex_token_storage
+
+    storage = codex_token_storage(config.instance_home)
     token = None
     with suppress(Exception):
-        token = get_token(proxy=proxy)
+        token = get_token(proxy=proxy, storage=storage)
     if not getattr(token, "access", None):
         console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
         try:
@@ -1638,6 +1641,7 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
                 print_fn=lambda message: console.print(message, markup=False),
                 prompt_fn=lambda prompt: _get_questionary().text(prompt).ask() or "",
                 proxy=proxy,
+                storage=storage,
             )
         except Exception as exc:
             console.print(f"[red]OAuth login failed: {escape(str(exc))}[/red]")
@@ -1662,7 +1666,9 @@ def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> b
         from oauth_cli_kit import get_token  # pyright: ignore[reportMissingTypeStubs]
 
         proxy = _quick_start_codex_proxy(config)
-        token = get_token(proxy=proxy)
+        from nanobot.providers.oauth_storage import codex_token_storage
+
+        token = get_token(proxy=proxy, storage=codex_token_storage(config.instance_home))
     except Exception:
         return False
     return bool(getattr(token, "access", None))

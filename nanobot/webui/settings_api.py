@@ -8,6 +8,7 @@ domains; this module preserves the established Python and HTTP-facing seams.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -71,8 +72,8 @@ _NATIVE_RESTART_BEHAVIOR_BY_SECTION = {
 }
 
 
-def _load_settings_config(config_path: Path | None) -> Config:
-    return load_config(config_path) if config_path is not None else load_config()
+def _load_settings_config(config_path: Path | None, *, home: Path | None = None) -> Config:
+    return load_config(config_path, home=home)
 
 
 def _save_settings_config(config: Config, config_path: Path | None) -> None:
@@ -161,16 +162,17 @@ def settings_payload(
     restart_required_sections: list[str] | None = None,
     apply_state: dict[str, Any] | None = None,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     payload: dict[str, Any] = {
         **models.model_settings_payload(
             config,
-            oauth_status=_oauth_provider_status,
+            oauth_status=partial(_oauth_provider_status, home=config.instance_home),
         ),
         **capabilities.capability_settings_payload(
             config,
-            oauth_status=_oauth_provider_status,
+            oauth_status=partial(_oauth_provider_status, home=config.instance_home),
         ),
         **system.system_settings_payload(
             config,
@@ -188,20 +190,21 @@ def settings_payload(
     )
 
 
-def settings_usage_payload(*, config_path: Path | None = None) -> dict[str, Any]:
-    return system.settings_usage_payload(_load_settings_config(config_path))
+def settings_usage_payload(*, config_path: Path | None = None, home: Path | None = None) -> dict[str, Any]:
+    return system.settings_usage_payload(_load_settings_config(config_path, home=home))
 
 
 def update_agent_settings(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     model_changed = models.update_agent_model_settings(
         config,
         query,
-        oauth_status=_oauth_provider_status,
+        oauth_status=partial(_oauth_provider_status, home=config.instance_home),
     )
     system_changed, restart_required = system.update_agent_system_settings(config, query)
     if model_changed or system_changed:
@@ -209,6 +212,7 @@ def update_agent_settings(
     return settings_payload(
         requires_restart=restart_required,
         config_path=config_path,
+        home=home,
     )
 
 
@@ -216,15 +220,16 @@ def create_model_configuration(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     name = models.create_model_configuration(
         config,
         query,
-        oauth_status=_oauth_provider_status,
+        oauth_status=partial(_oauth_provider_status, home=config.instance_home),
     )
     _save_settings_config(config, config_path)
-    payload = settings_payload(config_path=config_path)
+    payload = settings_payload(config_path=config_path, home=home)
     payload["created_model_preset"] = name
     return payload
 
@@ -233,14 +238,15 @@ def update_model_configuration(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
     rename_model_preset: Callable[[str, str], int] | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     names_before = set(config.model_presets)
     changed = models.update_model_configuration(
         config,
         query,
-        oauth_status=_oauth_provider_status,
+        oauth_status=partial(_oauth_provider_status, home=config.instance_home),
     )
     if changed:
         removed = names_before - set(config.model_presets)
@@ -259,58 +265,62 @@ def update_model_configuration(
                 raise
         else:
             _save_settings_config(config, config_path)
-    return settings_payload(config_path=config_path)
+    return settings_payload(config_path=config_path, home=home)
 
 
 def update_model_call_order(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     if models.update_model_call_order(
         config,
         query,
-        oauth_status=_oauth_provider_status,
+        oauth_status=partial(_oauth_provider_status, home=config.instance_home),
     ):
         _save_settings_config(config, config_path)
-    return settings_payload(config_path=config_path)
+    return settings_payload(config_path=config_path, home=home)
 
 
 def migrate_model_configurations(
     _query: QueryParams | None = None,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     if models.migrate_model_configurations(
         config,
-        oauth_status=_oauth_provider_status,
+        oauth_status=partial(_oauth_provider_status, home=config.instance_home),
     ):
         _save_settings_config(config, config_path)
-    return settings_payload(config_path=config_path)
+    return settings_payload(config_path=config_path, home=home)
 
 
 def delete_model_configuration(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     models.delete_model_configuration(config, query)
     _save_settings_config(config, config_path)
-    return settings_payload(config_path=config_path)
+    return settings_payload(config_path=config_path, home=home)
 
 
 def create_provider_settings(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     provider_key = models.create_provider_settings(config, query)
     _save_settings_config(config, config_path)
-    payload = settings_payload(config_path=config_path)
+    payload = settings_payload(config_path=config_path, home=home)
     payload["created_provider"] = provider_key
     return payload
 
@@ -319,14 +329,16 @@ def update_provider_settings(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     changed, restart_required = models.update_provider_settings(config, query)
     if changed:
         _save_settings_config(config, config_path)
     return settings_payload(
         requires_restart=restart_required,
         config_path=config_path,
+        home=home,
     )
 
 
@@ -334,17 +346,19 @@ def model_api_resolution_payload(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    return models.model_api_resolution_payload(_load_settings_config(config_path), query)
+    return models.model_api_resolution_payload(_load_settings_config(config_path, home=home), query)
 
 
 def provider_models_payload(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     return models.provider_models_payload(
-        _load_settings_config(config_path),
+        _load_settings_config(config_path, home=home),
         query,
         http_get=httpx.get,
     )
@@ -355,13 +369,14 @@ def login_oauth_provider(
     *,
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     return models.login_oauth_provider(
-        _load_settings_config(config_path),
+        _load_settings_config(config_path, home=home),
         query,
         oauth_flows=oauth_flows,
         config_path=config_path,
-        settings_payload=settings_payload,
+        settings_payload=partial(settings_payload, home=home),
     )
 
 
@@ -371,13 +386,14 @@ def complete_oauth_provider(
     *,
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     return models.complete_oauth_provider(
         query,
         authorization_response,
         oauth_flows=oauth_flows,
         config_path=config_path,
-        settings_payload=settings_payload,
+        settings_payload=partial(settings_payload, home=home),
     )
 
 
@@ -386,12 +402,15 @@ def logout_oauth_provider(
     *,
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
+    config = _load_settings_config(config_path, home=home)
     return models.logout_oauth_provider(
         query,
+        home=config.instance_home,
         oauth_flows=oauth_flows,
         config_path=config_path,
-        settings_payload=settings_payload,
+        settings_payload=partial(settings_payload, home=config.instance_home),
     )
 
 
@@ -399,8 +418,9 @@ def update_network_safety_settings(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     changed, default_access_mode = capabilities.update_network_safety_settings(
         config,
         query,
@@ -409,24 +429,26 @@ def update_network_safety_settings(
         _save_settings_config(config, config_path)
     if default_access_mode is not None:
         try:
-            write_webui_default_access_mode(default_access_mode)
+            write_webui_default_access_mode(default_access_mode, home=config.instance_home)
         except ValueError as exc:
             raise WebUISettingsError(str(exc)) from exc
-    return settings_payload(requires_restart=changed, config_path=config_path)
+    return settings_payload(requires_restart=changed, config_path=config_path, home=home)
 
 
 def update_web_search_settings(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     changed, restart_required = capabilities.update_web_search_settings(config, query)
     if changed:
         _save_settings_config(config, config_path)
     return settings_payload(
         requires_restart=restart_required,
         config_path=config_path,
+        home=home,
     )
 
 
@@ -434,48 +456,53 @@ def update_api_settings(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     capabilities.update_api_settings(config, query)
     _save_settings_config(config, config_path)
-    return settings_payload(config_path=config_path)
+    return settings_payload(config_path=config_path, home=home)
 
 
 def update_image_generation_settings(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     changed = capabilities.update_image_generation_settings(
         config,
         query,
-        oauth_status=_oauth_provider_status,
+        oauth_status=partial(_oauth_provider_status, home=config.instance_home),
     )
     if changed:
         _save_settings_config(config, config_path)
-    return settings_payload(requires_restart=changed, config_path=config_path)
+    return settings_payload(requires_restart=changed, config_path=config_path, home=home)
 
 
 def update_transcription_settings(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     if capabilities.update_transcription_settings(config, query):
         _save_settings_config(config, config_path)
-    return settings_payload(config_path=config_path)
+    return settings_payload(config_path=config_path, home=home)
 
 
 def update_runtime_config_settings(
     values: dict[str, Any], *, local_browser: bool = False, config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
+    config = _load_settings_config(config_path, home=home)
     changed = runtime.update_runtime_config(config, values, local_browser=local_browser)
     if changed:
         _save_settings_config(config, config_path)
     return settings_payload(
         requires_restart=changed,
         config_path=config_path,
+        home=home,
     )

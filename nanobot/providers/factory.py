@@ -74,6 +74,7 @@ def _make_provider_core(
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(
+            home=config.instance_home,
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
@@ -83,6 +84,7 @@ def _make_provider_core(
         from nanobot.providers.xai_grok_provider import XAIGrokProvider
 
         provider = XAIGrokProvider(
+            home=config.instance_home,
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
@@ -103,6 +105,7 @@ def _make_provider_core(
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
         provider = GitHubCopilotProvider(
+            home=config.instance_home,
             default_model=model, provider_name=provider_name,
             model_api=setup.model_api,
         )

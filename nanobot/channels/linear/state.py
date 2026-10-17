@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from nanobot.config.paths import get_config_path, get_runtime_subdir
+from nanobot.config.home import get_home_path
+from nanobot.config.paths import get_runtime_subdir
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,10 +402,11 @@ def _installation_from_row(row: sqlite3.Row) -> LinearInstallation:
 
 def local_state_present(_section: Any) -> bool:
     """Report OAuth installation state without importing the channel runtime."""
-    path = get_config_path().parent / "linear" / "state.sqlite3"
+    path = get_home_path() / "linear" / "state.sqlite3"
     if not path.is_file():
         return False
     try:
-        return LinearStateStore(path).has_installations()
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as connection:
+            return connection.execute("SELECT 1 FROM installations LIMIT 1").fetchone() is not None
     except (OSError, sqlite3.Error):
         return False

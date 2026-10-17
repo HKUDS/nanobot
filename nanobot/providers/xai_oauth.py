@@ -30,7 +30,7 @@ import httpx
 from filelock import FileLock
 from loguru import logger
 
-from nanobot.config.paths import get_data_dir
+from nanobot.config.home import get_home_path
 from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPrivateUsage]
 
 XAI_OAUTH_ISSUER = "https://auth.x.ai"
@@ -123,7 +123,9 @@ class XAIOAuthLoginFlow:
         result_queue: queue.Queue[_CallbackResult],
         server: ThreadingHTTPServer,
         timeout_s: float,
+        home: Path | None = None,
     ) -> None:
+        self._storage_path = get_xai_oauth_storage_path(home)
         self.authorization_url = authorization_url
         self.redirect_uri = redirect_uri
         self._verifier = verifier
@@ -223,8 +225,8 @@ class XAIOAuthLoginFlow:
                     redirect_uri=self.redirect_uri,
                     proxy=self._proxy,
                 )
-                with _token_lock():
-                    _write_token(token)
+                with _token_lock(self._storage_path):
+                    _write_token(token, self._storage_path)
             except Exception as exc:
                 self._error = exc
                 raise
@@ -257,20 +259,20 @@ class XAIOAuthLoginFlow:
             self._server_thread.join(timeout=2)
 
 
-def get_xai_oauth_storage_path() -> Path:
+def get_xai_oauth_storage_path(home: Path | None = None) -> Path:
     """Return the instance-scoped xAI OAuth credential path."""
-    return get_data_dir() / "auth" / "xai.json"
+    return (home or get_home_path()).expanduser().resolve() / "auth" / "xai.json"
 
 
-def get_xai_oauth_login_status() -> XAIToken | None:
+def get_xai_oauth_login_status(*, home: Path | None = None) -> XAIToken | None:
     """Return locally stored login state without making a network request."""
-    return _load_token()
+    return _load_token(get_xai_oauth_storage_path(home))
 
 
-def logout_xai_oauth() -> bool:
+def logout_xai_oauth(*, home: Path | None = None) -> bool:
     """Remove this instance's credentials while excluding token refreshes."""
-    path = get_xai_oauth_storage_path()
-    with _token_lock():
+    path = get_xai_oauth_storage_path(home)
+    with _token_lock(path):
         try:
             path.unlink()
         except FileNotFoundError:
@@ -285,13 +287,14 @@ def login_xai_oauth(
     proxy: str | None = None,
     callback_timeout_s: float = 600,
     browser_opener: Callable[[str], bool] = webbrowser.open,
+    home: Path | None = None,
 ) -> XAIToken:
     """Run xAI's browser-based OAuth flow and persist the resulting token.
 
     ``prompt_fn`` is used only when no local browser could be opened. It lets a
     headless user paste either the final callback URL or its authorization code.
     """
-    flow = start_xai_oauth_login(proxy=proxy, timeout_s=callback_timeout_s)
+    flow = start_xai_oauth_login(proxy=proxy, timeout_s=callback_timeout_s, home=home)
 
     try:
         print_fn("Opening xAI sign-in in your browser...")
@@ -315,8 +318,10 @@ def start_xai_oauth_login(
     *,
     proxy: str | None = None,
     timeout_s: float = 600,
+    home: Path | None = None,
 ) -> XAIOAuthLoginFlow:
     """Create a non-blocking OAuth flow for browser or pasted-callback completion."""
+    home = (home or get_home_path()).expanduser().resolve()
     discovery = _discover(proxy)
     verifier, challenge = _generate_pkce()
     state = secrets.token_urlsafe(32)
@@ -341,6 +346,7 @@ def start_xai_oauth_login(
         result_queue=result_queue,
         server=server,
         timeout_s=timeout_s,
+        home=home,
     )
 
 
@@ -357,9 +363,11 @@ def get_xai_oauth_token(
     proxy: str | None = None,
     min_ttl_ms: int = _TOKEN_REFRESH_MARGIN_MS,
     force_refresh: bool = False,
+    storage_path: Path | None = None,
 ) -> XAIToken:
     """Load a usable token, refreshing it under an inter-process lock when needed."""
-    token = _load_token()
+    path = storage_path or get_xai_oauth_storage_path()
+    token = _load_token(path)
     if token is None:
         raise XAIOAuthReauthRequiredError(
             "xAI is not signed in. Run `nanobot provider login xai-grok` first."
@@ -374,8 +382,8 @@ def get_xai_oauth_token(
             "Run `nanobot provider login xai-grok` again."
         )
 
-    with _token_lock():
-        latest = _load_token()
+    with _token_lock(path):
+        latest = _load_token(path)
         if latest is None:
             raise XAIOAuthReauthRequiredError(
                 "xAI is not signed in. Run `nanobot provider login xai-grok` first."
@@ -388,7 +396,7 @@ def get_xai_oauth_token(
                 "Run `nanobot provider login xai-grok` again."
             )
         refreshed = _refresh_token(latest, proxy)
-        _write_token(refreshed)
+        _write_token(refreshed, path)
         return refreshed
 
 
@@ -724,14 +732,14 @@ def _http_client(proxy: str | None) -> httpx.Client:
     return httpx.Client(**kwargs)
 
 
-def _token_lock() -> FileLock:
-    path = get_xai_oauth_storage_path()
+def _token_lock(path: Path | None = None) -> FileLock:
+    path = path or get_xai_oauth_storage_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     return FileLock(str(path.with_suffix(".lock")), timeout=15)
 
 
-def _load_token() -> XAIToken | None:
-    path = get_xai_oauth_storage_path()
+def _load_token(path: Path | None = None) -> XAIToken | None:
+    path = path or get_xai_oauth_storage_path()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -742,8 +750,8 @@ def _load_token() -> XAIToken | None:
     return XAIToken.from_dict(payload)
 
 
-def _write_token(token: XAIToken) -> None:
-    path = get_xai_oauth_storage_path()
+def _write_token(token: XAIToken, path: Path | None = None) -> None:
+    path = path or get_xai_oauth_storage_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with suppress(OSError):
         os.chmod(path.parent, 0o700)

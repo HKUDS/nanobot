@@ -88,7 +88,7 @@ def test_login_uses_enterprise_endpoint_overrides(monkeypatch):
             return FakeResponse({"login": "enterprise-user"})
 
     monkeypatch.setattr(gc.httpx, "Client", FakeClient)
-    monkeypatch.setattr(gc, "get_storage", lambda: SimpleNamespace(save=saved.append))
+    monkeypatch.setattr(gc, "get_storage", lambda home=None: SimpleNamespace(save=saved.append))
 
     token = gc.login_github_copilot(print_fn=lambda _message: None)
 
@@ -110,7 +110,7 @@ async def test_copilot_token_exchange_uses_enterprise_endpoint_override(monkeypa
         "NANOBOT_COPILOT_TOKEN_URL",
         "https://api.ghe.example/copilot_internal/v2/token",
     )
-    monkeypatch.setattr(gc, "_load_github_token", lambda: SimpleNamespace(access="github-token"))
+    monkeypatch.setattr(gc, "_load_github_token", lambda storage: SimpleNamespace(access="github-token"))
 
     calls = []
 

@@ -200,4 +200,4 @@ def test_provider_model_refresh_reaches_oauth_catalog(monkeypatch, provider, ref
     config = Config.model_validate({"providers": {provider: {}}})
     provider_models_payload(config, query, http_get=Mock())
 
-    catalog.assert_called_once_with(provider, proxy=None, refresh=refresh)
+    catalog.assert_called_once_with(provider, proxy=None, refresh=refresh, home=config.instance_home)

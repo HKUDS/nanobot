@@ -17,7 +17,6 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config.paths import get_media_dir
 from nanobot.providers.image_generation import (
     ImageGenerationError,
     ImageGenerationProvider,
@@ -79,6 +78,7 @@ class ImageGenerationTool(Tool):
     def create(cls, ctx: ToolContext) -> Tool:
         return cls(
             workspace=ctx.workspace,
+            home=ctx.instance_home,
             config=ctx.config.image_generation,
             provider_configs=image_gen_provider_configs(ctx.providers_config),
         )
@@ -90,7 +90,11 @@ class ImageGenerationTool(Tool):
         config: ImageGenerationToolConfig,
         provider_config: ProviderConfig | None = None,
         provider_configs: dict[str, ProviderConfig] | None = None,
+        home: Path | None = None,
     ) -> None:
+        from nanobot.config.home import get_home_path
+
+        self._home = (home or get_home_path()).expanduser().resolve()
         self.workspace = Path(workspace).expanduser()
         self.config = config
         self.provider_configs = dict(provider_configs or {})
@@ -122,6 +126,7 @@ class ImageGenerationTool(Tool):
         body = deepcopy(provider.extra_body or {}) if provider else {}
         body.update(deepcopy(self.config.extra_body or {}))
         kwargs: dict[str, Any] = {
+            "home": self._home,
             "api_key": provider.api_key if provider and isinstance(provider.api_key, str) else None,
             "api_base": provider.api_base if provider and isinstance(provider.api_base, str) else None,
             "extra_headers": headers or None,
@@ -138,7 +143,7 @@ class ImageGenerationTool(Tool):
                 value,
                 workspace=workspace,
                 allowed_root=access.allowed_root,
-                extra_allowed_roots=[get_media_dir()] if access.allowed_root is not None else None,
+                extra_allowed_roots=[self._home / "media"] if access.allowed_root is not None else None,
                 strict=True,
             )
         except WorkspaceBoundaryError as exc:
@@ -220,6 +225,7 @@ def register_image_generation_tool(
         config=config.tools,
         workspace=str(workspace),
         providers_config=config.providers,
+        instance_home=config.instance_home,
     )
     if ImageGenerationTool.enabled(ctx):
         registry.register(ImageGenerationTool.create(ctx))
@@ -231,13 +237,14 @@ async def reload_image_generation_tool(
     *,
     config_path: Path,
     workspace: Path,
+    home: Path | None = None,
     registry: ToolRegistry,
 ) -> dict[str, Any]:
     """Refresh the application's image tool from its persisted config."""
     try:
         from nanobot.config.loader import load_config, resolve_config_env_vars
 
-        config = resolve_config_env_vars(load_config(config_path), config_path=config_path)
+        config = resolve_config_env_vars(load_config(config_path, home=home), config_path=config_path)
         register_image_generation_tool(config, registry, workspace=workspace)
     except Exception as exc:
         logger.warning("Image generation hot reload could not read config: {}", exc)

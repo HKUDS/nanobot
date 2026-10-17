@@ -69,7 +69,7 @@ def test_cancels_copilot_login_while_device_prompt_is_loading(monkeypatch, tmp_p
         return SimpleNamespace(access="late-account-secret")
 
     monkeypatch.setattr("nanobot.providers.github_copilot_oauth.login_github_copilot", login)
-    monkeypatch.setattr("nanobot.providers.github_copilot_provider.get_storage", lambda: SimpleNamespace(
+    monkeypatch.setattr("nanobot.providers.github_copilot_provider.get_storage", lambda _home=None: SimpleNamespace(
         get_token_path=lambda: tmp_path / "copilot.json", save=saved.append,
     ))
     registry = WebUIOAuthFlowRegistry()

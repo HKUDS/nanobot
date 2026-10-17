@@ -10,7 +10,7 @@ from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
 
 from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
-from nanobot.config.home import get_home_path
+from nanobot.config.home import InstancePaths, get_instance_paths, get_selected_home_path
 from nanobot.config.schema import Config
 from nanobot.utils.file_io import write_text_atomic
 
@@ -23,20 +23,23 @@ def _as_config_object(value: object) -> dict[str, Any] | None:
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
-def set_config_path(path: Path) -> None:
-    """Set the current config path (used to derive data directory)."""
+def set_config_path(path: Path | None) -> None:
+    """Select the configuration file for the current CLI invocation."""
     global _current_config_path
-    _current_config_path = path
+    _current_config_path = path.expanduser().resolve() if path is not None else None
+
+
+def get_selected_config_path() -> Path | None:
+    """Return the explicit configuration selector, if one was selected."""
+    return _current_config_path
 
 
 def get_config_path() -> Path:
-    """Get the configuration file path."""
-    if _current_config_path:
-        return _current_config_path
-    return get_home_path() / "config.json"
+    """Return the current CLI configuration path."""
+    return get_instance_paths().config_path
 
 
-def load_config(config_path: Path | None = None) -> Config:
+def load_config(config_path: Path | None = None, *, home: Path | None = None) -> Config:
     """
     Load configuration from file or create default.
 
@@ -46,7 +49,11 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-    path = config_path or get_config_path()
+    paths = InstancePaths.resolve(
+        config_path if config_path is not None else get_selected_config_path(),
+        home=home if home is not None else get_selected_home_path(),
+    )
+    path = paths.config_path
 
     if not path.exists():
         try:
@@ -67,7 +74,7 @@ def load_config(config_path: Path | None = None) -> Config:
                 summary="Environment-based configuration is invalid.",
                 issues=validation_issues(exc),
             ) from exc
-        config.bind_source_path(path)
+        config.bind_source_path(path, home=paths.home)
         _apply_ssrf_whitelist(config)
         return config
 
@@ -123,7 +130,7 @@ def load_config(config_path: Path | None = None) -> Config:
             issues=issues,
         ) from exc
 
-    config.bind_source_path(path)
+    config.bind_source_path(path, home=paths.home)
     _apply_ssrf_whitelist(config)
     return config
 
@@ -141,9 +148,9 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     Args:
         config: Configuration to save.
-        config_path: Optional path to save to. Uses default if not provided.
+        config_path: Optional destination. Defaults to the config's bound source file.
     """
-    path = config_path or get_config_path()
+    path = config_path.expanduser().resolve() if config_path is not None else config.source_path
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(mode="json", by_alias=True)
@@ -199,12 +206,25 @@ def resolve_config_env_vars(
     missing = tuple(_missing_env_issues(config))
     if missing:
         raise ConfigLoadError(
-            config_path or get_config_path(),
+            config_path or config.source_path,
             kind="missing_env",
             summary=f"Found {len(missing)} missing environment variable reference(s).",
             issues=missing,
         )
-    return _resolve_in_place(config)
+    resolved = _resolve_in_place(config)
+    try:
+        resolved.workspace_path
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise ConfigLoadError(
+            config_path or config.source_path,
+            kind="invalid_schema",
+            summary="Agent workspace is invalid.",
+            issues=(ConfigIssue(
+                path=("agents", "defaults", "workspace"),
+                message="Workspace must be a nonempty, resolvable path.",
+            ),),
+        ) from exc
+    return resolved
 
 
 @overload

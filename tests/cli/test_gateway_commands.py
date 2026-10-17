@@ -129,7 +129,13 @@ def _test_app(
 
     def load_runtime_config(config_path: str | None, workspace: str | None) -> Config:
         fake_runtime.config_selectors.append((config_path, workspace))
-        return config or Config()
+        loaded = (config or Config()).model_copy(deep=True)
+        loaded.bind_source_path(
+            Path(config_path) if config_path else _resolved_config_selector(None),
+        )
+        if workspace is not None:
+            loaded.agents.defaults.workspace = workspace
+        return loaded
 
     def runtime_factory(*, config: str | None, workspace: str | None) -> FakeRuntime:
         fake_runtime.runtime_selectors.append((config, workspace))
@@ -184,7 +190,8 @@ def test_gateway_default_still_runs_foreground(tmp_path):
     assert calls[0][1] == 18791
     assert calls[0][2] == "warn"
     assert calls[0][4] == GatewayInstance.resolve(
-        config_path=_resolved_config_selector(None)
+        config_path=_resolved_config_selector(None),
+        workspace=str(calls[0][0].workspace_path),
     )
 
 
@@ -218,7 +225,8 @@ def test_config_workspace_does_not_split_the_foreground_instance(tmp_path: Path)
 
     assert result.exit_code == 0
     assert calls[0][4] == GatewayInstance.resolve(
-        config_path=_resolved_config_selector(None)
+        config_path=_resolved_config_selector(None),
+        workspace=str(tmp_path / "configured-workspace"),
     )
 
 
@@ -272,7 +280,8 @@ def test_gateway_background_starts_detached_runtime(tmp_path):
     assert result.exit_code == 0
     assert "Gateway started in the background" in result.stdout
     assert fake_runtime.started_options == GatewayInstance.resolve(
-        config_path=_resolved_config_selector(None)
+        config_path=_resolved_config_selector(None),
+        workspace=str(config.workspace_path),
     ).start_options(port=18792)
     assert prepare_calls == [(config, "warn")]
 
@@ -473,7 +482,8 @@ def test_gateway_restart_starts_background_runtime(tmp_path):
     assert "Gateway restarted in the background" in result.stdout
     assert fake_runtime.stop_timeout == 9
     assert fake_runtime.restarted_options == GatewayInstance.resolve(
-        config_path=_resolved_config_selector(None)
+        config_path=_resolved_config_selector(None),
+        workspace=str(config.workspace_path),
     ).start_options(port=18793, verbose=True)
     assert prepare_calls == [(config, "warn")]
     assert json.loads(lease_state.read_text(encoding="utf-8"))["auto_stop"] is True

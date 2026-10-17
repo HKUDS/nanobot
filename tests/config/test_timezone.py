@@ -82,7 +82,7 @@ def test_onboard_refresh_materializes_manual_timezone_mode(tmp_path, monkeypatch
         json.dumps({"agents": {"defaults": {"timezone": "America/New_York"}}}),
         encoding="utf-8",
     )
-    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
         "nanobot.cli.commands.get_workspace_path",
         lambda _workspace=None: workspace,

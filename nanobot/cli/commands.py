@@ -47,6 +47,7 @@ from nanobot.cli.agent import agent  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.gateway_runtime import _run_gateway  # noqa: E402
 from nanobot.cli.log_control import _set_nanobot_logs  # noqa: E402
+from nanobot.cli.paths import paths  # noqa: E402
 from nanobot.cli.process_identity import set_cli_process_identity  # noqa: E402
 from nanobot.cli.provider import provider_app  # noqa: E402
 from nanobot.cli.runtime_config import (  # noqa: E402
@@ -56,6 +57,7 @@ from nanobot.cli.runtime_config import (  # noqa: E402
     _print_config_error,
     _print_model_setup_steps,
     _provider_setup_error,
+    _resolve_workspace_override,
 )
 from nanobot.cli.webui import webui  # noqa: E402
 from nanobot.cli.webui_support import (  # noqa: E402
@@ -120,10 +122,15 @@ def main(
     ),
 ):
     """nanobot - Personal AI Assistant."""
+    from nanobot.config.loader import get_selected_config_path, set_config_path
+
+    previous_config = get_selected_config_path()
+    ctx.call_on_close(lambda: set_config_path(previous_config))
     if home is not None:
         from nanobot.config.home import get_selected_home_path, set_home_path
 
         previous_home = get_selected_home_path()
+        set_config_path(None)
         set_home_path(home)
         ctx.call_on_close(lambda: set_home_path(previous_home))
     # Editable/source installs can retain an older generated console script that
@@ -151,7 +158,7 @@ def main(
 
 @app.command()
 def onboard(
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
     non_interactive_refresh: bool = typer.Option(False, "--refresh", help="Refresh config, preserving existing settings without prompting"),
@@ -169,8 +176,8 @@ def onboard(
         config_path = get_config_path()
 
     def _apply_workspace_override(loaded: Config) -> Config:
-        if workspace:
-            loaded.agents.defaults.workspace = workspace
+        if workspace is not None:
+            loaded.agents.defaults.workspace = _resolve_workspace_override(workspace)
         return loaded
 
     loaded_config: Config | None = None
@@ -322,7 +329,7 @@ def _read_trigger_cli_message(message: str | None) -> str:
 def trigger(
     trigger_id: str = typer.Argument(..., help="Trigger ID returned by /trigger"),
     message: str | None = typer.Argument(None, help="Message to deliver; stdin is used when omitted"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Deliver a local trigger message to its bound chat session."""
@@ -358,11 +365,39 @@ def serve(
     host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
     timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the OpenAI-compatible API server (/v1/chat/completions)."""
     runtime_config = _load_runtime_config(config, workspace)
+    from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
+
+    api_cfg = runtime_config.api
+    host = host if host is not None else api_cfg.host
+    port = port if port is not None else api_cfg.port
+    timeout = timeout if timeout is not None else api_cfg.timeout
+    runtime = ApiRuntime(paths=api_runtime_paths(runtime_config.instance_home))
+    options = ApiStartOptions(
+        home=str(runtime_config.instance_home),
+        config_path=str(runtime_config.source_path),
+        workspace=str(runtime_config.workspace_path),
+        port=port,
+        host=host,
+        verbose=verbose,
+    )
+    try:
+        with runtime.foreground_instance(options):
+            _run_api_server(runtime_config, host=host, port=port, timeout=timeout, verbose=verbose)
+    except RuntimeError as exc:
+        console.print(Text(f"API cannot start: {exc}", style="red"))
+        status = runtime.status()
+        if status.running:
+            console.print(f"Active config: {status.config_path}", markup=False)
+            console.print(f"Active agent workspace: {status.workspace}", markup=False)
+        raise typer.Exit(1) from exc
+
+
+def _run_api_server(runtime_config: Config, *, host: str, port: int, timeout: float, verbose: bool) -> None:
     try:
         from aiohttp import web  # noqa: F401
     except ImportError:
@@ -377,9 +412,6 @@ def serve(
     _set_nanobot_logs(verbose)
 
     api_cfg = runtime_config.api
-    host = host if host is not None else api_cfg.host
-    port = port if port is not None else api_cfg.port
-    timeout = timeout if timeout is not None else api_cfg.timeout
     api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
     if not is_loopback_host(host) and not api_key:
         console.print(
@@ -389,7 +421,10 @@ def serve(
         raise typer.Exit(1)
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
-    session_manager = SessionManager(runtime_config.workspace_path)
+    session_manager = SessionManager(
+        runtime_config.workspace_path,
+        sessions_root=runtime_config.instance_home / "sessions",
+    )
     tools = ToolRegistry()
     register_image_generation_tool(runtime_config, tools, workspace=runtime_config.workspace_path)
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
@@ -629,11 +664,13 @@ def plugins_disable(
 # Status Commands
 # ============================================================================
 
+app.command()(paths)
+
 
 @app.command()
 def status(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
 ):
     """Show nanobot status."""
     config_path, loaded = _load_inspection_config(config=config, workspace=workspace)

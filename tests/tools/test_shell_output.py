@@ -104,3 +104,27 @@ async def test_exec_session_filters_split_sequences_and_waits_for_visible_text(t
         assert "190m" not in combined
     finally:
         await manager.close_all()
+
+
+async def test_configured_exec_keeps_media_access_after_home_change(tmp_path, monkeypatch):
+    from nanobot.agent.tools.context import ToolContext
+    from nanobot.agent.tools.shell import ExecTool
+    from nanobot.config.schema import ToolsConfig
+
+    first_home, second_home = tmp_path / "a", tmp_path / "b"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    files = []
+    for home in (first_home, second_home):
+        path = home / "media" / "upload.txt"
+        path.parent.mkdir(parents=True)
+        path.write_text("uploaded attachment", encoding="utf-8")
+        files.append(path)
+    tool = ExecTool.create(ToolContext(
+        config=ToolsConfig(restrict_to_workspace=True), workspace=str(workspace),
+        instance_home=first_home,
+    ))
+    monkeypatch.setattr("nanobot.config.home._home_path", second_home)
+
+    assert "uploaded attachment" in await tool.execute(command=f'cat "{files[0]}"')
+    assert "outside working dir" in await tool.execute(command=f'cat "{files[1]}"')

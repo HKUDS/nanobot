@@ -502,7 +502,6 @@ def _run_gateway(
     session_manager = SessionManager(config.workspace_path)
 
     # Use the same runtime identity for foreground and managed gateway processes.
-    from nanobot.config.loader import get_config_path
     from nanobot.gateway.runtime import (
         GatewayClientLease,
         GatewayRuntime,
@@ -510,7 +509,9 @@ def _run_gateway(
     )
 
     instance = gateway_instance or GatewayInstance.resolve(
-        config_path=get_config_path(),
+        home=config.instance_home,
+        config_path=config.source_path,
+        workspace=str(config.workspace_path),
     )
     config_path = str(instance.config_path)
     gateway_runtime = GatewayRuntime(paths=instance.paths)
@@ -752,6 +753,7 @@ def _run_gateway(
     async def _webui_image_generation_reload() -> dict[str, Any]:
         return await reload_image_generation_tool(
             config_path=Path(config_path),
+            home=config.instance_home,
             workspace=agent.workspace,
             registry=tools,
         )

@@ -11,8 +11,8 @@ from loguru import logger as default_logger
 
 from nanobot.channels.websocket.attachment_http import AttachmentHTTP
 from nanobot.channels.websocket.attachment_store import AttachmentStore
+from nanobot.config.home import InstancePaths
 from nanobot.config.loader import get_config_path
-from nanobot.config.paths import get_media_dir
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -66,6 +66,7 @@ def build_gateway_services(
     default_restrict_to_workspace: bool,
     unified_session: bool = False,
     config_path: Path | None = None,
+    instance_home: Path | None = None,
     runtime_model_name: Callable[[], str | None] | None,
     refresh_runtime_config: Callable[[], None] | None = None,
     runtime_surface: str,
@@ -86,8 +87,10 @@ def build_gateway_services(
     discard_session: Callable[[str], Awaitable[None]] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
+    paths = InstancePaths.resolve(config_path or get_config_path(), home=instance_home)
     settings = WebUISettingsServices.create(
-        config_path or get_config_path(),
+        paths.config_path,
+        home=paths.home,
         rename_model_preset=(
             session_manager.rename_model_preset
             if session_manager is not None
@@ -105,15 +108,24 @@ def build_gateway_services(
             config.max_message_bytes,
             minimum_frame_bytes,
         )
+    def media_dir(channel: str | None) -> Path:
+        path = paths.home / "media"
+        if channel:
+            path /= channel
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
+        media_dir=media_dir,
     )
     uploads = AttachmentHTTP(AttachmentStore(
-        get_media_dir("websocket"), limits=ingress.attachments,
+        media_dir("websocket"), limits=ingress.attachments,
     ))
     transcripts = WebUITranscriptRecorder(log=logger)
     workspaces = WebUIWorkspaceController(
+        home=paths.home,
         session_manager=session_manager,
         default_workspace=workspace_path,
         default_restrict_to_workspace=default_restrict_to_workspace,

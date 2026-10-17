@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 
 from oauth_cli_kit.models import OAuthToken
 
@@ -16,7 +17,8 @@ from nanobot.providers.github_copilot_provider import login_github_copilot
 class GitHubCopilotOAuthFlow:
     """Expose the device prompt while the existing login worker waits for approval."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, home: Path | None = None) -> None:
+        self._storage = github_copilot_provider.get_storage(home)
         self.authorization_url = ""
         self.user_code = ""
         self._deadline = time.monotonic() + 900
@@ -84,6 +86,6 @@ class GitHubCopilotOAuthFlow:
             if self._error is not None or self._token is None or not self._token.access:
                 raise RuntimeError("GitHub sign-in failed. Start again.") from None
             if not self._saved:
-                github_copilot_provider.get_storage().save(self._token)
+                self._storage.save(self._token)
                 self._saved = True
             return self._token

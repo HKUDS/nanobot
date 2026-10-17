@@ -28,6 +28,21 @@ def test_workspace_state_defaults_when_file_missing(tmp_path, monkeypatch) -> No
     assert webui_workspace_state_path() == tmp_path / "webui" / "workspace-state.json"
 
 
+def test_default_access_uses_bound_home_after_selection_changes(tmp_path):
+    from nanobot.config.home import set_home_path
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    assert write_webui_default_access_mode("full", home=first) is True
+    set_home_path(second)
+
+    assert read_webui_default_access_mode(home=first) == "full"
+    assert read_webui_default_access_mode(home=second) == "default"
+    assert write_webui_default_access_mode("default", home=first) is True
+    assert read_webui_default_access_mode(home=first) == "default"
+    assert not webui_workspace_state_path(home=second).exists()
+
+
 def test_workspace_payload_is_config_data_dir_scoped(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"

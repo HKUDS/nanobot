@@ -12,11 +12,14 @@ import threading
 import time
 from concurrent.futures import Future
 from contextlib import suppress
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from oauth_cli_kit import login_oauth_interactive
 from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+
+from nanobot.providers.oauth_storage import codex_token_storage
 
 _AUTHORIZATION_URL_TIMEOUT_S = 5.0
 _CALLBACK = urlsplit(OPENAI_CODEX_PROVIDER.redirect_uri)
@@ -41,7 +44,9 @@ class OpenAICodexOAuthLoginFlow:
         proxy: str | None,
         timeout_s: float,
         open_browser: bool,
+        home: Path | None = None,
     ) -> None:
+        self._storage = codex_token_storage(home)
         self.authorization_url = ""
         self._expected_state = ""
         self._proxy = proxy
@@ -135,6 +140,7 @@ class OpenAICodexOAuthLoginFlow:
                 print_fn=self._capture_output,
                 prompt_fn=self._prompt_for_callback,
                 provider=OPENAI_CODEX_PROVIDER,
+                storage=self._storage,
                 proxy=self._proxy,
                 open_browser=self._open_browser,
             )
@@ -191,12 +197,14 @@ def start_openai_codex_oauth_login(
     proxy: str | None = None,
     timeout_s: float = 600,
     open_browser: bool = True,
+    home: Path | None = None,
 ) -> OpenAICodexOAuthLoginFlow:
     """Start a non-blocking wrapper around oauth-cli-kit's Codex login."""
     return OpenAICodexOAuthLoginFlow(
         proxy=proxy,
         timeout_s=timeout_s,
         open_browser=open_browser,
+        home=home,
     ).start()
 
 

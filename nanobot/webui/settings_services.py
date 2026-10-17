@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 
 from filelock import FileLock
 
+from nanobot.config.home import InstancePaths
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
 
@@ -20,22 +21,30 @@ _WEBUI_OAUTH_MAX_FLOWS = 8
 class WebUISettingsConfig:
     """Path-scoped config access with process-safe read-modify-write operations."""
 
-    def __init__(self, config_path: Path) -> None:
-        self.path = config_path.expanduser().resolve(strict=False)
+    def __init__(self, config_path: Path, *, home: Path | None = None) -> None:
+        self._paths = InstancePaths.resolve(config_path, home=home)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         lock_path = self.path.with_suffix(f"{self.path.suffix}.lock")
         self._file_lock = FileLock(str(lock_path))
 
+    @property
+    def path(self) -> Path:
+        return self._paths.config_path
+
+    @property
+    def instance_home(self) -> Path:
+        return self._paths.home
+
     def load(self) -> Config:
         """Load this gateway's config without consulting the process-global path."""
         with self._lock:
-            return load_config(self.path)
+            return load_config(self.path, home=self.instance_home)
 
     def update(self, mutation: Callable[[Config], _T]) -> _T:
         """Apply and atomically persist one path-scoped read-modify-write operation."""
         with self._lock, self._file_lock:
-            config = load_config(self.path)
+            config = load_config(self.path, home=self.instance_home)
             result = mutation(config)
             save_config(config, self.path)
             return result
@@ -126,11 +135,12 @@ class WebUISettingsServices:
         cls,
         config_path: Path,
         *,
+        home: Path | None = None,
         rename_model_preset: Callable[[str, str], int] | None = None,
         refresh_runtime_config: Callable[[], None] | None = None,
     ) -> WebUISettingsServices:
         return cls(
-            config=WebUISettingsConfig(config_path),
+            config=WebUISettingsConfig(config_path, home=home),
             oauth_flows=WebUIOAuthFlowRegistry(),
             rename_model_preset=rename_model_preset,
             refresh_runtime_config=refresh_runtime_config,
@@ -144,7 +154,9 @@ class WebUISettingsServices:
         **kwargs: Any,
     ) -> _T:
         """Run a settings read against this gateway's explicit config path."""
-        return operation(*args, config_path=self.config.path, **kwargs)
+        return operation(
+            *args, config_path=self.config.path, home=self.config.instance_home, **kwargs,
+        )
 
     def mutate(
         self,
@@ -158,6 +170,7 @@ class WebUISettingsServices:
             lambda config_path: operation(
                 *args,
                 config_path=config_path,
+                home=self.config.instance_home,
                 **kwargs,
             )
         )

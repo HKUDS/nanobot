@@ -129,7 +129,7 @@ def _provider(adapter, url, monkeypatch):
         monkeypatch.setenv("NANOBOT_COPILOT_BASE_URL", f"{url}/v1")
         monkeypatch.setenv("NANOBOT_COPILOT_TOKEN_URL", f"{url}/copilot_token")
         monkeypatch.setattr("nanobot.providers.github_copilot_provider._load_github_token",
-                            lambda: SimpleNamespace(access="github-fixture"))
+                            lambda _storage: SimpleNamespace(access="github-fixture"))
         return GitHubCopilotProvider(default_model="github-copilot/gpt-5.4-mini")
     if adapter == "xai":
         monkeypatch.setattr("nanobot.providers.xai_grok_provider.DEFAULT_XAI_GROK_URL", f"{url}/v1/responses")

@@ -37,6 +37,8 @@ async def test_generate_image_does_not_attach_media_to_final_response(
 ) -> None:
     """Generating an image does not attach it to the final outbound response."""
     set_config_path(tmp_path / "config.json")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     monkeypatch.setattr(
         "nanobot.agent.tools.image_generation.get_image_gen_provider",
         lambda name: FakeImageClient if name == "openrouter" else None,
@@ -64,11 +66,11 @@ async def test_generate_image_does_not_attach_media_to_final_response(
     config.tools.image_generation.enabled = True
     config.providers.openrouter.api_key = "sk-or-test"
     tools = ToolRegistry()
-    register_image_generation_tool(config, tools, workspace=tmp_path)
+    register_image_generation_tool(config, tools, workspace=workspace)
     loop = AgentLoop(
         bus=MessageBus(),
         provider=provider,
-        workspace=tmp_path,
+        workspace=workspace,
         model="test-model",
         tools_config=config.tools,
         tool_registry=tools,

@@ -38,6 +38,7 @@ from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, SubagentTaskChanged
+from nanobot.config.home import get_home_path
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.events import AgentEvent, EventSink
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
@@ -221,6 +222,7 @@ class SubagentManager:
         *,
         consolidator: Consolidator,
         session_manager: SessionManager | None = None,
+        instance_home: Path | None = None,
     ):
         if cast(object, consolidator) is None:
             raise TypeError("SubagentManager requires a consolidator")
@@ -249,6 +251,7 @@ class SubagentManager:
                 model or provider.get_default_model(),
                 context_window_tokens=defaults.context_window_tokens,
             )
+        self.instance_home = (instance_home or get_home_path()).expanduser().resolve()
         self.workspace = workspace
         self.bus = bus
         self.tools_config = tools_config or ToolsConfig()
@@ -525,6 +528,7 @@ class SubagentManager:
         registry = ToolRegistry()
         cfg = tools_config if tools_config is not None else self._subagent_tools_config()
         ctx = ToolContext(
+            instance_home=self.instance_home,
             config=cfg,
             workspace=str(root.resolve()),
             exec_session_manager=exec_manager or self._exec_session_manager,
@@ -953,6 +957,7 @@ class SubagentManager:
         skills_summary = SkillsLoader(
             self.workspace,
             disabled_skills=self.disabled_skills,
+            home=self.instance_home,
         ).build_skills_summary(workspace=project_workspace)
         history_log = (
             str(agent_workspace / "memory" / "history.jsonl")

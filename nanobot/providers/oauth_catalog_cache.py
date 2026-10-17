@@ -115,6 +115,7 @@ class OAuthModelCatalog:
 
     def get(
         self, *, cache_key: str, proxy: str | None = None, refresh: bool = False,
+        fetch: Callable[[], Sequence[ProviderModelSpec]] | None = None,
     ) -> OAuthModelCatalogSnapshot:
         """Reuse cached discovery unless explicitly refreshed, retaining fallback models."""
         with self._condition:
@@ -134,7 +135,7 @@ class OAuthModelCatalog:
             self._inflight.add(cache_key)
 
         try:
-            models = tuple(self._fetch(proxy))
+            models = tuple(fetch() if fetch is not None else self._fetch(proxy))
             if not models:
                 raise ValueError("provider returned an empty model catalog")
         except Exception as exc:

@@ -77,12 +77,10 @@ def test_default_tui_workspace_is_the_launch_directory(
     tmp_path: Path,
 ) -> None:
     launch_directory = tmp_path / "project"
-    override = tmp_path / "override"
     launch_directory.mkdir()
     monkeypatch.chdir(launch_directory)
 
-    assert _initial_tui_workspace(None) == launch_directory.resolve()
-    assert _initial_tui_workspace(str(override)) == override.resolve()
+    assert _initial_tui_workspace() == launch_directory.resolve()
 
 
 def test_launcher_passes_the_canonical_model_preset_to_the_tui(
@@ -105,8 +103,9 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
 
     monkeypatch.setattr("nanobot.cli.tui_launcher.resolve_tui_command", lambda: ["nanobot-tui"])
     def ensure_gateway(*args: object, **kwargs: object) -> SimpleNamespace:
-        assert events == ["spawned"]
+        assert events == []
         assert kwargs["wait_until_ready"] is False
+        events.append("gateway")
         return SimpleNamespace(
             base_url="http://127.0.0.1:8765",
             lease=FakeLease(),
@@ -148,27 +147,16 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert "NANOBOT_TUI_API_TOKEN" not in captured
     assert "NANOBOT_TUI_CHAT_ID" not in captured
     assert "NANOBOT_TUI_STATE_PATH" not in captured
-    assert events == ["spawned", "waited"]
+    assert events == ["gateway", "spawned", "waited"]
     assert released == [True]
 
 
-def test_launcher_terminates_the_tui_when_gateway_start_fails(
+def test_launcher_rejects_gateway_conflict_before_starting_tui(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     config = Config()
-    terminated: list[bool] = []
-
-    class FakeProcess:
-        def poll(self) -> None:
-            return None
-
-        def terminate(self) -> None:
-            terminated.append(True)
-
-        def wait(self, timeout: float | None = None) -> int:
-            assert timeout == 5
-            return 1
+    spawned: list[bool] = []
 
     def fail_gateway(*args: object, **kwargs: object) -> None:
         raise RuntimeError("gateway failed")
@@ -176,7 +164,7 @@ def test_launcher_terminates_the_tui_when_gateway_start_fails(
     monkeypatch.setattr("nanobot.cli.tui_launcher.resolve_tui_command", lambda: ["nanobot-tui"])
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher.subprocess.Popen",
-        lambda *args, **kwargs: FakeProcess(),
+        lambda *args, **kwargs: spawned.append(True),
     )
     monkeypatch.setattr("nanobot.cli.tui_launcher._ensure_gateway", fail_gateway)
 
@@ -189,7 +177,7 @@ def test_launcher_terminates_the_tui_when_gateway_start_fails(
             theme="dark",
         )
 
-    assert terminated == [True]
+    assert spawned == []
 
 
 def test_launcher_keeps_the_tui_alive_while_an_existing_gateway_recovers(
@@ -197,6 +185,7 @@ def test_launcher_keeps_the_tui_alive_while_an_existing_gateway_recovers(
     tmp_path: Path,
 ) -> None:
     config = Config()
+    config.bind_source_path(tmp_path / "config.json")
     events: list[str] = []
     status_calls = 0
 
@@ -212,6 +201,9 @@ def test_launcher_keeps_the_tui_alive_while_an_existing_gateway_recovers(
                 port=config.gateway.port,
                 ready=False,
                 log_path=tmp_path / "gateway.log",
+                config_path=str(tmp_path / "config.json"),
+                workspace=str(config.workspace_path),
+                home=str(config.instance_home),
             )
 
     class FakeProcess:
@@ -309,6 +301,8 @@ def test_launcher_promotes_the_gateway_when_the_tui_detaches(
 
     config_path = tmp_path / "custom config" / "config.json"
     workspace = tmp_path / "custom workspace"
+    home = tmp_path / "instance home"
+    config.bind_source_path(config_path, home=home)
     result = launch_tui(
         config,
         config_path=config_path,
@@ -320,8 +314,9 @@ def test_launcher_promotes_the_gateway_when_the_tui_detaches(
     assert result == 0
     assert events == ["waited", "promoted", "released"]
     assert captured["NANOBOT_TUI_GATEWAY_STOP_COMMAND"] == (
-        f"nanobot gateway stop --config '{config_path}' --workspace '{workspace.resolve()}'"
+        f"nanobot --home '{home}' gateway stop"
     )
+    assert captured["NANOBOT_TUI_WORKSPACE"] == str(Path.cwd().resolve())
 
 
 def test_explicit_tui_binary_must_exist(
@@ -720,6 +715,7 @@ def test_gateway_reuse_requires_the_matching_managed_instance(
     tmp_path: Path,
 ) -> None:
     config = Config()
+    config.bind_source_path(tmp_path / "config.json")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     config.agents.defaults.workspace = str(workspace)
@@ -738,7 +734,6 @@ def test_gateway_reuse_requires_the_matching_managed_instance(
         _ensure_gateway(
             config,
             config_path=tmp_path / "config.json",
-            workspace_override=str(workspace),
         )
 
 
@@ -747,6 +742,7 @@ def test_gateway_reuses_the_matching_managed_instance(
     tmp_path: Path,
 ) -> None:
     config = Config()
+    config.bind_source_path(tmp_path / "config.json")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     config.agents.defaults.workspace = str(workspace)
@@ -756,7 +752,11 @@ def test_gateway_reuses_the_matching_managed_instance(
             self.paths = paths
 
         def status(self) -> SimpleNamespace:
-            return SimpleNamespace(running=True, port=config.gateway.port)
+            return SimpleNamespace(
+                running=True, port=config.gateway.port,
+                config_path=str(tmp_path / "config.json"),
+                workspace=str(config.workspace_path), home=str(config.instance_home),
+            )
 
         def stop(self, *, timeout_s: int) -> None:
             raise AssertionError(f"unowned gateway stopped with timeout {timeout_s}")
@@ -771,7 +771,6 @@ def test_gateway_reuses_the_matching_managed_instance(
     gateway = _ensure_gateway(
         config,
         config_path=tmp_path / "config.json",
-        workspace_override=str(workspace),
     )
 
     assert gateway.base_url == "http://127.0.0.1:8765"
@@ -782,6 +781,7 @@ def test_gateway_reuse_returns_a_degraded_live_gateway_without_waiting(
     tmp_path: Path,
 ) -> None:
     config = Config()
+    config.bind_source_path(tmp_path / "config.json")
     status_calls = 0
 
     class FakeRuntime:
@@ -796,6 +796,9 @@ def test_gateway_reuse_returns_a_degraded_live_gateway_without_waiting(
                 port=config.gateway.port,
                 ready=False,
                 log_path=tmp_path / "gateway.log",
+                config_path=str(tmp_path / "config.json"),
+                workspace=str(config.workspace_path),
+                home=str(config.instance_home),
             )
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
@@ -817,7 +820,6 @@ def test_gateway_reuse_returns_a_degraded_live_gateway_without_waiting(
     gateway = _ensure_gateway(
         config,
         config_path=tmp_path / "config.json",
-        workspace_override=None,
         wait_until_ready=False,
     )
 
@@ -832,6 +834,7 @@ def test_gateway_reuse_waits_for_a_live_gateway_to_recover_its_webui_listener(
     tmp_path: Path,
 ) -> None:
     config = Config()
+    config.bind_source_path(tmp_path / "config.json")
     endpoint_results = iter((False, False, True))
 
     class FakeRuntime:
@@ -843,6 +846,9 @@ def test_gateway_reuse_waits_for_a_live_gateway_to_recover_its_webui_listener(
                 running=True,
                 port=config.gateway.port,
                 log_path=tmp_path / "gateway.log",
+                config_path=str(tmp_path / "config.json"),
+                workspace=str(config.workspace_path),
+                home=str(config.instance_home),
             )
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
@@ -865,7 +871,6 @@ def test_gateway_reuse_waits_for_a_live_gateway_to_recover_its_webui_listener(
     gateway = _ensure_gateway(
         config,
         config_path=tmp_path / "config.json",
-        workspace_override=None,
     )
 
     assert gateway.base_url == "http://127.0.0.1:8765"
@@ -879,6 +884,7 @@ def test_gateway_reuse_with_explicit_wait_rejects_a_live_but_unready_gateway(
     tmp_path: Path,
 ) -> None:
     config = Config()
+    config.bind_source_path(tmp_path / "config.json")
 
     class FakeRuntime:
         def __init__(self, *, paths: object) -> None:
@@ -889,6 +895,9 @@ def test_gateway_reuse_with_explicit_wait_rejects_a_live_but_unready_gateway(
                 running=True,
                 port=config.gateway.port,
                 log_path=tmp_path / "gateway.log",
+                config_path=str(tmp_path / "config.json"),
+                workspace=str(config.workspace_path),
+                home=str(config.instance_home),
             )
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
@@ -910,7 +919,6 @@ def test_gateway_reuse_with_explicit_wait_rejects_a_live_but_unready_gateway(
         _ensure_gateway(
             config,
             config_path=tmp_path / "config.json",
-            workspace_override=None,
         )
 
 
@@ -919,6 +927,7 @@ def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
     tmp_path: Path,
 ) -> None:
     config = Config()
+    config.bind_source_path(tmp_path / "config.json")
     started = False
     stopped = False
 
@@ -930,6 +939,9 @@ def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
             return SimpleNamespace(
                 running=started,
                 port=config.gateway.port if started else None,
+                config_path=str(tmp_path / "config.json"),
+                workspace=str(config.workspace_path),
+                home=str(config.instance_home),
             )
 
         def start_background(self, _options: object) -> SimpleNamespace:
@@ -968,7 +980,6 @@ def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
     gateway = _ensure_gateway(
         config,
         config_path=tmp_path / "config.json",
-        workspace_override=None,
     )
 
     assert gateway.base_url == "http://127.0.0.1:8765"

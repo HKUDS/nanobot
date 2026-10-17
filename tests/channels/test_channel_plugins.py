@@ -1262,7 +1262,11 @@ def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
         async def login(self, force: bool = False) -> bool:
             return True
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    def load_selected_config(config_path=None):
+        seen["loaded_config"] = config_path
+        return Config()
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", load_selected_config)
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
@@ -1275,7 +1279,8 @@ def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
     result = runner.invoke(app, ["channels", "login", "fakeplugin", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert seen["config_path"] == config_path.resolve()
+    assert seen["loaded_config"] == config_path.resolve()
+    assert seen["config_path"] is None
 
 
 def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
@@ -1288,7 +1293,11 @@ def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
     seen: dict[str, object] = {}
     config_path = tmp_path / "custom-config.json"
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    def load_selected_config(config_path=None):
+        seen["loaded_config"] = config_path
+        return Config()
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", load_selected_config)
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
@@ -1298,7 +1307,8 @@ def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
     result = runner.invoke(app, ["channels", "status", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert seen["config_path"] == config_path.resolve()
+    assert seen["loaded_config"] == config_path.resolve()
+    assert seen["config_path"] is None
 
 
 def test_plugins_list_shows_available_features(monkeypatch):

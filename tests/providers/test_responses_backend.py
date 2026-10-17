@@ -95,7 +95,7 @@ async def test_adapters_replay_tool_results_and_reasoning(responses_peer, monkey
         monkeypatch.setenv("NANOBOT_COPILOT_TOKEN_URL", f"{url}/copilot_token")
         monkeypatch.setattr(
             "nanobot.providers.github_copilot_provider._load_github_token",
-            lambda: SimpleNamespace(access="github-fixture"),
+            lambda _storage: SimpleNamespace(access="github-fixture"),
         )
         provider = GitHubCopilotProvider(default_model="github-copilot/gpt-5.4-mini")
     else:

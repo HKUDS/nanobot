@@ -174,10 +174,14 @@ def resolve_automatic_model_api(
         return setup.provider_name, spec.request_apis[0]
     provider_config = setup.provider_config
     if setup.backend == "github_copilot":
-        from nanobot.providers.github_copilot_provider import cached_github_copilot_model_api
+        from nanobot.providers.github_copilot_provider import (
+            cached_github_copilot_model_api,
+            get_storage,
+        )
 
         api = cached_github_copilot_model_api(
             setup.model, provider_config.proxy if provider_config else None,
+            storage=get_storage(config.instance_home),
         )
         if api is not None:
             return setup.provider_name, api.preferred_api

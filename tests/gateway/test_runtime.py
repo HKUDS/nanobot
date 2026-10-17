@@ -151,23 +151,23 @@ class _ManagedForegroundChildRuntime(GatewayRuntime):
         ]
 
 
-def test_paths_use_stable_instance_suffix_for_custom_selectors(tmp_path):
-    default_paths = GatewayRuntimePaths.for_instance(data_dir=tmp_path)
-    first_paths = GatewayRuntimePaths.for_instance(
-        data_dir=tmp_path,
-        workspace="/tmp/workspace-a",
-        config_path="/tmp/config-a.json",
+def test_home_owns_one_gateway_component_across_selectors(tmp_path):
+    home = tmp_path / "home"
+    first = GatewayInstance.resolve(
+        home=home, config_path=tmp_path / "first.json", workspace=str(tmp_path / "a"),
     )
-    second_paths = GatewayRuntimePaths.for_instance(
-        data_dir=tmp_path,
-        workspace="/tmp/workspace-b",
-        config_path="/tmp/config-b.json",
+    second = GatewayInstance.resolve(
+        home=home, config_path=tmp_path / "second.json", workspace=str(tmp_path / "b"),
+    )
+    other = GatewayInstance.resolve(
+        home=tmp_path / "other", config_path=tmp_path / "first.json",
     )
 
-    assert default_paths.state_path.name == "gateway.json"
-    assert first_paths.state_path.name.startswith("gateway.")
-    assert first_paths.state_path != second_paths.state_path
-    assert first_paths.log_path != second_paths.log_path
+    assert first.paths.state_path == second.paths.state_path
+    assert first.paths.log_path == second.paths.log_path
+    assert first.paths.state_path == home / "run" / "gateway.json"
+    assert first.paths.log_path == home / "logs" / "gateway.log"
+    assert first.paths != other.paths
 
 
 def test_default_instance_preserves_released_gateway_paths() -> None:
@@ -177,7 +177,9 @@ def test_default_instance_preserves_released_gateway_paths() -> None:
 
     assert instance.paths.state_path == config_path.parent / "run" / "gateway.json"
     assert instance.paths.log_path == config_path.parent / "logs" / "gateway.log"
-    assert instance.start_options(port=18790) == GatewayStartOptions(port=18790)
+    assert instance.start_options(port=18790) == GatewayStartOptions(
+        port=18790, home=str(config_path.parent), config_path=str(config_path),
+    )
 
 
 def test_custom_instance_round_trips_the_same_child_selectors(tmp_path: Path) -> None:
@@ -190,12 +192,13 @@ def test_custom_instance_round_trips_the_same_child_selectors(tmp_path: Path) ->
     options = parent.start_options(port=18790)
 
     child = GatewayInstance.resolve(
+        home=options.home,
         config_path=options.config_path or "",
         workspace=options.workspace,
     )
 
     assert child == parent
-    assert parent.paths.state_path.name.startswith("gateway.")
+    assert parent.paths.state_path.name == "gateway.json"
 
 
 def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
@@ -251,6 +254,63 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
     assert state["port"] == 18790
     assert state["launch_mode"] == "background"
     assert result.status.launch_mode == "background"
+
+
+def test_same_home_rejects_new_selectors_before_lease_promotion(tmp_path, monkeypatch):
+    commands: list[list[str]] = []
+
+    def fake_popen(command, **_kwargs):
+        commands.append(command)
+        return FakeProcess()
+
+    runtime = GatewayRuntime(
+        paths=_paths(tmp_path), popen=fake_popen, sleep=lambda _seconds: None,
+    )
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 12345)
+    first = GatewayStartOptions(
+        port=18790, home=str(tmp_path),
+        config_path=str(tmp_path / "first.json"),
+        workspace=str(tmp_path / "agent-a"),
+    )
+    changed = GatewayStartOptions(
+        port=18790, home=str(tmp_path),
+        config_path=str(tmp_path / "second.json"),
+        workspace=str(tmp_path / "agent-b"),
+    )
+    assert runtime.start_background(first).ok
+    lease = GatewayClientLease(runtime, kind="test")
+    lease.mark_ephemeral()
+
+    result = runtime.start_background(changed)
+
+    assert result.message == "gateway_instance_mismatch"
+    assert result.status.config_path == first.config_path
+    assert result.status.workspace == first.workspace
+    assert lease.snapshot().auto_stop is True
+    assert len(commands) == 1
+
+
+def test_gateway_compares_existing_path_aliases(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(home, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable")
+    status = GatewayStatus(
+        running=True, pid=12345, state_path=home / "run" / "gateway.json",
+        log_path=home / "logs" / "gateway.log",
+        home=str(home), config_path=str(home / "config.json"),
+        workspace=str(home / "workspace"),
+    )
+    options = GatewayStartOptions(
+        port=18790, home=str(alias), config_path=str(alias / "config.json"),
+        workspace=str(alias / "workspace"),
+    )
+
+    assert GatewayRuntime.selectors_mismatch(status, options) is False
 
 
 def test_read_log_tail_spans_rotated_files(tmp_path: Path) -> None:

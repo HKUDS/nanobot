@@ -251,7 +251,7 @@ class WebUISettingsRouter:
         self._mcp_reload = mcp_reload
         self._image_generation_reload = image_generation_reload
         self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
-        self._mcp_oauth = McpOAuthManager()
+        self._mcp_oauth = McpOAuthManager(home=self.settings.config.instance_home)
         self._restart_sections: set[str] = set()
         self._restart_baselines: dict[str, dict[str, Any]] = {}
         self._restart_changes: dict[str, str] = {}
@@ -597,7 +597,7 @@ class WebUISettingsRouter:
         return self._query(request)
 
     def _api_runtime(self) -> ApiRuntime:
-        return ApiRuntime(paths=api_runtime_paths(self.settings.config.path))
+        return ApiRuntime(paths=api_runtime_paths(self.settings.config.instance_home))
 
     def _save_channel_config_values(
         self,

@@ -599,7 +599,7 @@ def network_safety_payload(config: Config) -> dict[str, Any]:
     return {
         "webui_allow_local_service_access": config.tools.webui_allow_local_service_access,
         "allow_local_preview_access": config.tools.webui_allow_local_service_access,
-        "webui_default_access_mode": read_webui_default_access_mode(),
+        "webui_default_access_mode": read_webui_default_access_mode(home=config.instance_home),
         "private_service_protection_enabled": True,
         "ssrf_whitelist_count": len(config.tools.ssrf_whitelist),
     }
@@ -617,6 +617,14 @@ def api_runtime_message(message: str) -> str:
         "api_exited_during_startup": "API server exited during startup. Check its log for details.",
         "api_stop_timeout": "API server did not stop in time.",
         "api_state_stale": "API server state was stale; try starting it again.",
+        "api_foreground_restart_required": (
+            "API server is running in a foreground terminal. Stop it there "
+            "before starting the managed API."
+        ),
+        "api_instance_mismatch": (
+            "API server is running with a different config or agent workspace. "
+            "Stop it before changing those paths."
+        ),
     }
     if message in known:
         return known[message]
@@ -756,6 +764,23 @@ class CapabilitySettingsHandler:
                 "API service API key must be a string",
             )
         try:
+            config = self.settings.config.load()
+            runtime = operations.api_runtime()
+            current = runtime.status()
+            requested = ApiStartOptions(
+                host=config.api.host,
+                port=config.api.port,
+                workspace=str(config.workspace_path),
+                config_path=str(self.settings.config.path),
+                home=str(config.instance_home),
+            )
+            if current.running and runtime.selectors_mismatch(current, requested):
+                return SettingsRouteResult.failure(
+                    409,
+                    "API server is running with a different config or agent workspace "
+                    f"(config: {current.config_path}; workspace: {current.workspace}). "
+                    "Stop it before changing those paths.",
+                )
             await asyncio.to_thread(
                 self.settings.mutate,
                 operations.nanobot_features_action,
@@ -765,19 +790,30 @@ class CapabilitySettingsHandler:
             )
             self.settings.mutate(operations.update_api, request.query)
             config = self.settings.config.load()
-            runtime = operations.api_runtime()
             options = ApiStartOptions(
                 host=config.api.host,
                 port=config.api.port,
                 workspace=str(config.workspace_path),
                 config_path=str(self.settings.config.path),
+                home=str(config.instance_home),
             )
-            current = runtime.status()
             result = await asyncio.to_thread(
                 runtime.restart if current.running else runtime.start_background,
                 options,
             )
             if not result.ok:
+                if result.message == "api_instance_mismatch":
+                    return SettingsRouteResult.failure(
+                        409,
+                        "API server is running with a different config or agent "
+                        f"workspace (config: {result.status.config_path}; "
+                        f"workspace: {result.status.workspace}). Stop it before "
+                        "changing those paths.",
+                    )
+                if result.message == "api_foreground_restart_required":
+                    return SettingsRouteResult.failure(
+                        409, api_runtime_message(result.message),
+                    )
                 return SettingsRouteResult.failure(
                     500,
                     api_runtime_message(result.message),

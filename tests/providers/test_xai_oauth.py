@@ -32,7 +32,7 @@ from nanobot.providers.xai_oauth import (
 
 
 def _use_temp_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    monkeypatch.setattr(xai_oauth, "get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(xai_oauth, "get_home_path", lambda: tmp_path)
 
 
 def test_authorize_url_uses_pkce_and_frozen_xai_scope_contract() -> None:
@@ -309,9 +309,9 @@ def test_refresh_does_not_restore_credentials_removed_after_its_initial_read(
     refresh_errors: list[Exception] = []
     first_load = True
 
-    def gated_load_token() -> XAIToken | None:
+    def gated_load_token(path=None) -> XAIToken | None:
         nonlocal first_load
-        token = real_load_token()
+        token = real_load_token(path)
         if first_load:
             first_load = False
             initial_read_finished.set()

@@ -399,7 +399,7 @@ class GatewayHTTPHandler:
         from nanobot.webui.remote_instances import RemoteInstances
 
         self.remote_instances = RemoteInstances(
-            settings.config.path.parent / "webui", local_gateway_id=tokens.instance_id,
+            settings.config.instance_home / "webui", local_gateway_id=tokens.instance_id,
         )
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills: set[str] = (
@@ -1280,12 +1280,13 @@ class GatewayHTTPHandler:
         metadata_only = _query_first(query, "metadata") == "1"
         try:
             scope = self.workspaces.scope_for_session_key(decoded_key)
+            home = self.settings.config.instance_home
             if metadata_only:
-                payload = file_reference_payload(path, scope=scope)
+                payload = file_reference_payload(path, scope=scope, home=home)
             elif is_probe:
-                payload = file_preview_availability_payload(path, scope=scope)
+                payload = file_preview_availability_payload(path, scope=scope, home=home)
             else:
-                payload = file_preview_payload(path, scope=scope)
+                payload = file_preview_payload(path, scope=scope, home=home)
         except WebUIFilePreviewError as e:
             if is_probe and not metadata_only and e.status in {400, 403, 404, 413, 415}:
                 return _http_json_response({"available": False}, extra_headers=_NO_STORE_HEADERS)
@@ -1747,6 +1748,7 @@ class GatewayHTTPHandler:
             webui_skills_payload,
             self.skills_workspace_path,
             disabled_skills=set(self.disabled_skills),
+            home=self.settings.config.instance_home,
         )
 
     async def _handle_webui_skills(self, request: WsRequest) -> Response:
@@ -1765,6 +1767,7 @@ class GatewayHTTPHandler:
                 query,
                 self.skills_workspace_path,
                 provider=provider,
+                home=self.settings.config.instance_home,
             )
         except SkillsMarketplaceError as exc:
             return _http_error(exc.status, exc.message)
@@ -1781,6 +1784,7 @@ class GatewayHTTPHandler:
             payload = await trending_marketplace_skills(
                 self.skills_workspace_path,
                 provider=provider,
+                home=self.settings.config.instance_home,
             )
         except SkillsMarketplaceError as exc:
             return _http_error(exc.status, exc.message)
@@ -1824,6 +1828,7 @@ class GatewayHTTPHandler:
                     skill_id,
                     self.skills_workspace_path,
                     provider=provider,
+                    home=self.settings.config.instance_home,
                     version=version,
                 )
             except SkillsMarketplaceError as exc:
@@ -1863,6 +1868,7 @@ class GatewayHTTPHandler:
                     enabled=raw_enabled == "true",
                     disabled_skills=self.disabled_skills,
                     config_path=config_path,
+                    home=self.settings.config.instance_home,
                 )
             )
         except SkillManagementError as exc:
@@ -1890,6 +1896,7 @@ class GatewayHTTPHandler:
                     name,
                     disabled_skills=self.disabled_skills,
                     config_path=config_path,
+                    home=self.settings.config.instance_home,
                 )
             )
         except SkillManagementError as exc:
@@ -1917,6 +1924,7 @@ class GatewayHTTPHandler:
             self.skills_workspace_path,
             name,
             disabled_skills=set(self.disabled_skills),
+            home=self.settings.config.instance_home,
         )
         if payload is None:
             return _http_error(404, "skill not found")

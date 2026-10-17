@@ -20,7 +20,7 @@ from nanobot.agent.tools.web_config import (
     WebSearchConfig as WebSearchConfig,
 )
 from nanobot.agent.tools.web_config import WebToolsConfig
-from nanobot.config.home import get_default_workspace
+from nanobot.config.home import InstancePaths, get_instance_paths
 from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
@@ -166,7 +166,7 @@ class ModelPresetConfig(RequestOverrides):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = Field(default_factory=get_default_workspace)
+    workspace: str = "./workspace"
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
@@ -222,6 +222,15 @@ class AgentDefaults(Base):
         if timezone_mode == "auto":
             data["timezone"] = detect_system_timezone()
         return data
+
+    @field_validator("workspace")
+    @classmethod
+    def _validate_workspace(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Workspace must not be empty.")
+        if "\x00" in value:
+            raise ValueError("Workspace must not contain null bytes.")
+        return value
 
     @field_validator("timezone")
     @classmethod
@@ -499,7 +508,7 @@ class _ExecRuntimeConfigSource(PydanticBaseSettingsSource):
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
-    _source_path: Path | None = PrivateAttr(default=None)
+    _instance_paths: InstancePaths = PrivateAttr(default_factory=get_instance_paths)
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
@@ -527,14 +536,24 @@ class Config(BaseSettings):
             init_settings, env_settings, dotenv_settings, file_secret_settings,
         ))
 
-    def bind_source_path(self, path: Path) -> None:
-        """Record the config file that owns instance-level runtime data."""
-        self._source_path = path.expanduser().resolve(strict=False)
+    def bind_source_path(self, path: Path, *, home: Path | None = None) -> None:
+        """Bind the source file and instance home to this configuration snapshot."""
+        self._instance_paths = InstancePaths.resolve(path, home=home)
 
     @property
-    def runtime_data_dir(self) -> Path | None:
-        """Return the active instance data directory when loaded from a config path."""
-        return self._source_path.parent if self._source_path is not None else None
+    def source_path(self) -> Path:
+        """Return the configuration snapshot's bound source file."""
+        return self._instance_paths.config_path
+
+    @property
+    def instance_home(self) -> Path:
+        """Return the instance home bound to this configuration snapshot."""
+        return self._instance_paths.home
+
+    @property
+    def runtime_data_dir(self) -> Path:
+        """Return the bound root for instance-owned runtime data."""
+        return self.instance_home
 
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
@@ -574,8 +593,16 @@ class Config(BaseSettings):
 
     @property
     def workspace_path(self) -> Path:
-        """Get expanded workspace path."""
-        return Path(self.agents.defaults.workspace).expanduser()
+        """Resolve the agent workspace against the bound instance home."""
+        value = self.agents.defaults.workspace
+        if not value.strip():
+            raise ValueError("Workspace must not be empty.")
+        if "\x00" in value:
+            raise ValueError("Workspace must not contain null bytes.")
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = self.instance_home / path
+        return path.resolve()
 
     def _match_provider(
         self, model: str | None = None,

@@ -12,6 +12,7 @@ import typer
 from loguru import logger
 from rich.console import Console
 
+from nanobot.config.home import get_instance_paths, get_selected_home_path
 from nanobot.config.schema import Config
 from nanobot.gateway import (
     GatewayAlreadyRunningError,
@@ -73,16 +74,29 @@ def create_gateway_app(
         *,
         workspace: str | None = None,
         config: str | None = None,
+        loaded_config: Config | None = None,
     ) -> GatewayInstance:
+        if loaded_config is not None:
+            return GatewayInstance.resolve(
+                home=loaded_config.instance_home,
+                config_path=loaded_config.source_path,
+                workspace=str(loaded_config.workspace_path),
+            )
         return GatewayInstance.resolve(
             config_path=_resolved_config_selector(config),
             workspace=workspace,
+            home=get_instance_paths().home if config is None else get_selected_home_path(),
         )
 
-    def runtime_for_instance(*, workspace: str | None = None, config: str | None = None):
+    def runtime_for_instance(
+        *, workspace: str | None = None, config: str | None = None,
+        loaded_config: Config | None = None,
+    ):
         if runtime_factory is not None:
             return runtime_factory(workspace=workspace, config=config)
-        instance = instance_for_selectors(workspace=workspace, config=config)
+        instance = instance_for_selectors(
+            workspace=workspace, config=config, loaded_config=loaded_config,
+        )
         return GatewayRuntime(paths=instance.paths)
 
     def service_installer():
@@ -105,6 +119,7 @@ def create_gateway_app(
         return instance_for_selectors(
             workspace=workspace,
             config=config,
+            loaded_config=cfg,
         ).start_options(
             port=port if port is not None else cfg.gateway.port,
             verbose=verbose,
@@ -120,6 +135,9 @@ def create_gateway_app(
         if status.started_at is not None:
             console.print(f"Started At: {status.started_at}")
         if status.running:
+            console.print(f"Home: {status.home or 'unknown'}")
+            console.print(f"Config: {status.config_path or 'unknown'}")
+            console.print(f"Agent workspace: {status.workspace or 'unknown'}")
             console.print(f"Launch Mode: {status.launch_mode}")
             console.print(f"Lifetime: {status.lifetime}")
             console.print(f"Clients: {status.clients}")
@@ -143,7 +161,7 @@ def create_gateway_app(
     def gateway(  # pyright: ignore[reportUnusedFunction]
         ctx: typer.Context,
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
-        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
         foreground: bool = typer.Option(False, "--foreground", help="Run in the foreground"),
@@ -167,7 +185,9 @@ def create_gateway_app(
                 validate_startup_config(cfg)
             if prepare_webui_bundle is not None:
                 prepare_webui_bundle(cfg, interactive_build_mode())
-            runtime = runtime_for_instance(workspace=workspace, config=config)
+            runtime = runtime_for_instance(
+                workspace=workspace, config=config, loaded_config=cfg,
+            )
             result = runtime.start_background(
                 start_options(
                     port=port,
@@ -177,6 +197,13 @@ def create_gateway_app(
                     loaded_config=cfg,
                 )
             )
+            if result.message == "gateway_instance_mismatch":
+                console.print(
+                    "[red]Gateway is running with a different config or agent "
+                    "workspace. Stop it before changing those paths.[/red]"
+                )
+                print_status(result.status)
+                raise typer.Exit(1)
             if (
                 result.message == "gateway_already_running"
                 and result.status.launch_mode == "foreground"
@@ -233,7 +260,9 @@ def create_gateway_app(
 
         configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
-        instance = instance_for_selectors(workspace=workspace, config=config)
+        instance = instance_for_selectors(
+            workspace=workspace, config=config, loaded_config=cfg,
+        )
         unconfigured_provider_error = None
         if validate_startup_config is not None:
             unconfigured_provider_error = validate_startup_config(cfg)
@@ -246,13 +275,16 @@ def create_gateway_app(
                 gateway_instance=instance,
             )
         except GatewayAlreadyRunningError as exc:
-            console.print("[yellow]Gateway is already running.[/yellow]")
+            console.print(
+                "[yellow]Gateway is already running. Check its config and agent "
+                "workspace before attaching.[/yellow]"
+            )
             print_status(exc.status)
             raise typer.Exit(1) from None
 
     @gateway_app.command("status")
     def gateway_status(  # pyright: ignore[reportUnusedFunction]
-        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
         """Show the background gateway status."""
@@ -262,7 +294,7 @@ def create_gateway_app(
     def gateway_logs(  # pyright: ignore[reportUnusedFunction]
         tail: int = typer.Option(200, "--tail", help="Number of recent lines to show"),
         follow: bool = typer.Option(True, "--follow/--no-follow", help="Follow new log output"),
-        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
         """Show background gateway logs."""
@@ -279,7 +311,7 @@ def create_gateway_app(
     @gateway_app.command("stop")
     def gateway_stop(  # pyright: ignore[reportUnusedFunction]
         timeout: int = typer.Option(20, "--timeout", help="Stop timeout in seconds"),
-        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
         """Stop the background gateway."""
@@ -296,7 +328,7 @@ def create_gateway_app(
     @gateway_app.command("restart")
     def gateway_restart(  # pyright: ignore[reportUnusedFunction]
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
-        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
         timeout: int = typer.Option(20, "--timeout", help="Restart timeout in seconds"),
@@ -307,7 +339,9 @@ def create_gateway_app(
             validate_startup_config(cfg)
         if prepare_webui_bundle is not None:
             prepare_webui_bundle(cfg, interactive_build_mode())
-        runtime = runtime_for_instance(workspace=workspace, config=config)
+        runtime = runtime_for_instance(
+            workspace=workspace, config=config, loaded_config=cfg,
+        )
         result = runtime.restart(
             start_options(
                 port=port,
@@ -347,7 +381,7 @@ def create_gateway_app(
     @gateway_app.command("install-service")
     def gateway_install_service(  # pyright: ignore[reportUnusedFunction]
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
-        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+        workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
         name: str = typer.Option("nanobot-gateway", "--name", help="Service name"),

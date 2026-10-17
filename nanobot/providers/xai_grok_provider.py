@@ -9,6 +9,7 @@ import json
 import re
 import uuid
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -77,8 +78,10 @@ class XAIGrokProvider(LLMProvider):
         extra_body: dict[str, Any] | None = None,
         *,
         provider_name: str = "xai_grok",
+        home: Path | None = None,
     ):
         super().__init__(api_key=None, api_base=None, provider_name=provider_name)
+        self._storage_path = get_xai_oauth_storage_path(home)
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
@@ -91,6 +94,7 @@ class XAIGrokProvider(LLMProvider):
         catalog = await asyncio.to_thread(
             get_xai_grok_model_catalog,
             self.proxy,
+            home=self._storage_path.parent.parent,
         )
         if catalog.message:
             logger.warning(
@@ -123,7 +127,7 @@ class XAIGrokProvider(LLMProvider):
 
         stage = "oauth_token"
         try:
-            token = await asyncio.to_thread(get_xai_oauth_token, proxy=self.proxy)
+            token = await asyncio.to_thread(get_xai_oauth_token, storage_path=self._storage_path, proxy=self.proxy)
             configured_tools = self._extra_body.get("tools")
             tools_are_explicit = "tools" in self._extra_body
             configured_hosted_search = isinstance(configured_tools, list) and any(
@@ -193,6 +197,7 @@ class XAIGrokProvider(LLMProvider):
                     stage = "oauth_refresh"
                     token = await asyncio.to_thread(
                         get_xai_oauth_token,
+                        storage_path=self._storage_path,
                         proxy=self.proxy,
                         force_refresh=True,
                     )
@@ -653,21 +658,27 @@ def _should_retry_status(
 
 
 def get_xai_grok_model_catalog(
-    proxy: str | None = None, *, refresh: bool = False,
+    proxy: str | None = None, *, refresh: bool = False, home: Path | None = None,
 ) -> OAuthModelCatalogSnapshot:
-    token = get_xai_oauth_login_status()
+    storage_path = get_xai_oauth_storage_path(home)
+    token = get_xai_oauth_login_status(home=storage_path.parent.parent)
     account_key = _catalog_account_key(getattr(token, "account_id", None))
-    cache_key = f"{get_xai_oauth_storage_path()}\0{account_key}\0{proxy or ''}"
-    return _XAI_GROK_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy, refresh=refresh)
+    cache_key = f"{storage_path}\0{account_key}\0{proxy or ''}"
+    return _XAI_GROK_MODEL_CATALOG.get(
+        cache_key=cache_key, refresh=refresh,
+        fetch=lambda: _fetch_xai_grok_models(proxy, storage_path=storage_path),
+    )
 
 
 def invalidate_xai_grok_model_catalog() -> None:
     _XAI_GROK_MODEL_CATALOG.invalidate()
 
 
-def _fetch_xai_grok_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
+def _fetch_xai_grok_models(
+    proxy: str | None, *, storage_path: Path | None = None,
+) -> tuple[ProviderModelSpec, ...]:
     try:
-        token = get_xai_oauth_token(proxy=proxy)
+        token = get_xai_oauth_token(proxy=proxy, storage_path=storage_path)
     except XAIOAuthReauthRequiredError:
         raise OAuthCatalogAuthRequiredError() from None
     client_kwargs: dict[str, Any] = {"timeout": 10.0, "follow_redirects": False}

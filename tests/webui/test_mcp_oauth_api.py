@@ -55,7 +55,7 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
         lambda _url: (True, ""),
     )
 
-    async def connect(servers, _registry, *, oauth_handlers):
+    async def connect(servers, _registry, *, oauth_handlers, home=None):
         assert set(servers) == {"xmind"}
         handlers = oauth_handlers["xmind"]
         await handlers.redirect_handler(
@@ -132,7 +132,7 @@ async def test_browser_flow_activates_tools_before_probe_cleanup_completes(
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, home=None):
         handlers = oauth_handlers["linear"]
         await handlers.redirect_handler(
             "https://accounts.example.com/authorize?client_id=test&state=blocked-close"
@@ -188,7 +188,7 @@ async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, home=None):
         handlers = oauth_handlers["linear"]
         received["redirect_uri"] = handlers.redirect_uri
         await handlers.redirect_handler(
@@ -260,7 +260,7 @@ async def test_browser_flow_surfaces_provider_denial_without_callback_descriptio
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, home=None):
         handlers = oauth_handlers["notion"]
         await handlers.redirect_handler("https://accounts.example.com/auth?state=deny-state")
         await handlers.callback_handler()
@@ -306,7 +306,7 @@ async def test_browser_flow_blocks_unsafe_authorization_url(
         lambda _url: (url_is_safe, "private address"),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, home=None):
         await oauth_handlers["linear"].redirect_handler(authorization_url)
         return {}
 

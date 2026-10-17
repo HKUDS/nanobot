@@ -310,7 +310,11 @@ class ImageGenerationProvider(ABC):
         proxy: str | None = None,
         timeout: float | None = None,
         client: httpx.AsyncClient | None = None,
+        home: Path | None = None,
     ) -> None:
+        from nanobot.config.home import get_home_path
+
+        self._home = (home or get_home_path()).expanduser().resolve()
         self.api_key = api_key
         self.api_base = self._resolve_base_url(api_base)
         self.extra_headers = extra_headers or {}
@@ -364,6 +368,7 @@ class ImageGenerationProvider(ABC):
         headers: dict[str, str],
         body: dict[str, Any],
         client: httpx.AsyncClient | None = None,
+        home: Path | None = None,
     ) -> httpx.Response:
         if client is not None:
             return await client.post(url, headers=headers, json=body)
@@ -1426,7 +1431,9 @@ class CodexImageGenerationClient(ImageGenerationProvider):
 
         try:
             get_codex_token = cast(Any, _get_codex_token)
-            token_kwargs = {"proxy": self.proxy} if self.proxy else {}
+            from nanobot.providers.oauth_storage import codex_token_storage
+
+            token_kwargs = {"proxy": self.proxy, "storage": codex_token_storage(self._home)}
             token = await asyncio.to_thread(get_codex_token, **token_kwargs)
         except Exception as exc:
             raise ImageGenerationError(self.missing_key_message) from exc

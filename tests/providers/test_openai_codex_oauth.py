@@ -43,6 +43,7 @@ def _fake_interactive_login(
         provider,
         proxy,
         open_browser,
+        storage,
     ) -> OAuthToken:
         captured.update(
             provider=provider,

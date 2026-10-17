@@ -920,12 +920,13 @@ class WebUICommandRouter:
                 policy = self._temporary_chats.message_policy(connection, chat_id, "")
                 if policy is None:
                     raise TemporaryChatError("temporary_chat_unavailable")
+                home = self.gateway.settings.config.instance_home
                 if metadata_only:
-                    result = file_reference_payload(path, scope=policy.workspace_scope)
+                    result = file_reference_payload(path, scope=policy.workspace_scope, home=home)
                 elif probe:
-                    result = file_preview_availability_payload(path, scope=policy.workspace_scope)
+                    result = file_preview_availability_payload(path, scope=policy.workspace_scope, home=home)
                 else:
-                    result = file_preview_payload(path, scope=policy.workspace_scope)
+                    result = file_preview_payload(path, scope=policy.workspace_scope, home=home)
             except TemporaryChatError as exc:
                 await self.send_webui_response(
                     connection, request_id, status=404, message=exc.detail,

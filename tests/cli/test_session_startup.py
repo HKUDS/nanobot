@@ -53,7 +53,7 @@ def test_startup_rejects_nested_sessions_before_writing_files(
     source = "--workspace" if override else "agents.defaults.workspace"
     assert f"Workspace ({source})" in output
     assert "back up" in output
-    assert "--config pointing to the moved config file" in output
+    assert "--home selecting that home" in output
     assert "Traceback" not in output
     assert config_path.read_bytes() == before
     assert set(workspace.rglob("*")) == {config_path.parent, config_path}

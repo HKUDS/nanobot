@@ -426,11 +426,12 @@ def optional_features_payload(
     *,
     config: Config | None = None,
     last_action: dict[str, Any] | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     from nanobot.channels.registry import discover_plugins
     from nanobot.config.loader import load_config
 
-    config = config or load_config()
+    config = config or load_config(home=home)
     extras = optional_dependency_groups()
     channel_plugins = discover_plugins()
     features: list[dict[str, Any]] = []
@@ -676,6 +677,7 @@ def install_optional_feature_support(
     name: str,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
     allow_install: bool = True,
     runner: Any = run_install_command,
 ) -> dict[str, Any]:
@@ -710,7 +712,7 @@ def install_optional_feature_support(
             status=500,
         )
 
-    payload = optional_features_payload(config=load_config(config_path))
+    payload = optional_features_payload(config=load_config(config_path, home=home))
     feature = next(
         (item for item in payload["features"] if item.get("name") == name),
         None,
@@ -742,6 +744,7 @@ def enable_optional_feature(
     name: str,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
     allow_install: bool = True,
     instance_id: str | None = None,
     runner: Any = run_install_command,
@@ -751,6 +754,7 @@ def enable_optional_feature(
 
     if name in _BUNDLED_FEATURE_ALIASES:
         payload = optional_features_payload(
+            home=home,
             last_action={
                 "ok": True,
                 "message": f"Feature '{name}' is included with nanobot",
@@ -814,7 +818,7 @@ def enable_optional_feature(
     from nanobot.config.loader import load_config
 
     payload = optional_features_payload(
-        config=load_config(config_path),
+        config=load_config(config_path, home=home),
         last_action={"ok": True, "message": message, "enabled": True},
     )
     payload["requires_restart"] = _feature_requires_restart(
@@ -863,6 +867,7 @@ def disable_optional_feature(
     name: str,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
     instance_id: str | None = None,
 ) -> dict[str, Any]:
     from nanobot.channels.registry import discover_plugins
@@ -889,7 +894,7 @@ def disable_optional_feature(
         instance_id=target_instance_id,
     )
     payload = optional_features_payload(
-        config=load_config(config_path),
+        config=load_config(config_path, home=home),
         last_action={"ok": True, "message": f"Disabled channel '{name}'", "enabled": False}
     )
     payload["requires_restart"] = True

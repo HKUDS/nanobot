@@ -36,7 +36,7 @@ class SessionLocation:
         if root == canonical_workspace or root.is_relative_to(canonical_workspace):
             raise RuntimeError(
                 "session storage must be outside the agent workspace; "
-                "move --config outside --workspace or choose a nested workspace directory"
+                "keep the instance home outside the agent workspace or choose a nested agent workspace"
             )
         ensure_dir(root)
         with suppress(OSError):

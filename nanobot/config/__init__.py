@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from nanobot.config.errors import ConfigIssue, ConfigLoadError
+    from nanobot.config.home import InstancePaths, get_instance_paths
     from nanobot.config.loader import get_config_path, load_config
     from nanobot.config.paths import (
         get_cli_history_path,
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
 _EXPORTS = {
     "Config": "nanobot.config.schema",
+    "InstancePaths": "nanobot.config.home",
+    "get_instance_paths": "nanobot.config.home",
     "ConfigIssue": "nanobot.config.errors",
     "ConfigLoadError": "nanobot.config.errors",
     "load_config": "nanobot.config.loader",
@@ -57,6 +60,8 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "Config",
+    "InstancePaths",
+    "get_instance_paths",
     "ConfigIssue",
     "ConfigLoadError",
     "load_config",

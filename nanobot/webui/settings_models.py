@@ -184,14 +184,13 @@ def provider_requires_api_base(spec: Any) -> bool:
     return bool(spec.backend == "openai_compat" and spec.is_direct and not spec.default_api_base)
 
 
-def oauth_provider_status(spec: Any) -> dict[str, Any]:
+def oauth_provider_status(spec: Any, *, home: Path | None = None) -> dict[str, Any]:
     if not getattr(spec, "is_oauth", False):
         return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
 
     if spec.name == "openai_codex":
         try:
-            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-            from oauth_cli_kit.storage import FileTokenStorage
+            from nanobot.providers.oauth_storage import codex_token_storage
         except Exception:
             return {
                 "configured": False,
@@ -201,7 +200,7 @@ def oauth_provider_status(spec: Any) -> dict[str, Any]:
             }
         token = None
         with suppress(Exception):
-            token = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).load()
+            token = codex_token_storage(home).load()
         expires_at = getattr(token, "expires", None) if token else None
         now_ms = int(time.time() * 1000)
         return {
@@ -227,7 +226,7 @@ def oauth_provider_status(spec: Any) -> dict[str, Any]:
             }
         token = None
         with suppress(Exception):
-            token = get_github_copilot_login_status()
+            token = get_github_copilot_login_status(home=home)
         return {
             "configured": bool(token and token.access and token.expires > int(time.time() * 1000)),
             "account": getattr(token, "account_id", None) if token else None,
@@ -247,7 +246,7 @@ def oauth_provider_status(spec: Any) -> dict[str, Any]:
             }
         token = None
         with suppress(Exception):
-            token = get_xai_oauth_login_status()
+            token = get_xai_oauth_login_status(home=home)
         expires_at = getattr(token, "expires", None) if token else None
         now_ms = int(time.time() * 1000)
         return {
@@ -590,6 +589,7 @@ def provider_models_payload(
         proxy = _resolve_env_placeholders(provider_config.proxy)
         catalog = get_oauth_model_catalog(
             spec.name, proxy=proxy, refresh=query_first(query, "refresh") == "1",
+            home=config.instance_home,
         )
         rows = [
             {
@@ -1635,6 +1635,7 @@ def login_oauth_provider(
                 proxy=proxy,
                 timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
                 open_browser=not remote_browser,
+                home=config.instance_home,
             )
         except Exception as exc:
             raise WebUISettingsError(
@@ -1661,7 +1662,7 @@ def login_oauth_provider(
         # An existing token can be revoked. Expose the device prompt immediately
         # instead of waiting for approval inside a blocking CLI login request.
         oauth_flows.clear(spec.name)
-        copilot_flow = GitHubCopilotOAuthFlow()
+        copilot_flow = GitHubCopilotOAuthFlow(home=config.instance_home)
         flow_id = secrets.token_urlsafe(24)
         # Own the flow before network I/O, so logout/replacement also cancels a
         # login that is still waiting for GitHub to return its device prompt.
@@ -1695,6 +1696,7 @@ def login_oauth_provider(
             flow = start_xai_oauth_login(
                 proxy=proxy,
                 timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
+                home=config.instance_home,
             )
         except Exception as exc:
             raise WebUISettingsError(f"xAI OAuth login failed: {exc}", status=502) from exc
@@ -1782,6 +1784,7 @@ def complete_oauth_provider(
 def logout_oauth_provider(
     query: QueryParams,
     *,
+    home: Path | None = None,
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None,
     settings_payload: SettingsPayloadBuilder,
@@ -1795,26 +1798,23 @@ def logout_oauth_provider(
 
     if spec.name == "openai_codex":
         try:
-            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-            from oauth_cli_kit.storage import FileTokenStorage
+            from nanobot.providers.oauth_storage import codex_token_storage
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
         oauth_flows.clear(spec.name)
-        token_path = FileTokenStorage(
-            token_filename=OPENAI_CODEX_PROVIDER.token_filename
-        ).get_token_path()
+        token_path = codex_token_storage(home).get_token_path()
     elif spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import get_storage
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
         oauth_flows.clear(spec.name)
-        token_path = get_storage().get_token_path()
+        token_path = get_storage(home).get_token_path()
     elif spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import logout_xai_oauth
 
         oauth_flows.clear(spec.name)
-        logout_xai_oauth()
+        logout_xai_oauth(home=home)
         invalidate_oauth_model_catalog(spec.name)
         return settings_payload(config_path=config_path)
     else:

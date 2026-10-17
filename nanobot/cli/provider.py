@@ -15,6 +15,8 @@ from nanobot import __logo__
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
 if TYPE_CHECKING:
+    from oauth_cli_kit.storage import TokenStorage  # pyright: ignore[reportMissingTypeStubs]
+
     from nanobot.providers.registry import ProviderSpec
 
 
@@ -40,29 +42,18 @@ class _OAuthToken(Protocol):
 
 
 class _GetOAuthToken(Protocol):
-    def __call__(self, *, proxy: str | None = None) -> _OAuthToken | None: ...
+    def __call__(self, *, storage: TokenStorage, proxy: str | None = None) -> _OAuthToken | None: ...
 
 
 class _LoginOAuthInteractive(Protocol):
     def __call__(
         self,
         *,
+        storage: TokenStorage,
         print_fn: Callable[[str], None],
         prompt_fn: Callable[[str], str],
         proxy: str | None = None,
     ) -> _OAuthToken | None: ...
-
-
-class _OAuthProviderConfig(Protocol):
-    token_filename: str
-
-
-class _TokenStorage(Protocol):
-    def get_token_path(self) -> Path: ...
-
-
-class _FileTokenStorageFactory(Protocol):
-    def __call__(self, *, token_filename: str) -> _TokenStorage: ...
 
 
 def _required_module_attribute(module_name: str, attribute: str) -> object:
@@ -81,23 +72,6 @@ def _load_openai_oauth_client() -> tuple[_GetOAuthToken, _LoginOAuthInteractive]
         cast(
             _LoginOAuthInteractive,
             _required_module_attribute("oauth_cli_kit", "login_oauth_interactive"),
-        ),
-    )
-
-
-def _load_openai_oauth_storage() -> tuple[_OAuthProviderConfig, _FileTokenStorageFactory]:
-    """Load the untyped OAuth storage API behind a typed boundary."""
-    return (
-        cast(
-            _OAuthProviderConfig,
-            _required_module_attribute(
-                "oauth_cli_kit.providers",
-                "OPENAI_CODEX_PROVIDER",
-            ),
-        ),
-        cast(
-            _FileTokenStorageFactory,
-            _required_module_attribute("oauth_cli_kit.storage", "FileTokenStorage"),
         ),
     )
 
@@ -220,8 +194,10 @@ def provider_logout(
 def _login_openai_codex() -> None:
     try:
         from nanobot.config.loader import load_config, resolve_config_env_vars
+        from nanobot.providers.oauth_storage import codex_token_storage
 
         get_token, login_oauth_interactive = _load_openai_oauth_client()
+        storage = codex_token_storage()
         proxy = None
         try:
             proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
@@ -230,10 +206,11 @@ def _login_openai_codex() -> None:
             raise typer.Exit(1) from e
         token = None
         with suppress(Exception):
-            token = get_token(proxy=proxy)
+            token = get_token(storage=storage, proxy=proxy)
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(
+                storage=storage,
                 print_fn=lambda s: console.print(s),
                 prompt_fn=lambda s: typer.prompt(s),
                 proxy=proxy,
@@ -252,12 +229,13 @@ def _login_openai_codex() -> None:
 def _logout_openai_codex() -> None:
     """Clear local OAuth credentials for OpenAI Codex."""
     try:
-        provider_config, storage_factory = _load_openai_oauth_storage()
+        from nanobot.providers.oauth_storage import codex_token_storage
+
+        storage = codex_token_storage()
     except ImportError:
         console.print(f"[red]{OAUTH_CLI_KIT_MISSING_MESSAGE}[/red]")
         raise typer.Exit(1)
 
-    storage = storage_factory(token_filename=provider_config.token_filename)
     _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["openai_codex"])
 
 

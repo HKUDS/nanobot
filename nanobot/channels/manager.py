@@ -212,6 +212,7 @@ class ChannelManager:
                 default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
                 unified_session=self.config.agents.defaults.unified_session,
                 config_path=self._config_path,
+                instance_home=self.config.instance_home,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,
                 refresh_runtime_config=self._webui_refresh_runtime_config,

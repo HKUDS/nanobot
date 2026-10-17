@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import shlex
 import shutil
 import signal
 import urllib.error
@@ -639,7 +640,7 @@ def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkey
     lock_path.write_text("", encoding="utf-8")
     monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
 
-    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+    result = runner.invoke(app, ["--home", str(tmp_path), "provider", "logout", "openai-codex"])
 
     assert result.exit_code == 0
     assert not token_path.exists()
@@ -655,7 +656,7 @@ def test_provider_logout_github_copilot_removes_local_oauth_files(tmp_path, monk
     lock_path.write_text("", encoding="utf-8")
     monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
 
-    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+    result = runner.invoke(app, ["--home", str(tmp_path), "provider", "logout", "github-copilot"])
 
     assert result.exit_code == 0
     assert not token_path.exists()
@@ -667,7 +668,7 @@ def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypa
     token_path = tmp_path / "auth" / "codex.json"
     monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
 
-    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+    result = runner.invoke(app, ["--home", str(tmp_path), "provider", "logout", "openai-codex"])
 
     assert result.exit_code == 0
     assert "No local OAuth credentials found for OpenAI Codex" in result.stdout
@@ -681,10 +682,10 @@ def test_provider_logout_xai_grok_removes_instance_credentials(tmp_path, monkeyp
     lock_path.write_text("", encoding="utf-8")
     monkeypatch.setattr(
         "nanobot.providers.xai_oauth.get_xai_oauth_storage_path",
-        lambda: token_path,
+        lambda home=None: token_path,
     )
 
-    result = runner.invoke(app, ["provider", "logout", "xai-grok"])
+    result = runner.invoke(app, ["--home", str(tmp_path), "provider", "logout", "xai-grok"])
 
     assert result.exit_code == 0
     assert not token_path.exists()
@@ -718,27 +719,25 @@ def test_provider_logout_github_copilot_succeeds_when_no_local_oauth_file(monkey
     token_path = tmp_path / "auth" / "github-copilot.json"
     monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
 
-    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+    result = runner.invoke(app, ["--home", str(tmp_path), "provider", "logout", "github-copilot"])
 
     assert result.exit_code == 0
     assert "No local OAuth credentials found for GitHub Copilot" in result.stdout
 
 
-def test_provider_logout_rejects_unknown_provider():
-    result = runner.invoke(app, ["provider", "logout", "not-a-real-provider"])
+def test_provider_logout_rejects_unknown_provider(tmp_path):
+    result = runner.invoke(app, ["--home", str(tmp_path), "provider", "logout", "not-a-real-provider"])
 
     assert result.exit_code == 1
     assert "Unknown OAuth provider" in result.stdout
 
 
 def test_provider_logout_paths_resolve_to_expected_files():
-    from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-    from oauth_cli_kit.storage import FileTokenStorage
-
     from nanobot.providers.github_copilot_provider import get_storage
+    from nanobot.providers.oauth_storage import codex_token_storage
     from nanobot.providers.xai_oauth import get_xai_oauth_storage_path
 
-    codex_storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    codex_storage = codex_token_storage()
     codex_path = codex_storage.get_token_path()
     assert codex_path.name == "codex.json"
     assert codex_path.parent.name == "auth"
@@ -915,7 +914,7 @@ def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
 
     captured: dict[str, str | None] = {}
 
-    def fake_login(*, print_fn, prompt_fn, proxy=None):
+    def fake_login(*, print_fn, prompt_fn, proxy=None, storage=None):
         captured["proxy"] = proxy
         return SimpleNamespace(access="access-token", account_id="acct-test")
 
@@ -936,10 +935,10 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
         json.dumps({"providers": {"openaiCodex": {"proxy": proxy}}}),
         encoding="utf-8",
     )
-    active_path: dict[str, Path] = {}
+    active_path: dict[str, Path | None] = {}
     real_load_config = loader.load_config
 
-    def fake_set_config_path(path: Path) -> None:
+    def fake_set_config_path(path: Path | None) -> None:
         active_path["path"] = path
 
     def fake_load_config(config_path: Path | None = None) -> Config:
@@ -957,7 +956,7 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
 
     captured: dict[str, str | None] = {}
 
-    def fake_get_token(*, proxy=None):
+    def fake_get_token(*, proxy=None, storage=None):
         captured["proxy"] = proxy
         return SimpleNamespace(access="access-token", account_id="acct-test")
 
@@ -969,7 +968,7 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
     )
 
     assert result.exit_code == 0
-    assert active_path["path"] == config_path.resolve()
+    assert active_path["path"] is None
     assert captured["proxy"] == proxy
 
 
@@ -987,7 +986,7 @@ def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
 
     captured: dict[str, str | None] = {}
 
-    def fake_get_token(*, proxy=None):
+    def fake_get_token(*, proxy=None, storage=None):
         captured["proxy"] = proxy
         return SimpleNamespace(access="access-token", account_id="acct-test")
 
@@ -1011,7 +1010,7 @@ def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(monkeyp
     )
     captured: dict[str, object] = {}
 
-    def fake_login(*, print_fn, prompt_fn, proxy=None):
+    def fake_login(*, print_fn, prompt_fn, proxy=None, storage=None):
         captured.update(print_fn=print_fn, prompt_fn=prompt_fn, proxy=proxy)
         return SimpleNamespace(access="access-token", account_id="user@example.com")
 
@@ -1660,7 +1659,7 @@ def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
     assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
 
 
-def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
+def test_agent_loads_explicit_config_and_restores_selection(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
     config_file.write_text("{}")
@@ -1672,7 +1671,11 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         "nanobot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
     )
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    def load_selected_config(path=None):
+        seen["loaded_config"] = path
+        return config
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", load_selected_config)
     monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
@@ -1697,7 +1700,8 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
     assert result.exit_code == 0
-    assert seen["config_path"] == config_file.resolve()
+    assert seen["loaded_config"] == config_file.resolve()
+    assert seen["config_path"] is None
 
 
 def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Path) -> None:
@@ -1854,20 +1858,22 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
 
 def test_agent_overrides_workspace_path(mock_agent_runtime):
     workspace_path = Path("/tmp/agent-workspace")
+    expected_workspace = workspace_path.resolve()
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-w", str(workspace_path)])
 
     assert result.exit_code == 0
-    assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
-    assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
+    assert mock_agent_runtime["config"].agents.defaults.workspace == str(expected_workspace)
+    assert mock_agent_runtime["sync_templates"].call_args.args == (expected_workspace,)
     passed_config = mock_agent_runtime["from_config"].call_args.args[0]
-    assert passed_config.workspace_path == workspace_path
+    assert passed_config.workspace_path == expected_workspace
 
 
 def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime, tmp_path: Path):
     config_path = tmp_path / "agent-config.json"
     config_path.write_text("{}")
     workspace_path = Path("/tmp/agent-workspace")
+    expected_workspace = workspace_path.resolve()
 
     result = runner.invoke(
         app,
@@ -1876,10 +1882,10 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
 
     assert result.exit_code == 0
     assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
-    assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
-    assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
+    assert mock_agent_runtime["config"].agents.defaults.workspace == str(expected_workspace)
+    assert mock_agent_runtime["sync_templates"].call_args.args == (expected_workspace,)
     passed_config = mock_agent_runtime["from_config"].call_args.args[0]
-    assert passed_config.workspace_path == workspace_path
+    assert passed_config.workspace_path == expected_workspace
 
 
 @pytest.mark.parametrize(
@@ -2282,7 +2288,7 @@ def test_webui_creates_config_and_enables_local_websocket_with_one_confirmation(
     assert websocket["port"] == 8899
     assert websocket["websocketRequiresToken"] is True
     assert len(websocket["tokenIssueSecret"]) >= 32
-    assert data["agents"]["defaults"]["workspace"] == str(workspace)
+    assert data["agents"]["defaults"]["workspace"] == "./workspace"
     assert seen["templates"] == workspace
     assert seen["templates_options"] == {"silent": True}
     options = seen["start_options"]
@@ -2340,15 +2346,19 @@ def test_webui_not_ready_does_not_print_a_login_link(monkeypatch, tmp_path: Path
     assert "bootstrapSecret=" not in result.stdout
 
 
+@pytest.mark.parametrize("explicit_home", [False, True])
 def test_webui_background_points_to_the_single_persistent_gateway_command(
     tmp_path: Path,
+    explicit_home: bool,
 ) -> None:
     config_file = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
+    home = tmp_path / "instance [home]" if explicit_home else tmp_path
 
     result = runner.invoke(
         app,
         [
+            *(["--home", str(home)] if explicit_home else []),
             "webui",
             "--background",
             "--config",
@@ -2361,8 +2371,13 @@ def test_webui_background_points_to_the_single_persistent_gateway_command(
     assert result.exit_code == 1
     compact_output = _strip_ansi(result.stdout).replace("\n", " ")
     assert "webui --background` no longer owns gateway lifecycle" in compact_output
-    assert "nanobot gateway --background --config" in compact_output
-    assert "--workspace" in compact_output
+    commands = [shlex.split(line.strip()) for line in result.stdout.splitlines() if line.strip().startswith("nanobot ")]
+    prefix = ["nanobot", "--home", str(home)]
+    selectors = ["--config", str(config_file), "--workspace", str(workspace)]
+    assert commands == [
+        [*prefix, "gateway", "--background", *selectors],
+        [*prefix, "webui", *selectors],
+    ]
     assert not config_file.exists()
 
 
@@ -2754,6 +2769,10 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
         def status(self):
             return SimpleNamespace(running=True)
 
+        @staticmethod
+        def selectors_mismatch(_status, _options):
+            return False
+
         def start_background(self, options):
             return SimpleNamespace(
                 ok=False,
@@ -2790,6 +2809,47 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     assert parsed.fragment.startswith("/?bootstrapSecret=")
     assert seen["open_kwargs"] == {"wait": False}
     assert seen["lease_release_wait_for_stop"] is False
+
+
+@pytest.mark.parametrize("different_config,different_workspace", [(True, False), (False, True)])
+def test_webui_rejects_active_home_with_different_paths_before_writing(
+    monkeypatch, tmp_path: Path, different_config: bool, different_workspace: bool,
+) -> None:
+    from nanobot.config.loader import save_config
+    from nanobot.gateway import GatewayInstance, GatewayRuntime
+
+    home = tmp_path / "instance"
+    active_config = tmp_path / "active.json"
+    requested_config = tmp_path / "requested.json" if different_config else active_config
+    active_workspace = tmp_path / "active-workspace"
+    requested_workspace = tmp_path / "requested-workspace" if different_workspace else active_workspace
+    config = Config()
+    config.agents.defaults.workspace = str(active_workspace)
+    save_config(config, active_config)
+    if different_config:
+        save_config(config, requested_config)
+    before = requested_config.read_bytes()
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr(cli_webui, "_gateway_health_ready", lambda *_a, **_kw: True)
+    monkeypatch.setattr(cli_webui, "_webui_endpoint_reachable", lambda *_a, **_kw: True)
+    instance = GatewayInstance.resolve(
+        home=home, config_path=active_config, workspace=str(active_workspace),
+    )
+    runtime = GatewayRuntime(paths=instance.paths)
+    with runtime.foreground_instance(instance.start_options(port=18790)):
+        result = runner.invoke(app, [
+            "--home", str(home), "webui", "--config", str(requested_config),
+            "--workspace", str(requested_workspace), "--yes", "--no-open",
+        ])
+        assert runtime.status().running
+
+    assert result.exit_code == 1, result.output
+    assert "different paths" in result.output
+    rendered_output = "".join(result.output.split())
+    assert "".join(str(active_config).split()) in rendered_output
+    assert "".join(str(active_workspace).split()) in rendered_output
+    assert requested_config.read_bytes() == before
+    assert not requested_workspace.exists()
 
 
 def test_attach_to_background_gateway_detaches_on_ctrl_c(capsys, tmp_path: Path) -> None:
@@ -3073,7 +3133,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         monkeypatch,
         config,
         message_bus=MessageBus,
-        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
+        session_manager=lambda _workspace, **_kwargs: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
@@ -3097,7 +3157,7 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert isinstance(result.exception, _StopGatewayError)
-    assert seen["config_path"] == config_file.resolve()
+    assert seen["config_path"] is None
     assert seen["workspace"] == Path(config.agents.defaults.workspace)
 
 

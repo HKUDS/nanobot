@@ -133,6 +133,7 @@ def normalize_mcp_preset_mentions(
     raw: Any,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Sanitize structured MCP preset mentions sent by the WebUI."""
     if not isinstance(raw, list):
@@ -338,12 +339,12 @@ def _config_available(cfg: MCPServerConfig | None) -> bool:
     return False
 
 
-def _status_for(preset: McpPreset, cfg: MCPServerConfig | None) -> str:
+def _status_for(preset: McpPreset, cfg: MCPServerConfig | None, *, home: Path | None = None) -> str:
     if cfg is None:
         return "not_installed" if preset.install_supported else "coming_soon"
     if any(field.required and not _field_configured(field, cfg) for field in preset.fields):
         return "missing_credentials"
-    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(preset.name, cfg.url):
+    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(preset.name, cfg.url, home=home):
         return "authorization_required"
     if cfg.command and not _command_available(cfg.command):
         return "missing_dependency"
@@ -466,9 +467,11 @@ def _custom_manifest(name: str, cfg: MCPServerConfig) -> dict[str, Any]:
     )
 
 
-def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerConfig]) -> dict[str, Any]:
+def _preset_payload(
+    preset: McpPreset, configured_servers: dict[str, MCPServerConfig], *, home: Path | None = None,
+) -> dict[str, Any]:
     cfg = configured_servers.get(preset.name)
-    status = _status_for(preset, cfg)
+    status = _status_for(preset, cfg, home=home)
     configured = cfg is not None and status not in {"missing_credentials", "authorization_required"}
     logo_url = _favicon_url(preset.brand_domain)
     return {
@@ -501,11 +504,12 @@ def _custom_payload(
     cfg: MCPServerConfig,
     *,
     tool_names: list[str] | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     transport = cfg.type
     if not transport:
         transport = "stdio" if cfg.command else ("sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp")
-    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url):
+    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url, home=home):
         status = "authorization_required"
     else:
         status = "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
@@ -566,23 +570,24 @@ def mcp_presets_payload(
     tool_preview: Mapping[str, list[str]] | None = None,
     runtime_status: Mapping[str, str] | None = None,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = load_config(config_path) if config_path is not None else load_config()
+    config = load_config(config_path, home=home)
     known = _known_preset_names()
     preset_rows = [
-        _preset_payload(preset, config.tools.mcp_servers)
+        _preset_payload(preset, config.tools.mcp_servers, home=config.instance_home)
         | ({"tool_names": tool_preview.get(preset.name, [])} if tool_preview and preset.name in tool_preview else {})
         for preset in MCP_PRESETS
     ]
     custom_rows = [
-        _custom_payload(name, cfg, tool_names=(tool_preview or {}).get(name))
+        _custom_payload(name, cfg, tool_names=(tool_preview or {}).get(name), home=config.instance_home)
         for name, cfg in sorted(config.tools.mcp_servers.items())
         if name not in known
     ]
     existing_names = {str(row["name"]) for row in (*preset_rows, *custom_rows)}
     plugin_rows = [
         _agent_plugin_payload(plugin)
-        for plugin in discover_agent_plugins(config.workspace_path)
+        for plugin in discover_agent_plugins(config.workspace_path, home=config.instance_home)
         if f"plugin-{plugin.name}" not in existing_names
     ]
     payload: dict[str, Any] = {
@@ -680,15 +685,17 @@ def mcp_reconnect_action(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     """Validate a configured server before asking the live runtime to retry it."""
     name = _validated_server_name((_query_first(query, "name") or "").strip())
-    config = load_config(config_path) if config_path is not None else load_config()
+    config = load_config(config_path, home=home)
     if name not in config.tools.mcp_servers:
         raise McpPresetError("unknown MCP server", status=404)
     payload = mcp_presets_payload(
         last_action=_server_action_message("reconnect", name),
         config_path=config_path,
+        home=home,
     )
     payload["requires_restart"] = True
     return payload
@@ -719,6 +726,7 @@ async def mcp_presets_test_action(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     """Connect to an enabled MCP preset and report its complete tool surface."""
     from nanobot.agent.tools.mcp import connect_mcp_servers
@@ -733,7 +741,7 @@ async def mcp_presets_test_action(
 
     try:
         config = resolve_config_env_vars(
-            load_config(config_path) if config_path is not None else load_config(),
+            load_config(config_path, home=home),
             config_path=config_path,
         )
     except ValueError as exc:
@@ -747,13 +755,14 @@ async def mcp_presets_test_action(
                 "checked_at": _checked_at(),
             },
             config_path=config_path,
+            home=home,
         )
 
     cfg = config.tools.mcp_servers.get(name)
     if cfg is None:
         raise McpPresetError(f"{display_name} is not enabled", status=404)
 
-    status = _status_for(preset, cfg) if preset is not None else (
+    status = _status_for(preset, cfg, home=home) if preset is not None else (
         "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
     )
     if status == "missing_credentials":
@@ -765,7 +774,7 @@ async def mcp_presets_test_action(
             "tool_names": [],
             "checked_at": _checked_at(),
         }
-        return mcp_presets_payload(last_action=last_action, config_path=config_path)
+        return mcp_presets_payload(last_action=last_action, config_path=config_path, home=home)
 
     if cfg.command and not _command_available(cfg.command):
         last_action = {
@@ -776,14 +785,14 @@ async def mcp_presets_test_action(
             "tool_names": [],
             "checked_at": _checked_at(),
         }
-        return mcp_presets_payload(last_action=last_action, config_path=config_path)
+        return mcp_presets_payload(last_action=last_action, config_path=config_path, home=home)
 
     registry = ToolRegistry()
     stacks: dict[str, Any] = {}
     inspection_cfg = cfg.model_copy(update={"enabled_tools": ["*"]})
     try:
         stacks = await asyncio.wait_for(
-            connect_mcp_servers({name: inspection_cfg}, registry),
+            connect_mcp_servers({name: inspection_cfg}, registry, home=config.instance_home),
             timeout=_test_timeout(cfg),
         )
         tool_prefix = f"mcp_{name}_"
@@ -842,6 +851,7 @@ async def mcp_presets_test_action(
         last_action=last_action,
         tool_preview=preview,
         config_path=config_path,
+        home=home,
     )
 
 
@@ -1079,18 +1089,20 @@ def custom_mcp_action(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
-    config = load_config(config_path) if config_path is not None else load_config()
+    config = load_config(config_path, home=home)
     if action == "custom":
         name, cfg = _custom_server_from_query(query)
         delete_credentials = _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
         config.tools.mcp_servers[name] = cfg
         save_config(config, config_path)
         if delete_credentials:
-            delete_mcp_oauth_credentials(name)
+            delete_mcp_oauth_credentials(name, home=config.instance_home)
         payload = mcp_presets_payload(
             last_action=_server_action_message(action, name),
             config_path=config_path,
+            home=home,
         )
         payload["requires_restart"] = True
         return payload
@@ -1105,13 +1117,14 @@ def custom_mcp_action(
         config.tools.mcp_servers.update(servers)
         save_config(config, config_path)
         for name in delete_credentials:
-            delete_mcp_oauth_credentials(name)
+            delete_mcp_oauth_credentials(name, home=config.instance_home)
         payload = mcp_presets_payload(
             last_action={
                 "ok": True,
                 "message": f"Imported {len(servers)} MCP server(s).",
             },
             config_path=config_path,
+            home=home,
         )
         payload["requires_restart"] = True
         return payload
@@ -1127,6 +1140,7 @@ def custom_mcp_action(
         payload = mcp_presets_payload(
             last_action=_server_action_message(action, name),
             config_path=config_path,
+            home=home,
         )
         payload["requires_restart"] = True
         return payload
@@ -1138,10 +1152,11 @@ def ensure_mcp_oauth_server(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> tuple[str, MCPServerConfig]:
     """Materialize an OAuth preset on first click and return its saved config."""
     name = _validated_server_name((_query_first(query, "name") or "").strip())
-    config = load_config(config_path) if config_path is not None else load_config()
+    config = load_config(config_path, home=home)
     cfg = config.tools.mcp_servers.get(name)
     preset = _preset_by_name_optional(name)
     fields_provided = preset is not None and any(
@@ -1165,13 +1180,14 @@ def mcp_presets_action(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
     if not name:
         raise McpPresetError("missing MCP preset name")
     preset = _preset_by_name_optional(name)
 
-    config = load_config(config_path) if config_path is not None else load_config()
+    config = load_config(config_path, home=home)
     existing = config.tools.mcp_servers.get(name)
 
     if action == "enable":
@@ -1182,6 +1198,7 @@ def mcp_presets_action(
         payload = mcp_presets_payload(
             last_action=_action_message(action, preset),
             config_path=config_path,
+            home=home,
         )
         payload["requires_restart"] = True
         return payload
@@ -1199,7 +1216,7 @@ def mcp_presets_action(
                 cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
             save_config(config, config_path)
-            delete_mcp_oauth_credentials(name)
+            delete_mcp_oauth_credentials(name, home=config.instance_home)
         last_action = (
             _action_message(action, preset)
             if preset is not None
@@ -1218,6 +1235,7 @@ def mcp_presets_action(
         payload = mcp_presets_payload(
             last_action=last_action,
             config_path=config_path,
+            home=home,
         )
         payload["requires_restart"] = True
         return payload
@@ -1259,16 +1277,18 @@ async def mcp_presets_settings_action(
 ) -> dict[str, Any]:
     """Run a WebUI MCP preset action and hot-reload the agent when config changes."""
     config_path = config.path if config is not None else None
+    home = config.instance_home if config is not None else None
     if action is None:
         return mcp_presets_payload(
             runtime_status=mcp_runtime_status() if mcp_runtime_status is not None else None,
             config_path=config_path,
+            home=home,
         )
     name = (_query_first(query, "name") or "").strip()
     if name.startswith("plugin-"):
-        plugin_config = load_config(config_path) if config_path is not None else load_config()
+        plugin_config = load_config(config_path, home=home)
         plugin_name = name.removeprefix("plugin-")
-        plugins = discover_agent_plugins(plugin_config.workspace_path)
+        plugins = discover_agent_plugins(plugin_config.workspace_path, home=plugin_config.instance_home)
         plugin = next((item for item in plugins if item.name == plugin_name), None)
         if name not in plugin_config.tools.mcp_servers and plugin is not None:
             if action not in {"enable", "disable"}:
@@ -1278,17 +1298,19 @@ async def mcp_presets_settings_action(
                 plugin_config.workspace_path,
                 plugin_name,
                 action == "enable",
+                home=plugin_config.instance_home,
             )
             verb = "enabled" if action == "enable" else "disabled"
             payload = mcp_presets_payload(
                 last_action={"ok": True, "message": f"{plugin.display_name} {verb}."},
                 config_path=config_path,
+                home=home,
             )
             if reload_mcp is not None:
                 payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
             return payload
     if action == "test":
-        payload = await mcp_presets_test_action(query, config_path=config_path)
+        payload = await mcp_presets_test_action(query, config_path=config_path, home=home)
         return attach_mcp_runtime_status(
             payload,
             mcp_runtime_status() if mcp_runtime_status is not None else None,
@@ -1298,12 +1320,13 @@ async def mcp_presets_settings_action(
             mcp_reconnect_action,
             query,
             config_path=config_path,
+            home=home,
         )
     elif config is not None:
         operation = custom_mcp_action if action in _CUSTOM_ACTIONS else mcp_presets_action
         payload = await asyncio.to_thread(
             config.run_serialized,
-            lambda path: operation(action, query, config_path=path),
+            lambda path: operation(action, query, config_path=path, home=home),
         )
     elif action in _CUSTOM_ACTIONS:
         payload = await asyncio.to_thread(custom_mcp_action, action, query)

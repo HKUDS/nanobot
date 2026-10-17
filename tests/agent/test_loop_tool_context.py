@@ -318,3 +318,28 @@ async def test_process_message_captures_original_text_before_restore(
         )
 
     assert seen == [(expected, runtime)]
+
+
+def test_config_home_reaches_sessions_and_subagent_tools(tmp_path: Path, monkeypatch) -> None:
+    from nanobot.agent.tools.loader import ToolLoader
+    from nanobot.config.loader import load_config
+
+    home = tmp_path / "instance"
+    config = load_config(tmp_path / "external.json", home=home)
+    contexts = []
+    original_load = ToolLoader.load
+
+    def capture_load(self, ctx, registry, *, scope="core"):
+        contexts.append(ctx)
+        return original_load(self, ctx, registry, scope=scope)
+
+    monkeypatch.setattr(ToolLoader, "load", capture_load)
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "other")
+    loop = AgentLoop.from_config(config, tool_registry=ToolRegistry(), provider=_provider_for_loop())
+    loop.subagents._build_tools(workspace=tmp_path / "project")
+
+    assert loop.sessions.sessions_dir.is_relative_to(home / "sessions")
+    assert loop.workspace == home / "workspace"
+    assert len(contexts) == 2
+    assert all(context.instance_home == home for context in contexts)
+    assert contexts[-1].workspace == str(tmp_path / "project")

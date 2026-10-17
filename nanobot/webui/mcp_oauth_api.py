@@ -9,12 +9,14 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
 
 from nanobot.agent.tools.mcp import MCPConnection, connect_mcp_servers
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH, MCPOAuthHandlers
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.home import get_home_path
 from nanobot.config.schema import MCPServerConfig
 from nanobot.security.network import validate_url_target
 from nanobot.webui.http_utils import is_loopback_host
@@ -100,7 +102,8 @@ def prepare_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, bool]:
 class McpOAuthManager:
     """Own short-lived browser flows while the gateway process is running."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, home: Path | None = None) -> None:
+        self._home = (home or get_home_path()).expanduser().resolve()
         self._flows: dict[str, _McpOAuthFlow] = {}
         self._states: dict[str, str] = {}
 
@@ -302,6 +305,7 @@ class McpOAuthManager:
                 {flow.name: flow.cfg},
                 ToolRegistry(),
                 oauth_handlers={flow.name: handlers},
+                home=self._home,
             )
             if flow.name not in connections:
                 await self._close_connections(connections)

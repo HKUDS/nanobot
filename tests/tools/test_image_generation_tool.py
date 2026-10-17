@@ -274,3 +274,31 @@ async def test_generate_image_tool_rejects_reference_outside_workspace(tmp_path:
     result = await tool.execute(prompt="edit", reference_images=[str(outside)])
 
     assert "reference_images must be inside the workspace" in result
+
+
+async def test_image_reference_media_uses_captured_home(tmp_path, monkeypatch):
+    first_home, second_home = tmp_path / "a", tmp_path / "b"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    references = []
+    for home in (first_home, second_home):
+        image = home / "media" / "reference.png"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(PNG_BYTES)
+        references.append(image)
+    FakeImageClient.instances = []
+    monkeypatch.setattr(
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name, connection=None: FakeImageClient,
+    )
+    tool = ImageGenerationTool(
+        workspace=workspace, config=ImageGenerationToolConfig(enabled=True), home=first_home,
+    )
+    monkeypatch.setattr("nanobot.config.home._home_path", second_home)
+
+    result = json.loads(await tool.execute(prompt="edit", reference_images=[str(references[0])]))
+    assert result["artifacts"][0]["source_images"] == [str(references[0])]
+    assert FakeImageClient.instances[0].calls[0]["reference_images"] == [str(references[0])]
+    denied = await tool.execute(prompt="edit", reference_images=[str(references[1])])
+    assert "reference_images must be inside the workspace" in denied
+    assert sum(len(client.calls) for client in FakeImageClient.instances) == 1

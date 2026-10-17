@@ -54,7 +54,7 @@ def _classic_dependency(name: str) -> Any:
 def agent(
     message: str | None = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str | None = typer.Option(None, "--session", "-s", help="Session ID"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     markdown: bool = typer.Option(
         True,

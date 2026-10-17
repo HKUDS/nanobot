@@ -1283,7 +1283,8 @@ async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch, codex_oauth) -
     client = CodexImageGenerationClient(api_key=None, proxy=proxy)
     response = await client.generate(prompt="draw", model="gpt-image-2")
     assert response.images == [PNG_DATA_URL]
-    assert codex_oauth == [{"proxy": proxy}]
+    assert [call["proxy"] for call in codex_oauth] == [proxy]
+    assert codex_oauth[0]["storage"].get_token_path().name == "codex.json"
     assert captured["client_kwargs"]["proxy"] == proxy
     assert captured["client_kwargs"]["trust_env"] is False
 

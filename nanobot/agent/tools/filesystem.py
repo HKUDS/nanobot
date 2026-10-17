@@ -50,7 +50,9 @@ class _FsTool(Tool):
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
         extra_read_allowed_files: list[Path] | None = None,
+        home: Path | None = None,
     ):
+        self._home = home
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         # Legacy alias: extra_allowed_dirs is read-only. Write-capable tools
@@ -90,6 +92,7 @@ class _FsTool(Tool):
         # capability: expose only the append-only log, not the surrounding memory directory.
         return cls(
             workspace=agent_workspace,
+            home=ctx.instance_home,
             allowed_dir=allowed_dir,
             extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, resolved_agent_workspace / "skills"],
             extra_read_allowed_files=[resolved_agent_workspace / "memory" / "history.jsonl"],
@@ -140,6 +143,7 @@ class _FsTool(Tool):
             extra_allowed_dirs,
             extra_allowed_files,
             include_media_dir=include_media_dir,
+            home=self._home,
         )
 
     def _resolve_read(self, path: str) -> Path:
@@ -161,6 +165,7 @@ class _FsTool(Tool):
                         enabled_agent_plugin_skill_dirs(
                             Path(self._workspace),
                             requested_path=candidate.resolve(strict=False),
+                            home=self._home,
                         )
                     )
             except (OSError, RuntimeError):

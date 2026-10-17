@@ -12,13 +12,13 @@ import os
 import re
 import ssl
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
 from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
-from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-from oauth_cli_kit.storage import FileTokenStorage
+from oauth_cli_kit.storage import TokenStorage
 
 from nanobot import __version__
 from nanobot.providers.base import (
@@ -36,6 +36,7 @@ from nanobot.providers.oauth_catalog_cache import (
     OAuthModelCatalogSnapshot,
     oauth_catalog_auth_rejected,
 )
+from nanobot.providers.oauth_storage import codex_token_storage
 from nanobot.providers.openai_responses import (
     ResponsesBackend,
     ResponsesWebSocketOptions,
@@ -174,8 +175,10 @@ class OpenAICodexProvider(LLMProvider):
         extra_body: dict[str, Any] | None = None,
         *,
         provider_name: str = "openai_codex",
+        home: Path | None = None,
     ):
         super().__init__(api_key=None, api_base=None, provider_name=provider_name)
+        self._token_storage = codex_token_storage(home)
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
@@ -277,7 +280,7 @@ class OpenAICodexProvider(LLMProvider):
                     provider_context.context_window_tokens - max_tokens - CONTEXT_SAFETY_BUFFER,
                 )
         try:
-            token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
+            token = await asyncio.to_thread(get_codex_token, storage=self._token_storage, proxy=self.proxy)
             headers = _build_headers(
                 cast(str, token.account_id),
                 token.access,
@@ -765,13 +768,17 @@ def get_openai_codex_model_catalog(
     proxy: str | None = None,
     *,
     refresh: bool = False,
+    home: Path | None = None,
 ) -> OAuthModelCatalogSnapshot:
-    storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    storage = codex_token_storage(home)
     token = storage.load()
     account_id = getattr(token, "account_id", None)
     account_key = _catalog_account_key(account_id)
     cache_key = f"{storage.get_token_path()}\0{account_key}\0{proxy or ''}"
-    return _OPENAI_CODEX_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy, refresh=refresh)
+    return _OPENAI_CODEX_MODEL_CATALOG.get(
+        cache_key=cache_key, refresh=refresh,
+        fetch=lambda: _fetch_openai_codex_models(proxy, storage=storage),
+    )
 
 
 def invalidate_openai_codex_model_catalog() -> None:
@@ -797,9 +804,11 @@ def _codex_login_required(exc: RuntimeError) -> bool:
     return False
 
 
-def _fetch_openai_codex_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
+def _fetch_openai_codex_models(
+    proxy: str | None, *, storage: TokenStorage | None = None,
+) -> tuple[ProviderModelSpec, ...]:
     try:
-        token = get_codex_token(proxy=proxy)
+        token = get_codex_token(storage=storage or codex_token_storage(), proxy=proxy)
     except RuntimeError as exc:
         if _codex_login_required(exc):
             raise OAuthCatalogAuthRequiredError() from None

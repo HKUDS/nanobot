@@ -29,7 +29,7 @@ def test_device_prompt_precedes_approval_and_success_persists_token(monkeypatch)
 
     client = httpx.Client(transport=httpx.MockTransport(respond))
     monkeypatch.setattr(provider.httpx, "Client", lambda **_kwargs: client)
-    monkeypatch.setattr(provider, "get_storage", lambda: SimpleNamespace(save=saved.append))
+    monkeypatch.setattr(provider, "get_storage", lambda home=None: SimpleNamespace(save=saved.append))
     monkeypatch.setattr(provider.webbrowser, "open", lambda *_args: (_ for _ in ()).throw(
         AssertionError("The gateway must not open the user's browser")
     ))
@@ -67,7 +67,7 @@ def test_cancelling_device_flow_interrupts_polling_without_saving(monkeypatch):
 
     client = httpx.Client(transport=httpx.MockTransport(respond))
     monkeypatch.setattr(provider.httpx, "Client", lambda **_kwargs: client)
-    monkeypatch.setattr(provider, "get_storage", lambda: SimpleNamespace(save=saved.append))
+    monkeypatch.setattr(provider, "get_storage", lambda home=None: SimpleNamespace(save=saved.append))
     flow = GitHubCopilotOAuthFlow()
     flow.start()
     flow.cancel()
@@ -100,7 +100,7 @@ def test_approval_after_cancellation_cannot_overwrite_saved_credentials(monkeypa
         return SimpleNamespace(access="new-account-secret")
 
     monkeypatch.setattr(oauth, "login_github_copilot", login)
-    monkeypatch.setattr(provider, "get_storage", lambda: SimpleNamespace(save=saved.append))
+    monkeypatch.setattr(provider, "get_storage", lambda home=None: SimpleNamespace(save=saved.append))
     flow = GitHubCopilotOAuthFlow()
     try:
         flow.start()

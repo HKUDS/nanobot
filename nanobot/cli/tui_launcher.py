@@ -28,6 +28,7 @@ from nanobot.cli.webui_support import (
 )
 from nanobot.config.paths import get_data_dir
 from nanobot.config.schema import Config
+from nanobot.process_runtime import process_selectors_mismatch
 from nanobot.webui.session_identity import is_webui_session_key, webui_chat_id
 
 if TYPE_CHECKING:
@@ -85,7 +86,7 @@ def launch_tui(
 ) -> int:
     """Run the native TUI against the shared local gateway."""
     chat_id = _initial_tui_chat_id(session_id)
-    tui_workspace = _initial_tui_workspace(workspace_override)
+    tui_workspace = _initial_tui_workspace()
     command = resolve_tui_command()
     base_url, bootstrap_secret = _tui_gateway_connection(config)
     gateway: _GatewayHandle | None = None
@@ -114,8 +115,7 @@ def launch_tui(
                 "NANOBOT_TUI_THEME": theme,
                 "NANOBOT_TUI_GATEWAY_STOP_COMMAND": _gateway_instance_command(
                     "stop",
-                    config_path=config_path,
-                    workspace=workspace_override,
+                    home=config.instance_home,
                 ),
             }
         )
@@ -127,16 +127,15 @@ def launch_tui(
             env["NANOBOT_TUI_CHAT_ID"] = chat_id
         else:
             env.pop("NANOBOT_TUI_CHAT_ID", None)
+        gateway = _ensure_gateway(
+            config,
+            config_path=config_path,
+            wait_until_ready=False,
+        )
         try:
             process = subprocess.Popen(command, env=env)
         except OSError as exc:
             raise TuiUnavailableError(f"could not start the native TUI: {exc}") from exc
-        gateway = _ensure_gateway(
-            config,
-            config_path=config_path,
-            workspace_override=workspace_override,
-            wait_until_ready=False,
-        )
         exit_code = process.wait()
         if exit_code == _TUI_DETACH_EXIT_CODE:
             lease = gateway.lease
@@ -410,7 +409,6 @@ def _ensure_gateway(
     config: Config,
     *,
     config_path: Path,
-    workspace_override: str | None,
     wait_until_ready: bool = True,
 ) -> _GatewayHandle:
     from nanobot.gateway import (
@@ -422,8 +420,10 @@ def _ensure_gateway(
     base_url, _bootstrap_secret = _tui_gateway_connection(config)
     instance = GatewayInstance.resolve(
         config_path=config_path,
-        workspace=workspace_override,
+        workspace=str(config.workspace_path),
+        home=config.instance_home,
     )
+    options = instance.start_options(port=config.gateway.port)
     runtime = GatewayRuntime(paths=instance.paths)
     lease = GatewayClientLease(runtime, kind="tui")
     lease.acquire()
@@ -463,6 +463,12 @@ def _ensure_gateway(
 
         status = runtime.status()
         if status.running:
+            if process_selectors_mismatch(status, options):
+                raise TuiUnavailableError(
+                    "gateway is running with a different config or agent workspace "
+                    f"(config: {status.config_path}; workspace: {status.workspace}); "
+                    "stop it before changing those paths"
+                )
             if status.port not in {None, config.gateway.port}:
                 raise TuiUnavailableError(
                     "the matching gateway instance is running on a different port; "
@@ -480,8 +486,15 @@ def _ensure_gateway(
             )
 
         result = lease.ensure_on_demand_gateway(
-            instance.start_options(port=config.gateway.port)
+            options
         )
+        if result.message == "gateway_instance_mismatch":
+            raise TuiUnavailableError(
+                "gateway is running with a different config or agent workspace "
+                f"(config: {result.status.config_path}; "
+                f"workspace: {result.status.workspace}); "
+                "stop it before changing those paths"
+            )
         if not result.ok and result.message != "gateway_already_running":
             raise TuiUnavailableError(
                 f"could not start the local gateway ({result.message}); "
@@ -541,7 +554,6 @@ def _initial_tui_chat_id(session_id: str | None) -> str | None:
     return None
 
 
-def _initial_tui_workspace(workspace_override: str | None) -> Path:
-    """Use the launch directory unless the caller explicitly selects a workspace."""
-    workspace = Path(workspace_override) if workspace_override is not None else Path.cwd()
-    return workspace.expanduser().resolve(strict=False)
+def _initial_tui_workspace() -> Path:
+    """Select the launch directory as the initial session project."""
+    return Path.cwd().resolve(strict=False)

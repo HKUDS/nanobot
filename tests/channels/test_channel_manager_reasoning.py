@@ -72,7 +72,7 @@ def manager() -> ChannelManager:
 def test_websocket_gateway_uses_configured_workspace_restriction(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "nanobot.webui.workspaces.read_webui_default_access_mode",
-        lambda: "default",
+        lambda *, home=None: "default",
     )
     config = Config.model_validate(
         {

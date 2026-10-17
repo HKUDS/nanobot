@@ -17,13 +17,15 @@ from nanobot.webui.http_utils import query_first
 QueryParams = dict[str, list[str]]
 
 
-def nanobot_features_payload(*, config_path: Path | None = None) -> dict[str, Any]:
+def nanobot_features_payload(
+    *, config_path: Path | None = None, home: Path | None = None,
+) -> dict[str, Any]:
     if config_path is None:
-        return optional_features_payload()
+        return optional_features_payload(home=home)
 
     from nanobot.config.loader import load_config
 
-    return optional_features_payload(config=load_config(config_path))
+    return optional_features_payload(config=load_config(config_path, home=home))
 
 
 def nanobot_feature_instance_target(query: QueryParams) -> str | None:
@@ -40,6 +42,7 @@ def nanobot_features_action(
     *,
     allow_install: bool = True,
     config_path: Path | None = None,
+    home: Path | None = None,
 ) -> dict[str, Any]:
     name = (query_first(query, "name") or "").strip()
     instance_id = nanobot_feature_instance_target(query)
@@ -59,11 +62,13 @@ def nanobot_features_action(
             return install_optional_feature_support(
                 name,
                 config_path=config_path,
+                home=home,
                 allow_install=allow_install,
             )
         return enable_optional_feature(
             name,
             config_path=config_path,
+            home=home,
             allow_install=allow_install,
             instance_id=instance_id,
         )
@@ -81,6 +86,7 @@ def nanobot_features_action(
         return disable_optional_feature(
             name,
             config_path=config_path,
+            home=home,
             instance_id=instance_id,
         )
     raise OptionalFeatureError(f"unknown feature action '{action}'", status=404)

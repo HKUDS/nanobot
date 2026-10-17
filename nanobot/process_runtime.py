@@ -40,6 +40,7 @@ class ProcessStartOptions:
     verbose: bool = False
     workspace: str | None = None
     config_path: str | None = None
+    home: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,9 @@ class ProcessStatus:
     port: int | None = None
     command: tuple[str, ...] = ()
     reason: str = "not_started"
+    config_path: str | None = None
+    workspace: str | None = None
+    home: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,7 +116,12 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
     def _start_background(self, options: _StartOptionsT) -> ProcessResult:
         current = self.status()
         if current.running:
-            return ProcessResult(False, self._message("already_running"), current)
+            reason = (
+                "instance_mismatch"
+                if self.selectors_mismatch(current, options)
+                else "already_running"
+            )
+            return ProcessResult(False, self._message(reason), current)
 
         command = self._build_child_command(options)
         self.paths.run_dir.mkdir(parents=True, exist_ok=True)
@@ -145,8 +154,11 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             "port": options.port,
             "workspace": options.workspace,
             "config_path": options.config_path,
+            "home": options.home,
             "command": command,
             "log_path": str(self.paths.log_path),
+            "launch_mode": "background",
+            "pending_pid_handoff": True,
         }
         state.update(self.process_identity_record(pid))
         self._write_state(state)
@@ -193,6 +205,9 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
     def restart(self, options: _StartOptionsT, *, timeout_s: int = 20) -> ProcessResult:
         """Restart the managed process."""
         with self._lifecycle_lock():
+            current = self.status()
+            if current.running and self.selectors_mismatch(current, options):
+                return ProcessResult(False, self._message("instance_mismatch"), current)
             stop_result = self._stop(timeout_s=timeout_s)
             recoverable = {self._message("not_running"), self._message("state_stale")}
             if not stop_result.ok and stop_result.message not in recoverable:
@@ -236,6 +251,27 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             reason=reason or (
                 "identity_unavailable" if identity_match == "unknown" else "running"
             ),
+            config_path=_as_str(state.get("config_path")),
+            workspace=_as_str(state.get("workspace")),
+            home=_as_str(state.get("home")),
+        )
+
+    @staticmethod
+    def selectors_mismatch(status: ProcessStatus, options: ProcessStartOptions) -> bool:
+        return process_selectors_mismatch(status, options)
+
+    def _pending_parent_pid_handoff(
+        self, current: ProcessStatus, state: dict[str, Any],
+    ) -> bool:
+        """Allow a managed Windows launcher to yield its recorded PID to its child."""
+        return (
+            self.platform_name == "Windows"
+            and current.running
+            and current.pid != os.getpid()
+            and current.pid == os.getppid()
+            and state.get("pid") == current.pid
+            and state.get("launch_mode") == "background"
+            and state.get("pending_pid_handoff") is True
         )
 
     def read_log_tail(self, *, tail: int = 200) -> list[str]:
@@ -578,6 +614,33 @@ def _as_int(value: object) -> int | None:
 
 def _as_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _same_path(left: str | None, right: str | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    first = Path(left).expanduser().resolve(strict=False)
+    second = Path(right).expanduser().resolve(strict=False)
+    try:
+        if first.samefile(second):
+            return True
+    except OSError:
+        pass
+    return os.path.normcase(str(first)) == os.path.normcase(str(second))
+
+
+def process_selectors_mismatch(
+    status: ProcessStatus, options: ProcessStartOptions,
+) -> bool:
+    """Compare a live process's recorded paths with a requested launch."""
+    return any(
+        not _same_path(active, requested)
+        for active, requested in (
+            (status.config_path, options.config_path),
+            (status.workspace, options.workspace),
+            (status.home, options.home),
+        )
+    )
 
 
 def _darwin_identity_match(

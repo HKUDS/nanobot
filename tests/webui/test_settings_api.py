@@ -62,7 +62,7 @@ def test_settings_payload_propagates_preset_resolution_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = Config()
-    monkeypatch.setattr("nanobot.webui.settings_api.load_config", lambda: config)
+    monkeypatch.setattr("nanobot.webui.settings_api.load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(
         Config,
         "resolve_preset",
@@ -446,7 +446,7 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
         "nanobot.webui.settings_api._oauth_provider_status",
-        lambda spec: {
+        lambda spec, *, home=None: {
             "configured": spec.name == "openai_codex",
             "account": "acct-test",
             "expires_at": 123,
@@ -1076,7 +1076,7 @@ def test_update_provider_settings_updates_and_clears_oauth_proxy(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
         "nanobot.webui.settings_api._oauth_provider_status",
-        lambda _spec: {
+        lambda _spec, *, home=None: {
             "configured": False,
             "account": None,
             "expires_at": None,
@@ -1214,7 +1214,7 @@ def test_settings_payload_includes_oauth_provider_status(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    def fake_oauth_status(spec):
+    def fake_oauth_status(spec, *, home=None):
         if spec.name == "openai_codex":
             return {
                 "configured": True,
@@ -1842,7 +1842,7 @@ def test_xai_grok_status_accepts_refreshable_login(
     )
     monkeypatch.setattr(
         "nanobot.providers.xai_oauth.get_xai_oauth_login_status",
-        lambda: token,
+        lambda *, home=None: token,
     )
 
     status = _oauth_provider_status(find_by_name("xai_grok"))
@@ -1878,7 +1878,7 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
         def cancel(self) -> None:
             captured["cancelled"] = True
 
-    def fake_start(*, proxy=None, timeout_s=None, open_browser=None):
+    def fake_start(*, proxy=None, timeout_s=None, open_browser=None, home=None):
         captured.update(
             proxy=proxy,
             timeout_s=timeout_s,
@@ -2046,7 +2046,7 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
         def cancel(self) -> None:
             captured["cancelled"] = True
 
-    def fake_start(*, proxy=None, timeout_s=None):
+    def fake_start(*, proxy=None, timeout_s=None, home=None):
         captured.update(proxy=proxy, timeout_s=timeout_s)
         return FakeFlow()
 
@@ -2141,7 +2141,7 @@ def test_xai_grok_logout_removes_token_through_shared_lock(
     token_path.with_suffix(".lock").write_text("", encoding="utf-8")
     monkeypatch.setattr(
         "nanobot.providers.xai_oauth.get_xai_oauth_storage_path",
-        lambda: token_path,
+        lambda _home=None: token_path,
     )
 
     logout_oauth_provider(
@@ -2614,7 +2614,7 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
         "nanobot.webui.settings_api._oauth_provider_status",
-        lambda spec: {
+        lambda spec, *, home=None: {
             "configured": spec.name == "openai_codex",
             "account": "acct-test",
             "expires_at": 123,

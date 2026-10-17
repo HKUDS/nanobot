@@ -20,7 +20,7 @@ def get_config_path() -> Path:
 
 def get_data_dir() -> Path:
     """Return the instance-level runtime data directory."""
-    return ensure_dir(get_config_path().parent)
+    return ensure_dir(get_home_path())
 
 
 def get_runtime_subdir(name: str) -> Path:

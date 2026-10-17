@@ -25,7 +25,7 @@ def test_home_onboard_and_status(tmp_path):
     result = runner.invoke(app, ["--home", str(home), "onboard"])
     assert result.exit_code == 0, result.output
     data = json.loads((home / "config.json").read_text(encoding="utf-8"))
-    assert Path(data["agents"]["defaults"]["workspace"]) == home / "workspace"
+    assert data["agents"]["defaults"]["workspace"] == "./workspace"
     assert (home / "workspace" / "SOUL.md").is_file()
     result = runner.invoke(app, ["--home", str(home), "status"])
     assert result.exit_code == 0, result.output

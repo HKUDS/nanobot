@@ -14,6 +14,7 @@ __all__ = [
     "_load_config_for_cli",
     "_load_inspection_config",
     "_load_runtime_config",
+    "_resolve_workspace_override",
     "_migrate_cron_store",
     "_model_display",
     "_print_agent_start_error",
@@ -100,13 +101,14 @@ def _load_config_for_cli(
     config_path: Path | None = None,
     *,
     resolve_env: bool = False,
+    home: Path | None = None,
 ) -> Config:
     """Load CLI configuration and turn expected failures into a clean exit."""
     from nanobot.config.errors import ConfigLoadError
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
     try:
-        loaded = load_config(config_path)
+        loaded = load_config(config_path, home=home) if home is not None else load_config(config_path)
         if resolve_env:
             loaded = resolve_config_env_vars(loaded)
         return loaded
@@ -115,33 +117,37 @@ def _load_config_for_cli(
         raise typer.Exit(1) from exc
 
 
+def _resolve_workspace_override(workspace: str) -> str:
+    if not workspace.strip():
+        raise typer.BadParameter("must not be empty", param_hint="--workspace")
+    return str(Path(workspace).expanduser().resolve())
+
+
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import set_config_path
 
     config_path = None
-    if config:
+    if config is not None:
+        if not config.strip():
+            raise typer.BadParameter("must not be empty", param_hint="--config")
         config_path = Path(config).expanduser().resolve()
         if not config_path.exists():
             console.print(f"[red]Error: Config file not found: {config_path}[/red]")
             raise typer.Exit(1)
         set_config_path(config_path)
-        console.print(f"[dim]Using config: {config_path}[/dim]")
+        console.print(Text(f"Using config: {config_path}", style="dim"), soft_wrap=True)
 
     loaded = _load_config_for_cli(config_path, resolve_env=True)
-    if workspace:
-        loaded.agents.defaults.workspace = workspace
+    if workspace is not None:
+        loaded.agents.defaults.workspace = _resolve_workspace_override(workspace)
     _validate_session_storage(loaded, workspace_override=workspace)
     return loaded
 
 
 def _validate_session_storage(config: Config, *, workspace_override: str | None = None) -> None:
     """Reject overlapping session storage before startup creates workspace files."""
-    from nanobot.config.loader import get_config_path
-
-    config_path = get_config_path().expanduser().resolve(strict=False)
-    data_dir = config.runtime_data_dir or config_path.parent
-    sessions = (data_dir / "sessions").resolve(strict=False)
+    sessions = (config.instance_home / "sessions").resolve(strict=False)
     workspace = config.workspace_path.resolve(strict=False)
     if not sessions.is_relative_to(workspace):
         return
@@ -149,13 +155,14 @@ def _validate_session_storage(config: Config, *, workspace_override: str | None 
     source = "--workspace" if workspace_override else "agents.defaults.workspace"
     console.print(Text("Cannot start: chat history must be outside the workspace.", style="red"))
     console.print()
-    console.print(Text(f"Workspace ({source}): {workspace}"))
-    console.print(Text(f"Chat history: {sessions}"))
+    console.print(Text(f"Workspace ({source}): {workspace}"), soft_wrap=True)
+    console.print(Text(f"Config: {config.source_path}"), soft_wrap=True)
+    console.print(Text(f"Chat history: {sessions}"), soft_wrap=True)
     console.print()
     console.print("To fix, keep the workspace in place:")
     console.print("  1. Stop the instance and back up its files.")
-    console.print("  2. Move config.json and its runtime data outside the workspace.")
-    console.print("  3. Restart with --config pointing to the moved config file.")
+    console.print("  2. Keep the instance home and its private data outside the agent workspace.")
+    console.print("  3. Restart with --home selecting that home and --workspace selecting the agent workspace.")
     console.print("Migration help: docs/troubleshooting.md")
     raise typer.Exit(1)
 
@@ -169,7 +176,9 @@ def _load_inspection_config(
     from nanobot.config.loader import get_config_path, load_config, set_config_path
 
     config_path = None
-    if config:
+    if config is not None:
+        if not config.strip():
+            raise typer.BadParameter("must not be empty", param_hint="--config")
         config_path = Path(config).expanduser().resolve(strict=False)
         set_config_path(config_path)
         console.print(f"[dim]Using config: {config_path}[/dim]")
@@ -183,8 +192,8 @@ def _load_inspection_config(
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
-    if workspace:
-        loaded.agents.defaults.workspace = workspace
+    if workspace is not None:
+        loaded.agents.defaults.workspace = _resolve_workspace_override(workspace)
     return display_path, loaded
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.channels.contracts import channel_field_value
-from nanobot.config.paths import get_config_path
+from nanobot.config.home import get_home_path
 
 
 def local_state_present(section: Any) -> bool:
@@ -15,7 +15,7 @@ def local_state_present(section: Any) -> bool:
     state_dir = (
         Path(str(configured_dir)).expanduser()
         if configured_dir
-        else get_config_path().parent / "weixin"
+        else get_home_path() / "weixin"
     )
     try:
         payload = json.loads((state_dir / "account.json").read_text(encoding="utf-8"))

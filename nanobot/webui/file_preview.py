@@ -38,9 +38,9 @@ class WebUIFilePreviewError(ValueError):
         self.message = message
 
 
-def file_reference_payload(raw_path: str | None, *, scope: WorkspaceScope) -> dict[str, str | None]:
+def file_reference_payload(raw_path: str | None, *, scope: WorkspaceScope, home: Path | None = None) -> dict[str, str | None]:
     """Resolve copyable paths through the preview policy without reading file contents."""
-    resolved = _resolve_preview_path(raw_path, scope=scope)
+    resolved = _resolve_preview_path(raw_path, scope=scope, home=home)
     try:
         relative = resolved.relative_to(scope.project_path).as_posix()
     except ValueError:
@@ -52,11 +52,12 @@ def file_preview_payload(
     raw_path: str | None,
     *,
     scope: WorkspaceScope,
+    home: Path | None = None,
     max_bytes: int = MAX_FILE_PREVIEW_BYTES,
 ) -> dict[str, Any]:
     """Return a bounded source or raster preview within the session workspace scope."""
 
-    resolved = _resolve_preview_path(raw_path, scope=scope)
+    resolved = _resolve_preview_path(raw_path, scope=scope, home=home)
 
     try:
         with open(resolved, "rb") as f:
@@ -107,10 +108,11 @@ def file_preview_availability_payload(
     raw_path: str | None,
     *,
     scope: WorkspaceScope,
+    home: Path | None = None,
 ) -> dict[str, bool]:
     """Probe a readable source or raster candidate without loading it fully."""
 
-    resolved = _resolve_preview_path(raw_path, scope=scope)
+    resolved = _resolve_preview_path(raw_path, scope=scope, home=home)
     try:
         with open(resolved, "rb") as f:
             prefix = f.read(4096)
@@ -125,7 +127,7 @@ def file_preview_availability_payload(
     return {"available": True}
 
 
-def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Path:
+def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope, home: Path | None = None) -> Path:
     path = _clean_preview_path(raw_path)
     if not path:
         raise WebUIFilePreviewError(400, "missing path")
@@ -133,7 +135,7 @@ def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Pat
         raise WebUIFilePreviewError(400, "path is too long")
 
     try:
-        extra_roots = [get_media_dir()] if scope.restrict_to_workspace else None
+        extra_roots = [home / "media" if home is not None else get_media_dir()] if scope.restrict_to_workspace else None
         resolved = resolve_allowed_path(
             path,
             workspace=scope.project_path,

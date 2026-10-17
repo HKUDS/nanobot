@@ -59,6 +59,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.command.router import command_text
+from nanobot.config.home import get_home_path
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
@@ -312,6 +313,7 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        instance_home: Path | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -329,6 +331,7 @@ class AgentLoop:
         self.channels_config = channels_config
         self.restart_mode = restart_mode
         self._runtime_model_publisher = runtime_model_publisher
+        self.instance_home = (instance_home or get_home_path()).expanduser().resolve()
         self.workspace = workspace
         initial_model = model or provider.get_default_model()
         self.max_iterations = (
@@ -378,8 +381,12 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
-        self.sessions = session_manager or SessionManager(workspace)
+        self.context = ContextBuilder(
+            workspace, timezone=timezone, disabled_skills=disabled_skills, home=self.instance_home,
+        )
+        self.sessions = session_manager or SessionManager(
+            workspace, sessions_root=self.instance_home / "sessions",
+        )
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)
@@ -401,6 +408,7 @@ class AgentLoop:
             ),
         )
         self.subagents = SubagentManager(
+            instance_home=self.instance_home,
             workspace=workspace,
             bus=bus,
             tools_config=_tc,
@@ -484,10 +492,9 @@ class AgentLoop:
             bus = MessageBus()
         defaults = config.agents.defaults
         if "session_manager" not in extra:
-            data_dir = config.runtime_data_dir
             extra["session_manager"] = SessionManager(
                 config.workspace_path,
-                sessions_root=data_dir / "sessions" if data_dir is not None else None,
+                sessions_root=config.instance_home / "sessions",
             )
         provider = extra.pop("provider", None) or make_provider(config)
         resolved = config.resolve_preset()
@@ -502,6 +509,7 @@ class AgentLoop:
             bus=bus,
             provider=provider,
             workspace=config.workspace_path,
+            instance_home=config.instance_home,
             model=model,
             max_iterations=defaults.max_tool_iterations,
             max_concurrent_subagents=defaults.max_concurrent_subagents,
@@ -653,6 +661,7 @@ class AgentLoop:
         runtime_control = AgentRuntimeControl(self)
         self.register_runtime_context_provider(runtime_control.workspace_context)
         ctx = ToolContext(
+            instance_home=self.instance_home,
             config=self.tools_config,
             workspace=str(self.workspace),
             bus=self.bus,

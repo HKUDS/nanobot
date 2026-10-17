@@ -1,7 +1,5 @@
 """WebUI CLI command."""
 
-from pathlib import Path
-
 import typer
 from pydantic import ValidationError
 from rich.console import Console
@@ -11,6 +9,7 @@ from nanobot.cli.runtime_config import (
     _print_config_error,
     _print_runtime_config_validation_error,
     _provider_setup_error,
+    _resolve_workspace_override,
     _validate_session_storage,
 )
 from nanobot.cli.webui_support import (
@@ -71,7 +70,7 @@ def webui(
         "--gateway-port",
         help="Gateway health port",
     ),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Agent workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     background: bool = typer.Option(
         False,
@@ -104,31 +103,32 @@ def webui(
     if background:
         import shlex
 
-        command = ["nanobot", "gateway", "--background", "--config", str(config_path)]
-        if workspace:
-            command.extend(
-                ["--workspace", str(Path(workspace).expanduser().resolve(strict=False))]
-            )
+        from nanobot.config.home import get_instance_paths
+
+        prefix = ["nanobot", "--home", str(get_instance_paths().home)]
+        selectors = ["--config", str(config_path)]
+        if workspace is not None:
+            selectors.extend(["--workspace", _resolve_workspace_override(workspace)])
+        command = [*prefix, "gateway", "--background", *selectors]
         console.print(
             "[red]`nanobot webui --background` no longer owns gateway lifecycle.[/red]"
         )
         console.print("Start the persistent gateway explicitly, then open the WebUI:")
-        console.print("  [cyan]" + " ".join(shlex.quote(part) for part in command) + "[/cyan]")
-        console.print(
-            "  [cyan]nanobot webui --config " + shlex.quote(str(config_path)) + "[/cyan]"
-        )
+        console.print("  " + shlex.join(command), style="cyan", markup=False, soft_wrap=True)
+        console.print("  " + shlex.join([*prefix, "webui", *selectors]), style="cyan", markup=False, soft_wrap=True)
         raise typer.Exit(1)
     created_config = not config_path.exists()
     if created_config:
         _confirm_webui_action("Set up nanobot and open WebUI on this device?", yes=yes)
 
     setup_config = _load_webui_setup_config(config_path)
-    if workspace:
-        setup_config.agents.defaults.workspace = workspace
+    runtime_setup = setup_config.model_copy(deep=True)
+    if workspace is not None:
+        runtime_setup.agents.defaults.workspace = _resolve_workspace_override(workspace)
 
     try:
         resolved_setup_config = resolve_config_env_vars(
-            setup_config.model_copy(deep=True),
+            runtime_setup,
             config_path=config_path,
         )
     except ValueError as exc:
@@ -144,9 +144,10 @@ def webui(
             port=port,
             yes=yes or created_config,
         )
-        resolved_webui_config = resolve_config_env_vars(
-            setup_config.model_copy(deep=True), config_path=config_path,
-        )
+        runtime_setup = setup_config.model_copy(deep=True)
+        if workspace is not None:
+            runtime_setup.agents.defaults.workspace = _resolve_workspace_override(workspace)
+        resolved_webui_config = resolve_config_env_vars(runtime_setup, config_path=config_path)
         _warn_webui_bind_scope(resolved_webui_config)
         webui_url = _webui_browser_url(resolved_webui_config)
     except ValidationError as exc:
@@ -163,28 +164,35 @@ def webui(
         console.print(f"[red]Error: invalid WebUI channel config: {exc}[/red]")
         raise typer.Exit(1) from exc
 
-    if created_config or provider_error or changed_webui or workspace:
-        save_config(setup_config, config_path)
-
-    workspace_path = get_workspace_path(setup_config.workspace_path)
-    workspace_path.mkdir(parents=True, exist_ok=True)
-    sync_workspace_templates(workspace_path, silent=True)
-
     runtime_config = resolved_webui_config
     effective_gateway_port = gateway_port if gateway_port is not None else runtime_config.gateway.port
+    instance = GatewayInstance.resolve(
+        config_path=config_path,
+        home=runtime_config.instance_home,
+        workspace=str(runtime_config.workspace_path),
+    )
+    runtime = GatewayRuntime(paths=instance.paths)
+    start_options = instance.start_options(port=effective_gateway_port)
+    active = runtime.status()
+    if active.running and runtime.selectors_mismatch(active, start_options):
+        console.print("[red]This home already has a gateway with different paths.[/red]")
+        console.print(f"Active config: {active.config_path}", markup=False)
+        console.print(f"Active agent workspace: {active.workspace}", markup=False)
+        raise typer.Exit(1)
+
+    if created_config or provider_error or changed_webui:
+        save_config(setup_config, config_path)
+
+    workspace_path = get_workspace_path(resolved_webui_config.workspace_path)
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    sync_workspace_templates(workspace_path, silent=True)
 
     dev_browser_url = webui_dev_browser_url(webui_url) if dev else None
     if not dev:
         webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
         _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
 
-    instance = GatewayInstance.resolve(
-        config_path=config_path,
-        workspace=workspace,
-    )
-    runtime = GatewayRuntime(paths=instance.paths)
     log_cursor = _start_gateway_log_cursor(runtime.paths.log_path)
-    start_options = instance.start_options(port=effective_gateway_port)
 
     def ensure_shared_gateway(*, client_lease: GatewayClientLease) -> None:
         """Start or refresh the one managed gateway shared by local clients."""
@@ -197,6 +205,9 @@ def webui(
         if not result.ok and (restart_attempted or result.message != "gateway_already_running"):
             action = "restarted" if restart_attempted else "started"
             console.print(f"[yellow]Gateway was not {action}: {result.message}[/yellow]")
+            if result.message == "gateway_instance_mismatch":
+                console.print(f"Active config: {result.status.config_path}", markup=False)
+                console.print(f"Active agent workspace: {result.status.workspace}", markup=False)
             console.print(f"Logs: {result.status.log_path}")
             raise typer.Exit(1)
         if not _wait_for_webui(webui_url, timeout_s=20):
@@ -234,7 +245,7 @@ def webui(
         if not existing_gateway:
             console.print("[dim]Starting WebUI…[/dim]")
             ensure_shared_gateway(client_lease=lease)
-        elif changed_webui and runtime.status().running:
+        elif runtime.status().running:
             ensure_shared_gateway(client_lease=lease)
             if not (_gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
                     and _webui_endpoint_reachable(webui_url)):

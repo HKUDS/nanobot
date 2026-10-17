@@ -163,7 +163,7 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
 async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch) -> None:
     started = asyncio.Event()
 
-    async def connect_mcp_servers(_servers: dict, _registry: ToolRegistry) -> dict:
+    async def connect_mcp_servers(_servers: dict, _registry: ToolRegistry, *, home=None) -> dict:
         started.set()
         await asyncio.sleep(60)
         return {}
@@ -197,7 +197,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
     class AuthorizationRequiredError(RuntimeError):
         pass
 
-    async def create_auth(_name: str, _url: str, _handlers=None) -> httpx.Auth:
+    async def create_auth(_name: str, _url: str, _handlers=None, *, home=None) -> httpx.Auth:
         return OAuthAuth()
 
     @asynccontextmanager
@@ -217,7 +217,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
     oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
     oauth_mod.MCPAuthorizationRequiredError = AuthorizationRequiredError  # type: ignore[attr-defined]
     oauth_mod.create_mcp_oauth_auth = create_auth  # type: ignore[attr-defined]
-    oauth_mod.mcp_oauth_has_credentials = lambda _name, _url: True  # type: ignore[attr-defined]
+    oauth_mod.mcp_oauth_has_credentials = lambda _name, _url, *, home=None: True  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
     monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", reachable)
@@ -1564,7 +1564,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
     def _validate(_url: str) -> tuple[bool, str]:
         return True, ""
 
-    async def _create_auth(name: str, url: str, handlers: object) -> object:
+    async def _create_auth(name: str, url: str, handlers: object, *, home=None) -> object:
         captured.update(name=name, url=url, handlers=handlers)
         return oauth_auth
 
@@ -1637,7 +1637,7 @@ async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
     class AuthorizationRequiredError(RuntimeError):
         pass
 
-    async def _create_auth(*_args: object) -> object:
+    async def _create_auth(*_args: object, **_kwargs: object) -> object:
         raise AuthorizationRequiredError
 
     probe_called = False
@@ -1673,6 +1673,7 @@ async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
 async def test_connect_mcp_servers_wraps_windows_stdio_launchers(
     fake_mcp_runtime: dict[str, object | None],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     fake_mcp_runtime["session"] = _make_fake_session(["demo"])
     captured: dict[str, object] = {}
@@ -1702,6 +1703,7 @@ async def test_connect_mcp_servers_wraps_windows_stdio_launchers(
             )
         },
         registry,
+        home=tmp_path,
     )
     for stack in stacks.values():
         await stack.aclose()

@@ -12,12 +12,14 @@ import time
 import webbrowser
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
 from oauth_cli_kit.models import OAuthToken
-from oauth_cli_kit.storage import FileTokenStorage
+from oauth_cli_kit.storage import TokenStorage
 
+from nanobot.config.home import get_home_path
 from nanobot.providers.base import LLMResponse, ProviderCallContext
 from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 from nanobot.providers.oauth_catalog_cache import (
@@ -25,6 +27,7 @@ from nanobot.providers.oauth_catalog_cache import (
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
 )
+from nanobot.providers.oauth_storage import InstanceTokenStorage
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
 
@@ -36,7 +39,6 @@ DEFAULT_COPILOT_BASE_URL = "https://api.githubcopilot.com"
 GITHUB_COPILOT_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 GITHUB_COPILOT_SCOPE = "read:user"
 TOKEN_FILENAME = "github-copilot.json"
-TOKEN_APP_NAME = "nanobot"
 USER_AGENT = "nanobot/0.1"
 EDITOR_VERSION = "vscode/1.99.0"
 EDITOR_PLUGIN_VERSION = "copilot-chat/0.26.0"
@@ -50,12 +52,8 @@ def _resolve(env_var: str, default: str) -> str:
     return value.strip() if value and value.strip() else default
 
 
-def get_storage() -> FileTokenStorage:
-    return FileTokenStorage(
-        token_filename=TOKEN_FILENAME,
-        app_name=TOKEN_APP_NAME,
-        import_codex_cli=False,
-    )
+def get_storage(home: Path | None = None) -> InstanceTokenStorage:
+    return InstanceTokenStorage((home or get_home_path()) / "auth" / TOKEN_FILENAME)
 
 
 def _copilot_headers(token: str) -> dict[str, str]:
@@ -68,16 +66,16 @@ def _copilot_headers(token: str) -> dict[str, str]:
     }
 
 
-def _load_github_token() -> OAuthToken | None:
-    token = get_storage().load()
+def _load_github_token(storage: TokenStorage) -> OAuthToken | None:
+    token = storage.load()
     if not token or not token.access:
         return None
     return token
 
 
-def get_github_copilot_login_status() -> OAuthToken | None:
+def get_github_copilot_login_status(*, home: Path | None = None) -> OAuthToken | None:
     """Return the persisted GitHub OAuth token if available."""
-    return _load_github_token()
+    return _load_github_token(get_storage(home))
 
 
 def login_github_copilot(
@@ -88,8 +86,10 @@ def login_github_copilot(
     cancelled: threading.Event | None = None,
     open_browser: bool = True,
     persist: bool = True,
+    home: Path | None = None,
 ) -> OAuthToken:
     """Run GitHub device flow and persist the GitHub OAuth token used for Copilot."""
+    storage = get_storage(home)
     del prompt_fn
     printer = print_fn or print
 
@@ -201,7 +201,7 @@ def login_github_copilot(
     )
     check_cancelled()
     if persist:
-        get_storage().save(token)
+        storage.save(token)
     return token
 
 
@@ -214,7 +214,9 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         *,
         provider_name: str = "github_copilot",
         model_api: ModelAPICapabilities | None = None,
+        home: Path | None = None,
     ):
+        self._token_storage = get_storage(home)
         self._copilot_access_token: str | None = None
         self._copilot_expires_at: float = 0.0
         self._copilot_token_lock: asyncio.Lock = asyncio.Lock()
@@ -237,7 +239,9 @@ class GitHubCopilotProvider(OpenAICompatProvider):
     ) -> ModelAPICapabilities:
         if self._preset_model_api is not None:
             return self._preset_model_api
-        api = cached_github_copilot_model_api(model or self.default_model, self._proxy)
+        api = cached_github_copilot_model_api(
+            model or self.default_model, self._proxy, storage=self._token_storage,
+        )
         if api is not None:
             return api
         return super()._model_api_capabilities(model, reasoning_effort)
@@ -254,7 +258,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             if self._copilot_access_token and now < self._copilot_expires_at - _EXPIRY_SKEW_SECONDS:
                 return self._copilot_access_token
 
-            github_token = _load_github_token()
+            github_token = _load_github_token(self._token_storage)
             if not github_token or not github_token.access:
                 raise RuntimeError(
                     "GitHub Copilot is not logged in. Run: nanobot provider login github-copilot"
@@ -345,10 +349,10 @@ class GitHubCopilotProvider(OpenAICompatProvider):
 
 
 def cached_github_copilot_model_api(
-    model: str, proxy: str | None = None,
+    model: str, proxy: str | None = None, *, storage: TokenStorage | None = None,
 ) -> ModelAPICapabilities | None:
     """Read the account's known model APIs without refreshing the catalog."""
-    catalog = _GITHUB_COPILOT_MODEL_CATALOG.peek(cache_key=_copilot_catalog_cache_key(proxy))
+    catalog = _GITHUB_COPILOT_MODEL_CATALOG.peek(cache_key=_copilot_catalog_cache_key(proxy, storage or get_storage()))
     row = catalog.find(model) if catalog is not None else None
     return row.api if row is not None else None
 
@@ -357,14 +361,16 @@ def get_github_copilot_model_catalog(
     proxy: str | None = None,
     *,
     refresh: bool = False,
+    home: Path | None = None,
 ) -> OAuthModelCatalogSnapshot:
+    storage = get_storage(home)
     return _GITHUB_COPILOT_MODEL_CATALOG.get(
-        cache_key=_copilot_catalog_cache_key(proxy), proxy=proxy, refresh=refresh,
+        cache_key=_copilot_catalog_cache_key(proxy, storage), refresh=refresh,
+        fetch=lambda: _fetch_github_copilot_models(proxy, storage=storage),
     )
 
 
-def _copilot_catalog_cache_key(proxy: str | None = None) -> str:
-    storage = get_storage()
+def _copilot_catalog_cache_key(proxy: str | None, storage: TokenStorage) -> str:
     token = storage.load()
     account_key = _catalog_account_key(getattr(token, "account_id", None))
     return (
@@ -377,8 +383,10 @@ def invalidate_github_copilot_model_catalog() -> None:
     _GITHUB_COPILOT_MODEL_CATALOG.invalidate()
 
 
-def _fetch_github_copilot_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
-    github_token = get_storage().load()
+def _fetch_github_copilot_models(
+    proxy: str | None, *, storage: TokenStorage | None = None,
+) -> tuple[ProviderModelSpec, ...]:
+    github_token = (storage or get_storage()).load()
     if not github_token or not github_token.access:
         raise OAuthCatalogAuthRequiredError()
 

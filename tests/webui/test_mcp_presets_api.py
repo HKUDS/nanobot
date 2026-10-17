@@ -615,7 +615,7 @@ def test_test_mcp_preset_connects_and_reports_tools(
         async def aclose(self) -> None:
             return None
 
-    async def fake_connect(servers, registry):
+    async def fake_connect(servers, registry, *, home=None):
         assert list(servers) == ["playwright"]
 
         class FakeTool:
@@ -652,7 +652,7 @@ def test_test_mcp_preset_inspects_tools_outside_the_enabled_allowlist(
         async def aclose(self) -> None:
             return None
 
-    async def fake_connect(servers, registry):
+    async def fake_connect(servers, registry, *, home=None):
         assert servers["playwright"].enabled_tools == ["*"]
 
         class FakeTool:
@@ -689,7 +689,7 @@ def test_test_mcp_preset_scrubs_connection_errors(
         },
     )
 
-    async def fake_connect(_servers, _registry):
+    async def fake_connect(_servers, _registry, *, home=None):
         raise RuntimeError("failed https://mcp.browserbase.com/mcp?browserbaseApiKey=bb_live_secret")
 
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)

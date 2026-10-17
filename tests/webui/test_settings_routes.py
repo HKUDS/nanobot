@@ -12,7 +12,9 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.datastructures import Headers
 
+from nanobot.api.runtime import ApiRuntime
 from nanobot.config.loader import get_config_path
+from nanobot.process_runtime import ProcessStatus
 from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.mcp_presets_api import custom_mcp_action
 from nanobot.webui.settings_routes import WebUISettingsRouter
@@ -59,6 +61,33 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
     request._nanobot_webui_mutation_payload = payload
     request._nanobot_trusted_proxy_authenticated = True
     return request
+
+
+@pytest.mark.asyncio
+async def test_api_start_rejects_selector_conflict_before_config_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "next.json"
+    active = ProcessStatus(
+        running=True, pid=12345,
+        state_path=tmp_path / "run" / "api.json",
+        log_path=tmp_path / "logs" / "api.log",
+        home=str(tmp_path), config_path=str(tmp_path / "active.json"),
+        workspace=str(tmp_path / "workspace"),
+    )
+    runtime = SimpleNamespace(
+        status=lambda: active,
+        selectors_mismatch=ApiRuntime.selectors_mismatch,
+    )
+    monkeypatch.setattr(WebUISettingsRouter, "_api_runtime", lambda _self: runtime)
+    router = _router(config_path=config_path)
+    path = "/api/settings/api-service/start"
+
+    response = await router.dispatch(None, _mutation_request(path, {}), path)
+
+    assert response.status_code == 409
+    assert "active.json" in json.loads(response.body)["error"]
+    assert not config_path.exists()
 
 
 @pytest.mark.asyncio
@@ -231,7 +260,7 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
-        lambda _query, *, config_path=None: ("xmind", config),
+        lambda _query, *, config_path=None, home=None: ("xmind", config),
     )
     router = _router()
     start = AsyncMock(return_value={
@@ -361,6 +390,7 @@ async def test_oauth_completion_reads_websocket_payload(
         *,
         oauth_flows=None,
         config_path=None,
+        home=None,
     ):
         captured.update(query=query, authorization_response=authorization_response)
         return {
@@ -459,7 +489,7 @@ async def test_runtime_config_mutation_routes_refresh_live_runtime(
     captured: dict[str, object] = {}
     refresh_runtime_config = MagicMock()
 
-    def mutate(query, *, config_path=None):
+    def mutate(query, *, config_path=None, home=None):
         captured["query"] = query
         return {"routed": function_name}
 
@@ -483,7 +513,7 @@ async def test_model_update_route_forwards_session_rename_dependency(monkeypatch
     refresh_runtime_config = MagicMock()
     captured: dict[str, object] = {}
 
-    def update(query, *, config_path=None, rename_model_preset=None):
+    def update(query, *, config_path=None, home=None, rename_model_preset=None):
         captured.update(query=query, rename_model_preset=rename_model_preset)
         return {"updated": True}
 

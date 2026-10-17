@@ -342,7 +342,7 @@ async def test_provider_refreshes_and_retries_exactly_once_after_401(monkeypatch
     _mock_model_capabilities(monkeypatch, supports_backend_search=False)
     token_calls: list[tuple[str | None, bool]] = []
 
-    def fake_token(*, proxy=None, force_refresh=False):
+    def fake_token(*, proxy=None, force_refresh=False, storage_path=None):
         token_calls.append((proxy, force_refresh))
         return _token("fresh-token" if force_refresh else "stale-token")
 

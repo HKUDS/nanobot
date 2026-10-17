@@ -570,6 +570,7 @@ class SystemSettingsHandler:
             payload = await asyncio.to_thread(
                 operations.nanobot_features_payload,
                 config_path=self.settings.config.path,
+                home=self.settings.config.instance_home,
             )
         except Exception:
             self.logger.exception("failed to load nanobot features")
@@ -582,7 +583,9 @@ class SystemSettingsHandler:
         self,
         operations: SystemSettingsOperations,
     ) -> dict[str, Any]:
-        return operations.nanobot_features_payload(config_path=self.settings.config.path)
+        return operations.nanobot_features_payload(
+            config_path=self.settings.config.path, home=self.settings.config.instance_home,
+        )
 
     def _nanobot_features_action(
         self,

@@ -495,3 +495,20 @@ class TestUnknownBackend:
         ws = str(tmp_path / "project")
         with pytest.raises(ValueError):
             wrap_command("", "ls", ws, ws)
+
+
+@pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+def test_sandbox_media_access_uses_bound_home(tmp_path, monkeypatch, backend):
+    first_home, second_home = tmp_path / "a", tmp_path / "b"
+    workspace = tmp_path / "workspace"
+    monkeypatch.setattr("nanobot.config.home._home_path", second_home)
+
+    command = wrap_command(backend, "echo hello", str(workspace), str(workspace), home=first_home)
+
+    tokens = _parse(command)
+    if backend == "seatbelt":
+        assert _sbpl_quote(str(first_home / "media")) in tokens[2]
+        assert _sbpl_quote(str(second_home / "media")) not in tokens[2]
+    else:
+        assert str(first_home / "media") in tokens
+        assert str(second_home / "media") not in tokens

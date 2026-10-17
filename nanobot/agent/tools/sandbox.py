@@ -52,6 +52,7 @@ def _bwrap(
     *,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
+    home: Path | None = None,
 ) -> str:
     """Wrap command in a bubblewrap sandbox (requires bwrap in container).
 
@@ -61,7 +62,7 @@ def _bwrap(
     roots, respectively.
     """
     ws = Path(workspace).resolve()
-    media = get_media_dir().resolve()
+    media = (home / "media" if home is not None else get_media_dir()).resolve()
 
     try:
         sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
@@ -189,6 +190,7 @@ def _seatbelt(
     *,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
+    home: Path | None = None,
 ) -> str:
     """Wrap command in a macOS Seatbelt sandbox (requires sandbox-exec(1)).
 
@@ -207,7 +209,7 @@ def _seatbelt(
     ``--unshare-net``).
     """
     ws = Path(workspace).resolve()
-    media = get_media_dir().resolve()
+    media = (home / "media" if home is not None else get_media_dir()).resolve()
 
     try:
         sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
@@ -318,6 +320,7 @@ def wrap_command(
     *,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
+    home: Path | None = None,
 ) -> str:
     """Wrap *command* using the named sandbox backend."""
     if backend := _BACKENDS.get(sandbox):
@@ -327,5 +330,6 @@ def wrap_command(
             cwd,
             sandbox_ro_binds=sandbox_ro_binds,
             sandbox_rw_binds=sandbox_rw_binds,
+            home=home,
         )
     raise ValueError(f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}")

@@ -581,3 +581,30 @@ class TestWorkspaceRestriction:
         )
         assert "Patch applied:" in result
         assert target.read_text(encoding="utf-8") == "after\n"
+
+
+async def test_configured_file_tools_keep_media_read_root_after_home_change(tmp_path, monkeypatch):
+    from nanobot.agent.tools.context import ToolContext
+    from nanobot.config.schema import ToolsConfig
+
+    first_home, second_home = tmp_path / "a", tmp_path / "b"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    files = []
+    for home in (first_home, second_home):
+        path = home / "media" / "upload.txt"
+        path.parent.mkdir(parents=True)
+        path.write_text("uploaded attachment", encoding="utf-8")
+        files.append(path)
+    context = ToolContext(
+        config=ToolsConfig(restrict_to_workspace=True), workspace=str(workspace),
+        instance_home=first_home,
+    )
+    read_tool = ReadFileTool.create(context)
+    write_tool = WriteFileTool.create(context)
+    monkeypatch.setattr("nanobot.config.home._home_path", second_home)
+
+    assert "uploaded attachment" in await read_tool.execute(path=str(files[0]))
+    assert "outside allowed directory" in await read_tool.execute(path=str(files[1]))
+    assert "outside allowed directory" in await write_tool.execute(path=str(files[0]), content="changed")
+    assert files[0].read_text(encoding="utf-8") == "uploaded attachment"

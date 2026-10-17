@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import http.client
 import json
 import os
@@ -39,8 +38,6 @@ from nanobot.process_runtime import (
 class GatewayStartOptions(ProcessStartOptions):
     """Gateway launch options, including the explicit instance root."""
 
-    home: str | None = None
-
 GatewayLaunchMode = Literal["foreground", "background", "unknown"]
 GatewayLifetime = Literal["explicit", "on_demand"]
 
@@ -70,10 +67,6 @@ def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bo
         payload.get("status") == "ok"
         and payload.get("ready") is not False
     )
-
-
-def _default_config_path() -> Path:
-    return (Path.home() / ".nanobot" / "config.json").resolve(strict=False)
 
 
 @dataclass(frozen=True)
@@ -143,19 +136,15 @@ class GatewayRuntimePaths(ProcessRuntimePaths):
         cls,
         *,
         data_dir: Path | None = None,
-        workspace: str | None = None,
-        config_path: str | None = None,
     ) -> "GatewayRuntimePaths":
         base = data_dir or get_data_dir()
-        suffix = _instance_suffix(workspace=workspace, config_path=config_path)
         run_dir = base / "run"
         logs_dir = base / "logs"
-        stem = "gateway" if suffix is None else f"gateway.{suffix}"
         return cls(
             run_dir=run_dir,
             logs_dir=logs_dir,
-            state_path=run_dir / f"{stem}.json",
-            log_path=logs_dir / f"{stem}.log",
+            state_path=run_dir / "gateway.json",
+            log_path=logs_dir / "gateway.log",
         )
 
 
@@ -166,7 +155,7 @@ class GatewayInstance:
     config_path: Path
     workspace: str | None
     paths: GatewayRuntimePaths
-    home: Path | None = None
+    home: Path
 
     @classmethod
     def resolve(
@@ -174,24 +163,20 @@ class GatewayInstance:
         *,
         config_path: str | Path,
         workspace: str | None = None,
+        home: str | Path | None = None,
     ) -> "GatewayInstance":
         resolved_config = Path(config_path).expanduser().resolve(strict=False)
         resolved_workspace = (
             str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
         )
-        # The released default instance used gateway.json. Keep that identity stable
-        # across upgrades while still namespacing explicit configs and workspaces.
-        config_selector = (
-            None if resolved_config == _default_config_path() else str(resolved_config)
-        )
+        selected_home = home or get_selected_home_path() or resolved_config.parent
+        resolved_home = Path(selected_home).expanduser().resolve(strict=False)
         return cls(
-            home=get_selected_home_path(),
+            home=resolved_home,
             config_path=resolved_config,
             workspace=resolved_workspace,
             paths=GatewayRuntimePaths.for_instance(
-                data_dir=resolved_config.parent,
-                workspace=resolved_workspace,
-                config_path=config_selector,
+                data_dir=resolved_home,
             ),
         )
 
@@ -202,13 +187,11 @@ class GatewayInstance:
         verbose: bool = False,
     ) -> GatewayStartOptions:
         return GatewayStartOptions(
-            home=str(self.home) if self.home is not None else None,
+            home=str(self.home),
             port=port,
             verbose=verbose,
             workspace=self.workspace,
-            config_path=(
-                None if self.config_path == _default_config_path() else str(self.config_path)
-            ),
+            config_path=str(self.config_path),
         )
 
 
@@ -249,6 +232,9 @@ class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
         while True:
             lease.wait_for_shutdown()
             with self._transition_lock(), self._lifecycle_lock():
+                current = self.status()
+                if current.running and self.selectors_mismatch(current, options):
+                    return RuntimeResult(False, "gateway_instance_mismatch", current)
                 promoted = lease._try_mark_persistent_locked()
                 if promoted is None:
                     continue
@@ -265,20 +251,17 @@ class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
                     continue
                 status = self.status()
                 if status.running:
-                    return RuntimeResult(False, "gateway_already_running", status)
+                    message = (
+                        "gateway_instance_mismatch"
+                        if self.selectors_mismatch(status, options)
+                        else "gateway_already_running"
+                    )
+                    return RuntimeResult(False, message, status)
                 lease._mark_ephemeral_locked()
                 return self._start_background(options)
 
     def _start_background(self, options: GatewayStartOptions) -> RuntimeResult:
-        result = super()._start_background(options)
-        if not result.ok:
-            return self._result(result)
-        state = self._read_state()
-        if state and result.status.pid == state.get("pid"):
-            state["launch_mode"] = "background"
-            state["pending_pid_handoff"] = True
-            self._write_state(state)
-        return RuntimeResult(True, result.message, self.status())
+        return self._result(super()._start_background(options))
 
     def stop(self, *, timeout_s: int = 20) -> RuntimeResult:
         """Stop the gateway recorded by this runtime."""
@@ -326,6 +309,9 @@ class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
             lifetime="on_demand" if lease.auto_stop else "explicit",
             clients=lease.clients,
             ready=ready,
+            config_path=process.config_path,
+            workspace=process.workspace,
+            home=process.home,
         )
 
     def publish_health_host(self, host: str) -> None:
@@ -354,16 +340,10 @@ class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
             with self._transition_lock(), self._lifecycle_lock():
                 current = self.status()
                 state = self._read_state() or {}
-                pid_handoff = (
-                    self.platform_name == "Windows"
-                    and current.running
-                    and current.pid != pid
-                    and current.pid == os.getppid()
-                    and state.get("pid") == current.pid
-                    and state.get("launch_mode") == "background"
-                    and state.get("pending_pid_handoff") is True
-                )
+                pid_handoff = self._pending_parent_pid_handoff(current, state)
                 if current.running and current.pid != pid and not pid_handoff:
+                    raise GatewayAlreadyRunningError(current)
+                if current.running and self.selectors_mismatch(current, options):
                     raise GatewayAlreadyRunningError(current)
                 if lease._shutdown_pending_locked():
                     continue
@@ -381,6 +361,7 @@ class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
                         "port": options.port,
                         "workspace": options.workspace,
                         "config_path": options.config_path,
+                        "home": options.home,
                         "command": self._build_child_command(options),
                         "log_path": str(self.paths.log_path),
                         "launch_mode": launch_mode,
@@ -411,6 +392,8 @@ class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
                 status = self.status()
                 if not status.running:
                     return RuntimeResult(False, "gateway_not_running", status)
+                if self.selectors_mismatch(status, options):
+                    return RuntimeResult(False, "gateway_instance_mismatch", status)
                 if status.launch_mode == "foreground":
                     return RuntimeResult(
                         False,
@@ -707,10 +690,3 @@ async def monitor_gateway_clients(
                 shutdown_event.set()
                 return True
     return False
-
-
-def _instance_suffix(*, workspace: str | None, config_path: str | None) -> str | None:
-    raw = "|".join(value for value in (workspace, config_path) if value)
-    if not raw:
-        return None
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]

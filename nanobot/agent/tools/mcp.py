@@ -11,6 +11,7 @@ import shutil
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack, suppress
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 import httpx
@@ -1008,6 +1009,7 @@ async def connect_mcp_servers(
     registry: ToolRegistry,
     *,
     oauth_handlers: Mapping[str, MCPOAuthHandlers] | None = None,
+    home: Path | None = None,
 ) -> dict[str, MCPConnection]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -1019,6 +1021,10 @@ async def connect_mcp_servers(
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
+
+    from nanobot.config.home import get_home_path
+
+    home = (home or get_home_path()).expanduser().resolve()
 
     async def open_single_server(
         name: str, cfg: MCPServerConfig, server_stack: AsyncExitStack
@@ -1065,6 +1071,7 @@ async def connect_mcp_servers(
                         name,
                         cfg.url,
                         (oauth_handlers or {}).get(name),
+                        home=home,
                     )
                 except MCPAuthorizationRequiredError:
                     logger.info("MCP server '{}': waiting for browser authorization", name)
@@ -1357,13 +1364,8 @@ def _configured_servers(config: Config) -> dict[str, MCPServerConfig]:
     return agent_plugin_mcp_servers(
         config.workspace_path,
         config.tools.mcp_servers,
+        home=config.instance_home,
     )
-
-
-def _load_current_servers() -> dict[str, MCPServerConfig]:
-    from nanobot.config.loader import load_config, resolve_config_env_vars
-
-    return _configured_servers(resolve_config_env_vars(load_config()))
 
 
 class MCPProvider:
@@ -1375,10 +1377,20 @@ class MCPProvider:
         registry: ToolRegistry,
         *,
         server_loader: MCPServerLoader | None = None,
+        home: Path | None = None,
     ) -> None:
+        from nanobot.config.home import get_home_path, get_instance_paths
+        from nanobot.config.loader import load_config, resolve_config_env_vars
+
+        paths = get_instance_paths()
+        self._home = (home or get_home_path()).expanduser().resolve()
         self._servers = dict(servers)
         self._registry = registry
-        self._server_loader = server_loader or _load_current_servers
+        self._server_loader = server_loader or (
+            lambda: _configured_servers(resolve_config_env_vars(
+                load_config(paths.config_path, home=self._home),
+            ))
+        )
         self._connections: dict[str, MCPConnection] = {}
         self._runtime_statuses: dict[str, MCPRuntimeStatus] = {}
         self._lock = asyncio.Lock()
@@ -1392,10 +1404,22 @@ class MCPProvider:
         *,
         server_loader: MCPServerLoader | None = None,
     ) -> MCPProvider:
+        if server_loader is None:
+            from nanobot.config.loader import load_config, resolve_config_env_vars
+
+            source_path = config.source_path
+            home = config.instance_home
+
+            def load_bound_servers() -> Mapping[str, MCPServerConfig]:
+                return _configured_servers(resolve_config_env_vars(load_config(source_path, home=home)))
+
+            server_loader = load_bound_servers
+
         return cls(
             _configured_servers(config),
             registry,
             server_loader=server_loader,
+            home=config.instance_home,
         )
 
     @property
@@ -1454,7 +1478,7 @@ class MCPProvider:
                 authorization_pending = {
                     name
                     for name, cfg in oauth_servers.items()
-                    if not mcp_oauth_has_credentials(name, cfg.url)
+                    if not mcp_oauth_has_credentials(name, cfg.url, home=self._home)
                 }
             for name in authorization_pending:
                 self._runtime_statuses.pop(name, None)
@@ -1467,7 +1491,7 @@ class MCPProvider:
                 return
             self._set_runtime_status(missing_servers, "connecting")
             try:
-                connected = await connect_mcp_servers(missing_servers, self._registry)
+                connected = await connect_mcp_servers(missing_servers, self._registry, home=self._home)
                 if self._closing:
                     await _close_mcp_connections(connected)
                     return
@@ -1520,7 +1544,7 @@ class MCPProvider:
             authorization_pending = {
                 name
                 for name, cfg in next_servers.items()
-                if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url)
+                if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url, home=self._home)
             }
             removed = sorted(current_names - next_names)
             added = sorted(next_names - current_names)
@@ -1556,7 +1580,7 @@ class MCPProvider:
             if to_connect:
                 self._set_runtime_status(to_connect, "connecting")
                 try:
-                    connected = await connect_mcp_servers(to_connect, self._registry)
+                    connected = await connect_mcp_servers(to_connect, self._registry, home=self._home)
                 except BaseException:
                     self._set_runtime_status(to_connect, "failed")
                     raise
@@ -1671,6 +1695,7 @@ class MCPProvider:
             connected = await connect_mcp_servers(
                 {server_name: cfg},
                 self._registry,
+                home=self._home,
             )
             if self._closing:
                 await _close_mcp_connections(connected)

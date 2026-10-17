@@ -2420,10 +2420,7 @@ async def test_send_stages_external_media_as_signed_url(monkeypatch, tmp_path) -
     external = tmp_path / "clip.mp4"
     external.write_bytes(b"video")
 
-    def fake_media_dir(channel: str | None = None):
-        return ws_media if channel == "websocket" else media_root
-
-    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path)
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
@@ -4304,7 +4301,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
         "nanobot.webui.settings_api._oauth_provider_status",
-        lambda _spec: {
+        lambda _spec, *, home=None: {
             "configured": False,
             "account": None,
             "expires_at": None,
@@ -4402,7 +4399,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert image_providers["gemini"]["label"] == "Gemini"
         assert body["runtime"]["config_path"] == str(config_path)
         workspace_path = body["runtime"]["workspace_path"].replace("\\", "/")
-        assert workspace_path.endswith("/.nanobot/workspace")
+        assert Path(workspace_path) == tmp_path / "workspace"
         assert body["runtime"]["gateway_port"] == 18790
         assert body["advanced"]["exec_enabled"] is True
         assert body["advanced"]["webui_allow_local_service_access"] is True
@@ -4719,7 +4716,7 @@ async def test_image_settings_hot_reload_without_restart(
     runtime_bus = MessageBus()
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
-    agent = AgentLoop(bus=runtime_bus, provider=provider, workspace=tmp_path)
+    agent = AgentLoop(bus=runtime_bus, provider=provider, workspace=tmp_path / "workspace")
 
     async def image_reload() -> dict[str, Any]:
         return await reload_image_generation_tool(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from nanobot.providers.oauth_catalog_cache import (
     CatalogErrorKind as CatalogErrorKind,
 )
@@ -27,20 +29,21 @@ def get_oauth_model_catalog(
     *,
     proxy: str | None = None,
     refresh: bool = False,
+    home: Path | None = None,
 ) -> OAuthModelCatalogSnapshot:
     """Discover models through the owning provider module."""
     if provider_name == "openai_codex":
         from nanobot.providers.openai_codex_provider import get_openai_codex_model_catalog
 
-        return get_openai_codex_model_catalog(proxy, refresh=refresh)
+        return get_openai_codex_model_catalog(proxy, refresh=refresh, home=home)
     if provider_name == "xai_grok":
         from nanobot.providers.xai_grok_provider import get_xai_grok_model_catalog
 
-        return get_xai_grok_model_catalog(proxy, refresh=refresh)
+        return get_xai_grok_model_catalog(proxy, refresh=refresh, home=home)
     if provider_name == "github_copilot":
         from nanobot.providers.github_copilot_provider import get_github_copilot_model_catalog
 
-        return get_github_copilot_model_catalog(proxy, refresh=refresh)
+        return get_github_copilot_model_catalog(proxy, refresh=refresh, home=home)
     raise ValueError(f"OAuth model discovery is not available for {provider_name}")
 
 

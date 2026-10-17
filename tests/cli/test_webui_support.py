@@ -37,7 +37,9 @@ def test_webui_ready_keeps_the_complete_login_url_copyable(monkeypatch, width: i
     assert "Open in your browser:" in output.getvalue()
     assert f"Config: {config_path}" in lines
     log_command = next(line.removeprefix("Logs: ") for line in lines if line.startswith("Logs: "))
-    assert shlex.split(log_command) == ["nanobot", "gateway", "logs", "--config", str(config_path)]
+    assert shlex.split(log_command) == [
+        "nanobot", "--home", str(config.instance_home), "gateway", "logs",
+    ]
 
 
 def test_unix_browser_reports_delayed_launcher_failure_without_raw_output(monkeypatch, tmp_path, capfd) -> None:
