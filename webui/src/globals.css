@@ -1002,10 +1002,7 @@
   }
 }
 
-/*
- * Composer controls adapt to their actual container, not just the viewport.
- * Narrow layouts move access and usage into a separate metadata row.
- */
+/* Composer controls adapt to their actual container, not just the viewport. */
 .thread-composer-surface {
   container-name: thread-composer;
   container-type: inline-size;
@@ -1201,31 +1198,11 @@
   height: 2.25rem;
 }
 
-.thread-composer-meta .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-}
-
-.thread-composer-meta .thread-composer-access {
-  max-width: 100%;
-  padding-inline: 0.625rem 0.5rem;
-}
-
-.thread-composer-workspace-row {
-  padding-inline: 0.75rem;
-}
-
-.thread-composer-workspace-row .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-}
-
-.thread-composer-workspace-row .thread-composer-access {
-  padding-inline-end: 0;
-}
-
-.thread-composer-workspace-row .thread-composer-workspace {
-  padding-inline-start: 0.6875rem;
+@media (pointer: coarse) {
+  .thread-composer-meta .touch-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
 }
 
 @media (forced-colors: active) {

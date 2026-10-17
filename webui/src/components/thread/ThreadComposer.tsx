@@ -77,6 +77,7 @@ import {
 } from "@/components/ui/tooltip";
 import {
   WorkspaceAccessToggle,
+  WorkspaceProjectLabel,
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
 import {
@@ -2425,7 +2426,6 @@ export function ThreadComposer({
     <WorkspaceAccessToggle
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
-      isHero={isHero}
       onChange={onWorkspaceScopeChange}
     />
   ) : null;
@@ -2444,6 +2444,8 @@ export function ThreadComposer({
       onBrowseDirectories={onBrowseWorkspaceDirectories}
       onChange={onWorkspaceScopeChange}
     />
+  ) : !isHero && workspaceScope && !workspaceControlsHidden ? (
+    <WorkspaceProjectLabel scope={workspaceScope} />
   ) : null;
   const modelControl = modelLabel && !voiceRecorder.isRecording ? (
     <ModelPresetBadge
@@ -2753,12 +2755,7 @@ export function ThreadComposer({
                 isHero={isHero}
                 levels={voiceRecorder.levels}
               />
-            ) : compactControls ? modelControl : (
-              <div className="thread-composer-workspace-group flex min-w-0 items-center gap-0.5">
-                {workspaceControl}
-                {accessControl}
-              </div>
-            )}
+            ) : compactControls ? modelControl : null}
           </div>
           <div
             className={cn(
@@ -2840,26 +2837,18 @@ export function ThreadComposer({
             </TooltipProvider>
           </div>
         </div>
-        {compactControls && projectPickerAvailable ? (
-          <div
-            className="inline-disclosure"
-            data-composer-workspace-drawer=""
-            data-state={showProjectPicker ? "open" : "closed"}
-            aria-hidden={showProjectPicker ? undefined : true}
-          >
-            <div className="inline-disclosure-clip">
-              <div className="inline-disclosure-content thread-composer-workspace-row flex min-w-0 items-center justify-between gap-2 rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4">
-                {workspaceControl}
-                <div className="ml-auto flex min-w-0 justify-end">{accessControl}</div>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
-      {compactControls && (!projectPickerAvailable || usageControl) ? (
-        <div className="thread-composer-meta mx-auto flex w-full max-w-[58rem] items-center justify-between gap-2 px-3">
-          {!projectPickerAvailable ? accessControl : null}
-          <div className="ml-auto">{usageControl}</div>
+      {accessControl || workspaceControl || compactControls && usageControl ? (
+        <div className={cn(
+          "thread-composer-meta mx-auto mt-1 flex w-full min-w-0 items-center gap-2 px-2 sm:px-3",
+          isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
+          paletteBeside && "col-start-1 row-start-2",
+        )}>
+          <div className="thread-composer-workspace-group flex min-w-0 items-center gap-1">
+            {accessControl}
+            {workspaceControl}
+          </div>
+          {compactControls ? <div className="ml-auto shrink-0">{usageControl}</div> : null}
         </div>
       ) : null}
     </form>

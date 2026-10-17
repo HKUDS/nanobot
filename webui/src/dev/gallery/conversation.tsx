@@ -111,10 +111,10 @@ function WorkspacePreview() {
   const [mode, setMode] = useState<"ready" | "disabled">("ready");
   return <div className="space-y-4">
     <StatePicker label="工作目录状态" value={mode} options={["ready", "disabled"]} onChange={setMode} />
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex min-w-0 items-center gap-1">
+      <WorkspaceAccessToggle scope={scope} disabled={mode === "disabled"} onChange={setScope} />
       <WorkspaceProjectPicker isHero scope={scope} defaultScope={projectScope} controls={workspaceCatalog.controls}
         disabled={mode === "disabled"} onLoadProjects={loadExampleProjects} onChange={setScope} />
-      <WorkspaceAccessToggle scope={scope} isHero disabled={mode === "disabled"} onChange={setScope} />
     </div>
     <p role="status" className="text-sm text-muted-foreground">{scope.project_path} · {scope.access_mode}</p>
   </div>;
@@ -285,7 +285,7 @@ export const conversationExamples: ComponentExample[] = [
     code: '<ComposerUsagePopover context={{ contextTokens: 18500, contextWindowTokens: 200000 }} rounds={rounds} showLabel />' },
   { title: "WorkspaceControls · 工作目录", files: ["thread/WorkspaceControls"], Preview: WorkspacePreview,
     description: "选择示例项目，并切换当前预览的访问模式。", options: "scope 与 onChange 控制当前选择；onLoadProjects 提供示例目录列表。真实路径解析和权限执行由 gateway 负责。",
-    code: '<WorkspaceProjectPicker isHero scope={scope} defaultScope={defaultScope} controls={controls} onLoadProjects={loadProjects} onChange={setScope} />\n<WorkspaceAccessToggle scope={scope} isHero onChange={setScope} />' },
+    code: '<WorkspaceProjectPicker isHero scope={scope} defaultScope={defaultScope} controls={controls} onLoadProjects={loadProjects} onChange={setScope} />\n<WorkspaceAccessToggle scope={scope} onChange={setScope} />' },
   { title: "PromptNavigator · 问题导航", files: ["thread/PromptNavigator"], Preview: NavigatorPreview,
     description: "打开问题列表，搜索历史问题并查看跳转回调。", options: "messages 提供完整消息列表，组件提取用户问题；onJumpToPrompt 接收目标消息 ID。",
     code: '<PromptNavigator messages={messages} onJumpToPrompt={jumpToPrompt} />' },
