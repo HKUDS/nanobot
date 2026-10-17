@@ -95,6 +95,14 @@ pdf = [
 olostep = [
     "olostep>=0.1.0; python_version < '3.14'",
 ]
+drive = [
+    "google-auth>=2.40.0,<3.0.0",
+    "google-api-python-client>=2.170.0,<3.0.0",
+]
+sheets = [
+    "google-auth>=2.40.0,<3.0.0",
+    "google-api-python-client>=2.170.0,<3.0.0",
+]
 dev = [
     "hatchling",
     "pytest>=9.0.0,<10.0.0",
