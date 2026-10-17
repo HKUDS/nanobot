@@ -7,8 +7,7 @@ import sys
 from contextlib import suppress
 
 from nanobot.cli.process_identity import set_cli_process_identity
-from nanobot.utils.log_config import configure_console_logging
-from nanobot.utils.rotating_output import configure_background_output_from_env
+from nanobot.installation_lock import InstallationBusyError, installation_access
 
 _ROOT_OPTIONS = frozenset(
     {
@@ -48,7 +47,8 @@ def _native_tui_candidate(args: list[str]) -> bool:
     return True
 
 
-def _configure_windows_console() -> None:
+def configure_windows_console() -> None:
+    """Keep multilingual output usable for CLI and protected gateway startup."""
     if sys.platform != "win32" or sys.stdout.encoding == "utf-8":
         return
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -61,6 +61,8 @@ def _configure_windows_console() -> None:
 
 def _run_agent(args: list[str], *, prog_name: str) -> None:
     """Run the shared agent command without importing the complete CLI graph."""
+    from nanobot.utils.log_config import configure_console_logging
+
     configure_console_logging(sys.stderr)
     import typer
 
@@ -72,8 +74,46 @@ def _run_agent(args: list[str], *, prog_name: str) -> None:
     command.main(args=args, prog_name=prog_name)
 
 
+def _command_args(args: list[str]) -> list[str]:
+    """Skip only global home selectors, not arguments belonging to a subcommand."""
+    position = 0
+    while position < len(args):
+        argument = args[position]
+        if argument == "--home":
+            position += 2
+        elif argument.startswith("--home="):
+            position += 1
+        else:
+            return args[position:]
+    return []
+
+
 def main() -> None:
+    """Acquire a runtime lease before loading application code."""
+    args = _command_args(sys.argv[1:])
+    saved_update = args[:1] == ["update"] and any(argument.split("=", 1)[0] == "--job" for argument in args[1:])
+    if args[:1] == ["update"] and not saved_update:
+        # The update entrypoint takes its own exclusive lease only for execution.
+        # Saved pre-mutation recovery instead owns a read lease before imports;
+        # its detached worker can replace files only after this process exits.
+        _dispatch()
+        return
+    try:
+        # Keep the repair/stop path usable after an interrupted older updater.
+        # These commands still take a lease and cannot run during a live install.
+        diagnostics = args[:1] in (["--help"], ["-h"], ["--version"], ["-v"])
+        stop_or_inspect = args[:2] in (["gateway", "stop"], ["gateway", "status"], ["gateway", "logs"])
+        with installation_access(allow_incomplete=diagnostics or stop_or_inspect):
+            _dispatch()
+    except InstallationBusyError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+def _dispatch() -> None:
     """Dispatch native TUI startup without importing the complete CLI graph."""
+    from nanobot.utils.rotating_output import configure_background_output_from_env
+
     configure_background_output_from_env()
     raw_args = sys.argv[1:]
     # Installed completion scripts call ``nanobot`` without positional arguments
@@ -83,7 +123,16 @@ def main() -> None:
     agent_args = None if shell_completion else _agent_invocation_args(raw_args)
     dispatch_args = ["agent", *agent_args] if agent_args is not None else raw_args
     set_cli_process_identity(dispatch_args)
-    _configure_windows_console()
+    configure_windows_console()
+    if not shell_completion and raw_args[:1] == ["update"]:
+        import typer
+
+        from nanobot.cli.update import update
+
+        update_app = typer.Typer(add_completion=False)
+        update_app.command()(update)
+        typer.main.get_command(update_app).main(args=raw_args[1:], prog_name="nanobot update")
+        return
     if not shell_completion and not raw_args:
         from nanobot.cli.desktop_target import dispatch_bare_desktop_target
 

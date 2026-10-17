@@ -25,7 +25,7 @@ function Buttons() {
   return <div className="space-y-6">
     <Sample label="Variants · 同一个按钮的不同样式">
       <div className="flex flex-wrap items-center gap-3">
-        {(["default", "secondary", "outline", "ghost", "destructive", "link"] as const).map((variant) =>
+        {(["default", "accent", "secondary", "outline", "ghost", "destructive", "link"] as const).map((variant) =>
           <Button key={variant} variant={variant} onClick={() => setClicks((value) => value + 1)}>{variant}</Button>)}
         <Button variant="icon" size="icon" aria-label="Add example" onClick={() => setClicks((value) => value + 1)}><Plus className="h-4 w-4" /></Button>
       </div>

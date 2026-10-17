@@ -15,7 +15,7 @@ import { HostNavigationContext } from "@/components/remote/HostSwitcher";
 import { StarLink } from "@/components/StarPrompt";
 import { AboutSettingsView } from "./AboutSettingsView";
 import { AppearanceSettingsView } from "./AppearanceSettingsView";
-import { VersionCheckRowView, type VersionCheckState, type VersionInfoProps } from "./VersionCheckRowView";
+import { VersionCheckRowView, type VersionInfoProps } from "./VersionCheckRowView";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
 import { settingsProviderConfigured } from "@/components/settings/shared/ModelControls";
@@ -25,14 +25,14 @@ import {
 } from "@/components/settings/shared/SettingsControls";
 import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { checkVersion } from "@/lib/api";
 import type {
   LocalPreferences,
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
 import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useClient } from "@/providers/ClientProvider";
+import { useUpdateFlow } from "@/providers/UpdateFlowProvider";
+import { useVersionCheck } from "@/providers/VersionCheckProvider";
 
 export function OverviewSettings({
   settings,
@@ -127,8 +127,10 @@ export function OverviewSettings({
   );
 }
 
-export function AboutSettings({ settings }: { settings: SettingsPayload }) {
+export function AboutSettings({ settings, onRequestUpdate: requestUpdate }: { settings: SettingsPayload; onRequestUpdate?: () => void }) {
   const hostPicker = useContext(HostNavigationContext);
+  const flow = useUpdateFlow();
+  const onRequestUpdate = requestUpdate ?? flow.open;
   const currentVersion = settings.version?.current;
   const currentCommit = settings.version?.commit;
   const environment = settings.environment;
@@ -152,38 +154,32 @@ export function AboutSettings({ settings }: { settings: SettingsPayload }) {
   reportIssueUrl.searchParams.set("connection", hostPicker?.kind === "embedded"
     ? "Remote host" : hostPicker ? "Local host" : "Direct WebUI");
   return <AboutSettingsView reportIssueUrl={reportIssueUrl.href}
-    versionCheck={<VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit} />}
+    versionCheck={<VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit}
+      onRequestUpdate={onRequestUpdate} hasPendingUpdate={flow.pending} />}
     starLink={<StarLink />} />;
 }
 
-function VersionCheckRow({ currentVersion, currentCommit }: VersionInfoProps) {
-  const { token } = useClient();
-  const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<VersionCheckState>(null);
-
-  const handleCheck = async () => {
-    setChecking(true);
-    setResult(null);
-    try {
-      const res = await checkVersion(token);
-      if (res.updateAvailable) {
-        setResult({
-          type: "update",
-          latestVersion: res.updateAvailable.latestVersion,
-          pypiUrl: res.updateAvailable.pypiUrl,
-        });
-      } else {
-        setResult({ type: "up-to-date" });
-      }
-    } catch (err) {
-      setResult({ type: "error", message: (err as Error).message });
-    } finally {
-      setChecking(false);
-    }
+function VersionCheckRow({ currentVersion, currentCommit, onRequestUpdate, hasPendingUpdate }: VersionInfoProps) {
+  const { checking, result, check, dismiss, dismissedVersion, releaseStatus, canChangeChannel,
+    changingChannel, channelError, channelSaved, changeChannel, installationMethod } = useVersionCheck();
+  const [manualFeedback, setManualFeedback] = useState(false);
+  const pending = checking || manualFeedback;
+  const checkManually = async () => {
+    if (pending) return;
+    setManualFeedback(true);
+    // A cached response can finish before the first paint. Keep this button's
+    // acknowledgement readable without delaying the shared check or its result.
+    await Promise.all([check({ revealNotice: true }), new Promise(resolve => setTimeout(resolve, 600))]);
+    setManualFeedback(false);
   };
 
   return <VersionCheckRowView currentVersion={currentVersion} currentCommit={currentCommit}
-    checking={checking} result={result} onCheck={() => void handleCheck()} />;
+    checking={pending} result={result} onCheck={() => void checkManually()}
+    onRequestUpdate={onRequestUpdate} hasPendingUpdate={hasPendingUpdate}
+    installationMethod={installationMethod}
+    releaseStatus={releaseStatus} canChangeChannel={canChangeChannel} changingChannel={changingChannel}
+    channelError={channelError} channelSaved={channelSaved} onChangeChannel={changeChannel}
+    onDismiss={dismiss} dismissedVersion={dismissedVersion} />;
 }
 
 export function AppearanceSettings({ theme, onToggleTheme, localPrefs, onChangeLocalPrefs }: {

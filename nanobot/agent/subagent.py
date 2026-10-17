@@ -544,6 +544,7 @@ class SubagentManager:
         runtime: LLMRuntime | None, *, announce: bool, origin_turn_id: str | None,
         session_policy: SessionPolicy | None,
     ) -> _SubagentTask:
+        self.bus.admission.check()
         if runtime is None:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
@@ -1002,6 +1003,11 @@ class SubagentManager:
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)
+
+    @property
+    def has_pending_work(self) -> bool:
+        """Completed turns may still own exec cleanup, including failed cleanup."""
+        return bool(self._tasks) or self._exec_session_manager.has_pending_work
 
     def get_running_count_by_session(self, session_key: str) -> int:
         """Return the number of currently running subagents for a session."""

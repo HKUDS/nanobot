@@ -19,6 +19,7 @@ from nanobot.cli.runtime_config import (
     _model_display,
     _print_agent_start_error,
 )
+from nanobot.config.schema import Config
 
 console = Console()
 
@@ -117,6 +118,20 @@ def agent(
                 raise typer.Exit(exit_code)
             return
 
+    from nanobot.config.home import get_home_path
+    from nanobot.config.loader import get_config_path
+    from nanobot.config.paths import get_data_dir
+    from nanobot.data_access import data_access, profile_data_paths
+
+    paths = profile_data_paths(home=get_home_path(), data_dir=get_data_dir(),
+                               config=get_config_path(), workspace=runtime_config.workspace_path)
+    with data_access(paths):
+        _run_classic(runtime_config, message=message, session_id=session_id, markdown=markdown, logs=logs)
+
+
+def _run_classic(runtime_config: Config, *, message: str | None, session_id: str | None,
+                 markdown: bool, logs: bool) -> None:
+    """Keep the data lease through writer initialization, execution and cleanup."""
     from nanobot.agent.hooks import create_file_edit_activity_hook
     from nanobot.agent.tools.image_generation import register_image_generation_tool
     from nanobot.agent.tools.mcp import MCPProvider

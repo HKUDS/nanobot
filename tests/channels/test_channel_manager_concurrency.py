@@ -1,12 +1,15 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels import manager as manager_module
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import Config
+from nanobot.runtime_admission import RuntimeBusyError
 
 
 def make_manager():
@@ -15,8 +18,64 @@ def make_manager():
     channel = MagicMock(spec=BaseChannel)
     channel.send = AsyncMock()
     channel.stop = AsyncMock()
+    channel.has_pending_delivery = False
     manager.channels["websocket"] = channel
     return manager, channel
+
+
+async def test_delivery_has_no_idle_gap_between_queue_dispatch_and_send(monkeypatch):
+    manager, channel = make_manager()
+    started, release = asyncio.Event(), asyncio.Event()
+    observations = []
+    consume = manager.bus.consume_outbound
+
+    def require_busy():
+        if manager.bus.admission.paused:
+            observations.append("parked")
+            return
+        with pytest.raises(RuntimeBusyError):
+            with manager.bus.admission.pause_if_idle(lambda: False):
+                pytest.fail("Delivery was incorrectly reported idle")
+        observations.append("busy")
+        assert not manager.bus.admission.paused
+
+    async def dequeue():
+        message = await consume()
+        asyncio.get_running_loop().call_soon(require_busy)
+        return message
+
+    async def send(message):
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(manager.bus, "consume_outbound", dequeue)
+    channel.send.side_effect = send
+    await manager.bus.publish_outbound(OutboundMessage("websocket", "chat", "final reply"))
+    require_busy()
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        assert manager.bus.outbound_size == 0
+        require_busy()
+        assert observations == ["busy", "busy", "busy"]
+        release.set()
+        await wait_until(lambda: not manager.has_pending_delivery)
+        with manager.bus.admission.pause_if_idle(lambda: False):
+            assert manager.bus.admission.paused
+            # A late producer may queue a lifecycle notice while the consumer
+            # is awaiting an empty queue. It must remain parked until admission
+            # is restored, rather than start new transport writes under the gate.
+            await manager.bus.publish_outbound(OutboundMessage("websocket", "chat", "late notice"))
+            await wait_until(lambda: manager._outbound_dispatching)
+            await wait_until(lambda: len(observations) == 4)
+            channel.send.assert_awaited_once()
+        assert not manager.bus.admission.paused
+        await wait_until(lambda: not manager.has_pending_delivery)
+        assert [call.args[0].content for call in channel.send.await_args_list] == ["final reply", "late notice"]
+        assert observations == ["busy", "busy", "busy", "parked"]
+    finally:
+        release.set()
+        await manager.stop_all()
 
 
 async def wait_until(predicate):

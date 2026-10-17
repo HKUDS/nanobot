@@ -155,6 +155,11 @@ export function useSettingsController({
 
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
 
+  const markUpdateInstalled = useCallback(() => {
+    setPendingRestartSections((current) => ({ ...current, runtime: true }));
+    setSettings((current) => current ? { ...current, requires_restart: true } : current);
+  }, []);
+
   const closeProviderOAuthFlow = useCallback((cancelPending = true) => {
     const flow = providerOAuthFlowRef.current;
     providerOAuthFlowRef.current = null;
@@ -443,6 +448,7 @@ export function useSettingsController({
     systemState,
     systemActions,
     activeSection,
+    markUpdateInstalled,
     runtimeConfigState,
     closeProviderOAuthFlow,
     error,

@@ -15,7 +15,7 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Generator, Literal, cast
@@ -45,19 +45,30 @@ GatewayLaunchMode = Literal["foreground", "background", "unknown"]
 GatewayLifetime = Literal["explicit", "on_demand"]
 
 
-def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bool:
+@dataclass(frozen=True)
+class GatewayHealthIdentity:
+    """Opaque local instance/run identity; never configuration paths or credentials."""
+
+    instance_id: str
+    run_id: str
+    version: str
+
+
+def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4,
+                          expected: GatewayHealthIdentity | None = None,
+                          maintenance: bool | None = None) -> bool:
     """Read readiness from the management listener without using proxy settings."""
     connect_host = "127.0.0.1" if host in {"", "0.0.0.0"} else "::1" if host == "::" else host
     connection = http.client.HTTPConnection(connect_host, port, timeout=timeout_s)
     try:
         connection.request("GET", "/health")
         response = connection.getresponse()
-        body = response.read(1024)
+        body = response.read(4097)
     except (OSError, http.client.HTTPException, TimeoutError):
         return False
     finally:
         connection.close()
-    if response.status != 200:
+    if response.status != 200 or len(body) > 4096:
         return False
     try:
         raw_payload = cast(object, json.loads(body.decode("utf-8")))
@@ -66,6 +77,15 @@ def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bo
     if not isinstance(raw_payload, dict):
         return False
     payload = cast(dict[str, object], raw_payload)
+    if maintenance is not None and payload.get("maintenance") is not maintenance:
+        return False
+    if expected is not None:
+        raw_identity = payload.get("runtime")
+        if payload.get("ready") is not True or not isinstance(raw_identity, dict):
+            return False
+        identity = cast(dict[str, object], raw_identity)
+        if any(identity.get(key) != value for key, value in asdict(expected).items()):
+            return False
     return (
         payload.get("status") == "ok"
         and payload.get("ready") is not False
@@ -336,6 +356,26 @@ class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
                 return
             state["health_host"] = host
             self._write_state(state)
+
+    def verify_ready(self, expected: GatewayHealthIdentity, *, maintenance: bool | None = None) -> bool:
+        """Bind health to one live local process, not merely a responding port.
+
+        This is local lifecycle evidence, not remote authentication. Missing
+        identity metadata on an older host cannot confirm an update restart.
+        """
+        state = self._read_state()
+        if not state:
+            return False
+        pid, host, port = state.get("pid"), state.get("health_host"), state.get("port")
+        if (type(pid) is not int or type(port) is not int or not 0 < port < 65536
+                or not isinstance(host, str) or not self._is_pid_running(pid)
+                or not self._record_matches_process(state, pid)):
+            return False
+        if not _gateway_health_ready(host, port, expected=expected, maintenance=maintenance):
+            return False
+        # The process may have exited or been replaced while the HTTP probe ran.
+        return (self._read_state() == state and self._is_pid_running(pid)
+                and self._record_matches_process(state, pid))
 
     @contextmanager
     def foreground_instance(self, options: GatewayStartOptions) -> Generator[None]:

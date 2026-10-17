@@ -1,5 +1,7 @@
 """WebUI CLI command."""
 
+import hashlib
+import sys
 from pathlib import Path
 
 import typer
@@ -84,6 +86,7 @@ def webui(
         help="Run the Vite development server with live frontend updates",
     ),
     no_open: bool = typer.Option(False, "--no-open", help="Do not open a browser"),
+    detach: bool = typer.Option(False, "--detach", help="Keep the gateway running and return to the terminal"),
     yes: bool = typer.Option(
         False,
         "--yes",
@@ -98,6 +101,14 @@ def webui(
         GatewayInstance,
         GatewayRuntime,
     )
+    from nanobot.installation_receipt import RECEIPT_NAME, managed_extras
+
+    receipt = Path(sys.prefix) / RECEIPT_NAME
+    if receipt.exists() and not dev:
+        managed_extras(str(Path(sys.prefix).resolve()), hashlib.sha256(receipt.read_bytes()).hexdigest())
+        detach = True
+    if detach and dev:
+        raise typer.BadParameter("--detach cannot keep a Vite development server alive")
 
     cli_terminal._ensure_interactive_tty_mode()
     config_path = _resolve_webui_config_path(config)
@@ -207,7 +218,7 @@ def webui(
     def announce_ready(url: str, *, managed: bool) -> None:
         _print_webui_ready(
             runtime_config, config_path, url, workspace=workspace, dev=dev, managed=managed,
-            provider_error=provider_error,
+            provider_error=provider_error, detached=detach,
         )
         if not no_open:
             _open_webui_browser(url, wait=False)
@@ -227,6 +238,27 @@ def webui(
                 gateway_port=effective_gateway_port,
             )
             raise typer.Exit(1)
+
+    if detach:
+        status = runtime.status()
+        if existing_gateway and not status.running:
+            raise typer.BadParameter("The existing gateway has another owner; use its launch command")
+        if changed_webui and status.running:
+            result = runtime.restart(start_options, timeout_s=20)
+            if result.ok:
+                # Restart retains the old lifetime; detached launch promotes it.
+                result = runtime.start_background(start_options)
+        else:
+            result = runtime.start_background(start_options)
+        if not result.ok and result.message != "gateway_already_running":
+            console.print(f"[red]Gateway could not start: {result.message}[/red]")
+            raise typer.Exit(1)
+        if not _wait_for_webui(webui_url, timeout_s=20):
+            console.print("[red]WebUI did not become ready. Check the gateway logs.[/red]")
+            console.print(f"Logs: {runtime.paths.log_path}", markup=False)
+            raise typer.Exit(1)
+        announce_ready(webui_url, managed=True)
+        return
 
     lease = GatewayClientLease(runtime, kind="webui")
     lease.acquire()

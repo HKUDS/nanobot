@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 from oauth_cli_kit import login_oauth_interactive
 from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+from oauth_cli_kit.storage import FileTokenStorage
 
 _AUTHORIZATION_URL_TIMEOUT_S = 5.0
 _CALLBACK = urlsplit(OPENAI_CODEX_PROVIDER.redirect_uri)
@@ -30,6 +31,22 @@ class OpenAICodexOAuthError(RuntimeError):
 
 class OpenAICodexOAuthInputError(OpenAICodexOAuthError):
     """A recoverable error in a callback URL pasted by the user."""
+
+
+class _LoginTokenStorage(FileTokenStorage):
+    """Use the SDK's public storage seam to exclude cancelled/expired writes."""
+
+    def __init__(self, cancelled: threading.Event, lock: threading.Lock, deadline: float) -> None:
+        super().__init__(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+        self._cancelled = cancelled
+        self._commit_lock = lock
+        self._deadline = deadline
+
+    def save(self, token: OAuthToken) -> None:
+        with self._commit_lock:
+            if self._cancelled.is_set() or time.monotonic() >= self._deadline:
+                raise OpenAICodexOAuthError("OpenAI Codex sign-in expired or was cancelled.")
+            super().save(token)
 
 
 class OpenAICodexOAuthLoginFlow:
@@ -51,6 +68,8 @@ class OpenAICodexOAuthLoginFlow:
         self._result: Future[OAuthToken] = Future()
         self._ready = threading.Event()
         self._submission_lock = threading.Lock()
+        self._commit_lock = threading.Lock()
+        self._cancelled = threading.Event()
         self._submitted = False
         self._thread = threading.Thread(
             target=self._run,
@@ -66,8 +85,20 @@ class OpenAICodexOAuthLoginFlow:
     def remaining_seconds(self) -> int:
         return max(0, int(self._expires_at - time.monotonic()))
 
+    @property
+    def has_pending_work(self) -> bool:
+        return self._thread.is_alive()
+
+    def wait_closed(self) -> None:
+        """Join the worker, including the SDK's token exchange and cleanup."""
+        if self._thread.ident is not None:
+            self._thread.join()
+
     def start(self) -> OpenAICodexOAuthLoginFlow:
-        self._thread.start()
+        with self._commit_lock:
+            if self._cancelled.is_set():
+                raise OpenAICodexOAuthError("OpenAI Codex sign-in was cancelled.")
+            self._thread.start()
         wait_s = min(
             _AUTHORIZATION_URL_TIMEOUT_S,
             max(0.0, self._expires_at - time.monotonic()),
@@ -126,8 +157,6 @@ class OpenAICodexOAuthLoginFlow:
     def cancel(self) -> None:
         """Unblock an abandoned interactive login."""
         self._fail(OpenAICodexOAuthError("OpenAI Codex sign-in was cancelled."))
-        if threading.current_thread() is not self._thread:
-            self._thread.join(timeout=0.5)
 
     def _run(self) -> None:
         try:
@@ -135,6 +164,7 @@ class OpenAICodexOAuthLoginFlow:
                 print_fn=self._capture_output,
                 prompt_fn=self._prompt_for_callback,
                 provider=OPENAI_CODEX_PROVIDER,
+                storage=_LoginTokenStorage(self._cancelled, self._commit_lock, self._expires_at),
                 proxy=self._proxy,
                 open_browser=self._open_browser,
             )
@@ -176,6 +206,8 @@ class OpenAICodexOAuthLoginFlow:
         return value
 
     def _fail(self, error: OpenAICodexOAuthError) -> None:
+        with self._commit_lock:
+            self._cancelled.set()
         try:
             self._result.set_exception(error)
         except Exception:
@@ -193,11 +225,17 @@ def start_openai_codex_oauth_login(
     open_browser: bool = True,
 ) -> OpenAICodexOAuthLoginFlow:
     """Start a non-blocking wrapper around oauth-cli-kit's Codex login."""
-    return OpenAICodexOAuthLoginFlow(
+    flow = OpenAICodexOAuthLoginFlow(
         proxy=proxy,
         timeout_s=timeout_s,
         open_browser=open_browser,
-    ).start()
+    )
+    try:
+        return flow.start()
+    except BaseException:
+        flow.cancel()
+        flow.wait_closed()
+        raise
 
 
 def complete_openai_codex_oauth_login(

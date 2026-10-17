@@ -9,6 +9,8 @@ import {
 
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type { WebUIIngressLimits } from "@/lib/types";
+import { VersionCheckProvider } from "@/providers/VersionCheckProvider";
+import { UpdateFlowProvider } from "@/providers/UpdateFlowProvider";
 
 interface ClientContextValue {
   client: NanobotClient;
@@ -27,6 +29,8 @@ export function ClientProvider({
   modelName = null,
   ingressLimits = null,
   webuiCapabilities = [],
+  checkUpdatesOnConnect = false,
+  allowUpdateFlow = true,
   children,
 }: {
   client: NanobotClient;
@@ -34,6 +38,8 @@ export function ClientProvider({
   modelName?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
   webuiCapabilities?: string[];
+  checkUpdatesOnConnect?: boolean;
+  allowUpdateFlow?: boolean;
   children: ReactNode;
 }) {
   const tokenRef = useRef(token);
@@ -46,7 +52,13 @@ export function ClientProvider({
 
   return (
     <ClientContext.Provider value={value}>
-      {children}
+      <VersionCheckProvider token={token} client={client} autoCheck={checkUpdatesOnConnect}
+        channels={allowUpdateFlow && webuiCapabilities.includes("webui.update-channels.v1")}>
+        <UpdateFlowProvider client={client} token={token} enabled={allowUpdateFlow && webuiCapabilities.includes("webui.update-flow.v1")}
+          canSettleHandoff={webuiCapabilities.includes("webui.update-jobs.settle-handoff.v1")}>
+          {children}
+        </UpdateFlowProvider>
+      </VersionCheckProvider>
     </ClientContext.Provider>
   );
 }

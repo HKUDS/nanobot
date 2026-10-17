@@ -32,6 +32,7 @@ from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.binding import CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
+from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.security.workspace_access import WorkspaceScope, WorkspaceScopeError
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import (
@@ -222,6 +223,12 @@ _WEBUI_MUTATION_PATHS = {
     "settings.cli_app.test": "/api/settings/cli-apps/test",
     "settings.feature.enable": "/api/settings/nanobot-features/enable",
     "settings.feature.disable": "/api/settings/nanobot-features/disable",
+    "settings.nanobot.update.channel": "/api/settings/nanobot-update/channel",
+    "settings.nanobot.update.plan": "/api/settings/nanobot-update/plan/create",
+    "settings.nanobot.update.prepare": "/api/settings/nanobot-update/job/prepare",
+    "settings.nanobot.update.settle": "/api/settings/nanobot-update/job/settle",
+    "settings.nanobot.update.execute": "/api/settings/nanobot-update/job/execute",
+    "settings.nanobot.update.retry": "/api/settings/nanobot-update/job/retry",
     "settings.channel.validate": "/api/settings/channels/validate",
     "settings.channel.configure": "/api/settings/channels/configure",
     "settings.pairing.approve": "/api/settings/pairing/approve",
@@ -475,8 +482,11 @@ class GatewayHTTPHandler:
                     405,
                     "WebUI mutations require an authenticated WebSocket",
                 )
-            response = await self._dispatch_resolved(connection, request, got)
+            with self.bus.admission.activity():
+                response = await self._dispatch_resolved(connection, request, got)
             return response
+        except RuntimeMaintenanceError:
+            return _http_error(503, "Gateway update is being verified. Retry shortly.")
         finally:
             self._log_slow_http(got, response, started)
 
@@ -507,7 +517,13 @@ class GatewayHTTPHandler:
         setattr(request, "_nanobot_trusted_proxy_authenticated", True)
         setattr(request, _WEBUI_MUTATION_REQUEST_ATTR, True)
         setattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, dict(payload))
-        response = await self._dispatch_resolved(connection, request, path)
+        try:
+            # WebUI mutation tasks already survive a disconnected browser. Keep
+            # their async/threaded writes busy until that operation really ends.
+            with self.bus.admission.activity():
+                response = await self._dispatch_resolved(connection, request, path)
+        except RuntimeMaintenanceError:
+            return _http_error(503, "Gateway update is being verified. Retry shortly.")
         if isinstance(response, Response):
             return response
         return _http_error(404, "WebUI mutation action not found")

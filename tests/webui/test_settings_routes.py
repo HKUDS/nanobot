@@ -12,7 +12,10 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.datastructures import Headers
 
+from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import get_config_path
+from nanobot.config.schema import MCPServerConfig
+from nanobot.runtime_admission import RuntimeBusyError
 from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.mcp_presets_api import custom_mcp_action
 from nanobot.webui.settings_routes import WebUISettingsRouter
@@ -35,8 +38,8 @@ def _router(
             rename_model_preset=rename_model_preset,
             refresh_runtime_config=refresh_runtime_config,
         ),
-        bus=SimpleNamespace(),
-        logger=SimpleNamespace(exception=lambda *_args: None),
+        bus=MessageBus(),
+        logger=SimpleNamespace(exception=lambda *_args: None, warning=lambda *_args: None),
         check_api_token=lambda _request: authorized,
         parse_query=lambda path: parse_qs(urlsplit(path).query),
         json_response=http_json_response,
@@ -62,11 +65,36 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
+async def test_nanobot_update_requires_auth_local_permission_and_websocket(tmp_path, monkeypatch):
+    router = _router(config_path=tmp_path / "config.json")
+    path = "/api/settings/nanobot-update/job/prepare"
+    request = SimpleNamespace(path=path, headers=Headers())
+    response = await router.dispatch(None, request, path)
+    assert response.status_code == 405
+    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    assert response.status_code == 403
+    unauthorized = _router(authorized=False, config_path=tmp_path / "config.json")
+    response = await unauthorized.dispatch(None, _mutation_request(path, {}), path)
+    assert response.status_code == 401
+    monkeypatch.setattr(router._system, "allow_feature_package_install", lambda _: True)
+    response = await router.dispatch(None, _mutation_request(path, {"id": "invalid"}), path)
+    assert response.status_code == 400
+    router._runtime_surface = "native"
+    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_close_releases_channel_connectors() -> None:
     router = _router()
     closed = False
 
     class Connector:
+        has_pending_work = False
+
+        async def handle(self, action, query):
+            return {}
+
         async def close(self) -> None:
             nonlocal closed
             closed = True
@@ -77,6 +105,162 @@ async def test_close_releases_channel_connectors() -> None:
 
     assert closed is True
     assert router._system._channel_connectors == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish", ["cancel", "logout", "shutdown"])
+async def test_provider_login_keeps_maintenance_busy_until_worker_exits(tmp_path, monkeypatch, finish):
+    router = _router(config_path=tmp_path / "config.json")
+    stopping, release = threading.Event(), threading.Event()
+    saved = []
+
+    def login(*, on_authorization, cancelled, persist, **_kwargs):
+        assert persist is False
+        on_authorization("https://github.com/login/device", "FIXTURE", 60)
+        assert cancelled.wait(3)
+        stopping.set()
+        assert release.wait(3)
+        return SimpleNamespace(access="late-fixture-token")
+
+    monkeypatch.setattr("nanobot.providers.github_copilot_oauth.login_github_copilot", login)
+    monkeypatch.setattr("nanobot.providers.github_copilot_provider.get_storage", lambda: SimpleNamespace(
+        get_token_path=lambda: tmp_path / "copilot.json", save=saved.append,
+    ))
+    monkeypatch.setattr("nanobot.webui.settings_api.settings_payload", lambda **_: {})
+    path = "/api/settings/provider/oauth-login"
+    response = await router.dispatch(None, _mutation_request(path, {"provider": "github_copilot"}), path)
+    assert response.status_code == 200
+    payload = json.loads(response.body)
+    with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+        pytest.fail("The authorization prompt still has a live worker")
+    try:
+        if finish == "shutdown":
+            shutdown = asyncio.create_task(router.close())
+            assert await asyncio.to_thread(stopping.wait, 1)
+            shutdown.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await shutdown
+        else:
+            path = (
+                "/api/settings/provider/oauth-logout" if finish == "logout"
+                else "/api/settings/provider/oauth-login/complete"
+            )
+            response = await router.dispatch(None, _mutation_request(path, {
+                "provider": "github_copilot", "flow_id": payload["flow_id"], "cancel": "true",
+            }), path)
+            assert response.status_code == 200
+            assert await asyncio.to_thread(stopping.wait, 1)
+        assert router.settings.oauth_flows.get("github_copilot", payload["flow_id"]) is None
+        with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+            pytest.fail("Removing a login or cancelling its close awaiter cannot forget the thread")
+    finally:
+        release.set()
+        await router.close()
+    assert saved == []
+    assert not router.settings.oauth_flows.has_pending_work
+    with router.bus.admission.pause_if_idle(lambda: False):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_failed_codex_login_start_still_owns_late_worker(tmp_path, monkeypatch):
+    import nanobot.providers.openai_codex_oauth as oauth
+
+    router = _router(config_path=tmp_path / "config.json")
+    entered, release = threading.Event(), threading.Event()
+    target = tmp_path / "codex.json"
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(target))
+    monkeypatch.setattr(oauth, "_AUTHORIZATION_URL_TIMEOUT_S", 0.02)
+
+    def login(*, storage, **_kwargs):
+        entered.set()
+        assert release.wait(3)
+        # The actual SDK can finish its token exchange after start() timed out.
+        storage.save(SimpleNamespace(access="late-fixture-token"))
+
+    monkeypatch.setattr(oauth, "login_oauth_interactive", login)
+    path = "/api/settings/provider/oauth-login"
+    try:
+        response = await router.dispatch(None, _mutation_request(path, {
+            "provider": "openai_codex", "remote_browser": "true",
+        }), path)
+        assert response.status_code == 502
+        assert entered.is_set()
+        with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+            pytest.fail("A failed start must retain its background worker")
+    finally:
+        release.set()
+        await router.close()
+    assert not target.exists()
+    with router.bus.admission.pause_if_idle(lambda: False):
+        pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("close_fails", [False, True])
+async def test_channel_setup_blocks_maintenance_until_confirmed_cleanup(
+    tmp_path, monkeypatch, close_fails,
+) -> None:
+    router = _router(config_path=tmp_path / "config.json")
+    cleanup_started, allow_cleanup = asyncio.Event(), asyncio.Event()
+
+    class Connector:
+        has_pending_work = True
+
+        async def handle(self, action, query):
+            return {"status": "pending", "session_id": "test"}
+
+        async def close(self):
+            cleanup_started.set()
+            await allow_cleanup.wait()
+            if close_fails:
+                raise RuntimeError("native writer has not stopped")
+            self.has_pending_work = False
+
+    connector = Connector()
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.load_channel_plugin",
+        lambda _: SimpleNamespace(load_connector=lambda: connector),
+    )
+    path = "/api/settings/channels/whatsapp/connect/start"
+    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    assert response.status_code == 200
+    assert json.loads(response.body)["status"] == "pending"
+    with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+        pytest.fail("Returning a QR code does not finish its connection")
+    shutdown = asyncio.create_task(router.close())
+    try:
+        await asyncio.wait_for(cleanup_started.wait(), timeout=0.5)
+        with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+            pytest.fail("Cleanup still owns its pending connection")
+    finally:
+        allow_cleanup.set()
+        await shutdown
+    if close_fails:
+        assert router._system._channel_connectors["whatsapp"] is connector
+        with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+            pytest.fail("A failed close must not release ownership")
+        close_fails = False
+        await router.close()
+    assert router._system._channel_connectors == {}
+    with router.bus.admission.pause_if_idle(lambda: False):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_legacy_connector_can_connect_but_cannot_claim_maintenance_idle(tmp_path, monkeypatch):
+    router = _router(config_path=tmp_path / "config.json")
+    connector = SimpleNamespace(handle=AsyncMock(return_value={"status": "pending"}))
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.load_channel_plugin",
+        lambda _: SimpleNamespace(load_connector=lambda: connector),
+    )
+    path = "/api/settings/channels/custom/connect/start"
+    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    assert response.status_code == 200
+    await router.close()
+    with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+        pytest.fail("An untracked extension must not be assumed idle")
 
 
 @pytest.mark.asyncio
@@ -220,6 +404,50 @@ async def test_mcp_reload_callback_is_bounded(
         "message": "MCP hot reload timed out. Restart nanobot to pick up changes.",
         "requires_restart": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_settings_shutdown_joins_browser_authorization_and_releases_admission(
+    tmp_path, monkeypatch,
+) -> None:
+    config = MCPServerConfig(type="streamableHttp", auth="oauth", url="https://mcp.example/mcp")
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
+        lambda _query, *, config_path=None: ("linear", config),
+    )
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
+    cleanup_started, allow_cleanup = asyncio.Event(), asyncio.Event()
+
+    async def connect(_servers, _registry, *, oauth_handlers):
+        handlers = oauth_handlers["linear"]
+        await handlers.redirect_handler("https://accounts.example/authorize?state=settings")
+        try:
+            await handlers.callback_handler()
+        finally:
+            cleanup_started.set()
+            await allow_cleanup.wait()
+        return {}
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    router = _router(config_path=tmp_path / "config.json")
+    path = "/api/settings/mcp-oauth/start"
+    response = await router.dispatch(None, _mutation_request(path, {"name": "linear"}), path)
+    assert response.status_code == 200
+    assert json.loads(response.body)["status"] == "authorization_required"
+    with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+        pytest.fail("Settings returned, but authorization has not finished")
+
+    shutdown = asyncio.create_task(router.close())
+    try:
+        await asyncio.wait_for(cleanup_started.wait(), timeout=0.5)
+        assert not shutdown.done()
+        with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
+            pytest.fail("Settings shutdown must retain ownership through cleanup")
+    finally:
+        allow_cleanup.set()
+        await shutdown
+    with router.bus.admission.pause_if_idle(lambda: False):
+        pass
 
 
 @pytest.mark.asyncio
@@ -554,7 +782,7 @@ async def test_version_check_route_returns_stable_payload(
 ) -> None:
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.check_for_update",
-        lambda: update_info,
+        lambda: {"updateAvailable": update_info, "releaseStatus": {"state": "available" if update_info else "current"}},
     )
     request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
 
@@ -583,6 +811,45 @@ async def test_version_check_route_enforces_auth_and_bounds_failures(
     assert failed.status_code == 500
     assert json.loads(failed.body) == {"error": "version check failed"}
     assert "upstream secret body" not in failed.body.decode()
+
+
+@pytest.mark.parametrize("state", ["waiting_stable", "withdrawn", "unavailable", "publishing", "unsupported"])
+async def test_channel_status_is_explicit_and_old_clients_never_report_false_success(monkeypatch, state):
+    result = {"updateAvailable": None, "releaseStatus": {
+        "channel": "stable", "revision": 2, "currentVersion": "0.3.7.dev42", "state": state,
+    }}
+    monkeypatch.setattr("nanobot.webui.settings_routes.check_for_update", lambda: result)
+    request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
+    router = _router()
+    response = await router.dispatch(None, request, request.path)
+    assert response.status_code == 409
+    request.path += "?channel_status=1"
+    response = await router.dispatch(None, request, "/api/settings/version-check")
+    assert response.status_code == 200
+    assert json.loads(response.body)["releaseStatus"] == result["releaseStatus"]
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+async def test_version_check_owner_is_additive_read_only_and_failure_is_not_a_release_failure(monkeypatch):
+    from nanobot.webui import settings_system
+
+    result = {"updateAvailable": None, "releaseStatus": {"state": "current"}}
+    monkeypatch.setattr("nanobot.webui.settings_routes.check_for_update", lambda: result)
+    inspect_owner = MagicMock(return_value=SimpleNamespace(owner="pipx", records={}))
+    monkeypatch.setattr(settings_system, "inspect_update_installation", inspect_owner)
+    request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
+    router = _router()
+    legacy = await router.dispatch(None, request, "/api/settings/version-check")
+    assert json.loads(legacy.body) == {"updateAvailable": None}
+    inspect_owner.assert_not_called()
+    request.path += "?channel_status=1"
+    modern = await router.dispatch(None, request, "/api/settings/version-check")
+    assert json.loads(modern.body)["installation_method"] == "pipx"
+    inspect_owner.side_effect = ValueError("private receipt secret")
+    unavailable = await router.dispatch(None, request, "/api/settings/version-check")
+    body = json.loads(unavailable.body)
+    assert body["installation_method"] is None and body["releaseStatus"] == result["releaseStatus"]
+    assert "secret" not in unavailable.body.decode()
 
 
 async def test_runtime_config_route_authentication_validation_and_restart(tmp_path):

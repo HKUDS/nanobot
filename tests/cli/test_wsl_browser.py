@@ -52,7 +52,10 @@ def test_windows_handoff_file_is_private_readable_and_removed(opens):
     result = subprocess.run(
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand",
          base64.b64encode(script.encode("utf-16-le")).decode("ascii")],
-        input=base64.b64encode(content) + b"\n", capture_output=True, timeout=15,
+        # This checks ACLs, sharing and cleanup, not the launcher's acknowledgement
+        # deadline. A fresh Windows runner also compiles the helper's C# via
+        # Add-Type; keep that cold-start budget separate from the 30 ms lifetime.
+        input=base64.b64encode(content) + b"\n", capture_output=True, timeout=60,
     )
 
     assert result.returncode == (0 if opens else 1), result.stderr

@@ -27,6 +27,7 @@ class GitHubCopilotOAuthFlow:
         self._error: Exception | None = None
         self._commit_lock = threading.Lock()
         self._saved = False
+        self._thread = threading.Thread(target=self._run, daemon=True, name="github-device-login")
 
     @property
     def remaining_seconds(self) -> int:
@@ -35,6 +36,14 @@ class GitHubCopilotOAuthFlow:
     @property
     def expired(self) -> bool:
         return self._cancelled.is_set() or self.remaining_seconds <= 0
+
+    @property
+    def has_pending_work(self) -> bool:
+        return self._thread.is_alive()
+
+    def wait_closed(self) -> None:
+        if self._thread.ident is not None:
+            self._thread.join()
 
     def cancel(self) -> None:
         with self._commit_lock:
@@ -63,7 +72,10 @@ class GitHubCopilotOAuthFlow:
             self._ready.set()
 
     def start(self) -> None:
-        threading.Thread(target=self._run, daemon=True, name="github-device-login").start()
+        with self._commit_lock:
+            if self.expired:
+                raise RuntimeError("GitHub sign-in expired or cancelled. Start again.")
+            self._thread.start()
         if not self._ready.wait(timeout=15):
             self.cancel()
             raise RuntimeError("GitHub sign-in timed out. Start again.")
@@ -72,7 +84,7 @@ class GitHubCopilotOAuthFlow:
         if self._error is not None:
             raise RuntimeError("GitHub sign-in failed. Start again.") from None
 
-    def complete(self) -> OAuthToken | None:
+    def complete(self, _authorization_response: str | None = None) -> OAuthToken | None:
         # Approval alone must not change credentials after the UI was closed.
         # Commit only through the live flow's completion endpoint, serialized
         # with cancellation (including sign-out).

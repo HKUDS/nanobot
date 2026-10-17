@@ -164,10 +164,10 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Real PowerShell, browser-handoff, and process-tree tests run
-            # serially so xdist workers do not compete for native processes.
-            # Bound concurrent threaded storage work on the Windows runner.
-            pytest_args: "-n 2 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py"
+            # Process identities run serially; isolated update jobs use case-level
+            # scheduling below so one file cannot serialize all real venv work.
+            # PowerShell/process-tree tests also keep their separate console job.
+            pytest_args: "-n 2 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -200,6 +200,13 @@ jobs:
       - name: Verify dependency consistency
         run: uv pip check
 
+      - name: Install pipx for offline installer checks
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          uv tool install pipx==1.17.12
+          uv tool dir --bin >> "$GITHUB_PATH"
+
       # Channel requirements live in manifests rather than uv.lock. Avoid a
       # later uv run sync pruning the packages installed by the previous step.
       - name: Lint with ruff
@@ -209,6 +216,26 @@ jobs:
       - name: Type check with BasedPyright (strict)
         if: matrix.coverage
         run: uv run --no-sync basedpyright
+
+      - name: Check Windows update coordination before the full suite
+        if: runner.os == 'Windows'
+        run: >-
+          uv run --no-sync python -m pytest
+          tests/test_installation_lock.py
+          tests/test_update_profiles.py
+          tests/utils/test_helpers.py::test_atomic_record_reader_does_not_block_concurrent_replacement
+          tests/gateway/test_runtime.py::test_runtime_state_publish_keeps_existing_snapshot_readable
+          tests/gateway/test_runtime.py::test_runtime_state_reader_does_not_block_publish_while_decoding
+          -q
+
+      # Each update job owns its venv, HOME, profile and lock directory. Preserve
+      # the real installation/restore checks, but avoid a loadfile straggler and
+      # disk contention with timing-sensitive runtime-registration checks.
+      - name: Run Windows isolated update jobs
+        if: runner.os == 'Windows'
+        run: >-
+          uv run --no-sync python -m pytest tests/test_update_jobs.py
+          -n 4 --dist load -vv --durations=25 --durations-min=1.0
 
       - name: Run tests with coverage
         if: matrix.coverage
@@ -247,6 +274,8 @@ jobs:
     if: needs.changes.outputs.python_required == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed"
 
     steps:
       - uses: actions/checkout@v4
@@ -278,6 +307,18 @@ jobs:
           tests/cli/test_wsl_browser.py
           --durations=25 --durations-min=1.0
 
+      - name: Install pipx for offline installer checks
+        shell: bash
+        run: |
+          uv tool install pipx==1.17.12
+          uv tool dir --bin >> "$GITHUB_PATH"
+
+      # Installer subprocesses run here, parallel to the broad Windows suite.
+      # Each case owns an isolated manager/config root, so individual cases can
+      # run concurrently without sharing a console or package installation.
+      - name: Run Windows installer checks
+        run: uv run --no-sync python -m pytest tests/test_install_scripts.py -n 4 --dist load -x -vv --durations=10
+
   webui:
     needs: changes
     if: needs.changes.outputs.webui_required == 'true'
@@ -290,7 +331,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.6
+          bun-version: 1.3.13
 
       - name: Verify npm lockfile
         working-directory: webui
@@ -322,10 +363,12 @@ jobs:
 
   tui:
     needs: changes
-    if: needs.changes.outputs.tui_required == 'true'
+    if: needs.changes.outputs.tui_required == 'true' || needs.changes.outputs.python_required == 'true' || needs.changes.outputs.webui_required == 'true'
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # Native build + clean install + recovery/next-update journeys on Windows.
+    # Each subprocess is separately bounded by the acceptance harness.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -370,11 +413,10 @@ jobs:
         working-directory: tui
         run: python3 scripts/pty_smoke.py
 
-      - name: Set up Python for ConPTY smoke test
-        if: runner.os == 'Windows'
+      - name: Set up Python for native package acceptance
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.11'
 
       - name: Test TUI in a real ConPTY terminal
         if: runner.os == 'Windows'
@@ -402,6 +444,45 @@ jobs:
         run: |
           bun scripts/release-notices.ts win32-x64
           python scripts/package-release.py win32-x64
+
+      - name: Build and install the native application package
+        shell: bash
+        env:
+          NATIVE_TARGET: ${{ runner.os == 'Windows' && 'win32-x64' || 'linux-x64' }}
+        run: |
+          python -m pip install --disable-pip-version-check build
+          python -m build --outdir "$RUNNER_TEMP/python-dist"
+          # Archive verification shares the installed launcher's dependencies.
+          # Install the intermediate in this build environment, not the separate
+          # clean-home environment used by the public-installer acceptance probe.
+          python -m pip install --disable-pip-version-check "$(find "$RUNNER_TEMP/python-dist" -name '*.whl' -print -quit)"
+          python -m scripts.build_tui_wheels \
+            --wheel "$(find "$RUNNER_TEMP/python-dist" -name '*.whl' -print -quit)" \
+            --tui-dir tui/dist --target "$NATIVE_TARGET" --out-dir "$RUNNER_TEMP/native-wheel"
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          python -I scripts/verify_installed_release.py \
+            --install-wheel "$(find "$RUNNER_TEMP/native-wheel" -name '*.whl' -print -quit)" \
+            --version "$version" --commit "$(git rev-parse HEAD)" --gateway \
+            --report "$RUNNER_TEMP/native-install-report.json"
+
+      - name: Verify packaged upgrades and automatic service recovery
+        shell: bash
+        run: |
+          python -I scripts/verify_packaged_update.py \
+            --wheel "$(find "$RUNNER_TEMP/native-wheel" -name '*.whl' -print -quit)" \
+            --commit "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/packaged-update"
+
+      - name: Retain the native package acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-install-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-install-report.json
+            ${{ runner.temp }}/packaged-update/packaged-update-report.json
+            ${{ runner.temp }}/packaged-update/*/result.json
+          if-no-files-found: error
+          retention-days: 3
 
   docker:
     needs: changes

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -43,6 +44,7 @@ def _fake_interactive_login(
         provider,
         proxy,
         open_browser,
+        storage,
     ) -> OAuthToken:
         captured.update(
             provider=provider,
@@ -80,6 +82,7 @@ def test_authorization_url_comes_from_oauth_cli_kit() -> None:
         assert params["state"]
     finally:
         flow.cancel()
+        flow.wait_closed()
 
 
 def test_local_flow_delegates_browser_and_callback_to_public_oauth_cli_kit(
@@ -248,3 +251,41 @@ def test_remote_flow_expires_while_waiting_for_callback(
             complete_openai_codex_oauth_login(flow)
     finally:
         flow.cancel()
+        flow.wait_closed()
+
+
+@pytest.mark.parametrize("finish", ["cancel", "expiry", "success"])
+def test_worker_exit_and_credential_commit_are_distinct(monkeypatch, tmp_path, finish):
+    entered, release = threading.Event(), threading.Event()
+    target = tmp_path / "oauth.json"
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(target))
+
+    def login(*, print_fn, storage, **_kwargs):
+        print_fn(_authorization_url())
+        entered.set()
+        assert release.wait(3)
+        token = OAuthToken(access="fixture-access", refresh="fixture-refresh", expires=123)
+        storage.save(token)
+        return token
+
+    monkeypatch.setattr(codex_oauth, "login_oauth_interactive", login)
+    flow = start_openai_codex_oauth_login(timeout_s=5, open_browser=False)
+    try:
+        assert entered.wait(1)
+        assert flow.has_pending_work
+        if finish == "cancel":
+            flow.cancel()
+        elif finish == "expiry":
+            # Advance the shared clock used by both the flow and its save guard.
+            now = time.monotonic() + 10
+            monkeypatch.setattr(codex_oauth, "time", SimpleNamespace(monotonic=lambda: now))
+        assert flow.has_pending_work
+        assert not target.exists()
+    finally:
+        release.set()
+        flow.wait_closed()
+    assert not flow.has_pending_work
+    assert target.exists() is (finish == "success")
+    if finish != "success":
+        with pytest.raises(OpenAICodexOAuthError):
+            flow.complete()

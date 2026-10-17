@@ -7,6 +7,7 @@ import json
 import runpy
 import stat
 import struct
+import subprocess
 import tarfile
 import tomllib
 import zipfile
@@ -17,6 +18,13 @@ import pytest
 
 from nanobot.cli import tui_launcher
 from scripts import build_tui_wheels as packager
+from scripts import release_candidate
+from scripts.release_candidate import (
+    retain_candidate,
+    verify_candidate,
+    write_install_guide,
+    write_manifest,
+)
 
 
 @pytest.fixture
@@ -186,3 +194,186 @@ def test_installed_tui_never_downloads_or_requires_bun(tmp_path, monkeypatch, sy
     cache = tmp_path / "empty-cache"
     assert tui_launcher.resolve_tui_command(data_dir=cache) == [str(binary)]
     assert not cache.exists()
+
+
+@pytest.fixture
+def complete_candidate(tmp_path, candidate):
+    """Actual checkout payload, with synthetic native binaries (not native execution)."""
+    from hatch_build import WebUIBuildHook
+
+    root = tmp_path / "checkout"
+    subprocess.run(["git", "clone", "--shared", str(packager.ROOT), str(root)],
+                   check=True, capture_output=True)
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    metadata = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    wheel, info = candidate
+    with zipfile.ZipFile(wheel) as archive:
+        files = {name: archive.read(name) for name in archive.namelist()}
+    tracked = subprocess.check_output(["git", "ls-files", "-z", "--", "nanobot"], cwd=root).decode().split("\0")
+    for name in filter(None, tracked):
+        parts = name.split("/")
+        if len(parts) > 3 and parts[1] == "channels" and parts[3] == "tests":
+            continue
+        files[name] = (root / name).read_bytes()
+    hook = WebUIBuildHook(str(root), {}, None, {}, "", "wheel",
+                          SimpleNamespace(display_info=lambda message: None))
+    hook.initialize("editable", {})
+    references = root / "nanobot/skills/nanobot-document/references"
+    documentation = {}
+    for reference in references.rglob("*.md"):
+        files[reference.relative_to(root).as_posix()] = reference.read_bytes()
+        name = "docs/" + reference.relative_to(references).as_posix()
+        documentation[name] = (root / name).read_bytes()
+    files[f"{info}/METADATA"] += f'Requires-Python: {metadata["requires-python"]}\n'.encode()
+    files["nanobot/_build_commit.txt"] = f"{commit}\n".encode()
+    files["nanobot/web/dist/index.html"] = b"<html>compiled fixture</html>"
+    record = io.StringIO()
+    writer = csv.writer(record)
+    for name, content in files.items():
+        if not name.endswith("/RECORD"):
+            writer.writerow((name, packager._digest(content), len(content)))
+    writer.writerow((f"{info}/RECORD", "", ""))
+    files[f"{info}/RECORD"] = record.getvalue().encode()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    for target in packager.PLATFORMS:
+        make_bundle(artifacts, target)
+        packager.build_wheel(wheel, artifacts, artifacts, target, root=root)
+    version = metadata["version"]
+    source_files = {
+        "PKG-INFO": files[f"{info}/METADATA"],
+        "pyproject.toml": (root / "pyproject.toml").read_bytes(),
+        **documentation,
+        **{name: data for name, data in files.items() if name.startswith("nanobot/")},
+    }
+    with tarfile.open(artifacts / f"nanobot_ai-{version}.tar.gz", "w:gz") as archive:
+        for name, data in source_files.items():
+            member = tarfile.TarInfo(f"nanobot_ai-{version}/{name}")
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+    return root, commit, artifacts
+
+
+def test_complete_manifest_binds_wheels_sdist_and_fallback_archives(tmp_path, complete_candidate):
+    """Real archive/RECORD checks, with synthetic binaries (not native execution)."""
+    root, commit, artifacts = complete_candidate
+    manifest = verify_candidate(root, artifacts, source_commit=commit)
+    assert len(manifest.artifacts) == 16
+    assert manifest.candidate_commit == commit
+    output = artifacts / "release-manifest.json"
+    write_manifest(manifest, output)
+    original = output.read_bytes()
+    write_manifest(verify_candidate(root, artifacts, source_commit=commit), output)
+    assert output.read_bytes() == original
+    with pytest.raises(FileExistsError):
+        write_manifest(manifest.model_copy(update={"source_commit": "f" * 40}), output)
+    guide = tmp_path / "install.md"
+    write_install_guide(root, artifacts, guide, source_commit=commit)
+    original_guide = guide.read_bytes()
+    write_install_guide(root, artifacts, guide, source_commit=commit)
+    assert guide.read_bytes() == original_guide
+    assert commit.encode() in original_guide
+    assert len(list(artifacts.iterdir())) == 17  # 16 artifacts and the manifest, no guide.
+    with pytest.raises(ValueError, match="outside"):
+        write_install_guide(root, artifacts, artifacts / "install.md", source_commit=commit)
+    guide.write_text("previous reviewed handoff\n")
+    with pytest.raises(FileExistsError, match="overwrite"):
+        write_install_guide(root, artifacts, guide, source_commit=commit)
+    assert guide.read_text() == "previous reviewed handoff\n"
+    recorded = json.loads(original)
+    recorded["artifacts"][0]["sha256"] = "f" * 64
+    output.write_text(json.dumps(recorded))
+    with pytest.raises(ValueError, match="recorded release manifest"):
+        write_install_guide(root, artifacts, tmp_path / "unverified.md", source_commit=commit)
+    assert not (tmp_path / "unverified.md").exists()
+    output.write_bytes(original)
+    damaged = artifacts / "nanobot-tui-linux-x64.zip.sha256"
+    damaged.write_text("0" * 64 + "  nanobot-tui-linux-x64.zip\n")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        verify_candidate(root, artifacts, source_commit=commit)
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        write_install_guide(root, artifacts, tmp_path / "damaged.md", source_commit=commit)
+    assert not (tmp_path / "damaged.md").exists()
+
+
+def test_retained_candidate_keeps_checked_bytes_and_independent_source(tmp_path, complete_candidate):
+    root, commit, artifacts = complete_candidate
+    manifest = verify_candidate(root, artifacts, source_commit=commit)
+    write_manifest(manifest, artifacts / "release-manifest.json")
+    (root / "private-untracked.txt").write_text("not release input")
+    output = tmp_path / "retained"
+    retain_candidate(root, artifacts, output, source_commit=commit)
+    identity = json.loads((output / "handoff.json").read_text())
+    assert identity["candidate_commit"] == commit and identity["published"] is False
+    assert identity["manifest_sha256"] == hashlib.sha256((artifacts / "release-manifest.json").read_bytes()).hexdigest()
+    assert verify_candidate(root, output / "artifacts", source_commit=commit) == manifest
+    for original in artifacts.iterdir():
+        assert (output / "artifacts" / original.name).read_bytes() == original.read_bytes()
+    independent = tmp_path / "independent"
+    subprocess.run(["git", "clone", "--no-local", str(output / "source.git"), str(independent)],
+                   check=True, capture_output=True)
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=independent, text=True).strip() == commit
+    assert not (independent / "private-untracked.txt").exists()
+    assert not (output / "source.git/objects/info/alternates").exists()
+    assert str(root) not in (output / "source.git/config").read_text()
+    assert verify_candidate(independent, output / "artifacts", source_commit=commit) == manifest
+    with pytest.raises(FileExistsError):
+        retain_candidate(root, artifacts, output, source_commit=commit)
+
+
+def test_interrupted_retention_has_no_accepted_handoff(tmp_path, complete_candidate, monkeypatch):
+    root, commit, artifacts = complete_candidate
+    write_manifest(verify_candidate(root, artifacts, source_commit=commit), artifacts / "release-manifest.json")
+
+    def interrupted_copy(source, target):
+        raise OSError("controlled interrupted copy")
+
+    monkeypatch.setattr(release_candidate.shutil, "copyfile", interrupted_copy)
+    output = tmp_path / "interrupted"
+    with pytest.raises(OSError, match="interrupted copy"):
+        retain_candidate(root, artifacts, output, source_commit=commit)
+    assert not (output / "handoff.json").exists()
+
+
+@pytest.mark.parametrize("mutation", ["wheel-code", "wheel-webui", "source-code", "source-missing", "source-extra"])
+def test_complete_candidate_rejects_mixed_or_incomplete_application_payload(tmp_path, complete_candidate, mutation):
+    root, commit, artifacts = complete_candidate
+    # These are intact archives with valid versions/commit markers and RECORDs.
+    # A stale intermediate or a stray local file can still be packaged correctly.
+    if mutation.startswith("wheel-"):
+        wheel = next(artifacts.glob("*-macosx_13_0_arm64.whl"))
+        with zipfile.ZipFile(wheel) as archive:
+            entries = archive.infolist()
+            files = {entry.filename: archive.read(entry) for entry in entries}
+        name = "nanobot/__init__.py" if mutation == "wheel-code" else "nanobot/web/dist/index.html"
+        files[name] += b"\n# stale build\n"
+        record_name = next(name for name in files if name.endswith(".dist-info/RECORD"))
+        record = io.StringIO()
+        writer = csv.writer(record)
+        for name, data in files.items():
+            writer.writerow((name, "", "") if name == record_name else (name, packager._digest(data), len(data)))
+        files[record_name] = record.getvalue().encode()
+        with zipfile.ZipFile(wheel, "w") as archive:
+            for entry in entries:
+                archive.writestr(entry, files[entry.filename])
+    else:
+        source = next(artifacts.glob("nanobot_ai-*.tar.gz"))
+        files = packager.source_files(source.read_bytes())
+        module = next(name for name in files if name.endswith("/nanobot/agent/loop.py"))
+        if mutation == "source-code":
+            files[module] += b"\n# stale build\n"
+        elif mutation == "source-missing":
+            del files[module]
+        else:
+            files[module.split("/", 1)[0] + "/nanobot/local-settings.json"] = b'{"local": true}'
+        with tarfile.open(source, "w:gz") as archive:
+            for name, data in files.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+    with pytest.raises(ValueError, match="application payload"):
+        verify_candidate(root, artifacts, source_commit=commit)
+    assert not (artifacts / "release-manifest.json").exists()

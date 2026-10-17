@@ -64,6 +64,7 @@ from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
+from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RUNTIME_CONTEXT_MESSAGE_META,
@@ -961,13 +962,14 @@ class AgentLoop:
 
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
-        self._discarding_sessions.add(key)
-        try:
-            await self.sessions.state.discard(key)
-            await self._cancel_active_tasks(key)
-        finally:
-            self.discard_session_file_state(key)
-            self._discarding_sessions.discard(key)
+        with self.bus.admission.activity():
+            self._discarding_sessions.add(key)
+            try:
+                await self.sessions.state.discard(key)
+                await self._cancel_active_tasks(key)
+            finally:
+                self.discard_session_file_state(key)
+                self._discarding_sessions.discard(key)
 
     def discard_session_file_state(self, key: str) -> None:
         """Forget ephemeral file-read state for a reset or removed session."""
@@ -1383,16 +1385,19 @@ class AgentLoop:
 
     async def _check_expired_sessions_if_due(self) -> None:
         """Scan idle sessions without blocking the event loop."""
+        if self.bus.admission.paused:
+            return
         now = time.monotonic()
         if now < self._next_idle_compact_check_at:
             return
         self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
         try:
-            await self.auto_compact.check_expired(
-                self.schedule_background,
-                self.runtime_for_session,
-                active_session_keys=self._pending_queues.keys(),
-            )
+            with self.bus.admission.activity():
+                await self.auto_compact.check_expired(
+                    self.schedule_background,
+                    self.runtime_for_session,
+                    active_session_keys=self._pending_queues.keys(),
+                )
         except SessionOperationQueueFullError:
             logger.debug("Skipping idle archival while session storage is busy")
 
@@ -1404,7 +1409,10 @@ class AgentLoop:
 
             while self._running:
                 try:
-                    msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+                    # Keep dequeue and admission in this task. wait_for would
+                    # dequeue in another task, leaving a false-idle handoff gap.
+                    async with asyncio.timeout(1.0):
+                        msg = await self.bus.consume_inbound()
                 except asyncio.TimeoutError:
                     await self._check_expired_sessions_if_due()
                     continue
@@ -1421,14 +1429,15 @@ class AgentLoop:
                     logger.warning("Error consuming inbound message: {}, continuing...", e)
                     continue
 
-                try:
-                    await self._dispatch_inbound(msg)
-                except (SessionOperationQueueFullError, SessionConflictError) as exc:
-                    key = self._effective_session_key(msg)
-                    logger.warning("Session input rejected for {}: {}", key, exc)
-                    if msg.is_user_input:
-                        delivery = self.turn_delivery_factory.unrouted(msg, key)
-                        await delivery.fail(publish_completion=key not in self._pending_queues)
+                with self.bus.admission.activity():
+                    try:
+                        await self._dispatch_inbound(msg)
+                    except (SessionOperationQueueFullError, SessionConflictError) as exc:
+                        key = self._effective_session_key(msg)
+                        logger.warning("Session input rejected for {}: {}", key, exc)
+                        if msg.is_user_input:
+                            delivery = self.turn_delivery_factory.unrouted(msg, key)
+                            await delivery.fail(publish_completion=key not in self._pending_queues)
         finally:
             await self.aclose()
 
@@ -1481,6 +1490,23 @@ class AgentLoop:
                 return
         await self._enqueue_session_message(routed_msg)
 
+    def maintenance(self) -> AbstractContextManager[None]:
+        """Close task intake only when this runtime's accepted work is finished.
+
+        The gateway shares the bus gate with cron and local trigger intake.
+        This does not stop other processes or channel/configuration writes;
+        those must be shut down before an updater takes a data backup.
+        """
+        return self.bus.admission.pause_if_idle(self._has_pending_work)
+
+    def _has_pending_work(self) -> bool:
+        return bool(
+            self.bus.inbound_size or self._pending_queues or self._deferred_automation_turns
+            or self.bus.has_pending_events or self._active_tasks or self._background_tasks
+            or self._close_lock.locked()
+            or self.subagents.has_pending_work or self._exec_session_manager.has_pending_work
+        )
+
     def preserve_inflight_turns_on_shutdown(self) -> None:
         """Keep durable checkpoints when the owning gateway exits.
 
@@ -1513,6 +1539,7 @@ class AgentLoop:
 
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
         """Admit session work without waiting for its execution or result."""
+        self.bus.admission.check()
         session_key = self._effective_session_key(msg)
         if not self.subagents.accepts_result(msg, session_key):
             return
@@ -1798,6 +1825,11 @@ class AgentLoop:
 
     def schedule_background(self, coro: Coroutine[Any, Any, Any]) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
+        try:
+            self.bus.admission.check()
+        except RuntimeMaintenanceError:
+            coro.close()
+            raise
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
         task.add_done_callback(self._background_task_done)
@@ -2651,53 +2683,54 @@ class AgentLoop:
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._get_session_lock(session_key)
-        temporary_parent = False
-        try:
-            async with lock:
-                kwargs: dict[str, Any] = {
-                    "session_key": session_key,
-                    "on_progress": on_progress,
-                    "on_stream": on_stream,
-                    "on_stream_end": on_stream_end,
-                    "ephemeral": ephemeral,
-                }
-                if _session_policy is not None:
-                    # Isolate per-run state before any early save or checkpoint;
-                    # the cached conversation must survive a temporary SDK turn.
-                    session = (await self.sessions.state.read(session_key) or Session(key=session_key)
-                               if not _session_policy.persist
-                               else await self.sessions.state.get(session_key))
-                    temporary_parent = not _session_policy.persist and not session.persisted
-                    session.policy = SessionPolicy(
-                        persist=session.policy.persist and _session_policy.persist,
-                        log_content=session.policy.log_content and _session_policy.log_content,
-                        disabled_tools=session.policy.disabled_tools | _session_policy.disabled_tools,
-                    )
-                    kwargs["session"] = session
-                if _run_extra_hooks_for_ephemeral:
-                    kwargs["run_extra_hooks_for_ephemeral"] = True
-                if hooks is not None:
-                    kwargs["hooks"] = hooks
-                if hook_factories is not None:
-                    kwargs["hook_factories"] = hook_factories
-                if tools is not None:
-                    kwargs["tools"] = tools
-                if runtime is not None:
-                    kwargs["runtime"] = runtime
-                if on_runtime_admitted is not None:
-                    kwargs["on_runtime_admitted"] = on_runtime_admitted
-                if attributes is not None:
-                    kwargs["attributes"] = dict(attributes)
-                try:
-                    return await self._process_message(msg, **kwargs)
-                finally:
-                    if temporary_parent:
-                        parent = self.sessions.state.peek_header(session_key)
-                        if parent is not None and not parent.policy.persist:
-                            await self.sessions.state.delete(session_key, expected_generation=parent.generation)
-        finally:
-            await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
-            self.runtime_event_publisher.clear_turn(session_key)
+        with self.bus.admission.activity():
+            temporary_parent = False
+            try:
+                async with lock:
+                    kwargs: dict[str, Any] = {
+                        "session_key": session_key,
+                        "on_progress": on_progress,
+                        "on_stream": on_stream,
+                        "on_stream_end": on_stream_end,
+                        "ephemeral": ephemeral,
+                    }
+                    if _session_policy is not None:
+                        # Isolate per-run state before any early save or checkpoint;
+                        # the cached conversation must survive a temporary SDK turn.
+                        session = (await self.sessions.state.read(session_key) or Session(key=session_key)
+                                   if not _session_policy.persist
+                                   else await self.sessions.state.get(session_key))
+                        temporary_parent = not _session_policy.persist and not session.persisted
+                        session.policy = SessionPolicy(
+                            persist=session.policy.persist and _session_policy.persist,
+                            log_content=session.policy.log_content and _session_policy.log_content,
+                            disabled_tools=session.policy.disabled_tools | _session_policy.disabled_tools,
+                        )
+                        kwargs["session"] = session
+                    if _run_extra_hooks_for_ephemeral:
+                        kwargs["run_extra_hooks_for_ephemeral"] = True
+                    if hooks is not None:
+                        kwargs["hooks"] = hooks
+                    if hook_factories is not None:
+                        kwargs["hook_factories"] = hook_factories
+                    if tools is not None:
+                        kwargs["tools"] = tools
+                    if runtime is not None:
+                        kwargs["runtime"] = runtime
+                    if on_runtime_admitted is not None:
+                        kwargs["on_runtime_admitted"] = on_runtime_admitted
+                    if attributes is not None:
+                        kwargs["attributes"] = dict(attributes)
+                    try:
+                        return await self._process_message(msg, **kwargs)
+                    finally:
+                        if temporary_parent:
+                            parent = self.sessions.state.peek_header(session_key)
+                            if parent is not None and not parent.policy.persist:
+                                await self.sessions.state.delete(session_key, expected_generation=parent.generation)
+            finally:
+                await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
+                self.runtime_event_publisher.clear_turn(session_key)
 
     def _get_session_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared lock while allowing idle session entries to expire."""

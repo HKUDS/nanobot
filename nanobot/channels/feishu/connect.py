@@ -46,6 +46,20 @@ class FeishuConnectStore:
         self._sessions: dict[str, FeishuConnectSession] = {}
         self._completion_lock = threading.Lock()
 
+    @property
+    def has_pending_work(self) -> bool:
+        # Registration only advances inside an owned settings request. Expired
+        # QR records have no listener or detached writer to keep alive.
+        now = time.monotonic()
+        return any(session.deadline > now for session in tuple(self._sessions.values()))
+
+    async def close(self) -> None:
+        def clear() -> None:
+            with self._completion_lock:
+                self._sessions.clear()
+
+        await asyncio.to_thread(clear)
+
     async def handle(self, action: str, query: QueryParams) -> dict[str, Any]:
         """Handle one generic settings connection action."""
         if action == "start":

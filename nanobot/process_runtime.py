@@ -23,6 +23,7 @@ from typing import Any, Generic, Literal, TypeVar, cast
 
 from filelock import FileLock
 
+from nanobot.utils.atomic_file import read_atomic_bytes, replace_atomic
 from nanobot.utils.rotating_output import (
     BACKGROUND_LOG_BACKUP_COUNT_ENV,
     BACKGROUND_LOG_MAX_BYTES_ENV,
@@ -479,8 +480,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
 
     def _read_state(self) -> dict[str, Any] | None:
         try:
-            with self.paths.state_path.open(encoding="utf-8") as handle:
-                payload = json.load(handle)
+            payload = json.loads(read_atomic_bytes(self.paths.state_path).decode("utf-8"))
         except (OSError, json.JSONDecodeError, ValueError):
             return None
         return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
@@ -499,7 +499,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            tmp_path.replace(self.paths.state_path)
+            replace_atomic(tmp_path, self.paths.state_path)
         finally:
             tmp_path.unlink(missing_ok=True)
 

@@ -107,6 +107,16 @@ class BaseChannel(ABC):
         """
         pass
 
+    @property
+    def has_pending_delivery(self) -> bool:
+        """Whether delivery outlives an awaited ``send``/streaming call.
+
+        The manager already accounts for awaited sends and retries. Channels
+        that enqueue their own writes must expose that work here, including
+        transport cleanup, before a gateway can be considered idle.
+        """
+        return False
+
     def progress_transport_defaults(self) -> tuple[bool, bool] | None:
         """Return channel-owned defaults for progress and tool-hint messages.
 

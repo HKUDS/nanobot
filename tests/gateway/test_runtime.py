@@ -49,6 +49,41 @@ def _paths(tmp_path: Path) -> GatewayRuntimePaths:
     return GatewayRuntimePaths.for_instance(data_dir=tmp_path)
 
 
+def test_runtime_state_publish_keeps_existing_snapshot_readable(tmp_path):
+    """Status polling must not prevent a gateway from publishing readiness."""
+    from nanobot.utils.atomic_file import _open_snapshot
+
+    runtime = GatewayRuntime(paths=_paths(tmp_path / "网关 home"))
+    previous = {"pid": os.getpid(), "identity": "fixture", "command": ["nanobot", "gateway"]}
+    current = {**previous, "health_host": "127.0.0.1"}
+    runtime._write_state(previous)
+    with _open_snapshot(runtime.paths.state_path) as snapshot:
+        runtime._write_state(current)
+        assert json.loads(snapshot.read()) == previous
+        assert runtime._read_state() == current
+    assert list(runtime.paths.run_dir.glob("*.tmp")) == []
+    if os.name != "nt":
+        assert runtime.paths.state_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_runtime_state_reader_does_not_block_publish_while_decoding(tmp_path, monkeypatch):
+    """Pause a real status read while a readiness update replaces its record."""
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    previous = {"pid": os.getpid(), "identity": "fixture"}
+    current = {**previous, "health_host": "127.0.0.1"}
+    runtime._write_state(previous)
+    decode = json.loads
+
+    def publish_during_decode(value, **kwargs):
+        runtime._write_state(current)
+        return decode(value, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("nanobot.process_runtime.json.loads", publish_during_decode)
+        assert runtime._read_state() == previous
+    assert runtime._read_state() == current
+
+
 _FOREGROUND_CHILD = r"""
 import os
 import signal

@@ -8,6 +8,7 @@ import sys
 import time
 from contextlib import suppress
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -91,7 +92,8 @@ def _pid_running(pid: int) -> bool:
         return False
     # A killed grandchild can remain a zombie until its new parent reaps it.
     stat = Path(f"/proc/{pid}/stat")
-    with suppress(FileNotFoundError):
+    # Linux can report ESRCH while reading an already-open stat file after exit.
+    with suppress(FileNotFoundError, ProcessLookupError):
         if stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
             return False
     return True
@@ -102,6 +104,20 @@ async def _pid_stopped(pid: int, *, timeout: float = 6) -> None:
     while _pid_running(pid) and time.monotonic() < deadline:
         await asyncio.sleep(0.03)
     assert not _pid_running(pid), f"subprocess {pid} is still running after {timeout}s"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process probe")
+@pytest.mark.parametrize("disappeared", [FileNotFoundError, ProcessLookupError])
+async def test_pid_stopped_tolerates_exit_during_proc_read(monkeypatch, disappeared):
+    stat = Mock()
+    stat.exists.return_value = True
+    stat.read_text.side_effect = disappeared("process exited during stat read")
+    monkeypatch.setattr(sys.modules[__name__], "Path", Mock(return_value=stat))
+    monkeypatch.setattr(os, "kill", Mock(side_effect=[None, ProcessLookupError, ProcessLookupError]))
+
+    await _pid_stopped(123, timeout=1)
+
+    stat.read_text.assert_called_once()
 
 
 async def _cleanup_pidfiles(*paths: Path) -> None:

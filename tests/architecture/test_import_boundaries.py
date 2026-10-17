@@ -23,6 +23,34 @@ def test_repository_respects_import_boundaries() -> None:
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize("module", [
+    "nanobot.agent.loop", "nanobot.session.state", "nanobot.runtime_admission",
+    "nanobot.data_access", "nanobot.installation_lock",
+])
+def test_runtime_owners_do_not_depend_on_update_policy(module: str) -> None:
+    assert find_violations("from nanobot.update_service import UpdateService", module) == [
+        Violation("update-policy-direction", "nanobot.update_service.UpdateService", 1),
+    ]
+
+
+def test_updater_uses_process_contracts_not_agent_or_client_implementations() -> None:
+    assert find_violations("from nanobot.agent.loop import AgentLoop", "nanobot.update_stop") == [
+        Violation("update-domain", "nanobot.agent.loop.AgentLoop", 1),
+    ]
+    assert find_violations(
+        "from nanobot.gateway.runtime import GatewayRuntime", "nanobot.update_stop",
+    ) == []
+    assert find_violations(
+        "from nanobot.update_stop import watch_gateway_stop", "nanobot.cli.gateway_runtime",
+    ) == []
+    assert find_violations(
+        "from nanobot.cli.gateway_runtime import _run_gateway", "nanobot.update_restart",
+    ) == []
+    assert find_violations(
+        "from nanobot.agent.loop import AgentLoop", "nanobot.update_restart",
+    ) == [Violation("update-restart-adapter", "nanobot.agent.loop.AgentLoop", 1)]
+
+
 @pytest.mark.parametrize(
     ("source", "target", "line"),
     [

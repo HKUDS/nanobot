@@ -24,6 +24,7 @@ import {
   type SidebarPaneGroup,
 } from "@/components/ChatList";
 import { HostSwitcher } from "@/components/remote/HostSwitcher";
+import { UpdateNotice } from "@/components/UpdateNotice";
 import {
   SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
   SidebarSelectionHighlight,
@@ -35,6 +36,7 @@ import type {
   SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import type { UpdateMethod } from "@/lib/api";
 import { sidebarShortcutAria, sidebarShortcutLabel } from "@/lib/sidebar-shortcuts";
 
 interface SidebarProps {
@@ -65,6 +67,8 @@ interface SidebarProps {
   onRequestRenameProject: (projectKey: string, label: string) => void;
   onNewChatInProject: (projectPath: string, projectName: string) => void;
   onOpenSettings: () => void;
+  onOpenUpdates?: () => void;
+  availableUpdate?: { version: string; onDismiss: () => void; onRequestUpdate?: () => void; installationMethod?: UpdateMethod | null };
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
@@ -311,6 +315,11 @@ export function Sidebar(props: SidebarProps) {
           />
         )}
       </div>
+      {props.onOpenUpdates && props.availableUpdate && (
+        <UpdateNotice version={props.availableUpdate.version} collapsed={collapsed}
+          onOpen={props.onOpenUpdates} onDismiss={props.availableUpdate.onDismiss}
+          onRequestUpdate={props.availableUpdate.onRequestUpdate} installationMethod={props.availableUpdate.installationMethod} />
+      )}
       <div
         className={cn(
           "flex items-center justify-between gap-1 bg-sidebar/55 px-2.5 py-3 text-xs",

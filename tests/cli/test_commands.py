@@ -3,6 +3,7 @@ import json
 import re
 import shutil
 import signal
+import sys
 import urllib.error
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -92,6 +93,10 @@ class _GatewayAgentContractStub:
 
     tools = ToolRegistry()
     subagents = MagicMock(spec=SubagentManager)
+
+    @contextmanager
+    def maintenance(self):
+        yield
 
     async def discard_session(self, _session_key: str) -> None:
         pass
@@ -1716,7 +1721,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
 
     class _FakeCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
@@ -1766,7 +1771,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
@@ -1822,7 +1827,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
@@ -1852,9 +1857,8 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     assert not (custom_workspace / "cron" / "jobs.json").exists()
 
 
-def test_agent_overrides_workspace_path(mock_agent_runtime):
-    workspace_path = Path("/tmp/agent-workspace")
-
+@pytest.mark.parametrize("workspace_path", [Path("/tmp/agent-workspace"), Path("relative-agent-workspace")])
+def test_agent_overrides_workspace_path(mock_agent_runtime, workspace_path):
     result = runner.invoke(app, ["agent", "-m", "hello", "-w", str(workspace_path)])
 
     assert result.exit_code == 0
@@ -2173,7 +2177,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
             return [{"key": "telegram:u1"}]
 
     class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
             seen["cron"] = self
 
@@ -2364,6 +2368,28 @@ def test_webui_background_points_to_the_single_persistent_gateway_command(
     assert "nanobot gateway --background --config" in compact_output
     assert "--workspace" in compact_output
     assert not config_file.exists()
+
+
+@pytest.mark.parametrize("managed", [False, True], ids=["explicit-detach", "fresh-installer"])
+def test_webui_detached_gateway_does_not_retain_launcher_lease(monkeypatch, tmp_path, managed):
+    config = tmp_path / "config.json"
+    _patch_webui_provider_ready(monkeypatch)
+    _patch_gateway_ports_free(monkeypatch)
+    seen = _patch_webui_managed_gateway(monkeypatch)
+    if managed:
+        prefix = tmp_path / "managed"
+        prefix.mkdir()
+        (prefix / "nanobot-install.json").write_text(json.dumps({
+            "schema_version": 1, "owner": "nanobot-installer", "environment": str(prefix), "extras": [],
+        }))
+        monkeypatch.setattr(sys, "prefix", str(prefix))
+    result = runner.invoke(app, ["webui", "--config", str(config), "--yes", "--no-open",
+                                 *([] if managed else ["--detach"])])
+    assert result.exit_code == 0, result.output
+    assert "start_options" in seen
+    assert "attached_runtime" not in seen
+    assert "lease_release_wait_for_stop" not in seen
+    assert "Stop nanobot" in result.stdout
 
 
 def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) -> None:
@@ -3150,7 +3176,7 @@ def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: 
     seen: dict[str, Path] = {}
 
     class _StopCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
@@ -3220,7 +3246,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     monkeypatch.setattr("nanobot.session.manager.SessionManager", _FakeSessionManager)
 
     class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
             seen["cron"] = self
 
@@ -3333,7 +3359,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     monkeypatch.setattr("nanobot.session.manager.SessionManager", _FakeSessionManager)
 
     class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
             seen["cron"] = self
 
@@ -3525,7 +3551,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         config,
         message_bus=lambda: bus,
         session_manager=lambda _workspace: _FakeSessionManager(),
-        cron_service=lambda _store_path: _FakeCronService(),
+        cron_service=lambda _store_path, **_kwargs: _FakeCronService(),
     )
 
     class _FakeMemory:
@@ -3686,7 +3712,7 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     seen: dict[str, Path] = {}
 
     class _StopCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
@@ -3725,7 +3751,7 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
     seen: dict[str, Path] = {}
 
     class _StopCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
@@ -3878,7 +3904,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return None
 
     class _FakeCronService:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
 
         async def start(self) -> None:
@@ -3970,6 +3996,10 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert health_writer.closed is True
     assert "HTTP/1.0 200 OK" in health_response
     health_body = json.loads(health_response.split("\r\n\r\n", 1)[1])
+    assert health_body.pop("maintenance") is False
+    identity = health_body.pop("runtime")
+    assert identity["version"] == cli_commands.__version__
+    assert identity["instance_id"] and identity["run_id"]
     assert health_body == {
         "status": "ok",
         "process": "alive",
@@ -4113,7 +4143,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
             seen["channels_stopped"] = True
 
     class _FakeCronService:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
 
         async def start(self) -> None:
@@ -4250,7 +4280,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
                 await asyncio.wait_for(channel_finished.wait(), timeout=1)
 
     class _FakeCronService:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
 
         async def start(self) -> None:

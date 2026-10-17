@@ -7,6 +7,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Goal | Command | Notes |
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
+| Update the current install | `nanobot update` | Latest PyPI release; `--dev` explicitly selects source |
 | Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
 | Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
@@ -51,6 +52,64 @@ Desktop terminal credentials are short-lived WebSocket/API tokens obtained throu
 Desktop-only distributions use the narrow `nanobot-desktop-tui` entrypoint inside their existing private runtime; it is not a replacement for the full Python CLI. They must ship this engine entrypoint and a matching terminal client together. The client cache can be kept inside Desktop's data root without reading or writing the separate Python installation's config. No additional system Python is needed.
 
 ## Common Patterns
+
+### Updating
+
+```bash
+nanobot update --check       # Check PyPI without changing the installation
+nanobot update               # Install the latest stable PyPI release
+nanobot update --dev         # Update source, prepare TUI dependencies, and build WebUI
+```
+
+`--update-dev` is an alias for `--dev`. In-place updates support virtual environments
+not owned by a tool manager. They leave already-satisfying dependencies installed.
+Missing pip is handled through the existing uv/ensurepip fallback.
+For uv tool installations, use `uv tool upgrade nanobot-ai` in the gateway's account;
+uv preserves the recorded constraints and extra packages. For pipx, inspect the
+original requirement and installer options first: a generic `pipx upgrade nanobot-ai`
+can discard version constraints and pip options. Use it only for an unconstrained
+registry install without recorded pip options; otherwise follow the owner's original
+workflow. Do not overwrite a manager-owned environment with pip. A pinned uv tool
+version requires an explicit `uv tool install` with the new version constraint.
+System Python installations use their original installer.
+
+Back up configuration, workspace files, and chat history before updating. The updater
+does not replace this data, but a new runtime may migrate it. Stop active tasks and
+other processes that share this Python environment.
+
+Source updates require Git. Existing editable checkouts keep their current branch
+and fast-forward to its upstream; local changes, detached HEADs, and divergent branches
+must be resolved manually. A package install switches to an editable checkout under
+`~/.nanobot/src/` on the official `main` branch. Bun is downloaded into
+`~/.nanobot/tools/bun/` when the pinned version is unavailable, with SHA-256 verification.
+Node is not required. Source is not a versioned preview channel. To switch from source
+to a release, stop nanobot, install the release in a separate environment, and launch
+outside the checkout. In-place source-to-release switching is refused because a restart
+can otherwise load the old source with the new package's version metadata.
+
+After a successful CLI installation, restart nanobot and verify the running gateway's
+version and behavior. Installation verification checks normal and isolated interpreter
+imports; it does not restart or verify the live process. An already-current install
+does not request a restart. An older stable release is never installed over a newer
+version unless the CLI receives `--allow-downgrade`; restore compatible data when needed.
+
+This is an in-place update, not a transactional deployment. Once installation begins,
+a marker under `~/.nanobot/run/` records an unverified update for that Python environment.
+It is removed only after installation verification succeeds. After a failure or process
+termination, stop nanobot and retry the same update from that environment. There is no
+automatic rollback. After a crash, the marker reports an incomplete update, not the previous logs.
+On Windows, if another nanobot process locks installation files, stop that process
+and retry with `python -m nanobot update` (add `--dev` for source).
+Containers must be rebuilt and redeployed; Desktop is updated through its host application.
+
+WebUI uses a separate, exact-plan flow under **Settings → About** when the host
+advertises `webui.update-flow.v1`. It stages a verified release, asks for shutdown
+and restart consent, and reconnects to the saved job after browser refreshes.
+Supported managed and uv installations retain their respective installer ownership;
+other installations show their owner's instructions. Source checkout updates remain
+CLI-only. See [Updating nanobot](updating.md) for installation eligibility, automatic
+service recovery and its limits. The existing remote package-install permission
+also governs this flow; checking a version never authorizes installation.
 
 Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:
 
@@ -137,7 +196,8 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 | Command | Description |
 |---|---|
-| `nanobot webui` | Create config/workspace if needed, enable the local WebUI channel after confirmation, start the gateway, open `http://127.0.0.1:8765`, and follow new gateway logs |
+| `nanobot webui` | Prepare local WebUI settings and open the browser; installer-managed environments launch persistently, other installations remain attached and follow gateway logs |
+| `nanobot webui --detach` | Explicitly start or join a persistent gateway, open the browser and return control to the terminal |
 | `nanobot webui --background` | Deprecated; prints the equivalent explicit `nanobot gateway --background` command and exits |
 | `nanobot webui --dev` | Start the gateway and Vite together at `http://127.0.0.1:5173`, with live frontend updates |
 | `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |
@@ -147,7 +207,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
-`--dev` is a foreground source-checkout workflow. For shell-based lifecycle management, use `nanobot gateway --background` (or `/detach` from an interactive TUI); `nanobot webui --background` prints migration guidance instead of silently changing process ownership. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it.
+`--dev` is a foreground source-checkout workflow and cannot be combined with `--detach`. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it. Installer-managed normal WebUI launches and explicit `--detach` use the gateway's persistent lifecycle; manage that same instance with the `gateway` commands below. The old `webui --background` spelling remains deprecated and prints migration guidance.
 
 ## Gateway
 

@@ -577,7 +577,8 @@ async def test_process_direct_accepts_media() -> None:
 
     loop = AgentLoop.__new__(AgentLoop)
     loop._session_locks = {}
-    loop.runtime_event_publisher = RuntimeEventPublisher(MessageBus())
+    loop.bus = MessageBus()
+    loop.runtime_event_publisher = RuntimeEventPublisher(loop.bus)
 
     captured_msg = None
 

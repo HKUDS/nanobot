@@ -241,6 +241,7 @@ def create_gateway_app(
             run_gateway(
                 cfg,
                 port=port,
+                verbose=verbose,
                 webui_bundle_mode=interactive_build_mode(),
                 unconfigured_provider_error=unconfigured_provider_error,
                 gateway_instance=instance,

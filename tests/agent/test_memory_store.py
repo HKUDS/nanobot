@@ -196,7 +196,7 @@ class TestHistoryWithCursor:
         assert [entry["cursor"] for entry in entries] == list(range(21, 101))
 
     def test_write_entries_uses_atomic_write(self, tmp_path):
-        """_write_entries uses temp file + os.replace for atomicity."""
+        """_write_entries uses a temporary file and atomic replacement."""
         store = MemoryStore(tmp_path)
         store.append_history("event 1")
         store.append_history("event 2")
@@ -221,11 +221,11 @@ class TestHistoryWithCursor:
         store.append_history("event 1")
         entries = store.read_unprocessed_history(since_cursor=0)
 
-        # Mock os.replace to raise an exception
+        # Fail the platform-independent replacement boundary.
         def failing_replace(*args, **kwargs):
             raise RuntimeError("Simulated failure")
 
-        monkeypatch.setattr('os.replace', failing_replace)
+        monkeypatch.setattr('nanobot.utils.atomic_file.replace_atomic', failing_replace)
 
         with pytest.raises(RuntimeError):
             store._write_entries(entries)
