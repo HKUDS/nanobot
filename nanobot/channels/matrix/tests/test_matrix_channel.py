@@ -2322,6 +2322,18 @@ def test_build_matrix_text_content_with_event_id_preserves_thread_relation() -> 
     assert result["m.new_content"]["m.relates_to"] == relates_to
 
 
+def test_build_matrix_text_content_with_event_id_preserves_html_formatting() -> None:
+    """HTML formatting for edits should be repeated inside m.new_content."""
+    result = _build_matrix_text_content("**Updated** message", "event-1")
+
+    assert result["m.new_content"] == {
+        "body": "**Updated** message",
+        "msgtype": "m.text",
+        "format": MATRIX_HTML_FORMAT,
+        "formatted_body": "<p><strong>Updated</strong> message</p>",
+    }
+
+
 def test_build_matrix_text_content_no_event_id() -> None:
     """Test that when event_id is not provided, no extra properties are added."""
     result = _build_matrix_text_content("Regular message")
