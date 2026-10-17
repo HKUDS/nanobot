@@ -37,6 +37,7 @@ from nanobot.channels.contracts import (
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
+from nanobot.security.network import configure_ssrf_whitelist
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.security.workspace_policy import resolve_allowed_path
 from nanobot.utils.restart import (
@@ -483,7 +484,7 @@ class ChannelManager:
                 "message": f"{plugin.display_name} is always enabled and is applied on restart.",
             }
 
-        from nanobot.config.loader import load_config
+        from nanobot.config.loader import load_config, resolve_ssrf_whitelist
 
         self.config = load_config()
         section = self._channel_section(name, default_enabled=plugin.default_enabled)
@@ -491,6 +492,7 @@ class ChannelManager:
         instance_id = resolve_channel_action_target(instance_id)
 
         if action == "disable":
+            whitelist = resolve_ssrf_whitelist(self.config)
             runtime_name = channel_runtime_name(plugin, instance_id)
             runtime_names = (
                 [runtime_name]
@@ -504,6 +506,7 @@ class ChannelManager:
                 self._channel_owners.pop(runtime_name, None)
             self._channel_runtime_specs.pop(runtime_name, None)
             self._channel_errors.pop(runtime_name, None)
+            configure_ssrf_whitelist(whitelist)
             return {
                 "handled": True,
                 "ok": True,
@@ -546,6 +549,7 @@ class ChannelManager:
                     + ", ".join(sorted(collisions))
                 ),
             }
+        whitelist = resolve_ssrf_whitelist(self.config)
         for runtime_name, spec in runtime_specs:
             self._channel_runtime_specs[runtime_name] = (name, spec.instance_id)
 
@@ -589,6 +593,7 @@ class ChannelManager:
                 "message": f"{name} channel could not be started. Check gateway logs.",
             }
 
+        configure_ssrf_whitelist(whitelist)
         runtime_names_to_replace = {runtime_name for runtime_name, _channel in built}
         for runtime_name in sorted(runtime_names_to_replace):
             if runtime_name not in self.channels:

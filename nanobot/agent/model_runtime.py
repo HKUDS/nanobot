@@ -13,6 +13,7 @@ from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
 from nanobot.providers.request_overrides import isolate_request_overrides
+from nanobot.security.network import configure_ssrf_whitelist
 from nanobot.utils.llm_runtime import LLMRuntime, runtime_from_provider_snapshot
 
 
@@ -215,6 +216,8 @@ class ModelRuntimeResolver:
             runtime.snapshot_signature == self._runtime.snapshot_signature
             and runtime.model_preset == self._runtime.model_preset
         )
+        if snapshot.ssrf_whitelist is not None:
+            configure_ssrf_whitelist(list(snapshot.ssrf_whitelist))
         self._refresh_required = False
         if unchanged:
             self._default_selection_signature = default_selection

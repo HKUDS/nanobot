@@ -1321,7 +1321,11 @@ def _run_channel_login(
 
     console.print(f"[{_UI_ACCENT}]Starting {display_name} login...[/]")
     try:
+        from nanobot.config.loader import resolve_ssrf_whitelist
+        from nanobot.security.network import configure_ssrf_whitelist
+
         channel = channel_cls(model, bus=None)
+        configure_ssrf_whitelist(resolve_ssrf_whitelist(config))
         success = asyncio.run(channel.login(force=False))
     except KeyboardInterrupt:
         console.print("\n[dim]Login cancelled.[/dim]")

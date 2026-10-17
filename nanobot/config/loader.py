@@ -68,7 +68,6 @@ def load_config(config_path: Path | None = None) -> Config:
                 issues=validation_issues(exc),
             ) from exc
         config.bind_source_path(path)
-        _apply_ssrf_whitelist(config)
         return config
 
     try:
@@ -124,15 +123,7 @@ def load_config(config_path: Path | None = None) -> Config:
         ) from exc
 
     config.bind_source_path(path)
-    _apply_ssrf_whitelist(config)
     return config
-
-
-def _apply_ssrf_whitelist(config: Config) -> None:
-    """Apply SSRF whitelist from config to the network security module."""
-    from nanobot.security.network import configure_ssrf_whitelist
-
-    configure_ssrf_whitelist(config.tools.ssrf_whitelist)
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -205,6 +196,23 @@ def resolve_config_env_vars(
             issues=missing,
         )
     return _resolve_in_place(config)
+
+
+def resolve_ssrf_whitelist(
+    config: Config,
+    *,
+    config_path: Path | None = None,
+) -> list[str]:
+    """Resolve network policy references without requiring unrelated credentials."""
+    missing = tuple(_missing_env_issues(config.tools.ssrf_whitelist, ("tools", "ssrfWhitelist")))
+    if missing:
+        raise ConfigLoadError(
+            config_path or get_config_path(),
+            kind="missing_env",
+            summary=f"Found {len(missing)} missing environment variable reference(s).",
+            issues=missing,
+        )
+    return _resolve_in_place(config.tools.ssrf_whitelist)
 
 
 @overload

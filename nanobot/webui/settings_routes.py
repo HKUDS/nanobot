@@ -16,6 +16,7 @@ from nanobot.api.runtime import ApiRuntime, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
+from nanobot.config.loader import resolve_ssrf_whitelist
 from nanobot.pairing import approve_code, deny_code, list_pending
 from nanobot.webui import settings_capabilities as capability_domain
 from nanobot.webui import settings_contracts as contracts
@@ -629,12 +630,14 @@ class WebUISettingsRouter:
             )
             redirect_uri = self._mcp_oauth_redirect_uri(request)
             reset = (_query_first(query, "reset") or "").lower() in {"1", "true", "yes"}
+            config = self.settings.config.load()
             payload = await self._mcp_oauth.start(
                 name,
                 cfg,
                 redirect_uri,
                 reload_mcp=self._reload_mcp_runtime,
                 reset_credentials=reset,
+                ssrf_whitelist=resolve_ssrf_whitelist(config, config_path=self.settings.config.path),
             )
         except Exception as exc:
             return self._mcp_oauth_error_response(exc, action="start")

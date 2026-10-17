@@ -11,6 +11,7 @@ from nanobot.agent.tools.image_generation import (
 )
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.loader import load_config, save_config
+from nanobot.security.network import validate_url_target
 from nanobot.webui.settings_models import create_provider_settings
 
 
@@ -59,12 +60,14 @@ async def test_image_generation_reload_replaces_and_removes_live_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
     monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "other-instance.json")
     config = load_config(config_path)
     config.providers.openrouter.api_key = "first-key"
     config.tools.image_generation.enabled = True
     config.tools.image_generation.provider = "openrouter"
     config.tools.image_generation.model = "openai/first-image-model"
+    config.tools.ssrf_whitelist = ["10.0.0.0/8"]
     save_config(config, config_path)
 
     registry = ToolRegistry()
@@ -74,6 +77,7 @@ async def test_image_generation_reload_replaces_and_removes_live_tool(
     first_tool = registry.get("generate_image")
     assert result["requires_restart"] is False
     assert isinstance(first_tool, ImageGenerationTool)
+    assert validate_url_target("http://10.23.45.67/api")[0]
     assert first_tool.config.model == "openai/first-image-model"
     assert first_tool.provider_configs["openrouter"].api_key == "first-key"
     assert [definition["function"]["name"] for definition in registry.get_definitions()] == [
@@ -83,6 +87,7 @@ async def test_image_generation_reload_replaces_and_removes_live_tool(
     config = load_config(config_path)
     config.providers.openrouter.api_key = "second-key"
     config.tools.image_generation.model = "openai/second-image-model"
+    config.tools.ssrf_whitelist = []
     save_config(config, config_path)
 
     result = await reload_image_generation_tool(config_path=config_path, workspace=tmp_path, registry=registry)
@@ -92,6 +97,7 @@ async def test_image_generation_reload_replaces_and_removes_live_tool(
     assert second_tool is not first_tool
     assert second_tool.config.model == "openai/second-image-model"
     assert second_tool.provider_configs["openrouter"].api_key == "second-key"
+    assert not validate_url_target("http://10.23.45.67/api")[0]
 
     config = load_config(config_path)
     config.tools.image_generation.enabled = False
@@ -109,7 +115,9 @@ async def test_image_generation_reload_failure_preserves_live_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
     config = load_config(config_path)
+    config.tools.ssrf_whitelist = ["10.0.0.0/8"]
     config.tools.image_generation.enabled = True
     config.providers.openrouter.api_key = "working-key"
     save_config(config, config_path)
@@ -121,6 +129,7 @@ async def test_image_generation_reload_failure_preserves_live_tool(
     missing_env = "NANOBOT_TEST_IMAGE_RELOAD_KEY"
     monkeypatch.delenv(missing_env, raising=False)
     config.providers.openrouter.api_key = f"${{{missing_env}}}"
+    config.tools.ssrf_whitelist = []
     save_config(config, config_path)
     result = await reload_image_generation_tool(config_path=config_path, workspace=tmp_path, registry=registry)
 
@@ -128,3 +137,4 @@ async def test_image_generation_reload_failure_preserves_live_tool(
     assert result["requires_restart"] is True
     assert registry.get("generate_image") is working_tool
     assert registry.get_definitions() == definitions
+    assert validate_url_target("http://10.23.45.67/api")[0]

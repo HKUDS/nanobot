@@ -257,6 +257,7 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
         "https://gateway.example/auth/mcp/callback",
         reload_mcp=ANY,
         reset_credentials=False,
+        ssrf_whitelist=[],
     )
 
     denied = _router(authorized=False)
@@ -273,6 +274,53 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
     assert failed_response.status_code == 500
     assert json.loads(failed_response.body) == {"error": "MCP OAuth start failed"}
     assert b"upstream secret response" not in failed_response.body
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_start_activates_resolved_policy_without_unrelated_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config, MCPServerConfig
+    from nanobot.security.network import validate_url_target
+
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
+    monkeypatch.setenv("NANOBOT_TEST_OAUTH_CIDR", "10.0.0.0/8")
+    monkeypatch.delenv("NANOBOT_TEST_OAUTH_UNRELATED_KEY", raising=False)
+    config = Config()
+    config.tools.ssrf_whitelist = ["${NANOBOT_TEST_OAUTH_CIDR}"]
+    config.providers.openai.api_key = "${NANOBOT_TEST_OAUTH_UNRELATED_KEY}"
+    config.tools.mcp_servers["demo"] = MCPServerConfig(
+        type="streamableHttp", auth="oauth", url="http://10.23.45.67/mcp",
+    )
+    config_path = tmp_path / "config.json"
+    save_config(config, config_path)
+    before = config_path.read_bytes()
+    accepted: list[bool] = []
+
+    async def connect(servers, _registry, *, oauth_handlers):
+        accepted.append(validate_url_target(servers["demo"].url)[0])
+        return {}
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    router = _router(config_path=config_path)
+    request = _mutation_request("/api/settings/mcp-oauth/start", {"name": "demo"})
+    try:
+        response = await router.dispatch(None, request, "/api/settings/mcp-oauth/start")
+
+        assert response is not None and response.status_code == 200
+        assert accepted == [True]
+        assert config_path.read_bytes() == before
+
+        monkeypatch.delenv("NANOBOT_TEST_OAUTH_CIDR")
+        failed = await router.dispatch(None, request, "/api/settings/mcp-oauth/start")
+        assert failed is not None and failed.status_code == 500
+        assert json.loads(failed.body) == {"error": "MCP OAuth start failed"}
+        assert accepted == [True]
+        assert validate_url_target("http://10.23.45.67/mcp")[0]
+    finally:
+        await router.close()
 
 
 @pytest.mark.asyncio

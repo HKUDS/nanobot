@@ -781,6 +781,9 @@ async def mcp_presets_test_action(
     registry = ToolRegistry()
     stacks: dict[str, Any] = {}
     inspection_cfg = cfg.model_copy(update={"enabled_tools": ["*"]})
+    from nanobot.security.network import configure_ssrf_whitelist
+
+    configure_ssrf_whitelist(config.tools.ssrf_whitelist)
     try:
         stacks = await asyncio.wait_for(
             connect_mcp_servers({name: inspection_cfg}, registry),

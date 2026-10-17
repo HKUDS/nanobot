@@ -24,6 +24,7 @@ from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_configs,
 )
+from nanobot.security.network import configure_ssrf_whitelist
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
 from nanobot.utils.artifacts import (
@@ -248,6 +249,7 @@ async def reload_image_generation_tool(
             "error": str(exc),
         }
 
+    configure_ssrf_whitelist(config.tools.ssrf_whitelist)
     tool_config = config.tools.image_generation
     logger.info(
         "Image generation config reloaded: enabled={} provider={} model={}",
