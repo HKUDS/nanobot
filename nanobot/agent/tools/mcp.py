@@ -1109,6 +1109,9 @@ async def connect_mcp_servers(
 
                 sse_kwargs: dict[str, Any] = {
                     "httpx_client_factory": httpx_client_factory,
+                    # Tool results arrive on the SSE stream, so its read timeout must
+                    # outlast the tool call; otherwise a slow tool fails with ReadTimeout.
+                    "sse_read_timeout": max(_HTTP_READ_TIMEOUT, cfg.tool_timeout),
                 }
                 if oauth_auth is not None:
                     sse_kwargs["auth"] = oauth_auth
