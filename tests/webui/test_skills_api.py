@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -27,12 +26,10 @@ def _write_skill(workspace: Path, name: str, *, metadata: str = "") -> Path:
     return directory
 
 
-def _config(*disabled: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        agents=SimpleNamespace(
-            defaults=SimpleNamespace(disabled_skills=list(disabled)),
-        )
-    )
+def _config(*disabled: str) -> Config:
+    config = Config()
+    config.agents.defaults.disabled_skills = list(disabled)
+    return config
 
 
 def test_disabled_skills_remain_visible_and_loadable(tmp_path: Path) -> None:
@@ -120,9 +117,9 @@ def test_set_webui_skill_enabled_persists_and_updates_runtime(
     _write_skill(tmp_path, "custom-skill")
     config = _config()
     saved: list[object] = []
-    monkeypatch.setattr("nanobot.webui.skills_api.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.webui.settings_services.load_config", lambda _path=None: config)
     monkeypatch.setattr(
-        "nanobot.webui.skills_api.save_config",
+        "nanobot.webui.settings_services.save_config",
         lambda value, _path=None: saved.append(value),
     )
     disabled: set[str] = set()
@@ -175,9 +172,9 @@ def test_delete_webui_skill_only_deletes_workspace_skills(
     directory = _write_skill(tmp_path, "custom-skill")
     config = _config("custom-skill")
     saved: list[object] = []
-    monkeypatch.setattr("nanobot.webui.skills_api.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.webui.settings_services.load_config", lambda _path=None: config)
     monkeypatch.setattr(
-        "nanobot.webui.skills_api.save_config",
+        "nanobot.webui.settings_services.save_config",
         lambda value, _path=None: saved.append(value),
     )
     disabled = {"custom-skill"}
@@ -229,12 +226,12 @@ def test_delete_webui_skill_restores_directory_when_config_save_fails(
 ) -> None:
     directory = _write_skill(tmp_path, "custom-skill")
     config = _config("custom-skill")
-    monkeypatch.setattr("nanobot.webui.skills_api.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.webui.settings_services.load_config", lambda _path=None: config)
 
     def fail_save(_config: object, _path: Path | None = None) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("nanobot.webui.skills_api.save_config", fail_save)
+    monkeypatch.setattr("nanobot.webui.settings_services.save_config", fail_save)
     disabled = {"custom-skill"}
 
     with pytest.raises(OSError, match="disk full"):
@@ -248,3 +245,29 @@ def test_delete_webui_skill_restores_directory_when_config_save_fails(
     assert (directory / "SKILL.md").is_file()
     assert config.agents.defaults.disabled_skills == ["custom-skill"]
     assert disabled == {"custom-skill"}
+
+
+def test_delete_builtin_skill_in_fresh_workspace(tmp_path: Path) -> None:
+    with pytest.raises(SkillManagementError) as exc_info:
+        delete_webui_skill(
+            tmp_path, "clawhub", disabled_skills=set(), config_path=tmp_path / "config.json",
+        )
+
+    assert exc_info.value.status == 403
+    assert not (tmp_path / "skills").exists()
+
+
+def test_enabling_enabled_skill_preserves_raw_disabled_order(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config = _config("github", "cron")
+    save_config(config, config_path)
+    before = config_path.read_bytes(), config_path.stat().st_mtime_ns
+    disabled = {"github", "cron"}
+
+    action = set_webui_skill_enabled(
+        tmp_path, "clawhub", enabled=True, disabled_skills=disabled, config_path=config_path,
+    )
+
+    assert action["enabled"] is True
+    assert disabled == {"github", "cron"}
+    assert (config_path.read_bytes(), config_path.stat().st_mtime_ns) == before

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -17,6 +17,9 @@ from nanobot.pairing import (
     is_approved,
     record_delivery,
 )
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import Config
 
 
 class BaseChannel(ABC):
@@ -342,11 +345,11 @@ class BaseChannel(ABC):
     @classmethod
     def refresh_feature_metadata(
         cls,
-        config_path: Path,
+        config: Config,
         *,
         instance_id: str = "default",
     ) -> bool:
-        """Refresh persisted display metadata after an explicit settings action."""
+        """Update display metadata in a raw configuration snapshot."""
         return False
 
     @property

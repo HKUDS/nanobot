@@ -27,38 +27,13 @@ from nanobot.webui.http_utils import http_response as _http_response
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.mcp_oauth_api import McpOAuthManager
 from nanobot.webui.mcp_presets_api import (
-    ensure_mcp_oauth_server,
+    materialize_mcp_oauth_server,
     mcp_presets_settings_action,
 )
 from nanobot.webui.nanobot_features_api import (
     nanobot_feature_instance_target,
-    nanobot_features_action,
-    nanobot_features_payload,
 )
-from nanobot.webui.settings_api import (
-    complete_oauth_provider,
-    create_model_configuration,
-    create_provider_settings,
-    decorate_settings_payload,
-    delete_model_configuration,
-    login_oauth_provider,
-    logout_oauth_provider,
-    migrate_model_configurations,
-    model_api_resolution_payload,
-    provider_models_payload,
-    settings_payload,
-    settings_usage_payload,
-    update_agent_settings,
-    update_api_settings,
-    update_image_generation_settings,
-    update_model_call_order,
-    update_model_configuration,
-    update_network_safety_settings,
-    update_provider_settings,
-    update_runtime_config_settings,
-    update_transcription_settings,
-    update_web_search_settings,
-)
+from nanobot.webui.settings_api import SettingsOperations, decorate_settings_payload
 from nanobot.webui.settings_contracts import (
     QueryParams,
     SettingsRequest,
@@ -238,6 +213,7 @@ class WebUISettingsRouter:
         mcp_oauth_redirect_uri: Callable[[WsRequest], str] | None = None,
     ) -> None:
         self.settings = settings
+        self.operations = SettingsOperations(settings.config)
         self.bus = bus
         self.logger = logger
         self._check_api_token = check_api_token
@@ -467,8 +443,7 @@ class WebUISettingsRouter:
     def _handle_settings(self) -> Response:
         return self._json_response(
             self._with_restart_state(
-                self.settings.read(
-                    settings_payload,
+                self.operations.payload(
                     surface=self._runtime_surface,
                     runtime_capability_overrides=self._runtime_capabilities,
                 )
@@ -476,23 +451,23 @@ class WebUISettingsRouter:
         )
 
     def _handle_settings_usage(self) -> Response:
-        return self._json_response(self.settings.read(settings_usage_payload))
+        return self._json_response(self.operations.usage_payload())
 
     def _model_operations(self) -> model_domain.ModelSettingsOperations:
         return model_domain.ModelSettingsOperations(
-            update_agent=update_agent_settings,
-            create_model=create_model_configuration,
-            update_model=update_model_configuration,
-            delete_model=delete_model_configuration,
-            migrate_models=migrate_model_configurations,
-            update_call_order=update_model_call_order,
-            update_provider=update_provider_settings,
-            create_provider=create_provider_settings,
-            provider_models=provider_models_payload,
-            model_api=model_api_resolution_payload,
-            oauth_login=login_oauth_provider,
-            oauth_complete=complete_oauth_provider,
-            oauth_logout=logout_oauth_provider,
+            update_agent=self.operations.update_agent,
+            create_model=self.operations.create_model,
+            update_model=self.operations.update_model,
+            delete_model=self.operations.delete_model,
+            migrate_models=self.operations.migrate_models,
+            update_call_order=self.operations.update_call_order,
+            update_provider=self.operations.update_provider,
+            create_provider=self.operations.create_provider,
+            provider_models=self.operations.provider_models,
+            model_api=self.operations.model_api,
+            oauth_login=self.operations.oauth_login,
+            oauth_complete=self.operations.oauth_complete,
+            oauth_logout=self.operations.oauth_logout,
             apply_image_runtime_change=self._apply_image_generation_runtime_change_result,
         )
 
@@ -500,23 +475,23 @@ class WebUISettingsRouter:
         self,
     ) -> capability_domain.CapabilitySettingsOperations:
         return capability_domain.CapabilitySettingsOperations(
-            update_web_search=update_web_search_settings,
-            update_api=update_api_settings,
-            update_image=update_image_generation_settings,
-            update_transcription=update_transcription_settings,
-            update_network=update_network_safety_settings,
-            nanobot_features_action=nanobot_features_action,
+            update_web_search=self.operations.update_web_search,
+            update_api=self.operations.update_api,
+            update_image=self.operations.update_image,
+            update_transcription=self.operations.update_transcription,
+            update_network=self.operations.update_network,
+            nanobot_features_action=self.operations.feature_action,
             api_runtime=self._api_runtime,
             reload_image=self._reload_image_generation_runtime,
         )
 
     def _system_operations(self) -> system_domain.SystemSettingsOperations:
         return system_domain.SystemSettingsOperations(
-            update_runtime_config=update_runtime_config_settings,
+            update_runtime_config=self.operations.update_runtime_config,
             cli_apps_payload=cli_apps_payload,
             cli_apps_action=cli_apps_action,
-            nanobot_features_payload=nanobot_features_payload,
-            nanobot_features_action=nanobot_features_action,
+            nanobot_features_payload=self.operations.features_payload,
+            nanobot_features_action=self.operations.feature_action,
             nanobot_feature_instance_target=nanobot_feature_instance_target,
             validate_channel_config=validate_channel_config,
             load_channel_plugin=load_channel_plugin,
@@ -624,9 +599,8 @@ class WebUISettingsRouter:
         query = self._parse_mcp_settings_query(request)
         try:
             name, cfg = await asyncio.to_thread(
-                self.settings.mutate,
-                ensure_mcp_oauth_server,
-                query,
+                self.settings.config.update,
+                lambda config: materialize_mcp_oauth_server(config, query),
             )
             redirect_uri = self._mcp_oauth_redirect_uri(request)
             reset = (_query_first(query, "reset") or "").lower() in {"1", "true", "yes"}

@@ -5,14 +5,16 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.channels.registry import load_channel_plugin
+from nanobot.config.loader import get_config_path
 from nanobot.optional_features import (
     OptionalFeatureError,
-    disable_optional_feature,
-    enable_optional_feature,
     install_optional_feature_support,
     optional_features_payload,
+    prepare_optional_feature,
+    update_optional_feature,
 )
 from nanobot.webui.http_utils import query_first
+from nanobot.webui.settings_services import WebUISettingsConfig
 
 QueryParams = dict[str, list[str]]
 
@@ -41,6 +43,18 @@ def nanobot_features_action(
     allow_install: bool = True,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
+    return update_nanobot_feature(
+        WebUISettingsConfig(config_path or get_config_path()), action, query, allow_install=allow_install,
+    )
+
+
+def update_nanobot_feature(
+    store: WebUISettingsConfig,
+    action: str,
+    query: QueryParams,
+    *,
+    allow_install: bool = True,
+) -> dict[str, Any]:
     name = (query_first(query, "name") or "").strip()
     instance_id = nanobot_feature_instance_target(query)
     raw_install_only = query_first(query, "install_only")
@@ -58,15 +72,11 @@ def nanobot_features_action(
         if install_only:
             return install_optional_feature_support(
                 name,
-                config_path=config_path,
+                config_path=store.path,
                 allow_install=allow_install,
             )
-        return enable_optional_feature(
-            name,
-            config_path=config_path,
-            allow_install=allow_install,
-            instance_id=instance_id,
-        )
+        prepared = prepare_optional_feature(name, enabled=True, allow_install=allow_install, instance_id=instance_id)
+        return store.update(lambda config: update_optional_feature(config, prepared, enabled=True))
     if action == "disable":
         try:
             plugin = load_channel_plugin(name)
@@ -78,9 +88,6 @@ def nanobot_features_action(
                 f"Use `nanobot plugins disable {name}` from a terminal if you need to disable it.",
                 status=400,
             )
-        return disable_optional_feature(
-            name,
-            config_path=config_path,
-            instance_id=instance_id,
-        )
+        prepared = prepare_optional_feature(name, enabled=False, instance_id=instance_id)
+        return store.update(lambda config: update_optional_feature(config, prepared, enabled=False))
     raise OptionalFeatureError(f"unknown feature action '{action}'", status=404)

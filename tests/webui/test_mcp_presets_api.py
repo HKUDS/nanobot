@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from functools import partial
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credent
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.security.network import validate_url_target
+from nanobot.webui import mcp_presets_api
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
@@ -23,6 +25,7 @@ from nanobot.webui.mcp_presets_api import (
     mcp_presets_test_action,
     normalize_mcp_preset_mentions,
 )
+from nanobot.webui.settings_services import WebUISettingsConfig
 
 
 def _use_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -936,3 +939,38 @@ def test_normalize_mcp_mentions_uses_explicit_gateway_config(
     )
 
     assert payload == [{"name": "gateway-docs", "display_name": "Gateway docs"}]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_remove_and_enable_preserve_managed_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    store = WebUISettingsConfig(tmp_path / "config.json")
+    query = {"name": ["playwright"]}
+    await mcp_presets_settings_action("enable", query, config=store)
+    entered_cleanup = threading.Event()
+    release_cleanup = threading.Event()
+    original_cleanup = mcp_presets_api._remove_managed_stdio_cwd
+
+    def paused_cleanup(name, previous):
+        entered_cleanup.set()
+        if not release_cleanup.wait(timeout=5):
+            raise TimeoutError("MCP cleanup was not released")
+        return original_cleanup(name, previous)
+
+    monkeypatch.setattr(mcp_presets_api, "_remove_managed_stdio_cwd", paused_cleanup)
+    removing = asyncio.create_task(mcp_presets_settings_action("remove", query, config=store))
+    enabling = None
+    try:
+        assert await asyncio.to_thread(entered_cleanup.wait, 5)
+        enabling = asyncio.create_task(mcp_presets_settings_action("enable", query, config=store))
+        await asyncio.wait({enabling}, timeout=1)
+    finally:
+        release_cleanup.set()
+        await removing
+        if enabling is not None:
+            await enabling
+
+    server = load_config(store.path).tools.mcp_servers["playwright"]
+    assert Path(server.cwd).is_dir()

@@ -137,6 +137,13 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    data = config_persistence_data(config)
+    # Temp + replace so a crash mid-write cannot leave a truncated config.json.
+    write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def config_persistence_data(config: Config) -> dict[str, Any]:
+    """Return the raw configuration fields written by save_config."""
     data = config.model_dump(mode="json", by_alias=True)
     # OAuth credentials live in dedicated token stores. Persist only the
     # non-credential request settings consumed by these provider backends.
@@ -152,9 +159,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         )
         if settings:
             data.setdefault("providers", {})[alias] = settings
-
-    # Temp + replace so a crash mid-write cannot leave a truncated config.json.
-    write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
+    return data
 
 
 def merge_missing_defaults(existing: object, defaults: object) -> object:

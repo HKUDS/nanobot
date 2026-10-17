@@ -116,8 +116,8 @@ from nanobot.webui.sidebar_state import (
 )
 from nanobot.webui.skills_api import (
     SkillManagementError,
-    delete_webui_skill,
-    set_webui_skill_enabled,
+    delete_skill,
+    set_skill_enabled,
     webui_skill_detail_payload,
     webui_skills_payload,
 )
@@ -1862,15 +1862,13 @@ class GatewayHTTPHandler:
         if raw_enabled not in {"true", "false"}:
             return _http_error(400, "enabled must be true or false")
         try:
-            action = self.settings.config.run_serialized(
-                lambda config_path: set_webui_skill_enabled(
-                    self.skills_workspace_path,
-                    name,
-                    enabled=raw_enabled == "true",
-                    disabled_skills=self.disabled_skills,
-                    config_path=config_path,
-                    plugins=self.plugins,
-                )
+            action = set_skill_enabled(
+                self.settings.config,
+                self.skills_workspace_path,
+                name,
+                enabled=raw_enabled == "true",
+                disabled_skills=self.disabled_skills,
+                plugins=self.plugins,
             )
         except SkillManagementError as exc:
             return _http_error(exc.status, exc.message)
@@ -1891,14 +1889,12 @@ class GatewayHTTPHandler:
             return _http_error(403, "remote skill deletion is disabled")
         name = _query_first(_request_query(request), "name") or ""
         try:
-            action = self.settings.config.run_serialized(
-                lambda config_path: delete_webui_skill(
-                    self.skills_workspace_path,
-                    name,
-                    disabled_skills=self.disabled_skills,
-                    config_path=config_path,
-                    plugins=self.plugins,
-                )
+            action = delete_skill(
+                self.settings.config,
+                self.skills_workspace_path,
+                name,
+                disabled_skills=self.disabled_skills,
+                plugins=self.plugins,
             )
         except SkillManagementError as exc:
             return _http_error(exc.status, exc.message)

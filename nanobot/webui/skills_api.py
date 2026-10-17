@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import shlex
 import tempfile
+from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.skills import SkillsLoader
-from nanobot.config.loader import load_config, save_config
+from nanobot.config.loader import get_config_path
+from nanobot.config.schema import Config
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, require_path_within
+from nanobot.webui.settings_services import WebUISettingsConfig
 
 
 class SkillManagementError(Exception):
@@ -72,6 +76,32 @@ def webui_skill_detail_payload(
         }
 
 
+def set_skill_enabled(
+    store: WebUISettingsConfig,
+    workspace_path: Path,
+    name: str,
+    *,
+    enabled: bool,
+    disabled_skills: set[str],
+    plugins: AgentPlugins | None = None,
+) -> dict[str, Any]:
+    def mutation(config: Config) -> set[str]:
+        _require_skill_entry(workspace_path, name, plugins=plugins)
+        next_disabled = set(config.agents.defaults.disabled_skills)
+        if enabled:
+            next_disabled.discard(name)
+        else:
+            next_disabled.add(name)
+        if next_disabled != set(config.agents.defaults.disabled_skills):
+            config.agents.defaults.disabled_skills = sorted(next_disabled)
+        return next_disabled
+
+    next_disabled = store.update(mutation)
+    disabled_skills.clear()
+    disabled_skills.update(next_disabled)
+    return {"name": name, "enabled": enabled, "deleted": False}
+
+
 def set_webui_skill_enabled(
     workspace_path: Path,
     name: str,
@@ -82,19 +112,67 @@ def set_webui_skill_enabled(
     plugins: AgentPlugins | None = None,
 ) -> dict[str, Any]:
     """Persist and apply one skill's enabled state."""
-    _require_skill_entry(workspace_path, name, plugins=plugins)
-    config = load_config(config_path)
-    next_disabled = set(config.agents.defaults.disabled_skills)
-    if enabled:
-        next_disabled.discard(name)
-    else:
-        next_disabled.add(name)
-    if next_disabled != set(config.agents.defaults.disabled_skills):
-        config.agents.defaults.disabled_skills = sorted(next_disabled)
-        save_config(config, config_path)
+    return set_skill_enabled(
+        WebUISettingsConfig(config_path or get_config_path()), workspace_path, name,
+        enabled=enabled, disabled_skills=disabled_skills, plugins=plugins,
+    )
+
+
+@dataclass(frozen=True)
+class _SkillDeletion:
+    config: Config
+    original_disabled: list[str]
+    next_disabled: set[str]
+    target: Path
+    staged_target: Path
+
+
+def delete_skill(
+    store: WebUISettingsConfig,
+    workspace_path: Path,
+    name: str,
+    *,
+    disabled_skills: set[str],
+    plugins: AgentPlugins | None = None,
+) -> dict[str, Any]:
+    workspace = workspace_path.expanduser().resolve()
+    try:
+        skills_root = require_path_within(
+            workspace / "skills", workspace,
+            message="skills directory must stay inside the workspace",
+        )
+    except WorkspaceBoundaryError as exc:
+        raise SkillManagementError(str(exc), status=403) from exc
+
+    def rollback(result: _SkillDeletion) -> None:
+        result.config.agents.defaults.disabled_skills = result.original_disabled
+        result.staged_target.replace(result.target)
+
+    with ExitStack() as staging_stack:
+        def mutation(config: Config) -> _SkillDeletion:
+            entry = _require_skill_entry(workspace_path, name, plugins=plugins)
+            if entry.get("source") != "workspace":
+                raise SkillManagementError("built-in skills cannot be deleted", status=403)
+            target = skills_root / name
+            if target.parent != skills_root:
+                raise SkillManagementError("invalid skill name")
+            if not target.is_symlink() and not target.is_dir():
+                raise SkillManagementError("skill directory was not found", status=404)
+            original_disabled = list(config.agents.defaults.disabled_skills)
+            next_disabled = set(original_disabled) - {name}
+            staging = staging_stack.enter_context(
+                tempfile.TemporaryDirectory(prefix=".nanobot-delete-", dir=skills_root)
+            )
+            staged_target = Path(staging) / name
+            target.replace(staged_target)
+            if next_disabled != set(original_disabled):
+                config.agents.defaults.disabled_skills = sorted(next_disabled)
+            return _SkillDeletion(config, original_disabled, next_disabled, target, staged_target)
+
+        result = store.update(mutation, on_save_error=rollback)
     disabled_skills.clear()
-    disabled_skills.update(next_disabled)
-    return {"name": name, "enabled": enabled, "deleted": False}
+    disabled_skills.update(result.next_disabled)
+    return {"name": name, "enabled": False, "deleted": True}
 
 
 def delete_webui_skill(
@@ -106,44 +184,10 @@ def delete_webui_skill(
     plugins: AgentPlugins | None = None,
 ) -> dict[str, Any]:
     """Delete one workspace skill and remove its disabled-state entry."""
-    entry = _require_skill_entry(workspace_path, name, plugins=plugins)
-    if entry.get("source") != "workspace":
-        raise SkillManagementError("built-in skills cannot be deleted", status=403)
-
-    workspace = workspace_path.expanduser().resolve()
-    try:
-        skills_root = require_path_within(
-            workspace / "skills",
-            workspace,
-            message="skills directory must stay inside the workspace",
-        )
-    except WorkspaceBoundaryError as exc:
-        raise SkillManagementError(str(exc), status=403) from exc
-    target = skills_root / name
-    if target.parent != skills_root:
-        raise SkillManagementError("invalid skill name")
-    if not target.is_symlink() and not target.is_dir():
-        raise SkillManagementError("skill directory was not found", status=404)
-
-    config = load_config(config_path)
-    original_disabled = list(config.agents.defaults.disabled_skills)
-    next_disabled = set(original_disabled)
-    if name in next_disabled:
-        next_disabled.remove(name)
-    with tempfile.TemporaryDirectory(prefix=".nanobot-delete-", dir=skills_root) as staging:
-        staged_target = Path(staging) / name
-        target.replace(staged_target)
-        try:
-            if next_disabled != set(original_disabled):
-                config.agents.defaults.disabled_skills = sorted(next_disabled)
-                save_config(config, config_path)
-        except Exception:
-            config.agents.defaults.disabled_skills = original_disabled
-            staged_target.replace(target)
-            raise
-    disabled_skills.clear()
-    disabled_skills.update(next_disabled)
-    return {"name": name, "enabled": False, "deleted": True}
+    return delete_skill(
+        WebUISettingsConfig(config_path or get_config_path()), workspace_path, name,
+        disabled_skills=disabled_skills, plugins=plugins,
+    )
 
 
 def _require_skill_entry(

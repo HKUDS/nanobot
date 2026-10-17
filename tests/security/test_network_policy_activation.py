@@ -16,7 +16,7 @@ from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.nanobot import Nanobot
 from nanobot.providers.factory import build_unconfigured_provider_snapshot, load_provider_snapshot
 from nanobot.security.network import configure_ssrf_whitelist, validate_url_target
-from nanobot.webui.settings_api import settings_payload
+from nanobot.webui.settings_api import SettingsOperations
 from nanobot.webui.settings_services import WebUISettingsServices
 
 _PRIVATE_URL = "http://10.23.45.67/api"
@@ -58,7 +58,7 @@ def test_config_and_settings_reads_and_writes_preserve_active_policy(
     assert "default" in load_model_preset_catalog(config_path)
     services = WebUISettingsServices.create(config_path)
     assert services.config.load().agents.defaults.model == "gpt-4o"
-    assert services.read(settings_payload)["agent"]["model"] == "gpt-4o"
+    assert SettingsOperations(services.config).payload()["agent"]["model"] == "gpt-4o"
     services.config.update(lambda candidate: setattr(candidate.api, "port", 19001))
     assert load_config(config_path).api.port == 19001
     assert validate_url_target(_PRIVATE_URL)[0] is allowed

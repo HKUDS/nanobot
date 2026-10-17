@@ -681,7 +681,7 @@ async def test_webui_skill_management_routes(
     )
 
     def set_enabled(
-        workspace: Path,
+        _store, workspace: Path,
         name: str,
         *,
         enabled: bool,
@@ -696,7 +696,7 @@ async def test_webui_skill_management_routes(
         return {"name": name, "enabled": enabled, "deleted": False}
 
     def delete(
-        workspace: Path,
+        _store, workspace: Path,
         name: str,
         *,
         disabled_skills: set[str],
@@ -711,8 +711,8 @@ async def test_webui_skill_management_routes(
         skill_dir.rmdir()
         return {"name": name, "enabled": False, "deleted": True}
 
-    monkeypatch.setattr("nanobot.webui.ws_http.set_webui_skill_enabled", set_enabled)
-    monkeypatch.setattr("nanobot.webui.ws_http.delete_webui_skill", delete)
+    monkeypatch.setattr("nanobot.webui.ws_http.set_skill_enabled", set_enabled)
+    monkeypatch.setattr("nanobot.webui.ws_http.delete_skill", delete)
 
     port = _free_port()
     channel = _ch(
@@ -957,7 +957,7 @@ async def test_webui_skill_delete_remains_local_only(
     policy = MagicMock()
     policy.tools.webui_allow_remote_package_install = True
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: policy)
-    monkeypatch.setattr("nanobot.webui.ws_http.delete_webui_skill", delete)
+    monkeypatch.setattr("nanobot.webui.ws_http.delete_skill", delete)
     channel = _ch(
         bus,
         session_manager=_seed_session(tmp_path),
@@ -1422,11 +1422,10 @@ async def test_nanobot_feature_install_only_does_not_start_channel(
     runtime_calls: list[tuple[str, str, str | None]] = []
 
     def feature_action(
-        action: str,
+        _self, action: str,
         query: dict[str, list[str]],
         *,
         allow_install: bool,
-        config_path: Path,
     ) -> dict[str, Any]:
         assert action == "enable"
         assert query == {"name": ["whatsapp"], "install_only": ["true"]}
@@ -1453,7 +1452,7 @@ async def test_nanobot_feature_install_only_does_not_start_channel(
         return {"handled": True, "ok": True, "requires_restart": False}
 
     monkeypatch.setattr(
-        "nanobot.webui.settings_routes.nanobot_features_action",
+        "nanobot.webui.settings_api.SettingsOperations.feature_action",
         feature_action,
     )
     channel = _ch(
@@ -1548,8 +1547,8 @@ async def test_feishu_connect_routes_write_config_and_hot_reload(
         },
     )
     monkeypatch.setattr(
-        "nanobot.webui.settings_routes.nanobot_features_action",
-        lambda _action, _query, *, allow_install=True, config_path=None: {
+        "nanobot.webui.settings_api.SettingsOperations.feature_action",
+        lambda _self, _action, _query, *, allow_install=True: {
             "features": [{
                 "name": "feishu",
                 "display_name": "Feishu",
@@ -1713,7 +1712,7 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
     monkeypatch.setattr(loader, "_current_config_path", config_path)
 
     def fake_feature_action(
-        action: str,
+        _self, action: str,
         query: dict[str, list[str]],
         *,
         allow_install: bool = True,
@@ -1743,7 +1742,7 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
             "last_action": {"ok": True, "message": "Enabled channel 'discord'", "enabled": True},
         }
 
-    monkeypatch.setattr("nanobot.webui.settings_routes.nanobot_features_action", fake_feature_action)
+    monkeypatch.setattr("nanobot.webui.settings_api.SettingsOperations.feature_action", fake_feature_action)
     calls: list[tuple[str, str, str]] = []
 
     async def channel_feature_action(action: str, name: str, instance_id: str) -> dict[str, Any]:
@@ -2126,8 +2125,8 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nanobot.webui.mcp_presets_api.mcp_presets_payload",
-        lambda **_kwargs: {
+        "nanobot.webui.mcp_presets_api._mcp_presets_payload",
+        lambda _config, **_kwargs: {
             "presets": [
                 {
                     "name": "browserbase",
@@ -2186,14 +2185,11 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             },
         }
 
-    monkeypatch.setattr(
-        "nanobot.webui.mcp_presets_api.mcp_presets_action",
-        _mcp_preset_action,
-    )
-    monkeypatch.setattr(
-        "nanobot.webui.mcp_presets_api.custom_mcp_action",
-        _custom_action,
-    )
+    def update(_store, action, query):
+        operation = _custom_action if action in {"custom", "import", "import-cursor", "tools"} else _mcp_preset_action
+        return operation(action, query)
+
+    monkeypatch.setattr("nanobot.webui.mcp_presets_api.update_mcp_settings", update)
 
     async def _hot_reload():
         return {"ok": True, "message": "MCP config reloaded.", "requires_restart": False}

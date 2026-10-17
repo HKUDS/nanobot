@@ -1,19 +1,20 @@
 """Optional nanobot feature discovery and enablement."""
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+from pydantic import BaseModel
 
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.contracts import (
@@ -30,6 +31,10 @@ from nanobot.channels.contracts import (
 )
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
+
+if TYPE_CHECKING:
+    from nanobot.channels.base import BaseChannel
+    from nanobot.channels.plugin import ChannelPlugin
 
 
 class OptionalFeatureError(Exception):
@@ -50,6 +55,7 @@ class InstallResult:
 
 _INSTALL_TIMEOUT_SECONDS = 300
 _LOG_OUTPUT_LIMIT = 4000
+_FEATURE_INSTALL_LOCK = threading.Lock()
 _HIDDEN_OPTIONAL_FEATURES = {"documents", "pdf"}
 _BUNDLED_FEATURE_ALIASES = {"documents", "pdf"}
 
@@ -276,17 +282,27 @@ def install_extra(
     return InstallResult(False, label, pip_cmd, failed_cmd=failed_cmd, output=output)
 
 
-def read_config_data(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return cast(dict[str, Any], json.load(f))
-
-
-def write_config_data(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+def update_channel_config_enabled(
+    config: Config,
+    channel_name: str,
+    plugin: ChannelPlugin,
+    enabled: bool,
+    *,
+    instance_id: str | None = "default",
+) -> None:
+    """Update one instance or the top-level plugin gate in a raw snapshot."""
+    existing = getattr(config.channels, channel_name, {})
+    if isinstance(existing, BaseModel):
+        existing = existing.model_dump(by_alias=True)
+    values = cast(dict[str, Any], existing) if isinstance(existing, dict) else {}
+    if instance_id is None:
+        updated = {**values, "enabled": enabled}
+    else:
+        try:
+            updated = channel_set_config_enabled(plugin, values, enabled, instance_id=instance_id)
+        except ValueError as exc:
+            raise OptionalFeatureError(f"Invalid {channel_name} configuration: {exc}", status=400) from exc
+    setattr(config.channels, channel_name, updated)
 
 
 def set_channel_config_enabled(
@@ -298,28 +314,11 @@ def set_channel_config_enabled(
     instance_id: str | None = "default",
 ) -> None:
     """Persist one instance, or the top-level plugin gate when the target is ``None``."""
-    data = read_config_data(config_path)
-    channels = data.setdefault("channels", {})
-    existing = channels.get(channel_name, {})
-    if not isinstance(existing, dict):
-        existing = {}
-    if instance_id is None:
-        existing["enabled"] = enabled
-        channels[channel_name] = existing
-    else:
-        try:
-            channels[channel_name] = channel_set_config_enabled(
-                plugin,
-                existing,
-                enabled,
-                instance_id=instance_id,
-            )
-        except ValueError as exc:
-            raise OptionalFeatureError(
-                f"Invalid {channel_name} configuration: {exc}",
-                status=400,
-            ) from exc
-    write_config_data(config_path, data)
+    from nanobot.config.loader import load_config, save_config
+
+    config = load_config(config_path)
+    update_channel_config_enabled(config, channel_name, plugin, enabled, instance_id=instance_id)
+    save_config(config, config_path)
 
 
 def channel_enabled(
@@ -652,24 +651,25 @@ def _install_feature_dependencies(
     Returns ``True`` only when this call ran an installer. Package-install
     authorization belongs here so every WebUI action gets the same policy.
     """
-    if not dependencies or extra_installed(name, dependencies):
-        return False
-    if not allow_install:
-        raise OptionalFeatureError(
-            "Installing optional features from a remote WebUI is disabled. "
-            "Run this action from localhost or set tools.webuiAllowRemotePackageInstall to true.",
-            status=403,
+    with _FEATURE_INSTALL_LOCK:
+        if not dependencies or extra_installed(name, dependencies):
+            return False
+        if not allow_install:
+            raise OptionalFeatureError(
+                "Installing optional features from a remote WebUI is disabled. "
+                "Run this action from localhost or set tools.webuiAllowRemotePackageInstall to true.",
+                status=403,
+            )
+        result = install_extra(
+            name,
+            dependencies,
+            runner=runner,
         )
-    result = install_extra(
-        name,
-        dependencies,
-        runner=runner,
-    )
-    if not result.ok:
-        failed = command_text(result.failed_cmd or result.pip_cmd)
-        detail = f": {result.output}" if result.output else ""
-        raise OptionalFeatureError(f"Failed: {failed}{detail}", status=500)
-    return True
+        if not result.ok:
+            failed = command_text(result.failed_cmd or result.pip_cmd)
+            detail = f": {result.output}" if result.output else ""
+            raise OptionalFeatureError(f"Failed: {failed}{detail}", status=500)
+        return True
 
 
 def install_optional_feature_support(
@@ -738,29 +738,28 @@ def install_optional_feature_support(
     return payload
 
 
-def enable_optional_feature(
+@dataclass(frozen=True)
+class PreparedOptionalFeature:
+    name: str
+    plugin: ChannelPlugin | None
+    channel_cls: type[BaseChannel] | None
+    instance_id: str | None
+
+
+def prepare_optional_feature(
     name: str,
     *,
-    config_path: Path | None = None,
+    enabled: bool,
     allow_install: bool = True,
     instance_id: str | None = None,
     runner: Any = run_install_command,
-) -> dict[str, Any]:
+) -> PreparedOptionalFeature:
+    """Validate and install dependencies before entering a config transaction."""
     from nanobot.channels.registry import discover_plugins
-    from nanobot.config.loader import get_config_path
 
-    if name in _BUNDLED_FEATURE_ALIASES:
-        payload = optional_features_payload(
-            last_action={
-                "ok": True,
-                "message": f"Feature '{name}' is included with nanobot",
-                "enabled": True,
-            }
-        )
-        payload["requires_restart"] = False
-        return payload
-    config_path = config_path or get_config_path()
     requested_instance_id = (instance_id or "").strip() or None
+    if enabled and name in _BUNDLED_FEATURE_ALIASES:
+        return PreparedOptionalFeature(name, None, None, None)
     extras = optional_dependency_groups()
     channel_plugins = discover_plugins()
     known = set(channel_plugins) | set(extras)
@@ -770,16 +769,20 @@ def enable_optional_feature(
 
     channel_plugin = channel_plugins.get(name)
     dependencies = _feature_dependencies(name, channel_plugin, extras)
-    _install_feature_dependencies(
-        name,
-        dependencies,
-        allow_install=allow_install,
-        runner=runner,
-    )
+    if enabled:
+        _install_feature_dependencies(
+            name,
+            dependencies,
+            allow_install=allow_install,
+            runner=runner,
+        )
 
-    channel_cls: Any | None = None
+    if not enabled and channel_plugin is None:
+        raise OptionalFeatureError(f"Feature '{name}' cannot be disabled", status=400)
+
+    channel_cls: type[BaseChannel] | None = None
     target_instance_id: str | None = None
-    if channel_plugin is not None:
+    if channel_plugin is not None and enabled:
         try:
             channel_cls = channel_plugin.load_channel_class()
         except Exception as exc:
@@ -787,40 +790,53 @@ def enable_optional_feature(
                 f"Channel '{name}' is not importable after enable: {exc}",
                 status=500,
             ) from exc
-        target_instance_id = resolve_channel_action_target(
-            requested_instance_id,
-        )
-        set_channel_config_enabled(
-            config_path,
-            name,
-            channel_plugin,
-            True,
-            instance_id=target_instance_id,
-        )
-        message = f"Enabled channel '{name}'"
-    else:
-        message = f"Enabled feature '{name}'"
+    if channel_plugin is not None:
+        target_instance_id = resolve_channel_action_target(requested_instance_id)
+    return PreparedOptionalFeature(name, channel_plugin, channel_cls, target_instance_id)
 
-    if channel_cls is not None and target_instance_id is not None:
+
+def update_optional_feature(config: Config, prepared: PreparedOptionalFeature, *, enabled: bool) -> dict[str, Any]:
+    """Apply feature state and package-owned metadata to the transaction snapshot."""
+    name = prepared.name
+    if enabled and name in _BUNDLED_FEATURE_ALIASES:
+        payload = optional_features_payload(config=config, last_action={
+            "ok": True, "message": f"Feature '{name}' is included with nanobot", "enabled": True,
+        })
+        payload["requires_restart"] = False
+        return payload
+    if prepared.plugin is not None:
+        update_channel_config_enabled(config, name, prepared.plugin, enabled, instance_id=prepared.instance_id)
+    if enabled and prepared.channel_cls is not None and prepared.instance_id is not None:
         try:
-            refresh_channel_feature_metadata(
-                channel_cls,
-                config_path,
-                instance_id=target_instance_id,
-            )
+            refresh_channel_feature_metadata(prepared.channel_cls, config, instance_id=prepared.instance_id)
         except Exception as exc:
             logger.warning("Could not refresh {} channel metadata: {}", name, exc)
+    noun = "channel" if prepared.plugin is not None else "feature"
+    verb = "Enabled" if enabled else "Disabled"
+    payload = optional_features_payload(config=config, last_action={
+        "ok": True, "message": f"{verb} {noun} '{name}'", "enabled": enabled,
+    })
+    payload["requires_restart"] = _feature_requires_restart(name, is_channel=prepared.plugin is not None)
+    return payload
 
-    from nanobot.config.loader import load_config
 
-    payload = optional_features_payload(
-        config=load_config(config_path),
-        last_action={"ok": True, "message": message, "enabled": True},
+def enable_optional_feature(
+    name: str,
+    *,
+    config_path: Path | None = None,
+    allow_install: bool = True,
+    instance_id: str | None = None,
+    runner: Any = run_install_command,
+) -> dict[str, Any]:
+    from nanobot.config.loader import load_config, save_config
+
+    prepared = prepare_optional_feature(
+        name, enabled=True, allow_install=allow_install, instance_id=instance_id, runner=runner,
     )
-    payload["requires_restart"] = _feature_requires_restart(
-        name,
-        is_channel=channel_plugin is not None,
-    )
+    config = load_config(config_path)
+    payload = update_optional_feature(config, prepared, enabled=True)
+    if prepared.plugin is not None:
+        save_config(config, config_path)
     return payload
 
 
@@ -865,32 +881,10 @@ def disable_optional_feature(
     config_path: Path | None = None,
     instance_id: str | None = None,
 ) -> dict[str, Any]:
-    from nanobot.channels.registry import discover_plugins
-    from nanobot.config.loader import get_config_path, load_config
+    from nanobot.config.loader import load_config, save_config
 
-    config_path = config_path or get_config_path()
-    requested_instance_id = (instance_id or "").strip() or None
-    extras = optional_dependency_groups()
-    channel_plugins = discover_plugins()
-    known_channels = set(channel_plugins)
-    known = known_channels | set(extras)
-    if name not in known:
-        available = ", ".join(sorted(known))
-        raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
-    if name not in known_channels:
-        raise OptionalFeatureError(f"Feature '{name}' cannot be disabled", status=400)
-    channel_plugin = channel_plugins[name]
-    target_instance_id = resolve_channel_action_target(requested_instance_id)
-    set_channel_config_enabled(
-        config_path,
-        name,
-        channel_plugin,
-        False,
-        instance_id=target_instance_id,
-    )
-    payload = optional_features_payload(
-        config=load_config(config_path),
-        last_action={"ok": True, "message": f"Disabled channel '{name}'", "enabled": False}
-    )
-    payload["requires_restart"] = True
+    prepared = prepare_optional_feature(name, enabled=False, instance_id=instance_id)
+    config = load_config(config_path)
+    payload = update_optional_feature(config, prepared, enabled=False)
+    save_config(config, config_path)
     return payload

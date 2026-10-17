@@ -54,6 +54,8 @@ if TYPE_CHECKING:
         P2ImMessageReceiveV1,
     )
 
+    from nanobot.config.schema import Config
+
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 _LOGIN_CONSOLE = Console()
 _LARK_RUNTIME_LOCK = threading.Lock()
@@ -821,7 +823,18 @@ def refresh_saved_feishu_identities(
 
     from nanobot.config.loader import load_config, save_config
 
-    full_config = config or load_config()
+    full_config = config or load_config(config_path)
+    updated = refresh_feishu_identities(full_config, instance_id=instance_id)
+    if updated:
+        save_config(full_config, config_path)
+    return updated
+
+
+def refresh_feishu_identities(
+    full_config: Config, *, instance_id: str | None = None,
+) -> bool:
+    if not FEISHU_AVAILABLE:
+        return False
     feishu_cfg = getattr(full_config.channels, "feishu", None)
     defaults = feishu_default_config()
     specs = feishu_instance_specs(feishu_cfg, defaults)
@@ -863,7 +876,6 @@ def refresh_saved_feishu_identities(
         return False
 
     setattr(full_config.channels, "feishu", feishu_cfg)
-    save_config(full_config, config_path)
     return True
 
 
@@ -972,17 +984,11 @@ class FeishuChannel(BaseChannel):
     @classmethod
     def refresh_feature_metadata(
         cls,
-        config_path: Path,
+        config: Config,
         *,
         instance_id: str = DEFAULT_INSTANCE_ID,
     ) -> bool:
-        from nanobot.config.loader import load_config
-
-        return refresh_saved_feishu_identities(
-            load_config(config_path),
-            config_path=config_path,
-            instance_id=instance_id,
-        )
+        return refresh_feishu_identities(config, instance_id=instance_id)
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):

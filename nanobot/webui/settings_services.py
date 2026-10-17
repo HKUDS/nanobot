@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 
 from filelock import FileLock
 
-from nanobot.config.loader import load_config, save_config
+from nanobot.config.loader import config_persistence_data, load_config, save_config
 from nanobot.config.schema import Config
 
 _T = TypeVar("_T")
@@ -30,20 +30,36 @@ class WebUISettingsConfig:
     def load(self) -> Config:
         """Load this gateway's config without consulting the process-global path."""
         with self._lock:
-            return load_config(self.path)
+            return self._read()
 
-    def update(self, mutation: Callable[[Config], _T]) -> _T:
+    def _read(self) -> Config:
+        return load_config(self.path)
+
+    def _write(self, config: Config) -> None:
+        save_config(config, self.path)
+
+    def update(
+        self,
+        mutation: Callable[[Config], _T],
+        *,
+        on_save_error: Callable[[_T], None] | None = None,
+        on_commit: Callable[[_T], None] | None = None,
+    ) -> _T:
         """Apply and atomically persist one path-scoped read-modify-write operation."""
         with self._lock, self._file_lock:
-            config = load_config(self.path)
+            config = self._read()
+            before = config_persistence_data(config)
             result = mutation(config)
-            save_config(config, self.path)
+            try:
+                if config_persistence_data(config) != before:
+                    self._write(config)
+            except BaseException:
+                if on_save_error is not None:
+                    on_save_error(result)
+                raise
+            if on_commit is not None:
+                on_commit(result)
             return result
-
-    def run_serialized(self, operation: Callable[[Path], _T]) -> _T:
-        """Run a path-aware read-modify-write operation under the config-file lock."""
-        with self._lock, self._file_lock:
-            return operation(self.path)
 
 
 class WebUIOAuthFlowRegistry:
@@ -134,30 +150,4 @@ class WebUISettingsServices:
             oauth_flows=WebUIOAuthFlowRegistry(),
             rename_model_preset=rename_model_preset,
             refresh_runtime_config=refresh_runtime_config,
-        )
-
-    def read(
-        self,
-        operation: Callable[..., _T],
-        /,
-        *args: Any,
-        **kwargs: Any,
-    ) -> _T:
-        """Run a settings read against this gateway's explicit config path."""
-        return operation(*args, config_path=self.config.path, **kwargs)
-
-    def mutate(
-        self,
-        operation: Callable[..., _T],
-        /,
-        *args: Any,
-        **kwargs: Any,
-    ) -> _T:
-        """Serialize a path-aware settings read-modify-write operation."""
-        return self.config.run_serialized(
-            lambda config_path: operation(
-                *args,
-                config_path=config_path,
-                **kwargs,
-            )
         )

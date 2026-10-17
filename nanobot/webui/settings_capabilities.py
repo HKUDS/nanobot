@@ -6,7 +6,7 @@ import asyncio
 import os
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol, TypedDict
 
 from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
 from nanobot.api.runtime import ApiRuntime, ApiStartOptions
@@ -55,7 +55,14 @@ from nanobot.webui.workspaces import (
 if TYPE_CHECKING:
     from nanobot.webui.settings_services import WebUISettingsServices
 
-SettingsOperation = Callable[..., dict[str, Any]]
+SettingsOperation = Callable[[QueryParams], dict[str, Any]]
+
+
+class FeatureAction(Protocol):
+    def __call__(
+        self, action: str, query: QueryParams, *, allow_install: bool = True,
+    ) -> dict[str, Any]: ...
+
 
 
 @dataclass(frozen=True)
@@ -65,7 +72,7 @@ class CapabilitySettingsOperations:
     update_image: SettingsOperation
     update_transcription: SettingsOperation
     update_network: SettingsOperation
-    nanobot_features_action: SettingsOperation
+    nanobot_features_action: FeatureAction
     api_runtime: Callable[[], ApiRuntime]
     reload_image: Callable[[], Awaitable[dict[str, Any]]]
 
@@ -703,7 +710,7 @@ class CapabilitySettingsHandler:
 
         operation, section, apply_image_reload = mutation
         try:
-            payload = self.settings.mutate(operation, request.query)
+            payload = operation(request.query)
         except WebUISettingsError as exc:
             return SettingsRouteResult.failure(exc.status, exc.message)
         if apply_image_reload:
@@ -757,13 +764,12 @@ class CapabilitySettingsHandler:
             )
         try:
             await asyncio.to_thread(
-                self.settings.mutate,
                 operations.nanobot_features_action,
                 "enable",
                 {"name": ["api"]},
                 allow_install=self._allow_feature_package_install(request),
             )
-            self.settings.mutate(operations.update_api, request.query)
+            operations.update_api(request.query)
             config = self.settings.config.load()
             runtime = operations.api_runtime()
             options = ApiStartOptions(

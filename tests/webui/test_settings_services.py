@@ -11,7 +11,7 @@ from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.webui.gateway_services import build_gateway_services
-from nanobot.webui.settings_api import settings_payload, update_agent_settings, update_api_settings
+from nanobot.webui.settings_api import SettingsOperations
 from nanobot.webui.settings_services import (
     WebUIOAuthFlowRegistry,
     WebUISettingsServices,
@@ -63,10 +63,10 @@ def test_gateway_settings_services_isolate_config_paths_and_oauth_flows(
     assert second.http.settings_routes.settings is second.settings
     assert first.settings.config.load().api.host == "127.0.0.2"
     assert second.settings.config.load().api.host == "127.0.0.3"
-    assert first.settings.read(settings_payload)["api"]["host"] == "127.0.0.2"
-    assert second.settings.read(settings_payload)["api"]["host"] == "127.0.0.3"
+    assert SettingsOperations(first.settings.config).payload()["api"]["host"] == "127.0.0.2"
+    assert SettingsOperations(second.settings.config).payload()["api"]["host"] == "127.0.0.3"
 
-    first.settings.mutate(update_api_settings, {"port": ["19001"]})
+    SettingsOperations(first.settings.config).update_api( {"port": ["19001"]})
     assert load_config(first_path).api.port == 19001
     assert load_config(second_path).api.port != 19001
 
@@ -86,7 +86,7 @@ def test_settings_service_supports_a_new_config_directory(tmp_path: Path) -> Non
     config_path = tmp_path / "new" / "nested" / "config.json"
 
     services = WebUISettingsServices.create(config_path)
-    services.mutate(update_api_settings, {"port": ["19001"]})
+    SettingsOperations(services.config).update_api( {"port": ["19001"]})
 
     assert load_config(config_path).api.port == 19001
 
@@ -104,9 +104,9 @@ def test_settings_mutations_serialize_read_modify_write(
     second_loaded = threading.Event()
     errors: list[BaseException] = []
 
-    from nanobot.webui import settings_api
+    from nanobot.webui import settings_services
 
-    original_load = settings_api._load_settings_config
+    original_load = settings_services.load_config
 
     def controlled_load(path: Path | None) -> Config:
         config = original_load(path)
@@ -118,18 +118,18 @@ def test_settings_mutations_serialize_read_modify_write(
             second_loaded.set()
         return config
 
-    monkeypatch.setattr(settings_api, "_load_settings_config", controlled_load)
+    monkeypatch.setattr(settings_services, "load_config", controlled_load)
 
     def run_first() -> None:
         try:
-            services.mutate(update_agent_settings, {"timezone": ["Asia/Tokyo"]})
+            SettingsOperations(services.config).update_agent( {"timezone": ["Asia/Tokyo"]})
         except BaseException as exc:  # noqa: BLE001 - re-raised in the test thread
             errors.append(exc)
 
     def run_second() -> None:
         try:
             second_started.set()
-            services.mutate(update_api_settings, {"host": ["127.0.0.9"]})
+            SettingsOperations(services.config).update_api( {"host": ["127.0.0.9"]})
         except BaseException as exc:  # noqa: BLE001 - re-raised in the test thread
             errors.append(exc)
 
@@ -165,9 +165,9 @@ def test_distinct_gateways_serialize_mutations_for_the_same_config(
     second_loaded = threading.Event()
     errors: list[BaseException] = []
 
-    from nanobot.webui import settings_api
+    from nanobot.webui import settings_services
 
-    original_load = settings_api._load_settings_config
+    original_load = settings_services.load_config
 
     def controlled_load(path: Path | None) -> Config:
         config = original_load(path)
@@ -179,26 +179,25 @@ def test_distinct_gateways_serialize_mutations_for_the_same_config(
             second_loaded.set()
         return config
 
-    monkeypatch.setattr(settings_api, "_load_settings_config", controlled_load)
+    monkeypatch.setattr(settings_services, "load_config", controlled_load)
 
     def mutate(
-        services: WebUISettingsServices,
-        operation: Callable[..., object],
+        operation: Callable[[dict[str, list[str]]], object],
         query: dict[str, list[str]],
     ) -> None:
         try:
-            services.mutate(operation, query)
+            operation(query)
         except BaseException as exc:  # noqa: BLE001 - re-raised in the test thread
             errors.append(exc)
 
     first = threading.Thread(
         target=mutate,
-        args=(first_services, update_agent_settings, {"timezone": ["Asia/Tokyo"]}),
+        args=(SettingsOperations(first_services.config).update_agent, {"timezone": ["Asia/Tokyo"]}),
         name="gateway-first",
     )
     second = threading.Thread(
         target=mutate,
-        args=(second_services, update_api_settings, {"host": ["127.0.0.9"]}),
+        args=(SettingsOperations(second_services.config).update_api, {"host": ["127.0.0.9"]}),
         name="gateway-second",
     )
     first.start()
@@ -243,3 +242,20 @@ def test_oauth_registry_preserves_expiry_capacity_completion_and_cancel() -> Non
     registry.clear("openai_codex")
     assert replacement.cancel_count == 1
     assert registry.get("openai_codex", "replacement") is None
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_unchanged_settings_transaction_preserves_config_file(tmp_path: Path, existing: bool) -> None:
+    config_path = tmp_path / "config.json"
+    if existing:
+        save_config(Config(), config_path)
+    before = (config_path.read_bytes(), config_path.stat().st_mtime_ns) if existing else None
+    store = WebUISettingsServices.create(config_path).config
+
+    port = store.update(lambda config: config.api.port)
+
+    assert port == Config().api.port
+    if before is None:
+        assert not config_path.exists()
+    else:
+        assert (config_path.read_bytes(), config_path.stat().st_mtime_ns) == before

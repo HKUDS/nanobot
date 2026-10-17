@@ -8,10 +8,10 @@ import json
 import platform
 import re
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
 from zoneinfo import ZoneInfo
 
 from pydantic.alias_generators import to_snake
@@ -28,7 +28,7 @@ from nanobot.config.schema import Config
 from nanobot.llm_usage import llm_usage_payload
 from nanobot.optional_features import OptionalFeatureError, with_channel_runtime_status
 from nanobot.security.workspace_access import workspace_sandbox_status
-from nanobot.webui.settings_capabilities import network_safety_payload
+from nanobot.webui.settings_capabilities import FeatureAction, network_safety_payload
 from nanobot.webui.settings_contracts import (
     QueryParams,
     SettingsRequest,
@@ -40,31 +40,62 @@ from nanobot.webui.settings_contracts import (
 from nanobot.webui.settings_runtime import runtime_config_payload
 
 if TYPE_CHECKING:
-    from nanobot.webui.settings_services import WebUISettingsServices
+    from nanobot.webui.settings_services import WebUISettingsConfig, WebUISettingsServices
 
 LoadChannelPlugin = Callable[[str], Any]
 ListPendingPairings = Callable[[], Iterable[dict[str, Any]]]
-SettingsOperation = Callable[..., Any]
+class RuntimeConfigUpdate(Protocol):
+    def __call__(
+        self, values: dict[str, Any], *, local_browser: bool = False,
+    ) -> dict[str, Any]: ...
+
+
+class CliAppsPayload(Protocol):
+    def __call__(
+        self, *, installed_only: bool = False, config_path: Path | None = None,
+    ) -> Awaitable[dict[str, Any]]: ...
+
+
+class CliAppsAction(Protocol):
+    def __call__(
+        self, action: str, query: QueryParams, *, config_path: Path | None = None,
+    ) -> dict[str, Any]: ...
+
+
+class ChannelValidation(Protocol):
+    def __call__(
+        self, name: str, raw_values: dict[str, Any] | None = None, *, instance_id: str = "default",
+    ) -> dict[str, Any]: ...
+
+
+class McpAction(Protocol):
+    def __call__(
+        self, action: str | None, query: QueryParams, *,
+        reload_mcp: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
+        config: WebUISettingsConfig | None = None,
+    ) -> Awaitable[dict[str, Any]]: ...
+
 
 
 @dataclass(frozen=True)
 class SystemSettingsOperations:
-    update_runtime_config: SettingsOperation
-    cli_apps_payload: SettingsOperation
-    cli_apps_action: SettingsOperation
-    nanobot_features_payload: SettingsOperation
-    nanobot_features_action: SettingsOperation
-    nanobot_feature_instance_target: SettingsOperation
-    validate_channel_config: SettingsOperation
+    update_runtime_config: RuntimeConfigUpdate
+    cli_apps_payload: CliAppsPayload
+    cli_apps_action: CliAppsAction
+    nanobot_features_payload: Callable[[], dict[str, Any]]
+    nanobot_features_action: FeatureAction
+    nanobot_feature_instance_target: Callable[[QueryParams], str | None]
+    validate_channel_config: ChannelValidation
     load_channel_plugin: LoadChannelPlugin
     list_pending: ListPendingPairings
-    approve_code: SettingsOperation
-    deny_code: SettingsOperation
-    mcp_presets_action: SettingsOperation
-    reload_mcp: SettingsOperation
+    approve_code: Callable[[str], tuple[str, str] | None]
+    deny_code: Callable[[str], bool]
+    mcp_presets_action: McpAction
+    reload_mcp: Callable[[], Awaitable[dict[str, Any]]]
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None
-    check_for_update: SettingsOperation
-    channel_feature_action: SettingsOperation | None = None
+    check_for_update: Callable[[], dict[str, Any] | None]
+    channel_feature_action: Callable[[str, str, str | None], Any] | None = None
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None
 
 
@@ -462,9 +493,8 @@ class SystemSettingsHandler:
                 return SettingsRouteResult.failure(400, "Runtime settings must be an object")
             try:
                 payload = await asyncio.to_thread(
-                    self.settings.mutate,
                     operations.update_runtime_config,
-                    values,
+                    cast(dict[str, Any], values),
                     local_browser=request.local_browser,
                 )
             except WebUISettingsError as exc:
@@ -569,7 +599,6 @@ class SystemSettingsHandler:
         try:
             payload = await asyncio.to_thread(
                 operations.nanobot_features_payload,
-                config_path=self.settings.config.path,
             )
         except Exception:
             self.logger.exception("failed to load nanobot features")
@@ -582,7 +611,7 @@ class SystemSettingsHandler:
         self,
         operations: SystemSettingsOperations,
     ) -> dict[str, Any]:
-        return operations.nanobot_features_payload(config_path=self.settings.config.path)
+        return operations.nanobot_features_payload()
 
     def _nanobot_features_action(
         self,
@@ -592,8 +621,7 @@ class SystemSettingsHandler:
         *,
         allow_install: bool = True,
     ) -> dict[str, Any]:
-        return self.settings.mutate(
-            operations.nanobot_features_action,
+        return operations.nanobot_features_action(
             action,
             query,
             allow_install=allow_install,

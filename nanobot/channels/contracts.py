@@ -6,11 +6,11 @@ import json
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, TypeGuard, cast
 
 if TYPE_CHECKING:
     from nanobot.channels.plugin import ChannelPlugin
+    from nanobot.config.schema import Config
 
 FieldKind = Literal["string", "secret", "list", "bool", "int", "float", "json", "enum"]
 RouteFieldType = str | tuple[str, set[str]]
@@ -540,11 +540,11 @@ def channel_feature_instances(
 
 def refresh_channel_feature_metadata(
     channel_cls: type[Any],
-    config_path: Path,
+    config: Config,
     *,
     instance_id: str = "default",
 ) -> bool:
-    return bool(channel_cls.refresh_feature_metadata(config_path, instance_id=instance_id))
+    return bool(channel_cls.refresh_feature_metadata(config, instance_id=instance_id))
 
 
 def _validate_runtime_name(plugin: ChannelPlugin, runtime_name: Any) -> None:

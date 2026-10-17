@@ -21,7 +21,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol, TypedDict, cast
 
 import httpx
 
@@ -62,16 +62,35 @@ if TYPE_CHECKING:
     )
 
 OAuthStatusReader = Callable[[Any], dict[str, Any]]
-SettingsPayloadBuilder = Callable[..., dict[str, Any]]
+SettingsPayloadReader = Callable[[], dict[str, Any]]
 HttpGet = Callable[..., httpx.Response]
-SettingsOperation = Callable[..., dict[str, Any]]
+SettingsOperation = Callable[[QueryParams], dict[str, Any]]
+
+
+class ModelUpdate(Protocol):
+    def __call__(
+        self, query: QueryParams, *, rename_model_preset: Callable[[str, str], int] | None = None,
+    ) -> dict[str, Any]: ...
+
+
+class OAuthAction(Protocol):
+    def __call__(
+        self, query: QueryParams, *, oauth_flows: WebUIOAuthFlowRegistry,
+    ) -> dict[str, Any]: ...
+
+
+class OAuthCompletion(Protocol):
+    def __call__(
+        self, query: QueryParams, authorization_response: str | None = None,
+        *, oauth_flows: WebUIOAuthFlowRegistry,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
 class ModelSettingsOperations:
     update_agent: SettingsOperation
     create_model: SettingsOperation
-    update_model: SettingsOperation
+    update_model: ModelUpdate
     delete_model: SettingsOperation
     migrate_models: SettingsOperation
     update_call_order: SettingsOperation
@@ -79,9 +98,9 @@ class ModelSettingsOperations:
     create_provider: SettingsOperation
     provider_models: SettingsOperation
     model_api: SettingsOperation
-    oauth_login: SettingsOperation
-    oauth_complete: SettingsOperation
-    oauth_logout: SettingsOperation
+    oauth_login: OAuthAction
+    oauth_complete: OAuthCompletion
+    oauth_logout: OAuthAction
     apply_image_runtime_change: Callable[
         [dict[str, Any]],
         Awaitable[tuple[dict[str, Any], bool]],
@@ -1602,7 +1621,6 @@ def login_oauth_provider(
     *,
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None,
-    settings_payload: SettingsPayloadBuilder,
 ) -> dict[str, Any]:
     provider_name = (query_first(query, "provider") or "").strip()
     if not provider_name:
@@ -1717,8 +1735,7 @@ def complete_oauth_provider(
     authorization_response: str | None = None,
     *,
     oauth_flows: WebUIOAuthFlowRegistry,
-    config_path: Path | None,
-    settings_payload: SettingsPayloadBuilder,
+    read_settings: SettingsPayloadReader,
 ) -> dict[str, Any]:
     provider_name = (query_first(query, "provider") or "").strip()
     flow_id = (query_first(query, "flow_id") or "").strip()
@@ -1776,15 +1793,14 @@ def complete_oauth_provider(
     if not token.access:
         raise WebUISettingsError("OAuth login failed", status=401)
     invalidate_oauth_model_catalog(spec.name)
-    return settings_payload(config_path=config_path)
+    return read_settings()
 
 
 def logout_oauth_provider(
     query: QueryParams,
     *,
     oauth_flows: WebUIOAuthFlowRegistry,
-    config_path: Path | None,
-    settings_payload: SettingsPayloadBuilder,
+    read_settings: SettingsPayloadReader,
 ) -> dict[str, Any]:
     provider_name = (query_first(query, "provider") or "").strip()
     if not provider_name:
@@ -1816,7 +1832,7 @@ def logout_oauth_provider(
         oauth_flows.clear(spec.name)
         logout_xai_oauth()
         invalidate_oauth_model_catalog(spec.name)
-        return settings_payload(config_path=config_path)
+        return read_settings()
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
 
@@ -1824,7 +1840,7 @@ def logout_oauth_provider(
         with suppress(FileNotFoundError):
             path.unlink()
     invalidate_oauth_model_catalog(spec.name)
-    return settings_payload(config_path=config_path)
+    return read_settings()
 
 
 class ModelSettingsHandler:
@@ -1848,7 +1864,6 @@ class ModelSettingsHandler:
         try:
             if action == "agent-update":
                 payload = await asyncio.to_thread(
-                    self.settings.mutate,
                     operations.update_agent,
                     request.query,
                 )
@@ -1861,7 +1876,6 @@ class ModelSettingsHandler:
 
             if action == "model-update":
                 payload = await asyncio.to_thread(
-                    self.settings.mutate,
                     operations.update_model,
                     request.query,
                     rename_model_preset=self.settings.rename_model_preset,
@@ -1878,7 +1892,6 @@ class ModelSettingsHandler:
             }.get(action)
             if mutation is not None:
                 payload = await asyncio.to_thread(
-                    self.settings.mutate,
                     mutation,
                     request.query,
                 )
@@ -1887,7 +1900,6 @@ class ModelSettingsHandler:
 
             if action == "provider-update":
                 payload = await asyncio.to_thread(
-                    self.settings.mutate,
                     operations.update_provider,
                     request.query,
                 )
@@ -1906,15 +1918,14 @@ class ModelSettingsHandler:
 
             if action == "model-api":
                 payload = await asyncio.to_thread(
-                    self.settings.read, operations.model_api, request.query,
+                    operations.model_api, request.query,
                 )
                 return SettingsRouteResult.success(payload)
 
             if action == "provider-models":
                 try:
                     payload = await asyncio.to_thread(
-                        self.settings.read,
-                        operations.provider_models,
+                            operations.provider_models,
                         request.query,
                     )
                 except WebUISettingsError:
@@ -1929,7 +1940,6 @@ class ModelSettingsHandler:
 
             if action == "oauth-login":
                 payload = await asyncio.to_thread(
-                    self.settings.read,
                     operations.oauth_login,
                     request.query,
                     oauth_flows=self.settings.oauth_flows,
@@ -1941,7 +1951,6 @@ class ModelSettingsHandler:
                         "OAuth authorization response must be a string"
                     )
                 payload = await asyncio.to_thread(
-                    self.settings.read,
                     operations.oauth_complete,
                     request.query,
                     raw_response or None,
@@ -1949,7 +1958,6 @@ class ModelSettingsHandler:
                 )
             elif action == "oauth-logout":
                 payload = await asyncio.to_thread(
-                    self.settings.read,
                     operations.oauth_logout,
                     request.query,
                     oauth_flows=self.settings.oauth_flows,
