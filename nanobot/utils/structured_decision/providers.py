@@ -33,6 +33,47 @@ class DecisionProviderSettings:
     requires_api_key: bool
 
 
+@dataclass(frozen=True)
+class DecisionModelCapabilities:
+    max_images: int
+    max_image_bytes: int | None = None
+
+
+_CLEF_MAX_IMAGE_BYTES = 300_000
+_MODEL_CAPABILITIES: dict[tuple[str, str, str], DecisionModelCapabilities] = {
+    ("openrouter", "system_one", "cloudflare/clef"): DecisionModelCapabilities(
+        max_images=4,
+        max_image_bytes=_CLEF_MAX_IMAGE_BYTES,
+    ),
+    ("openrouter", "system_one", "cloudflare/clef-flash"): DecisionModelCapabilities(
+        max_images=4,
+        max_image_bytes=_CLEF_MAX_IMAGE_BYTES,
+    ),
+    ("openrouter", "system_one", "cloudflare/clef-omni"): DecisionModelCapabilities(
+        max_images=4,
+    ),
+    ("openrouter", "system_one", "openai/gpt-6-luna-decisions"): DecisionModelCapabilities(
+        max_images=128,
+    ),
+    # TypeSafe limits each decoded image to 16 MiB; request and processed-image limits
+    # are separate and enforced upstream.
+    ("openrouter", "system_one", "~typesafe/jev-latest"): DecisionModelCapabilities(
+        max_images=16,
+        max_image_bytes=16 * 1024 * 1024,
+    ),
+}
+
+
+def get_decision_model_capabilities(
+    *,
+    provider: str,
+    protocol: str,
+    model: str,
+) -> DecisionModelCapabilities | None:
+    """Return known input capabilities for a provider's exact model ID."""
+    return _MODEL_CAPABILITIES.get((provider, protocol, model))
+
+
 _PROVIDER_PROFILES = {
     "openrouter": DecisionProviderProfile(
         name="openrouter",

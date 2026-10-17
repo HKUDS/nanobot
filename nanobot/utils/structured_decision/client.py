@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -19,9 +19,11 @@ from .errors import (
     DecisionTimeoutError,
     DecisionTransportError,
     MissingCredentialsError,
+    UnsupportedDecisionFeatureError,
 )
 from .models import (
     ChoiceQuestion,
+    DecisionImage,
     DecisionQuestion,
     DecisionRequest,
     DecisionResult,
@@ -30,7 +32,11 @@ from .models import (
     StructuredInput,
     validate_structured_input,
 )
-from .providers import DecisionProviderSettings, resolve_provider_settings_from_config
+from .providers import (
+    DecisionProviderSettings,
+    get_decision_model_capabilities,
+    resolve_provider_settings_from_config,
+)
 from .transports import SystemOneTransport
 
 if TYPE_CHECKING:
@@ -38,6 +44,15 @@ if TYPE_CHECKING:
     from nanobot.llm_usage.models import LLMCallRecord
 
 LLMCallObserver = Callable[["LLMCallRecord"], None]
+_SUPPORTED_IMAGE_CONTENT_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
+
+
+def _is_supported_image_content_type(value: object) -> bool:
+    return isinstance(value, str) and value in _SUPPORTED_IMAGE_CONTENT_TYPES
+
+
+def _is_image_data(value: object) -> bool:
+    return isinstance(value, bytes)
 
 
 class StructuredDecisionClient:
@@ -132,12 +147,13 @@ class StructuredDecisionClient:
         *,
         state: StructuredInput,
         questions: Mapping[str, DecisionQuestion],
+        images: Sequence[DecisionImage] = (),
     ) -> DecisionResult:
-        """Send one state and its typed questions to the selected decision endpoint."""
+        """Send one state, optional images, and typed questions to the decision endpoint."""
         # Reject evaluations once aclose() has started, so a closing client cannot be reused.
         if self._wire_transport.closed:
             raise DecisionClientClosedError("Decision client is closed")
-        request = self._build_request(state=state, questions=questions)
+        request = self._build_request(state=state, questions=questions, images=images)
         observer = self._llm_call_observer
         if observer is None:
             return await self._wire_transport.evaluate(request)
@@ -245,6 +261,7 @@ class StructuredDecisionClient:
         *,
         state: StructuredInput,
         questions: Mapping[str, DecisionQuestion],
+        images: Sequence[DecisionImage] = (),
     ) -> DecisionRequest:
         validate_structured_input(state, "State")
         questions_value: Any = questions
@@ -265,8 +282,56 @@ class StructuredDecisionClient:
             question.validate()
             validated_questions[question_id] = question
 
+        images_value: Any = images
+        if isinstance(images_value, (str, bytes, bytearray)) or not isinstance(
+            images_value, Sequence
+        ):
+            raise DecisionProtocolError("Images must be an ordered sequence")
+        validated_images: list[DecisionImage] = []
+        for index, image_value in enumerate(cast(Sequence[Any], images_value)):
+            if not isinstance(image_value, DecisionImage):
+                raise DecisionProtocolError(
+                    f"Image at index {index} must be a DecisionImage"
+                )
+            if not _is_supported_image_content_type(image_value.content_type):
+                raise DecisionProtocolError(
+                    f"Image at index {index} must use PNG, JPEG, or WebP"
+                )
+            if not _is_image_data(image_value.data):
+                raise DecisionProtocolError(f"Image at index {index} data must be bytes")
+            if not image_value.data:
+                raise DecisionProtocolError(f"Image at index {index} cannot be empty")
+            validated_images.append(image_value)
+
+        images_tuple = tuple(validated_images)
+        if images_tuple:
+            capabilities = get_decision_model_capabilities(
+                provider=self.provider,
+                protocol=self.protocol,
+                model=self.model,
+            )
+            if capabilities is None:
+                raise UnsupportedDecisionFeatureError(
+                    f"Model {self.model!r} on provider {self.provider!r} "
+                    "does not support image input"
+                )
+            if len(images_tuple) > capabilities.max_images:
+                raise DecisionProtocolError(
+                    f"Model {self.model!r} accepts at most "
+                    f"{capabilities.max_images} images"
+                )
+            if capabilities.max_image_bytes is not None:
+                for index, image in enumerate(images_tuple):
+                    if len(image.data) > capabilities.max_image_bytes:
+                        raise DecisionProtocolError(
+                            f"Image at index {index} exceeds the "
+                            f"{capabilities.max_image_bytes}-byte size limit "
+                            f"for model {self.model!r}"
+                        )
+
         return DecisionRequest(
             model=self.model,
             state=state,
             questions=validated_questions,
+            images=images_tuple,
         )

@@ -127,6 +127,42 @@ client reads credentials and an optional proxy from `providers.openrouter`, with
 `OPENROUTER_API_KEY` as the environment fallback. OpenRouter is the only registered decision
 provider initially. Custom or local decision URLs are not configurable; another provider must
 be explicitly registered and support the System One decision API.
+For non-2xx JSON responses, the client extracts messages from `detail.message` or
+`error.message`. If `error.message` wraps JSON with a nested `detail`, the nested message is
+used; an accompanying `error_type` or OpenAI-style `type` is included when available.
+
+For image-capable Decisions models, pass image bytes to the structured decision client. The
+client encodes them as `image_url` items in the top-level `state` array, alongside the original
+state:
+
+Import `DecisionImage` from `nanobot.utils.structured_decision`, then pass
+`images=[DecisionImage(content_type="image/png", data=image_bytes)]` to
+`StructuredDecisionClient.evaluate`. Supply raw image bytes; the client creates the data URL.
+
+```json
+{
+  "model": "cloudflare/clef-flash",
+  "state": [
+    { "listing": "Red square sticker" },
+    {
+      "type": "image_url",
+      "image_url": { "url": "data:image/png;base64,..." }
+    }
+  ],
+  "questions": {
+    "matches_listing": {
+      "type": "noul",
+      "instructions": "Does the image show the item in the listing?"
+    }
+  }
+}
+```
+
+Do not send images in a top-level `images` field or as remote URLs; OpenRouter requires inline
+data URLs and rejects those alternatives. Supported image models and per-model count and size
+guidance are listed in the [structured decision configuration](./configuration.md#structured-decision-client).
+See OpenRouter's [multimodal Decisions guide](https://openrouter.ai/docs/guides/community/multimodal-decisions)
+for current details.
 
 To opt into OpenRouter server-managed search and fetch, add:
 

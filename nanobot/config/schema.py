@@ -384,7 +384,7 @@ class StructuredDecisionConfig(Base):
     provider: str = "openrouter"
     # Add each supported protocol to this Literal.
     protocol: Literal["system_one"] = "system_one"
-    model: str = "typesafe/jev-1.13"
+    model: str = "~typesafe/jev-latest"
     timeout_s: float = Field(
         default=15.0,
         gt=0,

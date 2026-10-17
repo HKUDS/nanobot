@@ -11,6 +11,7 @@ from .errors import (
     MalformedDecisionJsonError,
     MissingCredentialsError,
     StructuredDecisionError,
+    UnsupportedDecisionFeatureError,
     UnsupportedDecisionProtocolError,
     UnsupportedDecisionProviderError,
 )
@@ -19,6 +20,7 @@ from .models import (
     ChoiceQuestion,
     CriterionDescription,
     DecisionAnswer,
+    DecisionImage,
     DecisionQuestion,
     DecisionRequest,
     DecisionResult,
@@ -38,6 +40,7 @@ __all__ = [
     "DecisionAnswer",
     "DecisionClientClosedError",
     "DecisionHttpError",
+    "DecisionImage",
     "DecisionProtocolError",
     "DecisionQuestion",
     "DecisionRequest",
@@ -56,6 +59,7 @@ __all__ = [
     "StructuredDecisionClient",
     "StructuredDecisionError",
     "StructuredInput",
+    "UnsupportedDecisionFeatureError",
     "UnsupportedDecisionProviderError",
     "UnsupportedDecisionProtocolError",
 ]

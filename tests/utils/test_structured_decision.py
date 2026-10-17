@@ -1,8 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
+import base64
 import json
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -15,6 +16,7 @@ from nanobot.utils.structured_decision import (
     ChoiceQuestion,
     DecisionClientClosedError,
     DecisionHttpError,
+    DecisionImage,
     DecisionProtocolError,
     DecisionRequest,
     DecisionTimeoutError,
@@ -28,6 +30,7 @@ from nanobot.utils.structured_decision import (
     ScoreQuestion,
     StructuredDecisionClient,
     StructuredInput,
+    UnsupportedDecisionFeatureError,
 )
 from nanobot.utils.structured_decision import providers as decision_providers
 from nanobot.utils.structured_decision.providers import (
@@ -65,7 +68,7 @@ class _BlockingTransport(httpx.AsyncBaseTransport):
 
 def _make_client(
     *,
-    model: str = "typesafe/jev-1.13",
+    model: str = "~typesafe/jev-latest",
     api_key: str | None = "sk-test",
     timeout: float = 15.0,
     proxy: str | None = None,
@@ -98,7 +101,7 @@ async def test_usage_observer_records_decision_call_in_existing_store(tmp_path):
         return httpx.Response(
             200,
             json={
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
                 "usage": {"input_tokens": 40, "output_tokens": 6},
             },
@@ -130,7 +133,7 @@ async def test_usage_observer_keeps_absent_or_partial_usage_unknown(
 ):
     def handler(request: httpx.Request) -> httpx.Response:
         response: dict[str, object] = {
-            "model": "typesafe/jev-1.13-20260917",
+            "model": "~typesafe/jev-latest",
             "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
         }
         if usage_metadata is not None:
@@ -196,7 +199,7 @@ async def test_usage_observer_records_protocol_failure():
         transport=_Transport(
             lambda request: httpx.Response(
                 200,
-                json={"model": "typesafe/jev-1.13-20260917", "answers": {}},
+                json={"model": "~typesafe/jev-latest", "answers": {}},
             )
         ),
     )
@@ -218,7 +221,7 @@ async def test_usage_observer_failure_does_not_break_decision_call():
             lambda request: httpx.Response(
                 200,
                 json={
-                    "model": "typesafe/jev-1.13-20260917",
+                    "model": "~typesafe/jev-latest",
                     "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
                 },
             )
@@ -359,15 +362,16 @@ async def test_noul_decide_parses_successful_response():
         assert request.headers["Authorization"] == "Bearer sk-test"
         assert request.headers["Content-Type"] == "application/json"
         payload = json.loads(request.content.decode())
-        assert payload["model"] == "typesafe/jev-1.13"
+        assert payload["model"] == "~typesafe/jev-latest"
         assert payload["state"] == "Task: deploy\nContext: see logs"
+        assert "images" not in payload
         assert payload["questions"]["safe_to_run"]["type"] == "noul"
         assert payload["questions"]["safe_to_run"]["criteria"]["true"]
         return httpx.Response(
             200,
             json={
                 "id": "gen-dec-1",
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {"safe_to_run": {"type": "noul", "noul": 0.95}},
                 "usage": {"input_tokens": 492, "output_tokens": 22},
             },
@@ -386,13 +390,235 @@ async def test_noul_decide_parses_successful_response():
     )
 
     assert result.response_id == "gen-dec-1"
-    assert result.model == "typesafe/jev-1.13-20260917"
+    assert result.model == "~typesafe/jev-latest"
     noul_answer = result.answers["safe_to_run"]
     assert isinstance(noul_answer, NoulAnswer)
     assert noul_answer.noul == pytest.approx(0.95)
     assert result.usage is not None
     assert result.usage.input_tokens == 492
     assert result.usage.output_tokens == 22
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state",
+    [
+        "Listing: red square sticker",
+        {"listing": "red square sticker"},
+        ["Listing: red square sticker", {"category": "sticker"}],
+    ],
+)
+async def test_images_are_serialized_as_state_parts_and_preserve_original_state(
+    state: StructuredInput,
+):
+    expected_state = [
+        state,
+        {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,ZnJvbnQ="},
+        },
+        {
+            "type": "image_url",
+            "image_url": {"url": "data:image/jpeg;base64,ZGV0YWls"},
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode())
+        assert str(request.url) == "https://openrouter.ai/api/alpha/decisions"
+        assert payload["model"] == "~typesafe/jev-latest"
+        assert payload["state"] == expected_state
+        assert "images" not in payload
+        return httpx.Response(
+            200,
+            json={
+                "model": "~typesafe/jev-latest",
+                "answers": {"matches": {"type": "noul", "noul": 0.95}},
+            },
+        )
+
+    client = _make_client(
+        model="~typesafe/jev-latest",
+        transport=_Transport(handler),
+    )
+    result = await client.evaluate(
+        state=state,
+        questions={"matches": NoulQuestion(instructions="Does the image match?")},
+        images=[
+            DecisionImage(content_type="image/png", data=b"front"),
+            DecisionImage(content_type="image/jpeg", data=b"detail"),
+        ],
+    )
+
+    assert result.answers["matches"] == NoulAnswer(type="noul", noul=0.95)
+
+
+@pytest.mark.parametrize(
+    ("model", "max_images", "max_image_bytes"),
+    [
+        ("cloudflare/clef", 4, 300_000),
+        ("cloudflare/clef-flash", 4, 300_000),
+        ("cloudflare/clef-omni", 4, None),
+        ("openai/gpt-6-luna-decisions", 128, None),
+        ("~typesafe/jev-latest", 16, 16 * 1024 * 1024),
+    ],
+)
+def test_openrouter_image_model_capabilities(
+    model: str,
+    max_images: int,
+    max_image_bytes: int | None,
+):
+    capabilities = decision_providers.get_decision_model_capabilities(
+        provider="openrouter",
+        protocol="system_one",
+        model=model,
+    )
+
+    assert capabilities is not None
+    assert capabilities.max_images == max_images
+    assert capabilities.max_image_bytes == max_image_bytes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model",
+    [
+        "cloudflare/clef",
+        "cloudflare/clef-flash",
+    ],
+)
+async def test_rejects_clef_image_above_openrouter_size_guidance_without_request(
+    model: str,
+):
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={})
+
+    image_limit = 300_000
+    client = _make_client(model=model, transport=_Transport(handler))
+
+    with pytest.raises(DecisionProtocolError, match=f"{image_limit}-byte size limit"):
+        await client.evaluate(
+            state="Inspect this image",
+            questions={"check": NoulQuestion(instructions="Is this valid?")},
+            images=[
+                DecisionImage(content_type="image/png", data=b"x" * (image_limit + 1))
+            ],
+        )
+
+    assert request_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "image_count", "max_images"),
+    [
+        ("cloudflare/clef", 5, 4),
+        ("cloudflare/clef-flash", 5, 4),
+        ("cloudflare/clef-omni", 5, 4),
+        ("openai/gpt-6-luna-decisions", 129, 128),
+        ("~typesafe/jev-latest", 17, 16),
+    ],
+)
+async def test_rejects_image_count_above_model_limit_without_request(
+    model: str,
+    image_count: int,
+    max_images: int,
+):
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={})
+
+    client = _make_client(model=model, transport=_Transport(handler))
+
+    with pytest.raises(DecisionProtocolError, match=f"at most {max_images} images"):
+        await client.evaluate(
+            state="Inspect these images",
+            questions={"check": NoulQuestion(instructions="Is this valid?")},
+            images=[DecisionImage(content_type="image/png", data=b"x")] * image_count,
+        )
+
+    assert request_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "image", "error_message"),
+    [
+        (
+            "~typesafe/jev-latest",
+            DecisionImage(content_type="image/png", data=b""),
+            "cannot be empty",
+        ),
+        (
+            "~typesafe/jev-latest",
+            DecisionImage(content_type="image/png", data=cast(Any, bytearray(b"x"))),
+            "data must be bytes",
+        ),
+        (
+            "~typesafe/jev-latest",
+            DecisionImage(content_type="image/png", data=b"x" * (16 * 1024 * 1024 + 1)),
+            "size limit",
+        ),
+    ],
+)
+async def test_rejects_invalid_image_before_request(
+    model: str,
+    image: DecisionImage,
+    error_message: str,
+):
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={})
+
+    client = _make_client(model=model, transport=_Transport(handler))
+
+    with pytest.raises(DecisionProtocolError, match=error_message):
+        await client.evaluate(
+            state="Inspect this image",
+            questions={"check": NoulQuestion(instructions="Is this valid?")},
+            images=[image],
+        )
+
+    assert request_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model",
+    [
+        "perplexity/pplx-decider-v1-27b",
+        "perplexity/pplx-decider-v1.1-27b",
+        "unknown/decision-model",
+    ],
+)
+async def test_rejects_images_for_models_outside_the_supported_capability_set(model: str):
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={})
+
+    client = _make_client(model=model, transport=_Transport(handler))
+
+    with pytest.raises(UnsupportedDecisionFeatureError, match="does not support image input"):
+        await client.evaluate(
+            state="Inspect this image",
+            questions={"check": NoulQuestion(instructions="Is this valid?")},
+            images=[DecisionImage(content_type="image/png", data=b"x")],
+        )
+
+    assert request_count == 0
 
 
 @pytest.mark.asyncio
@@ -421,7 +647,7 @@ async def test_structured_json_inputs_and_optional_noul_criteria_are_preserved()
             200,
             json={
                 "id": "gen-structured",
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {
                     "notify": {"type": "noul", "noul": 0.9},
                     "category": {
@@ -716,7 +942,7 @@ async def test_choice_decide_parses_response():
             200,
             json={
                 "id": "gen-dec-choice",
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {
                     "team": {
                         "type": "choice",
@@ -755,7 +981,7 @@ async def test_score_decide_parses_response():
             200,
             json={
                 "id": "gen-dec-score",
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {
                     "buying_intent": {
                         "type": "score",
@@ -799,7 +1025,7 @@ async def test_uses_env_openrouter_key_when_not_explicitly_set(monkeypatch):
             200,
             json={
                 "id": "gen-dec-env",
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {"safe_to_run": {"type": "noul", "noul": 0.5}},
                 "usage": {"input_tokens": 8, "output_tokens": 2},
             },
@@ -856,7 +1082,7 @@ async def test_rejects_boolean_numeric_values():
             200,
             json={
                 "id": "bad-bool",
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {"safe_to_run": {"type": "noul", "noul": True}},
                 "usage": {"input_tokens": 10, "output_tokens": 2},
             },
@@ -882,7 +1108,7 @@ async def test_optional_metadata_can_be_absent():
         return httpx.Response(
             200,
             json={
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
             },
         )
@@ -899,7 +1125,7 @@ async def test_optional_metadata_can_be_absent():
         },
     )
 
-    assert result.model == "typesafe/jev-1.13-20260917"
+    assert result.model == "~typesafe/jev-latest"
     assert result.response_id is None
     assert result.usage is None
 
@@ -916,7 +1142,7 @@ async def test_optional_metadata_can_be_absent():
 async def test_invalid_usage_metadata_is_rejected(metadata):
     def handler(request: httpx.Request) -> httpx.Response:
         response = {
-            "model": "typesafe/jev-1.13-20260917",
+            "model": "~typesafe/jev-latest",
             "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
         }
         response.update(metadata)
@@ -945,7 +1171,7 @@ async def test_probability_values_are_preserved_without_sum_constraint(probabili
             200,
             json={
                 "id": "bad-probs",
-                "model": "typesafe/jev-1.13-20260917",
+                "model": "~typesafe/jev-latest",
                 "answers": {
                     "team": {
                         "type": "choice",
@@ -992,6 +1218,89 @@ async def test_http_error_raises_decision_http_error():
                 )
             },
         )
+
+
+@pytest.mark.asyncio
+async def test_http_error_includes_openrouter_detail_for_invalid_image():
+    # A 1x1 RGBA PNG fixture.
+    image_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+        "AAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
+    )
+    client = _make_client(
+        api_key="sk-http",
+        transport=_Transport(
+            lambda request: httpx.Response(
+                400,
+                json={
+                    "detail": {
+                        "error_type": "api_usage_error",
+                        "message": "Invalid image dimensions.",
+                    }
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(DecisionHttpError) as exc_info:
+        await client.evaluate(
+            state="Task",
+            questions={
+                "safe_to_run": NoulQuestion(instructions="Decide if should notify.")
+            },
+            images=[DecisionImage(content_type="image/png", data=image_bytes)],
+        )
+
+    assert str(exc_info.value) == "HTTP 400 api_usage_error: Invalid image dimensions."
+
+
+@pytest.mark.asyncio
+async def test_http_error_extracts_detail_wrapped_in_openrouter_error_message():
+    client = _make_client(
+        transport=_Transport(
+            lambda request: httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": (
+                            'HTTP 400: {"detail":{"error_type":"api_usage_error",'
+                            '"message":"Invalid image dimensions."}}'
+                        ),
+                        "code": 400,
+                    }
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(DecisionHttpError) as exc_info:
+        await _evaluate_noul(client)
+
+    assert str(exc_info.value) == "HTTP 400 api_usage_error: Invalid image dimensions."
+
+
+@pytest.mark.asyncio
+async def test_http_error_extracts_openai_error_message_and_type():
+    client = _make_client(
+        transport=_Transport(
+            lambda request: httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "Invalid image dimensions.",
+                        "type": "invalid_request_error",
+                        "param": "image",
+                        "code": "invalid_image",
+                    }
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(DecisionHttpError) as exc_info:
+        await _evaluate_noul(client)
+
+    assert str(exc_info.value) == "HTTP 400 invalid_request_error: Invalid image dimensions."
 
 
 @pytest.mark.asyncio

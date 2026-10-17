@@ -48,3 +48,7 @@ class UnsupportedDecisionProviderError(StructuredDecisionError):
 
 class UnsupportedDecisionProtocolError(StructuredDecisionError):
     """Raised when a provider does not support the requested protocol."""
+
+
+class UnsupportedDecisionFeatureError(StructuredDecisionError):
+    """Raised when a model does not support a requested input feature."""

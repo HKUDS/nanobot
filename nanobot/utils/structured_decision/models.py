@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, TypeAlias, cast
 
 from .errors import DecisionProtocolError
@@ -165,10 +165,17 @@ DecisionAnswer = NoulAnswer | ChoiceAnswer | ScoreAnswer
 
 
 @dataclass(frozen=True)
+class DecisionImage:
+    content_type: Literal["image/png", "image/jpeg", "image/webp"]
+    data: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
 class DecisionRequest:
     model: str
     state: StructuredInput
     questions: dict[str, DecisionQuestion]
+    images: tuple[DecisionImage, ...] = ()
 
 
 @dataclass(frozen=True)

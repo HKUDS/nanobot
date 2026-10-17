@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import math
 from collections.abc import Mapping
@@ -24,6 +25,7 @@ from .models import (
     ChoiceAnswer,
     ChoiceQuestion,
     DecisionAnswer,
+    DecisionImage,
     DecisionQuestion,
     DecisionRequest,
     DecisionResult,
@@ -119,6 +121,10 @@ class SystemOneTransport:
                 for question_id, question in request.questions.items()
             },
         }
+        if request.images:
+            payload["state"] = [request.state] + [
+                self._serialize_image_part(image) for image in request.images
+            ]
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -145,7 +151,10 @@ class SystemOneTransport:
                 self._idle.set()
 
         if not 200 <= response.status_code < 300:
-            raise DecisionHttpError(response.status_code)
+            raise DecisionHttpError(
+                response.status_code,
+                self._http_error_detail(response),
+            )
 
         try:
             data = response.json()
@@ -153,6 +162,69 @@ class SystemOneTransport:
             raise MalformedDecisionJsonError("Decision response is not valid JSON") from exc
 
         return self._parse_result(data, request.questions)
+
+    @staticmethod
+    def _format_http_error_detail(detail: Any) -> str | None:
+        if isinstance(detail, str):
+            return detail.strip() or None
+        if not isinstance(detail, Mapping):
+            return None
+
+        message = detail.get("message")
+        if not isinstance(message, str) or not message.strip():
+            return None
+        error_type = detail.get("error_type")
+        if not isinstance(error_type, str) or not error_type.strip():
+            error_type = detail.get("type")
+        if not isinstance(error_type, str) or not error_type.strip():
+            metadata = detail.get("metadata")
+            error_type = metadata.get("error_type") if isinstance(metadata, Mapping) else None
+        if isinstance(error_type, str) and error_type.strip():
+            return f"{error_type.strip()}: {message.strip()}"
+        return message.strip()
+
+    @classmethod
+    def _http_error_detail(cls, response: httpx.Response) -> str | None:
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        if not isinstance(payload, Mapping):
+            return None
+
+        detail = cls._format_http_error_detail(payload.get("detail"))
+        if detail is not None:
+            return detail
+
+        error = payload.get("error")
+        if not isinstance(error, Mapping):
+            return None
+        message = error.get("message")
+        if isinstance(message, str):
+            json_start = message.find("{")
+            if json_start >= 0:
+                try:
+                    nested_payload = json.loads(message[json_start:])
+                except ValueError:
+                    pass
+                else:
+                    if isinstance(nested_payload, Mapping):
+                        detail = cls._format_http_error_detail(
+                            nested_payload.get("detail")
+                        )
+                        if detail is not None:
+                            return detail
+        return cls._format_http_error_detail(error)
+
+    @staticmethod
+    def _serialize_image_part(image: DecisionImage) -> dict[str, Any]:
+        encoded_image = base64.b64encode(image.data).decode("ascii")
+        return {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{image.content_type};base64,{encoded_image}",
+            },
+        }
 
     @staticmethod
     def _serialize_question(question: DecisionQuestion) -> dict[str, Any]:

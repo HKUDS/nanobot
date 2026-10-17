@@ -11,7 +11,7 @@ def test_structured_decision_config_defaults() -> None:
     assert settings.enabled is False
     assert settings.provider == "openrouter"
     assert settings.protocol == "system_one"
-    assert settings.model == "typesafe/jev-1.13"
+    assert settings.model == "~typesafe/jev-latest"
     assert settings.timeout_s == 15.0
 
 
