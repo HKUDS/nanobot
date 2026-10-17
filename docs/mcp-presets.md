@@ -12,6 +12,7 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 | Firecrawl | None (keyless preset) | [Official guide](https://docs.firecrawl.dev/use-cases/developers-mcp) |
 | Parallel Search | None (anonymous access) | [Official guide](https://docs.parallel.ai/integrations/mcp/search-mcp) |
 | Exa | None | [Official guide](https://exa.ai/mcp) |
+| Keenable | None (API key optional) | [Official guide](https://docs.keenable.ai/mcp-server) |
 | Microsoft Learn | None (public documentation) | [Official guide](https://learn.microsoft.com/en-us/training/support/mcp) |
 | Xmind | Browser OAuth | [Official guide](https://xmind.com/user-guide/xmind-mcp) |
 | Notion | Browser OAuth | [Official guide](https://developers.notion.com/guides/mcp/get-started-with-mcp) |
