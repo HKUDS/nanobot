@@ -17,6 +17,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import (
     RuntimeEventContext,
+    TurnCompleted,
     TurnRuntimeAdmitted,
     UserInputAccepted,
 )
@@ -164,7 +165,7 @@ async def test_publish_turn_run_status_non_websocket_noop_registry() -> None:
 async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     bus = MessageBus()
     bus.publish_outbound = AsyncMock()
-    observer = wth.build_webui_fallback_model_observer(bus)
+    observer = wth.build_fallback_model_observer(bus)
 
     runtime = LLMRuntime(
         provider=MagicMock(),
@@ -187,6 +188,7 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     assert outbound.channel == "websocket"
     assert outbound.chat_id == "chat-model"
     assert outbound.metadata == {"webui": True}
+    assert outbound.content == ""  # websocket projection renders the event, not text
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
     assert outbound.event.model_preset == "Deep Research"
@@ -342,12 +344,62 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
 
 
 @pytest.mark.asyncio
-async def test_fallback_model_ignores_non_websocket_requests() -> None:
+async def test_fallback_notice_reaches_chat_channels_edge_triggered() -> None:
     bus = MessageBus()
     bus.publish_outbound = AsyncMock()
-    observer = wth.build_webui_fallback_model_observer(bus)
+    observer = wth.build_fallback_model_observer(bus)
 
-    with request_context(RequestContext(channel="telegram", chat_id="chat-model")):
-        await observer(FallbackModelSelection("fallback", "openai_codex"))
+    def _telegram_context() -> request_context:
+        return request_context(RequestContext(
+            channel="telegram",
+            chat_id="12345",
+            session_key="telegram:12345",
+        ))
 
-    bus.publish_outbound.assert_not_awaited()
+    # The first fallback selection on a chat channel publishes a notice.
+    with _telegram_context():
+        await observer(FallbackModelSelection("deepseek/deepseek-chat", None))
+    assert bus.publish_outbound.await_count == 1
+    outbound = bus.publish_outbound.await_args.args[0]
+    assert outbound.channel == "telegram"
+    assert outbound.chat_id == "12345"
+    assert isinstance(outbound.event, TurnModelUpdatedEvent)
+    assert outbound.event.model == "deepseek/deepseek-chat"
+    assert outbound.event.fallback is True
+    assert outbound.content  # human-readable text for the channel
+
+    # Later fallback turns for the same chat stay silent (edge-triggered).
+    with _telegram_context():
+        await observer(FallbackModelSelection("deepseek/deepseek-chat", None))
+    assert bus.publish_outbound.await_count == 1
+
+    # The fallback turn completing keeps the latch; the notice stays quiet.
+    await bus.publish(TurnCompleted(context=RuntimeEventContext(
+        channel="telegram", chat_id="12345", session_key="telegram:12345",
+    )))
+    with _telegram_context():
+        await observer(FallbackModelSelection("deepseek/deepseek-chat", None))
+    assert bus.publish_outbound.await_count == 1
+
+    # That second fallback turn also completes with a fallback selection,
+    # so the latch survives its completion too.
+    await bus.publish(TurnCompleted(context=RuntimeEventContext(
+        channel="telegram", chat_id="12345", session_key="telegram:12345",
+    )))
+
+    # A turn completing without any fallback selection re-arms the notice.
+    await bus.publish(TurnCompleted(context=RuntimeEventContext(
+        channel="telegram", chat_id="12345", session_key="telegram:12345",
+    )))
+    with _telegram_context():
+        await observer(FallbackModelSelection("zhipu/glm-4.7", None))
+    assert bus.publish_outbound.await_count == 2
+    assert bus.publish_outbound.await_args.args[0].event.model == "zhipu/glm-4.7"
+
+    # Other chats are notified independently.
+    with request_context(RequestContext(
+        channel="telegram", chat_id="67890", session_key="telegram:67890",
+    )):
+        await observer(FallbackModelSelection("zhipu/glm-4.7", None))
+    assert bus.publish_outbound.await_count == 3
+    assert bus.publish_outbound.await_args.args[0].chat_id == "67890"
