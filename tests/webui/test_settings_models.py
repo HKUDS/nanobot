@@ -227,7 +227,7 @@ def test_provider_catalog_normalizes_official_model_metadata_without_changing_bu
             "input_modalities": [" text ", "image", "text", "future-signal"],
             "output_modalities": ["text", " text "],
             "effort": {
-                "supported_levels": [" none ", "low", "high", "max", "adaptive", "max"],
+                "supported_levels": [" low ", "high", "max", "adaptive", "max"],
                 "default_level": " adaptive ",
             },
             "api_capabilities": {"anthropic_messages": {"system_prompt_update": True}},

@@ -560,6 +560,13 @@ def _model_metadata_payload(
             output_modalities = list(metadata.output_modalities)
         if reasoning_efforts is None and metadata.reasoning_efforts:
             reasoning_efforts = list(metadata.reasoning_efforts)
+        elif (
+            reasoning_efforts is not None
+            and "none" in metadata.reasoning_efforts
+            and "none" not in reasoning_efforts
+        ):
+            # Catalogs may list only enabled thinking levels, not the explicit off control.
+            reasoning_efforts = ["none", *reasoning_efforts]
         if default_effort not in (reasoning_efforts or []):
             default_effort = metadata.default_reasoning_effort
 
