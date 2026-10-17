@@ -173,7 +173,8 @@ export function UpdateFlowProvider({ client, token, enabled, canSettleHandoff = 
         // A lost/refused response keeps the original job and recovery entry.
         const response = await settleUpdate(client, retireId);
         if (generation.current !== current) return;
-        if (response.job.recorded_phase !== "cancelled" || response.job.mutation_started) throw new Error("Update not settled");
+        if ((response.job.recorded_phase !== "cancelled" && response.job.recorded_phase !== "preparation_failed")
+          || response.job.mutation_started) throw new Error("Update not settled");
         retired = true;
       }
       setJob(null);
@@ -250,12 +251,16 @@ export function UpdateFlowProvider({ client, token, enabled, canSettleHandoff = 
   // Backup can fail after shutdown/admission but before any package mutation.
   // That saved job still needs the standalone recovery path, not another update.
   const needsRecovery = failed && (job?.mutation_started || phase === "failed");
-  const reviewAgain = canSettleHandoff && job && !job.mutation_started && (phase === "handoff_failed"
-    || phase === "cancelled" || (phase === "ready" && review && review.plan.validity !== "current"));
+  const preparing = phase === "preparation_requested" || phase === "preparing";
+  // The base update flow can settle preparation, but only the gateway's leases
+  // establish abandonment. Keep this tab's confirmed preparation uninterrupted.
+  const reviewAgain = job && !job.mutation_started && ((enabled && preparing && approved.current !== job.id)
+    || (canSettleHandoff && (phase === "handoff_failed" || phase === "cancelled"
+      || (phase === "ready" && review && review.plan.validity !== "current"))));
   const restoringReview = !!pendingId && phase === "ready" && !job?.execution_confirmation_id && !review && !error;
   const reviewing = (submitting && (!review || !!reviewAgain)) || restoringReview;
-  const busy = checkingStatus || submitting || restoringReview || (!!pendingId && !error && !failed && !done && (phase !== "ready" || !!job?.execution_confirmation_id));
-  const title = restored ? "restored" : done ? "done" : offline || awaitingRestart ? "reconnecting" : reviewing ? "reviewingTitle" : busy ? phase === "preparation_requested" || phase === "preparing" ? "preparing" : phase === "installing" ? "installing" : "working" : failed ? "failed" : "confirm";
+  const busy = checkingStatus || submitting || restoringReview || (!!pendingId && !reviewAgain && !error && !failed && !done && (phase !== "ready" || !!job?.execution_confirmation_id));
+  const title = restored ? "restored" : done ? "done" : offline || awaitingRestart ? "reconnecting" : reviewing ? "reviewingTitle" : busy ? preparing ? "preparing" : phase === "installing" ? "installing" : "working" : failed ? "failed" : "confirm";
   const blocked = !reviewAgain && !job?.execution_confirmation_id && review && (!review.installation_allowed ? "permission" : review.plan.execution_blocked_reason);
   const guide = blocked && !busy && !error && !pendingId && review && ["upgrade", "restart"].includes(review.plan.action)
     && review.plan.validity === "current" ? review.plan.guide : null;

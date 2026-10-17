@@ -12,7 +12,7 @@ These repository docs describe `main`, which can be newer than the released pack
 - Access to one supported AI provider, company endpoint, or local model server.
 - The credential, endpoint URL, and model ID required by that service. Local providers such as Ollama may not require a key.
 
-Git and [Bun](https://bun.sh/) are only needed for an editable source install. Platform wheels contain both the WebUI and the matching native TUI, including its licenses, notices, corresponding application source, source offer, and relinking instructions. They support macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. Pip selects the right wheel; first TUI launch does not download anything from GitHub. Other platforms and source-distribution builds can use the WebUI or `nanobot --classic`; see the [terminal requirements](./cli-reference.md#agent-cli) for native TUI availability.
+Official platform packages include the WebUI and matching native TUI for macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64; no frontend build tools are needed. Other platforms can use the WebUI or `nanobot --classic`; see [terminal requirements](./cli-reference.md#agent-cli). Source installs need Git and use Bun, which nanobot downloads when needed.
 
 ## 1. Install nanobot
 
@@ -99,7 +99,6 @@ nanobot gateway status
 ```
 
 Use `nanobot gateway logs`, `restart`, and `stop` to manage that background gateway.
-See [updates and recovery](./updating.md) before updating through a different installation method.
 
 ## Terminal-Only Check
 
@@ -166,9 +165,7 @@ If pip reports `externally-managed-environment`, use the recommended installer, 
 
 **Current source**
 
-Clone the repository and install it in editable mode. The checkout uses Bun to run
-its matching native TUI; nanobot downloads the pinned Bun runtime when needed.
-Node is not required.
+Clone the repository and install it in editable mode. nanobot downloads the pinned Bun runtime to run the checkout's matching TUI; Node is not required.
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -185,15 +182,19 @@ nanobot webui
 
 The source path follows current `main` and can be newer than the published package. The editable install keeps Python pointed at the checkout; `nanobot` runs `tui/` with Bun, and `nanobot webui` automatically rebuilds `webui/` when its bundled assets are stale. All normal commands remain the same as a stable install. For development details, follow [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
-If the package is installed but the shell cannot find `nanobot`, use the runner that owns the installation. The recommended installer prints the exact command to reuse. Common forms are:
+If the shell cannot find `nanobot`, reuse the installer's printed command or run Python from the existing installation. For uv or pipx, locate that environment with the original manager; do not start a temporary tool environment to manage it. The official installer's default paths are:
 
 ```bash
-uv tool run --from nanobot-ai nanobot --version
-pipx run --spec nanobot-ai nanobot --version
-~/.nanobot/venv/bin/python -m nanobot --version
+~/.nanobot/venv/bin/python -I -m nanobot --version
 ```
 
-On Windows, the managed-environment form is `& "$HOME\.nanobot\venv\Scripts\python.exe" -m nanobot --version`. Replace `--version` with `webui`, `onboard --wizard`, or any other arguments you need. Use plain `python -m nanobot` only when that Python executable belongs to the environment where nanobot was installed.
+Windows PowerShell:
+
+```powershell
+& "$HOME\.nanobot\venv\Scripts\python.exe" -I -m nanobot --version
+```
+
+Replace `--version` with `webui`, `onboard --wizard`, or the arguments you need. Use plain `python -m nanobot` only when that Python belongs to the installed environment.
 
 ## Manual Configuration Fallback
 
@@ -232,47 +233,16 @@ Replace the provider, endpoint, and model together. Do not pair a credential fro
 
 ## Updating
 
-Back up your configuration and data and stop active tasks first. For a regular Python
-virtual environment, update the active installation:
+Open **Settings → About → Update**. Supported installations can update and restart there; others show instructions for their original package manager or deployment. Follow [Updating nanobot](./updating.md) for Preview selection, backups and recovery. Do not switch installation methods to work around an error.
+
+For an ordinary Python virtual environment, the [CLI updater](./cli-reference.md#updating) is also available:
 
 ```bash
 nanobot update --check
 nanobot update
-# Or explicitly update/build source (requires Git):
-nanobot update --dev
 ```
 
-You can also use **Settings → About → Update nanobot** in WebUI. Source installation
-is an advanced option, not a versioned preview release. Restart nanobot after installation. Existing source checkouts
-must be clean and able to fast-forward to their upstream; updates never discard local edits.
-See [Updating](./cli-reference.md#updating) for dependency handling and deployment limits.
-
-For uv tool, pipx, system-managed installations, or older versions without this command,
-use the same method you used to install:
-
-```bash
-# Recommended installer
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
-
-# Or one of these
-uv tool upgrade nanobot-ai
-# Only for an unconstrained registry install without recorded pip options:
-pipx upgrade nanobot-ai
-python -m pip install -U nanobot-ai
-```
-
-For a customized pipx installation, review its original requirement and options before
-updating. A generic upgrade can discard them; the installer refuses to do so. See the
-[installation-specific update guide](./updating.md#installation-owners).
-
-For a source checkout:
-
-```bash
-git pull --ff-only
-python -m pip install -e .
-```
-
-Because the install is editable, normal source changes are visible immediately. Re-running the install synchronizes any changed Python dependencies; the TUI and WebUI refresh their own dependencies/assets when launched. Then check `nanobot --version`. Run `nanobot onboard --refresh` when you want to add newly introduced default fields while preserving existing settings.
+Stop affected processes and back up configuration and data first; restart and verify the running version afterward. Source checkouts should preserve local changes and follow the [development instructions](../CONTRIBUTING.md).
 
 ## If the First Reply Fails
 

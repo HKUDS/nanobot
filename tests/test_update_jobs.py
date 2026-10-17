@@ -302,6 +302,18 @@ def installation(tmp_path, monkeypatch, request):
     return plan, candidate, site, requests, httpx.MockTransport(response)
 
 
+@pytest.fixture
+def managed_installation(installation):
+    plan, candidate, site, requests, transport = installation
+    receipt = Path(plan.installation.environment) / "nanobot-install.json"
+    write_record(receipt, {"schema_version": 1, "owner": "nanobot-installer",
+                           "environment": plan.installation.environment, "extras": []})
+    snapshot = plan.installation.model_copy(update={
+        "records": {**plan.installation.records, "nanobot-install.json": hashlib.sha256(receipt.read_bytes()).hexdigest()},
+    })
+    return plan.model_copy(update={"installation": snapshot}), candidate, site, requests, transport
+
+
 @pytest.mark.parametrize("cancel_feed_close", [False, True])
 async def test_confirmed_service_prepares_exact_offline_pip_job_without_installing(installation, monkeypatch, cancel_feed_close):
     from nanobot import update_service
@@ -1467,17 +1479,10 @@ def test_program_copy_flushes_writable_handle_and_preserves_read_only_mode(tmp_p
 
 
 @pytest.mark.parametrize("installation", ["handoff"], indirect=True)
-async def test_job_recovery_capability_comes_from_its_saved_worker(installation, tmp_path, monkeypatch):
+async def test_job_recovery_capability_comes_from_its_saved_worker(managed_installation, tmp_path, monkeypatch):
     from nanobot.update_jobs import read_update_job
 
-    plan, _, _, _, transport = installation
-    receipt = Path(plan.installation.environment) / "nanobot-install.json"
-    write_record(receipt, {"schema_version": 1, "owner": "nanobot-installer",
-                           "environment": plan.installation.environment, "extras": []})
-    snapshot = plan.installation.model_copy(update={
-        "records": {**plan.installation.records, "nanobot-install.json": hashlib.sha256(receipt.read_bytes()).hexdigest()},
-    })
-    plan = plan.model_copy(update={"installation": snapshot})
+    plan, _, _, _, transport = managed_installation
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
     monkeypatch.setattr(sys, "prefix", plan.installation.environment)
@@ -1490,6 +1495,90 @@ async def test_job_recovery_capability_comes_from_its_saved_worker(installation,
     assert read_update_job(plan.id).automatic_recovery is False
     (directory / "worker.pyz").unlink()
     assert read_update_job(plan.id).automatic_recovery is False, "Status must remain readable after damage"
+
+
+@pytest.mark.parametrize("installation", ["handoff"], indirect=True)
+async def test_stale_first_supervisor_cannot_take_new_confirmation(managed_installation, tmp_path, monkeypatch):
+    """Real frozen supervisor/worker/pip; synthetic preflight and restart bodies."""
+    from nanobot import update_jobs
+
+    plan, _, _, _, transport = managed_installation
+    async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
+        directory = await prepare_job(plan, feed)
+    spec = WorkerSpec.read(directory)
+    assert spec.automatic_recovery
+    # Park both launchers before process creation, then schedule stale A first.
+    with monkeypatch.context() as patch:
+        patch.setattr(update_jobs, "_spawn_worker", lambda *args, **kwargs: None)
+        start_handoff(directory, once=True)
+        previous = ExecutionConfirmation.read(directory)
+        assert previous is not None
+        retry_handoff(directory, previous.id)
+    current = ExecutionConfirmation.read(directory)
+    assert current is not None and current.id != previous.id
+    before = JobStatus.read(directory)
+    approval = (directory / "handoff-approval.json").read_bytes()
+    command = [spec.baseline.base_python, "-I", "-S", str(directory / "worker.pyz"),
+               "--supervise", str(directory), "--confirmed-handoff", str(directory)]
+    stale = await asyncio.to_thread(subprocess.run, [*command, previous.id], capture_output=True, timeout=40)
+    assert not (directory / "supervision.json").exists(), stale.stderr.decode()
+    assert stale.returncode != 0
+    assert JobStatus.read(directory) == before
+    assert ExecutionConfirmation.read(directory) == current
+    assert (directory / "handoff-approval.json").read_bytes() == approval
+    assert not (directory / "confirmation-claimed.json").exists()
+    assert not (directory / "preflight-entered.json").exists()
+    assert not (directory / "approval.json").exists()
+    assert not (installation_state_dir(spec.baseline.environment) / "stop.json").exists()
+    # B retains its first supervision budget and completes the explicit retry.
+    completed = await asyncio.to_thread(subprocess.run, [*command, current.id], capture_output=True, timeout=40)
+    assert completed.returncode == 0, completed.stderr.decode()
+    assert read_record(directory / "supervision.json")["confirmation_id"] == current.id
+    assert JobStatus.read(directory).phase == Phase.SUCCEEDED
+    assert JobStatus.read(directory).attempt == 1
+    assert inspect_environment(plan.installation.python).app_version == plan.target.version
+    assert not pending_update_path(spec.baseline.environment).exists()
+    with file_access(installation_state_dir(spec.baseline.environment) / "supervisor.lock", exclusive=True):
+        pass
+
+
+@pytest.mark.parametrize("installation", ["handoff"], indirect=True)
+@pytest.mark.parametrize("restarting", [False, True])
+async def test_service_restore_keeps_confirmation_identity_after_expiry(managed_installation, tmp_path, monkeypatch, restarting):
+    from nanobot import update_jobs, update_worker
+    from nanobot.update_fallback import restore_service
+
+    plan, _, _, _, transport = managed_installation
+    async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
+        directory = await prepare_job(plan, feed)
+    monkeypatch.setattr(update_jobs, "_spawn_worker", lambda *args, **kwargs: None)
+    start_handoff(directory, once=True)
+    previous = ExecutionConfirmation.read(directory)
+    assert previous is not None
+    retry_handoff(directory, previous.id)
+    current = ExecutionConfirmation.read(directory)
+    assert current is not None
+    # A long completion may outlive B's launch window, but never borrow its identity.
+    now = int(time.time())
+    current = replace(current, created_at=now - 1800, expires_at=now - 900)
+    current.save(directory)
+    approval = read_record(directory / "handoff-approval.json")
+    approval.update(created_at=current.created_at, expires_at=current.expires_at)
+    write_record(directory / "handoff-approval.json", approval)
+    if restarting:
+        write_record(directory / "restoration.json", {"plan_id": plan.id, "state": "restarting"})
+        JobStatus(plan.id, Phase.RESTART_FAILED, 0, False, "Interrupted original-service restart", now).save(directory)
+    before = JobStatus.read(directory)
+    restarts = []
+    monkeypatch.setattr(update_worker, "restart_runtime", lambda path, spec: restarts.append(path))
+    with pytest.raises(ValueError, match="replaced or revoked"):
+        restore_service(directory, confirmation_id=previous.id)
+    assert JobStatus.read(directory) == before
+    assert restarts == []
+    restore_service(directory, confirmation_id=current.id)
+    assert restarts == ([directory] if restarting else [])
+    assert JobStatus.read(directory).phase == (Phase.RESTART_FAILED if restarting else Phase.HANDOFF_FAILED)
+    assert inspect_environment(plan.installation.python).app_version == plan.installation.installed_version
 
 
 @pytest.mark.parametrize("installation", [True], indirect=True)
@@ -1562,8 +1651,10 @@ async def test_program_restore_after_real_broken_install_preserves_user_data(ins
         assert chat.read_bytes().endswith(b'{"content":"new message"}\n')
 
 
-@pytest.mark.parametrize("outcome", ["repaired", "restored", "unsafe"])
-async def test_supervisor_has_one_repair_budget_and_replays_transient_restore(installation, tmp_path, monkeypatch, outcome):
+@pytest.mark.parametrize(("outcome", "confirmed"), [
+    ("repaired", False), ("restored", False), ("unsafe", False), ("restored", True),
+])
+async def test_supervisor_has_one_repair_budget_and_replays_transient_restore(installation, tmp_path, monkeypatch, outcome, confirmed):
     from nanobot import update_fallback
 
     plan, _, _, _, transport = installation
@@ -1574,9 +1665,22 @@ async def test_supervisor_has_one_repair_budget_and_replays_transient_restore(in
     monkeypatch.setattr(WorkerSpec, "read", classmethod(lambda cls, directory: spec))
     calls = []
     restored = []
+    arguments = ["--handoff", str(directory)]
+    confirmation_id = uuid4().hex if confirmed else None
+    now = int(time.time())
+    if confirmation_id is not None:
+        digest = hashlib.sha256((directory / "request.json").read_bytes()).hexdigest()
+        ExecutionConfirmation(confirmation_id, plan.id, digest, now, now + 900).save(directory)
+        write_record(directory / "handoff-approval.json", {
+            "plan_id": plan.id, "request_sha256": digest, "confirmation_id": confirmation_id,
+            "created_at": now, "expires_at": now + 900,
+        })
+        arguments = ["--confirmed-handoff", str(directory), confirmation_id]
     def child(command, **kwargs):
         calls.append(command)
         if len(calls) == 1:
+            if confirmed:
+                monkeypatch.setattr(update_fallback.time, "time", lambda: now + 901)
             # Abrupt worker exit after admission leaves a non-terminal journal.
             write_record(directory / "approval.json", {"admitted": True})
             phase = Phase.INSTALLING
@@ -1585,7 +1689,8 @@ async def test_supervisor_has_one_repair_budget_and_replays_transient_restore(in
             phase = Phase.SUCCEEDED if outcome == "repaired" else Phase.FAILED
         JobStatus(spec.plan_id, phase, len(calls), True, "Injected execution result", int(time.time())).save(directory)
         return subprocess.CompletedProcess(command, 91 if len(calls) == 1 else 0)
-    def restore(path):
+    def restore(path, *, confirmation_id=None):
+        assert confirmation_id == (ExecutionConfirmation.read(directory).id if confirmed else None)
         restored.append(path)
         if outcome == "unsafe":
             raise ValueError("User data changed")
@@ -1594,12 +1699,12 @@ async def test_supervisor_has_one_repair_budget_and_replays_transient_restore(in
         JobStatus(spec.plan_id, Phase.RESTORED, 2, True, "Restored", int(time.time())).save(directory)
     monkeypatch.setattr(update_fallback.subprocess, "run", child)
     monkeypatch.setattr(update_fallback, "restore_service", restore)
-    update_fallback.supervise(directory, ["--handoff", str(directory)])
+    update_fallback.supervise(directory, arguments)
     assert len(calls) == 2
     assert len(restored) == {"repaired": 0, "restored": 2, "unsafe": 1}[outcome]
     if outcome == "unsafe":
         assert read_record(directory / "supervision.json")["state"] == "needs_attention"
-    update_fallback.supervise(directory, ["--handoff", str(directory)])
+    update_fallback.supervise(directory, arguments)
     assert len(calls) == 2, "A duplicate launch cannot acquire another recovery budget"
 
 

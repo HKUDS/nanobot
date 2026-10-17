@@ -77,7 +77,7 @@ You need **Python 3.11 or newer** and access to a [supported model provider or l
 
 Choose the **stable release** for everyday use or **current source** for development and the latest features. This README describes current source; [published documentation](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) covers the released version.
 
-New to terminals or model credentials? Follow [Start Without Technical Background](./docs/start-without-technical-background.md). Updating an existing instance? Follow [updates and recovery](./docs/updating.md) for your installation method. For manual updates, stop every old nanobot process using that workspace, back up its config directory and workspace, then update and restart through the original launcher or service. See [session storage and version changes](./docs/cli-reference.md#session-storage).
+New to terminals or model credentials? Follow [Start Without Technical Background](./docs/start-without-technical-background.md). Updating an existing instance? Follow [updates and recovery](./docs/updating.md) for your installation method, backup steps and restart checks.
 
 | Track | Install with | Update with | What runs |
 |---|---|---|---|
@@ -109,9 +109,9 @@ irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | i
 <details>
 <summary>Installer details, preview, and script review</summary>
 
-The default command installs or upgrades `nanobot-ai` from PyPI. A fresh install uses a dedicated environment under `~/.nanobot/venv`, even if uv or pipx is available. On a fresh local desktop, it starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. Installer-managed WebUI launches keep the gateway running in the background; closing the browser or terminal does not stop it. Use the printed `gateway stop` command to stop that instance. SSH, headless, existing-config, and older-release paths keep the terminal setup wizard.
+The default command installs or upgrades the stable PyPI release. Fresh installations use a dedicated environment under `~/.nanobot/venv`. On a fresh local desktop it opens the WebUI for model setup. That gateway keeps running after the browser or terminal closes; use the printed `gateway stop` command to stop it. SSH, headless, existing-config and older-release installs use terminal setup.
 
-Existing uv, pipx and installer-managed installations retain their owner, extras and constraints. An active ordinary venv remains an explicit installation target; it is not adopted as installer-managed. The installer avoids system-wide pip and prints the exact command used to run nanobot; reuse it if `nanobot` is not on `PATH`. See [updates and recovery](docs/updating.md) for supported in-app updates and other installation methods.
+Existing installations keep their package manager, extras and constraints. An active ordinary venv remains an explicit target, not an installer-managed environment. The installer avoids system-wide pip and prints the command to reuse if `nanobot` is not on `PATH`.
 
 To preview the plan without changing your environment, pass `--dry-run`.
 

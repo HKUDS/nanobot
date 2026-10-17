@@ -35,7 +35,7 @@ async def _prepare(directory: Path) -> None:
         # This process already owns the old runtime's lease, including startup
         # and atexit. Do not create an unprotected nested interpreter here.
         check_environment(spec, repairing=False, current=current_environment(uv=spec.uv is not None))
-        async with ReleaseFeed(installation_state_dir(spec.baseline.environment) / "feed") as feed:
+        async with ReleaseFeed(installation_state_dir(spec.baseline.environment) / "releases") as feed:
             await feed.revalidate(plan.target)
         plan.validate_for(plan.installation)
         require_no_pending_data_update()

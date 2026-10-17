@@ -7,7 +7,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Goal | Command | Notes |
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
-| Update the current install | `nanobot update` | Latest PyPI release; `--dev` explicitly selects source |
+| Update an ordinary Python venv | `nanobot update` | Latest stable PyPI release; use the [installation-specific route](./updating.md#installation-owners) for other methods |
 | Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
 | Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
@@ -56,60 +56,23 @@ Desktop-only distributions use the narrow `nanobot-desktop-tui` entrypoint insid
 ### Updating
 
 ```bash
-nanobot update --check       # Check PyPI without changing the installation
-nanobot update               # Install the latest stable PyPI release
-nanobot update --dev         # Update source, prepare TUI dependencies, and build WebUI
+nanobot update --check       # Check the latest stable PyPI release; do not install
+nanobot update               # Install it in an ordinary Python venv
+nanobot update --dev         # Update source and prepare its matching interfaces
+nanobot update --plan        # Save an exact review; do not install or restart
 ```
 
-`--update-dev` is an alias for `--dev`. In-place updates support virtual environments
-not owned by a tool manager. They leave already-satisfying dependencies installed.
-Missing pip is handled through the existing uv/ensurepip fallback.
-For uv tool installations, use `uv tool upgrade nanobot-ai` in the gateway's account;
-uv preserves the recorded constraints and extra packages. For pipx, inspect the
-original requirement and installer options first: a generic `pipx upgrade nanobot-ai`
-can discard version constraints and pip options. Use it only for an unconstrained
-registry install without recorded pip options; otherwise follow the owner's original
-workflow. Do not overwrite a manager-owned environment with pip. A pinned uv tool
-version requires an explicit `uv tool install` with the new version constraint.
-System Python installations use their original installer.
+The first two commands target stable PyPI releases, not the saved Preview subscription. `--dev` (`--update-dev`) selects source, not Preview. `--plan --channel stable` or `--plan --channel preview` inspects that channel without changing the subscription; `--channel` requires `--plan`. Saved plans are not executed by `nanobot update`.
 
-Back up configuration, workspace files, and chat history before updating. The updater
-does not replace this data, but a new runtime may migrate it. Stop active tasks and
-other processes that share this Python environment.
+Before an in-place update, back up configuration, workspace files and chat history, then stop all processes sharing that Python environment. New versions may migrate stored data. Use the original [installation-specific route](./updating.md#installation-owners) for uv, pipx, containers, system packages and Desktop; do not overwrite a manager-owned environment with pip. Already-satisfying dependencies remain installed.
 
-Source updates require Git. Existing editable checkouts keep their current branch
-and fast-forward to its upstream; local changes, detached HEADs, and divergent branches
-must be resolved manually. A package install switches to an editable checkout under
-`~/.nanobot/src/` on the official `main` branch. Bun is downloaded into
-`~/.nanobot/tools/bun/` when the pinned version is unavailable, with SHA-256 verification.
-Node is not required. Source is not a versioned preview channel. To switch from source
-to a release, stop nanobot, install the release in a separate environment, and launch
-outside the checkout. In-place source-to-release switching is refused because a restart
-can otherwise load the old source with the new package's version metadata.
+Source updates require Git. Existing editable checkouts fast-forward their current branch to its upstream; resolve local changes, detached HEADs and divergence manually. Updating a package with `--dev` creates an editable checkout under `~/.nanobot/src/` on the official `main` branch. nanobot downloads its pinned Bun when needed; Node is not required. To return to a release, install it in a separate environment and launch outside the checkout; in-place source-to-release switching is refused.
 
-After a successful CLI installation, restart nanobot and verify the running gateway's
-version and behavior. Installation verification checks normal and isolated interpreter
-imports; it does not restart or verify the live process. An already-current install
-does not request a restart. An older stable release is never installed over a newer
-version unless the CLI receives `--allow-downgrade`; restore compatible data when needed.
+After installation, restart nanobot and verify the **running** gateway's version and behavior. The CLI checks the installation, not the live process. Downgrading requires `--allow-downgrade` and compatible data; back up before using it.
 
-This is an in-place update, not a transactional deployment. Once installation begins,
-a marker under `~/.nanobot/run/` records an unverified update for that Python environment.
-It is removed only after installation verification succeeds. After a failure or process
-termination, stop nanobot and retry the same update from that environment. There is no
-automatic rollback. After a crash, the marker reports an incomplete update, not the previous logs.
-On Windows, if another nanobot process locks installation files, stop that process
-and retry with `python -m nanobot update` (add `--dev` for source).
-Containers must be rebuilt and redeployed; Desktop is updated through its host application.
+In-place CLI updates have no automatic rollback. A failed or interrupted installation leaves an incomplete-update marker under `~/.nanobot/run/`. Stop nanobot and retry the same update from that environment. On Windows, stop processes holding installation files and retry with that environment's `python -m nanobot update` (add `--dev` for source).
 
-WebUI uses a separate, exact-plan flow under **Settings → About** when the host
-advertises `webui.update-flow.v1`. It stages a verified release, asks for shutdown
-and restart consent, and reconnects to the saved job after browser refreshes.
-Supported managed and uv installations retain their respective installer ownership;
-other installations show their owner's instructions. Source checkout updates remain
-CLI-only. See [Updating nanobot](updating.md) for installation eligibility, automatic
-service recovery and its limits. The existing remote package-install permission
-also governs this flow; checking a version never authorizes installation.
+The WebUI's **Settings → About** uses a separate reviewed update-and-restart flow for supported installations and shows owner-specific instructions for others. See [Updating nanobot](./updating.md) for Preview selection, recovery and permission limits. Source updates remain CLI-only. To inspect a saved WebUI job, use `nanobot update --job <plan-id>`; [explicit handoff retry](./updating.md#explicit-recovery-before-package-mutation) requires additional consent and an intact installation, not a post-install repair.
 
 Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:
 

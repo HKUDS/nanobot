@@ -160,6 +160,83 @@ async def test_handoff_rejects_approval_before_requesting_gateway_shutdown(proto
     assert not (directory / "handoff-approval.json").exists()
 
 
+async def test_handoff_rejects_observed_catalogue_rollback_before_gateway_shutdown(protocol, monkeypatch):
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    import httpx
+    from packaging.tags import Tag
+
+    from nanobot import update_handoff
+    from nanobot.release_feed import CATALOGUE_URL, ReleaseFeed, ReleaseFeedError
+    from nanobot.releases import (
+        ReleaseCatalogue,
+        ReleaseManifest,
+        ReleasePointer,
+        release_filenames,
+    )
+
+    directory, plan, _, _ = protocol
+    artifact = plan.target.artifact
+    manifest = ReleaseManifest(
+        version=plan.target.version, source_commit="a" * 40, candidate_commit="b" * 40,
+        requires_python=">=3.11", artifacts=[
+            artifact if name == artifact.filename else ReleaseArtifact(filename=name, size=1, sha256="c" * 64)
+            for name in sorted(release_filenames(plan.target.version))
+        ],
+    )
+    payload = manifest.model_dump_json().encode()
+    pointer = ReleasePointer(version=manifest.version, candidate_commit=manifest.candidate_commit,
+                             manifest_sha256=hashlib.sha256(payload).hexdigest())
+    original = ReleaseCatalogue(generation=1, stable=pointer)
+    observed = original.model_copy(update={"generation": 2, "withdrawn": {manifest.version: "Startup regression"}})
+    selected = original
+
+    def respond(request):
+        if str(request.url) == CATALOGUE_URL:
+            return httpx.Response(200, content=selected.model_dump_json())
+        if str(request.url) == pointer.manifest_url:
+            return httpx.Response(200, content=payload)
+        assert request.url.path == f"/pypi/nanobot-ai/{manifest.version}/json"
+        return httpx.Response(200, json={
+            "info": {"name": "nanobot-ai", "version": manifest.version, "requires_python": ">=3.11"},
+            "urls": [{"filename": item.filename, "size": item.size, "yanked": False,
+                      "url": f"https://files.pythonhosted.org/packages/{item.filename}",
+                      "digests": {"sha256": item.sha256}}
+                     for item in manifest.artifacts if item.filename.endswith((".whl", ".tar.gz"))],
+        })
+
+    class CachedFeed(ReleaseFeed):
+        def __init__(self, cache_dir):
+            super().__init__(cache_dir, transport=httpx.MockTransport(respond),
+                             supported_tags=[Tag("py3", "none", "win_amd64")])
+
+    # Publication authority is independent of catalogue freshness. These fixture
+    # bytes stand for a previously approved release that has since been withdrawn.
+    monkeypatch.setattr(ReleaseFeed, "_authorize", AsyncMock())
+    root = installation_state_dir(plan.installation.environment)
+    spec = WorkerSpec.read(directory)
+    async with CachedFeed(root / "releases") as feed:
+        target = await feed.latest("preview")
+        plan = plan.model_copy(update={"channel": "preview", "target": target})
+        write_record(directory / "plan.json", plan.model_dump(mode="json"))
+        selected = observed
+        assert await feed.catalogue() == observed
+    replace(spec, plan_sha256=hashlib.sha256((directory / "plan.json").read_bytes()).hexdigest()).save(directory)
+    JobStatus.read(directory).advance(directory, Phase.CHECKING, "Checking the exact release", mutation_started=False)
+    monkeypatch.setattr(update_handoff, "current_environment", lambda **_: spec.baseline)
+    monkeypatch.setattr(update_handoff, "ReleaseFeed", CachedFeed)
+    stop = AsyncMock()
+    monkeypatch.setattr(update_handoff, "stop_reviewed_gateways", stop)
+    selected = original
+    with pytest.raises(ReleaseFeedError, match="generation"):
+        await update_handoff._prepare(directory)
+    stop.assert_not_called()
+    state = JobStatus.read(directory)
+    assert state.phase == Phase.HANDOFF_FAILED and not state.mutation_started
+    assert "shutdown was not requested" in state.message
+
+
 @pytest.mark.parametrize("phase", [Phase.READY, Phase.HANDOFF_FAILED])
 def test_expired_uncommitted_handoff_can_be_settled_while_gateway_remains_running(protocol, monkeypatch, phase):
     directory, plan, _, stops = protocol

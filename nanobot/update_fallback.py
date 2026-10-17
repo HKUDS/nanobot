@@ -218,7 +218,7 @@ def _shutdown_committed(spec: WorkerSpec) -> bool:
     return stop.get("plan_id") == spec.plan_id and stop.get("phase") in {"commit", "stopped"}
 
 
-def restore_service(directory: Path) -> None:
+def restore_service(directory: Path, *, confirmation_id: str | None = None) -> None:
     from nanobot.update_worker import (
         JobStatus,
         Phase,
@@ -244,6 +244,8 @@ def restore_service(directory: Path) -> None:
                     and status.phase in {Phase.RESTARTING, Phase.ACTIVATING, Phase.FINALIZING, Phase.RESTART_FAILED}):
                 # Program restoration already committed. Resume only its runtime
                 # handoff, including cleanup after old-version activation.
+                if confirmation_id is not None:
+                    check_approval(directory, spec, handoff=True, confirmation_id=confirmation_id, check_expiry=False)
                 restart_runtime(directory, spec)
                 return
             if restoration not in ({"plan_id": spec.plan_id, "state": "restoring"},
@@ -253,7 +255,7 @@ def restore_service(directory: Path) -> None:
         # downgrade or roll data back after that point.
         if (directory / "activation.json").exists():
             raise ValueError("The new runtime was activated; only same-version repair is safe")
-        check_approval(directory, spec, handoff=True, check_expiry=False)
+        check_approval(directory, spec, handoff=True, confirmation_id=confirmation_id, check_expiry=False)
         if not _shutdown_committed(spec):
             if not status.mutation_started:
                 status.advance(directory, Phase.HANDOFF_FAILED, "Shutdown was not committed; review the update again", mutation_started=False)
@@ -301,8 +303,9 @@ def supervise(directory: Path, arguments: list[str]) -> None:
             previous = read_record(journal)
             if confirmation is None or previous.get("confirmation_id") == confirmation:
                 return  # Duplicate/delayed launch is not another recovery budget.
-            # A deliberately retried preflight has fresh, exact consent. A stale
-            # launcher cannot overwrite that new supervision generation.
+        # Validate even the first journal publication: a delayed launcher may
+        # have been replaced before any supervisor acquired this lease.
+        if confirmation is not None:
             check_approval(directory, spec, handoff=True, confirmation_id=confirmation)
         write_record(journal, {"plan_id": spec.plan_id, "confirmation_id": confirmation, "started_at": int(time.time())})
         command = [spec.baseline.base_python, "-I", "-S", str(directory / "worker.pyz")]
@@ -320,6 +323,8 @@ def supervise(directory: Path, arguments: list[str]) -> None:
             # A busy gateway correctly refused shutdown and retains its runtime
             # lease. Waiting for that lease would hide the refusal for five minutes.
             return
+        if confirmation is not None:
+            check_approval(directory, spec, handoff=True, confirmation_id=confirmation, check_expiry=False)
         # Retry only admitted work. No second stop request, download or release
         # resolution. Lease-owning orphan children must finish before recovery.
         deadline = time.monotonic() + 300
@@ -340,12 +345,12 @@ def supervise(directory: Path, arguments: list[str]) -> None:
                 return
         try:
             try:
-                restore_service(directory)
+                restore_service(directory, confirmation_id=confirmation)
             except OSError:
                 # A transient filesystem error between the two renames must
                 # not leave an absent venv. Replay the journal once, retaining
                 # the same snapshot, ownership checks and recovery budget.
-                restore_service(directory)
+                restore_service(directory, confirmation_id=confirmation)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             # Keep fences, snapshots and the exact failure state. A hardware,
             # ownership or changed-data failure is not permission to discard data.
