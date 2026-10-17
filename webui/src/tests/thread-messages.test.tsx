@@ -774,7 +774,9 @@ describe("ThreadMessages", () => {
     expect(disclosure.compareDocumentPosition(timestamp) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(menu).toHaveClass("w-max", "max-w-64", "bg-popover", "rounded-floating", "overflow-y-auto");
-    expect(menu).not.toHaveClass("min-w-[8.5rem]", "bg-popover/95", "rounded-xl");
+    for (const className of ["min-w-[8.5rem]", "bg-popover/95", "rounded-xl"]) {
+      expect(menu).not.toHaveClass(className);
+    }
     const menuButtons = Array.from(menu.querySelectorAll("button"));
     expect(menuButtons.length).toBeGreaterThan(1);
     for (const button of menuButtons) {

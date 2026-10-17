@@ -7,7 +7,8 @@ function payload(id: string): WebuiThreadPersistedPayload {
   return {
     schemaVersion: 3,
     revision: `rev-${id}`,
-    messages: [{ id, role: "assistant", content: id, createdAt: 1 }],
+    projection: "events",
+    events: [{ event: "message", chat_id: id, text: id }],
   };
 }
 

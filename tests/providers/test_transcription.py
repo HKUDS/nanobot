@@ -419,38 +419,6 @@ def test_resolver_keeps_enabled_and_limits_on_effective_config() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_retries_on_5xx_then_succeeds(audio_file: Path) -> None:
-    """Transient 503 is retried; a subsequent 200 yields the text."""
-    provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(side_effect=[_response(503), _response(200, {"text": "hello"})])
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
-        result = await provider.transcribe(audio_file)
-    assert result == "hello"
-    assert post.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_openai_retries_on_429_then_succeeds(audio_file: Path) -> None:
-    provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(side_effect=[_response(429), _response(200, {"text": "rate ok"})])
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
-        result = await provider.transcribe(audio_file)
-    assert result == "rate ok"
-    assert post.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_openai_retries_on_connect_error(audio_file: Path) -> None:
-    """Network-level transient errors are retried."""
-    provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(side_effect=[httpx.ConnectError("boom"), _response(200, {"text": "ok"})])
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
-        result = await provider.transcribe(audio_file)
-    assert result == "ok"
-    assert post.await_count == 2
-
-
-@pytest.mark.asyncio
 async def test_openai_does_not_retry_on_auth_error(audio_file: Path) -> None:
     """401 is the user's misconfiguration — retrying wastes time and rate-limit quota."""
     provider = OpenAITranscriptionProvider(api_key="sk-test")

@@ -11,9 +11,10 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:browser": "tsc -p tsconfig.browser.json && playwright test",
     "check:imports": "bun ../scripts/check_client_import_boundaries.mjs --project webui",
     "test:imports": "bun test ../scripts/check_client_import_boundaries.test.mjs",
-    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" \"scripts/check_client_import_boundaries*.mjs\" --max-warnings 0"
+    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src webui/browser \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" \"scripts/check_client_import_boundaries*.mjs\" --max-warnings 0"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.4",
@@ -48,6 +49,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/typography": "^0.5.19",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",

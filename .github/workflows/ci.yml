@@ -316,6 +316,14 @@ jobs:
         working-directory: webui
         run: bun run test:coverage
 
+      - name: Install browser for layout regressions
+        working-directory: webui
+        run: bun x playwright install --with-deps chromium
+
+      - name: Test browser layout and history motion
+        working-directory: webui
+        run: bun run test:browser
+
       - name: Build WebUI
         working-directory: webui
         run: bun run build

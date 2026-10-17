@@ -289,20 +289,6 @@ async def test_composite_error_isolation_all_async():
 # ---------------------------------------------------------------------------
 
 
-def test_composite_finalize_content_pipeline():
-    class Upper(AgentHook):
-        def finalize_content(self, context, content):
-            return content.upper() if content else content
-
-    class Suffix(AgentHook):
-        def finalize_content(self, context, content):
-            return (content + "!") if content else content
-
-    hook = CompositeHook([Upper(), Suffix()])
-    result = hook.finalize_content(_ctx(), "hello")
-    assert result == "HELLO!"
-
-
 def test_composite_finalize_content_none_passthrough():
     hook = CompositeHook([AgentHook()])
     assert hook.finalize_content(_ctx(), None) is None

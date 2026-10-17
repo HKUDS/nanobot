@@ -1,11 +1,14 @@
 """Test Azure OpenAI provider (Responses API via OpenAI SDK)."""
 
+import json
 import sys
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
+import httpx
 import pytest
+from openai import AsyncOpenAI
 
 from nanobot.providers.azure_openai_provider import (
     AzureOpenAIProvider,
@@ -79,79 +82,100 @@ def _install_fake_azure_identity(monkeypatch, credential_factory):
     monkeypatch.setitem(sys.modules, "azure.identity.aio", aio_mod)
 
 
-def test_init_missing_key_uses_aad_token_provider(monkeypatch):
-    """Empty api_key falls back to DefaultAzureCredential via _AzureTokenProvider."""
-    credential_instance = MagicMock()
-    credential_factory = MagicMock(return_value=credential_instance)
-    _install_fake_azure_identity(monkeypatch, credential_factory)
+@pytest.fixture
+async def azure_wire_requests(monkeypatch):
+    """Inject only the HTTP transport; keep the SDK's request/auth path real."""
+    requests: list[httpx.Request] = []
 
-    provider = AzureOpenAIProvider(
-        api_key="", api_base="https://res.openai.azure.com",
-    )
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = json.loads(request.content)
+        return httpx.Response(200, json={
+            "id": f"resp_{len(requests)}", "object": "response", "created_at": 1,
+            "status": "completed", "model": body["model"],
+            "output": [{
+                "type": "message", "id": f"msg_{len(requests)}",
+                "role": "assistant", "status": "completed",
+                "content": [{
+                    "type": "output_text", "text": f"reply {len(requests)}", "annotations": [],
+                }],
+            }],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        })
 
-    assert provider._token_provider is not None
-    assert isinstance(provider._token_provider, _AzureTokenProvider)
-    # DefaultAzureCredential must have been instantiated exactly once
-    credential_factory.assert_called_once_with()
-    assert provider._token_provider._credential is credential_instance
-    # The token provider must be wired into the OpenAI SDK as its
-    # ``_api_key_provider`` callable — that's what the SDK invokes per
-    # request to refresh the bearer token.
-    assert provider._client._api_key_provider is provider._token_provider
-    # Static api_key starts empty until the first refresh.
-    assert provider._client.api_key == ""
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        def create_client(**kwargs):
+            return AsyncOpenAI(http_client=http_client, **kwargs)
+
+        monkeypatch.setattr("nanobot.providers.azure_openai_provider.AsyncOpenAI", create_client)
+        yield requests
 
 
 @pytest.mark.asyncio
-async def test_aad_token_provider_wires_into_sdk_auth_headers(monkeypatch):
-    """Regression guard: the token provider must be wired into the
-    OpenAI SDK so ``_refresh_api_key`` pulls a fresh token and the
-    bearer ends up in ``auth_headers``.  Without this, a refactor that
-    constructs ``_AzureTokenProvider`` but forgets to pass it to
-    ``AsyncOpenAI`` would silently send unauthenticated requests.
-    """
-    access_token = SimpleNamespace(token="token-A", expires_on=time.time() + 3600)
+async def test_aad_token_provider_sends_rotating_bearer_tokens_on_chat_requests(
+    monkeypatch, azure_wire_requests,
+):
     credential_instance = MagicMock()
-    credential_instance.get_token = AsyncMock(return_value=access_token)
+    credential_instance.get_token = AsyncMock(side_effect=[
+        SimpleNamespace(token="token-A", expires_on=time.time() + 3600),
+        SimpleNamespace(token="token-B", expires_on=time.time() + 3600),
+    ])
+    credential_instance.close = AsyncMock()
     credential_factory = MagicMock(return_value=credential_instance)
     _install_fake_azure_identity(monkeypatch, credential_factory)
-
     provider = AzureOpenAIProvider(
-        api_key="", api_base="https://res.openai.azure.com",
+        api_key="", api_base="https://res.openai.azure.com", default_model="gpt-4o-deployment",
     )
+    try:
+        responses = [
+            await provider.chat([{"role": "user", "content": f"turn {turn}"}])
+            for turn in (1, 2)
+        ]
+    finally:
+        await provider.aclose()
 
-    assert provider._client.api_key == ""
-    assert provider._client.auth_headers == {}
-
-    await provider._client._refresh_api_key()
-
-    assert provider._client.api_key == "token-A"
-    assert provider._client.auth_headers == {"Authorization": "Bearer token-A"}
-    credential_instance.get_token.assert_awaited_with(
-        "https://cognitiveservices.azure.com/.default"
+    assert [response.content for response in responses] == ["reply 1", "reply 2"]
+    assert all(response.finish_reason == "stop" for response in responses)
+    assert len(azure_wire_requests) == 2
+    assert [request.headers.get("Authorization") for request in azure_wire_requests] == [
+        "Bearer token-A", "Bearer token-B",
+    ]
+    assert all(request.method == "POST" for request in azure_wire_requests)
+    assert all(
+        str(request.url) == "https://res.openai.azure.com/openai/v1/responses"
+        for request in azure_wire_requests
     )
-
-    # Rotated token on second refresh proves per-request delegation (no client-side caching).
-    credential_instance.get_token = AsyncMock(
-        return_value=SimpleNamespace(token="token-B", expires_on=time.time() + 3600)
-    )
-    await provider._client._refresh_api_key()
-    assert provider._client.auth_headers == {"Authorization": "Bearer token-B"}
+    bodies = [json.loads(request.content) for request in azure_wire_requests]
+    assert [body["model"] for body in bodies] == ["gpt-4o-deployment", "gpt-4o-deployment"]
+    assert [body["input"][0]["content"][0]["text"] for body in bodies] == ["turn 1", "turn 2"]
     credential_factory.assert_called_once_with()
+    assert credential_instance.get_token.await_args_list == [
+        call("https://cognitiveservices.azure.com/.default"),
+        call("https://cognitiveservices.azure.com/.default"),
+    ]
 
 
-def test_init_explicit_key_does_not_construct_credential(monkeypatch):
-    """Explicit api_key wins; DefaultAzureCredential must never be touched."""
+@pytest.mark.asyncio
+async def test_explicit_key_sends_bearer_without_constructing_credential(
+    monkeypatch, azure_wire_requests,
+):
+    """Explicit api_key wins through chat(), without invoking Azure credentials."""
     credential_factory = MagicMock(side_effect=AssertionError(
         "DefaultAzureCredential must not be constructed when api_key is set"
     ))
     _install_fake_azure_identity(monkeypatch, credential_factory)
-
     provider = AzureOpenAIProvider(
         api_key="real-key", api_base="https://res.openai.azure.com",
     )
+    try:
+        response = await provider.chat([{"role": "user", "content": "hello"}])
+    finally:
+        await provider.aclose()
 
-    assert provider._token_provider is None
+    assert response.content == "reply 1"
+    assert response.finish_reason == "stop"
+    assert len(azure_wire_requests) == 1
+    assert azure_wire_requests[0].headers["Authorization"] == "Bearer real-key"
     credential_factory.assert_not_called()
 
 

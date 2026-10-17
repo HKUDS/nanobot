@@ -1,3 +1,5 @@
+import { vi } from "vitest";
+
 import { channelUiContribution } from "@/channel-plugins/registry";
 import { NanobotClient } from "@/lib/nanobot-client";
 import type { ConnectionStatus } from "@/lib/types";
@@ -253,16 +255,21 @@ describe("Linear channel UI", () => {
     requestMutationMock.mockRejectedValueOnce(new Error("Unable to save settings"));
     renderSettingsView({ initialSection: "channels" });
     fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "OAuth client ID" }), {
-      target: { value: "replacement-client" },
-    });
-    fireEvent.blur(screen.getByRole("textbox", { name: "OAuth client ID" }));
-    expect(await screen.findByText("Unable to save settings")).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toHaveValue("replacement-client");
-    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
-    await new Promise((resolve) => setTimeout(resolve, 750));
-    expect(actionCalls()).toHaveLength(1);
-    expect(actionCalls()[0][1]).not.toHaveProperty("enable");
+    const input = await screen.findByRole("textbox", { name: "OAuth client ID" });
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(input, { target: { value: "replacement-client" } });
+      fireEvent.blur(input);
+      await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+      expect(screen.getByText("Unable to save settings")).toBeVisible();
+      expect(input).toHaveValue("replacement-client");
+      expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+      expect(actionCalls()).toHaveLength(1);
+      expect(actionCalls()[0][1]).not.toHaveProperty("enable");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("replaces a saved secret only on explicit save and submits just that field", async () => {
@@ -280,10 +287,15 @@ describe("Linear channel UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Replace OAuth client secret" }));
     const input = screen.getByLabelText("OAuth client secret", { exact: true, selector: "input" });
     expect(input).toHaveFocus();
-    fireEvent.change(input, { target: { value: "replacement-secret" } });
-    fireEvent.blur(input);
-    await new Promise((resolve) => setTimeout(resolve, 750));
-    expect(actionCalls()).toHaveLength(0);
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(input, { target: { value: "replacement-secret" } });
+      fireEvent.blur(input);
+      await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+      expect(actionCalls()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
     fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
     await waitFor(() => expect(actionCalls()).toHaveLength(1));
     const params = actionCalls()[0][1] as { values: Record<string, unknown> };
@@ -300,14 +312,19 @@ describe("Linear channel UI", () => {
     fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Replace OAuth client secret" }));
-    fireEvent.change(screen.getByLabelText("OAuth client secret", { exact: true, selector: "input" }), {
-      target: { value: "discarded-draft" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
-    expect(screen.getAllByText("Saved", { exact: true })).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled();
-    await new Promise(resolve => setTimeout(resolve, 750));
-    expect(actionCalls()).toHaveLength(0);
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByLabelText("OAuth client secret", { exact: true, selector: "input" }), {
+        target: { value: "discarded-draft" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+      expect(screen.getAllByText("Saved", { exact: true })).toHaveLength(2);
+      expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+      expect(actionCalls()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
     fireEvent.click(screen.getByRole("button", { name: "Replace OAuth client secret" }));
     expect(screen.getByLabelText("OAuth client secret", { exact: true, selector: "input" })).toHaveValue("");
   });

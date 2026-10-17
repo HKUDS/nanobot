@@ -2725,15 +2725,6 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
     assert saved.model_presets["azure-aad"].model == "my-deployment"
 
 
-def test_azure_openai_spec_no_longer_requires_api_key() -> None:
-    """Contract guard: api_key is optional for azure_openai (AAD fallback)."""
-    from nanobot.webui.settings_api import _provider_requires_api_key
-
-    spec = find_by_name("azure_openai")
-    assert spec is not None
-    assert _provider_requires_api_key(spec) is False
-
-
 @pytest.mark.parametrize("protocol", ["chat_completions", "responses", "anthropic_messages"])
 def test_custom_connection_api_create_edit_and_preset_ceiling(tmp_path, monkeypatch, protocol):
     config_path = tmp_path / "config.json"

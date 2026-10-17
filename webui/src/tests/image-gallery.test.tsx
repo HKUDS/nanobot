@@ -97,7 +97,9 @@ describe("file quick look", () => {
     const quickLook = screen.getByTestId("file-image-quick-look");
     expect(quickLook.textContent).toBe("");
     expect(quickLook).toHaveClass("w-max");
-    expect(quickLook).not.toHaveClass("h-36", "w-full");
+    for (const className of ["h-36", "w-full"]) {
+      expect(quickLook).not.toHaveClass(className);
+    }
     expect(quickLook.querySelector("img")).toHaveClass("rounded-mark", "object-contain");
     expect(quickLook.querySelector("img")).toHaveClass("h-auto", "w-auto", "max-h-36");
     expect(screen.getByRole("tooltip")).toHaveTextContent("File preview");

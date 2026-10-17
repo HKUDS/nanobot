@@ -26,6 +26,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
+      "vitest": ["./node_modules/vitest"],
       "lucide-react": ["./node_modules/lucide-react"],
       "react": ["./node_modules/@types/react/index.d.ts"],
       "react/*": ["./node_modules/@types/react/*"],

@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
+import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS } from "@/components/settings/system/runtime-config-fields";
+import runtimeConfigKeys from "../../../tests/webui/fixtures/runtime-config-keys.json";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
 import { DEFAULT_AGENT_SETTINGS_DRAFT } from "@/components/settings/models/ModelsSettings";
 import { installSettingsViewTestHooks, jsonResponse, renderSettingsView, requestMutationMock, settingsPayload } from "@/tests/settings-test-utils";
@@ -28,6 +30,15 @@ function runtimeSettings() {
 
 describe("Runtime configuration settings", () => {
   installSettingsViewTestHooks();
+
+  it("covers the shared runtime wire-key catalogue without duplicate editors", () => {
+    const paths = RUNTIME_CONFIG_FIELDS.map((field) => field.path);
+    expect(new Set(paths).size).toBe(paths.length);
+    // This key gates the CLI group rather than having a separate editor.
+    const visibilityOnly = "tools.cli_apps.enable";
+    expect(RUNTIME_CONFIG_GROUPS.find((group) => group.id === "cli")?.enabledBy).toBe(visibilityOnly);
+    expect([...paths, visibilityOnly].sort()).toEqual([...runtimeConfigKeys].sort());
+  });
 
   it("keeps local service controls available when tool families are disabled", () => {
     const payload = runtimeSettings();

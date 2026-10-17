@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -11,7 +10,6 @@ from nanobot.config.schema import Config
 from nanobot.webui.settings_api import update_runtime_config_settings
 from nanobot.webui.settings_contracts import WebUISettingsError
 from nanobot.webui.settings_runtime import (
-    RUNTIME_CONFIG_PATHS,
     runtime_config_payload,
     update_runtime_config,
 )
@@ -166,13 +164,11 @@ def test_api_changes_require_explicit_restart(tmp_path):
     assert payload["requires_restart"]
 
 
-def test_every_exposed_runtime_setting_has_a_frontend_use():
-    fields = Path(__file__).parents[2] / "webui/src/components/settings/system/runtime-config-fields.ts"
-    paths = re.findall(r'group: "[^"]+", path: "([^"]+)"', fields.read_text(encoding="utf-8"))
+def test_runtime_payload_matches_shared_catalogue_contract():
+    fixture = Path(__file__).with_name("fixtures") / "runtime-config-keys.json"
+    paths = json.loads(fixture.read_text(encoding="utf-8"))
     assert len(paths) == len(set(paths))
-    # The CLI enable flag controls visibility of its advanced fields, without an editor.
-    visibility_only = {"tools.cli_apps.enable"}
-    assert set(paths) | visibility_only == set(RUNTIME_CONFIG_PATHS)
+    assert set(runtime_config_payload(Config())) == set(paths)
 
 
 def test_disabling_memory_consolidation_preserves_other_memory_settings():

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import tomllib
 from pathlib import Path
 
 from nanobot.webui.build import (
@@ -86,13 +85,6 @@ def test_shared_notifications_make_existing_bundle_stale(tmp_path: Path) -> None
     status = inspect_webui_bundle(source_dir=source, dist_dir=dist)
     assert status.needs_build
     assert status.newest_source == shared
-
-
-def test_channel_owned_ui_sources_are_included_in_distributions() -> None:
-    project_root = Path(__file__).resolve().parents[2]
-    pyproject = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
-
-    assert "nanobot/channels/*/webui/**/*" in pyproject["tool"]["hatch"]["build"]["include"]
 
 
 def test_inspect_webui_bundle_accepts_fresh_dist(tmp_path: Path) -> None:

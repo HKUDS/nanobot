@@ -773,9 +773,12 @@ async def test_running_message_handler_reorders_same_session_updates() -> None:
         MessageBus(),
     )
     seen: list[int] = []
+    processed = asyncio.Event()
 
     async def fake_process(update, context) -> None:
         seen.append(update.message.message_id)
+        if len(seen) == 2:
+            processed.set()
 
     channel._process_message_update = fake_process
     channel._running = True
@@ -787,12 +790,20 @@ async def test_running_message_handler_reorders_same_session_updates() -> None:
     second.update_id = 101
     second.message.message_id = 2
 
-    await channel._on_message(second, None)
-    await channel._on_message(first, None)
-    await asyncio.sleep(0.3)
-    channel._running = False
+    workers: set[asyncio.Task[None]] = set()
+    try:
+        await channel._on_message(second, None)
+        workers.update(channel._inbound_workers.values())
+        await channel._on_message(first, None)
+        await asyncio.wait_for(processed.wait(), timeout=5)
+        assert seen == [1, 2]
+    finally:
+        workers.update(channel._inbound_workers.values())
+        await channel.stop()
+        await asyncio.wait_for(asyncio.gather(*workers, return_exceptions=True), timeout=5)
 
-    assert seen == [1, 2]
+    assert workers
+    assert all(task.done() for task in workers)
 
 
 @pytest.mark.asyncio

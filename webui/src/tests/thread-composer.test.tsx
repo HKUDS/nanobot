@@ -816,7 +816,9 @@ describe("ThreadComposer", () => {
     expect(modelPill).not.toHaveClass("font-semibold");
     const providerLogo = screen.getByTestId("composer-model-logo-openai");
     expect(providerLogo).toBeInTheDocument();
-    expect(providerLogo).not.toHaveClass("border", "bg-background");
+    for (const className of ["border", "bg-background"]) {
+      expect(providerLogo).not.toHaveClass(className);
+    }
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
     expect(input.className).toContain("text-[16px]");

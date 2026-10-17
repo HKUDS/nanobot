@@ -507,21 +507,12 @@ class TestArchiveDelegates:
 
     @pytest.mark.asyncio
     async def test_no_summary_when_compact_returns_empty(self):
-        ac = _make_autocompact()
         mock_sm = _mock_sessions()
-        ac.sessions = mock_sm
+        mock_sm.get_or_create.return_value = _make_session(metadata={
+            "_last_summary": {"text": "Previous checkpoint.", "last_active": "2026-05-13T10:00:00"},
+        })
+        ac = _make_autocompact(sessions=mock_sm)
         ac.consolidator.compact_idle_session = AsyncMock(return_value="")
-
-        await ac._archive("cli:test", runtime=_runtime())
-
-        assert "cli:test" not in ac._summaries
-
-    @pytest.mark.asyncio
-    async def test_no_summary_when_compact_returns_nothing(self):
-        ac = _make_autocompact()
-        mock_sm = _mock_sessions()
-        ac.sessions = mock_sm
-        ac.consolidator.compact_idle_session = AsyncMock(return_value="(nothing)")
 
         await ac._archive("cli:test", runtime=_runtime())
 

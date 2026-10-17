@@ -649,13 +649,35 @@ async def test_reverting_runtime_switch_clears_restart_but_preserves_other_chang
 
 async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path):
     router = _router(config_path=tmp_path / "config.json")
-    original = router.settings.config.load().tools.web.fetch.use_jina_reader
+    config = router.settings.config.load()
+    original_reader = config.tools.web.fetch.use_jina_reader
+    original_timeout = config.api.timeout
     path = "/api/settings/web-search/update"
-    first = await router.dispatch(None, _mutation_request(path, {"provider": "duckduckgo", "use_jina_reader": not original}), path)
+    first = await router.dispatch(None, _mutation_request(path, {
+        "provider": "duckduckgo", "use_jina_reader": not original_reader,
+    }), path)
+    assert first.status_code == 200
     assert json.loads(first.body)["restart_required_sections"] == ["browser"]
-    router._restart_sections.add("runtime")
-    restored = await router.dispatch(None, _mutation_request(path, {"provider": "duckduckgo", "use_jina_reader": original}), path)
+
+    runtime_path = "/api/settings/runtime-config/update"
+    changed = await router.dispatch(None, _mutation_request(runtime_path, {
+        "values": {"api.timeout": original_timeout + 1},
+    }), runtime_path)
+    assert changed.status_code == 200
+    assert set(json.loads(changed.body)["restart_required_sections"]) == {"browser", "runtime"}
+
+    restored = await router.dispatch(None, _mutation_request(path, {
+        "provider": "duckduckgo", "use_jina_reader": original_reader,
+    }), path)
+    assert restored.status_code == 200
     assert json.loads(restored.body)["restart_required_sections"] == ["runtime"]
+    refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
+    assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
+    reverted = await router.dispatch(None, _mutation_request(runtime_path, {
+        "values": {"api.timeout": original_timeout},
+    }), runtime_path)
+    assert reverted.status_code == 200
+    assert json.loads(reverted.body)["restart_required_sections"] == []
 
 
 @pytest.mark.parametrize("enabled", [False, True])

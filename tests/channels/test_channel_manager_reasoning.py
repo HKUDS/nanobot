@@ -16,6 +16,7 @@ plugins only implement the streaming primitives.
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from unittest.mock import AsyncMock
 
 import pytest
@@ -41,6 +42,7 @@ class _MockChannel(BaseChannel):
         self._delta_mock = AsyncMock()
         self._end_mock = AsyncMock()
         self._file_edit_mock = AsyncMock()
+        self.received = []
 
     async def start(self):  # pragma: no cover - not exercised
         pass
@@ -49,27 +51,31 @@ class _MockChannel(BaseChannel):
         pass
 
     async def send(self, msg):
-        return await self._send_mock(msg)
+        await self._send_mock(msg)
+        self.received.append(("send", msg))
 
     async def send_reasoning_delta(self, chat_id, delta, metadata=None, *, stream_id=None):
-        return await self._delta_mock(chat_id, delta, metadata, stream_id=stream_id)
+        await self._delta_mock(chat_id, delta, metadata, stream_id=stream_id)
+        self.received.append(("delta", chat_id, delta, metadata, stream_id))
 
     async def send_reasoning_end(self, chat_id, metadata=None, *, stream_id=None):
-        return await self._end_mock(chat_id, metadata, stream_id=stream_id)
+        await self._end_mock(chat_id, metadata, stream_id=stream_id)
+        self.received.append(("end", chat_id, metadata, stream_id))
 
     async def send_file_edit_events(self, chat_id, edits, metadata=None):
         return await self._file_edit_mock(chat_id, edits, metadata)
 
 
 @pytest.fixture
-def manager() -> ChannelManager:
+def manager(tmp_path) -> ChannelManager:
     config = Config.model_validate({"channels": {"websocket": {"enabled": False}}})
-    mgr = ChannelManager(config, MessageBus())
+    mgr = ChannelManager(config, MessageBus(), config_path=tmp_path / "config.json")
     mgr.channels["mock"] = _MockChannel({}, mgr.bus)
     return mgr
 
 
 def test_websocket_gateway_uses_configured_workspace_restriction(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
         "nanobot.webui.workspaces.read_webui_default_access_mode",
         lambda: "default",
@@ -87,7 +93,9 @@ def test_websocket_gateway_uses_configured_workspace_restriction(tmp_path, monke
         }
     )
 
-    mgr = ChannelManager(config, MessageBus(), webui_static_dist=False)
+    mgr = ChannelManager(
+        config, MessageBus(), webui_static_dist=False, config_path=tmp_path / "config.json",
+    )
     channel = mgr.channels["websocket"]
 
     scope = channel.gateway.workspaces.default_scope()
@@ -142,58 +150,58 @@ async def test_one_shot_reasoning_expands_to_delta_plus_end(manager):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_drops_reasoning_when_channel_opts_out(manager):
+@pytest.mark.parametrize("show_reasoning", [False, True])
+@pytest.mark.parametrize("send_progress", [False, True])
+async def test_dispatch_reasoning_visibility_is_independent_of_progress(
+    manager, show_reasoning, send_progress,
+):
     channel = manager.channels["mock"]
-    channel.show_reasoning = False
-    msg = outbound_message_for_event(
-        channel="mock",
-        chat_id="c1",
-        event=ProgressEvent(content="hidden thinking", reasoning_delta=True),
-    )
-    await manager.bus.publish_outbound(msg)
+    channel.show_reasoning = show_reasoning
+    channel.send_progress = send_progress
+    events = [
+        ProgressEvent(content="first ", reasoning_delta=True, stream_id="r1"),
+        ProgressEvent(content="second", reasoning_delta=True, stream_id="r1"),
+        ProgressEvent(reasoning_end=True, stream_id="r1"),
+        ProgressEvent(content="one-shot reasoning", reasoning=True, stream_id="r2"),
+        ProgressEvent(content="ordinary progress"),
+    ]
+    messages = [
+        outbound_message_for_event(channel="mock", chat_id="c1", event=event)
+        for event in events
+    ]
+    for msg in messages:
+        await manager.bus.publish_outbound(msg)
 
-    await _pump_one(manager)
+    final = await _dispatch_through_final(manager)
 
-    channel._delta_mock.assert_not_awaited()
-    channel._end_mock.assert_not_awaited()
-    channel._send_mock.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_dispatch_delivers_reasoning_when_channel_opts_in(manager):
-    channel = manager.channels["mock"]
-    channel.show_reasoning = True
-    for chunk in ("first ", "second"):
-        await manager.bus.publish_outbound(outbound_message_for_event(
-            channel="mock",
-            chat_id="c1",
-            event=ProgressEvent(content=chunk, reasoning_delta=True, stream_id="r1"),
-        ))
-    await manager.bus.publish_outbound(outbound_message_for_event(
-        channel="mock",
-        chat_id="c1",
-        event=ProgressEvent(reasoning_end=True, stream_id="r1"),
-    ))
-
-    await _pump_one(manager)
-
-    assert channel._delta_mock.await_count == 2
-    channel._end_mock.assert_awaited_once()
+    expected = []
+    if show_reasoning:
+        expected.extend([
+            ("delta", "c1", "first ", messages[0].metadata, "r1"),
+            ("delta", "c1", "second", messages[1].metadata, "r1"),
+            ("end", "c1", messages[2].metadata, "r1"),
+            ("delta", "c1", "one-shot reasoning", messages[3].metadata, "r2"),
+            ("end", "c1", messages[3].metadata, "r2"),
+        ])
+    if send_progress:
+        expected.append(("send", messages[-1]))
+    assert channel.received == [*expected, ("send", final)]
 
 
 @pytest.mark.asyncio
 async def test_dispatch_silently_drops_reasoning_for_unknown_channel(manager):
-    msg = outbound_message_for_event(
+    await manager.bus.publish_outbound(outbound_message_for_event(
         channel="ghost",
         chat_id="c1",
-        event=ProgressEvent(content="nobody home", reasoning_delta=True),
-    )
-    await manager.bus.publish_outbound(msg)
+        event=ProgressEvent(content="nobody home", reasoning_delta=True, stream_id="ghost-r1"),
+    ))
 
-    await _pump_one(manager)
+    final = await _dispatch_through_final(manager)
 
-    manager.channels["mock"]._delta_mock.assert_not_awaited()
-    manager.channels["mock"]._send_mock.assert_not_awaited()
+    channel = manager.channels["mock"]
+    assert channel.received == [("send", final)]
+    channel._delta_mock.assert_not_awaited()
+    channel._end_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -259,41 +267,24 @@ async def test_base_channel_file_edit_events_are_noop_safe():
     assert await channel.send_file_edit_events("c", [{"path": "a.py"}]) is None
 
 
-@pytest.mark.asyncio
-async def test_reasoning_routing_does_not_consult_send_progress(manager):
-    """`show_reasoning` is orthogonal to `send_progress` — turning off
-    progress streaming must not silence reasoning."""
-    channel = manager.channels["mock"]
-    channel.send_progress = False
-    channel.show_reasoning = True
-    await manager.bus.publish_outbound(outbound_message_for_event(
-        channel="mock",
-        chat_id="c1",
-        event=ProgressEvent(content="still surfaces", reasoning_delta=True),
-    ))
+async def _dispatch_through_final(manager: ChannelManager) -> OutboundMessage:
+    """A same-destination send acknowledges completion of earlier callbacks."""
+    final = OutboundMessage(channel="mock", chat_id="c1", content="Final")
+    delivered = asyncio.Event()
 
-    await _pump_one(manager)
+    def record_send(msg):
+        if (msg.channel, msg.chat_id, msg.content, msg.event) == ("mock", "c1", "Final", None):
+            delivered.set()
 
-    channel._delta_mock.assert_awaited_once()
-
-
-async def _pump_one(manager: ChannelManager) -> None:
-    """Process currently queued messages through the reasoning dispatch branch."""
-
-    async def dispatch_one(msg: OutboundMessage) -> None:
-        event = msg.event
-        if isinstance(event, ProgressEvent) and (
-            event.reasoning_delta
-            or event.reasoning_end
-            or event.reasoning
-        ):
-            channel = manager.channels.get(msg.channel)
-            if channel is not None and channel.show_reasoning:
-                await manager._send_with_retry(channel, msg)
-
-    await dispatch_one(await asyncio.wait_for(manager.bus.consume_outbound(), timeout=1.0))
-    while True:
-        try:
-            await dispatch_one(manager.bus.outbound.get_nowait())
-        except asyncio.QueueEmpty:
-            break
+    manager.channels["mock"]._send_mock.side_effect = record_send
+    await manager.bus.publish_outbound(final)
+    task = asyncio.create_task(manager._dispatch_outbound())
+    try:
+        await asyncio.wait_for(delivered.wait(), timeout=2)
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+    assert not manager._outbound_tasks
+    assert not manager._outbound_tails
+    return final

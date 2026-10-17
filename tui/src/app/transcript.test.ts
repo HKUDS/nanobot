@@ -189,11 +189,10 @@ describe("NanobotTui transcript", () => {
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "dark")
     app.accept({ event: "attached", chat_id: "chat" })
     app.accept({ event: "reasoning_delta", chat_id: "chat", text: "hidden reasoning" })
-    await Bun.sleep(130)
-    await setup.renderOnce()
+    await setup.flush()
     let frame = setup.captureCharFrame()
 
-    expect(frame).toMatch(/Thinking\s+0s/u)
+    expect(frame).toMatch(/Thinking\s+\d+s/u)
     expect(frame).not.toMatch(/[◐◓◑◒⠋⠙⠹⠸]/u)
     expect(frame).not.toContain("hidden reasoning")
     const ui = app as unknown as {
@@ -205,7 +204,12 @@ describe("NanobotTui transcript", () => {
       composerFrame: BoxRenderable
     }
     const status = ui.status
-    expect(status.plainText).toMatch(/^Thinking\s+0s/u)
+    const statusColors = () => status.content.chunks
+      .slice(0, "Thinking".length)
+      .map((chunk) => chunk.fg?.toInts().join(","))
+    const firstFrame = JSON.stringify(statusColors())
+    await waitUntil(() => JSON.stringify(statusColors()) !== firstFrame, 2_000)
+    expect(status.plainText).toMatch(/^Thinking\s+\d+s/u)
     expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
     expect(ui.composerFrame.height).toBe(3)
     const shimmerColors = new Set(
@@ -223,11 +227,11 @@ describe("NanobotTui transcript", () => {
       kind: "tool_hint",
       tool_events: [{ phase: "start", name: "exec", arguments: { cmd: "pwd" } }],
     })
-    await Bun.sleep(130)
-    await setup.renderOnce()
+    await waitUntil(() => /^Working\s+\d+s/u.test(status.plainText), 2_000)
+    await setup.flush()
     frame = setup.captureCharFrame()
 
-    expect(frame).toMatch(/Working\s+0s/u)
+    expect(frame).toMatch(/Working\s+\d+s/u)
     expect(frame).not.toMatch(/[◐◓◑◒⠋⠙⠹⠸]/u)
     expect(frame).toContain("› Running  pwd")
     expect(occurrences(frame, "pwd")).toBe(1)
@@ -235,6 +239,10 @@ describe("NanobotTui transcript", () => {
     app.accept({ event: "turn_end", chat_id: "chat" })
     await setup.flush()
     expect(ui.composer.placeholder).toBe("Ask nanobot anything")
+    expect(status.plainText).toMatch(/^Ready/u)
+    const stopped = status.content
+    await Bun.sleep(200)
+    expect(status.content).toBe(stopped)
   })
 
   test("updates retry state in place and ends failed turns explicitly", async () => {

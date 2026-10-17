@@ -149,22 +149,37 @@ def test_exec_returns_completed_session_output_when_yield_time_ms_is_used(tmp_pa
 
 
 def test_exec_session_yield_returns_when_process_finishes_early(tmp_path):
-    async def run() -> tuple[str, str, float]:
+    async def run() -> str:
         manager = ExecSessionManager()
-        tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        stdin_tool = ExecSessionTool(manager=manager)
-        command = _python_command("import time; time.sleep(0.1); print('done')")
-        started = time.monotonic()
-        initial = await tool.execute(command=command, yield_time_ms=1200)
-        result, final = await _poll_if_running(initial, stdin_tool)
-        return result, final, time.monotonic() - started
+        tool = ExecTool(working_dir=str(tmp_path), timeout=20, session_manager=manager)
+        ready, release = tmp_path / "ready", tmp_path / "release"
+        command = _python_command(
+            "from pathlib import Path\nimport time\n"
+            "Path('ready').write_text('ready')\n"
+            "while not Path('release').exists(): time.sleep(0.01)\n"
+            "print('done')"
+        )
+        pending = asyncio.create_task(tool.execute(command=command, yield_time_ms=15000))
+        try:
+            async with asyncio.timeout(10):
+                while not ready.exists():
+                    if pending.done():
+                        pytest.fail(f"child exited before readiness: {await pending}")
+                    await asyncio.sleep(0.01)
+            # Measure responsiveness only after the actual child is ready to exit.
+            release.touch()
+            return await asyncio.wait_for(pending, timeout=3)
+        finally:
+            release.touch()
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+            await manager.close_all()
 
-    result, final, elapsed = asyncio.run(run())
+    result = asyncio.run(run())
 
     assert "done" in result
-    assert "Exit code: 0" in final
-    assert "session_id:" not in final
-    assert elapsed < 4.0
+    assert "Exit code: 0" in result
+    assert "session_id:" not in result
 
 
 def test_bounded_output_buffer_keeps_head_tail_and_exact_drop_count():

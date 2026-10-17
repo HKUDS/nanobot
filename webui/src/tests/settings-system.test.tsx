@@ -203,7 +203,9 @@ describe("Settings system domains", () => {
     expect(title.parentElement).toHaveClass("settings-section-heading");
     expect(title.nextElementSibling).toHaveTextContent("1");
     expect(title.nextElementSibling).toHaveClass("tabular-nums");
-    expect(title.nextElementSibling).not.toHaveClass("rounded-full", "bg-muted");
+    for (const className of ["rounded-full", "bg-muted"]) {
+      expect(title.nextElementSibling).not.toHaveClass(className);
+    }
 
     fireEvent.click(screen.getByRole("button", { name: "MCP", exact: true }));
     const mcpTitle = screen.getByRole("heading", { name: "MCP tools" });
@@ -267,7 +269,9 @@ describe("Settings system domains", () => {
     for (const name of ["Custom", "Built-in", "Other"]) {
       const title = screen.getByRole("heading", { name, exact: true });
       expect(title).toHaveClass("text-[13px]", "font-medium", "leading-5");
-      expect(title).not.toHaveClass("uppercase", "tracking-[0.08em]");
+      for (const className of ["uppercase", "tracking-[0.08em]"]) {
+        expect(title).not.toHaveClass(className);
+      }
       expect(title.nextElementSibling).toHaveTextContent("1");
       expect(title.nextElementSibling).toHaveClass("leading-5");
     }

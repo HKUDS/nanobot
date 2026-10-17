@@ -40,7 +40,9 @@ describe("settings provider icons", () => {
       expect(icon).not.toHaveAttribute("style");
       expect(fallback).toHaveClass("opacity-0");
       expect(image).toHaveClass("opacity-100");
-      expect(image).not.toHaveClass("invert", "grayscale");
+      for (const className of ["invert", "grayscale"]) {
+        expect(image).not.toHaveClass(className);
+      }
     },
   );
 

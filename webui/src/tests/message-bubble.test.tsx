@@ -274,31 +274,37 @@ describe("MessageBubble", () => {
     expect(bubble).toHaveClass("bg-secondary/70");
   });
 
-  it("does not replay an entrance animation when persisted messages mount", () => {
+  it("renders completed message branches with static wrapper classes", async () => {
     const messages: UIMessage[] = [
       {
         id: "u-persisted",
         role: "user",
         content: "Earlier question",
-        createdAt: Date.now(),
+        createdAt: 1_700_000_000_000,
       },
       {
         id: "a-persisted",
         role: "assistant",
         content: "Earlier answer",
-        createdAt: Date.now(),
+        createdAt: 1_700_000_001_000,
       },
       {
         id: "t-persisted",
         role: "tool",
         kind: "trace",
         content: "Earlier tool call",
-        createdAt: Date.now(),
+        createdAt: 1_700_000_002_000,
       },
     ];
 
     for (const message of messages) {
       const { container, unmount } = render(<MessageBubble message={message} />);
+      if (message.kind === "trace") {
+        const disclosure = screen.getByRole("button", { expanded: false });
+        fireEvent.click(disclosure);
+        expect(disclosure).toHaveAttribute("aria-expanded", "true");
+      }
+      expect(await screen.findByText(message.content)).toBeVisible();
       for (const className of ["animate-in", "fade-in-0", "slide-in-from-bottom-1"]) {
         expect(container.firstElementChild).not.toHaveClass(className);
       }

@@ -61,7 +61,7 @@ def test_json_presets_reject_invalid_configuration(preset_data: dict, invalid_pa
 
 
 @pytest.mark.parametrize("target", ["wheel", "sdist"])
-def test_distributions_bundle_mcp_preset_resource(tmp_path: Path, target: str) -> None:
+def test_distributions_bundle_webui_and_channel_resources(tmp_path: Path, target: str) -> None:
     repository = Path(__file__).resolve().parents[2]
     for name in ("pyproject.toml", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
         shutil.copyfile(repository / name, tmp_path / name)
@@ -70,8 +70,15 @@ def test_distributions_bundle_mcp_preset_resource(tmp_path: Path, target: str) -
     (tmp_path / "nanobot/__init__.py").write_text("", encoding="utf-8")
     (package / "__init__.py").write_text("", encoding="utf-8")
     resource = "nanobot/webui/mcp_presets.json"
-    expected = (repository / resource).read_bytes()
-    (tmp_path / resource).write_bytes(expected)
+    resources = {
+        resource: (repository / resource).read_bytes(),
+        "nanobot/channels/example/webui/index.tsx": b"export const channel = 'example';\n",
+        "nanobot/channels/example/webui/assets/icon.svg": b'<svg id="channel-icon"/>\n',
+    }
+    for name, content in resources.items():
+        destination = tmp_path / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
 
     result = subprocess.run(
         [sys.executable, "-c", f"import hatchling.build; hatchling.build.build_{target}('dist')"],
@@ -85,11 +92,14 @@ def test_distributions_bundle_mcp_preset_resource(tmp_path: Path, target: str) -
 
     if target == "wheel":
         with ZipFile(next((tmp_path / "dist").glob("*.whl"))) as wheel:
-            assert wheel.read(resource) == expected
+            for name, content in resources.items():
+                assert wheel.read(name) == content
     else:
         with tarfile.open(next((tmp_path / "dist").glob("*.tar.gz"))) as sdist:
-            member = next(name for name in sdist.getnames() if name.endswith(f"/{resource}"))
-            bundled = sdist.extractfile(member)
-            assert bundled is not None
-            with bundled:
-                assert bundled.read() == expected
+            for name, content in resources.items():
+                member = next((member for member in sdist.getnames() if member.endswith(f"/{name}")), None)
+                assert member is not None, f"Missing bundled resource: {name}"
+                bundled = sdist.extractfile(member)
+                assert bundled is not None
+                with bundled:
+                    assert bundled.read() == content

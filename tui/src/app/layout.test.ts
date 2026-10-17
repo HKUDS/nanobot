@@ -809,8 +809,6 @@ describe("NanobotTui layout and themes", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       status: TextRenderable
-      shimmerFrame: number
-      renderActiveStatus(): void
     }
     expect(ui.composer.textColor.intent).toBe("default")
     expect(ui.composer.backgroundColor.intent).toBe("default")
@@ -832,8 +830,7 @@ describe("NanobotTui layout and themes", () => {
       .slice(0, "Thinking".length)
       .map((chunk) => chunk.attributes ?? 0)
     const firstFrame = terminalFrame()
-    ui.shimmerFrame += 1
-    ui.renderActiveStatus()
+    await waitUntil(() => JSON.stringify(terminalFrame()) !== JSON.stringify(firstFrame), 2_000)
     const secondFrame = terminalFrame()
     expect(firstFrame).toContain(TextAttributes.BOLD)
     expect(secondFrame).not.toEqual(firstFrame)

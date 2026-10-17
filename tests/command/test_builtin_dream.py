@@ -174,9 +174,15 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
     store = _FakeStore(_FakeGit(initialized=False), dream_prompt_result=("dream prompt", 123))
     bus = _FakeBus()
     calls = []
+    progress_sentinel = "private Dream progress sentinel"
 
     async def process_direct(*args, **kwargs):
         calls.append((args, kwargs))
+        await kwargs["on_progress"](progress_sentinel)
+        await kwargs["on_progress"](
+            "",
+            tool_events=[{"phase": "start", "name": "edit_file", "hint": progress_sentinel}],
+        )
         return OutboundMessage(
             channel="cli",
             chat_id="direct",
@@ -194,11 +200,17 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 
-    await _run_dream_command(ctx)
+    immediate = await _run_dream_command(ctx)
 
+    assert immediate.content == "Dreaming..."
+    assert (immediate.channel, immediate.chat_id) == ("feishu", "chat1")
     assert len(calls) == 1
-    assert callable(calls[0][1]["on_progress"])
     assert calls[0][1]["runtime"] is dream_runtime
+    assert len(bus.outbound) == 1
+    completion = bus.outbound[0]
+    assert (completion.channel, completion.chat_id) == ("feishu", "chat1")
+    assert completion.content.startswith("Dream completed")
+    assert progress_sentinel not in completion.content
 
 
 def _build_runnable_dream(

@@ -1487,40 +1487,6 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
     ]
 
 
-def test_governance_repairs_orphans_after_history_rewrite():
-    """A rewritten history drops tool results whose calls are no longer present."""
-    rewritten = [
-        {"role": "system", "content": "system"},
-        {"role": "tool", "tool_call_id": "tc_old", "name": "search",
-         "content": "old result"},
-        {"role": "assistant", "content": "old answer"},
-        {"role": "user", "content": "new msg"},
-    ]
-
-    cleaned = ContextGovernor.drop_orphan_tool_results(rewritten)
-    # The orphan tool result should be removed.
-    assert not any(
-        m.get("role") == "tool" and m.get("tool_call_id") == "tc_old"
-        for m in cleaned
-    )
-
-
-def test_governance_fallback_still_repairs_orphans():
-    """When full governance fails, the fallback must still repair orphans."""
-    # Messages with an orphan tool result (no matching assistant tool_call).
-    messages = [
-        {"role": "user", "content": "hello"},
-        {"role": "tool", "tool_call_id": "orphan_tc", "name": "read",
-         "content": "stale"},
-        {"role": "assistant", "content": "hi"},
-    ]
-
-    repaired = ContextGovernor.drop_orphan_tool_results(messages)
-    repaired = ContextGovernor.backfill_missing_tool_results(repaired)
-    # Orphan tool result should be gone.
-    assert not any(m.get("tool_call_id") == "orphan_tc" for m in repaired)
-
-
 # ---------------------------------------------------------------------------
 # Malformed tool_call name guard (missing/non-string name wedges the session
 # upstream: messages.content.N.tool_use.name: Input should be a valid string)

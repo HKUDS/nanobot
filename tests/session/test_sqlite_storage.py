@@ -293,15 +293,27 @@ async def test_detached_reads_do_not_publish_mutations(tmp_path):
 async def test_checkpoint_does_not_rewrite_messages(tmp_path):
     manager = SessionManager(tmp_path)
     state = manager.state
-    draft = await state.get("chat:a")
-    draft.add_message("user", "hello")
-    await state.prepare_input(draft)
-    path = manager.sessions_dir / "sessions.sqlite3"
-    with sqlite3.connect(path) as db:
-        db.execute("CREATE TRIGGER prohibit_rewrite BEFORE UPDATE ON messages BEGIN SELECT RAISE(ABORT, 'rewritten'); END")
-    await state.checkpoint_view(draft, {"step": 1})
-    assert (await state.get(draft.key)).metadata["runtime_checkpoint"] == {"step": 1}
-    await state.aclose()
+    try:
+        draft = await state.import_messages("chat:a", [
+            {"role": "user", "content": "earlier question"},
+            {"role": "assistant", "content": "earlier answer"},
+        ])
+        draft.add_message("user", "hello")
+        await state.prepare_input(draft)
+        accepted = manager.read_session_snapshot(draft.key).messages
+        assert accepted == draft.messages
+        path = manager.sessions_dir / "sessions.sqlite3"
+        with sqlite3.connect(path) as db:
+            for operation in ("INSERT", "UPDATE", "DELETE"):
+                db.execute(f"""CREATE TRIGGER prohibit_{operation.lower()} BEFORE {operation} ON messages
+                               BEGIN SELECT RAISE(ABORT, 'rewritten'); END""")
+        await state.checkpoint_view(draft, {"step": 1})
+    finally:
+        await state.aclose()
+
+    stored = manager.read_session_snapshot(draft.key)
+    assert stored.messages == accepted
+    assert stored.metadata["runtime_checkpoint"] == {"step": 1}
 
 
 async def test_database_lock_does_not_block_event_loop(tmp_path):

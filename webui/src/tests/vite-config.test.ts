@@ -1,14 +1,14 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { rollup } from "rollup";
 
 import webuiConfig, {
   entryLazyFeatureImports,
   gzipWebuiAssets,
   webuiManualChunk,
-  writeCompressedWebuiAssets,
 } from "../../vite.config";
 
 describe("development overlay dependencies", () => {
@@ -20,24 +20,37 @@ describe("development overlay dependencies", () => {
 });
 
 describe("gzipWebuiAssets", () => {
-  it("compresses finalized files after Rollup writes the bundle", () => {
+  it("compresses finalized files after Rollup writes the bundle", async () => {
     const plugin = gzipWebuiAssets();
     expect(plugin.generateBundle).toBeUndefined();
-    expect(plugin.writeBundle).toBeTypeOf("function");
-
     const outputDir = mkdtempSync(path.join(tmpdir(), "nanobot-vite-gzip-"));
+    const assetPath = path.join(outputDir, "assets", "index-final.js");
+    const finalized = Buffer.from(
+      "const __vite__mapDeps = ['assets/lazy-feature.js'];\n".repeat(200),
+    );
+    const build = await rollup({
+      input: "virtual-entry",
+      plugins: [
+        {
+          name: "fixture-entry",
+          resolveId: (id) => id === "virtual-entry" ? id : null,
+          load: (id) => id === "virtual-entry" ? 'console.log("stale in-memory bytes");' : null,
+        },
+        {
+          name: "finalize-on-disk",
+          writeBundle: {
+            sequential: true,
+            handler() { writeFileSync(assetPath, finalized); },
+          },
+        },
+        plugin,
+      ],
+    });
     try {
-      const assetPath = path.join(outputDir, "assets", "index-final.js");
-      mkdirSync(path.dirname(assetPath), { recursive: true });
-      const finalized = Buffer.from(
-        "const __vite__mapDeps = ['assets/lazy-feature.js'];\n".repeat(200),
-      );
-      writeFileSync(assetPath, finalized);
-
-      writeCompressedWebuiAssets(outputDir, ["assets/index-final.js"]);
-
+      await build.write({ dir: outputDir, format: "es", entryFileNames: "assets/index-final.js" });
       expect(gunzipSync(readFileSync(`${assetPath}.gz`))).toEqual(finalized);
     } finally {
+      await build.close();
       rmSync(outputDir, { recursive: true, force: true });
     }
   });
