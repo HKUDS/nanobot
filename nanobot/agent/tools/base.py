@@ -27,6 +27,26 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 }
 
 
+def _json_values_equal(left: Any, right: Any) -> bool:
+    """Compare JSON values without treating booleans as numbers."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return left is right
+    if isinstance(left, list) and isinstance(right, list):
+        left_items = cast(list[Any], left)
+        right_items = cast(list[Any], right)
+        return len(left_items) == len(right_items) and all(
+            _json_values_equal(a, b) for a, b in zip(left_items, right_items)
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        left_object = cast(dict[str, Any], left)
+        right_object = cast(dict[str, Any], right)
+        return left_object.keys() == right_object.keys() and all(
+            _json_values_equal(value, right_object[key])
+            for key, value in left_object.items()
+        )
+    return left == right
+
+
 class Schema(ABC):
     """Abstract base for JSON Schema fragments describing tool parameters.
 
@@ -99,7 +119,7 @@ class Schema(ABC):
             return [f"{label} must be finite"]
 
         errors: list[str] = []
-        if "enum" in schema and val not in schema["enum"]:
+        if "enum" in schema and not any(_json_values_equal(val, item) for item in schema["enum"]):
             errors.append(f"{label} must be one of {schema['enum']}")
         if t in ("integer", "number"):
             if "minimum" in schema and val < schema["minimum"]:
