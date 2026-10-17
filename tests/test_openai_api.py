@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,6 +13,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.api.server import (
+    _SESSION_LOCKS_KEY,
     API_CHAT_ID,
     API_SESSION_KEY,
     _chat_completion_response,
@@ -22,6 +24,7 @@ from nanobot.api.server import (
 from nanobot.providers.base import LLMUsage
 
 try:
+    from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
     HAS_AIOHTTP = True
@@ -378,9 +381,12 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
+@pytest.mark.parametrize("session_id", [None, "shared"])
+@pytest.mark.parametrize("stream", [False, True])
+async def test_session_requests_are_serialized(aiohttp_client, session_id, stream) -> None:
     order: list[str] = []
     first_started = asyncio.Event()
+    second_received = asyncio.Event()
     release_first = asyncio.Event()
 
     async def slow_process(content, session_key="", channel="", chat_id="", **kwargs):
@@ -396,19 +402,36 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     agent.aclose = AsyncMock()
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
+
+    @web.middleware
+    async def observe_request(request, handler):
+        body = await request.json()
+        if body["messages"][0]["content"] == "second":
+            second_received.set()
+        return await handler(request)
+
+    app.middlewares.append(observe_request)
     client = await aiohttp_client(app)
 
     async def send(msg: str):
-        return await client.post(
+        response = await client.post(
             "/v1/chat/completions",
             headers=AUTH_HEADERS,
-            json={"messages": [{"role": "user", "content": msg}]},
+            json={
+                "messages": [{"role": "user", "content": msg}],
+                "session_id": session_id,
+                "stream": stream,
+            },
         )
+        await response.read()
+        return response
 
     first = asyncio.create_task(send("first"))
     await asyncio.wait_for(first_started.wait(), timeout=1.0)
     second = asyncio.create_task(send("second"))
-    await asyncio.sleep(0)
+    await asyncio.wait_for(second_received.wait(), timeout=1.0)
+    gc.collect()
+    assert len(app[_SESSION_LOCKS_KEY]) == 1
     assert order == ["start:first"]
 
     release_first.set()
@@ -416,6 +439,30 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     assert r1.status == 200
     assert r2.status == 200
     assert order == ["start:first", "end:first", "start:second", "end:second"]
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_completed_custom_sessions_release_api_locks(aiohttp_client, mock_agent, stream) -> None:
+    app = create_app(mock_agent, api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    for index in range(20):
+        response = await client.post(
+            "/v1/chat/completions",
+            headers=AUTH_HEADERS,
+            json={
+                "messages": [{"role": "user", "content": "hello"}],
+                "session_id": f"temporary-{index}",
+                "stream": stream,
+            },
+        )
+        assert response.status == 200
+        await response.read()
+
+    gc.collect()
+    assert len(app[_SESSION_LOCKS_KEY]) == 0
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
