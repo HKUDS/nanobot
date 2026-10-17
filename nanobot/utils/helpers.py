@@ -289,9 +289,9 @@ class IncrementalThinkExtractor:
         if not thinking or thinking == self._emitted:
             return False
         new = thinking[len(self._emitted) :]
-        self._emitted = thinking
         if not new.strip():
             return False
+        self._emitted = thinking
         await emit(new)
         return True
 
