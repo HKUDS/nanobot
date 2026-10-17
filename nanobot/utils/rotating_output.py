@@ -52,10 +52,12 @@ class RotatingTextOutput(io.TextIOBase):
             return self._handle.fileno()
 
     def write(self, text: str) -> int:
-        if not text:
-            return 0
-        data = text.encode(self.encoding, errors=self.errors)
         with self._lock:
+            if self.closed:
+                raise ValueError("I/O operation on closed file.")
+            if not text:
+                return 0
+            data = text.encode(self.encoding, errors=self.errors)
             self._ensure_open()
             if len(data) <= self._max_bytes:
                 if self._size and self._size + len(data) > self._max_bytes:
@@ -133,6 +135,8 @@ class RotatingTextOutput(io.TextIOBase):
             super().close()
 
     def _ensure_open(self) -> None:
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
         if self._handle is not None:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
