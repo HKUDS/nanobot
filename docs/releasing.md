@@ -2,6 +2,10 @@
 
 Use this checklist with the [Release Packaging Contract](../CONTRIBUTING.md#release-packaging-contract). Preparing a release does not publish it. Pushing a Git tag, publishing a GitHub Release, uploading to PyPI, and deploying the documentation are separate operations.
 
+For the proposed stable/preview rollout and its implementation gates, see
+[Stable and preview channels](./release-channels.md). It does not enable preview
+publication or replace this stable release checklist.
+
 ## Prepare a candidate
 
 1. Choose the previous release and the exact candidate commit. Work in a clean worktree; do not include local configuration, session data, credentials, or unrelated changes.
