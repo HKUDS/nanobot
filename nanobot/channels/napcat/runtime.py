@@ -19,7 +19,6 @@ from pydantic import Field
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as ws_connect
 
-from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -444,11 +443,12 @@ class NapcatChannel(BaseChannel):
         ):
             return
         if self._ws is None:
-            raise ChannelNotReadyError("napcat: not connected")
+            raise RuntimeError("napcat: not connected")
 
         kind, _, target = msg.chat_id.partition(":")
         if kind not in ("private", "group") or not target:
-            raise DeliveryRejectedError("napcat: invalid chat_id")
+            logger.error("napcat: invalid chat_id '{}'", msg.chat_id)
+            return
 
         segments: list[dict[str, Any]] = []
         for ref in msg.media or []:

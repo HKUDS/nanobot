@@ -4,8 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from nanobot.bus.delivery import DeliveryRequest
-
 if TYPE_CHECKING:
     from nanobot.events import AgentEvent
 
@@ -70,5 +68,3 @@ class OutboundMessage:
     metadata: dict[str, Any] = field(default_factory=dict)
     buttons: list[list[str]] = field(default_factory=list)
     event: "AgentEvent | None" = None
-    delivery: DeliveryRequest | None = None
-    delivery_id: str | None = None

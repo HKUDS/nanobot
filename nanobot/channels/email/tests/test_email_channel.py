@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -875,15 +874,14 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
     # Mark alice as someone who sent us an email (making this a "reply")
     channel._last_subject_by_chat["alice@example.com"] = "Previous email"
 
-    # A policy rejection must not look like successful delivery to the manager.
-    with pytest.raises(DeliveryRejectedError, match="auto_reply_enabled"):
-        await channel.send(
-            OutboundMessage(
-                channel="email",
-                chat_id="alice@example.com",
-                content="Should not send.",
-            )
+    # Reply should be skipped (auto_reply_enabled=False)
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Should not send.",
         )
+    )
     assert fake_instances == []
 
     # Reply with force_send=True should be sent
@@ -981,15 +979,14 @@ async def test_send_skips_when_consent_not_granted(monkeypatch) -> None:
     cfg = _make_config()
     cfg.consent_granted = False
     channel = EmailChannel(cfg, MessageBus())
-    with pytest.raises(DeliveryRejectedError, match="consent_granted"):
-        await channel.send(
-            OutboundMessage(
-                channel="email",
-                chat_id="alice@example.com",
-                content="Should not send.",
-                metadata={"force_send": True},
-            )
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Should not send.",
+            metadata={"force_send": True},
         )
+    )
     assert called["smtp"] is False
 
 

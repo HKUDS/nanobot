@@ -14,7 +14,6 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown  # pyright: ignore[reportMissingTypeStubs]
 
-from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -209,7 +208,8 @@ class SlackChannel(BaseChannel):
         ):
             return
         if not self._web_client:
-            raise ChannelNotReadyError("Slack client not running")
+            self.logger.warning("client not running")
+            return
         try:
             web_api = self._require_web_api()
             target_chat_id = await self._resolve_target_chat_id(msg.chat_id)

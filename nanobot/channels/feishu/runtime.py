@@ -25,7 +25,6 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
-from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -2447,7 +2446,10 @@ class FeishuChannel(BaseChannel):
         ):
             return
         if not self._client:
-            raise ChannelNotReadyError("Feishu client is not ready to send the reply")
+            if msg.metadata.get(PAIRING_CODE_META_KEY):
+                raise RuntimeError("Feishu client is not ready to send the pairing reply")
+            self.logger.warning("client not initialized")
+            return
 
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"

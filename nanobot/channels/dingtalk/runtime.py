@@ -17,7 +17,6 @@ from urllib.parse import unquote, urljoin, urlparse
 import httpx
 from pydantic import Field
 
-from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -743,7 +742,7 @@ class DingTalkChannel(BaseChannel):
             return
         token = await self._get_access_token()
         if not token:
-            raise ChannelNotReadyError("DingTalk access token unavailable")
+            raise RuntimeError("DingTalk access token unavailable")
 
         content = msg.content.strip() if msg.content else ""
         if content:

@@ -15,7 +15,6 @@ from typing import Any, cast
 import httpx
 from pydantic import Field
 
-from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -357,7 +356,8 @@ class MochatChannel(BaseChannel):
         ):
             return
         if not self.config.claw_token:
-            raise DeliveryRejectedError("MoChat claw_token missing")
+            self.logger.warning("claw_token missing, skip send")
+            return
 
         parts = ([msg.content.strip()] if msg.content and msg.content.strip() else [])
         if msg.media:
@@ -372,7 +372,8 @@ class MochatChannel(BaseChannel):
 
         target = resolve_mochat_target(msg.chat_id)
         if not target.id:
-            raise DeliveryRejectedError("MoChat outbound target is empty")
+            self.logger.warning("outbound target is empty")
+            return
 
         is_panel = (target.is_panel or target.id in self._panel_set) and not target.id.startswith("session_")
         try:

@@ -29,7 +29,6 @@ from telegram.error import BadRequest, InvalidToken, NetworkError, RetryAfter, T
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import BaseRequest, HTTPXRequest
 
-from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -802,7 +801,7 @@ class TelegramChannel(BaseChannel):
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._app_ready.wait(), APP_RESTART_SEND_WAIT_SECONDS)
         if not self._app_ready.is_set() or self._app is None:
-            raise ChannelNotReadyError("Telegram application is restarting; message not delivered")
+            raise RuntimeError("Telegram application is restarting; message not delivered")
         return self._app
 
     def _note_poll_ok(self) -> None:
@@ -1075,7 +1074,8 @@ class TelegramChannel(BaseChannel):
             return
         app = await self._wait_for_app()
         if app is None:
-            raise ChannelNotReadyError("Telegram bot not running")
+            self.logger.warning("bot not running")
+            return
 
         progress_event = msg.event if isinstance(msg.event, ProgressEvent) else None
 
@@ -1089,7 +1089,8 @@ class TelegramChannel(BaseChannel):
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
-            raise DeliveryRejectedError("Invalid Telegram chat_id") from None
+            self.logger.exception("Invalid chat_id: {}", msg.chat_id)
+            return
         reply_to_message_id = msg.metadata.get("message_id")
         message_thread_id = msg.metadata.get("message_thread_id")
         if message_thread_id is None and reply_to_message_id is not None:

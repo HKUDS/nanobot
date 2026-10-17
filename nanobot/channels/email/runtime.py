@@ -23,7 +23,6 @@ from typing import Any, Literal, cast
 from loguru import logger
 from pydantic import Field, field_validator
 
-from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -246,10 +245,12 @@ class EmailChannel(BaseChannel):
         ):
             return
         if not self.config.consent_granted:
-            raise DeliveryRejectedError("Email consent_granted is false")
+            self.logger.warning("Skip email send: consent_granted is false")
+            return
 
         if not self.config.smtp_host:
-            raise DeliveryRejectedError("SMTP host not configured")
+            self.logger.warning("SMTP host not configured")
+            return
 
         # Skip progress messages to prevent sending an empty email after each tool call
         if isinstance(msg.event, ProgressEvent):
@@ -258,7 +259,8 @@ class EmailChannel(BaseChannel):
 
         to_addr = msg.chat_id.strip()
         if not to_addr:
-            raise DeliveryRejectedError("Missing email recipient address")
+            self.logger.warning("Missing recipient address")
+            return
 
         # Determine if this is a reply (recipient has sent us an email before)
         is_reply = to_addr in self._last_subject_by_chat
@@ -266,7 +268,8 @@ class EmailChannel(BaseChannel):
 
         # autoReplyEnabled only controls automatic replies, not proactive sends
         if is_reply and not self.config.auto_reply_enabled and not force_send:
-            raise DeliveryRejectedError("Email auto_reply_enabled is false")
+            self.logger.info("Skip automatic reply to {}: auto_reply_enabled is false", to_addr)
+            return
 
         base_subject = self._last_subject_by_chat.get(to_addr, "nanobot reply")
         subject = self._reply_subject(base_subject)

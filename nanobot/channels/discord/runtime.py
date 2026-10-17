@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field
 
-from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -540,7 +539,7 @@ class DiscordChannel(BaseChannel):
         """Send a message through Discord using discord.py."""
         client = self._client
         if client is None or not client.is_ready():
-            raise ChannelNotReadyError("Discord client is not ready")
+            raise RuntimeError("Discord client is not ready")
 
         is_progress = isinstance(msg.event, ProgressEvent)
 

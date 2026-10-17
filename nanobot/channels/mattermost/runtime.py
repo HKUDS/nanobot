@@ -11,7 +11,6 @@ from typing import Any, cast
 import httpx
 from pydantic import Field, model_validator
 
-from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -500,7 +499,8 @@ class MattermostChannel(BaseChannel):
         ):
             return
         if not self._http_client:
-            raise ChannelNotReadyError("Mattermost client not initialized")
+            self.logger.warning("client not initialized")
+            return
 
         try:
             chat_id = msg.chat_id
