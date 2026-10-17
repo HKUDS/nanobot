@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
   return { action, client, listeners, transportClient: null as NanobotClient | null, connect: vi.fn(), refresh: vi.fn(), cancel: vi.fn(), copy: vi.fn() };
 });
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: mocks.transportClient ?? mocks.client }) }));
-vi.mock("@/components/remote/RemoteInstances", () => ({ useRemoteConnections: () => ({ connect: mocks.connect, refresh: mocks.refresh, cancel: mocks.cancel, directory: { profiles: [] } }) }));
+vi.mock("@/components/remote/remote-context", () => ({ useRemoteConnections: () => ({ connect: mocks.connect, refresh: mocks.refresh, cancel: mocks.cancel, directory: { profiles: [] } }) }));
 vi.mock("@/lib/clipboard", () => ({ copyTextToClipboard: mocks.copy }));
 const request = () => ({ id: "request-1", command: "nanobot remote pair nbpr1.public", expires: Date.now() / 1000 + 600 });
 const preview = { id: "request-1", host: "ubuntu@server", hostname: "team", fingerprint: "SHA256:trusted-server", authorized_until: Date.now() / 1000 + 86400, revoke_command: "nanobot remote revoke request-1" };

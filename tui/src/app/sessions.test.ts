@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { CliRenderEvents, TextareaRenderable, TextRenderable } from "@opentui/core"
+import { CliRenderEvents, TextareaRenderable, TextRenderable, rgbToHex } from "@opentui/core"
 import { MockTreeSitterClient, createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { NanobotTui } from "./app"
 import type { RecoveryState, SlashCommand, WorkspaceScopePayload } from "../client"
-import { options, client, mount, waitUntil, occurrences } from "./test-support"
+import { options, client, mount, waitUntil, occurrences, contrastRatio } from "./test-support"
 
 describe("NanobotTui session navigation", () => {
   let setup: TestRendererSetup | undefined
@@ -907,7 +907,7 @@ describe("NanobotTui session navigation", () => {
   })
 
   test("opens the latest turn diff as a full-screen, navigable view", async () => {
-    setup = await createRenderer({ width: 96, height: 28, screenMode: "alternate-screen" })
+    setup = await createRenderer({ width: 96, height: 28, screenMode: "alternate-screen", consoleMode: "disabled" })
     const app = mount(setup)
     app.accept({ event: "attached", chat_id: "chat" })
     await waitUntil(() => (app as unknown as { ready: boolean }).ready)
@@ -971,6 +971,23 @@ describe("NanobotTui session navigation", () => {
     expect(frame).toContain("const newValue = 2")
     expect(frame).toContain("Diff truncated by the gateway")
     expect(frame).not.toContain("Ask nanobot anything")
+
+    const rows = frame.split("\n")
+    const y = rows.findIndex((row) => row.includes("const newValue = 2"))
+    const x = rows[y]!.indexOf("const newValue = 2")
+    await setup.mockMouse.drag(x, y, x + "const newValue = 2".length, y)
+    await setup.flush()
+    expect(setup.renderer.getSelection()?.getSelectedText()).toBe("const newValue = 2")
+    const selected = setup.captureSpans().lines[y]!.spans.find((span) => span.text.includes("const newValue = 2"))!
+    expect(selected.fg.intent).toBe("rgb")
+    expect(selected.bg.intent).toBe("rgb")
+    expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
+
+    setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
+    await setup.flush()
+    expect(setup.renderer.console.visible).toBe(false)
+    expect(setup.captureCharFrame()).toContain("const newValue = 2")
+    setup.renderer.clearSelection()
 
     setup.mockInput.pressArrow("right")
     await setup.flush()

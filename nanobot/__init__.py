@@ -57,7 +57,7 @@ __logo__ = "🐈"
 
 _LAZY_EXPORTS = {
     "Nanobot": ".nanobot",
-    "LLMUsage": ".nanobot",
+    "LLMUsage": ".llm_usage.types",
     "RunStream": ".nanobot",
     "RunResult": ".nanobot",
     "RequestContext": ".agent.tools.context",

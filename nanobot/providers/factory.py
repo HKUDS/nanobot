@@ -14,6 +14,7 @@ from nanobot.config.schema import (
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.registry import ProviderSpec, find_by_name
+from nanobot.providers.request_overrides import apply_request_overrides
 from nanobot.providers.routing import resolve_automatic_model_api as resolve_automatic_model_api
 from nanobot.providers.routing import resolve_model_api as resolve_model_api
 from nanobot.providers.routing import resolve_provider_route
@@ -45,6 +46,8 @@ def _provider_extra_headers(
 ) -> dict[str, str] | None:
     headers = dict(spec.default_extra_headers) if spec else {}
     if provider_config and provider_config.extra_headers:
+        names = {key.lower() for key in provider_config.extra_headers}
+        headers = {key: value for key, value in headers.items() if key.lower() not in names}
         headers.update(provider_config.extra_headers)
     return headers or None
 
@@ -171,6 +174,9 @@ def _inline_fallback_preset(
         ),
         reasoning_effort=fallback.reasoning_effort,
         api=fallback.api,
+        extra_headers=fallback.extra_headers,
+        extra_query=fallback.extra_query,
+        extra_body=fallback.extra_body,
     )
 
 
@@ -234,7 +240,9 @@ def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> Pr
 def _preset_provider_signature(
     config: Config, preset: ModelPresetConfig,
 ) -> tuple[object, ...]:
-    provider_config = config.get_provider(preset.model, preset=preset)
+    provider_config = apply_request_overrides(
+        config.get_provider(preset.model, preset=preset), preset,
+    )
     provider_name = config.get_provider_name(preset.model, preset=preset)
     return (
         preset.model,

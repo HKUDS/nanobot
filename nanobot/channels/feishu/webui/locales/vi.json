@@ -73,6 +73,7 @@
     }
   },
   "custom": {
+    "addAssistant": "Thêm trợ lý khác",
     "toggleAssistant": "Bật trợ lý {{name}}",
     "configured": "Đã kết nối",
     "needsSetup": "Cần cấp quyền",

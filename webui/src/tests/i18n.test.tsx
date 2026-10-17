@@ -49,6 +49,7 @@ const SETTINGS_NAV_KEYS = [
   "advanced",
 ];
 const LOCALIZED_SETTINGS_COPY_KEYS = [
+  "settings.providers.maskedSecretMissing",
   "settings.backToChat",
   "settings.sidebar.title",
   "settings.sidebar.ariaLabel",

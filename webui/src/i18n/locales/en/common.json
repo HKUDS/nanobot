@@ -339,6 +339,9 @@
       "description": "nanobot web UI — chat with your nanobot workspace."
     },
     "pairing": {
+      "haveCode": "Already received a code?",
+      "deliveryFailed": "Couldn't send the pairing code. Check this bot's send-message permissions and gateway logs, then send it another private message to retry.",
+      "deliverySending": "Sending a pairing code to your chat. If it doesn't arrive, send the bot another private message to retry.",
       "title": "Pair account",
       "description": "Enter the pairing code received in chat.",
       "code": "Pairing code",
@@ -388,6 +391,13 @@
     },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",
+      "commandRuntime": {
+        "custom": "Custom (seconds)",
+        "customLabel": "Custom runtime (seconds)",
+        "noLimit": "No time limit",
+        "limit": "Timed runs: up to {{duration}}",
+        "rangeError": "Enter whole seconds from 1 to {{max}}, or choose No time limit."
+      },
       "fields": {
         "agents_defaults_timezone_mode": {
           "label": "System timezone",
@@ -462,8 +472,8 @@
           "help": "Allow the agent to change its configuration.\n\nAllow the self-management tool to update configuration."
         },
         "tools_exec_timeout": {
-          "label": "Command timeout",
-          "help": "Stop commands after this many seconds; 0 means unlimited.\n\nStop commands that exceed this duration. Set to 0 for no time limit."
+          "label": "Command runtime",
+          "help": "Default hard runtime limit for shell commands.\n\nOutput and waiting do not extend it. Choose No time limit to remove this limit."
         },
         "tools_exec_path_prepend": {
           "label": "PATH priority",
@@ -499,7 +509,7 @@
         },
         "tools_web_proxy": {
           "label": "Web proxy",
-          "help": "Proxy URL; leave blank for the default network.\n\nProxy URL for web tools. Leave empty to use the default network configuration."
+          "help": "Used for the agent's web search and page reading. Leave blank to use the default network settings, including proxy environment variables.\n\n127.0.0.1 refers to the machine that runs nanobot. This setting does not change model, MCP, or browser connections."
         },
         "tools_web_user_agent": {
           "label": "User agent",
@@ -693,10 +703,12 @@
       "voiceInput": "Transcription"
     },
     "models": {
+      "requestOverridesHint": "Leave fields empty to use provider settings. Changing the provider clears these values.",
+      "otherPresets": "Fallback presets",
       "catalogAuthRequired": "Authorization expired. Please sign in again.",
-      "catalogUnavailable": "Could not refresh models. Try again later.",
-      "catalogStale": "Showing cached models; the list may be out of date.",
-      "catalogFallback": "Showing built-in models; the list may be out of date.",
+      "catalogUnavailable": "Refresh failed. Click to retry",
+      "catalogStale": "Cached list may be out of date.",
+      "catalogFallback": "Built-in list may be out of date.",
       "selectModel": "Select model",
       "addConfiguration": "Add configuration",
       "newConfiguration": "New model configuration",
@@ -706,7 +718,6 @@
       "configurationNamePlaceholder": "Fast writing",
       "callOrder": "Model order",
       "primary": "Primary",
-      "fallbackNumber": "Fallback {{number}}",
       "addToOrder": "Enable preset",
       "newPreset": "New preset",
       "newPresetHelp": "Save a model and settings for reuse.",
@@ -743,7 +754,7 @@
       "disabled": "Disabled",
       "noPresets": "No model presets yet",
       "noPresetsHelp": "Create a preset, then add it to the call order.",
-      "removeBeforeDelete": "Choose another primary preset before deleting this one.",
+      "removeBeforeDelete": "Cannot delete the primary model",
       "providerSetupRequired": "Provider setup required",
       "configureProviderBeforeSaving": "Configure this provider before saving the preset.",
       "deletePresetTitle": "Delete model preset?",
@@ -1185,6 +1196,19 @@
       "systemHelp": "Includes internal tasks and calls without a recorded source."
     },
     "providers": {
+      "manageProviders": "Manage providers",
+      "configureProvider": "Configure {{provider}}…",
+      "sharedProviderHelp": "Changes affect all presets that use this provider.",
+      "parameterCount": "Entries: {{count}}",
+      "useProviderSettings": "Use provider settings",
+      "applyToDraft": "Use in preset",
+      "draftHint": "Save the new preset to apply these settings.",
+      "invalidObject": "Enter a JSON object, for example: {\"key\":\"value\"}.",
+      "stringValuesRequired": "Use text values for headers and query parameters.",
+      "maskedSecretMissing": "No saved secret matches this mask. Enter the actual value or remove the entry.",
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "Local",
       "title": "Providers",
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search.",
@@ -1211,7 +1235,7 @@
       "extraBody": "Body parameters",
       "extraQuery": "Query parameters",
       "capabilityFastMode": "Fast mode",
-      "capabilityFastModeHelp": "Faster replies use credits faster.\n\nUse OpenAI's priority service tier for faster responses. This consumes credits faster.",
+      "capabilityFastModeHelp": "Faster responses, increased usage.",
       "capabilityXSearch": "X Search",
       "capabilityXSearchHelp": "Supported Grok models can search X.\n\nAllow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
       "capabilityOpenAISearch": "OpenAI web search",
@@ -1221,6 +1245,8 @@
       "thirdPartyBrands": "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement."
     },
     "image": {
+      "imagesApiHint": "Uses the OpenAI Images API at this connection's URL. Check that the endpoint supports image generation.",
+      "requestOverridesHint": "Only for images. Leave fields empty to use provider settings. Changing the provider clears these values.",
       "selectProvider": "Select provider",
       "selectAspect": "Select aspect",
       "selectSize": "Select size",
@@ -1800,7 +1826,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Could not load subtasks.",
       "stopFailed": "Could not stop this task.",
       "stopTask": "Stop {{label}}",
       "receiptHelp": "Delivered means the message was included in the subtask’s next model request. It does not mean the instructions have been carried out.",
@@ -2461,6 +2486,7 @@
     }
   },
   "common": {
+    "retry": "Retry",
     "dismiss": "Dismiss",
     "close": "Close",
     "current": "Current",

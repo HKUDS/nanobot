@@ -7,7 +7,7 @@ import {
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
 import { channelSetup } from "@/components/settings/channels/ChannelIdentity";
-import type { ChannelConfigField } from "@/components/settings/channels/catalog";
+import type { ChannelConfigField } from "@/channel-plugins/catalog";
 
 const fields: ChannelConfigField[] = [
   {

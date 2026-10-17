@@ -768,11 +768,13 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
             content="result",
         )
 
-    fake_loop = SimpleNamespace(time=clock)
-    with (
-        patch("nanobot.agent.loop.asyncio.get_running_loop", return_value=fake_loop),
-        patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_deliver),
-    ):
+    loop.tools.get_runtime_context_providers = MagicMock(return_value=[])
+    fake_loop = MagicMock(wraps=asyncio.get_running_loop())
+    fake_loop.time = clock
+    loop_asyncio = SimpleNamespace(**vars(asyncio))
+    loop_asyncio.get_running_loop = lambda: fake_loop
+    loop_asyncio.wait_for = _deliver
+    with patch("nanobot.agent.loop.asyncio", loop_asyncio):
         assert await terminal_injection_callback()
         assert await terminal_injection_callback()
 

@@ -14,15 +14,14 @@ from nanobot.session.recovery import (
     PENDING_USER_TURN_KEY,
     RECOVERY_METADATA_KEY,
     RUNTIME_CHECKPOINT_KEY,
-    RecoveryActionError,
-    RecoveryCoordinator,
-    _runtime_checkpoint_is_well_formed,
     acknowledge_pending_followups,
     pending_followups,
     record_pending_followup,
     restore_runtime_checkpoint,
+    runtime_checkpoint_is_well_formed,
 )
 from nanobot.webui import session_list_index, transcript
+from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 
 
 def _persist(manager: SessionManager, session: Session) -> None:
@@ -180,13 +179,13 @@ async def test_scan_loads_only_sessions_that_need_webui_recovery(
 
     coordinator, _, restarted = _coordinator(tmp_path)
     loaded: list[str] = []
-    get_or_create = restarted.get_or_create
+    get_or_create = restarted.state.get
 
-    def tracked_get_or_create(key: str) -> Session:
+    async def tracked_get_or_create(key: str) -> Session:
         loaded.append(key)
-        return get_or_create(key)
+        return await get_or_create(key)
 
-    monkeypatch.setattr(restarted, "get_or_create", tracked_get_or_create)
+    monkeypatch.setattr(restarted.state, "get", tracked_get_or_create)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
         lambda _key: False,
@@ -806,16 +805,16 @@ _COMPLETED_ALL = [
 
 def test_partial_checkpoint_partition_is_well_formed() -> None:
     # 中间态：A 完成、B/C 待执行 → 应通过
-    assert _runtime_checkpoint_is_well_formed(_partial_checkpoint(
+    assert runtime_checkpoint_is_well_formed(_partial_checkpoint(
         completed=[_tool_result("A")],
         pending=_PENDING_ALL[1:],
     ))
     # legacy 全 pending → 仍通过
-    assert _runtime_checkpoint_is_well_formed(_partial_checkpoint(
+    assert runtime_checkpoint_is_well_formed(_partial_checkpoint(
         pending=_PENDING_ALL,
     ))
     # legacy 全 completed（tools_completed 形状）→ 仍通过
-    assert _runtime_checkpoint_is_well_formed(_partial_checkpoint(
+    assert runtime_checkpoint_is_well_formed(_partial_checkpoint(
         phase="tools_completed",
         completed=_COMPLETED_ALL,
     ))
@@ -828,7 +827,7 @@ def test_partial_checkpoint_partition_is_well_formed() -> None:
     ([_tool_result("A"), _tool_result("A")], []),  # completed 重复
 ])
 def test_partial_checkpoint_bad_partition_rejected(completed, pending) -> None:
-    assert not _runtime_checkpoint_is_well_formed(_partial_checkpoint(
+    assert not runtime_checkpoint_is_well_formed(_partial_checkpoint(
         completed=completed, pending=pending,
     ))
 

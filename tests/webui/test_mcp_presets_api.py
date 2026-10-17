@@ -15,6 +15,7 @@ from nanobot.config.schema import Config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
+    ensure_mcp_oauth_server,
     mcp_presets_action,
     mcp_presets_payload,
     mcp_presets_settings_action,
@@ -274,6 +275,175 @@ def test_enable_browserbase_writes_scrubbed_config_payload(
     assert "bb_live_secret" not in str(payload)
     config = load_config()
     assert "browserbaseApiKey=bb_live_secret" in config.tools.mcp_servers["browserbase"].url
+
+
+@pytest.mark.parametrize(
+    ("name", "field", "header", "expected"),
+    [
+        ("deepnote", "deepnote_api_key", "Authorization", "Bearer preset-test-secret"),
+        ("agentmail", "agentmail_api_key", "x-api-key", "preset-test-secret"),
+    ],
+)
+def test_service_key_survives_reconnect_without_leaking_to_catalog(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    field: str,
+    header: str,
+    expected: str,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    payload = mcp_presets_action("enable", {"name": [name], field: ["preset-test-secret"]})
+    assert load_config().tools.mcp_servers[name].headers[header] == expected
+    assert "preset-test-secret" not in json.dumps(payload)
+
+    config = load_config()
+    config.tools.mcp_servers[name].enabled_tools = ["search"]
+    config.tools.mcp_servers[name].tool_timeout = 90
+    save_config(config)
+
+    payload = mcp_presets_action("enable", {"name": [name]})
+    saved = load_config().tools.mcp_servers[name]
+    assert saved.headers[header] == expected
+    assert saved.enabled_tools == ["search"]
+    assert saved.tool_timeout == 90
+    assert next(row for row in payload["presets"] if row["name"] == name)["configured"]
+
+
+def test_service_bearer_key_resolves_environment_reference(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.config.loader import resolve_config_env_vars
+
+    _use_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("DEEPNOTE_API_KEY", "environment-test-secret")
+    payload = mcp_presets_action("enable", {"name": ["deepnote"]})
+
+    config = load_config()
+    assert config.tools.mcp_servers["deepnote"].headers == {
+        "Authorization": "Bearer ${DEEPNOTE_API_KEY}"
+    }
+    resolved = resolve_config_env_vars(config)
+    assert resolved.tools.mcp_servers["deepnote"].headers == {
+        "Authorization": "Bearer environment-test-secret"
+    }
+    assert "environment-test-secret" not in json.dumps(payload)
+
+
+def test_account_endpoint_and_token_are_saved_together(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    payload = mcp_presets_action(
+        "enable",
+        {
+            "name": ["datadog"],
+            "mcp_url": ["https://mcp.example.com/datadog"],
+            "datadog_access_token": ["datadog-test-secret"],
+        },
+    )
+
+    saved = load_config().tools.mcp_servers["datadog"]
+    assert saved.url == "https://mcp.example.com/datadog"
+    assert saved.headers == {"Authorization": "Bearer datadog-test-secret"}
+    row = next(item for item in payload["presets"] if item["name"] == "datadog")
+    assert row["configured"] is True
+    assert row["connection_summary"] == saved.url
+    assert "datadog-test-secret" not in json.dumps(payload)
+
+
+def test_instance_oauth_setup_saves_endpoint_before_authorization(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    name, cfg = ensure_mcp_oauth_server(
+        {"name": ["metabase"], "mcp_url": ["https://analytics.example.com/api/metabase-mcp"]}
+    )
+    assert name == "metabase"
+    assert cfg.auth == "oauth"
+    assert cfg.url == "https://analytics.example.com/api/metabase-mcp"
+    row = next(item for item in mcp_presets_payload()["presets"] if item["name"] == name)
+    assert row["installed"] is True
+    assert row["status"] == "authorization_required"
+
+    config = load_config()
+    config.tools.mcp_servers[name].enabled_tools = ["search"]
+    save_config(config)
+    _, updated = ensure_mcp_oauth_server(
+        {"name": [name], "mcp_url": ["https://other.example.com/api/metabase-mcp"]}
+    )
+    assert updated.url == "https://other.example.com/api/metabase-mcp"
+    assert updated.enabled_tools == ["search"]
+    assert load_config().tools.mcp_servers[name].url == updated.url
+
+
+def test_instance_oauth_setup_requires_endpoint_without_saving_empty_connection(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    with pytest.raises(McpPresetError, match="missing MCP server URL"):
+        ensure_mcp_oauth_server({"name": ["metabase"]})
+    assert load_config().tools.mcp_servers == {}
+
+
+def test_google_workspace_uses_managed_stdio_and_environment_credentials(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    payload = mcp_presets_action(
+        "enable",
+        {
+            "name": ["google-workspace"],
+            "google_client_id": ["test.apps.googleusercontent.com"],
+            "google_client_secret": ["google-test-secret"],
+        },
+    )
+
+    saved = load_config().tools.mcp_servers["google-workspace"]
+    assert saved.command == "uvx"
+    assert saved.args == ["workspace-mcp", "--transport", "stdio", "--tool-tier", "core"]
+    assert saved.env == {
+        "GOOGLE_OAUTH_CLIENT_ID": "test.apps.googleusercontent.com",
+        "GOOGLE_OAUTH_CLIENT_SECRET": "google-test-secret",
+    }
+    assert Path(saved.cwd) == tmp_path / "mcp" / "google-workspace"
+    assert "google-test-secret" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize("from_environment", [False, True])
+def test_redis_url_is_passed_to_cli_and_kept_secret(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    from_environment: bool,
+) -> None:
+    from nanobot.config.loader import resolve_config_env_vars
+
+    _use_config(tmp_path, monkeypatch)
+    url = "rediss://default:redis-test-secret@cache.example.com:16380/3"
+    query = {"name": ["redis"]}
+    if from_environment:
+        monkeypatch.setenv("REDIS_URL", url)
+    else:
+        query["redis_url"] = [url]
+
+    payload = mcp_presets_action("enable", query)
+    config = load_config()
+    saved = config.tools.mcp_servers["redis"]
+    assert saved.args == [
+        "--from", "redis-mcp-server@latest", "redis-mcp-server", "--url",
+        "${REDIS_URL}" if from_environment else url,
+    ]
+    resolved = resolve_config_env_vars(config)
+    assert resolved.tools.mcp_servers["redis"].args[-1] == url
+    row = next(item for item in payload["presets"] if item["name"] == "redis")
+    assert row["configured"] is True
+    assert row["required_fields"][0]["secret"] is True
+    assert "redis-test-secret" not in json.dumps(payload)
 
 
 def test_enable_requires_missing_secret(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

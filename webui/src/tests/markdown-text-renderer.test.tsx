@@ -586,6 +586,39 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByRole("link", { name: "links" })).not.toHaveAttribute("node");
   });
 
+  it.each([
+    "~asdfdfasdf~",
+    '至此，§3.1 的全部主张都已对应到公式 (1)~(6) 与代码行号。refiner 与 composition-aware loss 在公式 (7)~(15)，那两批已经讲过。',
+  ])("keeps single tildes literal through streaming and completion: %s", (source) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.textContent).toBe(source);
+    expect(container.querySelector("del")).toBeNull();
+
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+      expect(container.querySelector("del")).toBeNull();
+    }
+    expect(container.textContent).toBe(source);
+
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.textContent).toBe(source);
+    expect(container.querySelector("del")).toBeNull();
+  });
+
+  it.each([false, true])("preserves double-tilde strikethrough and literal code (streaming=%s)", (streaming) => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming={streaming}>
+        {"~~old value~~ → new value, `~literal~` and `(1)~(6)`"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelectorAll("del")).toHaveLength(1);
+    expect(container.querySelector("del")?.textContent).toBe("old value");
+    expect(container.textContent).toBe("old value → new value, ~literal~ and (1)~(6)");
+    expect([...container.querySelectorAll("code")].map(code => code.textContent))
+      .toEqual(["~literal~", "(1)~(6)"]);
+  });
+
   it("keeps CJK prose outside a bold bare URL through stream completion", () => {
     const url = "https://github.com/HKUDS/nanobot";
     const source = `实际跳转到 **${url}**，不是推文页面。`;

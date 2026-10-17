@@ -1,7 +1,10 @@
 import shlex
 import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
@@ -341,6 +344,64 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
         "Error: Command blocked by safety guard (path outside working dir)"
     )
     assert "hard policy boundary" in error
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix resolves named homes through passwd")
+@pytest.mark.parametrize(
+    "command",
+    ["cat ~unknown/file.txt", "cat --config=~unknown/file.txt", "cat <~unknown/file.txt"],
+)
+async def test_exec_rejects_unknown_user_home(tmp_path, monkeypatch, command) -> None:
+    home_path = f"~nanobot-missing-{tmp_path.name}/file.txt"
+    command = command.replace("~unknown/file.txt", home_path)
+    with pytest.raises(RuntimeError):
+        Path(home_path).expanduser()
+
+    spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
+    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command=command)
+
+    assert result.startswith("Error: Command blocked by safety guard (path outside working dir)")
+    assert "hard policy boundary" in result
+    spawn.assert_not_called()
+
+
+async def test_exec_rejects_home_path_without_home_directory(tmp_path, monkeypatch) -> None:
+    for key in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(key, raising=False)
+    if sys.platform != "win32":
+        import pwd
+
+        def missing_passwd_entry(uid):
+            # A container UID may have no passwd entry when HOME is unset.
+            raise KeyError(uid)
+
+        monkeypatch.setattr(pwd, "getpwuid", missing_passwd_entry)
+    with pytest.raises(RuntimeError):
+        Path("~/file.txt").expanduser()
+
+    spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
+    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command="cat ~/file.txt")
+
+    assert result.startswith("Error: Command blocked by safety guard (path outside working dir)")
+    assert "hard policy boundary" in result
+    spawn.assert_not_called()
+
+
+async def test_exec_allows_resolved_home_inside_workspace(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("USERPROFILE" if sys.platform == "win32" else "HOME", str(tmp_path))
+    (tmp_path / "file.txt").write_text("allowed home content", encoding="utf-8")
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command="cat ~/file.txt", login=False)
+
+    assert "allowed home content" in result
+    assert "Exit code: 0" in result
 
 
 @pytest.mark.parametrize(
@@ -852,27 +913,61 @@ async def test_exec_head_tail_truncation(tmp_path) -> None:
     assert "Exit code:" in result
 
 
-async def test_exec_timeout_parameter() -> None:
-    """LLM-supplied timeout should override the constructor default."""
+@pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
+async def test_exec_timeout_parameter(runtime_parameter) -> None:
+    """Both runtime spellings override the constructor's hard budget."""
     tool = ExecTool(timeout=60)
-    # A very short timeout should cause the command to be killed
-    result = await tool.execute(command="sleep 10", timeout=1)
+    started_at = time.monotonic()
+    result = await tool.execute(
+        command=[sys.executable, "-c", "import time; time.sleep(10)"],
+        **{runtime_parameter: 1},
+    )
+
     assert "timed out" in result
-    assert "1 seconds" in result
+    assert time.monotonic() - started_at < 8
+    assert "Exit code: 0" not in result
 
 
-async def test_exec_timeout_capped_at_max() -> None:
-    """Timeout values above _MAX_TIMEOUT should be clamped."""
+@pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
+@pytest.mark.parametrize("runtime", [0, -1, 301])
+async def test_exec_runtime_rejects_out_of_range(
+    monkeypatch, runtime_parameter, runtime,
+) -> None:
+    """Invalid budgets fail before spawning instead of being clamped."""
+    spawn = AsyncMock(side_effect=AssertionError("Invalid runtime must not start a process"))
+    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    tool = ExecTool(max_runtime=301, max_runtime_limit=300)
+
+    result = await tool.execute(command="echo ok", **{runtime_parameter: runtime})
+
+    assert result.startswith("Error:")
+    assert "runtime" in result or "timeout" in result
+    spawn.assert_not_called()
+
+
+async def test_exec_runtime_aliases_are_mutually_exclusive(monkeypatch) -> None:
+    spawn = AsyncMock(side_effect=AssertionError("Conflicting runtime arguments must not spawn"))
+    monkeypatch.setattr(ExecTool, "_spawn", spawn)
     tool = ExecTool()
-    # Should not raise — just clamp to 600
-    result = await tool.execute(command="echo ok", timeout=9999)
-    assert "Exit code: 0" in result
+    params = {"command": "echo ok", "max_runtime": 5, "timeout": 5}
+
+    result = await tool.execute(**params)
+
+    assert result.startswith("Error:")
+    assert "max_runtime" in result
+    assert "timeout" in result
+    spawn.assert_not_called()
 
 
-def test_exec_config_timeout_uncapped_and_zero() -> None:
-    """Config timeout is no longer capped at 600 and accepts 0 = no limit (#3595)."""
-    assert ExecToolConfig(timeout=0).timeout == 0
-    assert ExecToolConfig(timeout=3600).timeout == 3600
+def test_exec_config_runtime_defaults_and_timeout_alias() -> None:
+    cfg = ExecToolConfig()
+    assert cfg.max_runtime == 3600
+    assert cfg.max_runtime_limit == 86400
+    assert cfg.idle_timeout == 300
+    assert cfg.idle_action == "report"
+    assert ExecToolConfig(timeout=5).max_runtime == 5
+    assert ExecToolConfig(timeout=3600).max_runtime == 3600
+    assert ExecToolConfig(timeout=0).max_runtime == 0
     with pytest.raises(ValidationError):
         ExecToolConfig(timeout=-1)
 
@@ -893,16 +988,38 @@ def test_exec_config_accepts_bwrap_bind_aliases() -> None:
     assert dumped["sandboxRwBinds"] == ["/home/user/.cache/uv"]
 
 
-def test_resolve_timeout_config_uncapped_and_unlimited() -> None:
-    """Config timeout drives the hard timeout uncapped; 0 means no limit (#3595)."""
-    assert ExecTool(timeout=3600)._resolve_timeout(None) == 3600
-    assert ExecTool(timeout=0)._resolve_timeout(None) is None
+def test_resolve_timeout_uses_configured_hard_budget() -> None:
+    assert ExecTool()._resolve_timeout(None) == 3600
+    assert ExecTool(timeout=5)._resolve_timeout(None) == 5
+    assert ExecTool(max_runtime=172800, max_runtime_limit=60)._resolve_timeout(None) == 172800
 
 
-def test_resolve_timeout_per_call_still_capped() -> None:
-    """Per-call (LLM) timeout stays capped at _MAX_TIMEOUT even with unlimited config."""
-    assert ExecTool(timeout=0)._resolve_timeout(9999) == ExecTool._MAX_TIMEOUT
-    assert ExecTool(timeout=60)._resolve_timeout(120) == 120
+def test_resolve_timeout_respects_configured_limit_without_clamping() -> None:
+    assert ExecTool()._resolve_timeout(9999) == 9999
+    tool = ExecTool(max_runtime=60, max_runtime_limit=1200)
+    assert tool._resolve_timeout(1) == 1
+    assert tool._resolve_timeout(1200) == 1200
+    for runtime in (0, -1, 1201):
+        with pytest.raises(ValueError):
+            tool._resolve_timeout(runtime)
+
+
+@pytest.mark.parametrize("limit", [60, 1200, 86400])
+@pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
+def test_exec_runtime_schema_matches_configured_limit(limit, runtime_parameter) -> None:
+    tool = ExecTool(max_runtime=limit + 1, max_runtime_limit=limit)
+    runtime_schema = tool.parameters["properties"][runtime_parameter]
+    assert runtime_schema["minimum"] == 1
+    assert runtime_schema["maximum"] == limit
+    assert tool.validate_params({"command": "echo ok"}) == []
+    for runtime in (1, limit):
+        assert tool.validate_params({"command": "echo ok", runtime_parameter: runtime}) == []
+    for runtime in (0, -1, limit + 1):
+        assert tool.validate_params({"command": "echo ok", runtime_parameter: runtime})
+
+    runtime_schema["maximum"] = 1
+    assert tool.parameters["properties"][runtime_parameter]["maximum"] == limit
+    assert ExecTool().parameters["properties"][runtime_parameter]["maximum"] == 86400
 
 
 # --- _resolve_type and nullable param tests ---
@@ -1009,3 +1126,37 @@ def test_cast_nullable_param_no_crash() -> None:
     assert result["name"] == "hello"
     result = tool.cast_params({"name": None})
     assert result["name"] is None
+
+
+@pytest.mark.parametrize("command", [
+    "cat ~unknown/file.txt",
+    "cat --config=~unknown/file.txt",
+    "cat <~unknown/file.txt",
+    "cat ~/file.txt",
+])
+def test_exec_guard_rejects_unresolvable_home_path(tmp_path, monkeypatch, command) -> None:
+    original = Path.expanduser
+
+    def expanduser(path):
+        if str(path).startswith("~"):
+            raise RuntimeError("Could not determine home directory.")
+        return original(path)
+
+    monkeypatch.setattr(Path, "expanduser", expanduser)
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command(command, str(tmp_path))
+    assert error is not None
+    assert error.startswith("Error: Command blocked by safety guard (path outside working dir)")
+
+
+def test_exec_guard_allows_resolved_home_inside_workspace(tmp_path, monkeypatch) -> None:
+    original = Path.expanduser
+
+    def expanduser(path):
+        if str(path).startswith("~"):
+            return tmp_path / "file.txt"
+        return original(path)
+
+    monkeypatch.setattr(Path, "expanduser", expanduser)
+    tool = ExecTool(restrict_to_workspace=True)
+    assert tool._guard_command("cat ~/file.txt", str(tmp_path)) is None

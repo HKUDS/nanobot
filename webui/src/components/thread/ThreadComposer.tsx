@@ -43,8 +43,8 @@ import {
   cliAppInitials,
   mcpPresetInitials,
   splitCapabilityMentionSegments,
-  type CapabilityMentionSegment,
 } from "@/components/CliAppMentionText";
+import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   ArrowUp,
@@ -65,6 +65,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   floatingItemClassName,
+  floatingItemFocusClassName,
   floatingSurfaceElevationClassName,
   floatingSurfaceVisualClassName,
 } from "@/components/ui/floating-surface";
@@ -213,6 +214,8 @@ interface ThreadComposerProps {
   inputAriaLabel?: string;
   compactWhenIdle?: boolean;
   isStreaming?: boolean;
+  activeTurnId?: string | null;
+  completedTurnIds?: readonly string[];
   modelLabel?: string | null;
   modelDetail?: string | null;
   modelPreset?: string | null;
@@ -294,6 +297,7 @@ const SLASH_PALETTE_CHROME_PX = 12;
 const SLASH_RECENTS_STORAGE_KEY = "nanobot.webui.slashCommandRecents";
 const SLASH_RECENTS_LIMIT = 5;
 const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
+const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
 const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
 const SESSION_MENTIONS_LIMIT = 8;
@@ -350,6 +354,16 @@ interface QueuedPrompt {
   images?: QueuedPromptImage[];
   quotedContext?: string;
   sessionMentions?: SessionMention[];
+  autoAfterTurnId?: string;
+  autoPaused?: boolean;
+}
+
+function pauseQueuedPrompt(prompt: QueuedPrompt): QueuedPrompt {
+  return { ...prompt, autoAfterTurnId: undefined, autoPaused: true };
+}
+
+function waitForNextQueuedTurn(prompt: QueuedPrompt): QueuedPrompt {
+  return { ...prompt, autoAfterTurnId: undefined, autoPaused: false };
 }
 
 interface QueuedPromptImage {
@@ -537,6 +551,10 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
     ...(images.length > 0 ? { images } : {}),
     ...(quotedContext ? { quotedContext } : {}),
     ...(sessionMentions.length > 0 ? { sessionMentions } : {}),
+    ...(typeof record.autoAfterTurnId === "string" && record.autoAfterTurnId.trim()
+      ? { autoAfterTurnId: record.autoAfterTurnId.trim() }
+      : {}),
+    ...(record.autoPaused === true ? { autoPaused: true } : {}),
   };
 }
 
@@ -573,6 +591,8 @@ function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
           ...(prompt.sessionMentions?.length
             ? { sessionMentions: prompt.sessionMentions.slice(0, SESSION_MENTIONS_LIMIT) }
             : {}),
+          ...(prompt.autoAfterTurnId ? { autoAfterTurnId: prompt.autoAfterTurnId } : {}),
+          ...(prompt.autoPaused ? { autoPaused: true } : {}),
         })),
       ),
     );
@@ -940,6 +960,8 @@ export function ThreadComposer({
   inputAriaLabel,
   compactWhenIdle = false,
   isStreaming = false,
+  activeTurnId = null,
+  completedTurnIds = EMPTY_COMPLETED_TURN_IDS,
   modelLabel = null,
   modelDetail = null,
   modelPreset = null,
@@ -1051,7 +1073,6 @@ export function ThreadComposer({
   const draggedQueuedPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
-  const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
   const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1077,6 +1098,20 @@ export function ThreadComposer({
     skipQueuedPromptPersistRef.current = true;
     setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
   }, [pendingQueueKey, queuedPromptStorageKey]);
+
+  useEffect(() => {
+    if (!isStreaming || !activeTurnId) return;
+    // The next lifecycle owner, not a guidance input, releases the remaining queue.
+    setQueuedPrompts((items) => {
+      let changed = false;
+      const next = items.map((item) => {
+        if (item.autoPaused || item.autoAfterTurnId === activeTurnId) return item;
+        changed = true;
+        return { ...item, autoAfterTurnId: activeTurnId };
+      });
+      return changed ? next : items;
+    });
+  }, [activeTurnId, isStreaming, pendingQueueKey]);
 
   useEffect(() => {
     if (!queuedPromptStorageKey) return;
@@ -1750,10 +1785,18 @@ export function ThreadComposer({
     };
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
+  const handleStop = useCallback(() => {
+    secondEnterPromptIdRef.current = null;
+    if (queuedPrompts.length > 0) {
+      setQueuedPrompts((items) => items.map(pauseQueuedPrompt));
+    }
+    onStop?.();
+  }, [onStop, queuedPrompts.length]);
+
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
       if (command.command === "/stop" && isStreaming && onStop) {
-        onStop();
+        handleStop();
         setValue("");
         setSlashMenuDismissed(true);
         setCliAppMenuDismissed(false);
@@ -1783,7 +1826,7 @@ export function ThreadComposer({
       setInlineError(null);
       resizeTextarea();
     },
-    [isStreaming, onStop, recentSlashCommands, replaceMentionInput, resizeTextarea, skillQuery, value],
+    [handleStop, isStreaming, onStop, recentSlashCommands, replaceMentionInput, resizeTextarea, skillQuery, value],
   );
 
   const insertMentionCandidate = useCallback(
@@ -1921,6 +1964,7 @@ export function ThreadComposer({
       {
         id,
         text,
+        ...(activeTurnId ? { autoAfterTurnId: activeTurnId } : {}),
         ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
         ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
         ...(activeSessionMentions.length > 0
@@ -1933,6 +1977,7 @@ export function ThreadComposer({
     onQuotedContextChange?.(null);
   }, [
     activeSessionMentions,
+    activeTurnId,
     canQueueGuidance,
     clear,
     clearComposerText,
@@ -1983,8 +2028,9 @@ export function ThreadComposer({
 
   const observeQueuedSend = useCallback((prompt: QueuedPrompt, result: void | boolean | Promise<void | boolean>) => {
     const restore = (error?: unknown) => {
-      skipNextQueuedFlushRef.current = true;
-      setQueuedPrompts((items) => items.some((item) => item.id === prompt.id) ? items : [prompt, ...items]);
+      setQueuedPrompts((items) => (items.some((item) => item.id === prompt.id)
+        ? items
+        : [prompt, ...items]).map(pauseQueuedPrompt));
       setInlineError(error instanceof Error ? error.message : "Message not sent; queued draft retained");
     };
     if (result instanceof Promise) void result.then((accepted) => { if (accepted === false) restore(); }).catch(restore);
@@ -1996,7 +2042,10 @@ export function ThreadComposer({
       secondEnterPromptIdRef.current = null;
       const text = prompt.text.trim();
       const queuedImages = queuedImagesToSendImages(prompt.images);
-      setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
+      setQueuedPrompts((items) => {
+        const remaining = items.filter((item) => item.id !== prompt.id);
+        return isStreaming ? remaining : remaining.map(waitForNextQueuedTurn);
+      });
       if (text || queuedImages?.length) {
         const options: SendOptions | undefined = (
           prompt.quotedContext
@@ -2025,7 +2074,7 @@ export function ThreadComposer({
       setQueuedPrompts([]);
       return;
     }
-    setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id));
+    setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id).map(waitForNextQueuedTurn));
     const queuedImages = queuedImagesToSendImages(nextPrompt.images);
     const options: SendOptions | undefined = (
       nextPrompt.quotedContext || nextPrompt.sessionMentions?.length
@@ -2050,25 +2099,16 @@ export function ThreadComposer({
     previousQueueRunRef.current = { key: pendingQueueKey, isStreaming };
     if (!isStreaming) secondEnterPromptIdRef.current = null;
     // Switching to an idle session is not completion of the previous session's run.
-    if (previous.key !== pendingQueueKey) {
-      skipNextQueuedFlushRef.current = false;
-      return;
-    }
-    if (!previous.isStreaming || isStreaming || queuedPrompts.length === 0) return;
-    if (skipNextQueuedFlushRef.current) {
-      skipNextQueuedFlushRef.current = false;
-      return;
-    }
+    if (previous.key !== pendingQueueKey) return;
+    if (isStreaming || interactionDisabled || queuedPrompts.length === 0) return;
+    const first = queuedPrompts[0];
+    if (first.autoPaused) return;
+    const waitingTurnCompleted = queuedPromptStorageKey !== null && first.autoAfterTurnId !== undefined
+      ? completedTurnIds.includes(first.autoAfterTurnId)
+      : previous.isStreaming;
+    if (!waitingTurnCompleted) return;
     sendNextQueuedPrompt();
-  }, [sendNextQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompts.length]);
-
-  const handleStop = useCallback(() => {
-    secondEnterPromptIdRef.current = null;
-    if (queuedPrompts.length > 0) {
-      skipNextQueuedFlushRef.current = true;
-    }
-    onStop?.();
-  }, [onStop, queuedPrompts.length]);
+  }, [completedTurnIds, interactionDisabled, sendNextQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompts, queuedPromptStorageKey]);
 
   const submit = useCallback(() => {
     if (modelNeedsSetup) {
@@ -2385,7 +2425,6 @@ export function ThreadComposer({
     <WorkspaceAccessToggle
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
-      canUseFullAccess={workspaceControls?.can_use_full_access !== false}
       isHero={isHero}
       onChange={onWorkspaceScopeChange}
     />
@@ -2645,7 +2684,7 @@ export function ThreadComposer({
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
             className={cn(
               inputTextClasses,
-              "relative z-10 block caret-foreground placeholder:text-muted-foreground/70",
+              "relative z-10 block caret-foreground placeholder:text-muted-foreground",
               "focus:outline-none focus-visible:outline-none",
               "disabled:cursor-not-allowed",
               hasMentionDecorations && "text-transparent selection:bg-primary/20",
@@ -3185,6 +3224,7 @@ function CliAppMentionPalette({
                   }}
                   className={cn(
                     floatingItemClassName,
+                    floatingItemFocusClassName,
                     "touch-target flex min-h-10 w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors",
                     selected
                       ? "bg-foreground/[0.055] text-foreground"
@@ -3333,6 +3373,7 @@ function SlashCommandPalette({
               }}
               className={cn(
                 floatingItemClassName,
+                floatingItemFocusClassName,
                 "flex min-h-[44px] w-full items-center gap-3 px-3 py-2 text-left transition-colors",
                 selected
                   ? "bg-foreground/[0.065] text-foreground dark:bg-white/[0.09]"

@@ -21,16 +21,20 @@ from nanobot.utils.llm_runtime import LLMRuntime
 
 
 class _EventStream(httpx.AsyncByteStream):
-    def __init__(self, events: list[dict], *, stall_at: int | None = None) -> None:
+    def __init__(
+        self, events: list[dict], *, stall_at: int | None = None, event_delay: float = 0,
+    ) -> None:
         self.events = events
         self.stall_at = stall_at
+        self.event_delay = event_delay
         self.closed = False
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
         for index, event in enumerate(self.events):
             if index == self.stall_at:
                 await asyncio.Event().wait()
-            await asyncio.sleep(0.05)
+            if self.event_delay:
+                await asyncio.sleep(self.event_delay)
             yield f"data: {json.dumps(event)}\n\n".encode()
 
     async def aclose(self) -> None:
@@ -74,15 +78,18 @@ def _events(api: str, kind: str) -> list[dict]:
 
 @pytest.fixture
 async def make_provider(monkeypatch):
-    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0.3")
     clients = []
 
-    async def make(api: str, kind: str, *, stall_at: int | None = None):
-        stream = _EventStream(_events(api, kind), stall_at=stall_at)
+    async def make(
+        api: str, kind: str, *, stall_at: int | None = None,
+        event_delay: float = 0, idle_timeout: float = 5,
+    ):
+        monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", str(idle_timeout))
+        stream = _EventStream(_events(api, kind), stall_at=stall_at, event_delay=event_delay)
 
         def handler(request: httpx.Request) -> httpx.Response:
             assert json.loads(request.content)["stream"] is True
-            assert request.extensions["timeout"]["read"] == 0.3
+            assert request.extensions["timeout"]["read"] == idle_timeout
             return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=stream)
 
         client = AsyncOpenAI(
@@ -111,7 +118,7 @@ async def make_provider(monkeypatch):
 @pytest.mark.parametrize("api", ["chat", "responses", "azure"])
 @pytest.mark.parametrize("kind", ["content", "reasoning", "tool", "metadata"])
 async def test_silent_stream_renews_idle_timeout_on_every_event(make_provider, api, kind):
-    provider, stream = await make_provider(api, kind)
+    provider, stream = await make_provider(api, kind, event_delay=0.05, idle_timeout=0.3)
     response = await provider.chat_stream_with_retry([{"role": "user", "content": "work"}])
     assert response.finish_reason == "stop"
     assert response.content is not None and response.content.strip().endswith("done")
@@ -121,7 +128,7 @@ async def test_silent_stream_renews_idle_timeout_on_every_event(make_provider, a
 @pytest.mark.parametrize("api", ["chat", "responses", "azure"])
 @pytest.mark.parametrize("stall_at", [0, 2], ids=["first-event", "after-reasoning"])
 async def test_silent_stream_times_out_without_events(make_provider, api, stall_at):
-    provider, stream = await make_provider(api, "reasoning", stall_at=stall_at)
+    provider, stream = await make_provider(api, "reasoning", stall_at=stall_at, idle_timeout=0.3)
     response = await asyncio.wait_for(
         provider.chat_stream_with_retry([{"role": "user", "content": "work"}]),
         timeout=2,
@@ -182,7 +189,7 @@ async def test_runner_streams_past_old_wall_limit_with_optional_ui(
     make_provider, monkeypatch, show_deltas,
 ):
     monkeypatch.setenv("NANOBOT_LLM_TIMEOUT_S", "0.01")
-    provider, _ = await make_provider("chat", "reasoning")
+    provider, _ = await make_provider("chat", "reasoning", event_delay=0.05)
     content_deltas = []
 
     class Hook(AgentHook):

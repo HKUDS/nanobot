@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 
-import type { ChannelPresentation } from "@/components/settings/channels/catalog";
+import type { ChannelPresentation } from "@/channel-plugins/catalog";
 import type {
   NanobotFeatureInfo,
   NanobotFeaturesPayload,

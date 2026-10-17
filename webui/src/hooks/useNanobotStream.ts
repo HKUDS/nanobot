@@ -1,5 +1,5 @@
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
@@ -46,6 +46,8 @@ type PendingStreamEvent =
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
 // Markdown and layout work must leave room for input between visible updates.
 const VISIBLE_STREAM_FLUSH_INTERVAL_MS = 50;
+const EMPTY_INITIAL_MESSAGES: UIMessage[] = [];
+const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
 
 /**
  * Subscribe to a chat by ID. Returns the in-memory message list for the chat,
@@ -134,10 +136,11 @@ function appendProjectedSessionInput(
 
 export function useNanobotStream(
   chatId: string | null,
-  initialMessages: UIMessage[] = [],
+  initialMessages: UIMessage[] = EMPTY_INITIAL_MESSAGES,
   hasPendingToolCalls = false,
   onTurnEnd?: () => void,
   onStreamDetach?: (messages: UIMessage[]) => void,
+  completedTurnIds: readonly string[] = EMPTY_COMPLETED_TURN_IDS,
 ): {
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
@@ -186,7 +189,13 @@ export function useNanobotStream(
   }, []);
   const [messageOwnerChatId, setMessageOwnerChatId] = useState(chatId);
   /** If history ends in unfinished agent activity, keep the loading spinner alive. */
-  const initialStreaming = hasPendingAgentActivity(initialMessages);
+  const initialStreaming = useMemo(() => {
+    if (completedTurnIds.length === 0) return hasPendingAgentActivity(initialMessages);
+    const completedInitialTurns = new Set(completedTurnIds);
+    return hasPendingAgentActivity(initialMessages.filter((message) => (
+      !message.turnId || !completedInitialTurns.has(message.turnId)
+    )));
+  }, [completedTurnIds, initialMessages]);
   const [isStreaming, setIsStreaming] = useState(
     initialStreaming || hasPendingToolCalls || initialRunStartedAt !== null,
   );
@@ -518,7 +527,7 @@ export function useNanobotStream(
     setMessages(initialMessages);
     setMessageOwnerChatId(chatId);
     setIsStreaming(
-      hasPendingAgentActivity(initialMessages)
+      initialStreaming
       || hasPendingToolCalls
       || restoredRunStartedAt !== null,
     );
@@ -1023,7 +1032,7 @@ export function useNanobotStream(
 
   const reconcileTurnComplete = useCallback(() => {
     clearPendingStreamWork();
-    projectionRef.current = resetThreadProjectionCursor(projectionRef.current);
+    projectionRef.current = resetThreadProjectionCursor(projectionRef.current, messagesRef.current);
     setRunStartedAt(null);
     setRetryStatus(null);
     setIsStreaming(false);

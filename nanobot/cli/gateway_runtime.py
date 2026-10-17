@@ -4,6 +4,8 @@ import asyncio
 import signal
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextlib import suppress
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,8 +17,14 @@ from nanobot import __logo__, __version__
 from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.image_generation import (
+    register_image_generation_tool,
+    reload_image_generation_tool,
+)
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.cli import terminal as cli_terminal
 from nanobot.cli.runtime_config import _migrate_cron_store
 from nanobot.cli.webui_support import (
@@ -40,7 +48,9 @@ from nanobot.session.keys import (
     HEARTBEAT_SESSION_KEY,
     UNIFIED_SESSION_KEY,
     last_channel_from_metadata,
+    session_key_for_channel,
 )
+from nanobot.session.manager import SessionManager
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.token_encoding import warmup_token_encoding
@@ -51,6 +61,48 @@ from nanobot.webui.sidebar_state import read_webui_sidebar_state
 __all__ = ["_run_gateway"]
 
 console = Console()
+
+
+async def _deliver_to_channel(
+    msg: OutboundMessage,
+    *,
+    bus: MessageBus,
+    session_manager: SessionManager,
+    unified_session: bool = False,
+    record: bool = False,
+    session_key: str | None = None,
+    session_generation: str | None = None,
+) -> None:
+    """Publish a user-visible message and mirror it into its admitted session."""
+    metadata = dict(msg.metadata or {})
+    record = record or bool(metadata.pop("_record_channel_delivery", False))
+    raw_key = metadata.pop("_session_key", None)
+    raw_generation = metadata.pop("_session_generation", None)
+    expected_generation = (
+        session_generation
+        if session_generation is not None
+        else raw_generation if isinstance(raw_generation, str) else None
+    )
+    if metadata != (msg.metadata or {}):
+        msg = replace(msg, metadata=metadata)
+    if record and msg.channel != "cli" and msg.content.strip():
+        key = session_key or (raw_key if isinstance(raw_key, str) else None)
+        if key is None:
+            key = session_key_for_channel(
+                msg.channel, msg.chat_id, unified_session=unified_session,
+            )
+        if expected_generation is None:
+            # Cross-target sends admit their target before recording; subsequent
+            # deletion or reset must still revoke this delivery's generation.
+            target = await session_manager.state.get_header(key)
+            expected_generation = target.generation
+        extra: dict[str, Any] = {"_channel_delivery": True}
+        if msg.media:
+            extra["media"] = list(msg.media)
+        await session_manager.state.record_delivery(
+            key, msg.content, extra, expected_generation=expected_generation,
+        )
+    await bus.publish_outbound(msg)
 
 
 class _MCPReadinessHook(AgentHook):
@@ -123,7 +175,11 @@ def _install_gateway_shutdown_handlers(
         print_status("\nShutting down... Press Ctrl+C again to force.")
         shutdown_event.set()
 
-    for signum in (signal.SIGINT, signal.SIGTERM):
+    shutdown_signals = [signal.SIGINT, signal.SIGTERM]
+    if sigbreak := getattr(signal, "SIGBREAK", None):
+        shutdown_signals.append(sigbreak)
+
+    for signum in shutdown_signals:
         try:
             loop.add_signal_handler(signum, request_shutdown, signum)
         except (NotImplementedError, RuntimeError, ValueError):
@@ -377,9 +433,7 @@ def _run_gateway(
         load_provider_snapshot,
     )
     from nanobot.providers.fallback_provider import FallbackProvider
-    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
-    from nanobot.session.recovery import RecoveryCoordinator
     from nanobot.session.webui_turns import (
         WebuiTurnCoordinator,
         WebuiTurnRoutePolicy,
@@ -387,6 +441,7 @@ def _run_gateway(
     )
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
+    from nanobot.webui.recovery import RecoveryCoordinator
 
     port = port if port is not None else config.gateway.port
     webui_url = _webui_browser_url(config)
@@ -476,6 +531,7 @@ def _run_gateway(
     )
 
     tools = ToolRegistry()
+    register_image_generation_tool(config, tools, workspace=config.workspace_path)
     mcp_provider = MCPProvider.from_config(config, tools)
 
     recovery = RecoveryCoordinator(
@@ -492,7 +548,6 @@ def _run_gateway(
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-        image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
         turn_delivery_factory=turn_delivery_factory,
@@ -512,9 +567,6 @@ def _run_gateway(
         schedule_background=_schedule_webui_background,
         recovery=recovery,
     )
-    from nanobot.bus.events import OutboundMessage
-    from nanobot.session.keys import session_key_for_channel
-
     def _channel_session_key(channel: str, chat_id: str) -> str:
         return session_key_for_channel(
             channel,
@@ -522,41 +574,16 @@ def _run_gateway(
             unified_session=config.agents.defaults.unified_session,
         )
 
-    async def _deliver_to_channel(
-        msg: OutboundMessage, *, record: bool = False, session_key: str | None = None,
-    ) -> None:
-        """Publish a user-visible message and mirror it into that channel's session."""
-        metadata = dict(msg.metadata or {})
-        record = record or bool(metadata.pop("_record_channel_delivery", False))
-        if metadata != (msg.metadata or {}):
-            msg = OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=msg.content,
-                reply_to=msg.reply_to,
-                media=msg.media,
-                metadata=metadata,
-                buttons=msg.buttons,
-            )
-        if (
-            record
-            and msg.channel != "cli"
-            and msg.content.strip()
-            and hasattr(session_manager, "get_or_create")
-            and hasattr(session_manager, "save")
-        ):
-            key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            session = session_manager.get_or_create(key)
-            extra: dict[str, Any] = {"_channel_delivery": True}
-            if msg.media:
-                extra["media"] = list(msg.media)
-            session.add_message("assistant", msg.content, **extra)
-            session_manager.save(session)
-        await bus.publish_outbound(msg)
+    deliver_to_channel = partial(
+        _deliver_to_channel,
+        bus=bus,
+        session_manager=session_manager,
+        unified_session=config.agents.defaults.unified_session,
+    )
 
     message_tool = agent.tools.get("message")
     if isinstance(message_tool, MessageTool):
-        message_tool.set_send_callback(_deliver_to_channel)
+        message_tool.set_send_callback(deliver_to_channel)
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | CronRunResult | None:
@@ -569,7 +596,6 @@ def _run_gateway(
             from nanobot.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
-            prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
             resp = None
@@ -621,7 +647,7 @@ def _run_gateway(
                 if sha:
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
-                prune_dream_sessions(agent.sessions)
+                await agent.sessions.state.prune_dream_sessions()
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
@@ -636,9 +662,14 @@ def _run_gateway(
                 logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
                 return None
 
-            channel, chat_id = _pick_heartbeat_target()
+            channel, chat_id = await _pick_heartbeat_target()
             if channel == "cli":
                 return None
+            delivery_key = _channel_session_key(channel, chat_id)
+            delivery_session = await session_manager.state.read(delivery_key)
+            if delivery_session is None:
+                return None
+            delivery_generation = delivery_session.generation
 
             prompt = (
                 _HEARTBEAT_PREAMBLE
@@ -683,9 +714,11 @@ def _run_gateway(
 
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")
-                await _deliver_to_channel(
+                await deliver_to_channel(
                     OutboundMessage(channel=channel, chat_id=chat_id, content=response),
                     record=True,
+                    session_key=delivery_key,
+                    session_generation=delivery_generation,
                 )
             else:
                 logger.info("Heartbeat: silenced by post-run evaluation")
@@ -716,6 +749,13 @@ def _run_gateway(
         agent.context.skills.disabled_skills = set(disabled_skills)
         agent.subagents.disabled_skills = set(disabled_skills)
 
+    async def _webui_image_generation_reload() -> dict[str, Any]:
+        return await reload_image_generation_tool(
+            config_path=Path(config_path),
+            workspace=agent.workspace,
+            registry=tools,
+        )
+
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
     channels = ChannelManager(
@@ -733,6 +773,7 @@ def _run_gateway(
         webui_runtime_capabilities=webui_runtime_capabilities,
         webui_mcp_runtime_status=mcp_provider.runtime_status,
         webui_mcp_reload=mcp_provider.reload,
+        webui_image_generation_reload=_webui_image_generation_reload,
         webui_skill_state_action=_webui_skill_state_action,
         webui_recovery_action=recovery.handle_action,
         webui_subagent_manager=agent.subagents,
@@ -740,17 +781,17 @@ def _run_gateway(
         config_path=Path(config_path),
     )
 
-    def _pick_heartbeat_target() -> tuple[str, str]:
+    async def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        sidebar_state = read_webui_sidebar_state()
+        sidebar_state = await asyncio.to_thread(read_webui_sidebar_state)
         unified_metadata = None
         if config.agents.defaults.unified_session:
-            record = session_manager.read_session_metadata(UNIFIED_SESSION_KEY)
+            record = await session_manager.state.read_metadata(UNIFIED_SESSION_KEY)
             if isinstance(record, dict) and isinstance(record.get("metadata"), dict):
                 unified_metadata = record["metadata"]
         return _pick_heartbeat_target_from_sessions(
             enabled_channels=channels.enabled_channels,
-            sessions=session_manager.list_sessions(),
+            sessions=await session_manager.state.list_sessions(),
             archived_keys=sidebar_state.get("archived_keys", []),
             unified_session_metadata=unified_metadata,
         )
@@ -915,6 +956,7 @@ def _run_gateway(
             console.print,
         )
         try:
+            await agent.subagents.recover_interrupted()
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
@@ -937,7 +979,7 @@ def _run_gateway(
                 if orphaned:
                     logger.info("Last local client disappeared; stopping on-demand gateway")
 
-            tasks = [
+            tasks.extend([
                 asyncio.create_task(
                     watch_config_file(
                         Path(config_path),
@@ -959,7 +1001,7 @@ def _run_gateway(
                     _monitor_local_clients(),
                     name="nanobot-gateway-client-monitor",
                 ),
-            ]
+            ])
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),
@@ -1024,12 +1066,6 @@ def _run_gateway(
                     runtime_tasks,
                 )
                 await bus.drain()
-                # Flush all cached sessions to durable storage before exit.
-                # This prevents data loss on filesystems with write-back
-                # caching (rclone VFS, NFS, FUSE mounts, etc.).
-                flushed = agent.sessions.flush_all()
-                if flushed:
-                    logger.info("Shutdown: flushed {} session(s) to disk", flushed)
             finally:
                 restore_shutdown_handlers()
 
@@ -1037,7 +1073,6 @@ def _run_gateway(
         gateway_runtime.foreground_instance(gateway_start_options),
         webui_turn_coordinator.connected(),
     ):
-        agent.subagents.recover_interrupted()
         if health_server_enabled:
             gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

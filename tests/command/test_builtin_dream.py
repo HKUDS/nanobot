@@ -141,12 +141,21 @@ def _make_dream_prompt_ctx(tmp_path, raw: str = "/dream-prompt", args: str = "")
     return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args=args, loop=loop)
 
 
+async def _run_dream_command(ctx: CommandContext) -> OutboundMessage:
+    before = asyncio.all_tasks()
+    immediate = await cmd_dream(ctx)
+    try:
+        await asyncio.gather(*(asyncio.all_tasks() - before))
+    finally:
+        await ctx.loop.sessions.state.aclose()
+    return immediate
+
+
 @pytest.mark.asyncio
 async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
     ctx, bus = _make_dream_ctx(tmp_path)
 
-    immediate = await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    immediate = await _run_dream_command(ctx)
 
     assert immediate.content == "Dreaming..."
     assert len(bus.outbound) == 1
@@ -185,8 +194,7 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 
-    await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    await _run_dream_command(ctx)
 
     assert len(calls) == 1
     assert callable(calls[0][1]["on_progress"])
@@ -243,8 +251,7 @@ def _build_runnable_dream(
 async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
     """A completed run with a real file delta advances the cursor."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="SOUL.md: +1 -0")
-    await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    await _run_dream_command(ctx)
     assert store._last_dream_cursor == 42
 
 
@@ -252,8 +259,7 @@ async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
 async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
     """A completed no-op has processed the batch and must not repeat it."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="")
-    await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    await _run_dream_command(ctx)
     assert store._last_dream_cursor == 42
     assert "no memory changes" in ctx.loop.bus.outbound[0].content
 
@@ -267,8 +273,7 @@ async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
         content_diff="SOUL.md: +1 -0",
         stop_reason="length",
     )
-    await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    await _run_dream_command(ctx)
     assert store._last_dream_cursor == 5
     assert "did not complete" in ctx.loop.bus.outbound[0].content
 
@@ -282,8 +287,7 @@ async def test_dream_advances_cursor_when_completed_after_tool_error(tmp_path) -
         content_diff="",
         tool_error=True,
     )
-    await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    await _run_dream_command(ctx)
     assert store._last_dream_cursor == 42
     assert "no memory changes" in ctx.loop.bus.outbound[0].content
 
@@ -322,8 +326,7 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 
-    await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    await _run_dream_command(ctx)
 
     assert len(processed_prompts) == 1
     assert "entry-20" in processed_prompts[0]
@@ -343,8 +346,7 @@ async def test_dream_non_git_falls_back_to_completion_gate(tmp_path) -> None:
     ctx, store = _build_runnable_dream(
         tmp_path, initialized=False, content_diff="", stop_reason="completed",
     )
-    await cmd_dream(ctx)
-    await asyncio.sleep(0)
+    await _run_dream_command(ctx)
     assert store._last_dream_cursor == 42  # advanced via completion fallback
 
 

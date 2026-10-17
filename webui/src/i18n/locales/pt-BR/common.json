@@ -339,6 +339,9 @@
       "description": "Interface web do nanobot — converse com o seu espaço de trabalho do nanobot."
     },
     "pairing": {
+      "haveCode": "Já recebeu um código?",
+      "deliveryFailed": "Não foi possível enviar o código. Verifique as permissões de envio do bot e os logs do gateway. Depois, envie outra mensagem privada para tentar novamente.",
+      "deliverySending": "Enviando o código ao chat. Se ele não chegar, envie outra mensagem privada ao bot para tentar novamente.",
       "title": "Parear conta",
       "description": "Digite o código de pareamento recebido na conversa.",
       "code": "Código de vinculação",
@@ -388,6 +391,13 @@
     },
     "runtimeConfig": {
       "apiSaved": "Salvo. Reinicie o serviço de API para aplicar as alterações.",
+      "commandRuntime": {
+        "custom": "Personalizada (segundos)",
+        "customLabel": "Duração personalizada (segundos)",
+        "noLimit": "Sem limite de tempo",
+        "limit": "Com limite: até {{duration}}",
+        "rangeError": "Digite um número inteiro de segundos de 1 a {{max}}, ou escolha Sem limite de tempo."
+      },
       "fields": {
         "agents_defaults_timezone_mode": {"label": "Fuso do sistema", "help": "Desative para escolher um fuso horário.\n\nDesative para escolher o fuso horário manualmente."},
         "agents_defaults_timezone": {"label": "Fuso horário", "help": "Os deslocamentos UTC usam a data atual.\n\nEscolha um fuso horário. A diferença em relação ao UTC considera a data atual."},
@@ -407,7 +417,7 @@
         "tools_cli_apps_enable": {"label": "Apps CLI", "help": "Permita instalar, gerenciar e executar apps CLI.\n\nPermite que o agente gerencie e execute aplicativos de linha de comando."},
         "tools_my_enable": {"label": "Ver configuração", "help": "Permita que o agente consulte sua configuração.\n\nPermite que o agente consulte sua própria configuração."},
         "tools_my_allow_set": {"label": "Editar configuração", "help": "Permita que o agente altere sua configuração.\n\nPermite que a ferramenta de autogerenciamento atualize a configuração."},
-        "tools_exec_timeout": {"label": "Tempo limite de comandos", "help": "Pare os comandos após este número de segundos; 0 significa sem limite.\n\nDuração máxima dos comandos de shell. 0 significa sem limite."},
+        "tools_exec_timeout": {"label": "Duração dos comandos", "help": "Limite padrão de duração dos comandos de shell.\n\nA saída e a espera não prolongam esse limite. Escolha Sem limite de tempo para remover o limite de duração."},
         "tools_exec_path_prepend": {"label": "Prioridade no PATH", "help": "Pesquise primeiro nestas pastas.\n\nDiretórios adicionados ao início de PATH. Separe-os com ponto e vírgula no Windows ou com dois-pontos no macOS e no Linux."},
         "tools_exec_path_append": {"label": "Adições ao PATH", "help": "Pesquise nestas pastas por último.\n\nDiretórios adicionados ao final de PATH. Separe-os com ponto e vírgula no Windows ou com dois-pontos no macOS e no Linux."},
         "tools_exec_sandbox": {"label": "Sandbox de comandos", "help": "Isole os processos de comandos; requer suporte do sistema.\n\nUse bwrap no Linux ou Seatbelt no macOS. As verificações do espaço de trabalho, por si só, não isolam processos."},
@@ -416,7 +426,7 @@
         "tools_exec_allowed_env_keys": {"label": "Variáveis de ambiente", "help": "Variáveis extras para os comandos, um nome por linha.\n\nVariáveis adicionais passadas aos comandos, uma por linha. As variáveis básicas necessárias continuam disponíveis."},
         "tools_exec_allow_patterns": {"label": "Comandos permitidos", "help": "Execute apenas comandos que correspondam totalmente às regras de permissão.\n\nUma expressão regular por linha. Se houver regras, cada trecho do comando deve corresponder por completo a uma delas. Os comandos permitidos ignoram as regras de bloqueio integradas e personalizadas, mas continuam sujeitos às restrições de rede e do espaço de trabalho."},
         "tools_exec_deny_patterns": {"label": "Comandos bloqueados", "help": "Bloqueie comandos que correspondam a estas regras.\n\nExpressões regulares de bloqueio adicionais, uma por linha. As regras de permissão explícitas têm prioridade sobre as regras de bloqueio integradas e personalizadas."},
-        "tools_web_proxy": {"label": "Proxy web", "help": "URL do proxy; deixe vazio para usar a rede padrão.\n\nURL do proxy das ferramentas web. Deixe vazio para usar a rede padrão."},
+        "tools_web_proxy": {"label": "Proxy web", "help": "Usado para a pesquisa web e a leitura de páginas pelo agente. Deixe em branco para usar a rede padrão, incluindo as variáveis de ambiente de proxy.\n\n127.0.0.1 é a máquina que executa nanobot. Esta configuração não altera as conexões de modelos, MCP ou do navegador."},
         "tools_web_user_agent": {"label": "Cabeçalho User-Agent", "help": "User-Agent das solicitações web; deixe vazio para usar o padrão.\n\nCabeçalho User-Agent personalizado. Deixe vazio para usar o valor padrão."},
         "tools_restrict_to_workspace": {"label": "Restrição do espaço", "help": "Limites globais do espaço; permissões de conversas WebUI são separadas.\n\nPolítica global das ferramentas. As permissões de cada conversa WebUI são configuradas separadamente."},
         "tools_ssrf_whitelist": {"label": "IPs permitidos", "help": "IPs ou faixas CIDR permitidos, um por linha.\n\nEndereços IP ou faixas CIDR isentos da proteção de solicitações de saída, um por linha."},
@@ -507,10 +517,12 @@
       "voiceInput": "Transcrição"
     },
     "models": {
+      "requestOverridesHint": "Deixe os campos vazios para usar os ajustes do provedor. Trocar de provedor apaga estes valores.",
+      "otherPresets": "Presets alternativos",
       "catalogAuthRequired": "A autorização expirou. Entre novamente.",
-      "catalogUnavailable": "Não foi possível atualizar os modelos. Tente mais tarde.",
-      "catalogStale": "Exibindo modelos em cache; a lista pode estar desatualizada.",
-      "catalogFallback": "Exibindo modelos integrados; a lista pode estar desatualizada.",
+      "catalogUnavailable": "Falha ao atualizar. Clique para tentar novamente",
+      "catalogStale": "A lista em cache pode estar desatualizada.",
+      "catalogFallback": "A lista integrada pode estar desatualizada.",
       "selectModel": "Selecionar modelo",
       "addConfiguration": "Adicionar configuração",
       "newConfiguration": "Nova configuração de modelo",
@@ -520,7 +532,6 @@
       "configurationNamePlaceholder": "Escrita rápida",
       "callOrder": "Ordem dos modelos",
       "primary": "Principal",
-      "fallbackNumber": "Alternativo {{number}}",
       "addToOrder": "Ativar predefinição",
       "newPreset": "Novo preset",
       "newPresetHelp": "Salve um modelo e seus ajustes para reutilizar.",
@@ -557,7 +568,7 @@
       "disabled": "Desabilitado",
       "noPresets": "Ainda não há predefinições de modelo",
       "noPresetsHelp": "Crie uma predefinição e adicione-a à ordem de chamada.",
-      "removeBeforeDelete": "Escolha outra predefinição principal antes de excluir esta.",
+      "removeBeforeDelete": "Não é possível excluir o modelo principal",
       "providerSetupRequired": "Configuração do provedor necessária",
       "configureProviderBeforeSaving": "Configure este provedor antes de salvar a predefinição.",
       "deletePresetTitle": "Excluir predefinição de modelo?",
@@ -999,6 +1010,19 @@
       }
     },
     "providers": {
+      "manageProviders": "Gerenciar provedores",
+      "configureProvider": "Configurar {{provider}}…",
+      "sharedProviderHelp": "As alterações afetam todas as predefinições que usam este provedor.",
+      "parameterCount": "{{count}} entradas",
+      "useProviderSettings": "Usar ajustes do provedor",
+      "applyToDraft": "Adicionar à predefinição",
+      "draftHint": "Salve a nova predefinição para aplicar estes ajustes.",
+      "invalidObject": "Insira um objeto JSON, por exemplo: {\"key\":\"value\"}.",
+      "stringValuesRequired": "Use valores de texto nos cabeçalhos e parâmetros de consulta.",
+      "maskedSecretMissing": "Nenhum segredo salvo corresponde a esta máscara. Digite o valor real ou remova a entrada.",
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "Local",
       "title": "Provedores",
       "searchPlaceholder": "Buscar provedores",
       "noMatches": "Nenhum provedor corresponde a esta busca.",
@@ -1025,7 +1049,7 @@
       "extraBody": "Parâmetros do corpo",
       "extraQuery": "Parâmetros de consulta",
       "capabilityFastMode": "Modo rápido",
-      "capabilityFastModeHelp": "Respostas mais rápidas consomem créditos mais rápido.\n\nUsa o nível de serviço prioritário da OpenAI para respostas mais rápidas. Isso consome créditos mais rapidamente.",
+      "capabilityFastModeHelp": "Respostas mais rápidas, maior consumo.",
       "capabilityXSearch": "Pesquisa no X",
       "capabilityXSearchHelp": "Modelos Grok compatíveis podem pesquisar no X.\n\nPermite que modelos Grok compatíveis usem o X Search hospedado pela xAI. A atividade de pesquisa aparece no chat.",
       "capabilityOpenAISearch": "Pesquisa web da OpenAI",
@@ -1035,6 +1059,8 @@
       "thirdPartyBrands": "Nomes de produtos, logotipos e marcas são propriedades de seus respectivos donos. O uso é apenas para identificação e não implica endosso."
     },
     "image": {
+      "imagesApiHint": "Usa a OpenAI Images API na URL desta conexão. Verifique se o endpoint gera imagens.",
+      "requestOverridesHint": "Apenas para imagens. Campos vazios usam os ajustes do provedor. Trocar de provedor apaga estes valores.",
       "selectProvider": "Selecionar provedor",
       "selectAspect": "Selecionar proporção",
       "selectSize": "Selecionar tamanho",
@@ -1614,7 +1640,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Não foi possível carregar as subtarefas.",
       "stopFailed": "Não foi possível interromper esta tarefa.",
       "stopTask": "Interromper {{label}}",
       "receiptHelp": "Entregue significa que a mensagem foi incluída na próxima solicitação do subagente, sem confirmar sua execução.",
@@ -2275,6 +2300,7 @@
     }
   },
   "common": {
+    "retry": "Tentar novamente",
     "dismiss": "Descartar",
     "close": "Fechar",
     "current": "Atual",

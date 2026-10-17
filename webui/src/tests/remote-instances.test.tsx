@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RemoteInstances, useRemoteConnections } from "@/components/remote/RemoteInstances";
+import { RemoteInstances } from "@/components/remote/RemoteInstances";
+import { useRemoteConnections } from "@/components/remote/remote-context";
 import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
 import { Sidebar } from "@/components/Sidebar";
 import { HOST_BRIDGE } from "@/components/remote/host-bridge";

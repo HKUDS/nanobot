@@ -4,7 +4,7 @@ import type {
   ChannelConfigField,
   ChannelFieldSection,
   ChannelSetupRequirement,
-} from "@/components/settings/channels/catalog";
+} from "@/channel-plugins/catalog";
 import {
   CredentialForm,
   channelFieldInputId,

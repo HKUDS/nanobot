@@ -10,16 +10,7 @@ import { logoFallbackUrls } from "@/lib/provider-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
 import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { composerMentionLabel } from "@/lib/composer-mention-text";
-
-type CliAppMentionSegment =
-  | { kind: "text"; text: string }
-  | { kind: "cli"; text: string; app: CliAppInfo };
-
-export type CapabilityMentionSegment =
-  | CliAppMentionSegment
-  | { kind: "mcp"; text: string; preset: McpPresetInfo }
-  | { kind: "session"; text: string; mention: SessionMention };
+import { composerMentionLabel, type CapabilityMentionSegment } from "@/lib/composer-mention-text";
 
 // Paint-only weight keeps the native textarea's regular-width caret and wrapping in sync.
 const COMPOSER_BRAND_NAME_CLASS = "[-webkit-text-stroke:0.4px_currentColor]";
@@ -188,7 +179,6 @@ function CliAppMentionToken({
   isHero?: boolean;
 }) {
   const { t } = useTranslation();
-  const color = app.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const displayName = app.display_name?.trim() || app.name;
   const mentionName = variant === "message"
     ? displayName
@@ -204,7 +194,6 @@ function CliAppMentionToken({
       title={t("thread.composer.mentions.cliTitle", {
         name: variant === "message" ? `${displayName} (${label})` : displayName,
       })}
-      color={color}
       className={variant === "composer" ? "font-normal" : "inline-flex max-w-full items-baseline [overflow-wrap:anywhere]"}
     >
       <span
@@ -259,7 +248,6 @@ function McpPresetMentionToken({
   isHero?: boolean;
 }) {
   const { t } = useTranslation();
-  const color = preset.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const displayName = preset.display_name?.trim() || preset.name;
   const mentionName = variant === "message"
     ? displayName
@@ -275,7 +263,6 @@ function McpPresetMentionToken({
       title={t("thread.composer.mentions.mcpTitle", {
         name: variant === "message" ? `${displayName} (${label})` : displayName,
       })}
-      color={color}
       className={variant === "composer" ? "font-normal" : "inline-flex max-w-full items-baseline [overflow-wrap:anywhere]"}
     >
       <span

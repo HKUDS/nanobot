@@ -50,7 +50,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { Input, SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
@@ -173,7 +173,7 @@ export function AppsCatalogSettings({
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
   onMcpAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect", name: string, values?: Record<string, string>) => void;
-  onMcpOAuthConnect: (name: string, reset?: boolean) => void;
+  onMcpOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onMcpOAuthCancel: () => void;
   onMcpOAuthOpen: () => void;
   onMcpOAuthCallbackUrlChange: (value: string) => void;
@@ -259,7 +259,7 @@ export function AppsCatalogSettings({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
+            <SearchInput
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder={tx("settings.apps.searchPlaceholder", "Search Apps")}
@@ -526,7 +526,7 @@ function McpAppsCatalogRow({
   showTypeBadge: boolean;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect", name: string, values?: Record<string, string>) => void;
-  onOAuthConnect: (name: string, reset?: boolean) => void;
+  onOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onOAuthCancel: () => void;
   onOAuthOpen: () => void;
   onOAuthCallbackUrlChange: (value: string) => void;
@@ -582,13 +582,13 @@ function McpAppsCatalogRow({
   const callbackErrorId = `${callbackInputId}-error`;
 
   const enableOrOpenSetup = () => {
-    if (isOAuth) {
-      onOAuthConnect(preset.name);
-      return;
-    }
     if (needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
       setManagementTab("connection");
       setManagementOpen(true);
+      return;
+    }
+    if (isOAuth) {
+      onOAuthConnect(preset.name);
       return;
     }
     onAction("enable", preset.name, values);
@@ -732,7 +732,7 @@ function McpAppsCatalogRow({
               visibleLabel={tx("settings.mcp.setup", "Connect")}
               busy={oauthBusy}
               disabled={anotherOAuthBusy}
-              onClick={() => onOAuthConnect(preset.name)}
+              onClick={enableOrOpenSetup}
             />
           ) : preset.installed && !preset.configured ? (
             <AppsActionButton

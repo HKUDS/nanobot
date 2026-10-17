@@ -74,6 +74,7 @@
     }
   },
   "custom": {
+    "addAssistant": "新增助理",
     "toggleAssistant": "{{name}} 助手",
     "configured": "已連接",
     "needsSetup": "需要授權",

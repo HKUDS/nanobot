@@ -90,6 +90,7 @@ import {
 } from "../views/footer-hints"
 import { copyWithSystemClipboard } from "../platform/clipboard"
 import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "../platform/host"
+import { applySelectionColors } from "../platform/selection"
 import { LOCAL_COMMANDS } from "./commands"
 import { CooperativeEventQueue } from "./event-queue"
 import {
@@ -404,6 +405,10 @@ export class NanobotTui {
     this.status = layout.status
     this.meta = layout.meta
     this.renderer.root.add(this.shell)
+    this.shell.renderBefore = () => {
+      const selection = this.renderer.getSelection()
+      if (selection) applySelectionColors(selection, this.palette.selection)
+    }
 
     this.renderer.keyInput.on("keypress", this.handleKey)
     this.renderer.on(CliRenderEvents.THEME_MODE, this.handleTheme)
@@ -1729,6 +1734,8 @@ export class NanobotTui {
     this.composerFrame.borderColor = this.palette.accent
     this.composer.backgroundColor = surface
     this.composer.focusedBackgroundColor = surface
+    this.composer.selectionBg = this.palette.selection.background
+    this.composer.selectionFg = this.palette.selection.foreground
     this.composer.placeholderColor = this.palette.muted
   }
 

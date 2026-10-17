@@ -339,6 +339,9 @@
       "description": "nanobot Web UI — nanobot ワークスペースと会話します。"
     },
     "pairing": {
+      "haveCode": "コードを受け取りましたか？",
+      "deliveryFailed": "ペアリングコードを送信できませんでした。ボットのメッセージ送信権限とゲートウェイのログを確認し、もう一度ボットにダイレクトメッセージを送ってください。",
+      "deliverySending": "チャットにペアリングコードを送信しています。届かない場合は、もう一度ボットにダイレクトメッセージを送ってください。",
       "title": "アカウント連携",
       "description": "チャットで受け取った連携コードを入力します。",
       "code": "ペアリングコード",
@@ -388,6 +391,13 @@
     },
     "runtimeConfig": {
       "apiSaved": "保存しました。API サービスを再起動すると反映されます。",
+      "commandRuntime": {
+        "custom": "カスタム（秒）",
+        "customLabel": "カスタム実行時間（秒）",
+        "noLimit": "時間制限なし",
+        "limit": "時間制限あり：最大 {{duration}}",
+        "rangeError": "1 から {{max}} までの整数で秒数を入力するか、「時間制限なし」を選んでください。"
+      },
       "fields": {
         "agents_defaults_timezone_mode": {"label": "システムの時間帯", "help": "オフにすると時間帯を指定できます。\n\nオフにすると手動でタイムゾーンを選択できます。"},
         "agents_defaults_timezone": {"label": "タイムゾーン", "help": "UTC オフセットは今日の日付に基づきます。\n\nタイムゾーンを選択します。UTC との時差は現在の日付に基づきます。"},
@@ -407,7 +417,7 @@
         "tools_cli_apps_enable": {"label": "CLI アプリ", "help": "CLI アプリのインストール・管理・実行を許可します。\n\nエージェントによる CLI アプリの管理と実行を許可します。"},
         "tools_my_enable": {"label": "設定を確認", "help": "エージェントによる自身の設定の確認を許可します。\n\nエージェントが自身の設定を確認できるようにします。"},
         "tools_my_allow_set": {"label": "設定を変更", "help": "エージェントによる自身の設定の変更を許可します。\n\n自己管理ツールによる設定の更新を許可します。"},
-        "tools_exec_timeout": {"label": "コマンドの制限時間", "help": "この秒数でコマンドを停止します。0 は無制限です。\n\nシェルコマンドの実行時間の上限。0 は無制限です。"},
+        "tools_exec_timeout": {"label": "コマンドの実行時間", "help": "シェルコマンドの既定の実行時間上限です。\n\n出力や待機によって上限は延長されません。「時間制限なし」を選ぶと実行時間の上限がなくなります。"},
         "tools_exec_path_prepend": {"label": "PATH の優先検索", "help": "これらのディレクトリを先に検索します。\n\nPATH の先頭に追加するディレクトリです。Windows ではセミコロン、macOS と Linux ではコロンで区切ります。"},
         "tools_exec_path_append": {"label": "PATH の末尾追加", "help": "これらのディレクトリを最後に検索します。\n\nPATH の末尾に追加するディレクトリです。Windows ではセミコロン、macOS と Linux ではコロンで区切ります。"},
         "tools_exec_sandbox": {"label": "コマンドサンドボックス", "help": "コマンドのプロセスを隔離します。システムの対応が必要です。\n\nLinux では bwrap、macOS では Seatbelt を使用します。ワークスペースの検査だけではプロセスは隔離されません。"},
@@ -416,7 +426,7 @@
         "tools_exec_allowed_env_keys": {"label": "環境変数", "help": "コマンドに追加で渡す変数名を1行に1つ指定します。\n\nコマンドに渡す環境変数を追加します。1 行に 1 つ指定してください。動作に必要な基本の環境変数は引き続き渡されます。"},
         "tools_exec_allow_patterns": {"label": "許可コマンド", "help": "許可ルールに完全一致するコマンドのみ実行します。\n\n1 行に 1 つ正規表現を指定します。設定すると、コマンドの各部分がいずれかのルールに完全一致する場合のみ実行できます。許可されたコマンドには組み込み・追加の禁止ルールを適用しませんが、ネットワークとワークスペースの制限は適用されます。"},
         "tools_exec_deny_patterns": {"label": "禁止コマンド", "help": "これらのルールに一致するコマンドを禁止します。\n\n追加の禁止ルールを正規表現で 1 行に 1 つ指定します。明示的な許可ルールは、組み込み・追加の禁止ルールより優先されます。"},
-        "tools_web_proxy": {"label": "ウェブプロキシ", "help": "プロキシの URL です。空欄では既定のネットワークを使います。\n\nウェブツール用のプロキシ URL。空欄の場合は既定のネットワークを使用します。"},
+        "tools_web_proxy": {"label": "ウェブプロキシ", "help": "エージェントのウェブ検索とページ読み取りに使用します。空欄では、プロキシ環境変数を含む既定のネットワーク設定を使用します。\n\n127.0.0.1 は nanobot を実行するマシンです。モデル、MCP、ブラウザーの接続には影響しません。"},
         "tools_web_user_agent": {"label": "User-Agent ヘッダー", "help": "ウェブ要求の User-Agent です。空欄では既定値を使います。\n\nカスタムの User-Agent ヘッダー。空欄の場合は既定値を使用します。"},
         "tools_restrict_to_workspace": {"label": "ワークスペース制限", "help": "ワークスペースの全体制限です。WebUI のチャット権限は別に設定します。\n\nツール全体のアクセス方針です。WebUI の会話ごとの権限は別途設定します。"},
         "tools_ssrf_whitelist": {"label": "許可 IP", "help": "許可する IP または CIDR を1行に1つ指定します。\n\n送信リクエストの保護から除外する IP/CIDR 範囲。1 行に 1 つ指定します。"},
@@ -762,6 +772,19 @@
       }
     },
     "providers": {
+      "manageProviders": "プロバイダーを管理",
+      "configureProvider": "{{provider}} を設定…",
+      "sharedProviderHelp": "変更はこのプロバイダーを使用するすべてのプリセットに適用されます。",
+      "parameterCount": "{{count}} 項目",
+      "useProviderSettings": "プロバイダー設定を使用",
+      "applyToDraft": "プリセットに追加",
+      "draftHint": "新しいプリセットを保存すると、この設定が適用されます。",
+      "invalidObject": "JSON オブジェクトを入力してください。例：{\"key\":\"value\"}。",
+      "stringValuesRequired": "ヘッダーとクエリパラメーターの値には文字列を使用してください。",
+      "maskedSecretMissing": "このマスクに対応する保存済みのシークレットがありません。実際の値を入力するか、この項目を削除してください。",
+      "providerGroupOAuth": "OAuth",
+      "providerGroupApiKey": "API Key",
+      "providerGroupLocal": "ローカル",
       "title": "プロバイダー",
       "searchPlaceholder": "プロバイダーを検索",
       "noMatches": "一致するプロバイダーはありません。",
@@ -788,13 +811,15 @@
       "extraBody": "本文のパラメーター",
       "extraQuery": "クエリパラメーター",
       "capabilityFastMode": "高速モード",
-      "capabilityFastModeHelp": "応答が速くなり、クレジットの消費も速くなります。\n\nOpenAI の優先サービス階層を使用して応答を高速化します。クレジットの消費も速くなります。",
+      "capabilityFastModeHelp": "応答が速くなり、使用量が増えます。",
       "capabilityXSearch": "X 検索",
       "capabilityXSearchHelp": "対応する Grok モデルが X を検索できます。\n\n対応する Grok モデルが xAI ホストの X Search を使用できるようにします。検索状況はチャットに表示されます。",
       "capabilityOpenAISearch": "OpenAI ウェブ検索",
       "capabilityOpenAISearchHelp": "対応するモデルがウェブ検索を使えます。\n\nResponses API 対応モデルがウェブを検索できるようにします。検索状況はチャットに表示されます。"
     },
     "image": {
+      "imagesApiHint": "この接続先で OpenAI Images API を使います。画像生成に対応していることを確認してください。",
+      "requestOverridesHint": "画像専用です。空欄はプロバイダー設定を使用します。プロバイダーを変更すると、ここに入力した値は消去されます。",
       "selectProvider": "プロバイダーを選択",
       "selectAspect": "比率を選択",
       "selectSize": "サイズを選択",
@@ -812,10 +837,12 @@
       "installing": "必要なパッケージをインストール中…"
     },
     "models": {
+      "requestOverridesHint": "空欄はプロバイダー設定を使用します。プロバイダーを変更すると、ここに入力した値は消去されます。",
+      "otherPresets": "フォールバックプリセット",
       "catalogAuthRequired": "認証が失効しました。再度ログインしてください。",
-      "catalogUnavailable": "モデルを更新できません。しばらくしてから再試行してください。",
-      "catalogStale": "キャッシュ済みのモデルを表示しています。最新ではない可能性があります。",
-      "catalogFallback": "組み込みのモデルを表示しています。最新ではない可能性があります。",
+      "catalogUnavailable": "更新できません。クリックして再試行",
+      "catalogStale": "キャッシュ済みの一覧は古い可能性があります。",
+      "catalogFallback": "組み込みの一覧は古い可能性があります。",
       "selectModel": "モデルを選択",
       "addConfiguration": "設定を追加",
       "newConfiguration": "新しいモデル設定",
@@ -825,7 +852,6 @@
       "configurationNamePlaceholder": "文章作成用",
       "callOrder": "モデルの順序",
       "primary": "プライマリ",
-      "fallbackNumber": "フォールバック {{number}}",
       "addToOrder": "プリセットを有効化",
       "newPreset": "プリセット作成",
       "newPresetHelp": "モデルと設定を保存して再利用します。",
@@ -862,7 +888,7 @@
       "disabled": "無効",
       "noPresets": "モデルプリセットはまだありません",
       "noPresetsHelp": "プリセットを作成してから呼び出し順序に追加してください。",
-      "removeBeforeDelete": "削除する前に、別のプリセットをメインに設定してください。",
+      "removeBeforeDelete": "メインモデルは削除できません",
       "providerSetupRequired": "プロバイダーの設定が必要です",
       "configureProviderBeforeSaving": "プリセットを保存する前に、このプロバイダーを設定してください。",
       "deletePresetTitle": "モデルプリセットを削除しますか？",
@@ -1600,7 +1626,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "サブタスクを読み込めませんでした。",
       "stopFailed": "このタスクを停止できませんでした。",
       "stopTask": "{{label}} を停止",
       "receiptHelp": "配信済みは子タスクの次のモデルリクエストにメッセージが含まれたことを示し、実行完了を意味しません。",
@@ -2261,6 +2286,7 @@
     }
   },
   "common": {
+    "retry": "再試行",
     "dismiss": "閉じる",
     "close": "閉じる",
     "current": "現在",

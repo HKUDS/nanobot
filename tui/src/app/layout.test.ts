@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { BoxRenderable, CliRenderEvents, StyledText, TextareaRenderable, TextAttributes, TextRenderable } from "@opentui/core"
+import { BoxRenderable, CliRenderEvents, StyledText, TextareaRenderable, TextAttributes, TextRenderable, rgbToHex } from "@opentui/core"
 import { MockTreeSitterClient, TestRecorder, setRendererCapabilities, createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { NanobotTui } from "./app"
 import type { Transcript } from "../rendering/transcript"
@@ -515,7 +515,7 @@ describe("NanobotTui layout and themes", () => {
     expect(internals.composerFrame.borderColor.toInts().slice(0, 3)).toEqual([185, 77, 11])
     expect(internals.composerFrame.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
     expect(internals.composer.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
-    expect(internals.composer.placeholderColor.toInts().slice(0, 3)).toEqual([111, 111, 120])
+    expect(internals.composer.placeholderColor.toInts().slice(0, 3)).toEqual([98, 98, 107])
 
     app.accept({ event: "attached", chat_id: "chat" })
     await waitUntil(() => internals.ready)
@@ -527,6 +527,118 @@ describe("NanobotTui layout and themes", () => {
     expect(composerLine).not.toContain("┌")
     expect(composerLine).not.toContain("┐")
   })
+
+  test.each(["light", "dark", "auto"] as const)(
+    "keeps the %s composer cursor cell readable at the end of input",
+    async (theme) => {
+      setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+      const app = NanobotTui.mount(
+        setup.renderer,
+        { ...options, theme },
+        client(),
+        new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      )
+      const ui = app as unknown as { ready: boolean; composer: TextareaRenderable }
+      app.accept({ event: "attached", chat_id: "chat" })
+      await waitUntil(() => ui.ready)
+      await setup.mockInput.pressKeys([..."Draft 中文🙂"])
+
+      const expectCursorCell = async () => {
+        await setup!.flush()
+        const cursor = setup!.renderer.getCursorState()
+        const spans = setup!.captureSpans().lines[cursor.y - 1]!.spans
+        let column = 1
+        const cell = spans.find((span) => {
+          const containsCursor = column <= cursor.x && cursor.x < column + span.width
+          column += span.width
+          return containsCursor
+        })!
+        expect(cursor.visible).toBe(true)
+        const buffer = setup!.renderer.currentRenderBuffer
+        expect(buffer.buffers.char[(cursor.y - 1) * buffer.width + cursor.x - 1]).toBe(32)
+        expect(cell.fg.equals(ui.composer.textColor)).toBe(true)
+        expect(cell.bg.equals(ui.composer.backgroundColor)).toBe(true)
+      }
+
+      await expectCursorCell()
+      setup.mockInput.pressKey("HOME")
+      setup.mockInput.pressKey("END")
+      await expectCursorCell()
+      setup.mockInput.pressArrow("left")
+      setup.mockInput.pressArrow("right")
+      await expectCursorCell()
+      setup.mockInput.pressBackspace()
+      await expectCursorCell()
+      expect(ui.composer.plainText).toBe("Draft 中文")
+      setup.resize(18, 20)
+      await expectCursorCell()
+    },
+  )
+
+  test.each(["light", "dark", "auto"] as const)(
+    "keeps %s conversation selections readable across Markdown blocks",
+    async (theme) => {
+      setup = await createRenderer({ width: 96, height: 48, screenMode: "alternate-screen" })
+      const app = NanobotTui.mount(
+        setup.renderer,
+        { ...options, theme },
+        client(),
+        new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      )
+      const ui = app as unknown as { transcript: Transcript; composer: TextareaRenderable }
+      ui.transcript.user("User selection text")
+      ui.transcript.assistant([
+        "Normal selection text",
+        "**Bold selection text**",
+        "- List selection text",
+        "```text\nCode selection text\n```",
+        "| Heading |\n| --- |\n| Table selection text |",
+      ].join("\n\n"))
+      await setup.flush()
+
+      for (const text of [
+        "User selection text", "Normal selection text", "Bold selection text",
+        "List selection text", "Code selection text", "Table selection text",
+      ]) {
+        setup.renderer.clearSelection()
+        await setup.flush()
+        const lines = setup.captureCharFrame().split("\n")
+        const y = lines.findIndex((line) => line.includes(text))
+        const x = lines[y]!.indexOf(text)
+        await setup.mockMouse.drag(x, y, x + text.length, y)
+        await setup.flush()
+        expect(setup.renderer.getSelection()?.getSelectedText()).toContain(text)
+        const selected = setup.captureSpans().lines[y]!.spans.find((span) => span.text.includes(text))!
+        expect(selected.fg.intent).toBe("rgb")
+        expect(selected.bg.intent).toBe("rgb")
+        expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
+      }
+
+      if (theme === "auto") {
+        for (const mode of ["light", "dark"] as const) {
+          setup.renderer.emit(CliRenderEvents.THEME_MODE, mode)
+          await setup.flush()
+          expect(setup.renderer.getSelection()?.getSelectedText()).toContain("Table selection text")
+          const selected = setup.captureSpans().lines.flatMap((line) => line.spans)
+            .find((span) => span.text.includes("Table selection text"))!
+          expect(selected.fg.intent).toBe("rgb")
+          expect(selected.bg.intent).toBe("rgb")
+          expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+
+      setup.renderer.clearSelection()
+      await setup.mockInput.typeText("Composer selection text")
+      setup.mockInput.pressKey("HOME", { shift: true })
+      await setup.flush()
+      expect(ui.composer.getSelectedText()).toBe("Composer selection text")
+      const selected = setup.captureSpans().lines.flatMap((line) => line.spans)
+        .find((span) => span.text.includes("Composer selection text"))!
+      expect(selected.fg.intent).toBe("rgb")
+      expect(selected.bg.intent).toBe("rgb")
+      expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
+    },
+  )
 
   test("uses asymmetric roles instead of chat bubbles", async () => {
     setup = await createRenderer({ width: 72, height: 24, screenMode: "alternate-screen" })
@@ -750,11 +862,12 @@ describe("NanobotTui layout and themes", () => {
     const internals = app as unknown as {
       palette: Record<string, string> & { referenceBackground: string; faint: string }
     }
-    const assertContrast = () => {
-      for (const tone of ["text", "muted", "accent", "link", "success", "error", "user", "warm", "cool"]) {
-        expect(contrastRatio(internals.palette[tone] ?? "", internals.palette.referenceBackground)).toBeGreaterThanOrEqual(4.5)
+    const assertContrast = (backgrounds: string[]) => {
+      for (const background of backgrounds) {
+        for (const tone of ["text", "muted", "faint", "accent", "link", "success", "error", "user", "warm", "cool"]) {
+          expect(contrastRatio(internals.palette[tone] ?? "", background)).toBeGreaterThanOrEqual(4.5)
+        }
       }
-      expect(contrastRatio(internals.palette.faint, internals.palette.referenceBackground)).toBeGreaterThanOrEqual(3)
       const turnContrast = contrastRatio(
         internals.palette.userBackground ?? "",
         internals.palette.referenceBackground,
@@ -764,11 +877,11 @@ describe("NanobotTui layout and themes", () => {
     }
 
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "dark")
-    assertContrast()
+    assertContrast([internals.palette.referenceBackground, "#282C34", "#282A36", "#282828", "#002B36"])
     expect(internals.palette.accent).toBe("#EF8E30")
     expect(internals.palette.user).toBe("#EF8E30")
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
-    assertContrast()
+    assertContrast([internals.palette.referenceBackground, "#FDF6E3"])
     expect(internals.palette.accent).toBe("#B94D0B")
     expect(internals.palette.user).toBe("#B94D0B")
   })

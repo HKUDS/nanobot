@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 
 from nanobot.agent.automation_turns import AutomationTurnCoordinator
 from nanobot.bus.events import InboundMessage
@@ -19,7 +19,7 @@ class CronTurnCoordinator(AutomationTurnCoordinator):
     def __init__(
         self,
         *,
-        enqueue: Callable[[InboundMessage], None],
+        enqueue: Callable[[InboundMessage], Awaitable[None]],
         deferred_queues: dict[str, list[InboundMessage]] | None = None,
     ) -> None:
         super().__init__(

@@ -179,10 +179,6 @@ class ProviderSpec:
         )
 
     @property
-    def model_api_configurable(self) -> bool:
-        return len(self.request_apis) > 1
-
-    @property
     def provider_api_configurable(self) -> bool:
         return self.name == "openai" or (
             self.is_direct and self.backend == "openai_compat" and "anthropic_messages" in self.request_apis

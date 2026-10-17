@@ -73,6 +73,7 @@
     }
   },
   "custom": {
+    "addAssistant": "別のアシスタントを追加",
     "toggleAssistant": "アシスタント {{name}} を有効にする",
     "configured": "接続済み",
     "needsSetup": "認可が必要",

@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "gallery": "vite --open /gallery.html",
     "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" --max-warnings 0"
+    "check:imports": "bun ../scripts/check_client_import_boundaries.mjs --project webui",
+    "test:imports": "bun test ../scripts/check_client_import_boundaries.test.mjs",
+    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" \"scripts/check_client_import_boundaries*.mjs\" --max-warnings 0"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.4",
@@ -50,6 +53,7 @@
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
     "@types/node": "^24.0.0",
+    "@types/mdast": "^4.0.4",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
@@ -62,6 +66,9 @@
     "globals": "^17.6.0",
     "happy-dom": "^16.3.0",
     "katex": "^0.16.21",
+    "micromark-util-types": "^2.0.2",
+    "micromark-extension-math": "^3.1.0",
+    "micromark-extension-gfm-autolink-literal": "^2.1.0",
     "postcss": "^8.5.0",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",

@@ -140,7 +140,8 @@ async def test_legacy_run_identity_is_captured_before_the_first_move(tmp_path):
         cron.stop()
 
 
-def test_target_identity_scope_and_channel_lifecycle(tmp_path):
+@pytest.mark.asyncio
+async def test_target_identity_scope_and_channel_lifecycle(tmp_path):
     sessions, _, job = seed(tmp_path)
     (tmp_path / "other").mkdir()
     workspaces = WebUIWorkspaceController(session_manager=sessions,
@@ -154,41 +155,40 @@ def test_target_identity_scope_and_channel_lifecycle(tmp_path):
         session = sessions.get_or_create(key)
         session.metadata.update(metadata)
         sessions.save(session)
-    chats = automation_chats(job, sessions, workspaces, {"telegram": {"running": True}})
+    chats = await automation_chats(job, sessions, workspaces, {"telegram": {"running": True}})
     assert {chat.binding.session_key for chat in chats} == {"websocket:source", "telegram:-100:topic:42"}
     target = next(chat for chat in chats if chat.title == "Product team")
     assert target.binding == target_binding()
     assert set(target.public_payload()) == {"id", "title", "channel"}
     assert "-100" not in json.dumps(target.public_payload())
-    assert len(automation_chats(job, sessions, workspaces, {})) == 1
+    assert len(await automation_chats(job, sessions, workspaces, {})) == 1
     job.payload.session_key = "telegram:-100:topic:42"
     job.payload.origin_channel = "telegram"
     job.payload.origin_chat_id = "-100"
-    offline = automation_chats(job, sessions, workspaces, {})
+    offline = await automation_chats(job, sessions, workspaces, {})
     current = next(chat for chat in offline if chat.title == "Product team")
     assert current.public_payload()["unavailable"] is True
     # Only identical display names need a visible disambiguator.
     session = sessions.get_or_create("websocket:source")
-    session.metadata["title"] = "Product team"
-    sessions.save(session)
-    duplicates = automation_chats(job, sessions, workspaces, {})
+    await sessions.state.update_metadata(session.key, {"title": "Product team"})
+    duplicates = await automation_chats(job, sessions, workspaces, {})
     assert len({chat.title for chat in duplicates}) == 2
     assert all(" · @" in chat.title for chat in duplicates)
 
 
-def test_untitled_chat_uses_message_preview_until_renamed(tmp_path):
+@pytest.mark.asyncio
+async def test_untitled_chat_uses_message_preview_until_renamed(tmp_path):
     sessions, _, job = seed(tmp_path)
     chat = sessions.get_or_create("websocket:reminder")
     chat.add_message("user", "十分钟后提醒我喝水")
     sessions.save(chat)
     workspaces = WebUIWorkspaceController(session_manager=sessions,
         default_workspace=tmp_path / "workspace", default_restrict_to_workspace=False)
-    chats = automation_chats(job, sessions, workspaces, {})
+    chats = await automation_chats(job, sessions, workspaces, {})
     choice = next(item for item in chats if item.binding.session_key == chat.key)
     assert choice.public_payload()["title"] == "十分钟后提醒我喝水"
-    chat.metadata.update(title="My reminders", title_user_edited=True)
-    sessions.save(chat)
-    renamed = next(item for item in automation_chats(job, sessions, workspaces, {})
+    await sessions.state.update_metadata(chat.key, {"title": "My reminders", "title_user_edited": True})
+    renamed = next(item for item in await automation_chats(job, sessions, workspaces, {})
                    if item.binding.session_key == chat.key)
     assert renamed.id == choice.id
     assert renamed.title == "My reminders"

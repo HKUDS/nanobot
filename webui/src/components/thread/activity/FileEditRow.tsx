@@ -326,7 +326,7 @@ function FileUnifiedDiff({
           aria-hidden
         />
         <span className="min-w-0 flex-1">{viewDiffLabel}</span>
-        <span className="shrink-0 text-muted-foreground/65">{lineCountLabel}</span>
+        <span className="shrink-0 text-muted-foreground">{lineCountLabel}</span>
       </button>
       <DisclosureContent id={contentId} open={open} onExitComplete={releaseBody}>
         {shouldRenderBody ? renderBody() : null}

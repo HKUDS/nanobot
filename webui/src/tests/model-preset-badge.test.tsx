@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ModelPresetBadge } from "@/components/thread/ModelPresetBadge";
 
 const presets = [
-  { name: "zhipu", model: "glm-5", provider: "zhipu" },
+  { name: "zhipu", model: "glm-5", provider: "zhipu", contextWindowTokens: 1_000_000, reasoningEffort: "high" },
   { name: "codex", model: "openai-codex/gpt-5.5", provider: "openai_codex" },
 ];
 
@@ -157,7 +157,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(container.querySelector("[title]")).toBeNull();
     await user.hover(trigger);
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("zhipu glm-5");
+    expect(tooltip).toHaveTextContent("zhipu glm-5 1M high");
     expect(tooltip).not.toHaveTextContent("codex");
     await user.click(trigger);
     expect(await screen.findByRole("listbox")).toBeInTheDocument();

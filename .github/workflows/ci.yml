@@ -104,6 +104,10 @@ jobs:
                   python_required=true
                   docker_required=true
                   ;;
+                scripts/check_client_import_boundaries.*)
+                  webui_required=true
+                  tui_required=true
+                  ;;
                 tests/*|conftest.py|uv.lock|scripts/*)
                   python_required=true
                   ;;
@@ -160,9 +164,10 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Real PowerShell/process-tree tests run serially in a separate
-            # job. Keep them out of xdist so workers never share a console.
-            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py"
+            # Real PowerShell, browser-handoff, and process-tree tests run
+            # serially so xdist workers do not compete for native processes.
+            # Bound concurrent threaded storage work on the Windows runner.
+            pytest_args: "-n 2 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -171,6 +176,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Check Python import boundaries
+        if: matrix.coverage
+        run: python -m scripts.check_import_boundaries
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -195,7 +204,7 @@ jobs:
       # later uv run sync pruning the packages installed by the previous step.
       - name: Lint with ruff
         if: matrix.coverage
-        run: uv run --no-sync ruff check nanobot tests conftest.py
+        run: uv run --no-sync ruff check nanobot tests conftest.py scripts/check_import_boundaries.py
 
       - name: Type check with BasedPyright (strict)
         if: matrix.coverage
@@ -266,6 +275,7 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py
+          tests/cli/test_wsl_browser.py
           --durations=25 --durations-min=1.0
 
   webui:
@@ -289,6 +299,14 @@ jobs:
       - name: Install WebUI dependencies
         working-directory: webui
         run: bun install --frozen-lockfile
+
+      - name: Check WebUI import boundaries
+        working-directory: webui
+        run: bun run check:imports
+
+      - name: Test client import checker with WebUI dependencies
+        working-directory: webui
+        run: bun run test:imports
 
       - name: Lint WebUI
         working-directory: webui
@@ -330,6 +348,14 @@ jobs:
       - name: Install TUI dependencies
         working-directory: tui
         run: bun install --frozen-lockfile
+
+      - name: Check TUI import boundaries
+        working-directory: tui
+        run: bun run check:imports
+
+      - name: Test client import checker with TUI dependencies
+        working-directory: tui
+        run: bun run test:imports
 
       - name: Check TUI
         working-directory: tui

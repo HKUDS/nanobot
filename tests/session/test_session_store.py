@@ -1,210 +1,98 @@
-from unittest.mock import MagicMock
+"""Administrative SQLite repository operations."""
+
+from datetime import datetime
 
 from nanobot.providers.base import ProviderConversationState
-from nanobot.session import Session, SessionManager
-from nanobot.session.manager import SessionStore
+from nanobot.session.manager import Session, SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 
-def test_manager_delegates_persistence_to_store(tmp_path) -> None:
-    stored = Session(key="cli:test")
-    stored.add_message("user", "hello")
-    payload = {
-        "key": stored.key,
-        "created_at": stored.created_at.isoformat(),
-        "updated_at": stored.updated_at.isoformat(),
-        "metadata": {},
-        "messages": stored.messages,
+def test_manager_roundtrips_full_history_and_private_state(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = Session(key="cli:test", messages=[{"role": "user", "content": str(i)} for i in range(2001)])
+    session.provider_state = ProviderConversationState(kind="openai_responses", provider="openai:test",
+        model="test-model", version=1, payload={"response_id": "private"})
+    manager.save(session)
+    loaded = manager.read_session_snapshot(session.key)
+    assert loaded is not session
+    assert loaded.messages == session.messages
+    assert loaded.provider_state == session.provider_state
+    assert "provider_state" not in manager.read_session_file(session.key)
+    assert manager.list_sessions()[0]["preview"] == "0"
+
+
+def test_rename_model_preset_is_atomic(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    for key in ("cli:one", "cli:two"):
+        manager.save(Session(key=key, metadata={SESSION_MODEL_PRESET_METADATA_KEY: "old"}))
+    original = manager._store.update_metadata
+    def fail_second(key, values, **kwargs):
+        if key == "cli:two":
+            raise OSError("disk full")
+        return original(key, values, **kwargs)
+    import pytest
+    with monkeypatch.context() as patch:
+        patch.setattr(manager._store, "update_metadata", fail_second)
+        with pytest.raises(OSError):
+            manager.rename_model_preset("old", "new")
+    assert all(manager.get_or_create(key).metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "old"
+               for key in ("cli:one", "cli:two"))
+    assert manager.rename_model_preset("old", "new") == 2
+    assert all(manager.get_or_create(key).metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "new"
+               for key in ("cli:one", "cli:two"))
+
+
+def test_metadata_updates_do_not_replace_messages(tmp_path):
+    manager = SessionManager(tmp_path)
+    manager.save(Session(key="cli:test", messages=[{"role": "user", "content": "hello"}]))
+    assert manager.update_session_metadata("cli:test", {"title": "new"})
+    assert manager.read_session_file("cli:test")["messages"] == [{"role": "user", "content": "hello"}]
+    assert manager.read_session_metadata("cli:test")["metadata"]["title"] == "new"
+    assert not manager.update_session_metadata("cli:missing", {"title": "x"})
+    assert manager.delete_session("cli:test")
+    assert manager.read_session_file("cli:test") is None
+
+
+def test_child_headers_select_declared_children_and_preserve_descendant_deletion(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    parent = "chat:项目'\"\\root"
+    manager.save(Session(key=parent))
+    manager.save(Session(key="chat:unrelated", metadata={"title": "unrelated"}))
+    for key, kind, parent_key, second in (
+        ("subagent:first", "subagent", parent, 1),
+        ("extension:child", "extension", parent, 2),
+        ("extension:grandchild", "extension", "extension:child", 3),
+    ):
+        manager.save(Session(
+            key=key, updated_at=datetime(2026, 1, 1, 0, 0, second),
+            messages=[{"role": "user", "content": "private transcript"}],
+            metadata={
+                PARENT_SESSION_KEY: parent_key, SESSION_TYPE_KEY: kind,
+                "nested": {"value": key}, "runtime_checkpoint": {"step": 1},
+                "pending_user_followups": [{"id": "queued"}],
+            },
+        ))
+
+    def prohibit_full_listing():
+        raise AssertionError("child queries must not materialize unrelated session headers")
+
+    monkeypatch.setattr(manager._store, "list_metadata", prohibit_full_listing)
+    assert manager.child_session_keys(parent) == ["extension:child", "subagent:first"]
+    rows = manager.list_child_session_metadata(parent)
+    assert [row["key"] for row in rows] == ["extension:child", "subagent:first"]
+    assert rows[0]["updated_at"] == "2026-01-01T00:00:02"
+    assert rows[0]["metadata"] == {
+        PARENT_SESSION_KEY: parent, SESSION_TYPE_KEY: "extension",
+        "nested": {"value": "extension:child"},
     }
-    metadata = {
-        "key": stored.key,
-        "created_at": stored.created_at.isoformat(),
-        "updated_at": stored.updated_at.isoformat(),
-        "metadata": {},
-    }
-    listing = [
-        {
-            "key": stored.key,
-            "created_at": stored.created_at.isoformat(),
-            "updated_at": stored.updated_at.isoformat(),
-            "title": "",
-            "preview": "hello",
-            "path": "session.db",
-        }
-    ]
-    store = MagicMock(spec=SessionStore)
-    store.load.return_value = stored
-    store.read.return_value = payload
-    store.read_metadata.return_value = metadata
-    store.list_sessions.return_value = listing
-    store.delete.return_value = True
-    manager = SessionManager(tmp_path, store=store)
+    rows[0]["metadata"]["nested"]["value"] = "detached edit"
+    assert manager.list_child_session_metadata(parent)[0]["metadata"]["nested"]["value"] == "extension:child"
+    assert manager.read_session_metadata("extension:child")["metadata"]["runtime_checkpoint"] == {"step": 1}
 
-    assert manager.get_or_create(stored.key) is stored
-    assert manager.get_or_create(stored.key) is stored
-    store.load.assert_called_once_with(stored.key)
-
-    manager.save(stored, fsync=True)
-    store.save.assert_called_once_with(stored, fsync=True)
-    assert manager.read_session_file(stored.key) == payload
-    assert manager.read_session_metadata(stored.key) == metadata
-    assert manager.list_sessions() == listing
-
-    assert manager.delete_session(stored.key) is True
-    store.delete.assert_called_once_with(stored.key)
-    assert manager.get_cached(stored.key) is None
-
-
-def test_manager_renames_model_preset_in_live_and_persisted_sessions(tmp_path) -> None:
-    workspace = tmp_path / "workspace"
-    sessions_root = tmp_path / "sessions"
-    manager = SessionManager(workspace, sessions_root=sessions_root)
-    selected = manager.get_or_create("websocket:selected")
-    selected.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
-    manager.save(selected)
-    other = manager.get_or_create("websocket:other")
-    other.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "backup"
-    manager.save(other)
-    transient = manager.get_or_create_transient("websocket:temporary")
-    transient.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
-
-    assert manager.rename_model_preset("openai", "Codex") == 2
-    assert selected.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
-    assert transient.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
-
-    reloaded = SessionManager(workspace, sessions_root=sessions_root)
-    assert (
-        reloaded.get_or_create("websocket:selected").metadata[
-            SESSION_MODEL_PRESET_METADATA_KEY
-        ]
-        == "Codex"
-    )
-    assert (
-        reloaded.get_or_create("websocket:other").metadata[
-            SESSION_MODEL_PRESET_METADATA_KEY
-        ]
-        == "backup"
-    )
-
-
-def test_read_session_snapshot_does_not_populate_runtime_cache(tmp_path) -> None:
-    stored = Session(key="websocket:context")
-    store = MagicMock(spec=SessionStore)
-    store.load.return_value = stored
-    manager = SessionManager(tmp_path, store=store)
-
-    assert manager.read_session_snapshot(stored.key) is stored
-    assert manager.get_cached(stored.key) is None
-    store.load.assert_called_once_with(stored.key)
-
-
-def test_manager_preserves_full_session_before_store_save(tmp_path) -> None:
-    store = MagicMock(spec=SessionStore)
-    manager = SessionManager(tmp_path, store=store)
-    session = Session(
-        key="cli:large",
-        messages=[
-            {
-                "role": "user" if index % 2 == 0 else "assistant",
-                "content": str(index),
-            }
-            for index in range(2_001)
-        ],
-    )
-
-    manager.save(session)
-
-    assert len(session.messages) == 2_001
-    assert session.messages[0]["content"] == "0"
-    assert session.messages[-1]["content"] == "2000"
-    store.save.assert_called_once_with(session, fsync=False)
-
-
-def test_runtime_checkpoint_does_not_rewrite_long_session(tmp_path) -> None:
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:long")
-    for index in range(256):
-        session.add_message("user", f"{index}:" + "x" * 4096)
-    manager.save(session)
-
-    main_path = manager._get_session_path(session.key)
-    main_before = main_path.read_bytes()
-    stat_before = main_path.stat()
-    session.metadata["runtime_checkpoint"] = {
-        "phase": "tools_completed",
-        "assistant_message": {"role": "assistant", "content": "working"},
-        "completed_tool_results": [],
-        "pending_tool_calls": [],
-    }
-    session.provider_state = ProviderConversationState(
-        kind="openai_responses",
-        provider="openai:test",
-        model="test-model",
-        version=1,
-        payload={"response_id": "private-response"},
-    )
-
-    manager.save_runtime_checkpoint(session)
-
-    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
-    assert main_path.read_bytes() == main_before
-    assert main_path.stat().st_ino == stat_before.st_ino
-    assert main_path.stat().st_mtime_ns == stat_before.st_mtime_ns
-    assert checkpoint_path.stat().st_size < len(main_before) // 100
-
-    restored = SessionManager(tmp_path).get_or_create(session.key)
-    assert restored.metadata["runtime_checkpoint"]["phase"] == "tools_completed"
-    assert restored.provider_state is not None
-    assert restored.provider_state.payload == {"response_id": "private-response"}
-
-
-def test_completed_session_supersedes_stale_checkpoint(tmp_path) -> None:
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:completed")
-    session.add_message("user", "question")
-    manager.save(session)
-    session.metadata["runtime_checkpoint"] = {"phase": "awaiting_tools"}
-    manager.save_runtime_checkpoint(session)
-    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
-    stale_checkpoint = checkpoint_path.read_bytes()
-
-    session.metadata.pop("runtime_checkpoint")
-    session.add_message("assistant", "answer")
-    manager.save(session)
-    assert not checkpoint_path.exists()
-
-    # Emulate a process dying after the main record was committed but before an
-    # obsolete sidecar could be removed. The base fingerprint keeps it stale.
-    checkpoint_path.write_bytes(stale_checkpoint)
-    restored = SessionManager(tmp_path).get_or_create(session.key)
-    assert "runtime_checkpoint" not in restored.metadata
-    assert restored.messages[-1]["content"] == "answer"
-    assert not checkpoint_path.exists()
-
-
-def test_delete_session_removes_runtime_checkpoint(tmp_path) -> None:
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:delete")
-    session.add_message("user", "question")
-    manager.save(session)
-    session.metadata["runtime_checkpoint"] = {"phase": "awaiting_tools"}
-    manager.save_runtime_checkpoint(session)
-    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
-    assert checkpoint_path.exists()
-
-    assert manager.delete_session(session.key) is True
-    assert not checkpoint_path.exists()
-
-
-def test_invalid_runtime_checkpoint_is_discarded(tmp_path) -> None:
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:invalid-checkpoint")
-    session.add_message("user", "question")
-    manager.save(session)
-    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
-    checkpoint_path.write_text("{truncated", encoding="utf-8")
-
-    restored = SessionManager(tmp_path).get_or_create(session.key)
-
-    assert "runtime_checkpoint" not in restored.metadata
-    assert not checkpoint_path.exists()
+    deleted = []
+    manager.set_delete_observer(deleted.append)
+    assert manager.delete_session(parent)
+    assert set(deleted) == {parent, "subagent:first", "extension:child", "extension:grandchild"}
+    assert [row["key"] for row in manager.list_sessions()] == ["chat:unrelated"]
+    assert manager.list_child_session_metadata(parent) == []

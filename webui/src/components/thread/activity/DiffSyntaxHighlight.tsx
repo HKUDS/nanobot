@@ -1,17 +1,12 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
 
-import { useThemeValue } from "@/hooks/useTheme";
 import type { RenderableFileDiffLine } from "@/lib/file-diff";
 import { cn } from "@/lib/utils";
 
 interface DiffSyntaxHighlightProps {
   language: string;
   lines: RenderableFileDiffLine[];
-}
-
-interface LoadedDiffSyntaxHighlightProps extends DiffSyntaxHighlightProps {
-  isDark: boolean;
 }
 
 type RendererArgs = Parameters<NonNullable<SyntaxHighlighterProps["renderer"]>>[0];
@@ -33,26 +28,21 @@ const LazyDiffSyntaxHighlight = lazy(async () => {
   const [
     { default: SyntaxHighlighter },
     { default: createSyntaxElement },
-    { default: oneDark },
-    { default: oneLight },
   ] = await Promise.all([
     import("react-syntax-highlighter/dist/esm/prism-async-light"),
     import("react-syntax-highlighter/dist/esm/create-element"),
-    import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
-    import("react-syntax-highlighter/dist/esm/styles/prism/one-light"),
   ]);
   return {
     default: function LoadedDiffSyntaxHighlight({
       language,
       lines,
-      isDark,
-    }: LoadedDiffSyntaxHighlightProps) {
-      const theme = isDark ? oneDark : oneLight;
+    }: DiffSyntaxHighlightProps) {
       const code = lines.map((line) => line.content || " ").join("\n");
       return (
         <SyntaxHighlighter
           language={language}
-          style={theme}
+          useInlineStyles={false}
+          style={{}}
           PreTag="div"
           CodeTag="div"
           customStyle={{
@@ -71,6 +61,7 @@ const LazyDiffSyntaxHighlight = lazy(async () => {
             },
           }}
           data-language={language}
+          className="code-content"
           data-testid="syntax-highlighted-diff-hunk"
           renderer={({ rows, stylesheet, useInlineStyles }) => (
             <DiffLineTable
@@ -96,10 +87,9 @@ const LazyDiffSyntaxHighlight = lazy(async () => {
 });
 
 export function DiffSyntaxHighlight({ language, lines }: DiffSyntaxHighlightProps) {
-  const isDark = useThemeValue() === "dark";
   return (
     <Suspense fallback={<PlainDiffLines lines={lines} />}>
-      <LazyDiffSyntaxHighlight language={language} lines={lines} isDark={isDark} />
+      <LazyDiffSyntaxHighlight language={language} lines={lines} />
     </Suspense>
   );
 }
@@ -148,22 +138,22 @@ function DiffLineRow({
     <tr
       className={cn(
         "border-0",
-        kind === "add" && "bg-emerald-500/[0.09] dark:bg-emerald-300/[0.11]",
-        kind === "delete" && "bg-rose-500/[0.09] dark:bg-rose-300/[0.11]",
+        kind === "add" && "bg-diff-added",
+        kind === "delete" && "bg-diff-deleted",
       )}
     >
-      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground/55">
+      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground">
         {line.old_lineno ?? ""}
       </td>
-      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground/55">
+      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground">
         {line.new_lineno ?? ""}
       </td>
       <td
         className={cn(
           "w-5 select-none px-1 text-center",
-          kind === "add" && "text-emerald-600/80 dark:text-emerald-300/85",
-          kind === "delete" && "text-rose-600/80 dark:text-rose-300/85",
-          kind === "context" && "text-muted-foreground/45",
+          kind === "add" && "text-diff-added-foreground",
+          kind === "delete" && "text-diff-deleted-foreground",
+          kind === "context" && "text-muted-foreground",
         )}
       >
         {marker}

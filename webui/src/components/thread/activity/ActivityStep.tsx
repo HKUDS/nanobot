@@ -1,7 +1,8 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
-import { StreamingLabelSheen } from "@/components/MessageBubble";
+import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
+import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -53,23 +54,30 @@ export function ActivityStep({
       data-testid="activity-line"
       tabIndex={typeof label === "string" ? 0 : undefined}
       aria-label={detail && typeof label === "string" ? `${label}, ${detail}` : undefined}
-      className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap"
+      className={cn(
+        "flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap",
+        formControlFocusClassName,
+      )}
     >
-      <StreamingLabelSheen
-        active={active && animateLabel}
-        className={cn(
-          "min-w-0 flex-1 truncate font-medium",
-          tone === "error" ? "text-destructive/[0.78]" : "text-muted-foreground",
-          labelClassName,
-        )}
-      >
+      <span className={cn("flex min-w-0 flex-1 items-baseline", detail && "gap-2")}>
+        <StreamingLabelSheen
+          active={active && animateLabel}
+          className={cn(
+            "min-w-0 truncate font-medium",
+            detail ? "max-w-[70%] shrink-0" : "flex-1",
+            tone === "error" ? "text-destructive/[0.78]" : "text-muted-foreground",
+            labelClassName,
+          )}
+        >
+          {label}
+        </StreamingLabelSheen>
         {detail ? (
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="max-w-[70%] shrink-0 truncate">{label}</span>{" "}
+          <>
+            {" "}
             <span className={cn("min-w-0 flex-1 truncate font-normal text-muted-foreground", detailClassName)}>{detail}</span>
-          </span>
-        ) : label}
-      </StreamingLabelSheen>
+          </>
+        ) : null}
+      </span>
     </div>
   );
 

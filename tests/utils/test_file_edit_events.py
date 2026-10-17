@@ -211,6 +211,29 @@ def test_unified_diff_payload_truncates_large_diffs() -> None:
     assert len(body_lines) == 5
 
 
+@pytest.mark.parametrize(("max_lines", "expected_tail", "truncated"), [
+    (2, "", True),
+    (3, "\n@@ -3,0 +3 @@\n+new last", True),
+    (4, "\n@@ -3 +3 @@\n+new last\n-old last", False),
+])
+def test_unified_diff_line_limit_across_hunks(
+    max_lines: int, expected_tail: str, truncated: bool,
+) -> None:
+    payload = build_unified_diff_payload(
+        "old first\nkeep\nold last\n",
+        "new first\nkeep\nnew last\n",
+        context_lines=0,
+        max_lines=max_lines,
+    )
+
+    assert payload == {
+        "format": "unified",
+        "context": 0,
+        "truncated": truncated,
+        "text": "--- before\n+++ after\n@@ -1 +1 @@\n+new first\n-old first" + expected_tail,
+    }
+
+
 def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:
     target = tmp_path / "data.bin"
     target.write_bytes(b"\x00\x01before")

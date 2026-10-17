@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import time
-from copy import deepcopy
 from typing import Any, cast
 
 from loguru import logger
@@ -13,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from nanobot.agent.subagent_status import SubagentSessionError as SubagentSessionError
 from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.session.manager import Session, SessionManager, SessionPolicy
+from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionType
 
 SUBAGENT = SessionType("subagent", needs_handle=False, public_history=False)
@@ -33,21 +33,23 @@ class SubagentSessions:
         return f"subagent:{task_id}"
 
     def exists(self, owner: str) -> bool:
-        return self.sessions.get_cached(owner) is not None or self.sessions.read_session_metadata(owner) is not None
+        return (
+            self.sessions.get_cached_metadata(owner) is not None
+            or self.sessions.read_session_metadata(owner) is not None
+        )
 
     def contains(self, task_id: str, owner: str) -> bool:
         key = self.key(task_id)
-        child = self.sessions.get_cached(key)
-        metadata = child.metadata if child is not None else (self.sessions.read_session_metadata(key) or {}).get("metadata", {})
+        metadata = self.sessions.get_cached_metadata(key)
+        if metadata is None:
+            metadata = (self.sessions.read_session_metadata(key) or {}).get("metadata", {})
         return metadata.get(SESSION_TYPE_KEY) == SUBAGENT.name and metadata.get(PARENT_SESSION_KEY) == owner
 
     def snapshot(self, task_id: str, owner: str) -> Session | None:
         """Read a detached child only while its parent still owns it."""
-        with self.sessions.locked_session_files():
-            if not self.exists(owner) or not self.contains(task_id, owner):
-                return None
-            child = self.sessions.get_cached(self.key(task_id))
-            return deepcopy(child) if child is not None else self.sessions.read_session_snapshot(self.key(task_id))
+        if not self.exists(owner) or not self.contains(task_id, owner):
+            return None
+        return self.sessions.get_existing(self.key(task_id))
 
     @staticmethod
     def _payload(status: SubagentStatus) -> dict[str, Any]:
@@ -56,49 +58,36 @@ class SubagentSessions:
             "elapsed_seconds": status.as_dict()["elapsed_seconds"],
         }
 
-    def create(self, status: SubagentStatus, *, policy: SessionPolicy | None = None) -> Session:
-        with self.sessions.locked_session_files():
-            parent = self.sessions.get_existing(status.owner)
-            if parent is None:
-                parent = self.sessions.get_or_create(status.owner)
-            requested = policy or SessionPolicy()
-            effective = SessionPolicy(
-                persist=parent.policy.persist and requested.persist,
-                log_content=parent.policy.log_content and requested.log_content,
-            )
-            if effective.persist and self.sessions.read_session_metadata(parent.key) is None:
-                self.sessions.save(parent, fsync=True)
-            key = self.key(status.task_id)
-            child = (self.sessions.get_or_create(key) if effective.persist
-                     else self.sessions.get_or_create_transient(key))
-            child.policy = effective
-            child.metadata.update({
-                SESSION_TYPE_KEY: SUBAGENT.name,
-                PARENT_SESSION_KEY: status.owner,
-                TASK_METADATA_KEY: self._payload(status),
-            })
-            child.add_message("user", status.task_description)
-            self.sessions.save(child, fsync=True)
-            return child
+    async def create(self, status: SubagentStatus, *, policy: SessionPolicy | None = None) -> Session:
+        return await self.sessions.state.create_child(
+            status.owner, self.key(status.task_id),
+            metadata={SESSION_TYPE_KEY: SUBAGENT.name, TASK_METADATA_KEY: self._payload(status)},
+            content=status.task_description, policy=policy or SessionPolicy(),
+        )
 
-    def save(self, status: SubagentStatus, *, fsync: bool = False) -> bool:
-        with self.sessions.locked_session_files():
-            if not self.exists(status.owner):
-                return False
-            child = self.sessions.get_existing(self.key(status.task_id))
-            if child is None or not self.contains(status.task_id, status.owner):
-                return False
-            child.metadata[TASK_METADATA_KEY] = self._payload(status)
-            # Only create() establishes identity. Progress and late completion
-            # cannot recreate a child removed with its parent.
-            self.sessions.save(child, fsync=fsync)
-            return True
+    async def save(self, status: SubagentStatus) -> bool:
+        try:
+            await self.sessions.state.update_metadata(
+                self.key(status.task_id), {TASK_METADATA_KEY: self._payload(status)},
+            )
+        except SessionConflictError:
+            return False
+        return True
 
     def status(self, task_id: str, owner: str) -> SubagentStatus | None:
         payload = self.sessions.read_session_metadata(self.key(task_id))
         if payload is None:
+            metadata = self.sessions.get_cached_metadata(self.key(task_id))
+            payload = {"metadata": metadata} if metadata is not None else None
+        if payload is None:
             return None
         metadata = payload.get("metadata", {})
+        return self._status_from_metadata(task_id, owner, metadata)
+
+    @staticmethod
+    def _status_from_metadata(
+        task_id: str, owner: str, metadata: dict[str, Any],
+    ) -> SubagentStatus | None:
         if metadata.get(SESSION_TYPE_KEY) != SUBAGENT.name or metadata.get(PARENT_SESSION_KEY) != owner:
             return None
         raw: object = metadata.get(TASK_METADATA_KEY)
@@ -123,16 +112,17 @@ class SubagentSessions:
 
     def load(self, owner: str) -> dict[str, SubagentStatus]:
         result: dict[str, SubagentStatus] = {}
-        for key in self.sessions.child_session_keys(owner):
+        for row in self.sessions.list_child_session_metadata(owner):
+            key = row["key"]
             task_id = key.removeprefix("subagent:")
             if key != self.key(task_id):
                 continue
-            status = self.status(task_id, owner)
+            status = self._status_from_metadata(task_id, owner, row["metadata"])
             if status is not None:
                 result[task_id] = status
         return result
 
-    def interrupt_pending(self) -> None:
+    async def interrupt_pending(self) -> None:
         """Seal abandoned work after the gateway acquires execution ownership."""
         for row in self.sessions.list_sessions():
             key = row["key"]
@@ -156,6 +146,6 @@ class SubagentSessions:
                 status.tool_events = []
                 status.receipts = {key: "undelivered" if receipt == "accepted" else receipt
                                    for key, receipt in status.receipts.items()}
-                self.save(status, fsync=True)
+                await self.save(status)
             except (OSError, SubagentSessionError):
                 logger.exception("Could not recover subagent session {}", key)

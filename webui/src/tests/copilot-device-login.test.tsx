@@ -47,7 +47,7 @@ describe("Copilot device sign-in", () => {
     renderSettingsView({ initialSection: "models" });
     fireEvent.click(await screen.findByRole("button", { name: "New preset" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), { target: { value: "Draft" } });
-    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    await openPopover(screen.getByRole("combobox", { name: "Select model" }));
     fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
     if (ending === "close-before-start") {
       cleanup();
@@ -70,7 +70,7 @@ describe("Copilot device sign-in", () => {
           await waitFor(() => expect(recovered).toBe(true), { timeout: 3000 });
           expect(screen.queryByRole("dialog", { name: "GitHub Copilot" })).not.toBeInTheDocument();
           expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("Draft");
-          await openPopover(screen.getByRole("button", { name: "Select model" }));
+          await openPopover(screen.getByRole("combobox", { name: "Select model" }));
           expect(await screen.findByRole("option", { name: /new-model/ })).toBeVisible();
           expect(requestMutationMock.mock.calls.some(([, args]) => args.cancel)).toBe(false);
         } finally {

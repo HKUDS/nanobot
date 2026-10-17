@@ -272,7 +272,7 @@ describe("session-owned task UI", () => {
     expect(statusHandlers.size).toBe(0);
   });
 
-  it("keeps load failures visible and keeps stop failures across a successful refresh", async () => {
+  it("preserves loaded tasks and stop errors across background snapshot failures", async () => {
     const user = userEvent.setup();
     requestMutation.mockRejectedValue(new Error("Cannot stop task"));
     render(layout());
@@ -282,23 +282,26 @@ describe("session-owned task UI", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     expect(screen.getByText("Cannot stop task")).toBeVisible();
     vi.mocked(fetch).mockRejectedValue(new Error("offline"));
-    fireEvent(window, new Event("focus"));
-    await screen.findByText("Could not load subtasks.");
+    await act(async () => { fireEvent(window, new Event("focus")); });
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    expect(screen.getByText("Cannot stop task")).toBeVisible();
   });
 
-  it("shows a read error for malformed or duplicate task records", async () => {
+  it("retains the last valid snapshot after malformed reads and recovers on refresh", async () => {
+    render(layout());
+    await screen.findByRole("button", { name: /Config check Running/ });
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({
       tasks: [{ ...task(), label: { unexpected: true } }],
     }), { headers: { "content-type": "application/json" } }));
-    render(layout());
-    await screen.findByText("Could not load subtasks.");
-    expect(screen.queryByText("Config check")).not.toBeInTheDocument();
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     vi.mocked(fetch).mockImplementation(async () => response([task(), task()]));
-    fireEvent(window, new Event("focus"));
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("Could not load subtasks.")).toBeVisible();
-    expect(screen.queryByText("Config check")).not.toBeInTheDocument();
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    vi.mocked(fetch).mockResolvedValue(response([task({ revision: 2, state: "done", completed_at: 102 })]));
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
   });
 
   it("discards reads from the previous session after switching", async () => {
@@ -464,17 +467,21 @@ describe("session-owned task UI", () => {
     expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
     expect(fetch).toHaveBeenCalledTimes(3);
     emitTask({ ...task(), revision: -1 });
-    expect(screen.getByText("Could not load subtasks.")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("keeps protocol 1 task controls usable on a host without event support", async () => {
+  it("reads snapshots without polling on a host without task events", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined })]));
     vi.useFakeTimers();
     const view = render(layout({ liveEvents: false }));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined, state: "done", completed_at: 102 })]));
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    await act(async () => { fireEvent(window, new Event("focus")); });
     expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
     expect(client.onChat).not.toHaveBeenCalled();
     view.rerender(layout({ liveEvents: false, visible: false }));
