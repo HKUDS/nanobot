@@ -8,8 +8,9 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.loader import load_config
+from nanobot.config.loader import get_config_path, load_config
 
 QueryParams = dict[str, list[str]]
 
@@ -95,6 +96,10 @@ def _manager(config_path: Path | None = None) -> CliAppManager:
     cli_cfg = config.tools.cli_apps
     return CliAppManager(
         workspace=config.workspace_path,
+        plugins=AgentPlugins(
+            home=config.runtime_data_dir or get_config_path().expanduser().resolve().parent,
+            workspace=config.workspace_path,
+        ),
         runtime=CliAppsRuntimeConfig(
             install_timeout=cli_cfg.install_timeout,
             run_timeout=cli_cfg.run_timeout,

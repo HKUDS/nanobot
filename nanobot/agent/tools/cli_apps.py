@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
 from nanobot.agent.tools.context import RequestContext, ToolContext
@@ -64,6 +65,7 @@ class CliAppsTool(Tool):
         cfg = ctx.config.cli_apps
         return cls(
             workspace=Path(ctx.workspace),
+            plugins=ctx.plugins,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             runtime=CliAppsRuntimeConfig(
                 install_timeout=cfg.install_timeout,
@@ -78,10 +80,12 @@ class CliAppsTool(Tool):
         workspace: Path,
         restrict_to_workspace: bool = False,
         runtime: CliAppsRuntimeConfig | None = None,
+        plugins: AgentPlugins | None = None,
     ) -> None:
         self.workspace = workspace
         self.restrict_to_workspace = restrict_to_workspace
         self.runtime = runtime or CliAppsRuntimeConfig()
+        self.plugins = plugins
 
     @property
     def name(self) -> str:
@@ -90,7 +94,7 @@ class CliAppsTool(Tool):
     @property
     def description(self) -> str:
         try:
-            installed = CliAppManager(workspace=self.workspace, runtime=self.runtime).installed_names()
+            installed = CliAppManager(workspace=self.workspace, runtime=self.runtime, plugins=self.plugins).installed_names()
         except Exception:
             installed = []
         installed_note = (
@@ -135,7 +139,7 @@ class CliAppsTool(Tool):
             restrict_to_workspace=self.restrict_to_workspace,
         )
         workspace = access.project_path or self.workspace
-        manager = CliAppManager(workspace=workspace, runtime=self.runtime)
+        manager = CliAppManager(workspace=workspace, runtime=self.runtime, plugins=self.plugins)
         try:
             return manager.run(
                 name,

@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
+from nanobot.agent.plugins import AGENT_PLUGIN_SCHEMA, AgentPlugins
 from nanobot.agent.skills import SkillsLoader
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
@@ -686,6 +687,7 @@ async def test_webui_skill_management_routes(
         enabled: bool,
         disabled_skills: set[str],
         config_path: Path | None = None,
+        plugins: AgentPlugins | None = None,
     ) -> dict[str, Any]:
         assert workspace == tmp_path
         assert name == "custom-skill"
@@ -699,6 +701,7 @@ async def test_webui_skill_management_routes(
         *,
         disabled_skills: set[str],
         config_path: Path | None = None,
+        plugins: AgentPlugins | None = None,
     ) -> dict[str, Any]:
         assert workspace == tmp_path
         assert name == "custom-skill"
@@ -798,6 +801,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         *,
         provider: str,
         version: str,
+        plugins: AgentPlugins,
     ) -> dict[str, Any]:
         assert source == "acme/agent-skills"
         assert skill_id == "react-testing"
@@ -840,7 +844,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         )
         assert search_response.status_code == 200
         assert search_response.json()["skills"][0]["skill_id"] == "react-testing"
-        search.assert_awaited_once_with("react", tmp_path, provider="all")
+        search.assert_awaited_once_with("react", tmp_path, provider="all", plugins=channel.gateway.http.plugins)
 
         trending_response = await _http_get(
             f"http://127.0.0.1:{port}/api/webui/skills/trending",
@@ -848,7 +852,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         )
         assert trending_response.status_code == 200
         assert trending_response.json()["period"] == "24h"
-        trending.assert_awaited_once_with(tmp_path, provider="all")
+        trending.assert_awaited_once_with(tmp_path, provider="all", plugins=channel.gateway.http.plugins)
 
         trends_response = await _http_get(
             f"http://127.0.0.1:{port}/api/webui/skills/trends"
@@ -899,6 +903,7 @@ async def test_webui_skill_install_rejects_overlapping_requests(
         *,
         provider: str,
         version: str,
+        plugins: AgentPlugins,
     ) -> dict[str, Any]:
         started.set()
         await finish.wait()
@@ -984,6 +989,7 @@ async def test_webui_skill_install_honors_remote_install_opt_in(
         *,
         provider: str,
         version: str,
+        plugins: AgentPlugins,
     ) -> dict[str, Any]:
         skill_dir = workspace / "skills" / skill_id
         skill_dir.mkdir(parents=True)
@@ -4293,3 +4299,48 @@ async def test_session_delete_waiting_on_sqlite_does_not_block_event_loop(
         if blocker.in_transaction:
             blocker.rollback()
         blocker.close()
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_reads_and_duplicate_install_keep_gateway_plugin_approval(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "gateway" / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    workspace = tmp_path / "agent"
+    plugin = workspace / "plugins" / "demo"
+    skill = plugin / "skills" / "bound-skill"
+    skill.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
+        json.dumps({"$schema": AGENT_PLUGIN_SCHEMA, "name": "demo"}), encoding="utf-8",
+    )
+    (skill / "SKILL.md").write_text(
+        "---\nname: bound-skill\ndescription: Approved plugin skill.\n---\nBound instructions.\n",
+        encoding="utf-8",
+    )
+    AgentPlugins(home=config_path.parent, workspace=workspace).set_enabled("demo", True)
+    channel = _ch(bus, workspace_path=workspace, port=_free_port())
+    monkeypatch.setattr(
+        "nanobot.config.loader._current_config_path", tmp_path / "other" / "config.json",
+    )
+    monkeypatch.setattr("nanobot.webui.skills_marketplace.shutil.which", lambda _command: None)
+    token = channel.gateway.tokens.issue_api_token(300)
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        listed = await _http_get(
+            f"http://127.0.0.1:{channel.config.port}/api/webui/skills", headers=headers,
+        )
+        assert listed.status_code == 200
+        assert any(row["name"] == "bound-skill" for row in listed.json()["skills"])
+        detail = await _http_get(
+            f"http://127.0.0.1:{channel.config.port}/api/webui/skills/bound-skill", headers=headers,
+        )
+        assert detail.status_code == 200
+        assert "Bound instructions." in detail.json()["raw_markdown"]
+        installed = await _webui_mutate(
+            channel, "skill.install", {"source": "acme/skills", "skill": "bound-skill"},
+        )
+        assert installed.status_code == 200
+        assert installed.json()["last_action"]["already_installed"] is True
+    finally:
+        await channel.stop()

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 import httpx
 from loguru import logger
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.registry import ToolRegistry
@@ -1351,19 +1352,16 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"mcp_presets": mcp_presets} if isinstance(mcp_presets, list) and mcp_presets else {}
 
 
-def _configured_servers(config: Config) -> dict[str, MCPServerConfig]:
-    from nanobot.agent.plugins import agent_plugin_mcp_servers
+def _load_current_servers(plugins: AgentPlugins | None = None) -> dict[str, MCPServerConfig]:
+    from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
 
-    return agent_plugin_mcp_servers(
-        config.workspace_path,
-        config.tools.mcp_servers,
-    )
-
-
-def _load_current_servers() -> dict[str, MCPServerConfig]:
-    from nanobot.config.loader import load_config, resolve_config_env_vars
-
-    return _configured_servers(resolve_config_env_vars(load_config()))
+    config = resolve_config_env_vars(load_config())
+    if plugins is None:
+        plugins = AgentPlugins(
+            home=config.runtime_data_dir or get_config_path().expanduser().resolve().parent,
+            workspace=config.workspace_path,
+        )
+    return plugins.mcp_servers(config.tools.mcp_servers)
 
 
 class MCPProvider:
@@ -1391,11 +1389,19 @@ class MCPProvider:
         registry: ToolRegistry,
         *,
         server_loader: MCPServerLoader | None = None,
+        plugins: AgentPlugins | None = None,
     ) -> MCPProvider:
+        from nanobot.config.loader import get_config_path
+
+        if plugins is None:
+            plugins = AgentPlugins(
+                home=config.runtime_data_dir or get_config_path().expanduser().resolve().parent,
+                workspace=config.workspace_path,
+            )
         return cls(
-            _configured_servers(config),
+            plugins.mcp_servers(config.tools.mcp_servers),
             registry,
-            server_loader=server_loader,
+            server_loader=server_loader or (lambda: _load_current_servers(plugins)),
         )
 
     @property

@@ -11,16 +11,13 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.plugins import (
     AGENT_PLUGIN_MCP_SCHEMA,
     AGENT_PLUGIN_SCHEMA,
-    agent_plugin_mcp_servers,
-    discover_agent_plugins,
-    enabled_agent_plugin_skill_dirs,
-    enabled_agent_plugin_skills,
-    set_agent_plugin_enabled,
+    AgentPlugins,
 )
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.bus.queue import MessageBus
+from nanobot.config.loader import get_config_path
 from nanobot.config.schema import ToolsConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
 from nanobot.security.workspace_access import (
@@ -34,7 +31,7 @@ from nanobot.session.manager import SessionManager
 @pytest.fixture(autouse=True)
 def _isolate_plugin_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        agent_plugins, "get_config_path", lambda: tmp_path / "config" / "config.json"
+        "nanobot.config.loader._current_config_path", tmp_path / "config" / "config.json"
     )
 
 
@@ -61,8 +58,12 @@ def _skill(root: Path, name: str, frontmatter: str | None = None, body: str = ""
     return path
 
 
+def _plugins(workspace: Path) -> AgentPlugins:
+    return AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
+
+
 def _loaded_skills(workspace: Path) -> list[str]:
-    return [name for name, _ in enabled_agent_plugin_skills(workspace)]
+    return [skill.name for skill in _plugins(workspace).skill_documents()]
 
 
 def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
@@ -83,7 +84,7 @@ def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
 
     assert [entry["source"] for entry in loader.list_skills()] == ["workspace"]
     assert "Workspace version" in (loader.load_skill("shared") or "")
-    set_agent_plugin_enabled(tmp_path, "demo", True)
+    _plugins(tmp_path).set_enabled("demo", True)
     assert [entry["source"] for entry in loader.list_skills()] == ["workspace"]
 
     shutil.rmtree(workspace_skill)
@@ -104,7 +105,7 @@ def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
         assert disabled_loader.load_skill("shared") is None
         assert disabled_loader.get_skill_metadata("shared") is None
 
-    set_agent_plugin_enabled(tmp_path, "demo", False)
+    _plugins(tmp_path).set_enabled("demo", False)
     assert [entry["source"] for entry in loader.list_skills()] == ["builtin"]
     assert "Built-in body" in (loader.load_skill("shared") or "")
 
@@ -143,7 +144,7 @@ async def test_prompt_snapshot_uses_approved_plugin_bytes_after_replacement(
     document = skill_dir / "SKILL.md"
     original = document.read_text(encoding="utf-8")
     replacement = original.replace("ORIGINAL_APPROVED_INSTRUCTIONS", "REPLACEMENT_INSTRUCTIONS")
-    set_agent_plugin_enabled(workspace, "demo", True)
+    _plugins(workspace).set_enabled("demo", True)
     provider = CaptureProvider()
     sessions = SessionManager(workspace, sessions_root=tmp_path / "sessions")
     loop = AgentLoop(
@@ -203,13 +204,13 @@ async def test_prompt_snapshot_uses_approved_plugin_bytes_after_replacement(
         assert "REPLACEMENT_INSTRUCTIONS" not in provider.prompts[-1]
 
         await loop.process_direct("Explain this project", session_key="cli:unapproved")
-        assert discover_agent_plugins(workspace)[0].enabled is False
+        assert _plugins(workspace).discover()[0].enabled is False
         assert "ORIGINAL_APPROVED_INSTRUCTIONS" not in provider.prompts[-1]
         assert "REPLACEMENT_INSTRUCTIONS" not in provider.prompts[-1]
 
-        set_agent_plugin_enabled(workspace, "demo", True)
+        _plugins(workspace).set_enabled("demo", True)
         await loop.process_direct("Explain this project", session_key="cli:reenabled")
-        assert discover_agent_plugins(workspace)[0].enabled is True
+        assert _plugins(workspace).discover()[0].enabled is True
         assert "REPLACEMENT_INSTRUCTIONS" in provider.prompts[-1]
     finally:
         reached.set()
@@ -236,7 +237,7 @@ def test_plugin_skills_are_direct_valid_and_contained(tmp_path: Path) -> None:
     except OSError:
         pass
 
-    set_agent_plugin_enabled(tmp_path, "demo", True)
+    _plugins(tmp_path).set_enabled("demo", True)
     assert _loaded_skills(tmp_path) == ["direct"]
 
 
@@ -250,7 +251,7 @@ def test_plugin_skills_are_direct_valid_and_contained(tmp_path: Path) -> None:
 )
 def test_plugin_manifest_boundary(tmp_path: Path, manifest: object, valid: bool) -> None:
     _write_json(tmp_path / "plugins" / "candidate" / "plugin.json", manifest)
-    assert bool(discover_agent_plugins(tmp_path)) is valid
+    assert bool(_plugins(tmp_path).discover()) is valid
 
 
 def test_plugin_logo_is_validated_and_contained(tmp_path: Path) -> None:
@@ -266,7 +267,7 @@ def test_plugin_logo_is_validated_and_contained(tmp_path: Path) -> None:
     except OSError:
         pass
 
-    assert {plugin.name: plugin.logo for plugin in discover_agent_plugins(tmp_path)} == {
+    assert {plugin.name: plugin.logo for plugin in _plugins(tmp_path).discover()} == {
         "demo": "data:image/png;base64,iVBORw0KGgpsb2dv",
         "escaped": None,
     }
@@ -294,17 +295,17 @@ def test_plugin_mcp_requires_explicit_enable(tmp_path: Path) -> None:
         },
     )
 
-    assert agent_plugin_mcp_servers(tmp_path) == {}
-    set_agent_plugin_enabled(tmp_path, "desktop", True)
-    server = agent_plugin_mcp_servers(tmp_path)["desktop"]
+    assert _plugins(tmp_path).mcp_servers() == {}
+    _plugins(tmp_path).set_enabled("desktop", True)
+    server = _plugins(tmp_path).mcp_servers()["desktop"]
     assert (server.command, server.cwd, server.env["PLUGIN_ROOT"]) == (
         str(executable),
         str(plugin),
         str(plugin),
     )
     assert server.args[1].endswith("/state")
-    set_agent_plugin_enabled(tmp_path, "desktop", False)
-    assert agent_plugin_mcp_servers(tmp_path) == {}
+    _plugins(tmp_path).set_enabled("desktop", False)
+    assert _plugins(tmp_path).mcp_servers() == {}
 
 
 def test_plugin_mcp_namespaces_cannot_shadow_plugin_identities(tmp_path: Path) -> None:
@@ -324,10 +325,10 @@ def test_plugin_mcp_namespaces_cannot_shadow_plugin_identities(tmp_path: Path) -
             root / "mcp.json",
             {"$schema": AGENT_PLUGIN_MCP_SCHEMA, "mcpServers": servers},
         )
-    set_agent_plugin_enabled(tmp_path, "foo-bar", True)
-    set_agent_plugin_enabled(tmp_path, "foo", True)
+    _plugins(tmp_path).set_enabled("foo-bar", True)
+    _plugins(tmp_path).set_enabled("foo", True)
 
-    servers = agent_plugin_mcp_servers(tmp_path)
+    servers = _plugins(tmp_path).mcp_servers()
 
     assert set(servers) == {"foo-bar", "foo--bar", "foo--other"}
     assert servers["foo-bar"].args == ["single"]
@@ -351,7 +352,7 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
     )
     read_tool = ReadFileTool.create(ctx)
     write_tool = WriteFileTool.create(ctx)
-    set_agent_plugin_enabled(agent_workspace, "demo", True)
+    _plugins(agent_workspace).set_enabled("demo", True)
     activation_checks = 0
     activation_marker = agent_plugins._activation_marker
 
@@ -374,7 +375,7 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
         read_result = await read_tool.execute(path=str(resource))
         repeated_read_result = await read_tool.execute(path=str(resource))
         write_result = await write_tool.execute(path=str(resource), content="changed")
-        set_agent_plugin_enabled(agent_workspace, "demo", False)
+        _plugins(agent_workspace).set_enabled("demo", False)
         disabled_result = await read_tool.execute(path=str(resource))
     finally:
         reset_workspace_scope(token)
@@ -404,7 +405,7 @@ async def test_restricted_project_revokes_cached_plugin_read_after_replacement(
             workspace=str(agent_workspace),
         )
     )
-    set_agent_plugin_enabled(agent_workspace, "demo", True)
+    _plugins(agent_workspace).set_enabled("demo", True)
     scope = validate_workspace_scope_payload(
         {"project_path": str(project), "access_mode": "restricted"},
         default_workspace=agent_workspace,
@@ -426,7 +427,7 @@ async def test_restricted_project_revokes_cached_plugin_read_after_replacement(
 
     assert "trusted" in trusted_result
     assert "outside allowed directory" in replacement_result
-    assert discover_agent_plugins(agent_workspace)[0].enabled is False
+    assert _plugins(agent_workspace).discover()[0].enabled is False
 
 
 @pytest.mark.asyncio
@@ -443,8 +444,8 @@ async def test_project_reads_do_not_rescan_cached_plugin_packages(
     skill = _skill(plugin / "skills", "demo-skill")
     resource = skill / "reference.md"
     resource.write_text("plugin reference", encoding="utf-8")
-    set_agent_plugin_enabled(agent_workspace, "demo", True)
-    assert enabled_agent_plugin_skill_dirs(agent_workspace) == (skill,)
+    _plugins(agent_workspace).set_enabled("demo", True)
+    assert _plugins(agent_workspace).readable_skill_dirs() == (skill,)
 
     fingerprint_checks = 0
     package_fingerprint = agent_plugins._package_fingerprint
@@ -491,11 +492,11 @@ def test_plugin_state_symlink_cannot_escape_config_root(
         (config / "plugin-data").symlink_to(outside, target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"directory symlink unavailable: {exc}")
-    monkeypatch.setattr(agent_plugins, "get_config_path", lambda: config / "config.json")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config / "config.json")
     _plugin(tmp_path, "desktop")
 
     with pytest.raises(RuntimeError, match="escapes its parent"):
-        set_agent_plugin_enabled(tmp_path, "desktop", True)
+        _plugins(tmp_path).set_enabled("desktop", True)
 
 
 def test_plugin_activation_requires_one_stable_package_identity(tmp_path: Path) -> None:
@@ -512,27 +513,27 @@ def test_plugin_activation_requires_one_stable_package_identity(tmp_path: Path) 
             },
         )
 
-    assert discover_agent_plugins(tmp_path) == []
+    assert _plugins(tmp_path).discover() == []
     with pytest.raises(ValueError, match="unknown Agent Plugin"):
-        set_agent_plugin_enabled(tmp_path, "duplicate", True)
+        _plugins(tmp_path).set_enabled("duplicate", True)
 
     shutil.rmtree(roots[1])
-    set_agent_plugin_enabled(tmp_path, "duplicate", True)
-    assert discover_agent_plugins(tmp_path)[0].enabled is True
+    _plugins(tmp_path).set_enabled("duplicate", True)
+    assert _plugins(tmp_path).discover()[0].enabled is True
 
     moved = tmp_path / "plugins" / "moved"
     roots[0].rename(moved)
-    assert discover_agent_plugins(tmp_path)[0].enabled is False
-    assert agent_plugin_mcp_servers(tmp_path) == {}
+    assert _plugins(tmp_path).discover()[0].enabled is False
+    assert _plugins(tmp_path).mcp_servers() == {}
 
 
 def test_legacy_path_activation_is_upgraded_to_package_fingerprint(tmp_path: Path) -> None:
     plugin = _plugin(tmp_path)
-    set_agent_plugin_enabled(tmp_path, "demo", True)
+    _plugins(tmp_path).set_enabled("demo", True)
     marker = next((tmp_path / "config" / "plugin-data").glob("*/demo/enabled"))
     marker.write_text(str(plugin), encoding="utf-8")
 
-    assert discover_agent_plugins(tmp_path)[0].enabled is True
+    assert _plugins(tmp_path).discover()[0].enabled is True
     assert marker.read_text(encoding="utf-8").startswith('{"fingerprint":')
 
 
@@ -554,13 +555,13 @@ def test_plugin_activation_does_not_survive_in_place_contract_replacement(
         )
 
     write_server("trusted")
-    set_agent_plugin_enabled(tmp_path, "desktop", True)
-    assert agent_plugin_mcp_servers(tmp_path)["desktop"].args == ["trusted"]
+    _plugins(tmp_path).set_enabled("desktop", True)
+    assert _plugins(tmp_path).mcp_servers()["desktop"].args == ["trusted"]
 
     write_server("replacement")
 
-    assert discover_agent_plugins(tmp_path)[0].enabled is False
-    assert agent_plugin_mcp_servers(tmp_path) == {}
+    assert _plugins(tmp_path).discover()[0].enabled is False
+    assert _plugins(tmp_path).mcp_servers() == {}
 
 
 def test_plugin_activation_does_not_survive_in_place_code_replacement(
@@ -583,12 +584,81 @@ def test_plugin_activation_does_not_survive_in_place_code_replacement(
             },
         },
     )
-    set_agent_plugin_enabled(tmp_path, "desktop", True)
-    assert discover_agent_plugins(tmp_path)[0].enabled is True
-    assert enabled_agent_plugin_skill_dirs(tmp_path) == (plugin / "skills" / "demo",)
+    _plugins(tmp_path).set_enabled("desktop", True)
+    assert _plugins(tmp_path).discover()[0].enabled is True
+    assert _plugins(tmp_path).readable_skill_dirs() == (plugin / "skills" / "demo",)
 
     executable.write_text("print('replacement')\n", encoding="utf-8")
 
-    assert discover_agent_plugins(tmp_path)[0].enabled is False
-    assert enabled_agent_plugin_skill_dirs(tmp_path) == ()
-    assert agent_plugin_mcp_servers(tmp_path) == {}
+    assert _plugins(tmp_path).discover()[0].enabled is False
+    assert _plugins(tmp_path).readable_skill_dirs() == ()
+    assert _plugins(tmp_path).mcp_servers() == {}
+
+
+def test_plugin_owners_share_approval_invalidation_for_the_same_home_and_workspace(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "agent"
+    plugin = _plugin(workspace)
+    skill = _skill(plugin / "skills", "shared")
+    home = tmp_path / "instance"
+    first = AgentPlugins(home=home, workspace=workspace)
+    second = AgentPlugins(home=home / ".", workspace=workspace / ".")
+
+    assert first.readable_skill_dirs() == ()
+    second.set_enabled("demo", True)
+    assert first.readable_skill_dirs() == (skill,)
+    second.set_enabled("demo", False)
+    assert first.readable_skill_dirs() == ()
+
+
+def test_plugin_approval_and_cached_read_permissions_are_isolated_by_home(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "agent"
+    plugin = _plugin(workspace)
+    skill = _skill(plugin / "skills", "shared")
+    first = AgentPlugins(home=tmp_path / "first", workspace=workspace)
+    second = AgentPlugins(home=tmp_path / "second", workspace=workspace)
+
+    first.set_enabled("demo", True)
+    assert first.readable_skill_dirs() == (skill,)
+    assert second.readable_skill_dirs() == ()
+    assert second.discover()[0].enabled is False
+    second.set_enabled("demo", True)
+    second.set_enabled("demo", False)
+    assert first.readable_skill_dirs() == (skill,)
+
+
+@pytest.mark.asyncio
+async def test_prompt_and_dream_reads_keep_the_bound_plugin_home_after_selection_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.agent.context import ContextBuilder
+
+    workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    project.mkdir()
+    plugin = _plugin(workspace)
+    skill = _skill(plugin / "skills", "shared", body="Approved instructions.")
+    resource = skill / "reference.md"
+    resource.write_text("approved reference", encoding="utf-8")
+    _plugins(workspace).set_enabled("demo", True)
+    context = ContextBuilder(workspace)
+    monkeypatch.setattr(
+        "nanobot.config.loader._current_config_path", tmp_path / "other" / "config.json",
+    )
+
+    assert "Approved instructions." in (context.skills.load_skill("shared") or "")
+    tools = context.memory.build_dream_tools()
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=workspace,
+        default_restrict_to_workspace=True,
+    )
+    token = bind_workspace_scope(scope)
+    try:
+        result = await tools.execute("read_file", {"path": str(resource)})
+    finally:
+        reset_workspace_scope(token)
+    assert "approved reference" in result

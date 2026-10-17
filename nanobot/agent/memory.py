@@ -47,6 +47,7 @@ from nanobot.utils.workspace_prompts import (
 )
 
 if TYPE_CHECKING:
+    from nanobot.agent.plugins import AgentPlugins
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -69,7 +70,19 @@ class MemoryStore:
         r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s+[A-Z][A-Z0-9_]*(?:\s+\[tools:\s*[^\]]+\])?:"
     )
 
-    def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
+    def __init__(
+        self,
+        workspace: Path,
+        max_history_entries: int = _DEFAULT_MAX_HISTORY,
+        *,
+        plugins: AgentPlugins | None = None,
+    ):
+        if plugins is None:
+            from nanobot.agent.plugins import AgentPlugins
+            from nanobot.config.loader import get_config_path
+
+            plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
+        self.plugins = plugins
         self.workspace = workspace
         self.max_history_entries = max_history_entries
         self.memory_dir = ensure_dir(workspace / "memory")
@@ -574,24 +587,28 @@ class MemoryStore:
 
         tools.register(ReadFileTool(
             workspace=workspace,
+            plugins=self.plugins,
             allowed_dir=workspace,
             extra_read_allowed_dirs=extra_read,
             file_states=file_states,
         ))
         tools.register(EditFileTool(
             workspace=workspace,
+            plugins=self.plugins,
             allowed_dir=skills_dir,
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         tools.register(ApplyPatchTool(
             workspace=workspace,
+            plugins=self.plugins,
             allowed_dir=skills_dir,
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         tools.register(WriteFileTool(
             workspace=workspace,
+            plugins=self.plugins,
             allowed_dir=skills_dir,
             extra_write_allowed_files=editable_files,
             file_states=file_states,

@@ -83,7 +83,7 @@ def test_skill_payload_verifies_plugins_once_per_request(
     monkeypatch: pytest.MonkeyPatch,
     detail: bool,
 ) -> None:
-    monkeypatch.setattr(agent_plugins, "get_config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
     workspace_skill = _write_skill(tmp_path, "custom-skill") / "SKILL.md"
     plugin = tmp_path / "plugins" / "demo"
     _write_skill(plugin, "plugin-skill")
@@ -91,7 +91,7 @@ def test_skill_payload_verifies_plugins_once_per_request(
         json.dumps({"$schema": agent_plugins.AGENT_PLUGIN_SCHEMA, "name": "demo"}),
         encoding="utf-8",
     )
-    agent_plugins.set_agent_plugin_enabled(tmp_path, "demo", True)
+    agent_plugins.AgentPlugins(home=tmp_path, workspace=tmp_path).set_enabled("demo", True)
     fingerprint = Mock(wraps=agent_plugins._package_fingerprint)
     monkeypatch.setattr(agent_plugins, "_package_fingerprint", fingerprint)
 

@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, cast
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.skills import SkillsLoader
 from nanobot.config.loader import load_config, save_config
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, require_path_within
@@ -26,9 +27,10 @@ def webui_skills_payload(
     workspace_path: Path,
     *,
     disabled_skills: set[str] | None = None,
+    plugins: AgentPlugins | None = None,
 ) -> dict[str, Any]:
     """Return agent skills without leaking local filesystem paths."""
-    loader = SkillsLoader(workspace_path)
+    loader = SkillsLoader(workspace_path, plugins=plugins)
     with loader.snapshot():
         entries = sorted(
             loader.list_skills(filter_unavailable=False),
@@ -47,9 +49,10 @@ def webui_skill_detail_payload(
     name: str,
     *,
     disabled_skills: set[str] | None = None,
+    plugins: AgentPlugins | None = None,
 ) -> dict[str, Any] | None:
     """Return a single skill's safe detail payload."""
-    loader = SkillsLoader(workspace_path)
+    loader = SkillsLoader(workspace_path, plugins=plugins)
     with loader.snapshot():
         entries = loader.list_skills(filter_unavailable=False)
         entry = next((item for item in entries if item["name"] == name), None)
@@ -76,9 +79,10 @@ def set_webui_skill_enabled(
     enabled: bool,
     disabled_skills: set[str],
     config_path: Path | None = None,
+    plugins: AgentPlugins | None = None,
 ) -> dict[str, Any]:
     """Persist and apply one skill's enabled state."""
-    _require_skill_entry(workspace_path, name)
+    _require_skill_entry(workspace_path, name, plugins=plugins)
     config = load_config(config_path)
     next_disabled = set(config.agents.defaults.disabled_skills)
     if enabled:
@@ -99,9 +103,10 @@ def delete_webui_skill(
     *,
     disabled_skills: set[str],
     config_path: Path | None = None,
+    plugins: AgentPlugins | None = None,
 ) -> dict[str, Any]:
     """Delete one workspace skill and remove its disabled-state entry."""
-    entry = _require_skill_entry(workspace_path, name)
+    entry = _require_skill_entry(workspace_path, name, plugins=plugins)
     if entry.get("source") != "workspace":
         raise SkillManagementError("built-in skills cannot be deleted", status=403)
 
@@ -141,13 +146,15 @@ def delete_webui_skill(
     return {"name": name, "enabled": False, "deleted": True}
 
 
-def _require_skill_entry(workspace_path: Path, name: str) -> dict[str, str]:
+def _require_skill_entry(
+    workspace_path: Path, name: str, *, plugins: AgentPlugins | None,
+) -> dict[str, str]:
     if not name or "/" in name or "\\" in name:
         raise SkillManagementError("invalid skill name")
     entry = next(
         (
             item
-            for item in SkillsLoader(workspace_path).list_skills(filter_unavailable=False)
+            for item in SkillsLoader(workspace_path, plugins=plugins).list_skills(filter_unavailable=False)
             if item["name"] == name
         ),
         None,

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.skill_metadata import parse_skill_metadata, valid_skill_metadata
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
@@ -423,8 +424,14 @@ class CliAppManager:
         workspace: Path,
         data_dir: Path | None = None,
         runtime: CliAppsRuntimeConfig | None = None,
+        plugins: AgentPlugins | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser()
+        if plugins is None:
+            from nanobot.config.loader import get_config_path
+
+            plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=self.workspace)
+        self.plugins = plugins
         self.data_dir = Path(data_dir) if data_dir is not None else get_runtime_subdir("cli-apps")
         self.runtime = runtime or CliAppsRuntimeConfig()
 
@@ -1167,14 +1174,12 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             shutil.rmtree(legacy_dir)
 
     def _record_installed(self, app: dict[str, Any]) -> dict[str, Any]:
-        from nanobot.agent.plugins import set_agent_plugin_enabled
-
         installed = self._load_installed()
         entry = self._installed_entry(app)
         installed[str(app["name"])] = entry
         self._save_installed(installed)
         self.install_skill(app)
-        set_agent_plugin_enabled(self.workspace, _skill_name(str(app["name"])), True)
+        self.plugins.set_enabled(_skill_name(str(app["name"])), True)
         return entry
 
     def install(self, name: str) -> dict[str, Any]:

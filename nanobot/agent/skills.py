@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.skill_metadata import (
     BUILTIN_SKILLS_DIR as BUILTIN_SKILLS_DIR,
 )
@@ -45,7 +46,19 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None,
+        *,
+        plugins: AgentPlugins | None = None,
+    ):
+        if plugins is None:
+            from nanobot.config.loader import get_config_path
+
+            plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
+        self.plugins = plugins
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
@@ -121,9 +134,7 @@ class SkillsLoader:
         return skills
 
     def _discover_skills(self) -> list[dict[str, str]]:
-        from nanobot.agent.plugins import enabled_agent_plugin_skill_documents
-
-        plugin_skills = enabled_agent_plugin_skill_documents(self.workspace)
+        plugin_skills = self.plugins.skill_documents()
         disabled = set(self.disabled_skills)
         if disabled:
             for legacy, canonical in self._skill_aliases().items():

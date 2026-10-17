@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates, current_file_states
@@ -50,7 +51,13 @@ class _FsTool(Tool):
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
         extra_read_allowed_files: list[Path] | None = None,
+        plugins: AgentPlugins | None = None,
     ):
+        if plugins is None and workspace is not None:
+            from nanobot.config.loader import get_config_path
+
+            plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
+        self._plugins = plugins
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         # Legacy alias: extra_allowed_dirs is read-only. Write-capable tools
@@ -90,6 +97,7 @@ class _FsTool(Tool):
         # capability: expose only the append-only log, not the surrounding memory directory.
         return cls(
             workspace=agent_workspace,
+            plugins=ctx.plugins,
             allowed_dir=allowed_dir,
             extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, resolved_agent_workspace / "skills"],
             extra_read_allowed_files=[resolved_agent_workspace / "memory" / "history.jsonl"],
@@ -144,9 +152,7 @@ class _FsTool(Tool):
 
     def _resolve_read(self, path: str) -> Path:
         plugin_skill_dirs: list[Path] = []
-        if self._workspace is not None:
-            from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
-
+        if self._plugins is not None:
             try:
                 access = current_tool_workspace(
                     self._workspace,
@@ -158,8 +164,7 @@ class _FsTool(Tool):
                     if not candidate.is_absolute() and access.project_path is not None:
                         candidate = access.project_path / candidate
                     plugin_skill_dirs = list(
-                        enabled_agent_plugin_skill_dirs(
-                            Path(self._workspace),
+                        self._plugins.readable_skill_dirs(
                             requested_path=candidate.resolve(strict=False),
                         )
                     )
