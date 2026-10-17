@@ -371,3 +371,21 @@ def test_untracked_tools_do_not_prepare_file_edit_trackers(tmp_path: Path) -> No
         workspace=tmp_path,
         params={"path": "created-by-shell.txt"},
     ) == []
+
+
+def test_apply_patch_trackers_follow_an_inherited_top_level_path(tmp_path: Path) -> None:
+    target = tmp_path / "notes.py"
+    target.write_text("old\n", encoding="utf-8")
+
+    trackers = prepare_file_edit_trackers(
+        call_id="call-patch-inherited-path",
+        tool_name="apply_patch",
+        tool=_patch_tool(tmp_path),
+        workspace=tmp_path,
+        params={
+            "path": "notes.py",
+            "edits": [{"action": "replace", "old_text": "old", "new_text": "new"}],
+        },
+    )
+
+    assert [tracker.display_path for tracker in trackers] == ["notes.py"]

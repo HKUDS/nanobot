@@ -490,3 +490,116 @@ def test_apply_patch_edits_rolls_back_when_later_write_fails(tmp_path, monkeypat
     else:
         assert not first.exists()
     assert second.read_bytes() == second_original
+
+
+def test_apply_patch_top_level_path_applies_to_every_edit(tmp_path):
+    target = tmp_path / "calc.py"
+    target.write_text("def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(
+            path="calc.py",
+            edits=[
+                {"action": "replace", "old_text": "    return a + b", "new_text": "    return a | b"},
+                {"action": "replace", "old_text": "    return a - b", "new_text": "    return a ^ b"},
+            ],
+        )
+    )
+
+    assert "update calc.py" in result
+    assert target.read_text() == (
+        "def add(a, b):\n    return a | b\n\n\ndef sub(a, b):\n    return a ^ b\n"
+    )
+
+
+def test_apply_patch_edit_path_overrides_top_level_path(tmp_path):
+    (tmp_path / "a.py").write_text("value = 1\n")
+    (tmp_path / "b.py").write_text("value = 2\n")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(
+            path="a.py",
+            edits=[
+                {"path": "b.py", "action": "replace", "old_text": "value = 2", "new_text": "value = 3"}
+            ],
+        )
+    )
+
+    assert "update b.py" in result
+    assert (tmp_path / "b.py").read_text() == "value = 3\n"
+    assert (tmp_path / "a.py").read_text() == "value = 1\n"
+
+
+def test_apply_patch_without_any_path_is_rejected(tmp_path):
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(tool.execute(edits=[{"action": "add", "new_text": "orphan"}]))
+
+    assert "path required for edit" in result
+    assert not (tmp_path / "orphan").exists()
+
+
+def test_apply_patch_top_level_path_creates_a_new_file(tmp_path):
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(path="notes.txt", edits=[{"action": "add", "new_text": "one\ntwo"}])
+    )
+
+    assert "add notes.txt" in result
+    assert (tmp_path / "notes.txt").read_text() == "one\ntwo\n"
+
+
+def test_apply_patch_top_level_path_survives_an_edit_that_names_its_own(tmp_path):
+    # The named edit points at a different file, so an implementation that lets
+    # the loop overwrite the default would send the second edit to b.py.
+    default = tmp_path / "a.py"
+    default.write_text("first = 1\nsecond = 2\n")
+    other = tmp_path / "b.py"
+    other.write_text("third = 3\n")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    asyncio.run(
+        tool.execute(
+            path="a.py",
+            edits=[
+                {"path": "b.py", "action": "replace", "old_text": "third = 3", "new_text": "third = 30"},
+                {"action": "replace", "old_text": "second = 2", "new_text": "second = 20"},
+            ],
+        )
+    )
+
+    assert other.read_text() == "third = 30\n"
+    assert default.read_text() == "first = 1\nsecond = 20\n"
+
+
+def test_apply_patch_rejects_a_misspelled_edit_path(tmp_path):
+    """An unknown key must not silently inherit the top-level path."""
+
+    (tmp_path / "a.py").write_text("x = 1\n")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    errors = tool.validate_params(
+        {"path": "a.py", "edits": [{"action": "add", "file": "b.py", "new_text": "stray"}]}
+    )
+
+    assert errors, "a misspelled path key must be reported before execution"
+    assert "edits[0].file" in errors[0]
+    assert (tmp_path / "a.py").read_text() == "x = 1\n"
+
+
+def test_apply_patch_schema_accepts_both_path_shapes(tmp_path):
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    assert tool.validate_params(
+        {"path": "a.py", "edits": [{"action": "add", "new_text": "x"}]}
+    ) == []
+    assert tool.validate_params(
+        {"edits": [{"path": "a.py", "action": "add", "new_text": "x"}]}
+    ) == []
+    # Tool-calling models emit nulls for fields they leave unset.
+    assert tool.validate_params(
+        {"path": None, "edits": [{"action": "add", "path": None, "new_text": "x"}]}
+    ) == []

@@ -48,7 +48,9 @@ def _append_text(content: str, addition: str) -> str:
             items=ObjectSchema(
                 path=StringSchema(
                     "Path to the file to edit. Relative paths resolve against the "
-                    "workspace; absolute paths and '..' obey the workspace access policy."
+                    "workspace; absolute paths and '..' obey the workspace access policy. "
+                    "Optional when a top-level path is supplied.",
+                    nullable=True,
                 ),
                 action=StringSchema(
                     "replace updates a unique text match; add creates a file or appends to an existing one.",
@@ -62,11 +64,17 @@ def _append_text(content: str, addition: str) -> str:
                     "Text to replace with or append. Required for replace and add.",
                     nullable=True,
                 ),
-                required=["path", "action"],
+                required=["action"],
+                additional_properties=False,
             ),
             description="File edits, applied in order.",
             min_items=1,
             max_items=20,
+        ),
+        path=StringSchema(
+            "Default path for every edit that omits its own. Saves repeating one "
+            "path across a patch that touches a single file.",
+            nullable=True,
         ),
         dry_run=BooleanSchema(
             description="Validate and summarize the patch without writing files.",
@@ -87,6 +95,8 @@ class ApplyPatchTool(_FsTool):
     def description(self) -> str:
         return (
             "Default tool for code edits, including multi-file changes. "
+            "Each edit carries its own path, or one top-level path may be given "
+            "for a patch that touches a single file. "
             "Returns a file-change summary. "
             "Use edit_file only for small exact replacements on a single file."
         )
@@ -94,9 +104,15 @@ class ApplyPatchTool(_FsTool):
     async def execute(
         self,
         edits: list[object] | None = None,
+        path: str | None = None,
         dry_run: bool = False,
         **kwargs: Any,
     ) -> str:
+        # A patch that touches one file reads better with its path given once, so
+        # a top-level path is inherited by every edit that omits its own.
+        # Validation accepts either shape; filling the gap happens here, once,
+        # which leaves the per-edit path authoritative.
+        default_path = path
         try:
             if not edits:
                 raise _PatchError("must provide edits")
@@ -110,8 +126,15 @@ class ApplyPatchTool(_FsTool):
                     raise _PatchError("each edit must be an object")
                 edit = cast(dict[str, Any], edit_value)
                 raw_path = edit.get("path")
+                if raw_path is None:
+                    raw_path = default_path
+                if raw_path is None:
+                    raise _PatchError(
+                        "path required for edit: give each edit a path, or pass one "
+                        "top-level path for all of them"
+                    )
                 if not isinstance(raw_path, str):
-                    raise _PatchError("path required for edit")
+                    raise _PatchError(f"path must be a string: {raw_path!r}")
                 path = _validate_patch_path(raw_path)
                 action = edit.get("action")
                 if not isinstance(action, str):
