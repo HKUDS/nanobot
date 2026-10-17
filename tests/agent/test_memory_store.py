@@ -538,3 +538,103 @@ def test_raw_archive_handles_none_timestamp_and_missing_role(tmp_path: Path) -> 
     assert "[?] USER: message with none timestamp" in raw_history
     assert "[1720000000] ASSISTANT: message with int timestamp" in raw_history
     assert "[2026-07-28T12:00] UNKNOWN: message with missing role" in raw_history
+
+
+def test_legacy_workspace_gitignore_backfilled_on_construction(tmp_path):
+    """#5246: MemoryStore repairs pre-fix workspace .gitignore on startup."""
+    from dulwich import porcelain
+
+    porcelain.init(str(tmp_path))
+    legacy = "/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n"
+    (tmp_path / ".gitignore").write_text(legacy, encoding="utf-8")
+
+    MemoryStore(tmp_path)
+
+    lines = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "memory/*" in lines
+    assert "!memory/.dream_cursor" in lines
+
+
+def test_gitignore_backfill_failure_does_not_prevent_memory_open(tmp_path, monkeypatch):
+    from nanobot.utils.gitstore import GitStore, GitStoreError
+
+    def fail(_self):
+        raise GitStoreError("read-only workspace")
+
+    monkeypatch.setattr(GitStore, "ensure_gitignore", fail)
+    store = MemoryStore(tmp_path)
+    assert store.memory_dir.is_dir()
+
+
+@pytest.mark.parametrize("existing", [
+    b"# Custom ignore policy\n\xff\n",
+    b"/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n# \xff\n",
+])
+def test_non_utf8_gitignore_preserved_across_memory_startup(tmp_path, existing):
+    from dulwich import porcelain
+
+    porcelain.init(str(tmp_path))
+    ignore = tmp_path / ".gitignore"
+    ignore.write_bytes(existing)
+
+    store = MemoryStore(tmp_path)
+    store.write_memory("Existing memory")
+    store.append_history("Retained history")
+    reopened = MemoryStore(tmp_path)
+
+    assert reopened.read_memory() == "Existing memory"
+    assert reopened.read_unprocessed_history(0)[0]["content"] == "Retained history"
+    assert ignore.read_bytes() == existing
+
+
+def test_ignore_backfill_preserves_memory_history_and_git_restore(tmp_path):
+    from dulwich import porcelain
+    from dulwich.repo import Repo
+
+    legacy_files = {
+        ".gitignore": "/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n",
+        "SOUL.md": "Original soul",
+        "USER.md": "Original user",
+        "memory/MEMORY.md": "Original memory",
+        "memory/.dream_cursor": "1",
+        "memory/.cursor": "1",
+        "memory/history.jsonl": '{"cursor":1,"timestamp":"2026-01-01","content":"Old history"}\n',
+    }
+    for name, content in legacy_files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    porcelain.init(str(tmp_path))
+    tracked = [".gitignore", "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor"]
+    porcelain.add(str(tmp_path), paths=[str(tmp_path / name) for name in tracked])
+    original_commit = porcelain.commit(
+        str(tmp_path), message=b"Original memory", author=b"Test <test@example.org>",
+    )
+    index = tmp_path / ".git/index"
+    original_index = index.read_bytes()
+    original_bytes = {name: (tmp_path / name).read_bytes() for name in legacy_files}
+
+    store = MemoryStore(tmp_path)
+    updated_ignore = (tmp_path / ".gitignore").read_bytes()
+    assert updated_ignore != original_bytes[".gitignore"]
+    assert index.read_bytes() == original_index
+    for name, content in original_bytes.items():
+        if name != ".gitignore":
+            assert (tmp_path / name).read_bytes() == content
+    with Repo(str(tmp_path)) as repo:
+        assert repo.head() == original_commit
+
+    store = MemoryStore(tmp_path)
+    assert (tmp_path / ".gitignore").read_bytes() == updated_ignore
+    assert store.read_memory() == "Original memory"
+    assert store.read_unprocessed_history(0)[0]["content"] == "Old history"
+    assert store.append_history("New history") == 2
+    store.write_memory("New memory")
+    change = store.git.auto_commit("dream: update memory")
+    assert change is not None
+    assert "New memory" in store.git.diff_commits(original_commit.decode()[:8], change)
+    assert store.git.revert(change) is not None
+    assert store.read_memory() == "Original memory"
+    assert [entry["content"] for entry in store.read_unprocessed_history(0)] == [
+        "Old history", "New history",
+    ]
