@@ -792,3 +792,104 @@ def test_get_history_extend_to_user_keeps_newer_user_inside_window():
 
     assert [m["content"] for m in history] == ["new question", "new answer"]
     _assert_no_orphans(history)
+
+
+def test_get_history_replays_reasoning_only_for_the_current_turn():
+    session = Session(key="test:reasoning-bound")
+    thinking = [{"type": "thinking", "thinking": "old chain", "signature": "sig-old"}]
+    # Turn 1: a reasoning-only row, a tool call with reasoning, the tool result
+    # and the final answer with reasoning.
+    session.messages.append({"role": "user", "content": "first"})
+    session.messages.append({
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "only reasoning",
+        "thinking_blocks": thinking,
+    })
+    session.messages.append({
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "call-1", "function": {"name": "read_file", "arguments": "{}"}}],
+        "reasoning_content": "why read",
+        "thinking_blocks": thinking,
+    })
+    session.messages.append({"role": "tool", "tool_call_id": "call-1", "name": "read_file", "content": "x"})
+    session.messages.append({
+        "role": "assistant",
+        "content": "first answer",
+        "reasoning_content": "old chain",
+        "thinking_blocks": thinking,
+    })
+    # Turn 2 (current): the reply keeps its reasoning on the wire.
+    session.messages.append({"role": "user", "content": "second"})
+    session.messages.append({
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "current only-reasoning row",
+    })
+    session.messages.append({
+        "role": "assistant",
+        "content": "second answer",
+        "reasoning_content": "new chain",
+        "thinking_blocks": [{"type": "thinking", "thinking": "new chain", "signature": "sig-new"}],
+    })
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [
+        {"role": "user", "content": "first"},
+        # The reasoning-only row of the old turn is gone; the tool call stays
+        # without its reasoning so the tool pair remains legal.
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call-1", "function": {"name": "read_file", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "name": "read_file", "content": "x"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "second"},
+        {"role": "assistant", "content": "", "reasoning_content": "current only-reasoning row"},
+        {
+            "role": "assistant",
+            "content": "second answer",
+            "reasoning_content": "new chain",
+            "thinking_blocks": [{"type": "thinking", "thinking": "new chain", "signature": "sig-new"}],
+        },
+    ]
+    # The persisted rows are untouched: this is a replay projection only.
+    assert session.messages[4]["reasoning_content"] == "old chain"
+
+
+def test_get_history_keeps_reasoning_without_a_user_boundary():
+    session = Session(key="test:reasoning-no-user")
+    session.messages.append({
+        "role": "assistant",
+        "content": "proactive note",
+        "reasoning_content": "kept",
+        "_channel_delivery": True,
+    })
+
+    assert session.get_history(max_messages=500) == [
+        {"role": "assistant", "content": "proactive note", "reasoning_content": "kept"},
+    ]
+
+
+def test_get_history_reasoning_bound_is_stable_across_prefix_and_chunk_views():
+    # Memory consolidation compares a prefix replay against the replay of its
+    # tail chunk; both must project the same rows for the same messages.
+    session = Session(key="test:reasoning-consolidation")
+    thinking = [{"type": "thinking", "thinking": "t", "signature": "s"}]
+    session.messages.append({"role": "user", "content": "one"})
+    session.messages.append({"role": "assistant", "content": "a1", "reasoning_content": "r1", "thinking_blocks": thinking})
+    session.messages.append({"role": "user", "content": "two"})
+    session.messages.append({"role": "assistant", "content": "a2", "reasoning_content": "r2", "thinking_blocks": thinking})
+
+    full = session.get_history()
+    chunk = Session(key="test:chunk", messages=list(session.messages[2:])).get_history()
+
+    assert full[-len(chunk):] == chunk
+    assert chunk == [
+        {"role": "user", "content": "two"},
+        {"role": "assistant", "content": "a2", "reasoning_content": "r2", "thinking_blocks": thinking},
+    ]
+    assert full[1] == {"role": "assistant", "content": "a1"}
