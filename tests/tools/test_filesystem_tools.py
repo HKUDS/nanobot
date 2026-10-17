@@ -94,6 +94,16 @@ class TestReadFileTool:
         assert result[1] == {"type": "text", "text": f"(Image file: {f})"}
 
     @pytest.mark.asyncio
+    async def test_svg_file_returns_numbered_source(self, tool, tmp_path):
+        f = tmp_path / "logo.svg"
+        f.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>\n', encoding="utf-8")
+
+        result = await tool.execute(path=str(f))
+
+        assert isinstance(result, str)
+        assert result.startswith('1| <svg xmlns="http://www.w3.org/2000/svg"/>')
+
+    @pytest.mark.asyncio
     async def test_file_not_found(self, tool, tmp_path):
         result = await tool.execute(path=str(tmp_path / "nope.txt"))
         assert "Error" in result
