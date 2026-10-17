@@ -431,10 +431,14 @@ class TestProgressFiltering:
 
 
 class TestRetryWaitFiltering:
-    """Internal provider retry heartbeats must never reach channels."""
+    """Provider retry notices follow the per-channel ``sendProgress`` gate."""
 
     @pytest.mark.asyncio
     async def test_retry_wait_message_dropped(self, manager, bus):
+        # With progress disabled the notice is dropped like any other
+        # progress line; the opted-in path is covered in
+        # test_channel_manager_retry_wait.py.
+        manager.channels["mock"].send_progress = False
         retry_msg = outbound_message_for_event(
             channel="mock",
             chat_id="chat1",
