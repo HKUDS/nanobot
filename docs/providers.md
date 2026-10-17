@@ -362,9 +362,13 @@ Replace the model with a model ID available to your account. Leave API selection
 
 Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models can retain server-provided conversation state; [native context compaction](./configuration.md#responses-state-and-compaction) depends on provider support. The WebUI offers switches for OpenAI web search, Codex Fast mode, and Grok X Search.
 
-DeepSeek's `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp` automatically use its native Responses API. For web search, use nanobot's [web search tool](./configuration.md#web-search). OpenCode Go's `muse-spark-1.2-contributor` and `muse-spark-1.3-contributor` also use Responses by default.
+Use `deepseek-flash` for DeepSeek's current Flash model. It supports image input on both Chat Completions and Responses; `deepseek-v4-pro` is text-only. DeepSeek currently accepts the legacy names `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` and serves them through the current Flash model. See [DeepSeek's model details](https://api-docs.deepseek.com/quick_start/pricing) for current alias availability.
 
-The `deepseek-flash` alias uses Responses automatically at `https://api.deepseek.com`, including the `/v1` form. With a different `providers.deepseek.apiBase`, Auto uses Chat Completions for this alias. Select Responses in the preset if the proxy supports it. The V4 model names listed above use Responses with either endpoint configuration.
+`deepseek-flash` uses Responses automatically at `https://api.deepseek.com`, including the `/v1` form. With a different `providers.deepseek.apiBase`, Auto uses Chat Completions for this model. Select Responses in the preset if the proxy supports it. `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp` use Responses by default with either endpoint configuration. Do not replace a proxy's model ID unless that proxy documents the new name.
+
+DeepSeek's known Flash and Pro models offer `none`, `low`, `high`, and `max` reasoning settings. Leave the setting empty to follow the provider default (currently thinking enabled at `high`); `none` explicitly disables thinking. The model picker uses available catalog reasoning levels and still accepts custom values. Selecting a catalog model for a new preset can initialize its context window; existing presets and manually entered context values are preserved. Catalog output limits do not raise your preset's output budget, which includes both reasoning and the final answer.
+
+For web search, use nanobot's [web search tool](./configuration.md#web-search). DeepSeek's standalone Search/Fetch APIs and Pro hosted search are not enabled by selecting a DeepSeek model. OpenCode Go's `muse-spark-1.2-contributor` and `muse-spark-1.3-contributor` also use Responses by default.
 
 ### Custom OpenAI-Compatible Endpoint
 

@@ -613,7 +613,11 @@ interface ProviderModelInfo {
   description?: string | null;
   owned_by?: string | null;
   context_window?: number | null;
+  max_output_tokens?: number;
+  input_modalities?: string[];
+  output_modalities?: string[];
   reasoning_efforts?: string[];
+  default_reasoning_effort?: string;
   supports_backend_search?: boolean;
   api?: ModelAPIConfig | null;
 }
