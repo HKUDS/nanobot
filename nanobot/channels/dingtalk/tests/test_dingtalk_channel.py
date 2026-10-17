@@ -229,6 +229,73 @@ async def test_dm_allowed_when_private_chat_not_disabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_group_message_publishes_session_webhook_metadata(monkeypatch) -> None:
+    """Group inbound events carry the reply webhook so later replies can真@.
+
+    The sessionWebhook arrives in the raw DingTalk payload and expires, so the
+    expiry timestamp must travel with it. Private chats get neither key.
+    """
+    bus = MessageBus()
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        bus,
+    )
+    handler = NanobotDingTalkHandler(channel)
+
+    class _FakeChatbotMessage:
+        text = SimpleNamespace(content="hello")
+        extensions = {}
+        sender_staff_id = "user1"
+        sender_id = "fallback-user"
+        sender_nick = "Alice"
+        message_type = "text"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeChatbotMessage()
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", _FakeChatbotMessage)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+
+    await handler.process(
+        SimpleNamespace(
+            data={
+                "conversationType": "2",
+                "conversationId": "conv123",
+                "sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+                "sessionWebhookExpiredTime": 9999999999999,
+                "text": {"content": "hello"},
+            }
+        )
+    )
+    await asyncio.gather(*list(channel._background_tasks))
+    group_msg = await bus.consume_inbound()
+
+    assert group_msg.metadata["sender_id"] == "user1"
+    assert group_msg.metadata["session_webhook"] == (
+        "https://oapi.dingtalk.com/robot/sendBySession?session=abc"
+    )
+    assert group_msg.metadata["session_webhook_expiry"] == 9999999999999
+
+    await handler.process(
+        SimpleNamespace(
+            data={
+                "conversationType": "1",
+                "sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+                "sessionWebhookExpiredTime": 9999999999999,
+                "text": {"content": "dm hello"},
+            }
+        )
+    )
+    await asyncio.gather(*list(channel._background_tasks))
+    dm_msg = await bus.consume_inbound()
+
+    assert "session_webhook" not in dm_msg.metadata
+    assert "session_webhook_expiry" not in dm_msg.metadata
+    assert "sender_id" not in dm_msg.metadata
+
+
+@pytest.mark.asyncio
 async def test_group_message_allowed_when_private_chat_disabled() -> None:
     """Disabling private chat must not affect group messages."""
     config = DingTalkConfig(
@@ -317,6 +384,205 @@ async def test_group_send_escapes_untrusted_sender_name(monkeypatch) -> None:
 
     sent_text = json.loads(channel._http.calls[0]["json"]["msgParam"])["text"]
     assert sent_text == r"# @Alice \# \[click\]\(https://evil\) \*admin\*" + "\n\nhello"
+
+
+@pytest.mark.asyncio
+async def test_group_send_uses_session_webhook_at_reply(monkeypatch) -> None:
+    """With a live sessionWebhook, group replies go out with a true @ (atUserIds
+    plus the literal @{userId} in the text) instead of the visual # header."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp(responses=[_FakeResponse(200, {"errcode": 0})])
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="group:conv123",
+            content="hello",
+            metadata={
+                "sender_name": "Alice",
+                "sender_id": "user1",
+                "session_webhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+                "session_webhook_expiry": 9999999999999,
+            },
+        )
+    )
+
+    assert len(channel._http.calls) == 1
+    call = channel._http.calls[0]
+    assert call["url"] == "https://oapi.dingtalk.com/robot/sendBySession?session=abc"
+    body = call["json"]
+    assert body["msgtype"] == "markdown"
+    assert body["at"] == {"atUserIds": ["user1"], "isAtAll": False}
+    assert body["markdown"]["text"] == "@user1\n\nhello"
+    assert body["markdown"]["title"]
+
+
+@pytest.mark.asyncio
+async def test_group_send_falls_back_when_webhook_expired(monkeypatch) -> None:
+    """An expired sessionWebhook must not be called; the reply goes through
+    the robot API with the visual # header as before."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="group:conv123",
+            content="hello",
+            metadata={
+                "sender_name": "Alice",
+                "sender_id": "user1",
+                "session_webhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+                "session_webhook_expiry": 1000,  # long past
+            },
+        )
+    )
+
+    assert len(channel._http.calls) == 1
+    call = channel._http.calls[0]
+    assert call["url"] == "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+    sent_text = json.loads(call["json"]["msgParam"])["text"]
+    assert sent_text == "# @Alice\n\nhello"
+
+
+@pytest.mark.asyncio
+async def test_group_send_falls_back_when_webhook_rejects(monkeypatch) -> None:
+    """A sessionWebhook API error (errcode != 0) must degrade to the robot API
+    rather than losing the reply."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp(responses=[
+        _FakeResponse(200, {"errcode": 310000, "errmsg": "session expired"}),
+    ])
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="group:conv123",
+            content="hello",
+            metadata={
+                "sender_name": "Alice",
+                "sender_id": "user1",
+                "session_webhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+                "session_webhook_expiry": 9999999999999,
+            },
+        )
+    )
+
+    assert len(channel._http.calls) == 2
+    assert channel._http.calls[0]["url"].startswith("https://oapi.dingtalk.com/robot/sendBySession")
+    fallback = channel._http.calls[1]
+    assert fallback["url"] == "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+    sent_text = json.loads(fallback["json"]["msgParam"])["text"]
+    assert sent_text == "# @Alice\n\nhello"
+
+
+@pytest.mark.asyncio
+async def test_group_send_ignores_untrusted_session_webhook(monkeypatch) -> None:
+    """sessionWebhook travels through persisted session metadata; a value not
+    pointing at the official DingTalk host must never be POSTed to."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="group:conv123",
+            content="hello",
+            metadata={
+                "sender_name": "Alice",
+                "sender_id": "user1",
+                "session_webhook": "https://evil.example.com/steal?session=abc",
+                "session_webhook_expiry": 9999999999999,
+            },
+        )
+    )
+
+    assert len(channel._http.calls) == 1
+    assert channel._http.calls[0]["url"] == "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("automation_meta_key", ["_cron_trigger", "_local_trigger"])
+async def test_group_automation_push_skips_session_webhook(monkeypatch, automation_meta_key) -> None:
+    """Cron/trigger pushes are not replies to the webhook's original message:
+    they must keep using the robot API even with a live sessionWebhook in the
+    persisted route metadata."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="group:conv123",
+            content="scheduled hello",
+            metadata={
+                "sender_name": "Alice",
+                "sender_id": "user1",
+                "session_webhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+                "session_webhook_expiry": 9999999999999,
+                automation_meta_key: {"job_id": "j1"},
+            },
+        )
+    )
+
+    assert len(channel._http.calls) == 1
+    call = channel._http.calls[0]
+    assert call["url"] == "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+    sent_text = json.loads(call["json"]["msgParam"])["text"]
+    assert sent_text == "# @Alice\n\nscheduled hello"
+
+
+@pytest.mark.asyncio
+async def test_private_send_without_metadata_unchanged(monkeypatch) -> None:
+    """A private reply with no metadata at all behaves exactly as before the
+    webhook feature: robot API, verbatim text, no @ handling."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(channel="dingtalk", chat_id="user1", content="hello")
+    )
+
+    assert len(channel._http.calls) == 1
+    call = channel._http.calls[0]
+    assert call["url"] == "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+    assert json.loads(call["json"]["msgParam"])["text"] == "hello"
 
 
 @pytest.mark.asyncio
