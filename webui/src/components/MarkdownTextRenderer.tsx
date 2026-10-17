@@ -14,6 +14,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { Streamdown, type Components, type StreamdownProps } from "streamdown";
 import remend from "remend";
+import type { ListItem, Nodes, Root } from "mdast";
 
 import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
 
@@ -73,6 +74,13 @@ type InlineLinkPreview = {
   host: string;
   prefix?: string;
   title: string;
+};
+
+type InlineLinkPreviewProperties = {
+  "data-link-preview-href": string;
+  "data-link-preview-host": string;
+  "data-link-preview-title": string;
+  "data-link-preview-prefix"?: string;
 };
 
 type AvailabilityResult = {
@@ -308,6 +316,7 @@ const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   [remarkMath, { singleDollarTextMath: false }],
   remarkTexMath,
   remarkSafeHtmlSubset,
+  remarkInlineLinkPreviews,
 ];
 type MathPlugin = typeof import("@/lib/markdown-math").default;
 let loadedMathPlugin: MathPlugin | undefined;
@@ -430,28 +439,6 @@ function sessionReferenceHref(href: string): string | null {
   }
 }
 
-function linkPreviewParts(value: ReactNode): { text: string; href?: string } {
-  let text = "";
-  let href: string | undefined;
-  for (const child of Children.toArray(value)) {
-    if (typeof child === "string" || typeof child === "number") {
-      text += String(child);
-      continue;
-    }
-    if (!isValidElement(child)) {
-      continue;
-    }
-    const props = child.props as { href?: unknown; children?: ReactNode };
-    if (!href && typeof props.href === "string" && /^https?:\/\//i.test(props.href)) {
-      href = props.href;
-    }
-    const nested = linkPreviewParts(props.children);
-    text += nested.text;
-    href ||= nested.href;
-  }
-  return { text, href };
-}
-
 function cleanLinkPreviewText(value: string): string {
   return value
     .replace(/\s+/g, " ")
@@ -459,36 +446,57 @@ function cleanLinkPreviewText(value: string): string {
     .trim();
 }
 
-function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview | null {
-  const { text: rawText, href } = linkPreviewParts(children);
-  if (!href) return null;
+function inlineLinkPreviewFromListItem(item: ListItem): InlineLinkPreview | null {
+  if (typeof item.checked === "boolean" || item.children.length !== 1) return null;
+  const paragraph = item.children[0];
+  if (paragraph.type !== "paragraph" || paragraph.children.length !== 3) return null;
+  const [heading, lineBreak, link] = paragraph.children;
+  if (heading.type !== "text" || lineBreak.type !== "break" || link.type !== "link"
+    || link.title || link.children.length !== 1 || link.children[0].type !== "text") return null;
 
   let url: URL;
   try {
-    url = new URL(href);
+    url = new URL(link.url);
+    if (new URL(link.children[0].value).href !== url.href) return null;
   } catch {
     return null;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
 
-  const strippedUrl = rawText
-    .replace(/\s+/g, " ")
-    .replace(href, "")
-    .replace(url.toString(), "")
-    .replace(/https?:\/\/\S+/i, "")
-    .trim();
-  if (!strippedUrl || strippedUrl.length < 4) return null;
-
-  const sourceMatch = /^(.*?)\s*(?:[—–]| - |:)\s*(.+)$/.exec(strippedUrl);
+  const headingText = heading.value.trim();
+  if (headingText.length < 4) return null;
+  const sourceMatch = /^(.*?)\s*(?:[—–]| - |:)\s*(.+)$/.exec(headingText);
   const prefix = sourceMatch?.[1] ? cleanLinkPreviewText(sourceMatch[1]) : undefined;
-  const title = cleanLinkPreviewText(sourceMatch?.[2] ?? strippedUrl);
+  const title = cleanLinkPreviewText(sourceMatch?.[2] ?? headingText);
   if (!title || /^https?:\/\//i.test(title)) return null;
 
-  return {
-    href,
-    host: url.hostname,
-    prefix,
-    title,
+  return { href: link.url, host: url.hostname, prefix, title };
+}
+
+function remarkInlineLinkPreviews() {
+  return (tree: Root) => {
+    function visit(node: Nodes) {
+      // Only the syntax tree knows both the whole item and its list's numbering.
+      // Never infer a preview by flattening rendered descendants.
+      if (node.type === "list" && !node.ordered) {
+        for (const item of node.children) {
+          const link = inlineLinkPreviewFromListItem(item);
+          if (!link) continue;
+          const properties: InlineLinkPreviewProperties = {
+            "data-link-preview-href": link.href,
+            "data-link-preview-host": link.host,
+            "data-link-preview-title": link.title,
+            "data-link-preview-prefix": link.prefix,
+          };
+          item.data = {
+            ...item.data,
+            hProperties: { ...item.data?.hProperties, ...properties },
+          };
+        }
+      }
+      if ("children" in node) node.children.forEach(visit);
+    }
+    visit(tree);
   };
 }
 
@@ -793,12 +801,17 @@ export default function MarkdownTextRenderer({
           </div>
         );
       },
-      li({ children: markdownChildren, className: itemClassName }) {
-        const link = !documentPath && inlineLinkPreviewFromChildren(markdownChildren);
-        if (link) {
+      li({ children: markdownChildren, className: itemClassName, node }) {
+        const preview = node?.properties as InlineLinkPreviewProperties | undefined;
+        if (!documentPath && preview?.["data-link-preview-href"]) {
           return (
             <li className={cn("list-none pl-0", itemClassName)}>
-              <InlineLinkPreviewRow link={link} />
+              <InlineLinkPreviewRow link={{
+                href: preview["data-link-preview-href"],
+                host: preview["data-link-preview-host"],
+                title: preview["data-link-preview-title"],
+                prefix: preview["data-link-preview-prefix"],
+              }} />
             </li>
           );
         }

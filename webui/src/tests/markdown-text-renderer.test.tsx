@@ -63,6 +63,24 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
+  it("does not promote unsafe title-plus-URL items through preview metadata", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {[
+          "- Unsafe script title",
+          "  [javascript:alert(1)](javascript:alert(1))",
+          "- Unsafe data title",
+          "  [data:text/html,alert](data:text/html,alert)",
+        ].join("\n")}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelector("li.list-none, a, img")).toBeNull();
+    expect(container).toHaveTextContent("javascript:alert(1)");
+    expect(container).toHaveTextContent("data:text/html,alert");
+  });
+
   it("keeps safe external, mail, relative, and fragment links", () => {
     render(
       <MarkdownTextRenderer>
@@ -318,6 +336,19 @@ describe("MarkdownTextRenderer", () => {
     ).toHaveAttribute("href", "https://polymarket.com/event/when-will-gpt-5pt6-be-released");
   });
 
+  it("keeps document title-plus-URL lists ordinary without loading favicons", () => {
+    const { container } = render(
+      <MarkdownTextRenderer documentPath="/workspace/notes.md">
+        {"- Example source title\n  https://example.com/source"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelector("li")).toHaveTextContent("Example source title");
+    expect(container.querySelector("li.list-none, img")).toBeNull();
+    expect(screen.getByRole("link", { name: "https://example.com/source" }))
+      .toHaveAttribute("href", "https://example.com/source");
+  });
+
   it("falls back through favicon sources before showing a globe for compact link rows", () => {
     const { container } = render(
       <MarkdownTextRenderer>
@@ -358,6 +389,225 @@ describe("MarkdownTextRenderer", () => {
     expect(favicon()).not.toBeInTheDocument();
     expect(link.querySelector("svg")).toBeInTheDocument();
     expect(container).not.toHaveTextContent("SC");
+  });
+
+  describe("compact link preview boundaries", () => {
+    const reportedMessage = [
+      "已完成：",
+      "",
+      "- **#6267、#6268、#6271** 已设为 **Draft**，未重写它们的分支。",
+      "- **[#6269](https://github.com/HKUDS/nanobot/pull/6269)** 已单独 rebase 到最新 `main`，PR base 也已改为 `main`，保持非 Draft。",
+      "  - 新 head：`16128a60a`",
+      "  - 仅保留自身一个提交，未带入 #6267、#6268。",
+      "  - 已用 `--force-with-lease` 推送，并更新 PR 描述。",
+      "",
+      "本地验证：**2,441 项通过、1 项跳过**；Ruff、BasedPyright、import boundaries、diff 检查均通过。",
+      "",
+      "[新 head 的 CI](https://github.com/HKUDS/nanobot/actions/runs/39046574215) 已启动，目前排队中，尚未出结果。",
+    ].join("\n");
+
+    function expectReportedList(container: HTMLElement) {
+      expect(container.querySelectorAll("li")).toHaveLength(5);
+      const topItems = container.querySelectorAll(".markdown-content > ul > li");
+      expect(topItems).toHaveLength(2);
+      expect(topItems[1].querySelectorAll("ul > li")).toHaveLength(3);
+      expect(topItems[1].querySelectorAll("code")).toHaveLength(4);
+      expect(Array.from(topItems[1].querySelectorAll("code"), (code) => code.textContent))
+        .toEqual(["main", "main", "16128a60a", "--force-with-lease"]);
+      const prLink = topItems[1].querySelector("a");
+      expect(prLink).toHaveTextContent(/^#6269$/);
+      expect(prLink).toHaveAttribute("href", "https://github.com/HKUDS/nanobot/pull/6269");
+      expect(prLink?.closest("strong")).not.toBeNull();
+      expect(topItems[1]).not.toHaveClass("list-none");
+      expect(container).toHaveTextContent("已用 --force-with-lease 推送，并更新 PR 描述。");
+      expect(container.querySelectorAll("a")).toHaveLength(2);
+    }
+
+    describe.each([
+      { label: "static", streaming: false, preserveStreamingLayout: false },
+      { label: "streaming", streaming: true, preserveStreamingLayout: false },
+      { label: "preserved static", streaming: false, preserveStreamingLayout: true },
+      { label: "preserved streaming", streaming: true, preserveStreamingLayout: true },
+    ])("$label", ({ streaming, preserveStreamingLayout }) => {
+      it("preserves the reported prose, emphasis, code, and three nested items", () => {
+        const { container } = render(
+          <MarkdownTextRenderer streaming={streaming} preserveStreamingLayout={preserveStreamingLayout}>
+            {reportedMessage}
+          </MarkdownTextRenderer>,
+        );
+
+        expectReportedList(container);
+      });
+
+      it("keeps prose links, multiple targets, and links in child items independent", () => {
+        const { container } = render(
+          <MarkdownTextRenderer streaming={streaming} preserveStreamingLayout={preserveStreamingLayout}>
+            {[
+              "- Read [the guide](https://example.com/guide) before running `setup`.",
+              "- Compare [first](https://example.com/first) and [second](https://example.org/second).",
+              "- Parent **summary**",
+              "  - Read [child](https://example.net/child) and keep `child-code`.",
+              "- A title with its own URL",
+              "  https://example.com/parent",
+              "  - Keep this nested item too.",
+            ].join("\n")}
+          </MarkdownTextRenderer>,
+        );
+
+        expect(container.querySelectorAll("li")).toHaveLength(6);
+        expect(container.querySelectorAll("ul ul")).toHaveLength(2);
+        expect(container.querySelectorAll("code")).toHaveLength(2);
+        expect(container.querySelector("strong")).toHaveTextContent("summary");
+        expect(Array.from(container.querySelectorAll("a"), (link) => [
+          link.textContent, link.getAttribute("href"),
+        ])).toEqual([
+          ["the guide", "https://example.com/guide"],
+          ["first", "https://example.com/first"],
+          ["second", "https://example.org/second"],
+          ["child", "https://example.net/child"],
+          ["https://example.com/parent", "https://example.com/parent"],
+        ]);
+        expect(container.querySelector(".list-none")).toBeNull();
+      });
+
+      it("does not compact same-line URLs, formatted titles, extra paragraphs, or URL commentary", () => {
+        const { container } = render(
+          <MarkdownTextRenderer streaming={streaming} preserveStreamingLayout={preserveStreamingLayout}>
+            {[
+              "- A title https://example.com/same-line",
+              "",
+              "- A **formatted** title",
+              "  https://example.com/formatted",
+              "",
+              "- A paragraph title",
+              "",
+              "  https://example.com/paragraph",
+              "",
+              "- A title with commentary",
+              "  https://example.com/commentary and more prose.",
+              "",
+              "- A title with two URLs",
+              "  https://example.com/one",
+              "  https://example.org/two",
+              "",
+              "- A title with a labelled link",
+              "  [label](https://example.com/labelled)",
+              "",
+              "- A title with a link tooltip",
+              "  [https://example.com/tooltip](https://example.com/tooltip \"Keep this tooltip\")",
+            ].join("\n")}
+          </MarkdownTextRenderer>,
+        );
+
+        expect(container.querySelectorAll("li")).toHaveLength(7);
+        expect(container.querySelectorAll("a")).toHaveLength(8);
+        expect(container.querySelector("strong")).toHaveTextContent("formatted");
+        expect(container).toHaveTextContent("and more prose.");
+        expect(container.querySelector("a[href='https://example.com/labelled']"))
+          .toHaveTextContent(/^label$/);
+        expect(container.querySelector("a[href='https://example.com/tooltip']"))
+          .toHaveAttribute("title", "Keep this tooltip");
+        expect(container.querySelector(".list-none")).toBeNull();
+      });
+
+      it("preserves ordered numbering and both task states even for title plus URL items", () => {
+        const { container } = render(
+          <MarkdownTextRenderer streaming={streaming} preserveStreamingLayout={preserveStreamingLayout}>
+            {[
+              "3. Ordered title",
+              "   https://example.com/ordered",
+              "4. Next ordered title",
+              "   https://example.com/next",
+              "",
+              "- [ ] Pending title",
+              "  https://example.com/pending",
+              "- [x] Completed title",
+              "  https://example.com/completed",
+            ].join("\n")}
+          </MarkdownTextRenderer>,
+        );
+
+        expect(container.querySelector("ol")).toHaveAttribute("start", "3");
+        expect(container.querySelectorAll("ol > li")).toHaveLength(2);
+        expect(container.querySelectorAll(".task-list-item")).toHaveLength(2);
+        expect(Array.from(container.querySelectorAll("[data-task-checked]"), (marker) =>
+          marker.getAttribute("data-task-checked"))).toEqual(["false", "true"]);
+        expect(container.querySelectorAll("a")).toHaveLength(4);
+        expect(container.querySelector(".list-none")).toBeNull();
+      });
+
+      it("still compacts standalone title and single URL items without a source heading", () => {
+        const { container } = render(
+          <MarkdownTextRenderer streaming={streaming} preserveStreamingLayout={preserveStreamingLayout}>
+            {[
+              "- Example — “A useful title”",
+              "  https://example.com/title",
+              "",
+              "- Another useful title",
+              "  <https://example.org/another>",
+              "",
+              "- Hard break title  ",
+              "  https://example.net/hard-break",
+            ].join("\r\n")}
+          </MarkdownTextRenderer>,
+        );
+
+        expect(screen.getByRole("link", { name: "Open link: Example — A useful title" }))
+          .toHaveAttribute("href", "https://example.com/title");
+        expect(screen.getByRole("link", { name: "Open link: Another useful title" }))
+          .toHaveAttribute("href", "https://example.org/another");
+        expect(screen.getByRole("link", { name: "Open link: Hard break title" }))
+          .toHaveAttribute("href", "https://example.net/hard-break");
+        expect(container.querySelectorAll("li.list-none")).toHaveLength(3);
+        expect(container.querySelectorAll("img")).toHaveLength(3);
+      });
+    });
+
+    it.each([false, true])("restores normal content when a preview gains more streamed content (preserve=%s)", (preserveStreamingLayout) => {
+      const source = "- A useful title\n  https://example.com/title";
+      const { container, rerender } = render(
+        <MarkdownTextRenderer streaming preserveStreamingLayout={preserveStreamingLayout}>
+          {source}
+        </MarkdownTextRenderer>,
+      );
+      expect(container.querySelector("li")).toHaveClass("list-none");
+
+      for (const suffix of [" and more text.", "\n  https://example.org/second", "\n  - Nested `code` stays visible."]) {
+        rerender(
+          <MarkdownTextRenderer streaming preserveStreamingLayout={preserveStreamingLayout}>
+            {source + suffix}
+          </MarkdownTextRenderer>,
+        );
+        expect(container.querySelector("li.list-none")).toBeNull();
+        expect(container.querySelector("a")).toHaveTextContent(/^https:\/\/example.com\/title$/);
+        expect(container).toHaveTextContent("A useful title");
+      }
+      expect(container.querySelector("ul ul code")).toHaveTextContent("code");
+    });
+
+    it.each([false, true])("keeps the list intact as streaming finishes (preserve=%s)", (preserveStreamingLayout) => {
+      const { container, rerender } = render(
+        <MarkdownTextRenderer streaming preserveStreamingLayout={preserveStreamingLayout}>
+          {""}
+        </MarkdownTextRenderer>,
+      );
+      for (const end of [reportedMessage.indexOf("  - 新 head"), reportedMessage.indexOf("  - 仅保留"), reportedMessage.length]) {
+        rerender(
+          <MarkdownTextRenderer streaming preserveStreamingLayout={preserveStreamingLayout}>
+            {reportedMessage.slice(0, end)}
+          </MarkdownTextRenderer>,
+        );
+        expect(container.querySelector("a[href$='/6269']")).toHaveTextContent(/^#6269$/);
+        expect(container.querySelector("li.list-none")).toBeNull();
+      }
+      expectReportedList(container);
+      rerender(
+        <MarkdownTextRenderer preserveStreamingLayout={preserveStreamingLayout}>
+          {reportedMessage}
+        </MarkdownTextRenderer>,
+      );
+      expectReportedList(container);
+    });
   });
 
   it("renders media attachments without an extra preview/code wrapper", () => {
