@@ -74,6 +74,14 @@ Use the WebUI as the primary setup surface:
 
 This path avoids hand-editing `config.json` for normal setup. Use the reference docs when you need an option the WebUI does not expose or when you manage config as code.
 
+## Run Shell Commands
+
+Send `!pwd` or `! pwd` in the chat composer to run a shell command directly, without a model call. Commands run on the selected gateway host in the topic's working directory and use its configured exec tool, timeout, workspace restrictions, and sandbox. On Windows, commands use PowerShell by default.
+
+Shell output appears in the conversation and persists with persistent topics. You can run a command while the agent is replying; its reply continues independently. Remove attachments, mentions, and quoted context before submitting a shell command. An empty `!` shows usage guidance.
+
+The gateway must advertise `webui.user-shell.v1`. If it does not, the composer keeps the draft and asks you to update nanobot on that host and reconnect. Other chat features remain available on compatible hosts.
+
 ## What It Is For
 
 | Area | Use it for |

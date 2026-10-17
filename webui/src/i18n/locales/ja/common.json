@@ -1756,6 +1756,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "Shell コマンドを実行する前に、添付ファイル、メンション、引用を削除してください。",
       "placeholderThread": "メッセージを入力…",
       "placeholderHero": "やりたいことを入力",
       "placeholderOpening": "新しいトピックを開いています…",

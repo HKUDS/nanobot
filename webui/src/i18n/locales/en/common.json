@@ -1956,6 +1956,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "Remove attachments, mentions, and quoted context before running a shell command.",
       "placeholderThread": "Type your message…",
       "placeholderHero": "Describe what you’d like to do",
       "placeholderOpening": "Opening a new topic…",

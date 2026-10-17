@@ -1883,6 +1883,7 @@ export function ThreadShell({
           draftStore={draftStore}
           persistDraft={persistDraft}
           onSend={handleThreadSend}
+          userShellEnabled={webuiCapabilities.includes("webui.user-shell.v1")}
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
@@ -1942,6 +1943,7 @@ export function ThreadShell({
           draftStore={draftStore}
           persistDraft={persistDraft}
           onSend={handleWelcomeSend}
+          userShellEnabled={webuiCapabilities.includes("webui.user-shell.v1")}
           disabled={booting}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}

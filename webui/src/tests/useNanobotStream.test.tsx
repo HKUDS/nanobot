@@ -2916,20 +2916,24 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].content).toBe("long task");
   });
 
-  it("does not mark side-channel slash commands as streaming", () => {
+  it.each([
+    { content: "/status", options: { sideChannel: true } },
+    { content: "! pwd", options: { sideChannel: true, userShell: true } },
+  ])("does not mark $content as streaming", ({ content, options }) => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-status", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
     });
 
     act(() => {
-      result.current.send("/status", undefined, { sideChannel: true });
+      result.current.send(content, undefined, options);
     });
 
     const call = fake.client.sendMessage.mock.calls.at(-1)!;
     const turnId = call[3]?.turnId;
     expect(call[3]).not.toHaveProperty("sideChannel");
     expect(call[3]).toMatchObject({ startsNewRun: false });
+    if ("userShell" in options) expect(call[3]).toHaveProperty("userShell", true);
     expect(result.current.isStreaming).toBe(false);
 
     act(() => {
@@ -2943,7 +2947,7 @@ describe("useNanobotStream", () => {
 
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages.map((message) => message.content)).toEqual([
-      "/status",
+      content,
       "status reply",
     ]);
   });
@@ -3005,7 +3009,10 @@ describe("useNanobotStream", () => {
     ]);
   });
 
-  it("keeps the turn active after stream_end while side-channel replies arrive", () => {
+  it.each([
+    { content: "/status", options: { sideChannel: true } },
+    { content: "!pwd", options: { sideChannel: true, userShell: true } },
+  ])("keeps the turn active after stream_end while $content replies arrive", ({ content, options }) => {
     vi.useFakeTimers();
     try {
       const fake = fakeClient();
@@ -3028,7 +3035,7 @@ describe("useNanobotStream", () => {
       });
 
       act(() => {
-        result.current.send("/status", undefined, { sideChannel: true });
+        result.current.send(content, undefined, options);
       });
       const statusTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
 

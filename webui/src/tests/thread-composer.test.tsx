@@ -2892,6 +2892,41 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Draw a friendly robot", undefined, undefined);
   });
 
+  it.each(["!pwd", "! pwd", "!"])("sends %s directly as a shell side-channel during a turn", (content) => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} isStreaming userShellEnabled />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: content } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(onSend).toHaveBeenCalledWith(content, undefined, { sideChannel: true, userShell: true });
+    expect(input).toHaveValue("");
+  });
+
+  it("keeps a shell draft on hosts without shell support while ordinary chat still works", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "!pwd" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("!pwd");
+    expect(screen.getByText(/Update nanobot on this server, then reconnect/)).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "Hello!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("Hello!", undefined, undefined);
+  });
+
+  it("keeps shell drafts with quoted context instead of sending an ambiguous command", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} userShellEnabled quotedContext="a previous answer" />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "!pwd" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("!pwd");
+    expect(screen.getByText(/Remove attachments, mentions, and quoted context/)).toBeInTheDocument();
+  });
+
   it("marks known slash commands as side-channel sends", () => {
     const onSend = vi.fn();
     render(

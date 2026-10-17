@@ -1756,6 +1756,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "Shell 명령을 실행하기 전에 첨부 파일, 멘션, 인용을 제거하세요.",
       "placeholderThread": "메시지를 입력하세요…",
       "placeholderHero": "하고 싶은 일을 알려 주세요",
       "placeholderOpening": "새 주제를 여는 중…",
