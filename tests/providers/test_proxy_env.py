@@ -7,6 +7,22 @@ import httpx
 import nanobot.providers.openai_compat_provider as openai_compat_provider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
+_PROXY_ENV_KEYS = (
+    "ALL_PROXY",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "all_proxy",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+)
+
+
+def _clear_proxy_env(monkeypatch) -> None:
+    for key in _PROXY_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
 
 def _make_spec(is_local: bool = False) -> MagicMock:
     spec = MagicMock()
@@ -44,7 +60,8 @@ class TestLocalEndpointProxyDisabled:
 class TestCloudEndpointProxyEnabled:
     """Cloud endpoints must respect proxy env vars for corporate/VPN proxies."""
 
-    async def test_cloud_respects_trust_env(self):
+    async def test_cloud_respects_trust_env(self, monkeypatch):
+        _clear_proxy_env(monkeypatch)
         spec = _make_spec(is_local=False)
         spec.env_key = ""
         spec.default_api_base = "https://api.openai.com/v1"
@@ -83,4 +100,90 @@ class TestCloudEndpointProxyEnabled:
             trust_env=False,
             follow_redirects=True,
         )
+        assert openai_client.call_args.kwargs["http_client"] is http_client
+
+    async def test_explicit_legacy_socks_proxy_is_normalized(self, monkeypatch):
+        _clear_proxy_env(monkeypatch)
+        spec = _make_spec(is_local=False)
+        spec.env_key = ""
+        spec.default_api_base = "https://api.openai.com/v1"
+
+        http_client = MagicMock()
+        async_client = MagicMock(return_value=http_client)
+        openai_client = MagicMock(return_value=object())
+        monkeypatch.setattr(httpx, "AsyncClient", async_client)
+        monkeypatch.setattr(openai_compat_provider, "AsyncOpenAI", openai_client)
+
+        provider = OpenAICompatProvider(
+            api_key="test",
+            api_base=None,
+            spec=spec,
+            proxy="socks://127.0.0.1:1080",
+        )
+        provider._build_client()
+
+        assert async_client.call_args.kwargs["proxy"] == "socks5://127.0.0.1:1080"
+        assert async_client.call_args.kwargs["trust_env"] is False
+        assert openai_client.call_args.kwargs["http_client"] is http_client
+
+    async def test_legacy_all_proxy_prefers_https_proxy(self, monkeypatch):
+        _clear_proxy_env(monkeypatch)
+        monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:1080")
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:8080")
+        spec = _make_spec(is_local=False)
+        spec.env_key = ""
+        spec.default_api_base = "https://api.openai.com/v1"
+
+        http_client = MagicMock()
+        async_client = MagicMock(return_value=http_client)
+        openai_client = MagicMock(return_value=object())
+        monkeypatch.setattr(httpx, "AsyncClient", async_client)
+        monkeypatch.setattr(openai_compat_provider, "AsyncOpenAI", openai_client)
+
+        provider = OpenAICompatProvider(api_key="test", api_base=None, spec=spec)
+        provider._build_client()
+
+        assert async_client.call_args.kwargs["proxy"] == "http://127.0.0.1:8080"
+        assert async_client.call_args.kwargs["trust_env"] is False
+        assert openai_client.call_args.kwargs["http_client"] is http_client
+
+    async def test_legacy_all_proxy_is_normalized_when_no_https_proxy(self, monkeypatch):
+        _clear_proxy_env(monkeypatch)
+        monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:1080")
+        spec = _make_spec(is_local=False)
+        spec.env_key = ""
+        spec.default_api_base = "https://api.openai.com/v1"
+
+        http_client = MagicMock()
+        async_client = MagicMock(return_value=http_client)
+        openai_client = MagicMock(return_value=object())
+        monkeypatch.setattr(httpx, "AsyncClient", async_client)
+        monkeypatch.setattr(openai_compat_provider, "AsyncOpenAI", openai_client)
+
+        provider = OpenAICompatProvider(api_key="test", api_base=None, spec=spec)
+        provider._build_client()
+
+        assert async_client.call_args.kwargs["proxy"] == "socks5://127.0.0.1:1080"
+        assert async_client.call_args.kwargs["trust_env"] is False
+        assert openai_client.call_args.kwargs["http_client"] is http_client
+
+    async def test_legacy_all_proxy_respects_no_proxy(self, monkeypatch):
+        _clear_proxy_env(monkeypatch)
+        monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:1080")
+        monkeypatch.setenv("NO_PROXY", "api.openai.com")
+        spec = _make_spec(is_local=False)
+        spec.env_key = ""
+        spec.default_api_base = "https://api.openai.com/v1"
+
+        http_client = MagicMock()
+        async_client = MagicMock(return_value=http_client)
+        openai_client = MagicMock(return_value=object())
+        monkeypatch.setattr(httpx, "AsyncClient", async_client)
+        monkeypatch.setattr(openai_compat_provider, "AsyncOpenAI", openai_client)
+
+        provider = OpenAICompatProvider(api_key="test", api_base=None, spec=spec)
+        provider._build_client()
+
+        assert async_client.call_args.kwargs["proxy"] is None
+        assert async_client.call_args.kwargs["trust_env"] is False
         assert openai_client.call_args.kwargs["http_client"] is http_client
