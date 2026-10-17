@@ -2466,7 +2466,8 @@ export function ThreadComposer({
     <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} showLabel={compactControls} bottomSheet={compactControls} />
   ) : null;
   const inputTextClasses = cn(
-    "w-full resize-none bg-transparent",
+    // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
+    "w-full resize-none bg-transparent [text-autospace:no-autospace]",
     compactControls
       ? "min-h-[52px] px-4 pb-2 pt-3 text-[16px] leading-6"
       : isHero
