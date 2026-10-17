@@ -1,0 +1,79 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn thiết lập tác nhân",
+    "officialLabel": "Mở trợ giúp tác nhân WhatsApp",
+    "summary": "Kết nối nanobot như một tác nhân bên thứ ba chính thức trong tài khoản WhatsApp của bạn. Chỉ bạn có thể trò chuyện với nó và nó không truy cập các cuộc trò chuyện khác.",
+    "fields": {
+      "token": {
+        "label": "Mã thông báo API",
+        "placeholder": "Trong WhatsApp, mở Cài đặt → Tác nhân, tạo tác nhân, rồi sao chép khóa từ trò chuyện của tác nhân → Thông tin trò chuyện → Khóa API.",
+        "help": "Trong WhatsApp, mở Cài đặt → Tác nhân, tạo tác nhân, rồi sao chép khóa từ trò chuyện của tác nhân → Thông tin trò chuyện → Khóa API."
+      },
+      "allowFrom": {
+        "label": "Người gửi được phép",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "Thư mục trạng thái",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "Thời gian chờ thăm dò (giây)",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "Kích thước phương tiện tối đa (MB)",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "Gửi biên nhận đã đọc",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "typingIndicator": {
+        "label": "Hiện chỉ báo đang nhập",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "downloadMedia": {
+        "label": "Tải phương tiện đến",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "Xóa phương tiện sau khi tải",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "Thử lại gửi không rõ kết quả",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "sendProgress": {
+        "label": "Gửi tin nhắn tiến trình",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "sendToolHints": {
+        "label": "Gửi gợi ý công cụ",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      }
+    }
+  }
+}

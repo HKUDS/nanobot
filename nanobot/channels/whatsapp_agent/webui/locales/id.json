@@ -1,0 +1,79 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan penyiapan agen",
+    "officialLabel": "Buka bantuan agen WhatsApp",
+    "summary": "Hubungkan nanobot sebagai agen pihak ketiga resmi di akun WhatsApp Anda sendiri. Hanya Anda yang dapat mengobrol dengannya, dan ia tidak mengakses obrolan lain Anda.",
+    "fields": {
+      "token": {
+        "label": "Token API",
+        "placeholder": "Di WhatsApp, buka Setelan → Agen, buat agen, lalu salin kunci dari obrolan agen → Info obrolan → Kunci API.",
+        "help": "Di WhatsApp, buka Setelan → Agen, buat agen, lalu salin kunci dari obrolan agen → Info obrolan → Kunci API."
+      },
+      "allowFrom": {
+        "label": "Pengirim yang diizinkan",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "Direktori status",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "Batas waktu polling (detik)",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "Ukuran media maksimum (MB)",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "Kirim tanda dibaca",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
+      },
+      "typingIndicator": {
+        "label": "Tampilkan indikator mengetik",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
+      },
+      "downloadMedia": {
+        "label": "Unduh media masuk",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "Hapus media setelah unduh",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "Coba ulang kirim yang tidak pasti",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
+      },
+      "sendProgress": {
+        "label": "Kirim pesan kemajuan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
+      },
+      "sendToolHints": {
+        "label": "Kirim petunjuk alat",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
+      }
+    }
+  }
+}

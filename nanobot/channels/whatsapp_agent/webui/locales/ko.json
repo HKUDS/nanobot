@@ -1,0 +1,79 @@
+{
+  "setup": {
+    "docsLabel": "에이전트 설정 가이드 열기",
+    "officialLabel": "WhatsApp 에이전트 도움말 열기",
+    "summary": "nanobot을 공식 서드파티 에이전트로 내 WhatsApp 계정에 연결합니다. 나만 대화할 수 있으며 다른 채팅에는 접근할 수 없습니다.",
+    "fields": {
+      "token": {
+        "label": "API 토큰",
+        "placeholder": "WhatsApp에서 설정 → 에이전트를 열고 에이전트를 만든 뒤 에이전트 채팅 → 채팅 정보 → API 키에서 키를 복사하세요.",
+        "help": "WhatsApp에서 설정 → 에이전트를 열고 에이전트를 만든 뒤 에이전트 채팅 → 채팅 정보 → API 키에서 키를 복사하세요."
+      },
+      "allowFrom": {
+        "label": "허용된 발신자",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "상태 디렉터리",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "폴링 제한 시간(초)",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "최대 미디어 크기(MB)",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "읽음 표시 보내기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "typingIndicator": {
+        "label": "입력 중 표시 보기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "downloadMedia": {
+        "label": "수신 미디어 다운로드",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "다운로드 후 미디어 삭제",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "결과를 알 수 없는 전송 재시도",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "sendProgress": {
+        "label": "진행 메시지 보내기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "sendToolHints": {
+        "label": "도구 힌트 보내기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      }
+    }
+  }
+}

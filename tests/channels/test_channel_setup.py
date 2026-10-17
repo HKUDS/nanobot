@@ -32,6 +32,7 @@ EXPECTED_CHANNELS = {
     "wecom",
     "weixin",
     "whatsapp",
+    "whatsapp_agent",
 }
 
 INTERNAL_CHANNEL_FIELDS = {

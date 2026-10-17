@@ -292,6 +292,7 @@ def test_channels_config_keeps_shared_delivery_defaults():
         "matrix",
         "weixin",
         "whatsapp",
+        "whatsapp_agent",
     ],
 )
 def test_special_setup_validation_is_owned_by_channel_package(name: str):
