@@ -19,13 +19,13 @@ function addFrame() {
 function send(source: Window, data: Record<string, unknown>, from = origin) {
   act(() => { window.dispatchEvent(new MessageEvent("message", { source, origin: from, data: { channel: HOST_BRIDGE, ...data } })); });
 }
-function parentView() {
+function parentView(onReveal?: (id: string) => void) {
   const node = addFrame();
   const source = node.contentWindow!;
   const post = vi.spyOn(source, "postMessage").mockImplementation(() => {});
   const nodes = { current: new Map([["host-a", node]]) };
   const restore = vi.fn();
-  const hook = renderHook(({ selectedId }) => useSidebarHostBridge([makeFrame()], selectedId, nodes, restore, {}), {
+  const hook = renderHook(({ selectedId }) => useSidebarHostBridge([makeFrame()], selectedId, nodes, restore, {}, false, undefined, onReveal), {
     initialProps: { selectedId: "host-a" as string | undefined },
   });
   send(source, { type: "hello" });
@@ -35,6 +35,18 @@ function parentView() {
 afterEach(() => { cleanup(); document.querySelectorAll("iframe").forEach((node) => node.remove()); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("sidebar host bridge", () => {
+  it("reveals only the notification sender's existing host with a verified peer", () => {
+    const reveal = vi.fn();
+    const { source, init, rerender } = parentView(reveal);
+    rerender({ selectedId: undefined });
+    send(source, { type: "reveal-notification", nonce: "wrong" });
+    send(window, { type: "reveal-notification", nonce: init.nonce });
+    send(source, { type: "reveal-notification", nonce: init.nonce }, "https://attacker.example");
+    expect(reveal).not.toHaveBeenCalled();
+    send(source, { type: "reveal-notification", nonce: init.nonce, id: "another-host", url: "https://attacker.example" });
+    expect(reveal).toHaveBeenCalledOnce();
+    expect(reveal).toHaveBeenCalledWith("host-a");
+  });
   it("sends only current display identity, never secrets, profiles or filesystem paths", () => {
     const { post, init } = parentView();
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "init", name: "Team server", hostname: "team-host" }), origin);

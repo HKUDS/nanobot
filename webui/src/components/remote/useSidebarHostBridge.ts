@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { HOST_BRIDGE, bridgeMessage, isLocalShellOrigin, readEmbeddedHost, readHostAnchor, type EmbeddedHost, type HostAnchor } from "./host-bridge";
 import type { HostFrame } from "./useHostSessions";
+import { NOTIFICATION_OPEN_EVENT } from "@/lib/browser-notifications";
 
 interface Peer { source: Window; origin: string; nonce: string }
 export function useSidebarHostBridge(frames: HostFrame[], selectedId: string | undefined,
   nodes: RefObject<Map<string, HTMLIFrameElement>>, restoreLocalFocus: () => void,
-  activity: { pendingName?: string; error?: string }, managing = false, onLeaveManagement?: () => void) {
+  activity: { pendingName?: string; error?: string }, managing = false, onLeaveManagement?: () => void, onReveal?: (id: string) => void) {
   const [embedded, setEmbedded] = useState<EmbeddedHost | null>(null);
   const [readyIds, setReadyIds] = useState<string[]>([]);
   const [anchor, setAnchor] = useState<HostAnchor | null>(null);
@@ -13,8 +14,8 @@ export function useSidebarHostBridge(frames: HostFrame[], selectedId: string | u
   const [hostedManagement, setHostedManagement] = useState(false);
   const parent = useRef<Peer | null>(null);
   const peers = useRef(new Map<string, Peer>());
-  const latest = useRef({ frames, selectedId, restoreLocalFocus, activity, managing, onLeaveManagement });
-  latest.current = { frames, selectedId, restoreLocalFocus, activity, managing, onLeaveManagement };
+  const latest = useRef({ frames, selectedId, restoreLocalFocus, activity, managing, onLeaveManagement, onReveal });
+  latest.current = { frames, selectedId, restoreLocalFocus, activity, managing, onLeaveManagement, onReveal };
   const initialize = useCallback((id: string) => {
     const frame = latest.current.frames.find((item) => item.connection.id === id);
     const source = nodes.current?.get(id)?.contentWindow;
@@ -70,13 +71,25 @@ export function useSidebarHostBridge(frames: HostFrame[], selectedId: string | u
         if (rect && rect.left >= 0 && rect.top >= 0) setSurfaces((previous) => ({ ...previous, [id]: { ...rect, theme } }));
       } else if (message.type === "leave-management" && latest.current.selectedId === id) {
         latest.current.onLeaveManagement?.();
+      } else if (message.type === "reveal-notification" && frame.loaded && !frame.offline) {
+        // Source/origin/nonce above select only this already-open view. No
+        // requested host id, destination URL, or connection command is accepted.
+        latest.current.onReveal?.(id);
       }
       // No select/connect/disconnect action is accepted from an embedded page.
     };
     window.addEventListener("message", receive);
+    const revealNotification = () => {
+      const peer = parent.current;
+      if (peer) window.parent.postMessage({ channel: HOST_BRIDGE, type: "reveal-notification", nonce: peer.nonce }, peer.origin);
+    };
+    window.addEventListener(NOTIFICATION_OPEN_EVENT, revealNotification);
     // A public capability probe carries no identity, settings or credentials.
     if (window.parent !== window) window.parent.postMessage({ channel: HOST_BRIDGE, type: "hello" }, "*");
-    return () => window.removeEventListener("message", receive);
+    return () => {
+      window.removeEventListener("message", receive);
+      window.removeEventListener(NOTIFICATION_OPEN_EVENT, revealNotification);
+    };
   }, [initialize, nodes]);
   useEffect(() => { setAnchor(null); }, [selectedId]);
   const selectedName = frames.find((frame) => frame.connection.id === selectedId)?.connection.name;

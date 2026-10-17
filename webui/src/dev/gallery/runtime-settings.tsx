@@ -81,8 +81,7 @@ function AppearancePreview() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [preferences, setPreferences] = useState(DEFAULT_LOCAL_PREFS);
   return <><AppearanceSettingsView theme={theme} onToggleTheme={() => setTheme((current) => current === "light" ? "dark" : "light")}
-    localPrefs={preferences} onChangeLocalPrefs={setPreferences}
-    onChangeBrowserNotifications={(enabled) => setPreferences((current) => ({ ...current, browserNotifications: enabled }))} />
+    localPrefs={preferences} onChangeLocalPrefs={setPreferences} />
     <pre role="status" className="mt-4 overflow-auto rounded-control bg-muted p-4 text-xs">{JSON.stringify({ theme, ...preferences }, null, 2)}</pre></>;
 }
 

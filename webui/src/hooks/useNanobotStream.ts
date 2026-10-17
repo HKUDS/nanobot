@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
-import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import type { StreamError } from "@/lib/nanobot-client";
 import {
@@ -22,7 +21,6 @@ import type {
   UIMessageTurnFields,
 } from "@/lib/thread-event-projection";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
-import { readLocalPreferences } from "@/lib/local-preferences";
 import { playTurnCompleteSound } from "@/lib/notification-sound";
 import type {
   InboundEvent,
@@ -215,16 +213,6 @@ export function useNanobotStream(
   const sideChannelTurnIdsRef = useRef<Set<string>>(new Set());
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
-
-  const notifyInBackground = useCallback((body: string) => {
-    if (
-      typeof Notification === "undefined"
-      || Notification.permission !== "granted"
-      || document.visibilityState === "visible"
-      || !readLocalPreferences().browserNotifications
-    ) return;
-    new Notification("nanobot", { body });
-  }, []);
 
   const clearPendingStreamWork = useCallback(() => {
     if (streamFrameRef.current !== null) {
@@ -816,13 +804,6 @@ export function useNanobotStream(
           : null;
         if (modelFailure) setStreamError(modelFailure);
         applyProjectionEvent(ev);
-        notifyInBackground(
-          modelFailure
-            ? resolveModelRequestFailureCopy(modelFailure, t).body
-            : ev.outcome === "failed"
-              ? ev.failure_message || "This turn failed and has ended."
-            : t("recovery.completed", { defaultValue: "Task completed" }),
-        );
         playTurnCompleteSound();
         onTurnEnd?.();
         return;
@@ -859,13 +840,6 @@ export function useNanobotStream(
           clearPendingStreamWork();
           closeActiveAssistantStream();
           clearActivitySegment();
-          if (ev.status !== "recovered") {
-            notifyInBackground(
-              ev.status === "failed"
-                ? t("recovery.failed", { defaultValue: "Task recovery failed" })
-                : t("recovery.interrupted", { defaultValue: "Task interrupted" }),
-            );
-          }
         }
         return;
       }
@@ -927,7 +901,6 @@ export function useNanobotStream(
     clearPendingStreamWork,
     flushPendingStreamEvents,
     isSideChannelEvent,
-    notifyInBackground,
     onTurnEnd,
     onStreamDetach,
     schedulePendingStreamFlush,

@@ -73,6 +73,7 @@ import {
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
+import { BrowserNotifications } from "@/components/BrowserNotifications";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
@@ -191,6 +192,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "overview",
   "about",
   "appearance",
+  "notifications",
   "models",
   "image",
   "voice",
@@ -1151,6 +1153,7 @@ export default function App() {
       ingressLimits={state.ingressLimits}
       webuiCapabilities={state.webuiCapabilities}
     >
+      <BrowserNotifications client={state.client} />
       <RemoteInstances><Shell
         runtimeSurface={state.runtimeSurface}
         onModelNameChange={handleModelNameChange}

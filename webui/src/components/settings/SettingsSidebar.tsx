@@ -10,7 +10,7 @@ import {
 } from "@/components/icons/product-icons";
 import { useContext, useRef, useState } from "react";
 import { HostNavigationContext, HostSwitcher } from "@/components/remote/HostSwitcher";
-import { Check, ChevronDown, ChevronLeft, LogOut, Loader2, type LucideIcon } from "lucide-react";
+import { Bell, Check, ChevronDown, ChevronLeft, LogOut, Loader2, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fallback: string }> = [
   { key: "overview", icon: OverviewIcon, fallback: "Overview" },
   { key: "appearance", icon: AppearanceIcon, fallback: "Appearance" },
+  { key: "notifications", icon: Bell, fallback: "Notifications" },
   { key: "models", icon: ModelsIcon, fallback: "Models" },
   { key: "capabilities", icon: CapabilitiesIcon, fallback: "Capabilities" },
   { key: "runtime", icon: SystemIcon, fallback: "System" },

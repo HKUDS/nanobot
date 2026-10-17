@@ -12,13 +12,11 @@ export function AppearanceSettingsView({
   onToggleTheme,
   localPrefs,
   onChangeLocalPrefs,
-  onChangeBrowserNotifications,
 }: {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   localPrefs: LocalPreferences;
   onChangeLocalPrefs: Dispatch<SetStateAction<LocalPreferences>>;
-  onChangeBrowserNotifications: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -100,39 +98,6 @@ export function AppearanceSettingsView({
               onChange={(brandLogos) => onChangeLocalPrefs((prev) => ({ ...prev, brandLogos }))}
               ariaLabel={tx("settings.rows.brandLogos", "Brand logos")}
               label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title={tx("settings.rows.browserNotifications", "Task notifications")}
-            description={tx(
-              "settings.help.browserNotifications",
-              "Notify only when this page is in the background. Off by default.",
-            )}
-          >
-            <ToggleButton
-              checked={localPrefs.browserNotifications}
-              onChange={onChangeBrowserNotifications}
-              ariaLabel={tx("settings.rows.browserNotifications", "Task notifications")}
-              label={localPrefs.browserNotifications
-                ? tx("settings.values.on", "On")
-                : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title={tx("settings.rows.notificationSound", "Completion sound")}
-            description={tx(
-              "settings.help.notificationSound",
-              "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
-            )}
-          >
-            <ToggleButton
-              checked={localPrefs.notificationSound}
-              onChange={(notificationSound) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, notificationSound }))}
-              ariaLabel={tx("settings.rows.notificationSound", "Completion sound")}
-              label={localPrefs.notificationSound
-                ? tx("settings.values.on", "On")
-                : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
         </SettingsGroup>

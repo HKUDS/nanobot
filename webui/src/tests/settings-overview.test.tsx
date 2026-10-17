@@ -1,12 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { HostNavigationContext } from "@/components/remote/HostSwitcher";
-import { AboutSettings, AppearanceSettings } from "@/components/settings/overview/OverviewSettings";
+import { AboutSettings } from "@/components/settings/overview/OverviewSettings";
 import { VersionCheckRowView } from "@/components/settings/overview/VersionCheckRowView";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
-import { DEFAULT_LOCAL_PREFS } from "@/lib/local-preferences";
+import { DEFAULT_LOCAL_PREFS, readLocalPreferences, writeLocalPreferences } from "@/lib/local-preferences";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
   const thirdPartyBrandNotice =
@@ -25,19 +25,15 @@ describe("Settings overview and appearance", () => {
     expect(check).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["granted", "denied"])("updates task notifications only after browser permission is %s", async (permission) => {
-    const requestPermission = vi.fn().mockResolvedValue(permission);
-    vi.stubGlobal("Notification", { permission: "default", requestPermission });
-    const changePreferences = vi.fn();
-    render(<AppearanceSettings theme="light" onToggleTheme={vi.fn()} localPrefs={DEFAULT_LOCAL_PREFS} onChangeLocalPrefs={changePreferences} />);
-    fireEvent.click(screen.getByRole("switch", { name: "Task notifications" }));
-    expect(changePreferences).not.toHaveBeenCalled();
-    await waitFor(() => expect(requestPermission).toHaveBeenCalledTimes(1));
-    await act(async () => { await Promise.resolve(); });
-    if (permission === "granted") {
-      expect(changePreferences).toHaveBeenCalledTimes(1);
-      expect(changePreferences.mock.calls[0][0](DEFAULT_LOCAL_PREFS).browserNotifications).toBe(true);
-    } else expect(changePreferences).not.toHaveBeenCalled();
+  it("opens the notifications section and preserves independent browser-local channel preferences", () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload(), showSidebar: true });
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByRole("switch", { name: "Browser notifications" })).toHaveAttribute("aria-checked", "false");
+    const sound = screen.getByRole("switch", { name: "Completion sound" });
+    expect(sound).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(sound);
+    expect(readLocalPreferences()).toMatchObject({ browserNotifications: false, notificationSound: false });
   });
 
 
