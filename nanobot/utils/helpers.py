@@ -288,9 +288,9 @@ class IncrementalThinkExtractor:
         thinking, _ = extract_think(buf)
         if not thinking or thinking == self._emitted:
             return False
-        new = thinking[len(self._emitted) :].strip()
+        new = thinking[len(self._emitted) :]
         self._emitted = thinking
-        if not new:
+        if not new.strip():
             return False
         await emit(new)
         return True
