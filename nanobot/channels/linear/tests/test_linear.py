@@ -23,6 +23,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
     ProgressEvent,
+    RetryWaitEvent,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -1195,6 +1196,35 @@ async def test_reasoning_can_be_hidden_for_linear(tmp_path: Path) -> None:
     await channel.send_reasoning_end("session-1", metadata)
 
     assert client.activities == []
+
+
+@pytest.mark.asyncio
+async def test_retry_wait_is_an_ephemeral_thought(tmp_path: Path) -> None:
+    channel, client = _runtime(tmp_path)
+    metadata = {
+        "linear": {"organization_id": "org-1", "agent_session_id": "session-1"}
+    }
+    notice = outbound_message_for_event(
+        channel="linear",
+        chat_id="session-1",
+        metadata=metadata,
+        event=RetryWaitEvent(content="Model request failed, retry in 2s (attempt 1)."),
+    )
+
+    await channel.send_retry_wait(notice)
+
+    assert len(client.activities) == 1
+    assert client.activities[0]["content"] == {
+        "type": "thought",
+        "body": "Model request failed, retry in 2s (attempt 1).",
+    }
+    assert client.activities[0]["ephemeral"] is True
+    assert client.activities[0]["signal"] is None
+
+    await channel.send(notice)
+    assert len(client.activities) == 2
+    assert client.activities[1]["content"] == client.activities[0]["content"]
+    assert client.activities[1]["ephemeral"] is True
 
 
 @pytest.mark.parametrize("include_start", [True, False])

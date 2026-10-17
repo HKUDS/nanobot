@@ -431,7 +431,7 @@ class TestProgressFiltering:
 
 
 class TestRetryWaitFiltering:
-    """Internal provider retry heartbeats must never reach channels."""
+    """Channels that do not override send_retry_wait do not post the notice."""
 
     @pytest.mark.asyncio
     async def test_retry_wait_message_dropped(self, manager, bus):
