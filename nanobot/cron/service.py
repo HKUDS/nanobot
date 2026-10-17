@@ -70,6 +70,26 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     return None
 
 
+def _resume_next_run(schedule: CronSchedule, persisted_ms: int | None, now_ms: int) -> int | None:
+    """Return the next run for a reloaded job, keeping a pending interval run.
+
+    ``every`` schedules are relative to the previous run, so recomputing them
+    from ``now`` on every startup postpones the job by a full interval each
+    time the gateway restarts. A persisted next run is kept while it is still
+    in the future and no more than one interval away; anything else falls back
+    to :func:`_compute_next_run`.
+    """
+    if (
+        schedule.kind == "every"
+        and schedule.every_ms
+        and schedule.every_ms > 0
+        and persisted_ms is not None
+        and now_ms < persisted_ms <= now_ms + schedule.every_ms
+    ):
+        return persisted_ms
+    return _compute_next_run(schedule, now_ms)
+
+
 def _validate_schedule_for_add(schedule: CronSchedule) -> None:
     """Validate schedule fields that would otherwise create non-runnable jobs."""
     if schedule.tz and schedule.kind != "cron":
@@ -489,7 +509,9 @@ class CronService:
             if self._enforce_agent_binding(job):
                 continue
             if job.enabled:
-                job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
+                job.state.next_run_at_ms = _resume_next_run(
+                    job.schedule, job.state.next_run_at_ms, now
+                )
 
     def _get_next_wake_ms(self) -> int | None:
         """Get the earliest next run time across all jobs."""
@@ -772,7 +794,13 @@ class CronService:
         """Register an internal system job (idempotent on restart)."""
         store = self._require_store()
         now = _now_ms()
-        job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
+        existing = next((j for j in store.jobs if j.id == job.id), None)
+        persisted_ms = (
+            existing.state.next_run_at_ms
+            if existing is not None and existing.enabled and existing.schedule == job.schedule
+            else None
+        )
+        job.state = CronJobState(next_run_at_ms=_resume_next_run(job.schedule, persisted_ms, now))
         job.created_at_ms = now
         job.updated_at_ms = now
         store.jobs = [j for j in store.jobs if j.id != job.id]

@@ -1450,3 +1450,65 @@ def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
     assert len(jobs[0].state.run_history) == 1
     assert jobs[0].state.run_history[0].run_at_ms == 1
     assert jobs[0].state.run_history[0].status == "ok"
+
+
+def _dream_job(every_ms: int) -> CronJob:
+    return CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="every", every_ms=every_ms),
+        payload=CronPayload(kind="system_event"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_restart_keeps_pending_every_job_run(tmp_path, monkeypatch) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    t0 = 1_800_000_000_000
+    hour = 3_600_000
+    monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: t0)
+    service = CronService(store_path)
+    await service.start()
+    job = service.add_job(
+        name="daily",
+        schedule=CronSchedule(kind="every", every_ms=24 * hour),
+        message="hello",
+        **_bound_chat(),
+    )
+    service.stop()
+    assert job.state.next_run_at_ms == t0 + 24 * hour
+
+    monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: t0 + 23 * hour)
+    restarted = CronService(store_path)
+    await restarted.start()
+    try:
+        reloaded = restarted.get_job(job.id)
+        assert reloaded is not None
+        assert reloaded.state.next_run_at_ms == t0 + 24 * hour
+    finally:
+        restarted.stop()
+
+
+@pytest.mark.asyncio
+async def test_reregistering_system_job_keeps_pending_every_run(tmp_path, monkeypatch) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    t0 = 1_800_000_000_000
+    minute = 60_000
+
+    async def boot(now: int, every_ms: int) -> int | None:
+        monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: now)
+        service = CronService(store_path)
+        service.register_system_job(_dream_job(every_ms))
+        await service.start()
+        try:
+            job = service.get_job("dream")
+            assert job is not None
+            return job.state.next_run_at_ms
+        finally:
+            service.stop()
+
+    assert await boot(t0, 120 * minute) == t0 + 120 * minute
+    # A gateway restart before the interval elapses must not push Dream back.
+    assert await boot(t0 + 90 * minute, 120 * minute) == t0 + 120 * minute
+    # A changed interval is a new schedule and is computed from now.
+    assert await boot(t0 + 100 * minute, 60 * minute) == t0 + 160 * minute
