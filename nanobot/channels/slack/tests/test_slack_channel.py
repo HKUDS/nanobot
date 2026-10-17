@@ -585,6 +585,35 @@ async def test_dm_thread_message_keeps_thread_ts_and_threaded_session() -> None:
     assert kwargs["metadata"]["slack"]["thread_ts"] == "1700000000.000100"
 
 
+@pytest.mark.asyncio
+async def test_dm_message_mentioning_bot_is_handled() -> None:
+    """Slack sends no app_mention for DMs, so a DM that mentions the bot must still be handled."""
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._web_client = _FakeAsyncWebClient()
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    req = SimpleNamespace(
+        type="events_api",
+        envelope_id="env-dm-mention",
+        payload={
+            "event": {
+                "type": "message",
+                "user": "U1",
+                "channel": "D123",
+                "channel_type": "im",
+                "text": "<@UBOT> hello",
+                "ts": "1700000000.000100",
+            }
+        },
+    )
+
+    await channel._on_socket_request(client, req)
+
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.await_args.kwargs["content"] == "hello"
+
+
 def _channel_mention_request(envelope_id: str, ts: str) -> SimpleNamespace:
     return SimpleNamespace(
         type="events_api",

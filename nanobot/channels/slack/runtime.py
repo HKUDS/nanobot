@@ -441,6 +441,9 @@ class SlackChannel(BaseChannel):
 
         sender_id = event.get("user")
         chat_id = event.get("channel")
+        channel_type = event.get("channel_type") or ""
+        if not isinstance(channel_type, str):
+            channel_type = ""
 
         subtype = event.get("subtype")
         # Slack uses subtype=file_share for user messages with attachments.
@@ -451,11 +454,17 @@ class SlackChannel(BaseChannel):
             return
 
         # Avoid double-processing: Slack sends both `message` and `app_mention`
-        # for mentions in channels. Prefer `app_mention`.
+        # for mentions in channels. Prefer `app_mention`. DMs never get
+        # `app_mention`, so keep their `message`.
         text = event.get("text") or ""
         if not isinstance(text, str):
             return
-        if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
+        if (
+            event_type == "message"
+            and channel_type != "im"
+            and self._bot_user_id
+            and f"<@{self._bot_user_id}>" in text
+        ):
             return
 
         # Debug: log basic event shape
@@ -470,10 +479,6 @@ class SlackChannel(BaseChannel):
         )
         if not isinstance(sender_id, str) or not sender_id or not isinstance(chat_id, str) or not chat_id:
             return
-
-        channel_type = event.get("channel_type") or ""
-        if not isinstance(channel_type, str):
-            channel_type = ""
 
         if not self._is_allowed(sender_id, chat_id, channel_type):
             if channel_type == "im" and self.config.dm.enabled:
