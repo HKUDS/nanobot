@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowRight, ChevronDown, Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { StarPrompt } from "@/components/StarPrompt";
@@ -86,8 +86,8 @@ import type {
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
 import {
   fetchPairingRequests,
@@ -437,47 +437,39 @@ function AuthForm({
             </h1>
           </div>
           <form onSubmit={handleSubmit} className="mt-8">
-            <div className="relative">
-              <Input
-                ref={inputRef}
-                id="webui-access-password"
-                name="webui-access-password"
-                aria-label={t("app.auth.label")}
-                type={passwordVisible ? "text" : "password"}
-                autoComplete="current-password"
-                value={value}
-                onChange={(e) => {
-                  setValue(e.target.value);
-                  setValidationError(null);
-                }}
-                disabled={submitting}
-                aria-invalid={validationError ? true : undefined}
-                aria-describedby={validationError ? "webui-auth-error" : undefined}
-                placeholder={errorMessage ?? undefined}
-                className={cn(
-                  "h-12 rounded-full border-foreground/15 bg-muted/30 px-4 pr-24 text-base",
-                  validationError && "placeholder:text-[13px] placeholder:text-red-600 dark:placeholder:text-red-400",
-                )}
-                autoFocus
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                disabled={submitting}
-                aria-label={t(
-                  passwordVisible ? "app.auth.hidePassword" : "app.auth.showPassword",
-                )}
-                aria-controls="webui-access-password"
-                onClick={() => setPasswordVisible((visible) => !visible)}
-                className="absolute right-12 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
-              >
-                {passwordVisible ? (
-                  <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-                ) : (
-                  <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-                )}
-              </Button>
+            <SecretInput
+              ref={inputRef}
+              id="webui-access-password"
+              name="webui-access-password"
+              aria-label={t("app.auth.label")}
+              autoComplete="current-password"
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                setValidationError(null);
+              }}
+              disabled={submitting}
+              aria-invalid={validationError ? true : undefined}
+              aria-describedby={validationError ? "webui-auth-error" : undefined}
+              placeholder={errorMessage ?? undefined}
+              className={cn(
+                "h-12 rounded-full border-foreground/15 bg-muted/30 px-4 pr-24 text-base",
+                validationError && "placeholder:text-[13px] placeholder:text-red-600 dark:placeholder:text-red-400",
+              )}
+              autoFocus
+              visible={passwordVisible}
+              onToggle={() => setPasswordVisible((visible) => !visible)}
+              toggleLabel={t(
+                passwordVisible ? "app.auth.hidePassword" : "app.auth.showPassword",
+              )}
+              toggleClassName={buttonVariants({
+                variant: "icon", size: "icon",
+                className: "absolute right-12 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground",
+              })}
+              toggleControls="webui-access-password"
+              iconClassName="h-4 w-4"
+              iconStrokeWidth={1.75}
+            >
               <Button
                 type="submit"
                 variant="ghost"
@@ -489,7 +481,7 @@ function AuthForm({
               >
                 <ArrowRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
               </Button>
-            </div>
+            </SecretInput>
             {errorMessage ? (
               <p id="webui-auth-error" role="alert" className="sr-only">
                 {errorMessage}

@@ -1,6 +1,7 @@
-import { Eye, EyeOff } from "lucide-react";
+import type { ComponentPropsWithoutRef } from "react";
 import { useTranslation } from "react-i18next";
 
+import { SecretInput } from "@/components/ui/secret-input";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { ChannelConfigField } from "@/channel-plugins/catalog";
@@ -202,54 +203,38 @@ export function CredentialForm({
             </div>
           );
         }
+        const inputProps: ComponentPropsWithoutRef<typeof Input> = {
+          id: inputId,
+          "aria-label": field.label,
+          "aria-invalid": Boolean(error),
+          "aria-describedby": describedBy,
+          autoComplete: field.secret ? "off" : undefined,
+          inputMode: field.inputType === "number" ? "numeric" : undefined,
+          placeholder: savedSecret
+            ? tx("settings.channels.savedSecretPlaceholder", "Saved secret")
+            : field.placeholder,
+          value,
+          disabled,
+          onChange: (event) => onChange(field.key, event.target.value),
+          onBlur: () => onFieldBlur?.(field.key),
+          className: cn(
+            "h-10 rounded-full border-border/40 bg-background text-base sm:h-9 sm:text-[13px]",
+            error && "border-destructive focus-visible:ring-destructive/30",
+            showSecretToggle && "pr-9",
+          ),
+        };
         return (
           <div key={field.key} className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-4">
             <label htmlFor={inputId} className="flex min-h-10 min-w-0 items-center self-start sm:min-h-9">{header}</label>
             <div className="min-w-0">
-            <span className="relative block">
-              <Input
-                id={inputId}
-                aria-label={field.label}
-                aria-invalid={Boolean(error)}
-                aria-describedby={describedBy}
-                type={inputType}
-                autoComplete={field.secret ? "off" : undefined}
-                inputMode={field.inputType === "number" ? "numeric" : undefined}
-                placeholder={
-                  savedSecret
-                    ? tx("settings.channels.savedSecretPlaceholder", "Saved secret")
-                    : field.placeholder
-                }
-                value={values[field.key] ?? ""}
-                disabled={disabled}
-                onChange={(event) => onChange(field.key, event.target.value)}
-                onBlur={() => onFieldBlur?.(field.key)}
-                className={cn(
-                  "h-10 rounded-full border-border/40 bg-background text-base sm:h-9 sm:text-[13px]",
-                  error && "border-destructive focus-visible:ring-destructive/30",
-                  showSecretToggle && "pr-9",
-                )}
-              />
-              {showSecretToggle ? (
-                <button
-                  type="button"
-                  aria-label={
-                    visible
-                      ? tx("settings.channels.hideSecret", "Hide secret")
-                      : tx("settings.channels.showSecret", "Show secret")
-                  }
-                  onClick={() => onToggleSecret(field.key)}
-                  disabled={disabled}
-                  className="absolute right-0 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:text-foreground sm:right-1 sm:h-8 sm:w-8"
-                >
-                  {visible ? (
-                    <EyeOff className="h-3.5 w-3.5" aria-hidden />
-                  ) : (
-                    <Eye className="h-3.5 w-3.5" aria-hidden />
-                  )}
-                </button>
-              ) : null}
-              </span>
+              {field.secret ? (
+                <SecretInput {...inputProps} visible={visible} visibleType={field.inputType ?? "text"}
+                  onToggle={() => onToggleSecret(field.key)} showToggle={showSecretToggle}
+                  toggleLabel={visible
+                    ? tx("settings.channels.hideSecret", "Hide secret")
+                    : tx("settings.channels.showSecret", "Show secret")}
+                  toggleClassName="absolute right-0 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:text-foreground sm:right-1 sm:h-8 sm:w-8" />
+              ) : <Input {...inputProps} type={inputType} />}
             {errorMessage}
             {showSecretActions && field.secret && configuredFields?.has(field.key) && !value.trim() && onClearSecret ? (
               <button

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, Loader2, PauseCircle, PlayCircle, RotateCcw } from "lucide-react";
+import { Loader2, PauseCircle, PlayCircle, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentSettingsDraft } from "@/components/settings/models/ModelsSettings";
@@ -11,8 +11,8 @@ import {
   SettingsSectionTitle,
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { isLoopbackHost } from "@/lib/network";
 import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
@@ -292,25 +292,19 @@ export function RuntimeSettings({
                       : tx("settings.api.apiKeyHelp", "Clients send this as a Bearer token.")
                   }
                 >
-                  <div className="relative w-full">
-                    <Input
-                      type={apiKeyVisible ? "text" : "password"}
-                      value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
-                      placeholder={apiDefaults.api_key_hint ?? tx("settings.api.apiKeyPlaceholder", "Enter an API key")}
-                      className="h-9 rounded-full pr-10 text-[13px]"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setApiKeyVisible((visible) => !visible)}
-                      aria-label={apiKeyVisible ? tx("settings.byok.hideApiKey", "Hide API key") : tx("settings.byok.showApiKey", "Show API key")}
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full"
-                    >
-                      {apiKeyVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </Button>
-                  </div>
+                  <SecretInput
+                    value={apiKey}
+                    onChange={(event) => setApiKey(event.target.value)}
+                    placeholder={apiDefaults.api_key_hint ?? tx("settings.api.apiKeyPlaceholder", "Enter an API key")}
+                    className="h-9 rounded-full pr-10 text-[13px]"
+                    visible={apiKeyVisible}
+                    onToggle={() => setApiKeyVisible((visible) => !visible)}
+                    toggleLabel={apiKeyVisible ? tx("settings.byok.hideApiKey", "Hide API key") : tx("settings.byok.showApiKey", "Show API key")}
+                    toggleClassName={buttonVariants({
+                      variant: "icon", size: "icon",
+                      className: "absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full",
+                    })}
+                  />
               </SettingsRow>
             </>
           ) : null}

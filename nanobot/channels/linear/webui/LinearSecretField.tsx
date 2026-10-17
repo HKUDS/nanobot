@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
 import type { ChannelConfigField } from "@/channel-plugins/catalog";
 import { channelFieldInputId } from "@/components/settings/channels/CredentialForm";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { SecretInput } from "@/components/ui/secret-input";
 
 /** A saved secret is a status, never a placeholder or a value sent back to the browser. */
 export function LinearSecretField({ field, configured, disabled, onSave }: {
@@ -89,27 +88,23 @@ export function LinearSecretField({ field, configured, disabled, onSave }: {
           </Button>
         </div>
       ) : <>
-        <div className="relative">
-          <Input ref={inputRef} id={inputId} type={visible ? "text" : "password"}
-            value={value} autoComplete="off" spellCheck={false} disabled={locked}
-            placeholder={tx("custom.enterSecret", "Enter secret")}
-            aria-invalid={error} aria-describedby={error ? `${inputId}-error` : undefined}
-            onChange={event => { setValue(event.target.value); setError(false); }}
-            onKeyDown={event => {
-              if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); void save(); }
-              if (event.key === "Escape" && (editing || value)) {
-                event.preventDefault(); event.stopPropagation(); cancel();
-              }
-            }}
-            className="h-10 rounded-full border-border/40 bg-background pe-10 text-base sm:h-9 sm:text-[13px]" />
-          {value ? <Button type="button" variant="ghost" size="icon" disabled={locked}
-            aria-label={visible ? t("settings.channels.hideSecret", { defaultValue: "Hide secret" })
-              : t("settings.channels.showSecret", { defaultValue: "Show secret" })}
-            onClick={() => setVisible(current => !current)}
-            className="absolute end-1 top-1/2 h-8 w-8 -translate-y-1/2 rounded-full text-muted-foreground">
-            {visible ? <EyeOff className="h-3.5 w-3.5" aria-hidden /> : <Eye className="h-3.5 w-3.5" aria-hidden />}
-          </Button> : null}
-        </div>
+        <SecretInput ref={inputRef} id={inputId} visible={visible}
+          value={value} autoComplete="off" spellCheck={false} disabled={locked}
+          placeholder={tx("custom.enterSecret", "Enter secret")}
+          aria-invalid={error} aria-describedby={error ? `${inputId}-error` : undefined}
+          onChange={event => { setValue(event.target.value); setError(false); }}
+          onKeyDown={event => {
+            if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); void save(); }
+            if (event.key === "Escape" && (editing || value)) {
+              event.preventDefault(); event.stopPropagation(); cancel();
+            }
+          }}
+          className="h-10 rounded-full border-border/40 bg-background pe-10 text-base sm:h-9 sm:text-[13px]"
+          onToggle={() => setVisible(current => !current)} showToggle={Boolean(value)}
+          toggleLabel={visible ? t("settings.channels.hideSecret", { defaultValue: "Hide secret" })
+            : t("settings.channels.showSecret", { defaultValue: "Show secret" })}
+          toggleClassName={buttonVariants({ variant: "icon", size: "icon",
+            className: "absolute end-1 top-1/2 h-8 w-8 -translate-y-1/2 rounded-full text-muted-foreground" })} />
         {editing || value ? <div className="mt-1.5 flex min-h-8 flex-wrap items-center justify-end gap-1.5">
           <Button type="button" variant="ghost" size="sm" disabled={locked} onClick={cancel}
             className="h-8 rounded-full px-3 text-[12px] text-muted-foreground">
