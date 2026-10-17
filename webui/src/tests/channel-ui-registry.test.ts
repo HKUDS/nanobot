@@ -1,7 +1,9 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import postcss from "postcss";
+import tailwindcss from "tailwindcss";
+import loadConfig from "tailwindcss/loadConfig";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   channelUiContribution,
@@ -34,9 +36,22 @@ describe("channel UI contributions", () => {
     expect(channelUiOwner("wechat")).toBe("weixin");
   });
 
-  it("includes channel-owned UI in Tailwind's production scan", () => {
-    const source = readFileSync(resolve(process.cwd(), "tailwind.config.js"), "utf8");
+  it("includes channel-owned UI in Tailwind's production scan", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const config = loadConfig(resolve(process.cwd(), "tailwind.config.js"));
+      const result = await postcss([tailwindcss(config)]).process("@tailwind utilities;", { from: undefined });
 
-    expect(source).toContain("../nanobot/channels/*/webui/**/*.{ts,tsx}");
+      // Linear's connecting indicator uses a channel-only arbitrary color.
+      let backgroundColor: string | undefined;
+      result.root.walkRules(".bg-\\[\\#5E6AD2\\]", (rule) => {
+        rule.walkDecls("background-color", (declaration) => {
+          backgroundColor = declaration.value;
+        });
+      });
+      expect(backgroundColor?.trim()).toBeTruthy();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

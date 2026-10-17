@@ -147,6 +147,7 @@ class TestInspectPathNavigation:
 
     @pytest.mark.asyncio
     async def test_inspect_config_subfield(self):
+        """Positive control for sensitive-field blocking: ordinary config stays inspectable."""
         loop = _make_mock_loop()
         tool = _make_tool(loop=loop)
         result = await tool.execute(action="check", key="web_config.enable")
@@ -650,60 +651,6 @@ class TestSubagentHookStatus:
 
 
 # ---------------------------------------------------------------------------
-# Checkpoint callback updates status
-# ---------------------------------------------------------------------------
-
-class TestCheckpointCallback:
-
-    @pytest.mark.asyncio
-    async def test_checkpoint_updates_phase_and_iteration(self):
-        """The _on_checkpoint callback should update status.phase and iteration."""
-
-        from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="cp",
-            label="test",
-            task_description="test",
-            started_at=time.monotonic(),
-        )
-
-        # Simulate the checkpoint callback as defined in _run_subagent
-        async def _on_checkpoint(payload: dict) -> None:
-            status.phase = payload.get("phase", status.phase)
-            status.iteration = payload.get("iteration", status.iteration)
-
-        await _on_checkpoint({"phase": "awaiting_tools", "iteration": 2})
-        assert status.phase == "awaiting_tools"
-        assert status.iteration == 2
-
-        await _on_checkpoint({"phase": "tools_completed", "iteration": 3})
-        assert status.phase == "tools_completed"
-        assert status.iteration == 3
-
-    @pytest.mark.asyncio
-    async def test_checkpoint_preserves_phase_on_missing_key(self):
-        """If payload doesn't have 'phase', status.phase should stay unchanged."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="cp",
-            label="test",
-            task_description="test",
-            started_at=time.monotonic(),
-            phase="initializing",
-        )
-
-        async def _on_checkpoint(payload: dict) -> None:
-            status.phase = payload.get("phase", status.phase)
-            status.iteration = payload.get("iteration", status.iteration)
-
-        await _on_checkpoint({"iteration": 1})
-        assert status.phase == "initializing"
-        assert status.iteration == 1
-
-
-# ---------------------------------------------------------------------------
 # read-only mode (tools.my.allow_set=False)
 # ---------------------------------------------------------------------------
 
@@ -818,13 +765,6 @@ class TestSensitiveSubFieldBlocking:
         tool = _make_tool(loop=loop)
         result = await tool.execute(action="set", key="some_config.password", value="evil")
         assert "not accessible" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_non_sensitive_subfield_allowed(self):
-        """web_config.enable should still be inspectable."""
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="web_config.enable")
-        assert "True" in result
 
     @pytest.mark.asyncio
     async def test_modify_sensitive_top_level_blocked(self):

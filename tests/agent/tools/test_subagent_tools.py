@@ -110,19 +110,13 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     )
     mgr._announce_result = AsyncMock()
 
-    async def fake_run(spec):
-        exec_tool = spec.tools.get("exec")
-        assert exec_tool is not None
-        assert exec_tool.allowed_env_keys == ["GOPATH", "JAVA_HOME"]
-        return AgentRunResult(
-            messages=[],
-            stop_reason="done",
-            final_content="done",
-            error=None,
-            tool_events=[],
-        )
-
-    mgr.runner.run = AsyncMock(side_effect=fake_run)
+    mgr.runner.run = AsyncMock(return_value=AgentRunResult(
+        messages=[],
+        stop_reason="done",
+        final_content="done",
+        error=None,
+        tool_events=[],
+    ))
 
     await mgr.spawn(
         task="do task",
@@ -134,6 +128,11 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
     mgr.runner.run.assert_awaited_once()
+    spec = mgr.runner.run.await_args.args[0]
+    exec_tool = spec.tools.get("exec")
+    assert exec_tool is not None
+    assert exec_tool.allowed_env_keys == ["GOPATH", "JAVA_HOME"]
+    assert [s.state for s in mgr.statuses_for_session("test:c1").values()] == ["done"]
 
 
 @pytest.mark.asyncio
@@ -154,17 +153,13 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
     )
     mgr._announce_result = AsyncMock()
 
-    async def fake_run(spec):
-        assert spec.max_iterations == 37
-        return AgentRunResult(
-            messages=[],
-            stop_reason="done",
-            final_content="done",
-            error=None,
-            tool_events=[],
-        )
-
-    mgr.runner.run = AsyncMock(side_effect=fake_run)
+    mgr.runner.run = AsyncMock(return_value=AgentRunResult(
+        messages=[],
+        stop_reason="done",
+        final_content="done",
+        error=None,
+        tool_events=[],
+    ))
 
     await mgr.spawn(
         task="do task",
@@ -176,6 +171,55 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
     await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
     mgr.runner.run.assert_awaited_once()
+    spec = mgr.runner.run.await_args.args[0]
+    assert spec.max_iterations == 37
+    assert [s.state for s in mgr.statuses_for_session("test:c1").values()] == ["done"]
+
+
+@pytest.mark.asyncio
+async def test_subagent_checkpoint_updates_status_and_preserves_omitted_fields(tmp_path):
+    """Runner checkpoints update detached task snapshots without resetting omitted fields."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+    snapshots = []
+
+    async def fake_run(spec):
+        for payload in [
+            {"phase": "awaiting_tools", "iteration": 2},
+            {"phase": "tools_completed", "iteration": 3},
+            {"iteration": 4},
+            {"phase": "final_response"},
+        ]:
+            await spec.checkpoint_callback(payload)
+            snapshots.extend(mgr.statuses_for_session("test:c1").values())
+        return AgentRunResult(
+            messages=[],
+            stop_reason="done",
+            final_content="done",
+            error=None,
+            tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    await mgr.spawn(task="do task", session_key="test:c1", runtime=_runtime(MagicMock()))
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert [(s.state, s.phase, s.iteration) for s in snapshots] == [
+        ("running", "awaiting_tools", 2),
+        ("running", "tools_completed", 3),
+        ("running", "tools_completed", 4),
+        ("running", "final_response", 4),
+    ]
+    assert [s.state for s in mgr.statuses_for_session("test:c1").values()] == ["done"]
 
 
 @pytest.mark.asyncio

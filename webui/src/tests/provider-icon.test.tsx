@@ -60,7 +60,9 @@ describe("settings provider icons", () => {
       fireEvent.load(image);
       expect(image).toHaveClass("opacity-100");
       expect(icon).toHaveClass("bg-transparent");
-      expect(icon).not.toHaveClass("bg-white", "bg-muted");
+      for (const className of ["bg-white", "bg-muted"]) {
+        expect(icon).not.toHaveClass(className);
+      }
 
       fireEvent.error(image);
       expect(image).toHaveAttribute("src", providerBrand(provider)!.logoUrls[1]);

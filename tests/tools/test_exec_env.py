@@ -1,22 +1,61 @@
 """Tests for exec tool environment isolation."""
 
+import json
+import shlex
 import sys
 
 import pytest
 
+from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.shell import ExecTool
 
 _UNIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="Unix shell commands")
 
 
-@_UNIX_ONLY
 @pytest.mark.asyncio
-async def test_exec_does_not_leak_parent_env(monkeypatch):
-    """Env vars from the parent process must not be visible to commands."""
+@pytest.mark.parametrize(
+    "allowed_env_keys, expected_allowed",
+    [
+        pytest.param(None, None, id="default-filtering"),
+        pytest.param(
+            ["MY_CUSTOM_VAR", "NONEXISTENT_VAR_12345"],
+            "hello-from-config",
+            id="configured-passthrough",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "command_mode", [pytest.param("shell", marks=_UNIX_ONLY), "argv"],
+)
+async def test_exec_child_receives_filtered_env(monkeypatch, allowed_env_keys, expected_allowed, command_mode):
+    """A successful child receives allowed values, but not secrets or unset keys."""
+    monkeypatch.setenv("MY_CUSTOM_VAR", "hello-from-config")
     monkeypatch.setenv("NANOBOT_SECRET_TOKEN", "super-secret-value")
-    tool = ExecTool()
-    result = await tool.execute(command="printenv NANOBOT_SECRET_TOKEN")
-    assert "super-secret-value" not in result
+    monkeypatch.delenv("NONEXISTENT_VAR_12345", raising=False)
+    marker = "ENV_PROBE_COMPLETE "
+    script = (
+        "import json, os; "
+        "keys = ['MY_CUSTOM_VAR', 'NANOBOT_SECRET_TOKEN', 'NONEXISTENT_VAR_12345']; "
+        f"print({marker!r} + json.dumps({{key: os.environ.get(key) for key in keys}}))"
+    )
+    argv = [sys.executable, "-c", script]
+    command = shlex.join(argv) if command_mode == "shell" else argv
+    manager = ExecSessionManager()
+    tool = ExecTool(allowed_env_keys=allowed_env_keys, session_manager=manager)
+    try:
+        result = await tool.execute(command=command)
+    finally:
+        await manager.close_all()
+
+    assert not getattr(result, "is_error", False), result
+    assert "Exit code: 0" in result
+    completed = [line.removeprefix(marker) for line in result.splitlines() if line.startswith(marker)]
+    assert len(completed) == 1, result
+    assert json.loads(completed[0]) == {
+        "MY_CUSTOM_VAR": expected_allowed,
+        "NANOBOT_SECRET_TOKEN": None,
+        "NONEXISTENT_VAR_12345": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -65,37 +104,6 @@ async def test_exec_path_prepend_takes_lookup_precedence(tmp_path):
 
     assert "preferred" in result
     assert "fallback" not in result
-
-
-@_UNIX_ONLY
-@pytest.mark.asyncio
-async def test_exec_allowed_env_keys_passthrough(monkeypatch):
-    """Env vars listed in allowed_env_keys should be visible to commands."""
-    monkeypatch.setenv("MY_CUSTOM_VAR", "hello-from-config")
-    tool = ExecTool(allowed_env_keys=["MY_CUSTOM_VAR"])
-    result = await tool.execute(command="printenv MY_CUSTOM_VAR")
-    assert "hello-from-config" in result
-
-
-@_UNIX_ONLY
-@pytest.mark.asyncio
-async def test_exec_allowed_env_keys_does_not_leak_others(monkeypatch):
-    """Env vars NOT in allowed_env_keys should still be blocked."""
-    monkeypatch.setenv("MY_CUSTOM_VAR", "hello-from-config")
-    monkeypatch.setenv("MY_SECRET_VAR", "secret-value")
-    tool = ExecTool(allowed_env_keys=["MY_CUSTOM_VAR"])
-    result = await tool.execute(command="printenv MY_SECRET_VAR")
-    assert "secret-value" not in result
-
-
-@_UNIX_ONLY
-@pytest.mark.asyncio
-async def test_exec_allowed_env_keys_missing_var_ignored(monkeypatch):
-    """If an allowed key is not set in the parent process, it should be silently skipped."""
-    monkeypatch.delenv("NONEXISTENT_VAR_12345", raising=False)
-    tool = ExecTool(allowed_env_keys=["NONEXISTENT_VAR_12345"])
-    result = await tool.execute(command="printenv NONEXISTENT_VAR_12345")
-    assert "Exit code: 1" in result
 
 
 # --- path_append injection prevention ------------------------------------

@@ -240,19 +240,6 @@ async def test_no_user_message_returns_400(aiohttp_client, app) -> None:
     assert resp.status == 400
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
-@pytest.mark.asyncio
-async def test_stream_true_returns_sse(aiohttp_client, app) -> None:
-    client = await aiohttp_client(app)
-    resp = await client.post(
-        "/v1/chat/completions",
-        headers=AUTH_HEADERS,
-        json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
-    )
-    assert resp.status == 200
-    assert resp.content_type == "text/event-stream"
-
-
 @pytest.mark.asyncio
 async def test_model_mismatch_returns_400() -> None:
     request = MagicMock()

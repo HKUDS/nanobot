@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sqlite3
 import threading
 from collections.abc import Callable, Iterator
+from contextlib import closing
+from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
@@ -127,18 +131,30 @@ async def test_observer_receives_every_retry_attempt(stream: bool) -> None:
 
 @pytest.mark.asyncio
 async def test_observer_estimates_missing_success_usage_without_storing_content() -> None:
-    provider = _SequenceProvider(iter([LLMResponse(content="hello")]))
+    prompt = "observer-prompt-canary-38a7cf"
+    reply = "observer-response-canary-92b6de"
+    provider = _SequenceProvider(iter([LLMResponse(content=reply)]))
     events: list[LLMCallRecord] = []
     provider.set_llm_call_observer(events.append)
 
     response = await provider.chat_with_retry(
-        messages=[{"role": "user", "content": "hello"}],
+        messages=[{"role": "user", "content": prompt}],
     )
 
+    assert response.content == reply
+    assert response.finish_reason == "stop"
+    assert provider.calls == 1
+    assert len(events) == 1
+    assert events[0].finish_reason == "stop"
     assert response.usage is not None
     assert response.usage.source == "estimated"
+    assert response.usage.input_tokens > 0
+    assert response.usage.output_tokens > 0
+    assert response.usage.estimated_tokens == response.usage.total_tokens > 0
     assert events[0].usage == response.usage
-    assert "content" not in LLMCallRecord.__dataclass_fields__
+    serialized = json.dumps(asdict(events[0]))
+    assert prompt not in serialized
+    assert reply not in serialized
 
 
 @pytest.mark.asyncio
@@ -342,26 +358,40 @@ async def test_usage_fast_paths_skip_local_estimation(stream: bool, kind: str) -
 async def test_gateway_usage_observer_records_missing_usage_and_retry(
     monkeypatch, tmp_path, stream: bool,
 ) -> None:
+    prompt = "gateway-prompt-canary-f6d5a4"
+    reply = "gateway-response-canary-27be91"
+    error = "gateway-error-canary-64a8cd"
     store = LLMUsageStore(tmp_path / "usage.sqlite3")
     monkeypatch.setattr("nanobot.llm_usage.service.get_llm_usage_store", lambda: store)
     provider = _SequenceProvider(iter([
-        LLMResponse(content="temporary failure", finish_reason="error", error_kind="timeout"),
-        LLMResponse(content="hello"),
+        LLMResponse(content=error, finish_reason="error", error_kind="timeout"),
+        LLMResponse(content=reply),
     ]))
     provider.set_llm_call_observer(record_llm_call)
     call = provider.chat_stream_with_retry if stream else provider.chat_with_retry
     try:
         with llm_usage_source("api"):
-            response = await call(messages=[{"role": "user", "content": "hello"}])
-        assert response.content == "hello"
+            response = await call(messages=[{"role": "user", "content": prompt}])
+        assert response.content == reply
         assert response.usage is not None and response.usage.source == "estimated"
+        assert response.usage.input_tokens > 0
+        assert response.usage.output_tokens > 0
+        assert response.usage.estimated_tokens == response.usage.total_tokens > 0
         assert provider.calls == 2
-        records = list(reversed(store.recent_calls()))
+        with closing(sqlite3.connect(store.path)) as connection:
+            connection.row_factory = sqlite3.Row
+            records = [dict(row) for row in connection.execute("SELECT * FROM llm_calls ORDER BY id")]
+        assert len(records) == 2
         assert [record["finish_reason"] for record in records] == ["error", "stop"]
+        assert records[0]["error_kind"] == "timeout"
         assert all(record["source"] == "api" for record in records)
         assert all(record["stream"] == int(stream) for record in records)
         assert records[0]["total_tokens"] is None
         assert records[1]["total_tokens"] == response.usage.total_tokens
+        assert records[1]["estimated_tokens"] == response.usage.estimated_tokens
+        serialized = json.dumps(records)
+        for canary in (prompt, reply, error):
+            assert canary not in serialized
     finally:
         store.close()
 

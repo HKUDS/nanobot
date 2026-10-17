@@ -156,15 +156,6 @@ def test_internal_continuation_requires_budget_boundary_and_queue():
     )
 
 
-def test_save_skip_matches_prefix_when_current_message_was_persisted():
-    skip = _save_skip_for_turn(
-        message_metadata=None,
-        initial_message_count=3,  # [system, history user, current user]
-        input_persisted_early=True,
-    )
-    assert skip == 3
-
-
 def test_save_skip_unchanged_for_standalone_current_message():
     # [system, history user, current user] with the current user already saved.
     assert _save_skip_for_turn(

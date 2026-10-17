@@ -92,6 +92,7 @@ async def test_model_command_lists_current_and_available_presets(tmp_path) -> No
 @pytest.mark.asyncio
 async def test_model_command_switches_preset(tmp_path) -> None:
     loop = _make_loop(tmp_path)
+    assert loop.tools_config.my.allow_set is False
 
     out = await cmd_model(_ctx(loop, "/model fast", args="fast"))
 
@@ -170,16 +171,6 @@ async def test_model_command_reports_provider_configuration_errors(tmp_path) -> 
     assert "No API key configured for provider 'openai'." in switched.content
     assert "Current selection error" in status.content
     assert "No API key configured for provider 'openai'." in status.content
-
-
-@pytest.mark.asyncio
-async def test_model_command_does_not_depend_on_my_allow_set(tmp_path) -> None:
-    loop = _make_loop(tmp_path)
-    assert loop.tools_config.my.allow_set is False
-
-    await cmd_model(_ctx(loop, "/model fast", args="fast"))
-
-    assert _saved_model_preset(loop) == "fast"
 
 
 @pytest.mark.asyncio

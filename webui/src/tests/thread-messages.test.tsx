@@ -731,7 +731,9 @@ describe("ThreadMessages", () => {
     const rows = Array.from(container.firstElementChild?.children ?? []);
 
     expect(rows).toHaveLength(2);
-    expect(rows[0]).not.toHaveClass("mt-2", "mt-4", "mt-5");
+    for (const className of ["mt-2", "mt-4", "mt-5"]) {
+      expect(rows[0]).not.toHaveClass(className);
+    }
     expect(rows[1]).not.toHaveClass("mt-4");
     const answerRow = screen.getByText("final answer")
       .closest<HTMLElement>("[data-thread-display-unit]")!;

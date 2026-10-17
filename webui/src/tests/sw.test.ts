@@ -139,10 +139,10 @@ function indexHtml(assetPaths: string[]): Response {
   return new Response(`<!doctype html><html><head>${refs}</head></html>`);
 }
 
-function fetchEvent(url: string) {
+function fetchEvent(url: string, init?: RequestInit) {
   const respondWith = vi.fn();
   const event = {
-    request: new Request(url, { method: "GET" }),
+    request: new Request(url, init),
     respondWith,
   };
   return { event, respondWith };
@@ -223,8 +223,8 @@ describe("service worker", () => {
     ];
 
     for (const path of paths) {
-      const { respondWith } = fetchEvent(`${ORIGIN}${path}`);
-      await sw.fire("fetch", { request: new Request(`${ORIGIN}${path}`) });
+      const { event, respondWith } = fetchEvent(`${ORIGIN}${path}`);
+      await sw.fire("fetch", event);
       expect(respondWith, path).not.toHaveBeenCalled();
     }
     expect(sw.fetchMock).not.toHaveBeenCalled();
@@ -233,16 +233,14 @@ describe("service worker", () => {
   it("does not intercept non-GET or unrelated cross-origin requests", async () => {
     const sw = loadSw();
 
-    const { respondWith: post } = fetchEvent(`${ORIGIN}/api/v1/models`);
-    await sw.fire("fetch", {
-      request: new Request(`${ORIGIN}/api/v1/models`, { method: "POST" }),
-    });
+    const { event: postEvent, respondWith: post } = fetchEvent(
+      `${ORIGIN}/assets/app.js`, { method: "POST" },
+    );
+    await sw.fire("fetch", postEvent);
     expect(post).not.toHaveBeenCalled();
 
-    const { respondWith: cross } = fetchEvent("https://other.test/assets/app.js");
-    await sw.fire("fetch", {
-      request: new Request("https://other.test/assets/app.js"),
-    });
+    const { event: crossEvent, respondWith: cross } = fetchEvent("https://other.test/assets/app.js");
+    await sw.fire("fetch", crossEvent);
     expect(cross).not.toHaveBeenCalled();
     expect(sw.fetchMock).not.toHaveBeenCalled();
   });

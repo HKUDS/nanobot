@@ -1365,10 +1365,14 @@ async def test_on_media_message_sets_thread_metadata_when_threaded_event(
     monkeypatch.setattr("nanobot.channels.matrix.runtime.get_data_dir", lambda: tmp_path)
 
     channel = MatrixChannel(_make_config(), MessageBus())
-    client = _FakeAsyncClient("", "", "", None)
-    client.download_bytes = b"image"
-    channel.client = client
+    channel.client = _FakeAsyncClient("", "", "", None)
+    downloads: list[tuple[str, int]] = []
 
+    async def _download_media_bytes(mxc_url: str, limit_bytes: int) -> bytes:
+        downloads.append((mxc_url, limit_bytes))
+        return b"image"
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_media_bytes)
     handled: list[dict[str, object]] = []
 
     async def _fake_handle_message(**kwargs) -> None:
@@ -1396,8 +1400,15 @@ async def test_on_media_message_sets_thread_metadata_when_threaded_event(
 
     await channel._on_media_message(room, event)
 
+    assert len(downloads) == 1
+    assert downloads[0][0] == "mxc://example.org/mediaid"
+    assert downloads[0][1] >= len(b"image")
     assert len(handled) == 1
+    media_paths = handled[0]["media"]
+    assert len(media_paths) == 1
+    assert Path(media_paths[0]).read_bytes() == b"image"
     metadata = handled[0]["metadata"]
+    assert metadata["attachments"][0]["path"] == media_paths[0]
     assert metadata["thread_root_event_id"] == "$root1"
     assert metadata["thread_reply_to_event_id"] == "$event1"
     assert metadata["event_id"] == "$event1"

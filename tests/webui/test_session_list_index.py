@@ -237,16 +237,26 @@ def test_webui_session_list_surfaces_pending_recovery_state(tmp_path: Path) -> N
 
 
 def test_webui_session_index_uses_unique_temp_file(tmp_path: Path) -> None:
+    key = "websocket:unique-index-temp"
+    transcript = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
+    transcript.write_text(
+        '{"event":"user","chat_id":"unique-index-temp","text":"hello"}\n',
+        encoding="utf-8",
+    )
     manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:unique-index-temp")
-    session.add_message("user", "hello")
-    manager.save(session)
     stale_shared_tmp = manager.sessions_dir / ".webui_session_index.json.tmp"
-    stale_shared_tmp.write_text("stale", encoding="utf-8")
+    stale_bytes = b"pre-existing shared temp\x00\xff"
+    stale_shared_tmp.write_bytes(stale_bytes)
 
-    assert list_webui_sessions(manager)[0]["preview"] == "hello"
+    row, = list_webui_sessions(manager)
 
-    assert stale_shared_tmp.read_text(encoding="utf-8") == "stale"
+    assert row["key"] == key
+    assert row["preview"] == "hello"
+    cache = json.loads((manager.sessions_dir / ".webui_session_index.json").read_text(encoding="utf-8"))
+    cached_row, = cache["sessions"]
+    assert cached_row["key"] == key
+    assert cached_row["preview"] == "hello"
+    assert stale_shared_tmp.read_bytes() == stale_bytes
     assert not list(manager.sessions_dir.glob(".webui_session_index.json.*.tmp"))
 
 

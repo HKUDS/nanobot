@@ -12,7 +12,9 @@ describe("Linear workspace logo", () => {
     expect(image).toHaveAttribute("height", "28");
     expect(image).toHaveAttribute("referrerpolicy", "no-referrer");
     expect(image.parentElement).toHaveClass("h-7", "w-7");
-    expect(image.parentElement).not.toHaveClass("overflow-hidden", "bg-muted");
+    for (const className of ["overflow-hidden", "bg-muted"]) {
+      expect(image.parentElement).not.toHaveClass(className);
+    }
     expect(image).toHaveClass("object-contain");
     expect(view.container.querySelector("svg")).toBeNull();
     fireEvent.error(image);

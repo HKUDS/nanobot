@@ -50,14 +50,17 @@ async def test_probe_returns_true_for_open_port(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_probe_returns_false_for_closed_port():
-    """Port 19999 is almost certainly not listening."""
-    assert await _probe_http_url("http://127.0.0.1:19999/mcp") is False
-
-
-@pytest.mark.asyncio
-async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch):
-    """When no port is present, probe the validated address on port 80."""
+@pytest.mark.parametrize(
+    "url, expected_port",
+    [
+        ("http://unreachable-host.test/mcp", 80),
+        ("http://unreachable-host.test:19999/mcp", 19999),
+    ],
+)
+async def test_probe_returns_false_when_validated_target_refuses_connection(
+    monkeypatch: pytest.MonkeyPatch, url: str, expected_port: int,
+):
+    """Connection refusal on a validated address must fail on the selected port."""
     attempts: list[tuple[str, int]] = []
 
     monkeypatch.setattr(
@@ -71,8 +74,8 @@ async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
 
-    assert await _probe_http_url("http://unreachable-host.test/mcp") is False
-    assert attempts == [("93.184.216.34", 80)]
+    assert await _probe_http_url(url) is False
+    assert attempts == [("93.184.216.34", expected_port)]
 
 
 @pytest.mark.asyncio
@@ -80,8 +83,12 @@ async def test_probe_rejects_public_name_resolving_to_loopback():
     def _resolver(hostname, port, family=0, type_=0):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
 
-    with patch("nanobot.security.network.socket.getaddrinfo", _resolver):
+    with (
+        patch("nanobot.security.network.socket.getaddrinfo", _resolver),
+        patch("nanobot.agent.tools.mcp.asyncio.open_connection") as open_connection,
+    ):
         assert await _probe_http_url("http://example.com:8765/mcp") is False
+    open_connection.assert_not_called()
 
 
 @pytest.mark.asyncio

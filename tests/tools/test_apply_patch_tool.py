@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -415,7 +416,7 @@ def test_apply_patch_edits_reports_invalid_edit_shapes(tmp_path):
     assert "each edit must be an object" in non_object
 
 
-def test_apply_patch_edits_rolls_back_when_late_operation_fails(tmp_path):
+def test_apply_patch_preflight_rejects_missing_later_file_without_partial_write(tmp_path):
     first = tmp_path / "first.txt"
     first.write_text("before\n")
     tool = ApplyPatchTool(workspace=tmp_path)
@@ -441,3 +442,51 @@ def test_apply_patch_edits_rolls_back_when_late_operation_fails(tmp_path):
 
     assert "file to update does not exist: missing.txt" in result
     assert first.read_text() == "before\n"
+
+
+@pytest.mark.parametrize("first_exists", [True, False], ids=["existing-file", "added-file"])
+def test_apply_patch_edits_rolls_back_when_later_write_fails(tmp_path, monkeypatch, first_exists):
+    first = tmp_path / "first.txt"
+    first_original = b"before\r\nfirst tail"
+    if first_exists:
+        first.write_bytes(first_original)
+    second = tmp_path / "second.txt"
+    second_original = b"before\r\nsecond tail"
+    second.write_bytes(second_original)
+    tool = ApplyPatchTool(workspace=tmp_path)
+    write_text = Path.write_text
+    failed = False
+
+    def _fail_second_write(path, *args, **kwargs):
+        nonlocal failed
+        written = write_text(path, *args, **kwargs)
+        if path == second and not failed:
+            failed = True
+            # A persistence error can occur after the file has already changed.
+            raise OSError("injected second write failure")
+        return written
+
+    monkeypatch.setattr(Path, "write_text", _fail_second_write)
+
+    result = asyncio.run(
+        tool.execute(
+            edits=[
+                {"path": "first.txt", "action": "add", "new_text": "after"},
+                {
+                    "path": "second.txt",
+                    "action": "replace",
+                    "old_text": "before",
+                    "new_text": "after",
+                },
+            ]
+        )
+    )
+
+    assert failed
+    assert getattr(result, "is_error", False)
+    assert "Error applying patch: injected second write failure" in result
+    if first_exists:
+        assert first.read_bytes() == first_original
+    else:
+        assert not first.exists()
+    assert second.read_bytes() == second_original
