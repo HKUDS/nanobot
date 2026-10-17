@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import type { SettingsPayload } from "@/lib/types";
+import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
@@ -2031,25 +2031,40 @@ describe("Settings models", () => {
     ));
   });
 
-  it("offers model-specific reasoning levels and retains manual values", async () => {
+  it("offers catalog reasoning levels including max and none, distinct from Default, and retains manual values", async () => {
     const payload = settingsPayload();
-    payload.model_presets[0].provider = "openai";
+    payload.model_presets[0].provider = "deepseek";
+    payload.model_presets[0].resolved_provider = "deepseek";
+    payload.model_presets[0].model = "deepseek-flash";
     payload.model_presets[0].reasoning_effort = "high";
-    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/provider-models?")
-      ? jsonResponse({ provider: "openai", status: "available", catalog_kind: "official", models: [
-        { id: payload.model_presets[0].model, reasoning_efforts: ["low", "high"] },
+    payload.model_presets[0].reasoning_effort_values = ["", "low", "medium", "high"];
+    payload.providers = [{ name: "deepseek", label: "DeepSeek", configured: true }];
+    const catalog: ProviderModelsPayload = {
+      provider: "deepseek", label: "DeepSeek", status: "available", catalog_kind: "official",
+      models: [
+        {
+          id: payload.model_presets[0].model, max_output_tokens: 393_216,
+          input_modalities: ["text", "image"], output_modalities: ["text"],
+          reasoning_efforts: ["none", "low", "high", "max"], default_reasoning_effort: "high",
+        },
         { id: "another-model", reasoning_efforts: ["ultra"] },
-      ], model_count: 2 }) : jsonResponse(payload)));
+      ], model_count: 2,
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/provider-models?")
+      ? jsonResponse(catalog) : jsonResponse(payload)));
     requestMutationMock.mockResolvedValue(payload);
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await togglePresetEditor();
     const input = screen.getByRole("combobox", { name: "Reasoning effort" });
     fireEvent.click(input);
-    fireEvent.click(await screen.findByRole("option", { name: "low", exact: true }));
-    await waitFor(() => expect(input).toHaveValue("low"));
+    fireEvent.click(await screen.findByRole("option", { name: "max", exact: true }));
+    await waitFor(() => expect(input).toHaveValue("max"));
     fireEvent.click(input);
     expect(screen.queryByRole("option", { name: "ultra", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "medium", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "none", exact: true }));
+    await waitFor(() => expect(input).toHaveValue("none"));
+    fireEvent.click(input);
     fireEvent.click(screen.getByRole("option", { name: "Default", exact: true }));
     await waitFor(() => expect(input).toHaveValue(""));
     fireEvent.click(input);

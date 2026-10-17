@@ -98,10 +98,6 @@ _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
 })
-_DEEPSEEK_MULTIMODAL_MODELS: frozenset[str] = frozenset({
-    "deepseek-flash",
-    "deepseek-v4-flash-vision-exp",
-})
 _TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
@@ -690,11 +686,10 @@ class OpenAICompatProvider(LLMProvider):
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
         id_map: dict[str, str] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
-        is_deepseek = bool(self._spec and self._spec.name == "deepseek")
-        model_name = model or self.default_model
-        force_string_content = (
-            is_deepseek and _model_slug(model_name) not in _DEEPSEEK_MULTIMODAL_MODELS
-        )
+        force_string_content = False
+        if self._spec and self._spec.name == "deepseek":
+            metadata = self._spec.model_metadata(model or self.default_model)
+            force_string_content = metadata is None or "image" not in metadata.input_modalities
         normalize_tool_ids = self._should_normalize_tool_call_ids()
         strip_reasoning = bool(
             self._spec

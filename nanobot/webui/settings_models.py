@@ -21,7 +21,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, NotRequired, TypedDict, cast
 
 import httpx
 
@@ -40,7 +40,13 @@ from nanobot.providers.oauth_model_catalog import (
     get_oauth_model_catalog,
     invalidate_oauth_model_catalog,
 )
-from nanobot.providers.registry import PROVIDERS, ProviderSpec, create_dynamic_spec, find_by_name
+from nanobot.providers.registry import (
+    PROVIDERS,
+    ProviderModelSpec,
+    ProviderSpec,
+    create_dynamic_spec,
+    find_by_name,
+)
 from nanobot.providers.request_overrides import isolate_request_overrides
 from nanobot.providers.routing import resolve_automatic_model_api, resolve_model_api
 from nanobot.webui import request_settings
@@ -98,6 +104,22 @@ class ModelSettingsPayload(TypedDict):
     provider_api_configuration_supported: bool
     model_request_overrides_supported: bool
     providers: list[dict[str, Any]]
+
+
+class ProviderModelMetadataPayload(TypedDict, total=False):
+    max_output_tokens: int
+    input_modalities: list[str]
+    output_modalities: list[str]
+    reasoning_efforts: list[str]
+    default_reasoning_effort: str
+
+
+class ProviderModelRowPayload(ProviderModelMetadataPayload):
+    id: str
+    label: str | None
+    owned_by: str | None
+    context_window: int | None
+    description: NotRequired[str]
 
 
 _OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
@@ -437,12 +459,12 @@ def model_catalog_kind(spec: Any) -> str:
     return "official"
 
 
-def _model_id_from_row(row: Any) -> str | None:
+def _model_id_from_row(row: object) -> str | None:
     if isinstance(row, str):
         return row.strip() or None
     if not isinstance(row, dict):
         return None
-    row_mapping = cast(dict[str, Any], row)
+    row_mapping = cast(dict[str, object], row)
     for key in ("id", "name", "model"):
         value = row_mapping.get(key)
         if isinstance(value, str) and value.strip():
@@ -450,10 +472,31 @@ def _model_id_from_row(row: Any) -> str | None:
     return None
 
 
-def _model_context_window(row: Any) -> int | None:
+def _model_positive_int(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
+def _model_string_values(value: object) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in cast(list[object], value):
+        if not isinstance(item, str):
+            return None
+        normalized = item.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            values.append(normalized)
+    return values
+
+
+def _model_context_window(row: object) -> int | None:
     if not isinstance(row, dict):
         return None
-    row_mapping = cast(dict[str, Any], row)
+    row_mapping = cast(dict[str, object], row)
     for key in (
         "context_window",
         "context_length",
@@ -462,17 +505,20 @@ def _model_context_window(row: Any) -> int | None:
         "max_input_tokens",
     ):
         value = row_mapping.get(key)
-        if isinstance(value, int) and value > 0:
-            return value
-        if isinstance(value, float) and value > 0:
-            return int(value)
+        parsed = _model_positive_int(value)
+        if parsed is not None:
+            return parsed
+        if isinstance(value, float) and math.isfinite(value) and value > 0:
+            parsed = _model_positive_int(int(value))
+            if parsed is not None:
+                return parsed
     return None
 
 
-def _model_shutdown_date(row: Any) -> date | None:
+def _model_shutdown_date(row: object) -> date | None:
     if not isinstance(row, dict):
         return None
-    row_mapping = cast(dict[str, Any], row)
+    row_mapping = cast(dict[str, object], row)
     raw = row_mapping.get("shutdown_date")
     if not isinstance(raw, str) or not raw.strip():
         return None
@@ -482,7 +528,7 @@ def _model_shutdown_date(row: Any) -> date | None:
         return None
 
 
-def _model_catalog_row_active(row: Any, *, on: date | None = None) -> bool:
+def _model_catalog_row_active(row: object, *, on: date | None = None) -> bool:
     """True when a provider catalog row should stay in the advisory model list."""
     shutdown = _model_shutdown_date(row)
     if shutdown is None:
@@ -491,15 +537,71 @@ def _model_catalog_row_active(row: Any, *, on: date | None = None) -> bool:
     return shutdown > reference
 
 
-def _model_row_payload(row: Any) -> dict[str, Any] | None:
+def _model_metadata_payload(
+    row: object,
+    metadata: ProviderModelSpec | None,
+) -> ProviderModelMetadataPayload:
+    row_mapping = cast(dict[str, object], row) if isinstance(row, dict) else {}
+    effort = row_mapping.get("effort")
+    effort_mapping = cast(dict[str, object], effort) if isinstance(effort, dict) else {}
+    max_output_tokens = _model_positive_int(row_mapping.get("max_output_tokens"))
+    input_modalities = _model_string_values(row_mapping.get("input_modalities"))
+    output_modalities = _model_string_values(row_mapping.get("output_modalities"))
+    reasoning_efforts = _model_string_values(effort_mapping.get("supported_levels"))
+    raw_default = effort_mapping.get("default_level")
+    default_effort = raw_default.strip() if isinstance(raw_default, str) else None
+
+    if metadata is not None:
+        if max_output_tokens is None:
+            max_output_tokens = metadata.max_output_tokens
+        if input_modalities is None and metadata.input_modalities:
+            input_modalities = list(metadata.input_modalities)
+        if output_modalities is None and metadata.output_modalities:
+            output_modalities = list(metadata.output_modalities)
+        if reasoning_efforts is None and metadata.reasoning_efforts:
+            reasoning_efforts = list(metadata.reasoning_efforts)
+        elif (
+            reasoning_efforts is not None
+            and "none" in metadata.reasoning_efforts
+            and "none" not in reasoning_efforts
+        ):
+            # Catalogs may list only enabled thinking levels, not the explicit off control.
+            reasoning_efforts = ["none", *reasoning_efforts]
+        if default_effort not in (reasoning_efforts or []):
+            default_effort = metadata.default_reasoning_effort
+
+    payload: ProviderModelMetadataPayload = {}
+    if max_output_tokens is not None:
+        payload["max_output_tokens"] = max_output_tokens
+    if input_modalities is not None:
+        payload["input_modalities"] = input_modalities
+    if output_modalities is not None:
+        payload["output_modalities"] = output_modalities
+    if reasoning_efforts is not None:
+        payload["reasoning_efforts"] = reasoning_efforts
+        if default_effort and default_effort in reasoning_efforts:
+            payload["default_reasoning_effort"] = default_effort
+    return payload
+
+
+def _model_row_payload(
+    row: object,
+    *,
+    spec: ProviderSpec | None = None,
+) -> ProviderModelRowPayload | None:
     model_id = _model_id_from_row(row)
     if not model_id:
         return None
+    metadata = spec.model_metadata(model_id) if spec is not None else None
+    context_window = _model_context_window(row)
+    if context_window is None and metadata is not None:
+        context_window = metadata.context_window
+    metadata_payload = _model_metadata_payload(row, metadata)
     label: str | None = None
     description: str | None = None
     owned_by: str | None = None
     if isinstance(row, dict):
-        row_mapping = cast(dict[str, Any], row)
+        row_mapping = cast(dict[str, object], row)
         raw_label = row_mapping.get("display_name") or row_mapping.get("label") or row_mapping.get("name")
         if isinstance(raw_label, str) and raw_label.strip() and raw_label.strip() != model_id:
             label = raw_label.strip()
@@ -509,27 +611,32 @@ def _model_row_payload(row: Any) -> dict[str, Any] | None:
         raw_owner = row_mapping.get("owned_by") or row_mapping.get("owner") or row_mapping.get("organization")
         if isinstance(raw_owner, str) and raw_owner.strip():
             owned_by = raw_owner.strip()
-    payload = {
+    payload: ProviderModelRowPayload = {
         "id": model_id,
         "label": label,
         "owned_by": owned_by,
-        "context_window": _model_context_window(row),
+        "context_window": context_window,
+        **metadata_payload,
     }
     if description:
         payload["description"] = description
     return payload
 
 
-def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
-    raw_rows = cast(dict[str, Any], body).get("data") if isinstance(body, dict) else body
+def _extract_model_rows(
+    body: object,
+    *,
+    spec: ProviderSpec | None = None,
+) -> list[ProviderModelRowPayload]:
+    raw_rows = cast(dict[str, object], body).get("data") if isinstance(body, dict) else body
     if not isinstance(raw_rows, list):
         return []
-    rows: list[dict[str, Any]] = []
+    rows: list[ProviderModelRowPayload] = []
     seen: set[str] = set()
     for raw_row in cast(list[object], raw_rows):
         if not _model_catalog_row_active(raw_row):
             continue
-        row = _model_row_payload(raw_row)
+        row = _model_row_payload(raw_row, spec=spec)
         if row is None or row["id"] in seen:
             continue
         seen.add(row["id"])
@@ -657,7 +764,7 @@ def provider_models_payload(
             follow_redirects=False,
         )
         response.raise_for_status()
-        rows = _extract_model_rows(response.json())
+        rows = _extract_model_rows(response.json(), spec=spec)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status in {401, 403}:
@@ -916,6 +1023,10 @@ def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
     implicit = getattr(spec, "implicit_reasoning_models", ())
     if implicit and any(pattern in model_lower for pattern in implicit):
         return [""]
+
+    metadata = spec.model_metadata(model)
+    if metadata is not None and metadata.reasoning_efforts:
+        return ["", *metadata.reasoning_efforts]
 
     remap = getattr(spec, "reasoning_effort_remap", ())
     if remap:
