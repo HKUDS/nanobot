@@ -53,6 +53,10 @@ def _bound_session_delivery_context(
                 source_label=source_label,
             )
         )
+    else:
+        # External scheduled results need one recoverable final message, not a
+        # transient stream whose completion marker cannot be replayed safely.
+        metadata.pop("_wants_stream", None)
 
     return channel, chat_id, metadata
 

@@ -12,6 +12,7 @@ try:
 except ImportError:
     pytest.skip("Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True)
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -621,14 +622,15 @@ async def test_send_during_rebuild_fails_instead_of_dropping(monkeypatch) -> Non
     channel._app = None
 
     msg = OutboundMessage(channel="telegram", chat_id="123", content="hello")
-    with pytest.raises(RuntimeError, match="restarting"):
+    with pytest.raises(ChannelNotReadyError, match="restarting"):
         await channel.send(msg)
     with pytest.raises(RuntimeError, match="restarting"):
         await channel.send_delta("123", "hello", stream_id="s1")
 
-    # Stopped: nothing to deliver, so stay quiet.
+    # A stopped channel must not report a final message as delivered.
     channel._running = False
-    await channel.send(msg)
+    with pytest.raises(ChannelNotReadyError, match="not running"):
+        await channel.send(msg)
     await channel.send_delta("123", "hello", stream_id="s1")
 
 

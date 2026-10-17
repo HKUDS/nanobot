@@ -37,6 +37,8 @@ from nanobot.channels.contracts import (
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
+from nanobot.security.workspace_access import WorkspaceScopeResolver
+from nanobot.security.workspace_policy import resolve_allowed_path
 from nanobot.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
@@ -799,6 +801,24 @@ class ChannelManager:
             if session is None or session.generation != request.session_generation:
                 self._outbox.finish(msg, "failed", "session_replaced")
                 return
+            if msg.media:
+                # An accepted local path can become a symlink during an outage.
+                # Recheck the current source policy before the adapter opens it.
+                scope = WorkspaceScopeResolver(
+                    self.config.workspace_path, self.config.tools.restrict_to_workspace,
+                ).for_turn(channel=request.session_key.split(":", 1)[0],
+                           message_metadata={}, session_metadata=session.metadata)
+                try:
+                    for path in msg.media:
+                        if not path.startswith(("http://", "https://")):
+                            resolve_allowed_path(
+                                path, workspace=scope.project_path,
+                                allowed_root=scope.project_path if scope.restrict_to_workspace else None,
+                                extra_allowed_roots=[self._config_path.parent / "media"],
+                            )
+                except (OSError, ValueError):
+                    self._outbox.finish(msg, "failed", "attachment_access_denied")
+                    return
         if not self._outbox.claim(msg):
             return
         try:

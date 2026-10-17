@@ -55,6 +55,8 @@ The gateway saves final scheduled messages before it accepts them into the outgo
 This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery
 record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and
 saved chat history keep their existing behavior.
+External channels receive one final scheduled reply instead of a streamed reply. Ordinary chat
+streaming is unchanged.
 
 If a channel reports that it has not sent any part of a message, the gateway retries every
 30 seconds, for up to one hour after queue acceptance. It sends the saved message to the saved
@@ -78,7 +80,7 @@ Look for `Channel delivery` in the gateway log. The run ID links execution to ea
 | `unknown` | An interrupted or failed attempt might have reached the service; no automatic retry |
 
 The queue is stored in `delivery/outbox.sqlite3`, beside the active config file. Include this
-directory in instance backups. It holds at most 256 pending messages, with a 1 MiB serialized limit
+directory in instance backups; stop the gateway before copying it. It holds at most 256 pending messages, with a 1 MiB serialized limit
 per message. A full queue or storage error rejects the enqueue operation instead of reporting it
 as accepted. Terminal records discard message text and keep status for up to seven days, capped
 at 1,000 records. Existing job and session files are not converted. Older versions ignore this

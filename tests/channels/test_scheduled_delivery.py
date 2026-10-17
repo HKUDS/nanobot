@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import sqlite3
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock
@@ -11,7 +12,12 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.message import MessageTool
-from nanobot.bus.delivery import DELIVERY_RUN_META, ChannelNotReadyError, DeliveryRequest
+from nanobot.bus.delivery import (
+    DELIVERY_RUN_META,
+    ChannelNotReadyError,
+    DeliveryRejectedError,
+    DeliveryRequest,
+)
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -19,6 +25,7 @@ from nanobot.channels import outbox as outbox_module
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.outbox import DeliveryOutbox
+from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.whatsapp.runtime import WhatsAppChannel
 from nanobot.config.schema import Config
 from nanobot.cron.bound_runner import run_bound_cron_job
@@ -54,8 +61,8 @@ async def drain(manager):
             await asyncio.sleep(0.01)
 
 
-@pytest.mark.parametrize("legacy_message", [False, True])
-async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, legacy_message):
+@pytest.mark.parametrize("legacy_message,one_shot", [(False, False), (True, False), (True, True)])
+async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, legacy_message, one_shot):
     monkeypatch.setattr(outbox_module, "RETRY_SECONDS", 0)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -93,13 +100,18 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
     manager.channels["whatsapp"] = channel
     manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
     # Legacy channel/to fields still normalize through the existing binding migration.
-    job = cron.add_job("Reminder", CronSchedule(kind="every", every_ms=86400000),
+    schedule = CronSchedule(kind="at", at_ms=4102444800000) if one_shot else CronSchedule(kind="every", every_ms=86400000)
+    job = cron.add_job("Reminder", schedule,
                        "Use message to send Diagnostic result" if legacy_message else "Return Diagnostic result",
-                       deliver=True, channel="whatsapp", to="synthetic")
+                       deliver=True, channel="whatsapp", to="synthetic", delete_after_run=one_shot,
+                       channel_meta={"_wants_stream": True})
     try:
         assert await asyncio.wait_for(cron.run_job(job.id), 15)
         await drain(manager)
-        assert cron.list_jobs()[0].state.last_status == "ok"
+        if one_shot:
+            assert cron.list_jobs() == []
+        else:
+            assert cron.list_jobs()[0].state.last_status == "ok"
         assert len(rows(manager._outbox)) == 1
         assert rows(manager._outbox)[0]["status"] == "pending"
         channel._client.send_message.assert_not_called()
@@ -123,7 +135,8 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         assert channel._client.send_message.await_count == 1
         assert len(calls) == count
         # Existing jobs still load after delivery state is added beside them.
-        assert CronService(cron.store_path).list_jobs()[0].payload.message == job.payload.message
+        old_jobs = CronService(cron.store_path).list_jobs()
+        assert old_jobs == [] if one_shot else old_jobs[0].payload.message == job.payload.message
     finally:
         await manager.stop_all()
         cron.stop()
@@ -172,6 +185,7 @@ async def test_legacy_broadcast_has_independent_targets_and_no_foreign_thread_me
 async def test_queue_acceptance_survives_restart_but_inflight_is_unknown(tmp_path):
     manager = make_manager(tmp_path)
     pending, inflight = message(), message(content="second")
+    inflight.chat_id = "other-destination"
     await manager.bus.publish_outbound(pending)
     await manager.bus.publish_outbound(inflight)
     assert manager._outbox.claim(inflight)
@@ -198,7 +212,8 @@ async def test_queue_bounds_expiry_and_untracked_events(tmp_path, monkeypatch):
     assert manager._outbox.ready() == []
     assert rows(manager._outbox)[0]["error"] == "expired"
     assert not manager._outbox.claim(first)
-    assert manager._outbox.path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert manager._outbox.path.stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize("operation", ["delete", "reset"])
@@ -218,3 +233,78 @@ async def test_pending_result_cannot_send_after_source_session_is_replaced(tmp_p
         assert rows(manager._outbox)[0]["error"] == "session_replaced"
     finally:
         await sessions.state.aclose()
+
+
+async def test_recovery_keeps_destination_order_and_does_not_block_other_chats(tmp_path, monkeypatch):
+    monkeypatch.setattr(outbox_module, "RETRY_SECONDS", 0)
+    manager = make_manager(tmp_path)
+    first, second, other = message(content="first"), message(content="second"), message(content="other")
+    other.chat_id = "another-chat"
+    for msg in (first, second, other):
+        await manager.bus.publish_outbound(msg)
+        await manager.bus.consume_outbound()
+    channel = MagicMock(spec=BaseChannel, send=AsyncMock(side_effect=ChannelNotReadyError()))
+    await manager._send_scheduled(channel, first)
+    channel.send.side_effect = None
+    await manager._send_scheduled(channel, second)
+    await manager._send_scheduled(channel, other)
+    assert [call.args[0].content for call in channel.send.await_args_list] == ["first", "other"]
+    manager.channels["whatsapp"] = channel
+    await manager._recover_scheduled()
+    await drain(manager)
+    assert [call.args[0].content for call in channel.send.await_args_list] == ["first", "other", "first", "second"]
+    # A stale queued copy must not downgrade the durable successful result.
+    manager._outbox.finish(first, "failed", "channel_disabled")
+    assert all(row["status"] == "sent" for row in rows(manager._outbox))
+
+
+async def test_relocated_instance_finds_queue_and_disabled_channel_does_not_send(tmp_path):
+    original = tmp_path / "original"
+    manager = make_manager(original)
+    await manager.bus.publish_outbound(message())
+    moved = tmp_path / "moved"
+    original.rename(moved)
+    restarted = make_manager(moved)
+    await restarted._recover_scheduled()
+    assert rows(restarted._outbox)[0]["error"] == "channel_disabled"
+    assert not original.exists()
+
+
+async def test_recovery_rechecks_attachment_workspace_boundary(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sessions = SessionManager(workspace, sessions_root=tmp_path / "sessions")
+    session = await sessions.state.get("whatsapp:synthetic")
+    manager = make_manager(tmp_path, sessions)
+    manager.config.agents.defaults.workspace = str(workspace)
+    manager.config.tools.restrict_to_workspace = True
+    attachment = workspace / "report.txt"
+    attachment.write_text("report")
+    msg = message(generation=session.generation)
+    msg.media = [str(attachment)]
+    channel = MagicMock(spec=BaseChannel, send=AsyncMock())
+    try:
+        await manager.bus.publish_outbound(msg)
+        attachment.unlink()
+        private = tmp_path / "private.txt"
+        private.write_text("not authorized")
+        attachment.symlink_to(private)
+        await manager._send_scheduled(channel, msg)
+        channel.send.assert_not_called()
+        assert rows(manager._outbox)[0]["error"] == "attachment_access_denied"
+    finally:
+        await sessions.state.aclose()
+
+
+@pytest.mark.parametrize("name", [
+    "whatsapp", "telegram", "discord", "slack", "matrix", "mattermost", "feishu",
+    "qq", "wecom", "weixin", "napcat", "msteams", "linear", "signal", "dingtalk",
+    "mochat", "email",
+])
+async def test_unavailable_adapter_does_not_report_success(name, monkeypatch):
+    cls = load_channel_plugin(name).load_channel_class()
+    channel = cls(cls.default_config(), MessageBus())
+    if name == "dingtalk":
+        monkeypatch.setattr(channel, "_get_access_token", AsyncMock(return_value=None))
+    with pytest.raises((ChannelNotReadyError, DeliveryRejectedError)):
+        await channel.send(OutboundMessage(name, "synthetic", "result"))

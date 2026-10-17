@@ -39,18 +39,24 @@ class DeliveryOutbox:
         fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
         os.close(fd)
         db = sqlite3.connect(self.path)
+        db.execute("PRAGMA secure_delete=ON")
         db.row_factory = sqlite3.Row
         try:
             with db:
                 if not self._initialized:
                     db.execute("""CREATE TABLE IF NOT EXISTS deliveries (
                         id TEXT PRIMARY KEY, run_id TEXT NOT NULL, channel TEXT NOT NULL,
+                        chat_id TEXT NOT NULL,
                         payload TEXT, status TEXT NOT NULL, created REAL NOT NULL,
                         updated REAL NOT NULL, next_attempt REAL NOT NULL, error TEXT
                     )""")
                     # A crash during send cannot tell us whether the service accepted it.
+                    interrupted = db.execute("SELECT id, run_id, channel FROM deliveries WHERE status='sending'").fetchall()
                     db.execute("""UPDATE deliveries SET status='unknown', payload=NULL,
                         error='interrupted_send', updated=? WHERE status='sending'""", (time.time(),))
+                    for row in interrupted:
+                        logger.warning("Channel delivery: run={} delivery={} channel={} status=unknown error=interrupted_send",
+                                       row["run_id"], row["id"], row["channel"])
                 yield db
             self._initialized = True
         finally:
@@ -79,16 +85,18 @@ class DeliveryOutbox:
             ).fetchone()[0]
             if count >= MAX_PENDING:
                 raise RuntimeError("Scheduled delivery queue is full; check channel connectivity")
-            db.execute("INSERT INTO deliveries VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL)",
-                       (delivery_id, msg.delivery.run_id, msg.channel, payload, now, now, now))
+            db.execute("INSERT INTO deliveries VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, NULL)",
+                       (delivery_id, msg.delivery.run_id, msg.channel, msg.chat_id, payload, now, now, now))
         msg.delivery_id = delivery_id
         self._log(msg, "pending")
 
     @staticmethod
     def _prune(db: sqlite3.Connection, now: float) -> None:
-        db.execute("""UPDATE deliveries SET status='failed', payload=NULL,
+        expired = db.execute("""UPDATE deliveries SET status='failed', payload=NULL,
             error='expired', updated=? WHERE status='pending' AND created<=?""",
-                   (now, now - MAX_AGE_SECONDS))
+                             (now, now - MAX_AGE_SECONDS)).rowcount
+        if expired:
+            logger.warning("{} scheduled deliveries expired; check the instance delivery store", expired)
         db.execute("DELETE FROM deliveries WHERE status NOT IN ('pending','sending') AND updated<?",
                    (now - RETENTION_SECONDS,))
         db.execute("""DELETE FROM deliveries WHERE id IN (
@@ -116,17 +124,23 @@ class DeliveryOutbox:
         with self._connect() as db:
             self._prune(db, now)
             changed = db.execute("""UPDATE deliveries SET status='sending', updated=?
-                WHERE id=? AND status='pending' AND next_attempt<=?""",
+                WHERE id=? AND status='pending' AND next_attempt<=?
+                AND NOT EXISTS (SELECT 1 FROM deliveries AS older
+                    WHERE older.channel=deliveries.channel AND older.chat_id=deliveries.chat_id
+                    AND older.rowid<deliveries.rowid AND older.status IN ('pending','sending'))""",
                                  (now, msg.delivery_id, now)).rowcount
         return changed == 1
 
     def finish(self, msg: OutboundMessage, status: DeliveryStatus, error: str | None = None) -> None:
         now = time.time()
         with self._connect() as db:
-            db.execute("""UPDATE deliveries SET status=?, error=?, updated=?, next_attempt=?,
-                payload=CASE WHEN ?='pending' THEN payload ELSE NULL END WHERE id=?""",
-                       (status, error, now, now + RETRY_SECONDS, status, msg.delivery_id))
-        self._log(msg, status, error)
+            changed = db.execute("""UPDATE deliveries SET status=?, error=?, updated=?, next_attempt=?,
+                payload=CASE WHEN ?='pending' THEN payload ELSE NULL END
+                WHERE id=? AND status IN ('pending','sending')""",
+                                 (status, error, now, now + RETRY_SECONDS, status, msg.delivery_id)).rowcount
+            self._prune(db, now)
+        if changed:
+            self._log(msg, status, error)
 
     @staticmethod
     def _log(msg: OutboundMessage, status: DeliveryStatus, error: str | None = None) -> None:

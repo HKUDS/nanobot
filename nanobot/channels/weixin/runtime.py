@@ -2082,7 +2082,13 @@ class WeixinChannel(BaseChannel):
                 )
                 delivery_state.completed_parts.add(text_part)
             completed = True
-        except WeixinQuotaError:
+        except WeixinQuotaError as error:
+            if msg.delivery_id is not None:
+                # The durable outbox owns scheduled results. Do not also retain
+                # one in the channel's independently replayed, volatile queue.
+                if not delivery_state.completed_parts:
+                    raise ChannelNotReadyError("WeChat needs a fresh inbound context") from error
+                raise
             if not is_progress:
                 self._defer_outbound(msg)
                 self.logger.warning(

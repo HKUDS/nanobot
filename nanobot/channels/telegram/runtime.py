@@ -802,7 +802,7 @@ class TelegramChannel(BaseChannel):
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._app_ready.wait(), APP_RESTART_SEND_WAIT_SECONDS)
         if not self._app_ready.is_set() or self._app is None:
-            raise RuntimeError("Telegram application is restarting; message not delivered")
+            raise ChannelNotReadyError("Telegram application is restarting; message not delivered")
         return self._app
 
     def _note_poll_ok(self) -> None:
