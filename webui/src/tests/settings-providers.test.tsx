@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
@@ -235,6 +235,33 @@ describe("Settings providers", () => {
     expect(screen.getByRole("combobox")).not.toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Custom", exact: true }));
     expect(screen.getByRole("dialog", { name: "Custom" })).toBe(dialog);
+  });
+
+  it.each(["base", "key"])("retains newer provider edits while a save is pending (%s)", async (field) => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: "moonshot", label: "Moonshot", configured: true, default_api_base: "https://old.example/v1" }];
+    const saved: SettingsPayload = {
+      ...payload, providers: [{ ...payload.providers[0], configured: true, api_key_hint: "configured" }],
+    };
+    let finishSave!: (value: SettingsPayload) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve) => { finishSave = resolve; }))
+      .mockResolvedValue(saved);
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(await screen.findByRole("button", { name: "Moonshot" }));
+    fireEvent.change(screen.getByLabelText("API key", { selector: "input" }), { target: { value: "first-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    const input = field === "base" ? screen.getByLabelText("API URL") : screen.getByLabelText("API key", { selector: "input" });
+    const latest = field === "base" ? "https://latest.example/v1" : "latest-key";
+    fireEvent.change(input, { target: { value: latest } });
+    await act(async () => finishSave(saved));
+    expect(screen.getByRole("dialog", { name: "Moonshot" })).toBeVisible();
+    expect(input).toHaveValue(latest);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.provider.update", expect.objectContaining(field === "base"
+        ? { apiBase: latest } : { apiKey: latest }), 20_000,
+    ));
   });
 
   it("adds a built-in provider only after saving and returns focus to its management row", async () => {

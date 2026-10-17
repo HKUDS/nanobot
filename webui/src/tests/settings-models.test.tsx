@@ -551,6 +551,45 @@ describe("Settings models", () => {
     });
   });
 
+  it.each(["edit", "rename", "rename-again"])("preserves newer preset edits while a save is pending (%s)", async (mode) => {
+    const rename = mode !== "edit";
+    const { payload } = settingsPayloadWithBackup();
+    const savedName = rename ? "renamed" : "primary";
+    const saved: SettingsPayload = {
+      ...payload,
+      model_presets: payload.model_presets.map((preset) => preset.name === "primary"
+        ? { ...preset, name: savedName, temperature: 0.4 } : preset),
+      model_call_order: [savedName, "backup"],
+    };
+    let finishSave!: (value: SettingsPayload) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve) => { finishSave = resolve; }))
+      .mockResolvedValue({ ...saved, model_presets: saved.model_presets.map((preset) => preset.name === savedName
+        ? { ...preset, temperature: 0.8 } : preset) });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+    if (rename) fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), { target: { value: savedName } });
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByLabelText("Temperature"), { target: { value: "0.4" } });
+    returnToPresetEditor();
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByLabelText("Temperature"), { target: { value: "0.8" } });
+    returnToPresetEditor();
+    if (mode === "rename-again") fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), { target: { value: "latest-name" } });
+    await act(async () => finishSave(saved));
+    expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue(mode === "rename-again" ? "latest-name" : savedName);
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    expect(screen.getByLabelText("Temperature")).toHaveValue(0.8);
+    returnToPresetEditor();
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", {
+        name: savedName, temperature: 0.8, ...(mode === "rename-again" ? { new_name: "latest-name" } : {}),
+      }, 20_000,
+    ));
+  });
+
   it("renames an existing preset without losing the editor selection", async () => {
     const payload = settingsPayload();
     const renamedPayload: SettingsPayload = {
