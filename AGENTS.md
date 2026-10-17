@@ -20,3 +20,4 @@ The Python gateway owns agent execution, sessions, tools, memory, and security p
 - Analyze the required behavior, state ownership, and root cause before extending existing code. Refactor when the structure causes the problem; a smaller diff does not justify another fallback.
 - Do not add defensive tests for hypothetical internal states or unsupported combinations. Each new test needs a reachable path and a meaningful contract to protect.
 - Do not run `ruff format`; mechanical formatting obscures git blame and creates unrelated diffs. This constraint takes precedence over the optional touched-file formatting in `CONTRIBUTING.md`.
+- Do not manually wrap prose in Markdown files. Keep each paragraph on one source line; use line breaks only for Markdown structure.
