@@ -146,6 +146,8 @@ class AgentRunResult:
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     summary_checkpoint: SessionSummaryCheckpoint | None = field(default=None, repr=False)
     provider_compaction_applied: bool = field(default=False, repr=False)
+    # Provider terminal reason when a model response, rather than the budget, ends the run.
+    provider_finish_reason: str | None = None
 
 
 class AgentRunner:
@@ -418,6 +420,7 @@ class AgentRunner:
         round_usages: list[LLMUsage] = []
         error: str | None = None
         failure_error_kind: str | None = None
+        provider_finish_reason: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
@@ -756,6 +759,7 @@ class AgentRunner:
                 await hook.after_iteration(context)
                 continue
 
+            provider_finish_reason = response.finish_reason
             if response.finish_reason == "error":
                 if LLMProvider.is_arrearage_response(response):
                     final_content = _ARREARAGE_ERROR_MESSAGE
@@ -835,6 +839,7 @@ class AgentRunner:
             break
         else:
             stop_reason = "max_iterations"
+            provider_finish_reason = None
             terminal_content = None
             await end_length_segment(interrupted=False)
             if spec.finalize_on_max_iterations:
@@ -867,6 +872,7 @@ class AgentRunner:
             stop_reason=stop_reason,
             error=error,
             failure_error_kind=failure_error_kind,
+            provider_finish_reason=provider_finish_reason,
             tool_events=tool_events,
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,
