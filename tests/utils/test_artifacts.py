@@ -25,8 +25,11 @@ def test_decode_image_data_url_validates_image_payload() -> None:
     assert raw.startswith(b"\x89PNG")
     assert mime == "image/png"
 
-    with pytest.raises(ArtifactError):
-        decode_image_data_url("data:image/png;base64,not-base64")
+
+@pytest.mark.parametrize("payload", ["not-base64", "不是base64", "\ud800"])
+def test_decode_image_data_url_rejects_invalid_base64(payload: str) -> None:
+    with pytest.raises(ArtifactError, match="invalid base64 image payload"):
+        decode_image_data_url(f"data:image/png;base64,{payload}")
 
 
 def test_store_generated_image_artifact_writes_image_and_sidecar(tmp_path: Path) -> None:
