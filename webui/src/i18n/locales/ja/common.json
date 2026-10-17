@@ -1570,6 +1570,7 @@
     "renameProjectDescription": "WebUI のサイドバーに表示するプロジェクト名だけを変更します。",
     "renameProjectPlaceholder": "プロジェクト名",
     "renameSave": "保存",
+    "renameFailed": "名前を保存できませんでした。再試行してください。",
     "archive": "アーカイブ",
     "unarchive": "アーカイブを解除",
     "showArchived": "アーカイブ済みを表示",

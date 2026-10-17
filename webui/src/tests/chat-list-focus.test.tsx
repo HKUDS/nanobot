@@ -43,7 +43,7 @@ function SidebarFocusCase() {
       onTogglePin={vi.fn()}
       onToggleArchive={vi.fn()}
       onAttachPane={vi.fn()}
-      onRequestRename={(_key, title) => setRename(title)}
+      onRequestRename={vi.fn().mockResolvedValue(undefined)}
       onRequestRenameTab={(_key, title) => setRename(title)}
       onRequestRenameProject={(_key, title) => setRename(title)}
     />
@@ -94,7 +94,10 @@ describe("sidebar action focus", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     await waitFor(() => expect(input).toHaveFocus());
     await user.keyboard("Updated");
-    expect(input).toHaveValue("ReviewUpdated");
+    expect(input).toHaveValue("Updated");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Review", exact: true })).toHaveFocus();
   });
 
   it("keeps an outside click focused on its destination", async () => {

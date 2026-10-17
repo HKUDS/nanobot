@@ -1570,6 +1570,7 @@
     "renameProjectDescription": "Ubah hanya nama proyek di sidebar WebUI.",
     "renameProjectPlaceholder": "Nama proyek",
     "renameSave": "Simpan",
+    "renameFailed": "Nama tidak dapat disimpan. Coba lagi.",
     "archive": "Arsipkan",
     "unarchive": "Batalkan arsip",
     "showArchived": "Tampilkan yang diarsipkan",

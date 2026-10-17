@@ -1770,6 +1770,7 @@
     "renameProjectDescription": "Change only this project's name in the WebUI sidebar.",
     "renameProjectPlaceholder": "Project name",
     "renameSave": "Save",
+    "renameFailed": "Couldn't save the name. Try again.",
     "archive": "Archive",
     "unarchive": "Unarchive",
     "showArchived": "Show archived",

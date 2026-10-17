@@ -47,6 +47,7 @@ import {
   HoverHint,
 } from "@/components/ui/tooltip";
 import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
+import { SidebarTopicRename } from "@/components/SidebarTopicRename";
 import {
   SIDEBAR_SELECTION_ITEM_CLASS,
   SidebarSelectionHighlight,
@@ -225,7 +226,7 @@ interface ChatListProps {
   onRequestDelete: (key: string, label: string) => void;
   onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
-  onRequestRename: (key: string, label: string) => void;
+  onRequestRename: (key: string, title: string) => Promise<void>;
   onRequestRenameTab?: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
@@ -339,6 +340,22 @@ export const ChatList = memo(function ChatList({
   const [paneDropTarget, setPaneDropTarget] = useState<string | null>(null);
   const [deleteSelectionMode, setDeleteSelectionMode] = useState(false);
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+  const [renamingTopic, setRenamingTopic] = useState<{ key: string } | null>(null);
+  const renamingKey = renamingTopic?.key ?? null;
+  const previousRenamingKeyRef = useRef<string | null>(null);
+  const beginRename = (key: string) => setRenamingTopic({ key });
+  const endRename = () => {
+    setRenamingTopic((current) => current === renamingTopic ? null : current);
+  };
+  useLayoutEffect(() => {
+    const previousKey = previousRenamingKeyRef.current;
+    previousRenamingKeyRef.current = renamingKey;
+    if (renamingKey !== null || previousKey === null) return;
+    const row = Array.from(scrollViewportRef.current?.querySelectorAll<HTMLElement>(
+      "[data-chat-row]",
+    ) ?? []).find((element) => element.dataset.chatRow === previousKey);
+    row?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+  }, [renamingKey]);
   const [selectedDeleteKeys, setSelectedDeleteKeys] = useState<Set<string>>(
     () => new Set(),
   );
@@ -904,6 +921,9 @@ export const ChatList = memo(function ChatList({
                                   onSelectPane={onSelectPane}
                                   onRequestDelete={onRequestDelete}
                                   onRequestRename={onRequestRename}
+                                  renamingKey={renamingKey}
+                                  onBeginRename={beginRename}
+                                  onEndRename={endRename}
                                   onTogglePin={onTogglePin}
                                   onToggleArchive={onToggleArchive}
                                   pinned={pinnedPanes}
@@ -968,7 +988,14 @@ export const ChatList = memo(function ChatList({
                               && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
                           )}
                         >
-                          <button
+                          {renamingKey === s.key ? (
+                            <SidebarTopicRename
+                              key={s.key}
+                              title={title}
+                              onSave={(nextTitle) => onRequestRename(s.key, nextTitle)}
+                              onClose={endRename}
+                            />
+                          ) : <button
                               type="button"
                               onClick={(event) => {
                                 if (deleteSelectionMode) {
@@ -1011,9 +1038,9 @@ export const ChatList = memo(function ChatList({
                                 </span>
                                 {isPinned ? <PinnedChatIndicator /> : null}
                               </span>
-                          </button>
+                          </button>}
                           <SessionActivityIndicator state={activityState} />
-                          {!deleteSelectionMode ? (
+                          {!deleteSelectionMode && renamingKey !== s.key ? (
                             <DropdownMenu
                               modal={false}
                               open={actionMenus.openId === actionMenuId}
@@ -1043,7 +1070,7 @@ export const ChatList = memo(function ChatList({
                                 {isPinned ? t("chat.unpin") : t("chat.pin")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
-                                onSelect={() => onRequestRename(s.key, title)}
+                                onSelect={() => beginRename(s.key)}
                               >
                                 <Pencil className="h-4 w-4 shrink-0" />
                                 {t("chat.rename")}
@@ -1319,6 +1346,9 @@ function ActivePaneRows({
   onSelectPane,
   onRequestDelete,
   onRequestRename,
+  renamingKey,
+  onBeginRename,
+  onEndRename,
   onTogglePin,
   onToggleArchive,
   pinned,
@@ -1343,7 +1373,10 @@ function ActivePaneRows({
   recovery: ReadonlySet<string>;
   onSelectPane?: (tabKey: string, paneKey: string) => void;
   onRequestDelete: (key: string, label: string) => void;
-  onRequestRename: (key: string, label: string) => void;
+  onRequestRename: (key: string, title: string) => Promise<void>;
+  renamingKey: string | null;
+  onBeginRename: (key: string) => void;
+  onEndRename: () => void;
   onTogglePin: (key: string) => void;
   onToggleArchive: (key: string) => void;
   pinned: ReadonlySet<string>;
@@ -1414,7 +1447,14 @@ function ActivePaneRows({
                   && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
               )}
             >
-              <button
+              {renamingKey === pane.key ? (
+                <SidebarTopicRename
+                  key={pane.key}
+                  title={pane.title}
+                  onSave={(nextTitle) => onRequestRename(pane.key, nextTitle)}
+                  onClose={onEndRename}
+                />
+              ) : <button
                   type="button"
                   onClick={(event) => {
                     if (deleteSelectionMode) {
@@ -1450,9 +1490,9 @@ function ActivePaneRows({
                     {isPinned ? <PinnedChatIndicator /> : null}
 
                   </span>
-              </button>
+              </button>}
               <SessionActivityIndicator state={activityState} />
-              {!deleteSelectionMode ? <DropdownMenu
+              {!deleteSelectionMode && renamingKey !== pane.key ? <DropdownMenu
                 modal={false}
                 open={actionMenus.openId === actionMenuId}
                 onOpenChange={(open) => actionMenus.onOpenChange(actionMenuId, open)}
@@ -1479,7 +1519,7 @@ function ActivePaneRows({
                     {isPinned ? t("chat.unpin") : t("chat.pin")}
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={() => onRequestRename(pane.key, pane.title)}
+                    onSelect={() => onBeginRename(pane.key)}
                   >
                     <Pencil className="h-4 w-4 shrink-0" />
                     {t("chat.rename")}

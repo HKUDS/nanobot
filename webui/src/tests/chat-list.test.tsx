@@ -115,8 +115,11 @@ describe("ChatList", () => {
     expect(trigger).toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
-    expect(onRequestRename).toHaveBeenCalledWith("websocket:review", "Review the patch");
+    const input = screen.getByRole("textbox", { name: "Topic name" });
+    expect(input).toHaveValue("Review the patch");
+    expect(onRequestRename).not.toHaveBeenCalled();
     expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Review the patch" }));
     expect(onSelect).toHaveBeenCalledWith("websocket:review");
   });
@@ -286,7 +289,10 @@ describe("ChatList", () => {
       .closest("[data-sidebar-pane]")!;
     fireEvent.contextMenu(paneRow);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
-    expect(onRequestRename).toHaveBeenCalledWith("websocket:child", "Research pane");
+    const input = screen.getByRole("textbox", { name: "Topic name" });
+    expect(input).toHaveValue("Research pane");
+    expect(onRequestRename).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Escape" });
 
     const tabRow = screen.getByRole("button", { name: "Group: Root topic" })
       .closest("[data-workbench-tab]")!;

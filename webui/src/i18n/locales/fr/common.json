@@ -1570,6 +1570,7 @@
     "renameProjectDescription": "Changez seulement le nom du projet dans la barre latérale WebUI.",
     "renameProjectPlaceholder": "Nom du projet",
     "renameSave": "Enregistrer",
+    "renameFailed": "Impossible d’enregistrer le nom. Réessayez.",
     "archive": "Archiver",
     "unarchive": "Désarchiver",
     "showArchived": "Afficher les archives",

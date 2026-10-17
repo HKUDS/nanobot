@@ -1212,6 +1212,7 @@ function Shell({
     state: sidebarState,
     loading: sidebarStateLoading,
     update: updateSidebarState,
+    rename: onRequestRename,
   } =
     useSidebarState(sessions, sessionsLoaded);
   const initialRouteRef = useRef<ShellRoute | null>(null);
@@ -1261,10 +1262,6 @@ function Shell({
   const [pendingDelete, setPendingDelete] = useState<{
     items: SidebarDeleteItem[];
     automations?: SessionAutomationJob[];
-  } | null>(null);
-  const [pendingRename, setPendingRename] = useState<{
-    key: string;
-    label: string;
   } | null>(null);
   const [pendingTabRename, setPendingTabRename] = useState<{
     key: string;
@@ -1981,32 +1978,6 @@ function Shell({
       });
     },
     [updateSidebarState],
-  );
-
-  const onRequestRename = useCallback((key: string, label: string) => {
-    setPendingRename({ key, label });
-  }, []);
-
-  const onConfirmRename = useCallback(
-    (title: string) => {
-      if (!pendingRename) return;
-      const key = pendingRename.key;
-      setPendingRename(null);
-      void updateSidebarState((current) => {
-        const titleOverrides = { ...current.title_overrides };
-        const cleaned = title.trim();
-        if (cleaned) {
-          titleOverrides[key] = cleaned;
-        } else {
-          delete titleOverrides[key];
-        }
-        return {
-          ...current,
-          title_overrides: titleOverrides,
-        };
-      });
-    },
-    [pendingRename, updateSidebarState],
   );
 
   const onRequestRenameTab = useCallback((key: string, label: string) => {
@@ -2926,6 +2897,12 @@ function Shell({
             >
               <SheetContent
                 ref={mobileSidebarRef}
+                onEscapeKeyDown={(event) => {
+                  if (event.target instanceof Element
+                    && event.target.closest("[data-sidebar-topic-rename]")) {
+                    event.preventDefault();
+                  }
+                }}
                 onOpenAutoFocus={(event) => {
                   // Keep opening navigation from focusing the search tooltip trigger.
                   event.preventDefault();
@@ -3174,16 +3151,6 @@ function Shell({
               automations={pendingDelete.automations}
               onCancel={() => setPendingDelete(null)}
               onConfirm={onConfirmDelete}
-            />
-          </Suspense>
-        ) : null}
-        {pendingRename ? (
-          <Suspense fallback={null}>
-            <RenameChatDialog
-              open
-              title={pendingRename.label}
-              onCancel={() => setPendingRename(null)}
-              onConfirm={onConfirmRename}
             />
           </Suspense>
         ) : null}

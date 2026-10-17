@@ -1570,6 +1570,7 @@
     "renameProjectDescription": "Chỉ đổi tên dự án trong thanh bên WebUI.",
     "renameProjectPlaceholder": "Tên dự án",
     "renameSave": "Lưu",
+    "renameFailed": "Không thể lưu tên. Vui lòng thử lại.",
     "archive": "Lưu trữ",
     "unarchive": "Bỏ lưu trữ",
     "showArchived": "Hiện mục đã lưu trữ",

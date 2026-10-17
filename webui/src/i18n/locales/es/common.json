@@ -1571,6 +1571,7 @@
     "renameProjectDescription": "Cambia solo el nombre del proyecto en la barra lateral WebUI.",
     "renameProjectPlaceholder": "Nombre del proyecto",
     "renameSave": "Guardar",
+    "renameFailed": "No se pudo guardar el nombre. Inténtalo de nuevo.",
     "archive": "Archivar",
     "unarchive": "Desarchivar",
     "showArchived": "Mostrar archivados",

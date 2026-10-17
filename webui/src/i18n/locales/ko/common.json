@@ -1570,6 +1570,7 @@
     "renameProjectDescription": "WebUI 사이드바의 프로젝트 이름만 변경하세요.",
     "renameProjectPlaceholder": "프로젝트 이름",
     "renameSave": "저장",
+    "renameFailed": "이름을 저장하지 못했습니다. 다시 시도하세요.",
     "archive": "보관",
     "unarchive": "보관 해제",
     "showArchived": "보관된 항목 표시",

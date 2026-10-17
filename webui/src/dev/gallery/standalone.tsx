@@ -65,7 +65,10 @@ function ChatsPreview() {
       loading={mode === "loading"}
       onTogglePin={(key) => setPinned(toggle(pinned, key))} onToggleArchive={(key) => setArchived(toggle(archived, key))}
       onRequestDelete={(key) => setSessions((items) => items.filter((item) => item.key !== key))}
-      onRequestRename={(_, label) => setAction(`选择重命名：${label}`)} /></div>
+      onRequestRename={async (key, label) => {
+        setSessions((items) => items.map((item) => item.key === key ? { ...item, title: label } : item));
+        setAction(`已重命名：${label}`);
+      }} /></div>
     <p role="status" className="mt-4 text-sm text-muted-foreground">{action || `选择的会话：${active ?? "无"}`}</p></>;
 }
 

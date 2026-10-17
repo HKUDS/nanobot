@@ -1770,6 +1770,7 @@
     "renameProjectDescription": "仅修改 WebUI 侧栏中的项目名称",
     "renameProjectPlaceholder": "项目名称",
     "renameSave": "保存",
+    "renameFailed": "名称保存失败，请重试。",
     "archive": "归档",
     "unarchive": "取消归档",
     "showArchived": "显示归档",
