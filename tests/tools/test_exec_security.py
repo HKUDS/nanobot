@@ -111,23 +111,67 @@ def test_exec_full_workspace_scope_still_blocks_metadata(tmp_path):
     assert "internal/private" in error
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "echo blocked",
-        "echo http://169.254.169.254/latest/meta-data/",
-    ],
-)
-async def test_exec_full_access_skips_command_guard(tmp_path, command):
+async def test_exec_full_access_skips_command_guard(tmp_path):
+    tool = ExecTool(
+        working_dir=str(tmp_path),
+        restrict_to_workspace=False,
+    )
+    result = await tool.execute(
+        command="echo http://169.254.169.254/latest/meta-data/",
+    )
+
+    assert "Exit code: 0" in result
+    assert "Command blocked" not in result
+
+
+async def test_exec_full_access_enforces_user_deny_patterns(tmp_path):
     tool = ExecTool(
         working_dir=str(tmp_path),
         restrict_to_workspace=False,
         deny_patterns=[r"echo\s+blocked"],
     )
+    result = await tool.execute(command="echo blocked")
+
+    assert "Command blocked by deny pattern filter" in result
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "remove-item test",
+        "Remove-Item test",
+        "REMOVE-ITEM test",
+    ],
+)
+async def test_exec_deny_patterns_case_insensitive(command):
+    tool = ExecTool(deny_patterns=[r"Remove-Item"])
+    guard_result = tool._guard_command(command, "/tmp")
+    assert guard_result is not None
+    assert "Command blocked by deny pattern filter" in guard_result
     result = await tool.execute(command=command)
+    assert "Command blocked by deny pattern filter" in result
+
+
+async def test_exec_user_deny_patterns_allow_priority(tmp_path):
+    tool = ExecTool(
+        working_dir=str(tmp_path),
+        restrict_to_workspace=False,
+        deny_patterns=[r"echo\s+blocked"],
+        allow_patterns=[r"echo\s+blocked"],
+    )
+    result = await tool.execute(command="echo blocked")
 
     assert "Exit code: 0" in result
     assert "Command blocked" not in result
+
+    denied_tool = ExecTool(
+        working_dir=str(tmp_path),
+        restrict_to_workspace=False,
+        deny_patterns=[r"echo\s+blocked"],
+        allow_patterns=[r"echo\s+allowed"],
+    )
+    denied_result = await denied_tool.execute(command="echo blocked")
+    assert "Command blocked by deny pattern filter" in denied_result
 
 
 async def test_exec_full_workspace_scope_skips_command_guard(tmp_path):
