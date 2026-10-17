@@ -724,6 +724,8 @@
       "presets": "模型预设",
       "editPreset": "编辑预设",
       "presetName": "预设名称",
+      "presetDescription": "用途说明",
+      "presetDescriptionHelp": "选填，用于说明适用场景。",
       "presetNameHelp": "名称不可重复，也用于 /model",
       "presetNameDuplicate": "已存在同名预设。",
       "presetNamePlaceholder": "例如：快速写作",

@@ -858,6 +858,8 @@
       "presets": "Prasetel model",
       "editPreset": "Ubah prasetel",
       "presetName": "Nama prasetel",
+      "presetDescription": "Deskripsi",
+      "presetDescriptionHelp": "Catatan opsional tentang kapan menggunakan prasetel ini.",
       "presetNameHelp": "Nama harus unik; juga digunakan oleh /model.",
       "presetNameDuplicate": "Prasetel dengan nama ini sudah ada.",
       "presetNamePlaceholder": "mis. Menulis cepat",

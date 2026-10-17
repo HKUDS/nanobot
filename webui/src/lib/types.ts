@@ -693,6 +693,7 @@ export interface SettingsPayload {
     name: string;
     /** @deprecated Compatibility alias. New clients must use `name`. */
     label?: string;
+    description?: string;
     active: boolean;
     is_default: boolean;
     model: string;
@@ -708,6 +709,7 @@ export interface SettingsPayload {
     extra_query?: Record<string, string> | null;
     extra_body?: Record<string, unknown> | null;
   }>;
+  model_preset_descriptions_supported?: boolean;
   model_call_order: string[];
   model_call_order_editable: boolean;
   /** Whether an actual legacy model configuration is available to convert. */
@@ -1333,6 +1335,7 @@ export interface ChannelConfigurePayload {
 
 export interface ModelConfigurationCreate {
   name: string;
+  description?: string;
   provider: string;
   model: string;
   maxTokens?: number;
@@ -1348,6 +1351,7 @@ export interface ModelConfigurationCreate {
 export interface ModelConfigurationUpdate {
   name: string;
   newName?: string;
+  description?: string;
   provider?: string;
   model?: string;
   maxTokens?: number;

@@ -858,6 +858,8 @@
       "presets": "モデルプリセット",
       "editPreset": "プリセットを編集",
       "presetName": "プリセット名",
+      "presetDescription": "説明",
+      "presetDescriptionHelp": "このプリセットを使う場面の任意のメモです。",
       "presetNameHelp": "名前は重複できません。/model でも使用します。",
       "presetNameDuplicate": "同じ名前のプリセットがすでに存在します。",
       "presetNamePlaceholder": "例：文章作成用",

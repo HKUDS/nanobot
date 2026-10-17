@@ -90,6 +90,7 @@ export function modelPresetOptionsFromSettings(
       const name = preset.name.trim();
       return {
         name,
+        description: preset.description,
         model: preset.model,
         contextWindowTokens: preset.context_window_tokens,
         reasoningEffort: preset.reasoning_effort,

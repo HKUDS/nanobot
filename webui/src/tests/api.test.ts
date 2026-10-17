@@ -626,6 +626,7 @@ describe("webui API helpers", () => {
   it("serializes model configuration creation", async () => {
     await createModelConfiguration(mutationTransport, {
       name: "Fast writing",
+      description: "Quick drafts",
       provider: "openai",
       model: "openai/gpt-4.1-mini",
       maxTokens: 4096,
@@ -638,6 +639,7 @@ describe("webui API helpers", () => {
       "settings.model_configuration.create",
       {
         name: "Fast writing",
+        description: "Quick drafts",
         provider: "openai",
         model: "openai/gpt-4.1-mini",
         max_tokens: 4096,
@@ -674,6 +676,13 @@ describe("webui API helpers", () => {
         reasoning_effort: "",
       },
       20_000,
+    );
+  });
+
+  it.each(["Careful review", ""])("serializes a preset description update without generation settings (%s)", async (description) => {
+    await updateModelConfiguration(mutationTransport, { name: "codex", description });
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { name: "codex", description }, 20_000,
     );
   });
 

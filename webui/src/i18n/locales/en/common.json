@@ -724,6 +724,8 @@
       "presets": "Model presets",
       "editPreset": "Edit preset",
       "presetName": "Preset name",
+      "presetDescription": "Description",
+      "presetDescriptionHelp": "Optional notes on when to use this preset.",
       "presetNameHelp": "Names must be unique; also used by /model.",
       "presetNameDuplicate": "A preset with this name already exists.",
       "presetNamePlaceholder": "e.g. Fast writing",

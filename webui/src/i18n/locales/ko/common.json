@@ -858,6 +858,8 @@
       "presets": "모델 프리셋",
       "editPreset": "프리셋 편집",
       "presetName": "프리셋 이름",
+      "presetDescription": "설명",
+      "presetDescriptionHelp": "이 프리셋을 언제 사용할지 설명하는 메모입니다. 선택 사항입니다.",
       "presetNameHelp": "이름은 고유해야 하며 /model에서도 사용됩니다.",
       "presetNameDuplicate": "같은 이름의 프리셋이 이미 있습니다.",
       "presetNamePlaceholder": "예: 빠른 작성",

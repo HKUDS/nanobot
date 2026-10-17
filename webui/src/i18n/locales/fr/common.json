@@ -858,6 +858,8 @@
       "presets": "Préréglages de modèle",
       "editPreset": "Modifier le préréglage",
       "presetName": "Nom du préréglage",
+      "presetDescription": "Description",
+      "presetDescriptionHelp": "Notes facultatives sur les cas d’utilisation de ce préréglage.",
       "presetNameHelp": "Les noms doivent être uniques ; ils servent aussi à /model.",
       "presetNameDuplicate": "Un préréglage portant ce nom existe déjà.",
       "presetNamePlaceholder": "p. ex. Rédaction rapide",
