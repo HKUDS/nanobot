@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
@@ -13,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
+from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     ProgressEvent,
@@ -32,8 +34,11 @@ from nanobot.channels.contracts import (
     channel_runtime_name,
     resolve_channel_action_target,
 )
+from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
+from nanobot.security.workspace_access import WorkspaceScopeResolver
+from nanobot.security.workspace_policy import resolve_allowed_path
 from nanobot.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
@@ -154,6 +159,9 @@ class ChannelManager:
         self._stopping_channels: set[str] = set()
         self._started = False
         self._origin_reply_fingerprints: OrderedDict[tuple[str, str, str], str] = OrderedDict()
+        self._outbox = DeliveryOutbox(self._config_path.parent / "delivery" / "outbox.sqlite3")
+        self._scheduled_deliveries: set[str] = set()
+        self.bus.outbound_recorder = self._outbox.record
 
         self._init_channels()
 
@@ -750,18 +758,25 @@ class ChannelManager:
         Retry waits occupy only their destination and one send slot. Saturation
         pauses dispatch rather than creating unbounded tasks or dropping messages.
         """
+        if msg.delivery_id in self._scheduled_deliveries:
+            return
         await self._outbound_slots.acquire()
         if msg.channel in self._stopping_channels or self.channels.get(msg.channel) is not channel:
             self._outbound_slots.release()
             return
         key = (msg.channel, msg.chat_id)
         previous = self._outbound_tails.get(key)
+        if msg.delivery_id is not None:
+            self._scheduled_deliveries.add(msg.delivery_id)
 
         async def send() -> None:
             if previous is not None:
                 await asyncio.shield(asyncio.gather(previous, return_exceptions=True))
             async with self._outbound_sends:
-                await self._send_with_retry(channel, msg)
+                if msg.delivery_id is not None:
+                    await self._send_scheduled(channel, msg)
+                else:
+                    await self._send_with_retry(channel, msg)
 
         task = asyncio.create_task(send(), name=f"outbound-{msg.channel}-{msg.chat_id}")
         self._outbound_tasks[task] = key
@@ -769,6 +784,8 @@ class ChannelManager:
 
         def finished(done: asyncio.Task[None]) -> None:
             self._outbound_tasks.pop(done, None)
+            if msg.delivery_id is not None:
+                self._scheduled_deliveries.discard(msg.delivery_id)
             if self._outbound_tails.get(key) is done:
                 self._outbound_tails.pop(key, None)
             self._outbound_slots.release()
@@ -776,6 +793,58 @@ class ChannelManager:
                 logger.error("Outbound delivery to {}:{} failed: {}", *key, error)
 
         task.add_done_callback(finished)
+
+    async def _send_scheduled(self, channel: BaseChannel, msg: OutboundMessage) -> None:
+        request = msg.delivery
+        if request is not None and request.session_generation is not None and self._session_manager:
+            session = await self._session_manager.state.read(request.session_key)
+            if session is None or session.generation != request.session_generation:
+                self._outbox.finish(msg, "failed", "session_replaced")
+                return
+            if msg.media:
+                # An accepted local path can become a symlink during an outage.
+                # Recheck the current source policy before the adapter opens it.
+                scope = WorkspaceScopeResolver(
+                    self.config.workspace_path, self.config.tools.restrict_to_workspace,
+                ).for_turn(channel=request.session_key.split(":", 1)[0],
+                           message_metadata={}, session_metadata=session.metadata)
+                try:
+                    for path in msg.media:
+                        if not path.startswith(("http://", "https://")):
+                            resolve_allowed_path(
+                                path, workspace=scope.project_path,
+                                allowed_root=scope.project_path if scope.restrict_to_workspace else None,
+                                extra_allowed_roots=[self._config_path.parent / "media"],
+                            )
+                except (OSError, ValueError):
+                    self._outbox.finish(msg, "failed", "attachment_access_denied")
+                    return
+        if not self._outbox.claim(msg):
+            return
+        try:
+            await self._send_once(channel, msg)
+        except ChannelNotReadyError:
+            # The adapter guarantees that no part of the message was submitted.
+            self._outbox.finish(msg, "pending", "channel_not_ready")
+        except DeliveryRejectedError:
+            self._outbox.finish(msg, "failed", "delivery_rejected")
+        except asyncio.CancelledError:
+            self._outbox.finish(msg, "unknown", "interrupted_send")
+            raise
+        except Exception as error:
+            # A timeout can follow an accepted send, including a partial multi-part send.
+            # Retrying the whole result here could deliver it twice.
+            self._outbox.finish(msg, "unknown", type(error).__name__)
+        else:
+            self._outbox.finish(msg, "sent")
+
+    async def _recover_scheduled(self) -> None:
+        for msg in self._outbox.ready():
+            channel = self.channels.get(msg.channel)
+            if channel is None:
+                self._outbox.finish(msg, "failed", "channel_disabled")
+            else:
+                await self._queue_outbound(channel, msg)
 
     async def _dispatch_outbound(self) -> None:
         try:
@@ -790,9 +859,16 @@ class ChannelManager:
         # Buffer for messages that couldn't be processed during delta coalescing
         # (since asyncio.Queue doesn't support push_front)
         pending: list[OutboundMessage] = []
+        next_recovery = 0.0
 
         while True:
             try:
+                if time.monotonic() >= next_recovery:
+                    next_recovery = time.monotonic() + RETRY_SECONDS
+                    try:
+                        await self._recover_scheduled()
+                    except Exception:
+                        logger.exception("Scheduled delivery recovery failed; check the instance delivery store")
                 # First check pending buffer before waiting on queue
                 if pending:
                     msg = pending.pop(0)
@@ -856,12 +932,14 @@ class ChannelManager:
                             StreamDeltaEvent | StreamEndEvent | StreamedResponseEvent,
                         )
                     ):
-                        if self._should_suppress_outbound(msg):
+                        if msg.delivery_id is None and self._should_suppress_outbound(msg):
                             logger.info("Suppressing duplicate outbound message to {}:{}", msg.channel, msg.chat_id)
                             continue
                     await self._queue_outbound(channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
+                    if msg.delivery_id is not None:
+                        self._outbox.finish(msg, "failed", "channel_disabled")
 
             except asyncio.TimeoutError:
                 continue
@@ -1043,7 +1121,7 @@ class ChannelManager:
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
-                if not channel.should_retry_send_error(e):
+                if isinstance(e, DeliveryRejectedError) or not channel.should_retry_send_error(e):
                     logger.error(
                         "Send to {} failed with a non-retryable {}: {}",
                         msg.channel,

@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import Field
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -466,7 +467,7 @@ class WhatsAppChannel(BaseChannel):
             return
         client = self._client
         if client is None or not self._connected:
-            raise RuntimeError("WhatsApp channel is not connected")
+            raise ChannelNotReadyError("WhatsApp channel is not connected")
 
         to = self._build_jid(msg.chat_id)
         if msg.content:

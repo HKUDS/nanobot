@@ -37,6 +37,7 @@ import aiohttp
 from loguru import logger
 from pydantic import Field
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
@@ -437,7 +438,7 @@ class QQChannel(BaseChannel):
 
         try:
             if not self._client:
-                raise RuntimeError("QQ client not initialized")
+                raise ChannelNotReadyError("QQ client not initialized")
 
             msg_id = msg.metadata.get("message_id")
             chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")

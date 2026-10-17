@@ -14,6 +14,7 @@ from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext, current_request_context
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
+from nanobot.bus.delivery import DeliveryRequest
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
@@ -236,6 +237,9 @@ class MessageTool(Tool):
             media=media or [],
             buttons=button_rows or [],
             metadata=metadata,
+            delivery=(DeliveryRequest.from_context(
+                default_metadata, request_ctx.session_key, request_ctx.session_generation,
+            ) if request_ctx is not None else None),
         )
 
         if self._suppress_delivery_var.get():
@@ -253,6 +257,7 @@ class MessageTool(Tool):
                 if button_rows
                 else ""
             )
-            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
+            action = "queued" if msg.delivery is not None else "sent"
+            return f"Message {action} to {channel}:{chat_id}{media_info}{button_info}"
         except Exception as e:
             return ToolResult.error(f"Error sending message: {str(e)}")

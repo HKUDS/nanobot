@@ -64,6 +64,46 @@ Repetition alone does not select heartbeat. "Every day at 8am, remind me to drin
 
 An upgrade does not overwrite your workspace's `AGENTS.md` or convert existing heartbeat entries into cron jobs. The current scheduling rules are included in the system prompt. If an old workspace rule directs all recurring tasks to heartbeat, update that rule too. To correct an existing reminder, remove its old heartbeat entry and create the cron task once. Check the task list to avoid duplicates.
 
+### Scheduled Result Delivery
+
+The gateway saves final scheduled messages before it accepts them into the outgoing queue.
+This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery
+record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and
+saved chat history keep their existing behavior. External channels receive a complete scheduled
+reply instead of a streamed reply. Ordinary chat streaming is unchanged.
+
+The queue cannot recover a send that the agent never requested. If an expected recipient has no
+delivery record, check the task's saved chat and the run's `message` calls first.
+
+If a channel reports that it has not sent any part of a message, the gateway retries every
+30 seconds, for up to one hour after queue acceptance. It sends the saved message to the saved
+destination. It does not run the task or call the model again. A gateway restart resumes pending
+messages. Deleting or resetting the source chat cancels pending messages from that chat generation.
+Disabling a channel prevents its pending messages from being sent. Changing, pausing, or deleting
+a task affects future runs; it does not redirect or recall an already queued result.
+
+If a request times out after sending starts, or the gateway stops during a send, delivery is
+unknown. The gateway does not retry that message automatically: the service might already have
+accepted it. Check the destination before sending the result again. This is not an exactly-once
+delivery guarantee. Adapter or service-specific retries still follow their own protocol.
+
+Look for `Channel delivery` in the gateway log. The run ID links execution to each delivery ID:
+
+| Status | Meaning |
+|---|---|
+| `pending` | Saved locally; waiting for an attempt or a channel connection |
+| `sent` | The channel adapter completed its send; not a recipient read receipt |
+| `failed` | Not sent: expired, disabled channel, replaced source chat, or rejected destination/policy |
+| `unknown` | An interrupted or failed attempt might have reached the service; no automatic retry |
+
+The queue is stored in `delivery/outbox.sqlite3`, beside the active config file. Include this
+directory in instance backups; stop the gateway before copying it. It holds at most 256 pending
+messages, with a 1 MiB serialized limit per message. A full queue or storage error rejects the
+enqueue operation instead of reporting it as accepted. Terminal records discard message text
+and keep status for up to seven days, capped at 1,000 records. Existing job and session files
+are not converted. Older versions ignore this queue. After an upgrade, pending messages can
+resume only within the original one-hour limit.
+
 ## Local Triggers
 
 Local triggers let a local script or external service send a message into a specific nanobot session later.
