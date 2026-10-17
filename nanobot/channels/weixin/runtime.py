@@ -31,6 +31,7 @@ from loguru import logger
 from pydantic import Field, model_validator
 
 from nanobot import __version__
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -1871,7 +1872,7 @@ class WeixinChannel(BaseChannel):
         ):
             return
         if not self._client or not self._token:
-            raise RuntimeError("WeChat client not initialized or not authenticated")
+            raise ChannelNotReadyError("WeChat client not initialized or not authenticated")
         self._assert_session_active()
 
         delivery_id = self._delivery_id(msg)

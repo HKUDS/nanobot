@@ -100,6 +100,10 @@ class BaseChannel(ABC):
 
         Implementations should raise on delivery failure so the channel manager
         can apply any retry policy in one place.
+        Raise ChannelNotReadyError only before submitting any part of a message.
+        Raise DeliveryRejectedError for a rejected destination or policy.
+        Other exceptions have an unknown delivery outcome for scheduled results.
+        A normal return confirms this adapter completed, not a recipient read receipt.
         """
         pass
 

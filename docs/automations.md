@@ -46,6 +46,44 @@ Write what the task should do, such as "Remind me to drink water". nanobot sends
 
 For separate sends, specify the recipients in the instructions. The agent can still use `message` to send to other chats, send to several recipients, or attach files. Existing tasks that explicitly request this tool remain supported.
 
+### Scheduled Result Delivery
+
+Task completion and message delivery are separate. `Turn completed` and a successful task run
+mean that execution finished. They do not confirm that a chat service received the result.
+
+The gateway saves final scheduled messages before it accepts them into the outgoing queue.
+This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery
+record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and
+saved chat history keep their existing behavior.
+
+If a channel reports that it has not sent any part of a message, the gateway retries every
+30 seconds, for up to one hour after queue acceptance. It sends the saved message to the saved
+destination. It does not run the task or call the model again. A gateway restart resumes pending
+messages. Deleting or resetting the source chat cancels pending messages from that chat generation.
+Disabling a channel prevents its pending messages from being sent. Changing a task's chat affects
+future runs; it does not redirect an already queued result.
+
+If a request times out after sending starts, or the gateway stops during a send, delivery is
+unknown. The gateway does not retry that message automatically: the service might already have
+accepted it. Check the destination before sending the result again. This is not an exactly-once
+delivery guarantee. Adapter or service-specific retries still follow their own protocol.
+
+Look for `Channel delivery` in the gateway log. The run ID links execution to each delivery ID:
+
+| Status | Meaning |
+|---|---|
+| `pending` | Saved locally; waiting for an attempt or a channel connection |
+| `sent` | The channel adapter completed its send; not a recipient read receipt |
+| `failed` | Not sent: expired, disabled channel, replaced source chat, or rejected destination/policy |
+| `unknown` | An interrupted or failed attempt might have reached the service; no automatic retry |
+
+The queue is stored in `delivery/outbox.sqlite3`, beside the active config file. Include this
+directory in instance backups. It holds at most 256 pending messages, with a 1 MiB serialized limit
+per message. A full queue or storage error rejects the enqueue operation instead of reporting it
+as accepted. Terminal records discard message text and keep status for up to seven days, capped
+at 1,000 records. Existing job and session files are not converted. Older versions ignore this
+queue; pending delivery resumes only when a version with queue support runs again.
+
 For background checks that should stay quiet unless there is something useful to report, use heartbeat instead of a user-created scheduled automation.
 
 Repetition alone does not select heartbeat. "Every day at 8am, remind me to drink water" needs a cron schedule. "Keep an eye on open issues and tell me when one needs attention" can use heartbeat if the check time is flexible. Heartbeat does not guarantee a requested time or interval.

@@ -8,6 +8,7 @@ import time
 import uuid
 from typing import Any, Protocol
 
+from nanobot.bus.delivery import DELIVERY_RUN_META
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cron.session_delivery import origin_delivery_context
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
@@ -89,6 +90,7 @@ async def run_bound_cron_job(
         ),
     }
     metadata[CRON_DEFER_UNTIL_IDLE_META] = True
+    metadata[DELIVERY_RUN_META] = run_id
     run_record_base: dict[str, Any] = {
         "job_id": job.id,
         "job_name": job.name,

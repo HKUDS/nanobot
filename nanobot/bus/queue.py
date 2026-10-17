@@ -33,6 +33,7 @@ class MessageBus:
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
         self._handlers: list[EventHandler] = []
         self._pending: set[asyncio.Task[None]] = set()
+        self.outbound_recorder: Callable[[OutboundMessage], None] | None = None
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""
@@ -44,6 +45,8 @@ class MessageBus:
 
     async def publish_outbound(self, msg: OutboundMessage) -> None:
         """Queue a routed message or event for its channel."""
+        if self.outbound_recorder is not None:
+            self.outbound_recorder(msg)
         await self.outbound.put(msg)
 
     async def publish_event(

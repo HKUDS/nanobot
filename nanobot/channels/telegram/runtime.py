@@ -29,6 +29,7 @@ from telegram.error import BadRequest, InvalidToken, NetworkError, RetryAfter, T
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import BaseRequest, HTTPXRequest
 
+from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -1074,8 +1075,7 @@ class TelegramChannel(BaseChannel):
             return
         app = await self._wait_for_app()
         if app is None:
-            self.logger.warning("bot not running")
-            return
+            raise ChannelNotReadyError("Telegram bot not running")
 
         progress_event = msg.event if isinstance(msg.event, ProgressEvent) else None
 
@@ -1089,8 +1089,7 @@ class TelegramChannel(BaseChannel):
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
-            self.logger.exception("Invalid chat_id: {}", msg.chat_id)
-            return
+            raise DeliveryRejectedError("Invalid Telegram chat_id") from None
         reply_to_message_id = msg.metadata.get("message_id")
         message_thread_id = msg.metadata.get("message_thread_id")
         if message_thread_id is None and reply_to_message_id is not None:

@@ -35,6 +35,7 @@ except ImportError:  # pragma: no cover
 import httpx
 from pydantic import Field
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -256,7 +257,7 @@ class MSTeamsChannel(BaseChannel):
         ):
             return
         if not self._http:
-            raise RuntimeError("MSTeams HTTP client not initialized")
+            raise ChannelNotReadyError("MSTeams HTTP client not initialized")
 
         ref = self._conversation_refs.get(str(msg.chat_id))
         if not ref:
