@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import stop_loop
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -13,19 +14,25 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 
 
-def _loop(tmp_path: Path) -> AgentLoop:
+@pytest.fixture
+async def loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "state")
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="Reviewed", tool_calls=[], usage=None)
     )
-    return AgentLoop(
+    agent = AgentLoop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
         model="test-model",
     )
+    try:
+        yield agent
+    finally:
+        await agent.aclose()
 
 
 def _message(content: str = "Please review") -> InboundMessage:
@@ -50,11 +57,8 @@ def _message(content: str = "Please review") -> InboundMessage:
 
 @pytest.mark.asyncio
 async def test_session_message_runs_as_user_input_and_replies_on_target_route(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    loop: AgentLoop,
 ) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "state")
-    loop = _loop(tmp_path)
     loop.sessions.save(loop.sessions.get_or_create("telegram:target"))
     msg = _message()
 
@@ -82,11 +86,8 @@ async def test_session_message_runs_as_user_input_and_replies_on_target_route(
 
 @pytest.mark.asyncio
 async def test_session_message_text_is_not_dispatched_as_a_slash_command(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    loop: AgentLoop,
 ) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "state")
-    loop = _loop(tmp_path)
     loop.sessions.save(loop.sessions.get_or_create("telegram:target"))
     task = asyncio.create_task(loop.run())
     try:
@@ -96,12 +97,10 @@ async def test_session_message_text_is_not_dispatched_as_a_slash_command(
         assert response.content == "Reviewed"
         loop.provider.chat_stream_with_retry.assert_awaited_once()
     finally:
-        loop.stop()
-        await asyncio.wait_for(task, timeout=2)
+        await stop_loop(loop, task, timeout=2)
 
 
-async def test_path_followup_reaches_running_turn(tmp_path: Path) -> None:
-    loop = _loop(tmp_path)
+async def test_path_followup_reaches_running_turn(loop: AgentLoop) -> None:
     first_call = asyncio.Event()
     release = asyncio.Event()
     calls = []
