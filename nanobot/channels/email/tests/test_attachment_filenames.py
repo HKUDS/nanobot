@@ -13,6 +13,7 @@ from nanobot.channels.email.runtime import EmailChannel
         ("report.txt", "report.txt"),
         ("report:2026.txt", "report?2026.txt"),
         ("report.txt", "report.txt", "report_1.txt"),
+        ("report.txt", "REPORT.txt"),
     ],
 )
 def test_extract_attachments_preserves_colliding_filenames(tmp_path, monkeypatch, filenames):
