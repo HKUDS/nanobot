@@ -28,7 +28,8 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista de permitidos"
+          "allowlist": "Lista de permitidos",
+          "listen": "Escuchar (responder al mencionar)"
         }
       },
       "allowFrom": {

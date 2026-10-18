@@ -28,7 +28,8 @@
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
-          "allowlist": "Danh sách cho phép"
+          "allowlist": "Danh sách cho phép",
+          "listen": "Lắng nghe (trả lời khi được nhắc)"
         }
       },
       "allowFrom": {

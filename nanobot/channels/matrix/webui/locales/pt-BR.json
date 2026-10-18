@@ -28,7 +28,8 @@
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
-          "allowlist": "Lista de permissão"
+          "allowlist": "Lista de permissão",
+          "listen": "Ouvir (responder ao mencionar)"
         }
       },
       "allowFrom": {

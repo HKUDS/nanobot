@@ -5,6 +5,8 @@ from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.matrix.validation import validate
 from nanobot.channels.plugin import ChannelPlugin
 
+MATRIX_GROUP_POLICIES = GROUP_POLICIES | {"listen"}
+
 SETUP_SPEC = ChannelSetupSpec(
     fields={
         "homeserver": field(default="https://matrix.org"),
@@ -12,7 +14,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "password": field("secret"),
         "accessToken": field("secret"),
         "deviceId": field(),
-        "groupPolicy": field("enum", choices=GROUP_POLICIES, default="open"),
+        "groupPolicy": field("enum", choices=MATRIX_GROUP_POLICIES, default="open"),
         "allowFrom": field("list"),
         "e2eeEnabled": field("bool", default=False),
         "sasVerification": field("bool", default=False),

@@ -28,7 +28,8 @@
         "choices": {
           "mention": "提及回复",
           "open": "全部消息",
-          "allowlist": "白名单"
+          "allowlist": "白名单",
+          "listen": "旁听（被提及时回复）"
         }
       },
       "allowFrom": {

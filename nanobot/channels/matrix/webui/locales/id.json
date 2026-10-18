@@ -28,7 +28,8 @@
         "choices": {
           "mention": "Hanya mention",
           "open": "Semua pesan",
-          "allowlist": "Daftar izin"
+          "allowlist": "Daftar izin",
+          "listen": "Dengar (balas saat disebut)"
         }
       },
       "allowFrom": {

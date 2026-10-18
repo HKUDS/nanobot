@@ -28,7 +28,8 @@
         "choices": {
           "mention": "メンションのみ",
           "open": "全メッセージ",
-          "allowlist": "許可リスト"
+          "allowlist": "許可リスト",
+          "listen": "リッスン（メンションで返信）"
         }
       },
       "allowFrom": {

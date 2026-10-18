@@ -13,6 +13,7 @@ pytest.importorskip("nio")
 pytest.importorskip("nh3")
 pytest.importorskip("mistune")
 from nio import JoinResponse, RoomSendResponse, SyncError
+from pydantic import ValidationError
 
 import nanobot.channels.matrix.runtime as matrix_module
 from nanobot.bus.events import OutboundMessage
@@ -25,6 +26,7 @@ from nanobot.channels.matrix.runtime import (
     MatrixConfig,
     _build_matrix_text_content,
 )
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, RuntimeContextBlock
 
 _ROOM_SEND_UNSET = object()
 
@@ -2870,3 +2872,156 @@ async def test_fetch_media_maps_streaming_cap_to_too_large(monkeypatch, tmp_path
     assert attachment is None
     assert marker == "[attachment: payload.bin - too large]"
     assert client.room_send_calls == []
+
+
+def test_listen_policy_config_value_accepted_and_unknown_rejected() -> None:
+    assert MatrixConfig(group_policy="listen").group_policy == "listen"
+    assert MatrixConfig.model_validate({"groupPolicy": "listen"}).group_policy == "listen"
+    with pytest.raises(ValidationError):
+        MatrixConfig(group_policy="observe")
+
+
+def test_listen_buffer_bounds_and_truncation() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    for index in range(40):
+        channel._buffer_listen_message("!r:matrix.org", f"@u{index}:matrix.org", f"m{index}")
+
+    buffer = channel._listen_buffers["!r:matrix.org"]
+    assert len(buffer) == matrix_module._LISTEN_BUFFER_MAX_MESSAGES
+    assert buffer[0] == "@u10:matrix.org: m10"
+
+    channel._buffer_listen_message("!fresh:matrix.org", "@u0:matrix.org", "x" * 2000)
+    assert channel._listen_buffers["!fresh:matrix.org"][0] == f"@u0:matrix.org: {'x' * 500}"
+
+    for index in range(20):
+        channel._buffer_listen_message("!cap:matrix.org", f"@u{index}:matrix.org", "y" * 400)
+    capped = channel._listen_buffers["!cap:matrix.org"]
+    assert len(capped) < 20
+    assert sum(len(entry) for entry in capped) <= matrix_module._LISTEN_BUFFER_MAX_CHARS
+
+
+@pytest.mark.asyncio
+async def test_on_message_listen_policy_buffers_then_serves_context_on_mention() -> None:
+    channel = MatrixChannel(_make_config(group_policy="listen"), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    calls: list[dict] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        calls.append(kwargs)
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Room", member_count=3)
+    plain = SimpleNamespace(
+        sender="@alice:matrix.org",
+        body="we were discussing the picnic",
+        source={"content": {}},
+    )
+    await channel._on_message(room, plain)
+    assert calls == []
+    assert client.typing_calls == []
+    assert channel._listen_buffers["!room:matrix.org"][-1] == (
+        "@alice:matrix.org: we were discussing the picnic"
+    )
+
+    mention = SimpleNamespace(
+        sender="@bob:matrix.org",
+        body="what did we decide?",
+        source={"content": {"m.mentions": {"user_ids": ["@bot:matrix.org"]}}},
+    )
+    await channel._on_message(room, mention)
+    assert len(calls) == 1
+    blocks = calls[0]["metadata"].get(RUNTIME_CONTEXT_INPUT_META)
+    assert blocks is not None and len(blocks) == 1
+    assert isinstance(blocks[0], RuntimeContextBlock)
+    assert blocks[0].source == "matrix_room_transcript"
+    assert "we were discussing the picnic" in blocks[0].content
+    assert "!room:matrix.org" not in channel._listen_buffers
+    assert client.typing_calls == [("!room:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS)]
+
+    await channel._on_message(room, mention)
+    assert len(calls) == 2
+    assert RUNTIME_CONTEXT_INPUT_META not in calls[1]["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_on_message_listen_policy_ignores_denied_sender() -> None:
+    channel = MatrixChannel(
+        _make_config(group_policy="listen", allow_from=[]), MessageBus()
+    )
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    calls: list[dict] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        calls.append(kwargs)
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    event = SimpleNamespace(sender="@stranger:matrix.org", body="hello", source={"content": {}})
+
+    await channel._on_message(room, event)
+    assert calls == []
+    assert channel._listen_buffers == {}
+
+
+@pytest.mark.asyncio
+async def test_on_message_listen_policy_leaves_direct_rooms_untouched() -> None:
+    channel = MatrixChannel(_make_config(group_policy="listen"), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    calls: list[dict] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        calls.append(kwargs)
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!dm:matrix.org", display_name="Alice & bot", member_count=2)
+    event = SimpleNamespace(sender="@alice:matrix.org", body="hi", source={"content": {}})
+
+    await channel._on_message(room, event)
+    assert len(calls) == 1
+    assert RUNTIME_CONTEXT_INPUT_META not in calls[0]["metadata"]
+    assert channel._listen_buffers == {}
+
+
+@pytest.mark.asyncio
+async def test_on_message_open_policy_does_not_buffer() -> None:
+    channel = MatrixChannel(_make_config(group_policy="open"), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    event = SimpleNamespace(sender="@alice:matrix.org", body="hi", source={"content": {}})
+
+    await channel._on_message(room, event)
+    assert handled == ["@alice:matrix.org"]
+    assert channel._listen_buffers == {}
+
+
+@pytest.mark.asyncio
+async def test_on_media_message_listen_policy_buffers_caption() -> None:
+    channel = MatrixChannel(_make_config(group_policy="listen"), MessageBus())
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    event = SimpleNamespace(
+        sender="@alice:matrix.org",
+        body="venue floor plan",
+        event_id="$m1",
+        url="mxc://example.org/media",
+        source={"content": {"msgtype": "m.image", "info": {"size": 8}}},
+    )
+
+    await channel._on_media_message(room, event)
+
+    assert channel._listen_buffers["!room:matrix.org"][-1] == (
+        "@alice:matrix.org: venue floor plan"
+    )
