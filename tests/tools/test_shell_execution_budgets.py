@@ -89,21 +89,24 @@ def _pid_running(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
+    if sys.platform != "linux":
+        return True
     # A killed grandchild can remain a zombie until its new parent reaps it.
     stat = Path(f"/proc/{pid}/stat")
     try:
-        if stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
-            return False
+        return stat.read_text().rsplit(")", 1)[1].split()[0] != "Z"
     except (FileNotFoundError, ProcessLookupError):
         return False
-    return True
 
 
-@pytest.mark.parametrize("error", [FileNotFoundError, ProcessLookupError])
-def test_pid_probe_handles_process_reaped_during_stat_read(monkeypatch, error) -> None:
+@pytest.mark.parametrize(
+    ("error", "stat_exists"),
+    [(FileNotFoundError, True), (ProcessLookupError, True), (FileNotFoundError, False)],
+)
+def test_pid_probe_handles_process_reaped_during_stat_read(monkeypatch, error, stat_exists) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(os, "kill", lambda _pid, _signal: None)
-    monkeypatch.setattr(Path, "exists", lambda _path: True)
+    monkeypatch.setattr(Path, "exists", lambda _path: stat_exists)
 
     def reaped(_path):
         raise error("process reaped after existence check")
