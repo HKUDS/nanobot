@@ -2974,6 +2974,24 @@ def test_markdown_to_html_tilde_fence_is_code() -> None:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fence", ["~~~", "````"])
+async def test_send_preserves_fenced_code_and_escapes_html(fence) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    await channel.send(OutboundMessage(
+        channel="telegram", chat_id="123",
+        content=f"{fence}python\n# setup\na < b && __raw__\n{fence}",
+    ))
+    assert len(channel._app.bot.sent_messages) == 1
+    sent = channel._app.bot.sent_messages[0]
+    assert sent["parse_mode"] == "HTML"
+    assert sent["text"] == "<pre><code># setup\na &lt; b &amp;&amp; __raw__\n</code></pre>"
+
+
 def test_markdown_to_html_longer_fence_keeps_nested_example() -> None:
     from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
 
