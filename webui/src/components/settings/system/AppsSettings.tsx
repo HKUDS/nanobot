@@ -1379,7 +1379,8 @@ function McpPresetLogo({
   return (
     <span
       className={cn(
-        "grid shrink-0 place-items-center font-semibold text-white",
+        "grid shrink-0 place-items-center font-semibold",
+        preset.brand_color ? "text-white" : "text-muted-foreground",
         compact
           ? "h-10 w-10 rounded-control text-[12px]"
           : "h-9 w-9 rounded-[10px] text-[12px]",

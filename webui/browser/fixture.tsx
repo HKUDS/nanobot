@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
 import { MessageBubble } from "@/components/MessageBubble";
+import { AppsCatalogSettings, DEFAULT_CUSTOM_MCP_FORM } from "@/components/settings/system/AppsSettings";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
@@ -13,7 +14,7 @@ import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initializeI18n } from "@/i18n";
-import type { UIMessage } from "@/lib/types";
+import type { McpPresetInfo, UIMessage } from "@/lib/types";
 import "../src/globals.css";
 
 const history: UIMessage[] = [
@@ -104,9 +105,40 @@ function RailFixture() {
     /> : viewport(false)}
   </main>;
 }
+const unbrandedPlugin: McpPresetInfo = {
+  name: "plugin-nanobot-workflows", display_name: "Nanobot Workflows", category: "Workflow",
+  description: "Engineering workflows", docs_url: "", requires: "Project files", note: "", connection_summary: "",
+  transport: "stdio", install_supported: false, installed: true, configured: true,
+  enabled: true, available: true, status: "enabled", required_fields: [], source: "agent-plugin",
+};
+function AppsFixture() {
+  const noop = () => {};
+  return <main className="mx-auto max-w-4xl p-6"><AppsCatalogSettings
+    cliApps={{ apps: [], installed_count: 0 }}
+    mcpPresets={{ presets: [
+      unbrandedPlugin,
+      { ...unbrandedPlugin, name: "test-mcp", display_name: "Test MCP", source: "builtin", logo_url: "/missing-app-icon.svg" },
+      { ...unbrandedPlugin, name: "brand-example", display_name: "Brand Example", source: "builtin", brand_color: "#5E6AD2" },
+    ], installed_count: 3 }}
+    cliAppsLoading={false} mcpPresetsLoading={false} query="" filter="ready"
+    cliActionKey={null} mcpActionKey={null} mcpOAuthFlow={null} mcpOAuthPopupBlocked={false}
+    mcpOAuthCallbackUrl="" mcpOAuthCompleting={false} mcpOAuthCallbackError={null}
+    cliMessage={null} cliError={null} cliFocusName={null} mcpMessage={null} mcpError={null}
+    mcpFieldValues={{}} customMcpForm={DEFAULT_CUSTOM_MCP_FORM} mcpConfigImport=""
+    showBrandLogos={parameters.get("logos") !== "hidden"} requiresRestartPending={false}
+    onQueryChange={noop} onFilterChange={noop} onCliAction={noop} onMcpAction={noop}
+    onMcpOAuthConnect={noop} onMcpOAuthCancel={noop} onMcpOAuthOpen={noop}
+    onMcpOAuthCallbackUrlChange={noop} onMcpOAuthComplete={noop} onDismissStatus={noop}
+    onBackToChat={noop} onMcpFieldChange={noop} onCustomMcpFormChange={noop}
+    onMcpConfigImportChange={noop} onSaveCustomMcp={noop} onImportMcpConfig={noop}
+    onMcpToolsChange={noop}
+  /></main>;
+}
 await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "rail"
+  {parameters.get("case") === "apps"
+    ? <ClientProvider client={railClient} token="fixture"><AppsFixture /></ClientProvider>
+    : parameters.get("case") === "rail"
     ? <ClientProvider client={railClient} token="fixture" webuiCapabilities={["webui.prompt-navigation.v1"]}><RailFixture /></ClientProvider>
     : parameters.get("case") === "history"
     ? <HistoryFixture />
