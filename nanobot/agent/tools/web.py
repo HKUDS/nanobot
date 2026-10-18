@@ -1001,7 +1001,9 @@ class WebSearchTool(Tool):
         from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
 
         attempts = 1 + max(0, self.config.retries)
-        backoff = max(0.0, self.config.retry_backoff)
+        # The cap applies to the first wait too, not just the doubling tail — an oversized
+        # retry_backoff must not stall the turn longer than the 3s budget (#6285).
+        backoff = min(max(0.0, self.config.retry_backoff), _DUCKDUCKGO_SEARCH_MAX_BACKOFF)
         last_error: Exception | None = None
         for attempt in range(attempts):
             if attempt:

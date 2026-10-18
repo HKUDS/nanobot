@@ -14,6 +14,7 @@ class WebSearchConfig(Base):
     timeout: int = 30
     # Transient-failure retries and base backoff (seconds, doubled per retry) for providers
     # without native retry — e.g. DuckDuckGo rate/anti-bot rejections on back-to-back searches.
+    # retry_backoff is clamped to a 3s ceiling per wait, so oversized values are capped.
     retries: int = 2
     retry_backoff: float = 1.0
 

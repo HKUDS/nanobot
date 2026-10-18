@@ -652,6 +652,37 @@ async def test_duckduckgo_genuinely_empty_results_do_not_retry(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_duckduckgo_first_retry_wait_is_capped(monkeypatch):
+    """Every retry wait — the first one included — must stay under the 3s backoff cap (#6285)."""
+    from ddgs.exceptions import DDGSException
+
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    class RejectingDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            raise DDGSException("No results found.")
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("ddgs.DDGS", RejectingDDGS)
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", fake_sleep)
+
+    tool = WebSearchTool(
+        config=WebSearchConfig(provider="duckduckgo", retries=3, retry_backoff=5.0),
+    )
+    result = await tool.execute(query="hello")
+    assert is_tool_error_result(result)
+    assert calls["n"] == 4  # 1 initial attempt + 3 retries
+    assert sleeps == [3.0, 3.0, 3.0]  # first wait capped too, not [5.0, 3.0, 3.0]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "env_key, provider",
     [
