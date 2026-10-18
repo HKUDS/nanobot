@@ -1462,7 +1462,8 @@ def _dream_job(every_ms: int) -> CronJob:
 
 
 @pytest.mark.asyncio
-async def test_restart_keeps_pending_every_job_run(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("restart_hours,expected_hours", [(23, 24), (25, 49)])
+async def test_restart_keeps_pending_every_job_run(tmp_path, monkeypatch, restart_hours, expected_hours) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     t0 = 1_800_000_000_000
     hour = 3_600_000
@@ -1478,15 +1479,16 @@ async def test_restart_keeps_pending_every_job_run(tmp_path, monkeypatch) -> Non
     service.stop()
     assert job.state.next_run_at_ms == t0 + 24 * hour
 
-    monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: t0 + 23 * hour)
-    restarted = CronService(store_path)
-    await restarted.start()
-    try:
-        reloaded = restarted.get_job(job.id)
-        assert reloaded is not None
-        assert reloaded.state.next_run_at_ms == t0 + 24 * hour
-    finally:
-        restarted.stop()
+    for elapsed in (restart_hours * hour, restart_hours * hour + hour // 4):
+        monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: t0 + elapsed)
+        restarted = CronService(store_path)
+        await restarted.start()
+        try:
+            reloaded = restarted.get_job(job.id)
+            assert reloaded is not None
+            assert reloaded.state.next_run_at_ms == t0 + expected_hours * hour
+        finally:
+            restarted.stop()
 
 
 @pytest.mark.asyncio
@@ -1512,3 +1514,6 @@ async def test_reregistering_system_job_keeps_pending_every_run(tmp_path, monkey
     assert await boot(t0 + 90 * minute, 120 * minute) == t0 + 120 * minute
     # A changed interval is a new schedule and is computed from now.
     assert await boot(t0 + 100 * minute, 60 * minute) == t0 + 160 * minute
+    assert await boot(t0 + 110 * minute, 60 * minute) == t0 + 160 * minute
+    # An overdue interval keeps the existing no-catch-up behavior.
+    assert await boot(t0 + 170 * minute, 60 * minute) == t0 + 230 * minute
