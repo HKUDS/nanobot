@@ -55,6 +55,29 @@ def test_import_is_once_and_private_sources_are_unchanged(tmp_path):
     assert SessionManager(workspace).read_session_snapshot("websocket:old") is None
 
 
+@pytest.mark.parametrize(("newline", "trailing_newline"), [
+    ("\n", True), ("\r\n", True), ("\n", False), ("\r\n", False),
+], ids=["lf", "crlf", "lf-no-final-newline", "crlf-no-final-newline"])
+def test_migration_preserves_unicode_separators(tmp_path, newline, trailing_newline):
+    workspace = tmp_path / "workspace"
+    path = legacy(workspace, content="中文🙂\u0085NEL\u2028LS\u2029PS\nLF\rCR")
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n")
+               if line.strip()]
+    records.append({"role": "assistant", "content": "reply\u2029\u2028\u0085"})
+    lines = [json.dumps(record, ensure_ascii=False) for record in records]
+    lines[1:1] = ["", " \t"]
+    original = (newline.join(lines) + (newline if trailing_newline else "")).encode("utf-8")
+    path.write_bytes(original)
+
+    manager = SessionManager(workspace)
+    expected = records[1:]
+    assert manager.read_session_snapshot("websocket:old").messages == expected
+    assert not path.exists()
+    assert (manager.sessions_dir / WORKSPACE_BACKUP_DIR / path.name).read_bytes() == original
+    reopened = SessionManager(workspace)
+    assert reopened.read_session_snapshot("websocket:old").messages == expected
+
+
 def test_invalid_source_rolls_back_entire_migration(tmp_path):
     workspace = tmp_path / "workspace"
     path = legacy(workspace)
