@@ -1755,6 +1755,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "Xóa tệp đính kèm, lượt nhắc và nội dung trích dẫn trước khi chạy lệnh shell.",
       "placeholderThread": "Nhập tin nhắn…",
       "placeholderHero": "Mô tả điều bạn muốn làm",
       "placeholderOpening": "Đang mở chủ đề mới…",

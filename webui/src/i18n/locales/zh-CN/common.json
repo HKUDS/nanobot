@@ -1955,6 +1955,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "执行 Shell 命令前，请移除附件、提及和引用。",
       "placeholderThread": "输入消息…",
       "placeholderHero": "描述你想做的事",
       "placeholderOpening": "正在打开新话题…",

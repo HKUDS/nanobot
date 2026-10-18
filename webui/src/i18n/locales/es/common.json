@@ -1756,6 +1756,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "Elimina los archivos adjuntos, las menciones y el contexto citado antes de ejecutar un comando shell.",
       "placeholderThread": "Escribe tu mensaje…",
       "placeholderHero": "Describe lo que quieres hacer",
       "placeholderOpening": "Abriendo un nuevo tema…",

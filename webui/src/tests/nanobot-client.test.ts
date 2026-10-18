@@ -71,6 +71,25 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("sends the shell marker without replacing the active agent run", () => {
+    const client = new NanobotClient({
+      url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    client.sendMessage("chat", "keep working", undefined, { turnId: "agent-turn" });
+    client.sendMessage("chat", "! pwd", undefined, {
+      turnId: "shell-turn", userShell: true, startsNewRun: false,
+    });
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({
+      type: "message", content: "! pwd", webui: true, user_shell: true, turn_id: "shell-turn",
+    });
+    expect(client.getRunTurnId("chat")).toBe("agent-turn");
+    client.close();
+  });
+
   it("bounds regular replay tails but retains temporary events until discard", async () => {
     const client = new NanobotClient({
       url: "ws://test", reconnect: false,

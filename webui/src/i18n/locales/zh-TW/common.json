@@ -1755,6 +1755,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "執行 Shell 命令前，請移除附件、提及和引用。",
       "placeholderThread": "輸入訊息…",
       "placeholderHero": "描述你想做的事",
       "placeholderOpening": "正在開啟新話題…",

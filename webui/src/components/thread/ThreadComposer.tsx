@@ -230,6 +230,7 @@ interface ThreadComposerProps {
   recentRoundUsage?: readonly ComposerRoundUsage[];
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
+  userShellEnabled?: boolean;
   onMentionSearch?: () => void;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
@@ -976,6 +977,7 @@ export function ThreadComposer({
   recentRoundUsage = [],
   variant = "thread",
   slashCommands = [],
+  userShellEnabled = false,
   onMentionSearch,
   cliApps = [],
   mcpPresets = [],
@@ -1235,6 +1237,7 @@ export function ThreadComposer({
     && !encoding
     && !hasErrors
     && hasComposerContent
+    && !value.trimStart().startsWith("!")
     // Without command metadata, let the gateway classify slash input immediately.
     && (slashCommands.length > 0
       ? !isRegisteredSlashCommand(value, slashCommands)
@@ -2157,6 +2160,17 @@ export function ThreadComposer({
       && attachedCliApps.length === 0
       && attachedMcpPresets.length === 0
       && activeSessionMentions.length === 0;
+    const isUserShell = content.startsWith("!");
+    if (isUserShell) {
+      if (!userShellEnabled) {
+        setInlineError(t("remote.compatibility.update_hostHint"));
+        return;
+      }
+      if (!hasPlainTextCommandPayload || normalizedQuotedContext) {
+        setInlineError(t("thread.composer.shellTextOnly"));
+        return;
+      }
+    }
     const slashLifecycle = hasPlainTextCommandPayload
       ? slashCommandLifecycle(content, slashCommands)
       : null;
@@ -2172,7 +2186,7 @@ export function ThreadComposer({
       onQuotedContextChange?.(null);
       return;
     }
-    const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
+    const isSideChannel = isUserShell || isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
     const submittedDraft = draftKey ? draftStore?.get(draftKey) : undefined;
@@ -2192,10 +2206,11 @@ export function ThreadComposer({
     const result = onSend(
       content,
       payload,
-      isSlashSideChannel
+      isSideChannel
         ? {
             ...options,
             sideChannel: true,
+            ...(isUserShell ? { userShell: true } : {}),
             ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
           }
         : isStreaming ? { ...options, continueActiveTurn: true } : options,
@@ -2234,6 +2249,8 @@ export function ThreadComposer({
     normalizedQuotedContext,
     readyImages,
     slashCommands,
+    userShellEnabled,
+    t,
     textTooLargeMessage,
     value,
   ]);

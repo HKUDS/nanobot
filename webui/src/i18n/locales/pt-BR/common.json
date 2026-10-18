@@ -1769,6 +1769,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "Remova os anexos, as menções e o contexto citado antes de executar um comando shell.",
       "placeholderThread": "Digite sua mensagem…",
       "placeholderHero": "Descreva o que você quer fazer",
       "placeholderOpening": "Abrindo um novo tópico…",

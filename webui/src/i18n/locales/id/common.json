@@ -1755,6 +1755,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "Hapus lampiran, sebutan, dan kutipan sebelum menjalankan perintah shell.",
       "placeholderThread": "Ketik pesan Anda…",
       "placeholderHero": "Jelaskan apa yang ingin Anda lakukan",
       "placeholderOpening": "Membuka topik baru…",

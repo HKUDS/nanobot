@@ -1755,6 +1755,7 @@
       }
     },
     "composer": {
+      "shellTextOnly": "Retirez les pièces jointes, les mentions et le contexte cité avant d’exécuter une commande shell.",
       "placeholderThread": "Saisissez votre message…",
       "placeholderHero": "Décrivez ce que vous souhaitez faire",
       "placeholderOpening": "Ouverture d’un nouveau sujet…",
