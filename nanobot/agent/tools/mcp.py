@@ -815,12 +815,14 @@ class MCPResourceWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP resource '{}' timed out after {}s", self._name, self._resource_timeout
                 )
-                return f"(MCP resource read timed out after {self._resource_timeout}s)"
+                return ToolResult.error(
+                    f"(MCP resource read timed out after {self._resource_timeout}s)"
+                )
             except asyncio.CancelledError:
                 if task_is_cancelling():
                     raise
                 logger.warning("MCP resource '{}' was cancelled by server/SDK", self._name)
-                return "(MCP resource read was cancelled)"
+                return ToolResult.error("(MCP resource read was cancelled)")
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -844,14 +846,16 @@ class MCPResourceWrapper(_MCPWrapperBase):
                         self._name,
                         type(exc).__name__,
                     )
-                    return f"(MCP resource read failed after retry: {type(exc).__name__})"
+                    return ToolResult.error(
+                        f"(MCP resource read failed after retry: {type(exc).__name__})"
+                    )
                 logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP resource '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
                     exc if tool_log_content_allowed() else "[content hidden]",
                 )
-                return f"(MCP resource read failed: {type(exc).__name__})"
+                return ToolResult.error(f"(MCP resource read failed: {type(exc).__name__})")
             else:
                 parts: list[str] = []
                 for block in result.contents:
@@ -934,12 +938,14 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout
                 )
-                return f"(MCP prompt call timed out after {self._prompt_timeout}s)"
+                return ToolResult.error(
+                    f"(MCP prompt call timed out after {self._prompt_timeout}s)"
+                )
             except asyncio.CancelledError:
                 if task_is_cancelling():
                     raise
                 logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
-                return "(MCP prompt call was cancelled)"
+                return ToolResult.error("(MCP prompt call was cancelled)")
             except McpError as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -954,7 +960,9 @@ class MCPPromptWrapper(_MCPWrapperBase):
                     exc.error.code,
                     exc.error.message if tool_log_content_allowed() else "[content hidden]",
                 )
-                return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+                return ToolResult.error(
+                    f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+                )
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -978,14 +986,16 @@ class MCPPromptWrapper(_MCPWrapperBase):
                         self._name,
                         type(exc).__name__,
                     )
-                    return f"(MCP prompt call failed after retry: {type(exc).__name__})"
+                    return ToolResult.error(
+                        f"(MCP prompt call failed after retry: {type(exc).__name__})"
+                    )
                 logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP prompt '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
                     exc if tool_log_content_allowed() else "[content hidden]",
                 )
-                return f"(MCP prompt call failed: {type(exc).__name__})"
+                return ToolResult.error(f"(MCP prompt call failed: {type(exc).__name__})")
             else:
                 parts: list[str] = []
                 for message in result.messages:
