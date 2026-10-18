@@ -68,6 +68,11 @@ duration = float(sys.argv[2])
 marker = Path(sys.argv[3])
 runtime = GatewayRuntime(paths=GatewayRuntimePaths.for_instance(data_dir=root))
 
+def publish_marker(detail):
+    pending = marker.with_suffix(".tmp")
+    pending.write_text(detail, encoding="utf-8")
+    pending.replace(marker)
+
 def stop(*_args):
     raise SystemExit(0)
 
@@ -75,13 +80,13 @@ try:
     if os.name != "nt":
         signal.signal(signal.SIGTERM, stop)
     with runtime.foreground_instance(GatewayStartOptions(port=18790)):
-        marker.write_text(f"claimed:{os.getpid()}", encoding="utf-8")
+        publish_marker(f"claimed:{os.getpid()}")
         time.sleep(duration)
 except GatewayAlreadyRunningError:
-    marker.write_text("occupied", encoding="utf-8")
+    publish_marker("occupied")
     raise SystemExit(17)
 except BaseException as exc:
-    marker.write_text(f"error:{type(exc).__name__}:{exc}", encoding="utf-8")
+    publish_marker(f"error:{type(exc).__name__}:{exc}")
     raise
 """
 
