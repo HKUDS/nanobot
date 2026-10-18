@@ -355,6 +355,7 @@ class MatrixChannel(BaseChannel):
         self._sas_verification_requests: dict[str, _SasVerificationRequest] = {}
         self._started_at_ms: int = 0
         self._listen_buffers: dict[str, deque[str]] = {}
+        self._listen_dropped: dict[str, int] = {}
         self._media_download_semaphore = asyncio.Semaphore(
             max(1, int(self.config.max_concurrent_media_downloads))
         )
@@ -1161,23 +1162,29 @@ class MatrixChannel(BaseChannel):
         buffer = self._listen_buffers.setdefault(room_id, deque())
         buffer.append(line)
         total = sum(len(entry) for entry in buffer)
+        dropped = self._listen_dropped.get(room_id, 0)
         while buffer and (
             len(buffer) > _LISTEN_BUFFER_MAX_MESSAGES or total > _LISTEN_BUFFER_MAX_CHARS
         ):
             expired = buffer.popleft()
             total -= len(expired)
+            dropped += 1
+        if dropped:
+            self._listen_dropped[room_id] = dropped
 
     def _pop_listen_context(self, room_id: str) -> list[RuntimeContextBlock] | None:
         """Return and clear the bounded listen-mode context for a room."""
         buffer = self._listen_buffers.pop(room_id, None)
+        dropped = self._listen_dropped.pop(room_id, 0)
         if not buffer:
             return None
+        notice = f"[{dropped} earlier messages not shown]\n" if dropped else ""
         return [
             RuntimeContextBlock(
                 source="matrix_room_transcript",
                 content=(
                     "Recent messages in this room not addressed to the bot "
-                    "(context; do not respond to these):\n" + "\n".join(buffer)
+                    "(context; do not respond to these):\n" + notice + "\n".join(buffer)
                 ),
             ),
         ]

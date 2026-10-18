@@ -390,9 +390,9 @@ nanobot plugins enable matrix
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
 | `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |
-
-In `listen` mode the bot reads every message from allowed senders in the room but replies only when mentioned (same mention semantics as `mention`, including `allowRoomMentions`). Unheard messages are kept in a bounded per-room buffer and attached as context to the next mention-triggered reply, so the answer reflects the conversation since its last response. The buffer clears once used, and nothing is ever replied to unheard messages. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
+
+In `listen` mode the bot reads every message from allowed senders in the room but replies only when mentioned (same mention semantics as `mention`, including `allowRoomMentions`). Unheard messages are kept in a bounded per-room buffer and attached as context to the next mention-triggered reply, so the answer reflects the conversation since its last response. The buffer clears once used, and nothing is ever replied to unheard messages. The buffer is in-memory only — if the bot restarts it starts empty (the bot does not announce the gap). When the buffer cap evicts older messages, the context block notes how many were dropped.
 
 
 

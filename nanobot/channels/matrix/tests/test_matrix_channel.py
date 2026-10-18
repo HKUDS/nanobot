@@ -2900,6 +2900,19 @@ def test_listen_buffer_bounds_and_truncation() -> None:
     assert sum(len(entry) for entry in capped) <= matrix_module._LISTEN_BUFFER_MAX_CHARS
 
 
+def test_listen_context_block_notes_dropped_lines() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    for index in range(34):
+        channel._buffer_listen_message("!r:matrix.org", f"@u{index}:matrix.org", f"m{index}")
+
+    blocks = channel._pop_listen_context("!r:matrix.org")
+    assert blocks is not None and len(blocks) == 1
+    assert "[4 earlier messages not shown]" in blocks[0].content
+    assert "@u0:matrix.org: m0" not in blocks[0].content
+    assert "@u4:matrix.org: m4" in blocks[0].content
+    assert channel._pop_listen_context("!r:matrix.org") is None
+
+
 @pytest.mark.asyncio
 async def test_on_message_listen_policy_buffers_then_serves_context_on_mention() -> None:
     channel = MatrixChannel(_make_config(group_policy="listen"), MessageBus())
