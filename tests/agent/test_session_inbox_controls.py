@@ -1,6 +1,7 @@
 """Independent turns and internal controls retain their session inbox semantics."""
 
 import asyncio
+import faulthandler
 import threading
 from unittest.mock import AsyncMock, MagicMock
 
@@ -705,4 +706,13 @@ async def test_queued_continuation_keeps_its_origin_after_another_chat_runs(loop
         assert replies == [("chat-a", "message-a")]
     finally:
         loop.stop()
-        await asyncio.wait_for(worker, timeout=3)
+        try:
+            await asyncio.wait_for(worker, timeout=3)
+        except TimeoutError:
+            # Native Windows CI has timed out after the routing assertions.
+            # Preserve the deadline and expose the shielded storage drain.
+            close_task = loop.sessions.state._close_task
+            if close_task is not None:
+                close_task.print_stack()
+            faulthandler.dump_traceback()
+            raise
