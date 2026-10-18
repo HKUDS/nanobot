@@ -14,6 +14,7 @@ from typing import Any, cast
 from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
 import httpx
+from ddgs.exceptions import DDGSException
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
@@ -36,6 +37,7 @@ _KEENABLE_SEARCH_API_URL = "https://api.keenable.ai/v1/search"
 _ANYSEARCH_SEARCH_API_URL = "https://api.anysearch.com/v1/search"
 _VOLCENGINE_SEARCH_API_URL = "https://open.feedcoopapi.com/search_api/web_search"
 _VOLCENGINE_TRAFFIC_TAG = "nanobot"
+_DUCKDUCKGO_SEARCH_MAX_BACKOFF = 3.0  # Cap (seconds) for the doubling retry backoff
 _VOLCENGINE_TIME_RANGES = {"OneDay", "OneWeek", "OneMonth", "OneYear"}
 _VOLCENGINE_DATE_RANGE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$")
 
@@ -996,30 +998,69 @@ class WebSearchTool(Tool):
         return _format_results(query, items, n)
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
-        try:
-            # DDGS.text performs synchronous requests; run it in a thread to avoid blocking the loop.
-            from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
+        from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
 
-            ddgs_type = cast(Any, DDGS)
-            ddgs = ddgs_type(timeout=10, proxy=self.proxy)
-            raw = await asyncio.wait_for(
-                asyncio.to_thread(ddgs.text, query, max_results=n),
-                timeout=self.config.timeout,
-            )
-            if not raw:
-                return f"No results for: {query}"
-            raw_items = cast(list[dict[str, Any]], raw)
-            items: list[dict[str, Any]] = [
-                {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
-                for r in raw_items
-            ]
-            return _format_results(query, items, n)
-        except Exception as e:
-            logger.warning(
-                "DuckDuckGo search failed: {}",
-                e if tool_log_content_allowed() else type(e).__name__,
-            )
-            return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
+        attempts = 1 + max(0, self.config.retries)
+        backoff = max(0.0, self.config.retry_backoff)
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            if attempt:
+                # Back-to-back searches trip upstream rate/anti-bot limits, which ddgs reports
+                # as DDGSException("No results found."); a short pause absorbs the transient
+                # rejections the way _search_brave retries HTTP 429.
+                logger.warning(
+                    "DuckDuckGo search attempt {}/{} failed ({}); retrying in {:.1f}s",
+                    attempt,
+                    attempts - 1,
+                    last_error if tool_log_content_allowed() else type(last_error).__name__,
+                    backoff,
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, _DUCKDUCKGO_SEARCH_MAX_BACKOFF)
+            try:
+                # DDGS.text performs synchronous requests; run it in a thread to avoid blocking the loop.
+                ddgs_type = cast(Any, DDGS)
+                ddgs = ddgs_type(timeout=10, proxy=self.proxy)
+                raw = await asyncio.wait_for(
+                    asyncio.to_thread(ddgs.text, query, max_results=n),
+                    timeout=self.config.timeout,
+                )
+                if not raw:
+                    return f"No results for: {query}"
+                raw_items = cast(list[dict[str, Any]], raw)
+                items: list[dict[str, Any]] = [
+                    {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
+                    for r in raw_items
+                ]
+                return _format_results(query, items, n)
+            except asyncio.TimeoutError as e:
+                # The per-call guard expired; retrying would only burn more wall time.
+                logger.warning(
+                    "DuckDuckGo search timed out: {}",
+                    e if tool_log_content_allowed() else type(e).__name__,
+                )
+                return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
+            except DDGSException as e:
+                last_error = e
+            except Exception as e:
+                logger.warning(
+                    "DuckDuckGo search failed: {}",
+                    e if tool_log_content_allowed() else type(e).__name__,
+                )
+                return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
+        logger.warning(
+            "DuckDuckGo search failed after {} attempt(s): {}",
+            attempts,
+            last_error if tool_log_content_allowed() else type(last_error).__name__,
+        )
+        # ddgs 9.x raises the same bare DDGSException("No results found.") for upstream
+        # rate/anti-bot rejections and for genuinely empty result sets; spell out the retry
+        # advice instead of letting the agent report "nothing found" to the user (#6285).
+        return ToolResult.error(
+            f"Error: DuckDuckGo search failed after {attempts} attempt(s) ({last_error}). "
+            "DuckDuckGo may be rate limiting or rejecting requests right now — wait a few "
+            "seconds and retry, or reduce consecutive web_search calls."
+        )
 
     async def _search_bocha(self, query: str, n: int, freshness: str = "noLimit") -> str:
         api_key = self.config.api_key or os.environ.get("BOCHA_API_KEY", "")

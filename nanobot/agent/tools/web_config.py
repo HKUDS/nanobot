@@ -12,6 +12,10 @@ class WebSearchConfig(Base):
     base_url: str = ""
     max_results: int = 5
     timeout: int = 30
+    # Transient-failure retries and base backoff (seconds, doubled per retry) for providers
+    # without native retry — e.g. DuckDuckGo rate/anti-bot rejections on back-to-back searches.
+    retries: int = 2
+    retry_backoff: float = 1.0
 
 
 class WebFetchConfig(Base):

@@ -566,6 +566,92 @@ async def test_duckduckgo_search_passes_proxy(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_duckduckgo_transient_rejection_is_retried(monkeypatch):
+    """A transient upstream rejection must be absorbed by a short retry/backoff (#6285)."""
+    from ddgs.exceptions import DDGSException
+
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    class FlakyDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # ddgs 9.x raises a bare DDGSException on rate/anti-bot rejection.
+                raise DDGSException("No results found.")
+            return [{"title": "DDG Result", "href": "https://ddg.example", "body": "OK"}]
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("ddgs.DDGS", FlakyDDGS)
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", fake_sleep)
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="hello")
+    assert "DDG Result" in result
+    assert calls["n"] == 2
+    assert sleeps == [1.0]
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_exhausted_rejections_report_rate_limit(monkeypatch):
+    """After retries are exhausted the error must suggest retrying later, not read as an empty result set (#6285)."""
+    from ddgs.exceptions import DDGSException
+
+    calls = {"n": 0}
+
+    class RejectingDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            raise DDGSException("No results found.")
+
+    async def fake_sleep(delay):
+        pass
+
+    monkeypatch.setattr("ddgs.DDGS", RejectingDDGS)
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", fake_sleep)
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="hello")
+    assert is_tool_error_result(result)
+    assert calls["n"] == 3  # 1 initial attempt + 2 retries (WebSearchConfig.retries default)
+    assert "retry" in str(result).lower()
+    assert "No results for" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_genuinely_empty_results_do_not_retry(monkeypatch):
+    """A real empty result set (falsy payload, no exception) must not burn retries."""
+    calls = {"n": 0}
+
+    class EmptyDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            return []
+
+    async def fail_sleep(delay):
+        raise AssertionError("no retry expected for a genuinely empty result set")
+
+    monkeypatch.setattr("ddgs.DDGS", EmptyDDGS)
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", fail_sleep)
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="hello")
+    assert calls["n"] == 1
+    assert "No results for: hello" in str(result)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "env_key, provider",
     [
