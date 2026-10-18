@@ -100,6 +100,22 @@ class _LivenessTrackedRequest(BaseRequest):
         return result
 
 
+_FENCE_OPEN_RE = re.compile(r'^[ \t]*(`{3,}|~{3,})(.*)$')
+_INLINE_FENCE_RE = re.compile(r'```(?:[^\n]*\n)?([\s\S]*?)```')
+
+
+def _opening_code_fence(line: str) -> str | None:
+    match = _FENCE_OPEN_RE.match(line)
+    if match and not (match.group(1)[0] == '`' and '`' in match.group(2)):
+        return match.group(1)
+    return None
+
+
+def _closes_code_fence(line: str, fence: str) -> bool:
+    closing = line.strip()
+    return len(closing) >= len(fence) and closing == fence[0] * len(closing)
+
+
 def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
     """Split raw Telegram Markdown without leaving fenced code blocks unbalanced."""
     if not content:
@@ -116,13 +132,33 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
             return content[fence_pos:]
         return content[fence_pos:line_end]
 
-    def split_inside_fenced_code_block(pos: int) -> tuple[bool, int, str]:
-        if content[:pos].count("```") % 2 == 0:
-            return False, -1, ""
-        opening = content.rfind("```", 0, pos)
-        if opening < 0:
-            return True, -1, "```"
-        return True, opening, fence_line(opening)
+    def split_inside_fenced_code_block(pos: int) -> tuple[int, str, str] | None:
+        fence = None
+        opening = -1
+        inline = False
+        offset = 0
+        for line in content[:pos].split("\n"):
+            if fence is not None and not inline:
+                if _closes_code_fence(line, fence):
+                    fence = None
+            else:
+                marker = _opening_code_fence(line) if fence is None else None
+                if marker is not None:
+                    fence = marker
+                    opening = offset
+                    inline = False
+                else:
+                    # Keep the legacy renderer's inline triple-backtick blocks.
+                    for match in re.finditer("```", line):
+                        if fence is None:
+                            fence = "```"
+                            opening = offset + match.start()
+                            inline = True
+                        else:
+                            fence = None
+                            inline = False
+            offset += len(line) + 1
+        return (opening, fence_line(opening), fence) if fence is not None else None
 
     chunks: list[str] = []
     while content:
@@ -137,12 +173,13 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
         if pos <= 0:
             pos = max_len
 
-        inside_code, opening, fence = split_inside_fenced_code_block(pos)
-        if inside_code:
+        active_fence = split_inside_fenced_code_block(pos)
+        if active_fence is not None:
+            opening, fence, marker = active_fence
             if opening > 0:
                 pos = opening
             else:
-                closing = "\n```"
+                closing = "\n" + marker
                 min_code_pos = len(fence)
                 if content.startswith(fence + "\n"):
                     min_code_pos += 1
@@ -205,10 +242,6 @@ def _strip_md(s: str) -> str:
     return s.strip()
 
 
-_FENCE_OPEN_RE = re.compile(r'^[ \t]*(`{3,}|~{3,})(.*)$')
-_INLINE_FENCE_RE = re.compile(r'```(?:[^\n]*\n)?([\s\S]*?)```')
-
-
 def _replace_fenced_code(text: str, replace: Callable[[str], str]) -> str:
     """Replace fenced code blocks with ``replace(code)``.
 
@@ -221,12 +254,10 @@ def _replace_fenced_code(text: str, replace: Callable[[str], str]) -> str:
     out: list[str] = []
     i = 0
     while i < len(lines):
-        match = _FENCE_OPEN_RE.match(lines[i])
-        if match and not (match.group(1)[0] == '`' and '`' in match.group(2)):
-            fence = match.group(1)
+        fence = _opening_code_fence(lines[i])
+        if fence is not None:
             for j in range(i + 1, len(lines)):
-                closing = lines[j].strip()
-                if len(closing) >= len(fence) and closing == fence[0] * len(closing):
+                if _closes_code_fence(lines[j], fence):
                     out.append(replace(''.join(line + '\n' for line in lines[i + 1:j])))
                     i = j + 1
                     break

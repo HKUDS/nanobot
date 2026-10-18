@@ -207,26 +207,28 @@ def _assert_code_blocks_render_balanced(chunks: list[str]) -> None:
         assert html.count("<pre><code>") == html.count("</code></pre>")
 
 
-def test_split_telegram_markdown_inside_code_block_moves_before_fence() -> None:
-    content = "Intro paragraph.\n```python\nprint('a')\nprint('b')\n```\nDone"
+@pytest.mark.parametrize("prefix", ["Intro paragraph.\n", "Intro paragraph. "])
+def test_split_telegram_markdown_inside_code_block_moves_before_fence(prefix) -> None:
+    content = prefix + "```python\nprint('a')\nprint('b')\n```\nDone"
 
     chunks = _split_telegram_markdown(content, max_len=35)
 
-    assert chunks[0] == "Intro paragraph.\n"
+    assert chunks[0] == prefix
     assert chunks[1].startswith("```python\nprint('a')")
     _assert_code_blocks_render_balanced(chunks)
 
 
-def test_split_telegram_markdown_long_code_block_closes_and_reopens() -> None:
-    content = "```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+@pytest.mark.parametrize("fence", ["```", "~~~", "````"])
+def test_split_telegram_markdown_long_code_block_closes_and_reopens(fence) -> None:
+    content = f"{fence}python\n" + ("print('line one')\n" * 6) + f"{fence}\nDone"
 
     chunks = _split_telegram_markdown(content, max_len=60)
 
     assert len(chunks) > 1
     assert all(len(chunk) <= 60 for chunk in chunks)
-    assert chunks[0].startswith("```python\n")
-    assert chunks[0].endswith("\n```")
-    assert chunks[1].startswith("```python\n")
+    assert chunks[0].startswith(f"{fence}python\n")
+    assert chunks[0].endswith(f"\n{fence}")
+    assert chunks[1].startswith(f"{fence}python\n")
     _assert_code_blocks_render_balanced(chunks)
 
 
@@ -251,6 +253,20 @@ def test_split_telegram_markdown_multiple_code_blocks() -> None:
     _assert_code_blocks_render_balanced(chunks)
 
 
+def test_split_telegram_markdown_keeps_nested_shorter_fence() -> None:
+    content = "````markdown\n```python\n" + "# raw example\n" * 40 + "```\n````"
+
+    chunks = _split_telegram_markdown(content, max_len=80)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 80 for chunk in chunks)
+    assert all(chunk.startswith("````markdown\n") and chunk.endswith("\n````") for chunk in chunks)
+    html = "".join(_markdown_to_telegram_html(chunk) for chunk in chunks)
+    assert html.count("# raw example") == 40
+    assert html.count("```") == 2
+    assert "<b>" not in html
+
+
 def test_split_telegram_markdown_leading_whitespace_before_fence() -> None:
     content = "\n```python\n" + ("print('line one')\n" * 6) + "```\nDone"
 
@@ -262,25 +278,26 @@ def test_split_telegram_markdown_leading_whitespace_before_fence() -> None:
     _assert_code_blocks_render_balanced(chunks)
 
 
-def test_split_telegram_markdown_long_single_line_code_body() -> None:
+@pytest.mark.parametrize("fence", ["```", "~~~", "````"])
+def test_split_telegram_markdown_long_single_line_code_body(fence) -> None:
     """Long fence bodies with no interior newlines must still advance."""
     body = "a" * 4500
-    content = f"```\n{body}\n```"
+    content = f"{fence}\n{body}\n{fence}"
 
     chunks = _split_telegram_markdown(content, TELEGRAM_MAX_MESSAGE_LEN)
 
     assert len(chunks) > 1
     assert all(len(chunk) <= TELEGRAM_MAX_MESSAGE_LEN for chunk in chunks)
-    assert chunks[0].startswith("```\n")
-    assert chunks[0].endswith("\n```")
-    assert chunks[1].startswith("```\n")
+    assert chunks[0].startswith(f"{fence}\n")
+    assert chunks[0].endswith(f"\n{fence}")
+    assert chunks[1].startswith(f"{fence}\n")
     reassembled = []
     for chunk in chunks:
         part = chunk.split("\n", 1)[1]
-        if part.endswith("\n```"):
-            part = part[:-4]
-        elif part.endswith("```"):
-            part = part[:-3]
+        if part.endswith(f"\n{fence}"):
+            part = part[:-(len(fence) + 1)]
+        elif part.endswith(fence):
+            part = part[:-len(fence)]
         reassembled.append(part)
     assert "".join(reassembled) == body
     _assert_code_blocks_render_balanced(chunks)
@@ -1616,7 +1633,8 @@ async def test_send_delta_stream_end_html_expansion_does_not_overflow() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_delta_stream_end_splits_long_code_block_before_html_rendering() -> None:
+@pytest.mark.parametrize("fence", ["```", "~~~", "````"])
+async def test_send_delta_stream_end_splits_long_code_block_before_html_rendering(fence) -> None:
     """Final streamed replies must not split Telegram HTML inside <pre><code>."""
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
@@ -1626,7 +1644,7 @@ async def test_send_delta_stream_end_splits_long_code_block_before_html_renderin
     channel._app.bot.edit_message_text = AsyncMock()
     channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
 
-    raw_text = "```python\n" + ("print(\"line\")\n" * 450) + "```\nDone"
+    raw_text = f"{fence}python\n" + ("print(\"line\")\n" * 450) + f"{fence}\nDone"
     channel._stream_bufs["123"] = _StreamBuf(text=raw_text, message_id=7, last_edit=0.0)
 
     await channel.send_delta("123", "", stream_end=True)
@@ -1642,6 +1660,9 @@ async def test_send_delta_stream_end_splits_long_code_block_before_html_renderin
     for html in html_chunks:
         assert len(html) <= 4096
         assert html.count("<pre><code>") == html.count("</code></pre>")
+        if 'print("line")' in html:
+            assert html.startswith("<pre><code>")
+    assert "".join(html_chunks).count('print("line")') == 450
     assert "123" not in channel._stream_bufs
 
 
