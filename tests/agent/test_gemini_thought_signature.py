@@ -253,6 +253,52 @@ def test_parse_chunks_dict_preserves_extra_content() -> None:
     assert payload["extra_content"] == GEMINI_EXTRA
 
 
+def test_parse_chunks_keeps_parallel_calls_without_index_apart() -> None:
+    """Gemini's OpenAI-compatible stream sends each parallel call whole in its own chunk,
+    without ``index``, and ends the turn with finish_reason "stop"."""
+    def tool_chunk(call: dict) -> dict:
+        return {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [call]}}]}
+
+    chunks = [
+        tool_chunk({
+            "extra_content": GEMINI_EXTRA,
+            "function": {"arguments": '{"city":"Paris"}', "name": "get_weather"},
+            "id": "call_4234484",
+            "type": "function",
+        }),
+        tool_chunk({
+            "function": {"arguments": '{"city":"Tokyo"}', "name": "get_weather"},
+            "id": "call_4234487",
+            "type": "function",
+        }),
+        {"choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": "stop"}]},
+    ]
+
+    result = OpenAICompatProvider._parse_chunks(chunks)
+
+    assert [(tc.id, tc.name, tc.arguments) for tc in result.tool_calls] == [
+        ("call_4234484", "get_weather", {"city": "Paris"}),
+        ("call_4234487", "get_weather", {"city": "Tokyo"}),
+    ]
+    assert result.tool_calls[0].extra_content == GEMINI_EXTRA
+    assert result.should_execute_tools
+
+
+def test_parse_chunks_appends_unindexed_fragments_to_the_last_call() -> None:
+    chunks = [
+        {"choices": [{"delta": {"tool_calls": [
+            {"id": "call_1", "function": {"name": "read_file", "arguments": '{"path":'}},
+        ]}}]},
+        {"choices": [{"delta": {"tool_calls": [{"function": {"arguments": ' "a.txt"}'}}]}}]},
+    ]
+
+    result = OpenAICompatProvider._parse_chunks(chunks)
+
+    assert [(tc.id, tc.name, tc.arguments) for tc in result.tool_calls] == [
+        ("call_1", "read_file", {"path": "a.txt"}),
+    ]
+
+
 # ── Model switching: stale extras shouldn't break other providers ─────
 
 def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:

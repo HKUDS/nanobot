@@ -1560,9 +1560,28 @@ class OpenAICompatProvider(LLMProvider):
         finish_reason = "stop"
         usage: LLMUsage | None = None
 
-        def _accum_tc(tc: Any, idx_hint: int) -> None:
+        last_unindexed: int | None = None
+
+        def _unindexed_key(tc: Any) -> int:
+            """Slot for a delta without ``index``. Gemini's OpenAI-compatible API omits it and sends
+            each parallel call whole in its own chunk, so a new id (or a name on an id-less call)
+            starts a call and anything else continues the last one."""
+            nonlocal last_unindexed
+            tc_id = _get(tc, "id")
+            fn = _get(tc, "function")
+            name = _get(fn, "name") if fn is not None else None
+            last = tc_bufs.get(last_unindexed) if last_unindexed is not None else None
+            if last is None or (tc_id and last["id"] and str(tc_id) != last["id"]) or (
+                name and not tc_id and last["name"]
+            ):
+                last_unindexed = max(tc_bufs, default=-1) + 1
+            return last_unindexed
+
+        def _accum_tc(tc: Any) -> None:
             """Accumulate one streaming tool-call delta into *tc_bufs*."""
-            tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
+            tc_index = _get(tc, "index")
+            if tc_index is None:
+                tc_index = _unindexed_key(tc)
             buf = tc_bufs.setdefault(tc_index, {
                 "id": "", "name": "", "arguments": "",
                 "extra_content": None, "prov": None, "fn_prov": None,
@@ -1638,13 +1657,8 @@ class OpenAICompatProvider(LLMProvider):
                 text = cls._extract_thinking_content(raw_delta_content)
             if text:
                 reasoning_parts.append(text)
-            for idx, tc in enumerate(
-                cast(
-                    Iterable[object],
-                    delta.get("tool_calls") or [],
-                )
-            ):
-                _accum_tc(tc, idx)
+            for tc in cast(Iterable[object], delta.get("tool_calls") or []):
+                _accum_tc(tc)
             _accum_legacy_function_call(delta.get("function_call"))
             usage = cls._extract_usage(chunk_map) or usage
 
