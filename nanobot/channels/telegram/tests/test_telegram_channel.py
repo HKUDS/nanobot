@@ -1907,7 +1907,12 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_remote_media_url_after_security_validation(monkeypatch) -> None:
+@pytest.mark.parametrize("media_url", [
+    "https://example.com/cat.jpg",
+    "https://example.com/cat.jpg?width=672",
+    "https://example.com/cat.jpg#preview",
+])
+async def test_send_remote_media_url_after_security_validation(monkeypatch, media_url) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
         MessageBus(),
@@ -1920,7 +1925,7 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
             channel="telegram",
             chat_id="123",
             content="",
-            media=["https://example.com/cat.jpg?width=672"],
+            media=[media_url],
         )
     )
 
@@ -1928,7 +1933,7 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
         {
             "kind": "photo",
             "chat_id": 123,
-            "photo": "https://example.com/cat.jpg?width=672",
+            "photo": media_url,
             "reply_parameters": None,
         }
     ]
