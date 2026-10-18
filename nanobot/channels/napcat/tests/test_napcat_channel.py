@@ -183,8 +183,9 @@ async def test_download_image_ignores_unparsable_declared_size(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_message_with_unparsable_image_size_still_routes(tmp_path, monkeypatch) -> None:
-    channel = _channel()
+@pytest.mark.parametrize("max_bytes", [32, 3])
+async def test_message_with_unparsable_image_size_still_routes(tmp_path, monkeypatch, max_bytes) -> None:
+    channel = _channel(NapcatConfig(allow_from=["*"], max_image_bytes=max_bytes))
     channel._media_root = tmp_path
     channel._http = _FakeHttp(_FakeResponse(status=200, chunks=[b"png-bytes"]))
     monkeypatch.setattr(
@@ -214,7 +215,9 @@ async def test_message_with_unparsable_image_size_still_routes(tmp_path, monkeyp
 
     msg = await channel.bus.consume_inbound()
     assert msg.content == "look at this"
-    assert msg.media == [str(tmp_path / "a.png")]
+    expected = [str(tmp_path / "a.png")] if max_bytes >= len(b"png-bytes") else []
+    assert msg.media == expected
+    assert sorted(str(path) for path in tmp_path.iterdir()) == expected
 
 
 @pytest.mark.asyncio
