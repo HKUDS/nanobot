@@ -268,7 +268,9 @@ For OpenCode Go, switch the provider block and preset:
 
 </details>
 
-OpenCode documents model IDs with `opencode/<model-id>` for Zen and `opencode-go/<model-id>` for Go. nanobot accepts those prefixes and strips them before sending the request to OpenCode. Use model IDs that OpenCode lists under the `chat/completions` endpoint; models listed only under `responses`, `messages`, or provider-specific endpoints are not handled by this OpenAI-compatible provider path.
+OpenCode documents model IDs with `opencode/<model-id>` for Zen and `opencode-go/<model-id>` for Go. nanobot accepts those prefixes and strips them before sending the request to OpenCode. Choose a model served through Chat Completions or Responses by the matching Zen or Go service; models that require Anthropic Messages or another provider-specific API are not supported by these connections.
+
+Leave API selection on **Auto** for OpenCode Go's `muse-spark-1.2-contributor` and `muse-spark-1.3-contributor`; these models use Responses automatically. Other models use Chat Completions by default. If another model requires Responses, select it in the preset's **Advanced options** only when the service supports it. See [preset API settings](./configuration.md#preset-request-api).
 
 ### Anthropic Direct
 
@@ -360,15 +362,15 @@ For a named custom provider serving Anthropic Messages, set `providers.<name>.ap
 
 Replace the model with a model ID available to your account. Leave API selection on Auto unless you need to choose Chat Completions or Responses in the preset's **Advanced options**. See [preset API settings](./configuration.md#preset-request-api) for WebUI and JSON configuration. `providers.openai.api` sets the connection default; explicit presets override it. If your configuration still uses `apiType`, follow the [migration instructions](./configuration.md#legacy-openai-api-selector-migration).
 
-Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models can retain server-provided conversation state; [native context compaction](./configuration.md#responses-state-and-compaction) depends on provider support. The WebUI offers switches for OpenAI web search, Codex Fast mode, and Grok X Search.
+### DeepSeek
 
-Use `deepseek-flash` for DeepSeek's current Flash model. It supports image input on both Chat Completions and Responses; `deepseek-v4-pro` is text-only. DeepSeek currently accepts the legacy names `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` and serves them through the current Flash model. See [DeepSeek's model details](https://api-docs.deepseek.com/quick_start/pricing) for current alias availability.
+Select **DeepSeek** in **Settings → Models**. Use `deepseek-flash` for text and image input, or `deepseek-v4-pro` for text-only input. The official service also accepts `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` as Flash aliases; see [current model details](https://api-docs.deepseek.com/quick_start/pricing) for availability.
 
-`deepseek-flash` uses Responses automatically at `https://api.deepseek.com`, including the `/v1` form. With a different `providers.deepseek.apiBase`, Auto uses Chat Completions for this model. Select Responses in the preset if the proxy supports it. `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp` use Responses by default with either endpoint configuration. Do not replace a proxy's model ID unless that proxy documents the new name.
+Known Flash and Pro models offer `none`, `low`, `high`, and `max` reasoning settings. Leave reasoning effort empty to follow the provider default (currently thinking enabled at `high`), or choose `none` to disable thinking. The output budget covers both reasoning and the final answer.
 
-DeepSeek's known Flash and Pro models offer `none`, `low`, `high`, and `max` reasoning settings. Leave the setting empty to follow the provider default (currently thinking enabled at `high`); `none` explicitly disables thinking. The model picker uses available catalog reasoning levels and still accepts custom values. Selecting a catalog model for a new preset can initialize its context window; existing presets and manually entered context values are preserved. Catalog output limits do not raise your preset's output budget, which includes both reasoning and the final answer.
+**Auto** uses Responses for these models at the official endpoint (`https://api.deepseek.com`, with or without `/v1`). With a proxy, keep the model ID it documents: `deepseek-flash` defaults to Chat Completions on other endpoints, while the V4 names above default to Responses. Select Responses explicitly for `deepseek-flash` only if your proxy supports it; see [preset API settings](./configuration.md#preset-request-api).
 
-For web search, use nanobot's [web search tool](./configuration.md#web-search). DeepSeek's standalone Search/Fetch APIs and Pro hosted search are not enabled by selecting a DeepSeek model. OpenCode Go's `muse-spark-1.2-contributor` and `muse-spark-1.3-contributor` also use Responses by default.
+For web search, configure nanobot's [web search tool](./guides/configure-web-search.md). Selecting a DeepSeek model does not enable DeepSeek-hosted search.
 
 ### Custom OpenAI-Compatible Endpoint
 
@@ -707,6 +709,10 @@ Pin `provider` in presets when using gateway catalog IDs such as `anthropic/clau
 ## Model Presets
 
 Model presets are the recommended model configuration surface. Use them when you want named model choices, runtime `/model` switching, or reusable fallback targets.
+
+When available, the selected provider's model catalog supplies reasoning-effort suggestions; you can still enter a custom value. Choosing a catalog model for a new preset can initialize its context window. Existing presets and manually entered context values are preserved, and catalog output limits do not raise the preset's output budget. See [preset fields](./configuration.md#model-presets) for configuration details.
+
+Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models can retain server-provided conversation state; [native context compaction](./configuration.md#responses-state-and-compaction) depends on provider support. The WebUI offers switches for OpenAI web search, Codex Fast mode, and Grok X Search.
 
 <details>
 <summary>Manual configuration</summary>
