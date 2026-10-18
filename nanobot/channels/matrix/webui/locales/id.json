@@ -31,6 +31,9 @@
           "allowlist": "Daftar izin"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Pengecualian aturan per ruang (JSON)"
+      },
       "allowFrom": {
         "label": "Pengguna diizinkan"
       },

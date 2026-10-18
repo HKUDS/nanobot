@@ -284,6 +284,9 @@ def _matrix_stream_key(chat_id: str, stream_id: str | None) -> str:
     return chat_id if stream_id is None else f"{chat_id}\0{stream_id}"
 
 
+MatrixGroupPolicy = Literal["open", "mention", "allowlist"]
+
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -299,9 +302,12 @@ class MatrixConfig(Base):
     max_media_bytes: int = 20 * 1024 * 1024
     max_concurrent_media_downloads: int = 2
     allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_policy: MatrixGroupPolicy = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
+    # Per-room policy overrides keyed by room id, e.g. {"!abc:matrix.org": "mention"}.
+    # Rooms not listed fall back to `group_policy` (issue #6286).
+    group_policy_overrides: dict[str, MatrixGroupPolicy] = Field(default_factory=dict)
     streaming: bool = False
     proxy: str | None = None
 
@@ -1146,7 +1152,9 @@ class MatrixChannel(BaseChannel):
             return False
         if self._is_direct_room(room):
             return True
-        policy = self.config.group_policy
+        policy = self.config.group_policy_overrides.get(
+            room.room_id, self.config.group_policy
+        )
         if policy == "open":
             return True
         if policy == "allowlist":

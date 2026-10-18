@@ -31,6 +31,9 @@
           "allowlist": "Lista de permissão"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Exceções de regras por sala (JSON)"
+      },
       "allowFrom": {
         "label": "Usuários permitidos"
       },

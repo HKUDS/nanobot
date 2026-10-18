@@ -31,6 +31,9 @@
           "allowlist": "Danh sách cho phép"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Ngoại lệ quy tắc theo phòng (JSON)"
+      },
       "allowFrom": {
         "label": "Người dùng được phép"
       },
