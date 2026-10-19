@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji Teams",
+    "officialLabel": "Otwórz portal deweloperski Teams",
+    "fields": {
+      "appId": {
+        "label": "Identyfikator aplikacji",
+        "placeholder": "Identyfikator aplikacji Microsoft"
+      },
+      "appPassword": {
+        "label": "Sekret klienta",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "Identyfikator dzierżawy",
+        "placeholder": "Opcjonalny identyfikator dzierżawy"
+      },
+      "path": {
+        "label": "Ścieżka wywołania zwrotnego",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy",
+        "placeholder": "Identyfikatory użytkowników Teams oddzielone przecinkami"
+      },
+      "host": {
+        "label": "Host nasłuchiwania"
+      },
+      "port": {
+        "label": "Port nasłuchiwania"
+      },
+      "replyInThread": {
+        "label": "Odpowiadaj w wątku",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Odpowiadaj tylko na wzmianki"
+      },
+      "validateInboundAuth": {
+        "label": "Weryfikuj żądania przychodzące",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "refTtlDays": {
+        "label": "Czas przechowywania rozmowy"
+      },
+      "pruneWebChatRefs": {
+        "label": "Usuwaj rozmowy Web Chat",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Usuwaj rozmowy inne niż prywatne",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Odstęp odświeżania rozmowy"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Zaufane hosty usług"
+      }
+    }
+  }
+}

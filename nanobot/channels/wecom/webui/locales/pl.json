@@ -1,0 +1,23 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji WeCom",
+    "officialLabel": "Otwórz konsolę WeCom",
+    "fields": {
+      "botId": {
+        "label": "Identyfikator bota",
+        "placeholder": "Identyfikator bota WeCom"
+      },
+      "secret": {
+        "label": "Sekret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy",
+        "placeholder": "Identyfikatory użytkowników oddzielone przecinkami"
+      },
+      "welcomeMessage": {
+        "label": "Wiadomość powitalna"
+      }
+    }
+  }
+}

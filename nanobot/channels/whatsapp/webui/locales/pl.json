@@ -1,0 +1,36 @@
+{
+  "setup": {
+    "primaryAction": "Połącz WhatsApp",
+    "docsLabel": "Otwórz instrukcję konfiguracji WhatsApp",
+    "officialLabel": "Otwórz pomoc WhatsApp",
+    "fields": {
+      "allowFrom": {
+        "label": "Dozwolone kontakty",
+        "placeholder": "Numery telefonów lub identyfikatory WhatsApp"
+      },
+      "groupPolicy": {
+        "label": "Zachowanie w grupach",
+        "choices": {
+          "mention": "Tylko wzmianki",
+          "open": "Wszystkie wiadomości",
+          "allowlist": "Lista dozwolonych"
+        }
+      },
+      "proxy": {
+        "label": "Serwer proxy",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Kod QR łączenia WhatsApp",
+    "scanTitle": "Połącz WhatsApp",
+    "scanDescription": "W WhatsApp otwórz Połączone urządzenia, wybierz Połącz urządzenie i zeskanuj ten kod.",
+    "waiting": "Oczekiwanie na WhatsApp…",
+    "connected": "Połączono z WhatsApp.",
+    "stopped": "Próba połączenia z WhatsApp została zatrzymana. Zacznij ponownie, aby uzyskać nowy kod.",
+    "connecting": "Łączenie…",
+    "scanAgain": "Połącz inne konto",
+    "connect": "Połącz WhatsApp"
+  }
+}

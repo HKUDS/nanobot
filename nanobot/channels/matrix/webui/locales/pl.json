@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji Matrix",
+    "officialLabel": "Otwórz listę klientów Matrix",
+    "fields": {
+      "homeserver": {
+        "label": "Serwer macierzysty",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "Identyfikator użytkownika",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Hasło",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "Token dostępu",
+        "placeholder": "Wpisz token dostępu"
+      },
+      "deviceId": {
+        "label": "Identyfikator urządzenia",
+        "placeholder": "Wymagany przy użyciu tokenu dostępu"
+      },
+      "groupPolicy": {
+        "label": "Zachowanie w grupach",
+        "choices": {
+          "mention": "Tylko wzmianki",
+          "open": "Wszystkie wiadomości",
+          "allowlist": "Lista dozwolonych"
+        }
+      },
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy"
+      },
+      "e2eeEnabled": {
+        "label": "Szyfrowanie end-to-end",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "sasVerification": {
+        "label": "Weryfikacja SAS",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Czas na łagodne zatrzymanie synchronizacji"
+      },
+      "maxMediaBytes": {
+        "label": "Maksymalny rozmiar multimediów"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Równoległe pobieranie multimediów"
+      },
+      "groupAllowFrom": {
+        "label": "Dozwolone grupy"
+      },
+      "allowRoomMentions": {
+        "label": "Zezwól na wzmianki o pokoju",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "streaming": {
+        "label": "Przesyłanie strumieniowe",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "proxy": {
+        "label": "Serwer proxy",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}
