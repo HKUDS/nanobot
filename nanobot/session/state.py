@@ -504,6 +504,8 @@ class SessionState:
             setattr(draft, item.name, getattr(fresh, item.name))
 
     def _apply_turn(self, draft: Session) -> tuple[Session, int]:
+        from nanobot.session.recovery import PENDING_FOLLOWUPS_KEY, acknowledge_pending_followups
+
         baseline = draft._baseline  # pyright: ignore[reportPrivateUsage]
         if baseline is None:
             raise ValueError("session changes require an owner-issued draft")
@@ -517,20 +519,15 @@ class SessionState:
         ):
             raise SessionConflictError("session was reset")
         for key in baseline.metadata.keys() | draft.metadata.keys():
+            if key == PENDING_FOLLOWUPS_KEY:
+                # queue_followup owns this journal; a draft may predate its inputs.
+                continue
             missing = object()
             before = baseline.metadata.get(key, missing)
             after = draft.metadata.get(key, missing)
             if before == after:
                 continue
             existing = current.metadata.get(key, missing)
-            if key == "pending_user_followups":
-                old_records = cast(list[dict[str, Any]], before) if isinstance(before, list) else []
-                new_records = cast(list[dict[str, Any]], after) if isinstance(after, list) else []
-                removed_ids = {item["id"] for item in old_records} - {item["id"] for item in new_records}
-                from nanobot.session.recovery import acknowledge_pending_followups
-
-                acknowledge_pending_followups(current, removed_ids)
-                continue
             if existing != before and existing != after:
                 raise SessionConflictError(f"turn metadata changed: {key}")
             if after is missing:
@@ -554,6 +551,7 @@ class SessionState:
                 if existing != before and existing != after:
                     raise SessionConflictError(f"session {name} changed")
                 setattr(current, name, deepcopy(after))
+        acknowledge_pending_followups(current, draft.consumed_followup_ids)
         current.policy = draft.policy
         current.updated_at = max(current.updated_at, draft.updated_at)
         return current, self._changed_start(before_messages, current.messages)

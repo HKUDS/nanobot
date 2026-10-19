@@ -46,6 +46,7 @@ from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
+    INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
     RUNTIME_CONTROL_SESSION_DISCARD,
     InboundMessage,
@@ -95,7 +96,6 @@ from nanobot.session.recovery import (
     REQUEST_ORIGIN_METADATA_KEY,
     RecoveryAdmission,
     RequestOrigin,
-    acknowledge_pending_followups,
     pending_followups,
     request_origin_from_metadata,
     restore_pending_interruption,
@@ -697,6 +697,15 @@ class AgentLoop:
     def pending_local_trigger_ids_for_session(self, session_key: str) -> set[str]:
         return self._local_trigger_turns.pending_trigger_ids_for_session(session_key)
 
+    @staticmethod
+    def _input_history_extra(msg: InboundMessage) -> dict[str, Any]:
+        """Keep input admission separate from the run that eventually consumes it."""
+        extra: dict[str, Any] = {"timestamp": msg.timestamp.isoformat()}
+        turn_id = msg.metadata.get(INBOUND_META_TURN_ID)
+        if isinstance(turn_id, str) and turn_id:
+            extra[INBOUND_META_TURN_ID] = turn_id
+        return extra
+
     async def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -715,7 +724,7 @@ class AgentLoop:
         content_value = cast(object, msg.content)
         has_text = isinstance(content_value, str) and content_value.strip()
         if has_text or media_paths or runtime_context_blocks:
-            extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
+            extra = self._input_history_extra(msg) | ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             if HIDDEN_HISTORY_META in msg.metadata:
                 extra[HIDDEN_HISTORY_META] = msg.metadata[HIDDEN_HISTORY_META]
@@ -734,7 +743,7 @@ class AgentLoop:
             self._mark_pending_user_turn(session)
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
             if isinstance(followup_id, str) and followup_id:
-                acknowledge_pending_followups(session, [followup_id])
+                session.consumed_followup_ids |= {followup_id}
             await self.sessions.state.prepare_input(session)
             return True
         return False
@@ -1104,7 +1113,10 @@ class AgentLoop:
                     content,
                     image_paths=image_paths,
                 )
-                row: dict[str, Any] = {"role": "user", "content": user_content}
+                row: dict[str, Any] = {
+                    "role": "user", "content": user_content,
+                    "_meta": self._input_history_extra(pending_msg),
+                }
                 if HIDDEN_HISTORY_META in pending_msg.metadata:
                     row[HIDDEN_HISTORY_META] = pending_msg.metadata[HIDDEN_HISTORY_META]
                 metadata_value = cast(object, pending_msg.metadata)
@@ -1146,9 +1158,7 @@ class AgentLoop:
                         blocks,
                     )
                     if runtime_marker is not None:
-                        row["_meta"] = {
-                            RUNTIME_CONTEXT_MESSAGE_META: runtime_marker,
-                        }
+                        row["_meta"][RUNTIME_CONTEXT_MESSAGE_META] = runtime_marker
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"
@@ -2481,18 +2491,7 @@ class AgentLoop:
                 session.commit_summary_checkpoint(summary_checkpoint.summary)
 
             entry = dict(message)
-            followup_id_value = cast(object, entry.pop(PENDING_FOLLOWUP_ID_KEY, None))
-            followup_ids = (
-                [followup_id_value]
-                if isinstance(followup_id_value, str)
-                else [
-                    followup_id
-                    for followup_id in cast(list[object], followup_id_value)
-                    if isinstance(followup_id, str)
-                ]
-                if isinstance(followup_id_value, list)
-                else []
-            )
+            followup_id = entry.pop(PENDING_FOLLOWUP_ID_KEY, None)
             internal_meta = cast(object, entry.pop("_meta", None))
             runtime_context_meta = (
                 cast(dict[str, Any], internal_meta).get(
@@ -2541,10 +2540,15 @@ class AgentLoop:
                     entry["content"] = filtered
                 if isinstance(runtime_context_meta, dict):
                     entry[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
+                if isinstance(internal_meta, dict):
+                    for key in ("timestamp", INBOUND_META_TURN_ID):
+                        value = cast(dict[str, Any], internal_meta).get(key)
+                        if isinstance(value, str) and value:
+                            entry[key] = value
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
-            if role == "user":
-                saved_followup_ids.update(followup_id for followup_id in followup_ids if followup_id)
+            if role == "user" and isinstance(followup_id, str) and followup_id:
+                saved_followup_ids.add(followup_id)
             if role == "assistant":
                 last_assistant_idx = len(session.messages) - 1
                 declared_tool_call_ids.update(
@@ -2561,8 +2565,7 @@ class AgentLoop:
             session.commit_summary_checkpoint(summary_checkpoint.summary)
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
-        if saved_followup_ids:
-            acknowledge_pending_followups(session, saved_followup_ids)
+        session.consumed_followup_ids |= saved_followup_ids
         session.updated_at = datetime.now()
 
     def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:

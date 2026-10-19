@@ -3,6 +3,8 @@ import type { UIMessage } from "@/lib/types";
 export interface PromptAnchor {
   answerPreview: string;
   id: string;
+  inputId?: string;
+  turnId?: string;
   label: string;
   preview: string;
   createdAt: number;
@@ -17,6 +19,8 @@ export function userPromptAnchors(messages: UIMessage[]): PromptAnchor[] {
     const anchor: PromptAnchor = {
       answerPreview: nextAssistantPreview(messages, messageIndex),
       id: message.id,
+      ...(message.inputId ? { inputId: message.inputId } : {}),
+      ...(message.turnId ? { turnId: message.turnId } : {}),
       label: promptLabel(message.content, index),
       preview: promptPreview(message.content, index),
       createdAt: message.createdAt,

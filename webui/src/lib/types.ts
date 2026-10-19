@@ -118,6 +118,8 @@ export interface UIMessage {
   kind?: MessageKind;
   isStreaming?: boolean;
   createdAt: number;
+  /** Host-proven logical input identity, independent of an execution/replay turn. */
+  inputId?: string;
   /** For trace rows: each individual hint line, so consecutive hints can
    * render as a single collapsible group. */
   traces?: string[];
@@ -1656,6 +1658,7 @@ export type ThreadProjectionEvent = Extract<
 > & {
   projection_id?: string;
   created_at_ms?: number;
+  input_id?: string;
 };
 
 /** Local draft/preview data, converted to HTTP binary before sending a message.
@@ -1702,6 +1705,7 @@ interface WebuiThreadPagePayload {
 
 export interface PromptSummary {
   id: string;
+  inputId?: string;
   preview: string;
   answerPreview: string;
   createdAt: number;

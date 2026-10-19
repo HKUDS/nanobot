@@ -143,3 +143,35 @@ it("reuses the full directory during token updates and conditional revalidation"
   expect(api.fetchPromptIndex).toHaveBeenLastCalledWith("test", "a", expect.any(AbortSignal), { prompts: index, revision: "first" });
   expect(result.current.prompts).toBe(anchors);
 });
+
+
+it("merges a live input by transport identity without adding an anchor or reordering unknown-time prompts", async () => {
+  const recovered = [
+    { id: "old", preview: "older", answerPreview: "", createdAt: 1000, cursor: "0", turnId: "old-input", inputId: "old-identity" },
+    { id: "persisted", preview: "same", answerPreview: "answer", createdAt: 0, cursor: "1", turnId: "input", inputId: "identity" },
+  ];
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: recovered, revision: "recovered" });
+  const users: UIMessage[] = [
+    { id: "optimistic", role: "user", content: "same", createdAt: 2000, turnId: "input" },
+    { id: "distinct", role: "user", content: "same", createdAt: 3000, turnId: "other-input" },
+  ];
+  const { result, rerender } = renderHook(({ key, version }) => usePromptHistory(key, version, users), {
+    wrapper: wrapper(), initialProps: { key: "a", version: 1 },
+  });
+  await waitFor(() => expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["old", "persisted", "distinct"]));
+  vi.mocked(api.fetchWebuiThread).mockResolvedValue({ schemaVersion: 3, projection: "events", events: [
+    { event: "user_message", chat_id: "a", text: "same", starts_turn: true, projection_id: "persisted", input_id: "identity", turn_id: "input", created_at_ms: 0 },
+    { event: "message", chat_id: "a", text: "answer", projection_id: "answer" },
+  ] });
+  await act(async () => result.current.jump("persisted"));
+  expect(result.current.target?.id).toBe("persisted");
+  expect(result.current.window?.messages[0].createdAt).toBe(0);
+  rerender({ key: "a", version: 2 });
+  await waitFor(() => expect(api.fetchPromptIndex).toHaveBeenCalledTimes(2));
+  expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["old", "persisted", "distinct"]);
+  rerender({ key: "b", version: 1 });
+  await waitFor(() => expect(api.fetchPromptIndex).toHaveBeenCalledTimes(3));
+  expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["old", "persisted", "distinct"]);
+  expect(result.current.window).toBeNull();
+  expect(result.current.target).toBeNull();
+});

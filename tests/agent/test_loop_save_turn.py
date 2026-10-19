@@ -205,31 +205,20 @@ async def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) ->
 
 async def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    session = await loop.sessions.state.get("websocket:chat")
-    session.metadata[PENDING_FOLLOWUPS_KEY] = [
-        {
-            "id": "followup-1",
-            "sender_id": "user",
-            "chat_id": "chat",
-            "content": "queued while busy",
-            "media": [],
-            "metadata": {},
-        }
-    ]
-
-    persisted = await loop._persist_user_message_early(
-        InboundMessage(
-            channel="websocket",
-            sender_id="user",
-            chat_id="chat",
-            content="queued while busy",
-            metadata={PENDING_FOLLOWUP_ID_KEY: "followup-1"},
-        ),
-        session,
+    loop.provider.aclose = AsyncMock()
+    message = InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="queued while busy",
     )
-
-    assert persisted is True
-    assert PENDING_FOLLOWUPS_KEY not in session.metadata
+    try:
+        identifier = await loop.sessions.state.queue_followup(message.session_key, message)
+        message.metadata[PENDING_FOLLOWUP_ID_KEY] = identifier
+        # Control: unlike mid-turn injection, this draft already sees the journal.
+        session = await loop.sessions.state.get(message.session_key)
+        assert await loop._persist_user_message_early(message, session)
+        assert PENDING_FOLLOWUPS_KEY not in session.metadata
+        assert PENDING_FOLLOWUPS_KEY not in (await loop.sessions.state.get(session.key)).metadata
+    finally:
+        await loop.aclose()
 
 
 async def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
@@ -596,34 +585,6 @@ def test_save_turn_commits_summary_boundary_without_rewriting_raw_history() -> N
         "full current result",
         "done",
     ]
-
-
-def test_save_turn_acknowledges_every_merged_recovery_followup() -> None:
-    """Persisting a merged injected row retires every durable follow-up ID."""
-    loop = _mk_loop()
-    session = Session(
-        key="test:recovery-followups",
-        metadata={
-            PENDING_FOLLOWUPS_KEY: [
-                {"id": "first"},
-                {"id": "second"},
-            ]
-        },
-    )
-
-    loop._save_turn(
-        session,
-        [
-            {
-                "role": "user",
-                "content": "first\n\nsecond",
-                PENDING_FOLLOWUP_ID_KEY: ["first", "second"],
-            }
-        ],
-        skip=0,
-    )
-
-    assert PENDING_FOLLOWUPS_KEY not in session.metadata
 
 
 def test_save_turn_keeps_image_placeholder_and_runtime_context() -> None:

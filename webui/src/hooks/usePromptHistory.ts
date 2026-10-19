@@ -92,24 +92,41 @@ export function usePromptHistory(key: string | null, version: number, messages: 
     return () => controller.abort();
   }, [client, enabled, getToken, key, version, refresh]);
 
-  const indexedIds = useMemo(() => new Set(index?.prompts.map((prompt) => prompt.id)), [index]);
+  const indexed = useMemo(() => {
+    const ids = new Set<string>();
+    const inputs = new Set<string>();
+    const turns = new Map<string, PromptAnchor | null>();
+    for (const prompt of index?.prompts ?? []) {
+      ids.add(prompt.id);
+      if (prompt.inputId) inputs.add(prompt.inputId);
+      if (prompt.turnId) turns.set(prompt.turnId, turns.has(prompt.turnId) ? null : prompt);
+    }
+    return { ids, inputs, turns };
+  }, [index]);
   const localCache = useRef<{ index: typeof index; users: UIMessage[]; prompts: PromptAnchor[] }>();
   const prompts = useMemo(() => {
     if (!enabled) return userPromptAnchors(messages);
     if (!currentScope || index?.key !== key) return [];
-    // Keep live prompts and legacy prompts backfilled by the history reader
-    // navigable, even when they have no persisted transcript cursor yet.
-    const users = messages.filter((message) => message.role === "user" && !indexedIds.has(message.id));
+    // Live rows can still have optimistic render ids after admission. Match the
+    // host's input identity, or an unambiguous original transport id, not text.
+    const users = messages.filter((message) => {
+      if (message.role !== "user" || indexed.ids.has(message.id)) return false;
+      if (message.inputId) return !indexed.inputs.has(message.inputId);
+      const admitted = message.turnId ? indexed.turns.get(message.turnId) : null;
+      return !admitted || admitted.preview !== message.content.trim().slice(0, 320);
+    });
     if (!users.length) return index.prompts;
     const cached = localCache.current;
     if (cached?.index === index && users.length === cached.users.length
       && users.every((user, position) => user === cached.users[position])) return cached.prompts;
-    const local = userPromptAnchors(messages).filter((prompt) => !indexedIds.has(prompt.id));
-    const merged = [...index.prompts, ...local].sort((a, b) => a.createdAt - b.createdAt)
-      .map((prompt, position) => ({ ...prompt, index: position }));
+    const localIds = new Set(users.map((message) => message.id));
+    const local = userPromptAnchors(messages).filter((prompt) => localIds.has(prompt.id));
+    // Directory order is logical admission order. Unknown legacy times are zero,
+    // not a reason to move an old prompt ahead of its preceding inputs.
+    const merged = [...index.prompts, ...local].map((prompt, position) => ({ ...prompt, index: position }));
     localCache.current = { index, users, prompts: merged };
     return merged;
-  }, [currentScope, enabled, index, indexedIds, key, messages]);
+  }, [currentScope, enabled, index, indexed, key, messages]);
 
   const updateMessages = useCallback((update: (messages: UIMessage[]) => UIMessage[]) => {
     setPages((current) => current.map((page) => ({ ...page, messages: update(page.messages) })));

@@ -134,6 +134,7 @@ from nanobot.webui.transcript import (
     build_session_thread_response,
     build_webui_thread_response,
     build_webui_trace_detail_response,
+    webui_display_revision,
     webui_transcript_revision,
 )
 from nanobot.webui.workspace_browser import browse_workspace_directories
@@ -1041,8 +1042,21 @@ class GatewayHTTPHandler:
             cleaned.append(row)
         return {"sessions": cleaned}
 
+    def _read_session_messages(self, key: str) -> list[dict[str, Any]] | None:
+        if self.session_manager is None:
+            return None
+        session_data = self.session_manager.read_session_file(key)
+        raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
+        if not isinstance(raw_messages, list):
+            return None
+        return [
+            cast(dict[str, Any], message)
+            for message in cast(list[Any], raw_messages)
+            if isinstance(message, dict)
+        ]
+
     def _handle_prompt_index_get(self, request: WsRequest, key: str) -> Response:
-        from nanobot.webui.transcript import prompt_index_response, webui_transcript_revision
+        from nanobot.webui.transcript import prompt_index_response
 
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -1051,12 +1065,15 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        revision = webui_transcript_revision(decoded_key)
+        query = _parse_query(request.path)
+        data = prompt_index_response(
+            decoded_key, _query_first(query, "since"),
+            session_messages_loader=lambda: self._read_session_messages(decoded_key),
+        )
+        revision = data.get("revision")
         etag = _quoted_etag(revision) if revision else None
         if etag and _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
             return _http_response(b"", status=304, extra_headers=[*_NO_STORE_HEADERS, ("ETag", etag)])
-        query = _parse_query(request.path)
-        data = prompt_index_response(decoded_key, _query_first(query, "since"))
         headers = list(_NO_STORE_HEADERS)
         response_revision = data.get("revision")
         if response_revision:
@@ -1160,20 +1177,6 @@ class GatewayHTTPHandler:
             diagnostics.session_hash = hashlib.sha256(decoded_key.encode("utf-8")).hexdigest()[:12]
         scope = self.workspaces.scope_for_session_key(decoded_key)
 
-        def load_session_messages() -> list[dict[str, Any]] | None:
-            if self.session_manager is None:
-                return None
-            session_data = self.session_manager.read_session_file(decoded_key)
-            raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
-            if not isinstance(raw_messages, list):
-                return None
-            raw_session_messages = cast(list[Any], raw_messages)
-            return [
-                cast(dict[str, Any], raw_message)
-                for raw_message in raw_session_messages
-                if isinstance(raw_message, dict)
-            ]
-
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None
@@ -1226,17 +1229,8 @@ class GatewayHTTPHandler:
             "workspace_scope": scope.payload(),
         }
         initial_revision = webui_transcript_revision(decoded_key, variant=revision_variant)
-        etag = _quoted_etag(initial_revision) if initial_revision is not None else None
-        if etag is not None and _etag_matches(
-            _case_insensitive_header(request.headers, "If-None-Match"),
-            etag,
-        ):
-            return _http_response(
-                b"",
-                status=304,
-                extra_headers=[*_NO_STORE_HEADERS, ("ETag", etag)],
-            )
         build_started = time.perf_counter()
+        replay_stats = diagnostics.transcript if diagnostics is not None else TranscriptReplayStats()
         data = build_webui_thread_response(
             decoded_key,
             augment_user_media=self.media.augment_transcript_media,
@@ -1245,7 +1239,7 @@ class GatewayHTTPHandler:
                 text,
                 workspace_path=scope.project_path,
             ),
-            session_messages_loader=load_session_messages,
+            session_messages_loader=lambda: self._read_session_messages(decoded_key),
             active_turn_started_at=active_turn_started_at,
             active_turn_id=active_turn_id,
             active_turn_transcript_persistence_failed=(
@@ -1255,7 +1249,7 @@ class GatewayHTTPHandler:
             direction=direction,
             before=before,
             after=after,
-            stats=diagnostics.transcript if diagnostics is not None else None,
+            stats=replay_stats,
         )
         if diagnostics is not None:
             diagnostics.build_ms = (time.perf_counter() - build_started) * 1000
@@ -1275,8 +1269,13 @@ class GatewayHTTPHandler:
         final_revision = webui_transcript_revision(decoded_key, variant=revision_variant)
         response_headers = list(_NO_STORE_HEADERS)
         if final_revision is not None and final_revision == initial_revision:
-            data["revision"] = final_revision
-            response_headers.append(("ETag", _quoted_etag(final_revision)))
+            display_revision = webui_display_revision(final_revision, replay_stats.canonical_backfill_revision)
+            assert display_revision is not None
+            etag = _quoted_etag(display_revision)
+            response_headers.append(("ETag", etag))
+            if _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
+                return _http_response(b"", status=304, extra_headers=response_headers)
+            data["revision"] = display_revision
         return _http_json_response(
             data,
             accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),

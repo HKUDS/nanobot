@@ -460,7 +460,8 @@ export async function fetchPromptIndex(token: string, key: string, signal: Abort
       throw new Error("Invalid prompt summary");
     }
     return { id: item.id, preview: item.preview, answerPreview: item.answerPreview,
-      cursor: item.cursor, createdAt: item.createdAt, turnId: item.turnId };
+      cursor: item.cursor, createdAt: item.createdAt, turnId: item.turnId,
+      ...(typeof item.inputId === "string" && item.inputId ? { inputId: item.inputId } : {}) };
   });
   return { prompts: [...(cached?.prompts.slice(0, replaceFrom) ?? []), ...prompts],
     revision: typeof body.revision === "string" ? body.revision : undefined };

@@ -88,6 +88,7 @@ def record_pending_followup(session: Session, message: InboundMessage) -> str | 
             "sender_id": message.sender_id,
             "chat_id": message.chat_id,
             "content": message.content,
+            "timestamp": message.timestamp.isoformat(),
             "media": list(message.media or []),
             "metadata": metadata,
         }
@@ -129,12 +130,16 @@ def pending_followups(session: Session) -> list[InboundMessage]:
             if isinstance(media_value, list)
             else []
         )
+        timestamp = record.get("timestamp")
+        # Older journals did not retain admission time; retain their existing recovery policy.
+        received_at = datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else datetime.now()
         messages.append(
             InboundMessage(
                 channel="websocket",
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=content,
+                timestamp=received_at,
                 media=media,
                 metadata={**cast(dict[str, Any], metadata), PENDING_FOLLOWUP_ID_KEY: followup_id},
                 session_key_override=session.key,

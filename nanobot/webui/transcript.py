@@ -22,6 +22,7 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
+from nanobot.bus.events import INBOUND_META_TURN_ID
 from nanobot.config.paths import get_webui_dir
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
@@ -282,6 +283,7 @@ class TranscriptReplayStats:
     capped_by_bytes: bool = False
     capped_by_records: bool = False
     truncated_oversized_turn: bool = False
+    canonical_backfill_revision: str | None = None
 
 
 def _record_json_line(record: dict[str, Any]) -> str:
@@ -1534,6 +1536,8 @@ def _is_legacy_raw_subagent_result(message: dict[str, Any]) -> bool:
 def _session_user_event(
     session_key: str,
     message: dict[str, Any],
+    *,
+    canonical_position: int | None = None,
 ) -> dict[str, Any] | None:
     if message.get("role") != "user":
         return None
@@ -1549,7 +1553,7 @@ def _session_user_event(
     mcp_presets = message.get("mcp_presets")
     session_mentions = message.get("session_mentions")
     chat_id = session_key.split(":", 1)[1] if ":" in session_key else session_key
-    return build_user_transcript_event(
+    event = build_user_transcript_event(
         chat_id,
         text,
         media_paths=cast(list[Any], media) if isinstance(media, list) else None,
@@ -1559,6 +1563,28 @@ def _session_user_event(
             cast(list[Any], session_mentions) if isinstance(session_mentions, list) else None
         ),
     )
+    if event is None:
+        return None
+    timestamp = message.get("timestamp")
+    created_at_ms = None
+    if isinstance(timestamp, str):
+        try:
+            created_at_ms = _valid_created_at_ms(datetime.fromisoformat(timestamp).timestamp() * 1000)
+        except (ValueError, OverflowError, OSError):
+            pass
+    event["created_at_ms"] = created_at_ms if created_at_ms is not None else 0
+    provenance = normalize_session_message_ui_metadata(message.get("session_message"))
+    if provenance:
+        event["session_message"] = provenance
+    input_id = message.get(INBOUND_META_TURN_ID)
+    if isinstance(input_id, str) and _WEBUI_TURN_ID_RE.fullmatch(input_id):
+        event["turn_id"] = input_id
+        event["turn_phase"] = "user"
+        signature = hashlib.sha256(_user_recovery_signature(event).encode("utf-8")).hexdigest()[:16]
+        event[_WEBUI_REPLAY_IDENTITY_KEY] = f"input:{session_key}:{input_id}:{signature}"
+    elif canonical_position is not None:
+        event[_WEBUI_REPLAY_IDENTITY_KEY] = f"canonical:{session_key}:message:{canonical_position}"
+    return event
 
 
 def _assistant_text_signature(value: Any) -> str:
@@ -1617,11 +1643,11 @@ def _session_backfill_turns(
             )
         )
 
-    for message in session_messages:
+    for position, message in enumerate(session_messages):
         role = message.get("role")
         if role == "user":
             flush()
-            current_user = _session_user_event(session_key, message)
+            current_user = _session_user_event(session_key, message, canonical_position=position)
             assistant_records = []
             continue
         if role == "assistant" and current_user is not None:
@@ -1741,15 +1767,15 @@ def _transcript_turn_signature(records: list[dict[str, Any]]) -> tuple[str, ...]
 
 
 def _find_unique_session_turn(
-    session_turns: list[_SessionBackfillTurn],
-    signature: tuple[str, ...],
+    session_signatures: list[str],
+    signature: str,
     start: int,
 ) -> int | None:
     if not signature:
         return None
     found: int | None = None
-    for index in range(start, len(session_turns)):
-        if session_turns[index].assistant_signature != signature:
+    for index in range(start, len(session_signatures)):
+        if session_signatures[index] != signature:
             continue
         if found is not None:
             return None
@@ -1760,7 +1786,7 @@ def _find_unique_session_turn(
 def _user_recovery_signature(event: dict[str, Any]) -> str:
     fields = {
         key: event[key]
-        for key in ("text", "media_paths", "cli_apps", "mcp_presets", "session_mentions")
+        for key in ("text", "media_paths", "cli_apps", "mcp_presets", "session_mentions", "session_message")
         if key in event
     }
     return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1851,6 +1877,14 @@ def _recover_incomplete_turns(
     return recovered
 
 
+def _needs_user_event_backfill(lines: list[dict[str, Any]]) -> bool:
+    return any(
+        not any(record.get("event") == "user" for record in turn)
+        and _transcript_turn_signature(turn)
+        for turn in _split_transcript_turns(lines)
+    )
+
+
 def _with_backfilled_user(
     records: list[dict[str, Any]],
     user_event: dict[str, Any],
@@ -1859,33 +1893,6 @@ def _with_backfilled_user(
         if rec.get("event") in _TURN_DISPLAY_EVENTS:
             return [*records[:index], dict(user_event), *records[index:]]
     return records
-
-
-def _needs_user_event_backfill(lines: list[dict[str, Any]]) -> bool:
-    for turn in _split_transcript_turns(lines):
-        if any(record.get("event") == "user" for record in turn):
-            continue
-        if _transcript_turn_signature(turn):
-            return True
-    return False
-
-
-def _inject_missing_user_events(
-    lines: list[dict[str, Any]],
-    session_turns: list[_SessionBackfillTurn],
-) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    session_cursor = 0
-    for turn in _split_transcript_turns(lines):
-        has_user = any(rec.get("event") == "user" for rec in turn)
-        signature = _transcript_turn_signature(turn)
-        match_index = _find_unique_session_turn(session_turns, signature, session_cursor)
-        if match_index is None:
-            out.extend(turn)
-            continue
-        out.extend(turn if has_user else _with_backfilled_user(turn, session_turns[match_index][0]))
-        session_cursor = match_index + 1
-    return out
 
 
 def _format_tool_call_trace(call: Any) -> str | None:
@@ -2181,6 +2188,7 @@ def _client_projection_event(
             **common,
             "text": record.get("text") if isinstance(record.get("text"), str) else "",
             "starts_turn": True,
+            "input_id": _user_input_identity(record),
         }
         raw_paths = record.get("media_paths")
         paths = [
@@ -2534,20 +2542,35 @@ def build_webui_thread_response(
     )
     if not lines and active_turn_started_at is None:
         return None
-    needs_user_backfill = _needs_user_event_backfill(lines)
-    needs_incomplete_recovery = _needs_incomplete_turn_recovery(lines)
-    if (
-        session_messages is None
-        and session_messages_loader is not None
-        and (needs_user_backfill or needs_incomplete_recovery)
-    ):
-        session_messages = session_messages_loader()
-    if session_messages and (needs_user_backfill or needs_incomplete_recovery):
-        session_turns = _session_backfill_turns(session_key, session_messages)
-        if needs_user_backfill:
-            lines = _inject_missing_user_events(lines, session_turns)
-        if needs_incomplete_recovery:
-            lines = _recover_incomplete_turns(lines, session_turns)
+    view = None
+    if _needs_user_event_backfill(lines):
+        view = _build_prompt_view(
+            session_key, session_messages=session_messages,
+            session_messages_loader=session_messages_loader,
+        )
+        replay_stats.canonical_backfill_revision = view.canonical_revision
+        recovered_lines: list[dict[str, Any]] = []
+        selected_turns = _split_transcript_turns(lines)
+        for turn in selected_turns:
+            # Page selection assigns this absolute identity before any recovery.
+            ordinal = int(turn[0][_WEBUI_REPLAY_IDENTITY_KEY].split(":")[1])
+            user = view.backfilled_users.get(ordinal)
+            visible = [record for record in turn if _client_projection_event_id(record) not in view.suppressed_ids]
+            recovered_lines.extend(_with_backfilled_user(visible, user) if user is not None else visible)
+        first_ordinal = int(selected_turns[0][0][_WEBUI_REPLAY_IDENTITY_KEY].split(":")[1])
+        lines = recovered_lines
+        page["user_message_offset"] = sum(
+            (decode_transcript_cursor(prompt["cursor"]) or 0) < first_ordinal
+            for prompt in view.prompts
+        )
+    if _needs_incomplete_turn_recovery(lines):
+        session_turns = view.session_turns if view is not None else None
+        if session_turns is None:
+            if session_messages is None and session_messages_loader is not None:
+                session_messages = session_messages_loader()
+            session_turns = _session_backfill_turns(session_key, session_messages or [])
+            replay_stats.canonical_backfill_revision = _canonical_backfill_revision(session_turns)
+        lines = _recover_incomplete_turns(lines, session_turns)
     lines = _ensure_replay_identities(lines)
     payload: dict[str, Any] = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
@@ -2582,6 +2605,7 @@ def build_webui_thread_response(
 
 class PromptSummary(TypedDict):
     id: str
+    inputId: str
     preview: str
     answerPreview: str
     createdAt: int
@@ -2589,14 +2613,79 @@ class PromptSummary(TypedDict):
     turnId: str
 
 
+class _BackfillCandidate(NamedTuple):
+    ordinal: int
+    signature: str
+    answer_preview: str
+    turn_id: str
+    has_user: bool
+
+
+class _ChunkPromptView(NamedTuple):
+    prompts: tuple[PromptSummary, ...]
+    candidates: tuple[_BackfillCandidate, ...]
+
+
+class _PromptView(NamedTuple):
+    prompts: list[PromptSummary]
+    backfilled_users: dict[int, dict[str, Any]]
+    suppressed_ids: set[str]
+    session_turns: list[_SessionBackfillTurn] | None
+    canonical_revision: str | None
+
+
+def _assistant_signature_identity(signature: tuple[str, ...]) -> str:
+    if not signature:
+        return ""
+    return hashlib.sha256(json.dumps(signature, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _canonical_backfill_revision(turns: list[_SessionBackfillTurn]) -> str:
+    return hashlib.sha256(json.dumps(turns, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:32]
+
+
+def webui_display_revision(revision: str | None, canonical_revision: str | None) -> str | None:
+    """Bind recovered display validators to the canonical snapshot actually used."""
+    if revision is None or canonical_revision is None:
+        return revision
+    return hashlib.sha256(f"{revision}\0{canonical_revision}".encode("ascii")).hexdigest()[:32]
+
+
+def _user_input_identity(record: dict[str, Any]) -> str:
+    provenance = normalize_session_message_ui_metadata(record.get("session_message"))
+    turn_id = record.get("turn_id")
+    if provenance:
+        origin = f"session-message:{provenance['message_id']}"
+    elif isinstance(turn_id, str) and turn_id:
+        origin = f"input:{turn_id}"
+    else:
+        origin = str(record.get(_WEBUI_REPLAY_IDENTITY_KEY) or _client_projection_event_id(record))
+    # Identity is provenance plus matching fields, never text alone. Conflicting
+    # records with a reused id remain distinct rather than being silently repaired.
+    digest = hashlib.sha256(f"{origin}\0{_user_recovery_signature(record)}".encode("utf-8"))
+    return f"input-{digest.hexdigest()[:24]}"
+
+
+def _prompt_summary(record: dict[str, Any], ordinal: int, answer: str) -> PromptSummary:
+    return {
+        "id": _client_projection_event_id(record),
+        "inputId": _user_input_identity(record),
+        "preview": str(record.get("text") or "").strip()[:320],
+        "answerPreview": answer,
+        "createdAt": _valid_created_at_ms(record.get("created_at_ms")) or 0,
+        "cursor": _encode_page_cursor(ordinal),
+        "turnId": str(record.get("turn_id") or ""),
+    }
+
+
 @lru_cache(maxsize=64)
-def _chunk_prompt_summaries(path: Path, identity: tuple[int, int, int], start: int) -> tuple[PromptSummary, ...]:
-    # Stored records use compact JSON. A normal chunk already fits the page byte
-    # budget, so do not serialize all answer/tool bodies again just to count them.
+def _chunk_prompt_summaries(path: Path, identity: tuple[int, int, int], start: int) -> _ChunkPromptView:
+    # Cache only navigation/recovery inputs, not full answer, trace or tool bodies
+    # for ordinary complete turns. Page selection still reads bounded chunks.
     check_turn_bytes = identity[2] > _MAX_TRANSCRIPT_PAGE_BYTES
     result: list[PromptSummary] = []
-    turns = _split_transcript_turns(_read_transcript_file(path))
-    for ordinal, raw_turn in enumerate(turns, start):
+    candidates: list[_BackfillCandidate] = []
+    for ordinal, raw_turn in enumerate(_split_transcript_turns(_read_transcript_file(path)), start):
         turn, _ = _compact_completed_stream_deltas(raw_turn)
         if len(turn) > _MAX_TRANSCRIPT_PAGE_RECORDS or (check_turn_bytes and _records_bytes(turn) > _MAX_TRANSCRIPT_PAGE_BYTES):
             turn = _trim_oversized_turn(
@@ -2604,23 +2693,16 @@ def _chunk_prompt_summaries(path: Path, identity: tuple[int, int, int], start: i
                 max_bytes=_MAX_TRANSCRIPT_PAGE_BYTES,
             )
         records = _records_with_replay_identity(turn, turn_ordinal=ordinal)
-        seen_turns: set[str] = set()
-        seen_messages: set[str] = set()
+        has_user = any(record.get("event") == "user" for record in records)
+        signature = _transcript_turn_signature(records)
+        turn_ids = {value for record in records if isinstance(value := record.get("turn_id"), str) and value}
+        candidates.append(_BackfillCandidate(
+            ordinal, _assistant_signature_identity(signature), signature[0][:240] if signature else "",
+            next(iter(turn_ids)) if len(turn_ids) == 1 else "", has_user,
+        ))
         for index, record in enumerate(records):
             if record.get("event") != "user":
                 continue
-            turn_id = str(record.get("turn_id") or "")
-            # Match the client projector's user-message deduplication.
-            provenance = normalize_session_message_ui_metadata(record.get("session_message"))
-            if provenance:
-                message_id = str(provenance["message_id"])
-                if message_id in seen_messages:
-                    continue
-                seen_messages.add(message_id)
-            elif turn_id and turn_id in seen_turns:
-                continue
-            if turn_id:
-                seen_turns.add(turn_id)
             answer = ""
             for following in records[index + 1:]:
                 if following.get("event") == "user":
@@ -2629,20 +2711,18 @@ def _chunk_prompt_summaries(path: Path, identity: tuple[int, int, int], start: i
                     answer = str(following.get("text") or "").strip()[:240]
                     if answer:
                         break
-            result.append({
-                "id": _client_projection_event_id(record),
-                "preview": str(record.get("text") or "").strip()[:320],
-                "answerPreview": answer,
-                "createdAt": _valid_created_at_ms(record.get("created_at_ms")) or 0,
-                "cursor": _encode_page_cursor(ordinal),
-                "turnId": turn_id,
-            })
-    return tuple(result)
+            result.append(_prompt_summary(record, ordinal, answer))
+    return _ChunkPromptView(tuple(result), tuple(candidates))
 
 
-def build_prompt_index(session_key: str) -> list[PromptSummary]:
-    """Read every prompt, without materializing full history or touching SQLite."""
-    result: list[PromptSummary] = []
+def _build_prompt_view(
+    session_key: str,
+    *,
+    session_messages: list[dict[str, Any]] | None = None,
+    session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
+) -> _PromptView:
+    raw_prompts: list[PromptSummary] = []
+    candidates: list[_BackfillCandidate] = []
     start = 0
     chunks = [
         (_segment_file_path(session_key, entry["id"]), entry["turn_count"])
@@ -2654,9 +2734,65 @@ def build_prompt_index(session_key: str) -> list[PromptSummary]:
             stat = path.stat()
         except FileNotFoundError:
             continue
-        result.extend(_chunk_prompt_summaries(path, (stat.st_ino, stat.st_mtime_ns, stat.st_size), start))
+        chunk = _chunk_prompt_summaries(path, (stat.st_ino, stat.st_mtime_ns, stat.st_size), start)
+        raw_prompts.extend(chunk.prompts)
+        candidates.extend(chunk.candidates)
         start += count
-    return result
+    session_turns = None
+    canonical_revision = None
+    if any(not candidate.has_user and candidate.signature for candidate in candidates):
+        if session_messages is None and session_messages_loader is not None:
+            session_messages = session_messages_loader()
+        session_turns = _session_backfill_turns(session_key, session_messages or [])
+        canonical_revision = _canonical_backfill_revision(session_turns)
+    entries: list[tuple[int, PromptSummary, dict[str, Any] | None]] = [
+        (decode_transcript_cursor(prompt["cursor"]) or 0, prompt, None) for prompt in raw_prompts
+    ]
+    recorded_by_input = {prompt["inputId"]: prompt for prompt in reversed(raw_prompts)}
+    session_cursor = 0
+    session_signatures = [_assistant_signature_identity(turn.assistant_signature) for turn in session_turns or []]
+    for candidate in candidates:
+        if not session_turns:
+            break
+        match = _find_unique_session_turn(session_signatures, candidate.signature, session_cursor)
+        if match is None:
+            continue
+        session_cursor = match + 1
+        if candidate.has_user:
+            continue
+        user = dict(session_turns[match].user_event)
+        summary = _prompt_summary(user, candidate.ordinal, candidate.answer_preview)
+        if not user.get("turn_id") and candidate.turn_id:
+            # Known historical replay reused the original admission id on its
+            # answer. Only an earlier recorded user with identical fields proves
+            # that provenance; an execution id alone says nothing about guidance.
+            known = recorded_by_input.get(_user_input_identity({**user, "turn_id": candidate.turn_id}))
+            if known and (decode_transcript_cursor(known["cursor"]) or 0) < candidate.ordinal:
+                summary["inputId"] = known["inputId"]
+        entries.append((candidate.ordinal, summary, user))
+    prompts: list[PromptSummary] = []
+    backfilled_users: dict[int, dict[str, Any]] = {}
+    suppressed_ids: set[str] = set()
+    seen: set[str] = set()
+    for ordinal, prompt, user in sorted(entries, key=lambda entry: entry[0]):
+        if prompt["inputId"] in seen:
+            if user is None:
+                suppressed_ids.add(prompt["id"])
+            continue
+        seen.add(prompt["inputId"])
+        prompts.append(prompt)
+        if user is not None:
+            backfilled_users[ordinal] = user
+    return _PromptView(prompts, backfilled_users, suppressed_ids, session_turns, canonical_revision)
+
+
+def build_prompt_index(
+    session_key: str,
+    *,
+    session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
+) -> list[PromptSummary]:
+    """Read the display prompt directory; only missing-user turns load canonical history."""
+    return _build_prompt_view(session_key, session_messages_loader=session_messages_loader).prompts
 
 
 # Short-lived response snapshots share the chunk summaries; they do not retain
@@ -2671,23 +2807,28 @@ class PromptIndexResponse(TypedDict):
     revision: NotRequired[str | None]
 
 
-def prompt_index_response(session_key: str, previous_revision: str | None) -> PromptIndexResponse:
+def prompt_index_response(
+    session_key: str,
+    previous_revision: str | None,
+    *,
+    session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
+) -> PromptIndexResponse:
     path = webui_transcript_path(session_key)
-    revision = webui_transcript_revision(session_key)
+    transcript_revision = webui_transcript_revision(session_key)
+    view = _build_prompt_view(session_key, session_messages_loader=session_messages_loader)
+    revision = webui_display_revision(transcript_revision, view.canonical_revision)
+    current = tuple(view.prompts)
     with _PROMPT_SNAPSHOT_LOCK:
         previous = _PROMPT_SNAPSHOTS.get((path, previous_revision)) if previous_revision else None
-        current = _PROMPT_SNAPSHOTS.get((path, revision)) if revision else None
-    if current is None:
-        current = tuple(build_prompt_index(session_key))
-        # Do not label a read made across an append/rotation as one stable revision.
-        if revision != webui_transcript_revision(session_key):
-            return {"prompts": current, "replaceFrom": 0}
-        if revision:
-            with _PROMPT_SNAPSHOT_LOCK:
-                _PROMPT_SNAPSHOTS[path, revision] = current
-                _PROMPT_SNAPSHOTS.move_to_end((path, revision))
-                while len(_PROMPT_SNAPSHOTS) > 8:
-                    _PROMPT_SNAPSHOTS.popitem(last=False)
+    # Do not label a read made across an append/rotation as one stable revision.
+    if transcript_revision != webui_transcript_revision(session_key):
+        return {"prompts": current, "replaceFrom": 0}
+    if revision:
+        with _PROMPT_SNAPSHOT_LOCK:
+            _PROMPT_SNAPSHOTS[path, revision] = current
+            _PROMPT_SNAPSHOTS.move_to_end((path, revision))
+            while len(_PROMPT_SNAPSHOTS) > 8:
+                _PROMPT_SNAPSHOTS.popitem(last=False)
     replace_from = 0
     if previous is not None:
         for old, new in zip(previous, current):

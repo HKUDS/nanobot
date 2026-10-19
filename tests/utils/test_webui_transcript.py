@@ -522,6 +522,32 @@ def test_latest_page_reads_active_chunk_once(tmp_path, monkeypatch) -> None:
     assert read_chunk_ids == ["active"]
 
 
+def test_cold_complete_page_does_not_parse_unselected_transcript_files(tmp_path, monkeypatch) -> None:
+    key = "websocket:cold-bounded-page"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "cold-bounded-page", 12)
+    original = transcript_module._read_transcript_file
+    reads: list[Path] = []
+
+    def track_read(path):
+        reads.append(path)
+        return original(path)
+
+    def fail_if_loaded():
+        raise AssertionError("complete pages must not load canonical history")
+
+    monkeypatch.setattr(transcript_module, "_read_transcript_file", track_read)
+    latest = build_webui_thread_response(key, limit=1, session_messages_loader=fail_if_loaded)
+
+    assert latest is not None
+    assert _message_contents(latest) == _numbered_turn_texts(12, 12)
+    assert reads == [transcript_module.webui_transcript_path(key)]
+    transcript_module.build_prompt_index(key, session_messages_loader=fail_if_loaded)
+    reads.clear()
+    warmed = build_webui_thread_response(key, limit=1, session_messages_loader=fail_if_loaded)
+    assert warmed == latest
+    assert reads == [transcript_module.webui_transcript_path(key)]
+
+
 def test_page_cursor_survives_active_rotation_after_latest_page(
     tmp_path,
     monkeypatch,

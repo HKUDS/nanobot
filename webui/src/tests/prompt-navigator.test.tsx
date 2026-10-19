@@ -50,3 +50,17 @@ it("lets users type into prompt search immediately after opening it", async () =
   expect(onJumpToPrompt).toHaveBeenCalledWith("two");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });
+
+
+it("keeps an unknown recovered time blank while the prompt remains navigable", async () => {
+  const user = userEvent.setup();
+  const onJumpToPrompt = vi.fn();
+  render(<PromptNavigator messages={[
+    { id: "undated", role: "user", content: "Undated recovered input", createdAt: 0 },
+  ]} onJumpToPrompt={onJumpToPrompt} />);
+  await user.click(screen.getByRole("button", { name: "Message navigation" }));
+  const prompt = screen.getByRole("button", { name: "Jump to message: Undated recovered input" });
+  expect(prompt.textContent).toBe("Undated recovered input");
+  await user.click(prompt);
+  expect(onJumpToPrompt).toHaveBeenCalledWith("undated");
+});
