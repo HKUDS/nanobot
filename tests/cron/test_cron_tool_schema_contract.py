@@ -21,7 +21,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 class _SvcStub:
     """Minimal CronService stand-in; we only exercise schema/dispatch paths."""
 
-    def list_jobs(self):
+    def list_jobs(self, include_disabled=False):
         return []
 
     def get_job(self, _job_id):
