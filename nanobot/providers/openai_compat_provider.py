@@ -1570,12 +1570,17 @@ class OpenAICompatProvider(LLMProvider):
             tc_id = _get(tc, "id")
             fn = _get(tc, "function")
             name = _get(fn, "name") if fn is not None else None
-            last = tc_bufs.get(last_unindexed) if last_unindexed is not None else None
-            if last is None or (tc_id and last["id"] and str(tc_id) != last["id"]) or (
-                name and not tc_id and last["name"]
+            key = last_unindexed
+            last = tc_bufs.get(key) if key is not None else None
+            if (
+                key is None
+                or last is None
+                or (tc_id and last["id"] and str(tc_id) != last["id"])
+                or (name and not tc_id and last["name"])
             ):
-                last_unindexed = max(tc_bufs, default=-1) + 1
-            return last_unindexed
+                key = max(tc_bufs, default=-1) + 1
+                last_unindexed = key
+            return key
 
         def _accum_tc(tc: Any) -> None:
             """Accumulate one streaming tool-call delta into *tc_bufs*."""
