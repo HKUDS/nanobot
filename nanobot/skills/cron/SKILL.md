@@ -47,6 +47,15 @@ cron(action="list")
 cron(action="remove", job_id="abc123")
 ```
 
+Pause and resume an existing task without deleting its schedule or run history:
+```
+cron(action="disable", job_id="abc123")
+cron(action="list", include_disabled=True)
+cron(action="enable", job_id="abc123")
+```
+
+Disabling a task stops future runs; it does not cancel a running task or recall a queued reply. System-managed jobs such as heartbeat and Dream are protected; change their configuration instead.
+
 ## Time Expressions
 
 | User says | Parameters |

@@ -62,6 +62,12 @@ Ask nanobot, "Move my daily report from 9am to 10am." The agent can use `cron(ac
 
 The task keeps its ID, linked chat, execution history, enabled state, and automatic-deletion setting. A paused task stays paused. Changing only the name or instruction preserves the next run time. Existing tasks configured to delete after a one-time run still do so; tasks configured to remain keep that behavior. System-managed tasks remain protected. Invalid updates leave the task unchanged.
 
+### Pause and Resume a Scheduled Task
+
+Ask nanobot to pause a scheduled task instead of removing it. The agent can use `cron(action="disable", job_id="...")`, then `cron(action="enable", job_id="...")` to resume it with the same ID, schedule, chat, and run history. Use `cron(action="list", include_disabled=True)` to find paused tasks; the default list still shows only enabled jobs.
+
+Disabling affects future runs. It does not cancel a running task or recall an already queued result. System-managed heartbeat and Dream jobs remain protected; change their configuration instead.
+
 ### Scheduled Result Delivery
 
 The gateway saves final scheduled messages before it accepts them into the outgoing queue. This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and saved chat history keep their existing behavior. External channels receive a complete scheduled reply instead of a streamed reply. Ordinary chat streaming is unchanged.
