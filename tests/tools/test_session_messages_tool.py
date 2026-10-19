@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.session_messages import (
     ListSessionsTool,
     SendSessionMessageTool,
@@ -90,6 +91,40 @@ async def test_list_sessions_includes_all_persisted_channels_except_current(
         result = json.loads(await tool.execute())
 
     assert set(result) == expected
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_pages_after_excluding_current(tmp_path: Path) -> None:
+    sessions = SessionManager(tmp_path)
+    keys = [f"websocket:chat-{index}" for index in range(5)]
+    _persist(sessions, *keys)
+    handles = SessionHandleResolver(sessions).list_all()
+    current = handles[1]
+    expected = [f"@{handle.name}" for handle in handles if handle != current]
+    registry = ToolRegistry()
+    registry.register(ListSessionsTool(sessions))
+
+    with request_context(RequestContext(
+        channel="websocket", chat_id="current", session_key=current.session_key,
+    )):
+        first = json.loads(await registry.execute("list_sessions", {"limit": 2}))
+        second = json.loads(await registry.execute("list_sessions", {"offset": 2, "limit": 2}))
+        remaining = json.loads(await registry.execute("list_sessions", {"offset": 2}))
+        end = json.loads(await registry.execute("list_sessions", {"offset": 4, "limit": 2}))
+
+    assert first == expected[:2]
+    assert second == remaining == expected[2:]
+    assert first + second == expected
+    assert end == []
+
+
+@pytest.mark.parametrize("params", [{"offset": -1}, {"limit": 0}])
+async def test_list_sessions_rejects_invalid_page(tmp_path: Path, params: dict[str, int]) -> None:
+    registry = ToolRegistry()
+    registry.register(ListSessionsTool(SessionManager(tmp_path)))
+    result = await registry.execute("list_sessions", params)
+    assert "Invalid parameters" in result
+    assert "must be >=" in result
 
 
 @pytest.mark.asyncio
