@@ -1286,6 +1286,7 @@ class WebSearchTool(Tool):
             "default": "markdown",
         },
         maxChars=IntegerSchema(description="Maximum output characters; defaults to 50000.", minimum=100),
+        offset=IntegerSchema(description="Start at this character offset in extracted text; use nextOffset to continue.", minimum=0),
         required=["url"],
     )
 )
@@ -1296,7 +1297,7 @@ class WebFetchTool(Tool):
     name = "web_fetch"  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
     description = (  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
         "Fetch a URL as readable markdown/text. "
-        "May fail on login-walled or JavaScript-heavy pages."
+        "Use offset to continue truncated text. May fail on login-walled or JavaScript-heavy pages."
     )
 
     config_key = "web"
@@ -1332,6 +1333,7 @@ class WebFetchTool(Tool):
         url: str,
         extract_mode: str = "markdown",
         max_chars: int | None = None,
+        offset: int = 0,
         **kwargs: Any,
     ) -> Any:  # pyright: ignore[reportIncompatibleMethodOverride]
         url = url.strip(" \t\r\n`\"'")
@@ -1386,12 +1388,12 @@ class WebFetchTool(Tool):
 
         result = None
         if self.config.use_jina_reader and jina_remote_safe:
-            result = await self._fetch_jina(url, max_chars)
+            result = await self._fetch_jina(url, max_chars, offset)
         if result is None:
-            result = await self._fetch_readability(url, extract_mode, max_chars)
+            result = await self._fetch_readability(url, extract_mode, max_chars, offset)
         return result
 
-    async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
+    async def _fetch_jina(self, url: str, max_chars: int, offset: int = 0) -> str | None:
         """Try fetching via Jina Reader API. Returns None on failure."""
         if _url_carries_credentials(url):
             logger.debug(
@@ -1423,14 +1425,16 @@ class WebFetchTool(Tool):
 
             if title:
                 text = f"# {title}\n\n{text}"
-            truncated = len(text) > max_chars
-            if truncated:
-                text = text[:max_chars]
+            total_length = len(text)
+            text = text[offset:offset + max_chars]
+            truncated = offset + len(text) < total_length
+            next_offset = offset + len(text) if truncated else None
             text = f"{_UNTRUSTED_BANNER}\n\n{text}"
 
             return json.dumps({
                 "url": url, "finalUrl": data.get("url", url), "status": r.status_code,
                 "extractor": "jina", "truncated": truncated, "length": len(text),
+                "offset": offset, "nextOffset": next_offset, "totalLength": total_length,
                 "untrusted": True, "text": text,
             }, ensure_ascii=False)
         except Exception as e:
@@ -1441,7 +1445,7 @@ class WebFetchTool(Tool):
             )
             return None
 
-    async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> Any:
+    async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int, offset: int = 0) -> Any:
         """Local fallback using readability-lxml."""
         try:
             async with httpx.AsyncClient(
@@ -1481,14 +1485,16 @@ class WebFetchTool(Tool):
             else:
                 text, extractor = r.text, "raw"
 
-            truncated = len(text) > max_chars
-            if truncated:
-                text = text[:max_chars]
+            total_length = len(text)
+            text = text[offset:offset + max_chars]
+            truncated = offset + len(text) < total_length
+            next_offset = offset + len(text) if truncated else None
             text = f"{_UNTRUSTED_BANNER}\n\n{text}"
 
             return json.dumps({
                 "url": url, "finalUrl": str(r.url), "status": r.status_code,
                 "extractor": extractor, "truncated": truncated, "length": len(text),
+                "offset": offset, "nextOffset": next_offset, "totalLength": total_length,
                 "untrusted": True, "text": text,
             }, ensure_ascii=False)
         except httpx.ProxyError as e:
