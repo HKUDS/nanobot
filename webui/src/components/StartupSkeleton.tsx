@@ -65,9 +65,27 @@ export function StartupSkeleton({
       </div>
       <div className="startup-content" aria-hidden="true">
         <div className="startup-chat">
-          <div className="startup-chat-header"><Block className="startup-nav-icon" /><Block className="startup-nav-label" /></div>
-          <div className="startup-messages"><Block /><Block /><Block /></div>
-          <div className="startup-composer"><Block className="startup-welcome" /><div className="startup-composer-surface"><Block /><Block /></div></div>
+          <div className="startup-chat-header">
+            <div className="startup-header-leading"><div className="startup-header-menu"><Block /></div><Block className="startup-header-title" /></div>
+            <div className="startup-header-actions"><div><Block /></div><div><Block /></div></div>
+          </div>
+          <div className="startup-chat-viewport">
+            <div className="startup-chat-layout">
+              <div className="startup-messages"><Block /><Block /><Block /></div>
+              <div className="startup-welcome"><div className="startup-welcome-line"><Block /></div></div>
+              <div className="startup-composer">
+                <div className="startup-composer-surface">
+                  <div className="startup-composer-input"><Block /></div>
+                  <div className="startup-composer-footer">
+                    <div className="startup-composer-primary"><Block className="startup-attach" /><Block className="startup-workspace" /><Block className="startup-access" /><Block className="startup-mobile-model" /></div>
+                    <div className="startup-composer-actions"><Block className="startup-model" /><Block className="startup-send" /></div>
+                  </div>
+                  <div className="startup-workspace-row"><Block /><Block /></div>
+                </div>
+              </div>
+              <div className="startup-chat-spacer" />
+            </div>
+          </div>
         </div>
         <div className="startup-scroll">
           <div className="startup-page">

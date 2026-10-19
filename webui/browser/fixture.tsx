@@ -19,6 +19,7 @@ import { initializeI18n } from "@/i18n";
 import type { McpPresetInfo, UIMessage } from "@/lib/types";
 import { SkeletonFixture } from "./skeleton-fixture";
 import { installSkeletonPreviewApi, SkeletonAdditionsFixture } from "./skeleton-additions-fixture";
+import { NewChatSkeletonFixture } from "./new-chat-skeleton-fixture";
 import "../src/globals.css";
 
 const history: UIMessage[] = [
@@ -141,7 +142,9 @@ function AppsFixture() {
 if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi();
 await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "skeleton-additions"
+  {parameters.get("case") === "new-chat-skeleton"
+    ? <ClientProvider client={railClient} token="fixture"><NewChatSkeletonFixture /></ClientProvider>
+    : parameters.get("case") === "skeleton-additions"
     ? <ClientProvider client={railClient} token="fixture"><SkeletonAdditionsFixture /></ClientProvider>
     : parameters.get("case") === "skeleton"
     ? <ClientProvider client={railClient} token="fixture"><SkeletonFixture surface={parameters.get("surface") ?? "skills"} loading={parameters.has("loading")} /></ClientProvider>
