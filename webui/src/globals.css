@@ -1487,11 +1487,13 @@
     transform-origin: center;
   }
   @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .icon-action [data-product-icon="settings"] {
+    .icon-action [data-product-icon="settings"] > path {
+      transform-box: view-box;
+      transform-origin: center;
       transform: rotate(0deg);
       transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
-    .icon-action:not(:disabled):hover [data-product-icon="settings"] {
+    .icon-action:not(:disabled):hover [data-product-icon="settings"] > path {
       transform: rotate(90deg);
     }
   }
