@@ -170,15 +170,20 @@ class SystemOneTransport:
         if not isinstance(detail, Mapping):
             return None
 
-        message = detail.get("message")
+        detail_mapping = cast(Mapping[object, object], detail)
+        message = detail_mapping.get("message")
         if not isinstance(message, str) or not message.strip():
             return None
-        error_type = detail.get("error_type")
+        error_type = detail_mapping.get("error_type")
         if not isinstance(error_type, str) or not error_type.strip():
-            error_type = detail.get("type")
+            error_type = detail_mapping.get("type")
         if not isinstance(error_type, str) or not error_type.strip():
-            metadata = detail.get("metadata")
-            error_type = metadata.get("error_type") if isinstance(metadata, Mapping) else None
+            metadata = detail_mapping.get("metadata")
+            if isinstance(metadata, Mapping):
+                metadata_mapping = cast(Mapping[object, object], metadata)
+                error_type = metadata_mapping.get("error_type")
+            else:
+                error_type = None
         if isinstance(error_type, str) and error_type.strip():
             return f"{error_type.strip()}: {message.strip()}"
         return message.strip()
@@ -191,15 +196,17 @@ class SystemOneTransport:
             return None
         if not isinstance(payload, Mapping):
             return None
+        payload_mapping = cast(Mapping[object, object], payload)
 
-        detail = cls._format_http_error_detail(payload.get("detail"))
+        detail = cls._format_http_error_detail(payload_mapping.get("detail"))
         if detail is not None:
             return detail
 
-        error = payload.get("error")
+        error = payload_mapping.get("error")
         if not isinstance(error, Mapping):
             return None
-        message = error.get("message")
+        error_mapping = cast(Mapping[object, object], error)
+        message = error_mapping.get("message")
         if isinstance(message, str):
             json_start = message.find("{")
             if json_start >= 0:
@@ -209,12 +216,13 @@ class SystemOneTransport:
                     pass
                 else:
                     if isinstance(nested_payload, Mapping):
+                        nested_mapping = cast(Mapping[object, object], nested_payload)
                         detail = cls._format_http_error_detail(
-                            nested_payload.get("detail")
+                            nested_mapping.get("detail")
                         )
                         if detail is not None:
                             return detail
-        return cls._format_http_error_detail(error)
+        return cls._format_http_error_detail(error_mapping)
 
     @staticmethod
     def _serialize_image_part(image: DecisionImage) -> dict[str, Any]:
