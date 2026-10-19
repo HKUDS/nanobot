@@ -214,9 +214,9 @@ export class NanobotClient {
   private runStatusHandlers = new Set<RunStatusHandler>();
   private runCompletionHandlers = new Set<RunCompletionHandler>();
   private errorHandlers = new Set<ErrorHandler>();
-  // chat_id -> handlers listening on it
   private chatHandlers = new Map<string, Set<EventHandler>>();
-  /** Inbound frames received while no subscriber is registered (e.g. user switched away). */
+  private transcriptHandlers = new Map<string, { handler: EventHandler }>();
+  /** Inbound frames received while the transcript owner is absent, regardless of observers. */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
   private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
@@ -460,7 +460,7 @@ export class NanobotClient {
     }
   }
 
-  /** Subscribe to events for a given chat_id. Auto-attaches on the next open. */
+  /** Observe live chat events without consuming transcript replay. Auto-attaches. */
   onChat(chatId: string, handler: EventHandler): Unsubscribe {
     let handlers = this.chatHandlers.get(chatId);
     if (!handlers) {
@@ -468,20 +468,30 @@ export class NanobotClient {
       this.chatHandlers.set(chatId, handlers);
     }
     handlers.add(handler);
-    const pending = this.pendingInboundByChat.get(chatId);
-    if (pending !== undefined && pending.length > 0) {
-      const flushed = pending.splice(0);
-      this.pendingInboundByChat.delete(chatId);
-      for (const ev of flushed) {
-        handler(ev);
-      }
-    }
     this.attach(chatId);
     return () => {
       const current = this.chatHandlers.get(chatId);
       if (!current) return;
       current.delete(handler);
       if (current.size === 0) this.chatHandlers.delete(chatId);
+    };
+  }
+
+  /** Own transcript delivery: consume the pending tail once, then receive live events. */
+  onTranscript(chatId: string, handler: EventHandler): Unsubscribe {
+    if (this.transcriptHandlers.has(chatId)) {
+      throw new Error(`Transcript already subscribed: ${chatId}`);
+    }
+    const subscription = { handler };
+    this.transcriptHandlers.set(chatId, subscription);
+    const pending = this.pendingInboundByChat.get(chatId);
+    this.pendingInboundByChat.delete(chatId);
+    for (const event of pending ?? []) handler(event);
+    this.attach(chatId);
+    return () => {
+      if (this.transcriptHandlers.get(chatId) === subscription) {
+        this.transcriptHandlers.delete(chatId);
+      }
     };
   }
 
@@ -1015,27 +1025,23 @@ export class NanobotClient {
   }
 
   private dispatch(chatId: string, ev: InboundEvent): void {
-    const handlers = this.chatHandlers.get(chatId);
-    if (handlers !== undefined && handlers.size > 0) {
-      for (const h of handlers) {
-        h(ev);
+    const transcript = this.transcriptHandlers.get(chatId);
+    if (transcript) {
+      transcript.handler(ev);
+    } else {
+      let pending = this.pendingInboundByChat.get(chatId);
+      if (!pending) {
+        pending = [];
+        this.pendingInboundByChat.set(chatId, pending);
       }
-      return;
+      pending.push(ev);
+      // Temporary chats have no canonical history to recover evicted events from.
+      if (!this.temporaryChatIds.has(chatId)) {
+        const over = pending.length - NanobotClient.PENDING_INBOUND_MAX;
+        if (over > 0) pending.splice(0, over);
+      }
     }
-    let q = this.pendingInboundByChat.get(chatId);
-    if (!q) {
-      q = [];
-      this.pendingInboundByChat.set(chatId, q);
-    }
-    q.push(ev);
-    // Temporary chats have no canonical history to recover evicted events from.
-    // Like their pinned message snapshots, retain them until resubscribe, close
-    // or disconnect. Disk-backed chats keep the bounded replay tail below.
-    if (this.temporaryChatIds.has(chatId)) return;
-    const over = q.length - NanobotClient.PENDING_INBOUND_MAX;
-    if (over > 0) {
-      q.splice(0, over);
-    }
+    for (const handler of this.chatHandlers.get(chatId) ?? []) handler(ev);
   }
 
   private handleClose(event?: { code?: number }): void {
@@ -1188,6 +1194,7 @@ export class NanobotClient {
     this.temporaryChatIds.delete(chatId);
     this.knownChats.delete(chatId);
     this.chatHandlers.delete(chatId);
+    this.transcriptHandlers.delete(chatId);
     this.pendingInboundByChat.delete(chatId);
     const effects = this.runs.transition({ kind: "forget", chatId });
     this.goalStateByChatId.delete(chatId);

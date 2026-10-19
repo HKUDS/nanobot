@@ -136,7 +136,7 @@ function fakeClient() {
       hasUnsettledRun(chatId: string) {
         return unsettledRunByChatId.get(chatId) === true;
       },
-      onChat(chatId: string, h: (ev: InboundEvent) => void) {
+      onTranscript(chatId: string, h: (ev: InboundEvent) => void) {
         let set = handlers.get(chatId);
         if (!set) {
           set = new Set();

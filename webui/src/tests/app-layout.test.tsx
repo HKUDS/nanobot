@@ -257,6 +257,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     onRuntimeModelUpdate = () => () => {};
     onError = () => () => {};
     onChat = () => () => {};
+    onTranscript = () => () => {};
     onSessionUpdate = (handler: (
       chatId: string,
       scope?: string,

@@ -47,6 +47,8 @@ Supporting hooks and display-model helpers stay near the feature that owns them.
 
 `NanobotClient` adapts WebSocket frames into observations for its `ClientRunLedger`. The ledger owns each chat's message delivery, run identities, clocks, and completion records, and returns effects for the client to apply to its queues and subscribers. A dropped connection makes unconfirmed delivery unknown while durable runs remain unresolved. Wire completion still permits late final messages; canonical completion records suppress matching top-level turn events. `useNanobotStream` owns message projection and render batching, while `ThreadShell` adopts canonical history and confirms completion after the messages commit.
 
+Chat delivery has two roles: `onChat` observes live events without consuming replay; `onTranscript` installs the single transcript owner for a chat, consumes its pending tail once, and receives subsequent live events. Frames remain queued whenever that owner is absent, even if task or model observers stay subscribed. The stream hook owns transcript delivery; task observers retain their HTTP hydration. Regular replay tails remain bounded at 2,000 frames, so this local compensation does not promise recovery of offline or evicted events; canonical history synchronization remains a separate boundary.
+
 ## Choose an existing component
 
 - Check the gallery and current callers before creating a control. Different labels, colors, or sizes usually call for an existing component's options. `Button` already has appearance and size variants; `Input` and `SearchInput` share the input implementation.

@@ -902,7 +902,7 @@ export function useNanobotStream(
       }
     };
 
-    const unsub = client.onChat(chatId, handle);
+    const unsub = client.onTranscript(chatId, handle);
     return () => {
       unsub();
       // Navigation may happen before the throttled paint. Snapshot the pending

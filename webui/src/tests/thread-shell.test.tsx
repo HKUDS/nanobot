@@ -159,6 +159,9 @@ function makeClient() {
       completedTurnIdsByChatId.set(chatId, fences);
     },
     getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
+    onTranscript(chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) {
+      return this.onChat(chatId, handler);
+    },
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
       if (!handlers) {
