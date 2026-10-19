@@ -1796,7 +1796,7 @@
         "guide": "立即傳送",
         "delete": "刪除訊息",
         "edit": "編輯訊息",
-        "drag": "拖曳排序"
+        "tooManyMentions": "每則訊息最多提及 {{max}} 個對話"
       },
       "attachImage": "附加檔案",
       "imageMode": {

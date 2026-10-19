@@ -1995,7 +1995,7 @@
         "guide": "立即发送",
         "delete": "删除消息",
         "edit": "编辑消息",
-        "drag": "拖动排序"
+        "tooManyMentions": "每条消息最多提及 {{max}} 个会话"
       },
       "attachImage": "添加文件",
       "imageMode": {

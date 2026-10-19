@@ -1996,7 +1996,7 @@
         "guide": "Send now",
         "delete": "Delete message",
         "edit": "Edit message",
-        "drag": "Drag to reorder"
+        "tooManyMentions": "A message can mention up to {{max}} chats"
       },
       "attachImage": "Attach files",
       "imageMode": {

@@ -1796,7 +1796,7 @@
         "guide": "今すぐ送信",
         "delete": "メッセージを削除",
         "edit": "メッセージを編集",
-        "drag": "ドラッグして並べ替え"
+        "tooManyMentions": "1つのメッセージでメンションできる会話は{{max}}件までです"
       },
       "attachImage": "ファイルを添付",
       "imageMode": {

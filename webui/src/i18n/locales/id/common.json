@@ -1796,7 +1796,7 @@
         "guide": "Kirim sekarang",
         "delete": "Hapus pesan",
         "edit": "Ubah pesan",
-        "drag": "Seret untuk mengurutkan"
+        "tooManyMentions": "Satu pesan dapat menyebut hingga {{max}} percakapan"
       },
       "attachImage": "Lampirkan file",
       "imageMode": {

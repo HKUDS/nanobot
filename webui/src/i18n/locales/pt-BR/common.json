@@ -1810,7 +1810,7 @@
         "guide": "Enviar agora",
         "delete": "Excluir mensagem",
         "edit": "Editar mensagem",
-        "drag": "Arraste para reordenar"
+        "tooManyMentions": "Uma mensagem pode mencionar até {{max}} conversas"
       },
       "attachImage": "Anexar imagem",
       "imageMode": {

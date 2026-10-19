@@ -1796,7 +1796,7 @@
         "guide": "지금 보내기",
         "delete": "메시지 삭제",
         "edit": "메시지 편집",
-        "drag": "드래그하여 순서 변경"
+        "tooManyMentions": "메시지 하나에서 최대 {{max}}개의 대화를 멘션할 수 있습니다"
       },
       "attachImage": "파일 첨부",
       "imageMode": {

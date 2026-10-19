@@ -1727,7 +1727,7 @@ describe("ThreadShell", () => {
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
   });
 
-  it.each([false, true])("drains persisted follow-ups before history refresh resolves (pending tools=%s)", async (pendingTools) => {
+  it.each([false, true])("sends the merged pending message before history refresh resolves (pending tools=%s)", async (pendingTools) => {
     const client = makeClient();
     const chatId = "queued-live-completion";
     const owner = "queued-owner";
@@ -1766,7 +1766,8 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(refreshStarted).toBe(true));
     try {
       act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: owner }));
-      await waitFor(() => expectSendMessageWithTurn(client, chatId, "first persisted follow-up"));
+      await waitFor(() => expectSendMessageWithTurn(client, chatId, "first persisted follow-up\nsecond persisted follow-up"));
+      expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
       const nextTurnId = client.sendMessage.mock.calls[0][3]!.turnId!;
       act(() => client._emitChat(chatId, {
@@ -1775,14 +1776,13 @@ describe("ThreadShell", () => {
       }));
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
       act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: nextTurnId }));
-      await waitFor(() => expectSendMessageWithTurn(client, chatId, "second persisted follow-up"));
-      expect(client.sendMessage).toHaveBeenCalledTimes(2);
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
     } finally {
       await act(async () => { finishRefresh(initialHistory as Response); });
     }
   });
 
-  it("drains temporary follow-ups once per live completed turn without persisted history", async () => {
+  it("sends the complete temporary pending message once without persisted history", async () => {
     const client = makeClient();
     const chatId = "temporary-queued-follow-ups";
     render(wrap(client, <ThreadShell
@@ -1803,9 +1803,9 @@ describe("ThreadShell", () => {
     act(() => client._emitChat(chatId, {
       event: "turn_end", chat_id: chatId, turn_id: "temporary-owner",
     }));
-    await waitFor(() => expectSendMessageWithTurn(client, chatId, "first temporary follow-up"));
+    await waitFor(() => expectSendMessageWithTurn(client, chatId, "first temporary follow-up\nsecond temporary follow-up"));
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("second temporary follow-up")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
     const nextTurnId = client.sendMessage.mock.calls[0][3]!.turnId!;
     act(() => client._emitChat(chatId, {
       event: "goal_status", chat_id: chatId, turn_id: nextTurnId,
@@ -1816,8 +1816,7 @@ describe("ThreadShell", () => {
     act(() => client._emitChat(chatId, {
       event: "turn_end", chat_id: chatId, turn_id: nextTurnId,
     }));
-    await waitFor(() => expectSendMessageWithTurn(client, chatId, "second temporary follow-up"));
-    expect(client.sendMessage).toHaveBeenCalledTimes(2);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/webui-thread"))).toBe(false);
     expect(window.localStorage.getItem(`nanobot.webui.composerQueuedGuidance.v1:${chatId}`)).toBeNull();

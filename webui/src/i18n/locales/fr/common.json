@@ -1796,7 +1796,7 @@
         "guide": "Envoyer",
         "delete": "Supprimer le message",
         "edit": "Modifier le message",
-        "drag": "Faire glisser pour réordonner"
+        "tooManyMentions": "Un message peut mentionner jusqu’à {{max}} conversations"
       },
       "attachImage": "Joindre des fichiers",
       "imageMode": {

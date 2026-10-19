@@ -3163,7 +3163,7 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("preserves waiting guidance when the send button submits a newer draft", () => {
+  it("includes waiting guidance when the send button submits a newer draft", () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} onStop={vi.fn()} isStreaming />);
     const input = screen.getByLabelText("Message input");
@@ -3172,10 +3172,9 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "send this now" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith("send this now", undefined, { continueActiveTurn: true });
-    expect(screen.getByText("waiting guidance")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
-    expect(onSend).toHaveBeenLastCalledWith("waiting guidance", undefined, { continueActiveTurn: true });
+    expect(onSend).toHaveBeenCalledWith("waiting guidance\nsend this now", undefined, { continueActiveTurn: true });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
   it("does not mark side-channel commands as guidance during an active turn", () => {
@@ -3402,7 +3401,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByText("leave this queued")).toBeInTheDocument();
   });
 
-  it("guides the newly queued prompt when older guidance is still waiting", () => {
+  it("merges consecutive queued inputs and interjects the whole message on a second Enter", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
@@ -3421,16 +3420,15 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledWith(
-      "guide this one now",
+      "older guidance\nguide this one now",
       undefined,
       { continueActiveTurn: true },
     );
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("older guidance")).toBeInTheDocument();
-    expect(screen.queryByText("guide this one now")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
-  it("keeps queued guidance attached to the composer and sends it one item at a time", async () => {
+  it("shows one pending message and sends all consecutive inputs once after completion", async () => {
     const onSend = vi.fn();
     const { rerender } = render(
       <ThreadComposer
@@ -3451,10 +3449,9 @@ describe("ThreadComposer", () => {
     expect(queue).toHaveClass("composer-status-strip");
     expect(queue).toHaveClass("mx-3");
     expect(queue.parentElement?.className).toContain("group/composer");
-    expect(within(queue).getByText("first follow-up")).toBeInTheDocument();
-    expect(within(queue).getByText("second follow-up")).toBeInTheDocument();
-    expect(within(queue).getAllByRole("button", { name: "Edit message" })).toHaveLength(2);
-    expect(within(queue).getAllByRole("button", { name: "Send now" })).toHaveLength(2);
+    expect(within(queue).getByText("first follow-up second follow-up")).toHaveTextContent("first follow-up second follow-up");
+    expect(within(queue).getAllByRole("button", { name: "Edit message" })).toHaveLength(1);
+    expect(within(queue).getAllByRole("button", { name: "Send now" })).toHaveLength(1);
 
     rerender(
       <ThreadComposer
@@ -3466,11 +3463,10 @@ describe("ThreadComposer", () => {
     );
 
     await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith("first follow-up");
+      expect(onSend).toHaveBeenCalledWith("first follow-up\nsecond follow-up");
     });
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("first follow-up")).not.toBeInTheDocument();
-    expect(screen.getByText("second follow-up")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
 
     rerender(
       <ThreadComposer
@@ -3489,10 +3485,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(onSend).toHaveBeenLastCalledWith("second follow-up");
-    });
-    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
@@ -3544,65 +3537,23 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("requeues edited guidance at the end of the pending list", async () => {
+  it("edits the complete pending message without overwriting a newer draft", () => {
     const onSend = vi.fn();
-    const { rerender } = render(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming
-        placeholder="Type your message..."
-      />,
-    );
-
+    const { rerender } = render(<ThreadComposer onSend={onSend} isStreaming />);
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "first follow-up" } });
+    for (const text of ["first follow-up", "second follow-up"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    fireEvent.change(input, { target: { value: "third follow-up" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    expect(input).toHaveValue("first follow-up\nsecond follow-up\nthird follow-up");
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "edited complete message" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.change(input, { target: { value: "second follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]);
-    await waitFor(() => {
-      expect(input).toHaveValue("first follow-up");
-    });
-    fireEvent.change(input, { target: { value: "first follow-up edited" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming={false}
-        placeholder="Type your message..."
-      />,
-    );
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith("second follow-up");
-    });
+    rerender(<ThreadComposer onSend={onSend} />);
     expect(onSend).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming
-        placeholder="Type your message..."
-      />,
-    );
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming={false}
-        placeholder="Type your message..."
-      />,
-    );
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenLastCalledWith("first follow-up edited");
-    });
-    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenCalledWith("edited complete message");
   });
 
   it("queues image guidance while running and restores it for editing", async () => {
@@ -3660,98 +3611,19 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("reorders queued guidance while dragging over another row", async () => {
+  it("deletes the complete pending message across remounts", () => {
     const onSend = vi.fn();
-    const { rerender } = render(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming
-        placeholder="Type your message..."
-      />,
-    );
-
+    const first = render(<ThreadComposer onSend={onSend} isStreaming pendingQueueKey="chat-a" />);
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "first follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.change(input, { target: { value: "second follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    const handles = screen.getAllByLabelText("Drag to reorder");
-    const secondRow = screen
-      .getByText("second follow-up")
-      .closest("[data-queued-prompt-row='true']");
-    expect(secondRow).toBeTruthy();
-
-    const dataTransfer = {
-      effectAllowed: "",
-      dropEffect: "",
-      setData: vi.fn(),
-      getData: vi.fn(),
-    };
-    fireEvent.dragStart(handles[0], { dataTransfer });
-    fireEvent.dragEnter(secondRow!, { dataTransfer });
-    fireEvent.dragEnd(handles[0], { dataTransfer });
-
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming={false}
-        placeholder="Type your message..."
-      />,
-    );
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith("second follow-up");
-    });
-  });
-
-  it("moves later queued guidance before an earlier item while dragging", async () => {
-    const onSend = vi.fn();
-    const { rerender } = render(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming
-        placeholder="Type your message..."
-      />,
-    );
-
-    const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "first follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.change(input, { target: { value: "second follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    const handles = screen.getAllByLabelText("Drag to reorder");
-    const firstRow = screen
-      .getByText("first follow-up")
-      .closest("[data-queued-prompt-row='true']");
-    expect(firstRow).toBeTruthy();
-
-    const dataTransfer = {
-      effectAllowed: "",
-      dropEffect: "",
-      setData: vi.fn(),
-      getData: vi.fn(),
-    };
-    fireEvent.dragStart(handles[1], { dataTransfer });
-    fireEvent.dragEnter(firstRow!, { dataTransfer });
-    fireEvent.dragEnd(handles[1], { dataTransfer });
-
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming={false}
-        placeholder="Type your message..."
-      />,
-    );
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith("second follow-up");
-    });
+    for (const text of ["1", "2"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
+    first.unmount();
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" />);
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("keeps queued guidance in its session when switching from running to idle", () => {
@@ -3887,13 +3759,13 @@ describe("ThreadComposer", () => {
       <ThreadComposer onSend={otherSend} pendingQueueKey="chat-b" completedTurnIds={["turn-a"]} />,
     );
     expect(otherSend).not.toHaveBeenCalled();
-    expect(screen.queryByText("first follow-up")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
     other.unmount();
 
     const returned = render(
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={[]} />,
     );
-    expect(screen.getByText("first follow-up")).toBeInTheDocument();
+    expect(screen.getByText("first follow-up second follow-up")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     returned.rerender(
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-other"]} />,
@@ -3902,15 +3774,16 @@ describe("ThreadComposer", () => {
     returned.rerender(
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
     );
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("first follow-up"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("first follow-up\nsecond follow-up"));
     for (let update = 0; update < 3; update += 1) {
       returned.rerender(
         <ThreadComposer onSend={(...args) => onSend(...args)} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
       );
     }
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("second follow-up")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send now" })).toBeDisabled();
     await act(async () => { acceptDelivery(true); await delivery; });
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
     returned.rerender(
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-next" completedTurnIds={["turn-a"]} />,
     );
@@ -3922,8 +3795,7 @@ describe("ThreadComposer", () => {
     render(
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-next"]} />,
     );
-    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("second follow-up"));
-    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
@@ -3958,7 +3830,7 @@ describe("ThreadComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("keep for later", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("keep for later");
   });
 
   it("retains a rejected queued attachment for manual retry after remounting", async () => {
@@ -3973,25 +3845,28 @@ describe("ThreadComposer", () => {
       target: { files: [new File(["image"], "queued.png", { type: "image/png" })] },
     });
     await screen.findByText("queued.png");
-    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "queued attachment" } });
-    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    for (const text of ["queued attachment", "more guidance"]) {
+      fireEvent.change(screen.getByLabelText("Message input"), { target: { value: text } });
+      fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    }
     first.unmount();
     const returned = render(
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
     );
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     await act(async () => { rejectDelivery(new Error("Attachment upload interrupted")); });
-    expect(screen.getByText("queued attachment")).toBeInTheDocument();
+    expect(screen.getByText("queued attachment more guidance")).toBeInTheDocument();
     expect(onSend).toHaveBeenCalledTimes(1);
     returned.unmount();
     render(
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
     );
-    expect(screen.getByText("queued attachment")).toBeInTheDocument();
+    expect(screen.getByText("queued attachment more guidance")).toBeInTheDocument();
     expect(onSend).toHaveBeenCalledTimes(1);
     onSend.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend.mock.calls[1][0]).toBe("queued attachment\nmore guidance");
     expect(onSend.mock.calls[1][1]).toEqual([expect.objectContaining({ media: expect.objectContaining({ name: "queued.png" }) })]);
   });
 
@@ -4004,7 +3879,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByText("legacy follow-up")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
-    expect(onSend).toHaveBeenCalledWith("legacy follow-up", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("legacy follow-up");
   });
 
   it("keeps temporary chat guidance in memory only", async () => {

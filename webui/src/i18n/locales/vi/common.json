@@ -1796,7 +1796,7 @@
         "guide": "Gửi ngay",
         "delete": "Xóa tin nhắn",
         "edit": "Sửa tin nhắn",
-        "drag": "Kéo để sắp xếp"
+        "tooManyMentions": "Mỗi tin nhắn có thể nhắc đến tối đa {{max}} cuộc trò chuyện"
       },
       "attachImage": "Đính kèm tệp",
       "imageMode": {

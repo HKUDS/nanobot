@@ -1797,7 +1797,7 @@
         "guide": "Enviar ahora",
         "delete": "Eliminar mensaje",
         "edit": "Editar mensaje",
-        "drag": "Arrastrar para reordenar"
+        "tooManyMentions": "Un mensaje puede mencionar hasta {{max}} conversaciones"
       },
       "attachImage": "Adjuntar archivos",
       "imageMode": {

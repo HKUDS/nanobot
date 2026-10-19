@@ -32,6 +32,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type Ref,
@@ -52,7 +53,6 @@ import {
   ChevronUp,
   CornerDownRight,
   FileText,
-  GripVertical,
   ImageIcon,
   Loader2,
   Quote,
@@ -91,6 +91,8 @@ import {
 import {
   ACCEPT_ATTR,
   MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_ATTACHMENT_BYTES,
+  MAX_TOTAL_ATTACHMENT_BYTES,
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
@@ -299,7 +301,6 @@ const SLASH_RECENTS_LIMIT = 5;
 const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
 const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
 const QUEUED_PROMPTS_LIMIT = 20;
-const QUEUED_PROMPT_MAX_CHARS = 4000;
 const SESSION_MENTIONS_LIMIT = 8;
 
 function VoiceRecordingMeter({
@@ -362,8 +363,29 @@ function pauseQueuedPrompt(prompt: QueuedPrompt): QueuedPrompt {
   return { ...prompt, autoAfterTurnId: undefined, autoPaused: true };
 }
 
-function waitForNextQueuedTurn(prompt: QueuedPrompt): QueuedPrompt {
-  return { ...prompt, autoAfterTurnId: undefined, autoPaused: false };
+function mergeQueuedPrompt(first: QueuedPrompt, next: QueuedPrompt): QueuedPrompt {
+  const prompts = [first, next];
+  const mentions = new Map<string, SessionMention>();
+  for (const prompt of prompts) {
+    for (const mention of prompt.sessionMentions ?? []) {
+      if (!mentions.has(mention.session_key)) mentions.set(mention.session_key, mention);
+    }
+  }
+  return {
+    id: first.id,
+    text: prompts.map((prompt) => prompt.text).filter(Boolean).join("\n"),
+    images: prompts.flatMap((prompt) => prompt.images ?? []),
+    quotedContext: [...new Set(prompts.map((prompt) => prompt.quotedContext).filter(Boolean))].join("\n\n"),
+    sessionMentions: [...mentions.values()],
+    autoAfterTurnId: first.autoAfterTurnId,
+    autoPaused: prompts.some((prompt) => prompt.autoPaused),
+  };
+}
+
+function queuedAttachmentBytes(image: QueuedPromptImage): number {
+  const base64 = image.dataUrl.slice(image.dataUrl.indexOf(",") + 1);
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor(base64.length * 3 / 4) - padding;
 }
 
 interface QueuedPromptImage {
@@ -508,14 +530,14 @@ function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
       session_key: sessionKey,
       title: candidate.title?.trim().slice(0, 160) ?? "",
     }];
-  }).slice(0, SESSION_MENTIONS_LIMIT);
+  });
 }
 
 function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | null {
   if (!item || typeof item !== "object") return null;
   const record = item as Partial<QueuedPrompt>;
   if (typeof record.text !== "string") return null;
-  const text = record.text.trim().slice(0, QUEUED_PROMPT_MAX_CHARS);
+  const text = record.text.trim();
   const images = Array.isArray(record.images)
     ? record.images.flatMap((image) => {
         if (!image || typeof image !== "object") return [];
@@ -535,10 +557,10 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
             ? { name: candidate.name.trim() }
             : {}),
         }];
-      }).slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
+      })
     : [];
   const quotedContext = typeof record.quotedContext === "string"
-    ? record.quotedContext.trim().slice(0, QUEUED_PROMPT_MAX_CHARS)
+    ? record.quotedContext.trim()
     : "";
   const sessionMentions = normalizeQueuedSessionMentions(record.sessionMentions);
   if (!text && images.length === 0) return null;
@@ -558,47 +580,113 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
   };
 }
 
-function readQueuedPrompts(storageKey: string): QueuedPrompt[] {
-  if (typeof window === "undefined") return [];
+function readQueuedPrompt(storageKey: string): QueuedPrompt | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(storageKey);
     const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed
+    if (!Array.isArray(parsed)) return null;
+    return parsed.slice(0, QUEUED_PROMPTS_LIMIT)
       .map((item, index) => normalizeQueuedPrompt(item, index))
       .filter((item): item is QueuedPrompt => item != null)
-      .slice(0, QUEUED_PROMPTS_LIMIT);
+      .reduce<QueuedPrompt | null>((pending, prompt) => (
+        pending ? mergeQueuedPrompt(pending, prompt) : prompt
+      ), null);
   } catch {
-    return [];
+    return null;
   }
 }
 
-function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
+function storeQueuedPrompt(storageKey: string, prompt: QueuedPrompt | null): void {
   if (typeof window === "undefined") return;
   try {
-    if (prompts.length === 0) {
+    if (!prompt) {
       window.localStorage.removeItem(storageKey);
       return;
     }
-    window.localStorage.setItem(
-      storageKey,
-      JSON.stringify(
-        prompts.slice(0, QUEUED_PROMPTS_LIMIT).map((prompt) => ({
-          id: prompt.id,
-          text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
-          ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_ATTACHMENTS_PER_MESSAGE) } : {}),
-          ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-          ...(prompt.sessionMentions?.length
-            ? { sessionMentions: prompt.sessionMentions.slice(0, SESSION_MENTIONS_LIMIT) }
-            : {}),
-          ...(prompt.autoAfterTurnId ? { autoAfterTurnId: prompt.autoAfterTurnId } : {}),
-          ...(prompt.autoPaused ? { autoPaused: true } : {}),
-        })),
-      ),
-    );
+    // Retain the v1 array shape so existing queued drafts remain readable.
+    window.localStorage.setItem(storageKey, JSON.stringify([prompt]));
   } catch {
-    // localStorage persistence is a convenience; the in-memory queue still works.
+    // localStorage persistence is a convenience; the in-memory draft still works.
   }
+}
+
+interface QueuedPromptSnapshot {
+  prompt: QueuedPrompt | null;
+  sending: boolean;
+  error: string | null;
+}
+
+// Delivery can outlive the composer during attachment upload or topic navigation.
+// Keep one owner per mounted/sending topic; idle, unmounted owners are reloaded from storage.
+const queuedPromptStores = new Map<string, QueuedPromptStore>();
+
+class QueuedPromptStore {
+  private snapshot: QueuedPromptSnapshot;
+  private listeners = new Set<() => void>();
+
+  constructor(private storageKey: string | null) {
+    this.snapshot = { prompt: storageKey ? readQueuedPrompt(storageKey) : null, sending: false, error: null };
+  }
+
+  getSnapshot = () => this.snapshot;
+
+  subscribe = (listener: () => void) => {
+    if (this.storageKey) queuedPromptStores.set(this.storageKey, this);
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+      this.release();
+    };
+  };
+
+  private release() {
+    if (this.storageKey && !this.snapshot.sending && this.listeners.size === 0
+      && queuedPromptStores.get(this.storageKey) === this) queuedPromptStores.delete(this.storageKey);
+  }
+
+  private publish(next: QueuedPromptSnapshot) {
+    if (this.storageKey && next.prompt !== this.snapshot.prompt) storeQueuedPrompt(this.storageKey, next.prompt);
+    this.snapshot = next;
+    for (const listener of this.listeners) listener();
+    this.release();
+  }
+
+  set = (next: QueuedPrompt | null | ((current: QueuedPrompt | null) => QueuedPrompt | null)) => {
+    const prompt = typeof next === "function" ? next(this.snapshot.prompt) : next;
+    if (prompt !== this.snapshot.prompt) this.publish({ ...this.snapshot, prompt, error: null });
+  };
+
+  send(prompt: QueuedPrompt, send: () => void | boolean | Promise<void | boolean>) {
+    if (this.snapshot.sending) return;
+    const retained = pauseQueuedPrompt(prompt);
+    this.publish({ prompt: retained, sending: true, error: null });
+    const finish = (accepted: void | boolean, error?: unknown) => {
+      const failed = accepted === false || error !== undefined;
+      this.publish({
+        prompt: failed ? retained : null,
+        sending: false,
+        error: failed ? error instanceof Error ? error.message : "Message not sent; queued draft retained" : null,
+      });
+    };
+    try {
+      const result = send();
+      if (result instanceof Promise) void result.then((accepted) => finish(accepted), (error: unknown) => finish(false, error));
+      else finish(result);
+    } catch (error) {
+      finish(false, error);
+    }
+  }
+}
+
+function queuedPromptStoreFor(storageKey: string | null): QueuedPromptStore {
+  if (!storageKey) return new QueuedPromptStore(null);
+  let store = queuedPromptStores.get(storageKey);
+  if (!store) {
+    store = new QueuedPromptStore(storageKey);
+    queuedPromptStores.set(storageKey, store);
+  }
+  return store;
 }
 
 function readyImagesToQueuedImages(
@@ -630,27 +718,6 @@ function queuedPromptLabel(prompt: QueuedPrompt): string {
   const text = prompt.text.trim();
   if (text) return text;
   return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "File attachment";
-}
-
-function suppressNativeDragPreview(dataTransfer: DataTransfer): void {
-  if (typeof document === "undefined" || typeof dataTransfer.setDragImage !== "function") {
-    return;
-  }
-  const ghost = document.createElement("div");
-  ghost.style.position = "fixed";
-  ghost.style.left = "-9999px";
-  ghost.style.top = "-9999px";
-  ghost.style.width = "1px";
-  ghost.style.height = "1px";
-  ghost.style.opacity = "0";
-  document.body.appendChild(ghost);
-  try {
-    dataTransfer.setDragImage(ghost, 0, 0);
-  } catch {
-    ghost.remove();
-    return;
-  }
-  window.setTimeout(() => ghost.remove(), 0);
 }
 
 function visualViewportBounds(): { top: number; bottom: number; height: number } {
@@ -1023,7 +1090,15 @@ export function ThreadComposer({
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [sendPending, setSendPending] = useState(false);
   const [modelSetupAttentionRequest, setModelSetupAttentionRequest] = useState(0);
-  const interactionDisabled = !!disabled || sendPending;
+  const queuedPromptStorageKey = queuedPromptsStorageKey(pendingQueueKey);
+  const queuedPromptStore = useMemo(() => queuedPromptStoreFor(queuedPromptStorageKey), [queuedPromptStorageKey]);
+  const queueSnapshot = useSyncExternalStore(queuedPromptStore.subscribe, queuedPromptStore.getSnapshot);
+  const queuedPrompt = queueSnapshot.prompt;
+  const setQueuedPrompt = queuedPromptStore.set;
+  const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
+  useEffect(() => {
+    if (queueSnapshot.error) setInlineError(queueSnapshot.error);
+  }, [queueSnapshot.error]);
   const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -1031,7 +1106,6 @@ export function ThreadComposer({
   const [selectedCliAppIndex, setSelectedCliAppIndex] = useState(0);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
-  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
   // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
   // keyboard still get the newline-on-Enter behavior.
@@ -1068,20 +1142,14 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
-  // Only the prompt queued by the immediately preceding Enter can use the second-Enter shortcut.
+  // A fresh queue submission arms Enter for the complete pending message.
   const secondEnterPromptIdRef = useRef<string | null>(null);
-  const draggedQueuedPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
-  const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
   const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHero = variant === "hero";
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
-  const queuedPromptStorageKey = useMemo(
-    () => queuedPromptsStorageKey(pendingQueueKey),
-    [pendingQueueKey],
-  );
   const projectPickerAvailable =
     isHero
     && !!workspaceDefaultScope
@@ -1095,32 +1163,16 @@ export function ThreadComposer({
 
   useEffect(() => {
     secondEnterPromptIdRef.current = null;
-    skipQueuedPromptPersistRef.current = true;
-    setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
   }, [pendingQueueKey, queuedPromptStorageKey]);
 
   useEffect(() => {
     if (!isStreaming || !activeTurnId) return;
-    // The next lifecycle owner, not a guidance input, releases the remaining queue.
-    setQueuedPrompts((items) => {
-      let changed = false;
-      const next = items.map((item) => {
-        if (item.autoPaused || item.autoAfterTurnId === activeTurnId) return item;
-        changed = true;
-        return { ...item, autoAfterTurnId: activeTurnId };
-      });
-      return changed ? next : items;
-    });
-  }, [activeTurnId, isStreaming, pendingQueueKey]);
-
-  useEffect(() => {
-    if (!queuedPromptStorageKey) return;
-    if (skipQueuedPromptPersistRef.current) {
-      skipQueuedPromptPersistRef.current = false;
-      return;
-    }
-    storeQueuedPrompts(queuedPromptStorageKey, queuedPrompts);
-  }, [queuedPromptStorageKey, queuedPrompts]);
+    setQueuedPrompt((prompt) => (
+      !prompt || prompt.autoPaused || prompt.autoAfterTurnId === activeTurnId
+        ? prompt
+        : { ...prompt, autoAfterTurnId: activeTurnId }
+    ));
+  }, [activeTurnId, isStreaming, pendingQueueKey, setQueuedPrompt]);
 
   const resolvedPlaceholder = isStreaming
     ? t("thread.composer.placeholderStreaming")
@@ -1136,7 +1188,7 @@ export function ThreadComposer({
   useLayoutEffect(() => {
     if (restoredDraftAttachments.current) return;
     restoredDraftAttachments.current = true;
-    if (initialDraft?.files.length) enqueue(initialDraft.files);
+    if (initialDraft?.files.length) enqueue(initialDraft.files, { restoringDraft: true });
     setDraftAttachmentsReady(true);
   }, [enqueue, initialDraft]);
 
@@ -1208,7 +1260,7 @@ export function ThreadComposer({
     return () => cancelAnimationFrame(id);
   }, [focusRequest, interactionDisabled]);
 
-  const normalizedQuotedContext = quotedContext?.trim().slice(0, QUEUED_PROMPT_MAX_CHARS) || null;
+  const normalizedQuotedContext = quotedContext?.trim() || null;
 
   const readyImages = useMemo(
     () => images.filter((img): img is AttachedImage & { dataUrl: string } =>
@@ -1468,7 +1520,7 @@ export function ThreadComposer({
       if (segment.kind !== "session" || seen.has(segment.mention.session_key)) return [];
       seen.add(segment.mention.session_key);
       return [segment.mention];
-    }).slice(0, SESSION_MENTIONS_LIMIT);
+    });
   }, [mentionSegments]);
   const filteredMentionCandidates = useMemo<MentionCandidate[]>(() => {
     if (!cliAppMention) return [];
@@ -1787,11 +1839,9 @@ export function ThreadComposer({
 
   const handleStop = useCallback(() => {
     secondEnterPromptIdRef.current = null;
-    if (queuedPrompts.length > 0) {
-      setQueuedPrompts((items) => items.map(pauseQueuedPrompt));
-    }
+    setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
     onStop?.();
-  }, [onStop, queuedPrompts.length]);
+  }, [onStop, setQueuedPrompt]);
 
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
@@ -1948,56 +1998,63 @@ export function ThreadComposer({
     resizeTextarea(restoreFocus);
   }, [resizeTextarea]);
 
+  const queuedPromptError = useCallback((prompt: QueuedPrompt): string | null => {
+    if (utf8Bytes(formatQuotedUserMessage(prompt.text, prompt.quotedContext)) > maxTextBytes) {
+      return textTooLargeMessage();
+    }
+    const attachments = prompt.images ?? [];
+    if (attachments.length > maxAttachments) return formatRejection("too_many_attachments");
+    const sizes = attachments.map(queuedAttachmentBytes);
+    if (sizes.some((size) => size > (ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES))) {
+      return formatRejection("too_large");
+    }
+    if (sizes.reduce((sum, size) => sum + size, 0) > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
+      return formatRejection("total_too_large");
+    }
+    if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
+      return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
+    }
+    return null;
+  }, [formatRejection, ingressLimits, maxAttachments, maxTextBytes, t, textTooLargeMessage]);
+
+  const collectGuidancePrompt = useCallback((): QueuedPrompt => {
+    queuedPromptCounterRef.current += 1;
+    const prompt: QueuedPrompt = {
+      id: `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`,
+      text: value.trim(),
+      images: readyImagesToQueuedImages(readyImages),
+      ...(activeTurnId ? { autoAfterTurnId: activeTurnId } : {}),
+      ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
+      sessionMentions: activeSessionMentions,
+    };
+    return queuedPrompt ? mergeQueuedPrompt(queuedPrompt, prompt) : prompt;
+  }, [activeSessionMentions, activeTurnId, normalizedQuotedContext, queuedPrompt, readyImages, value]);
+
   const queueGuidancePrompt = useCallback(() => {
-    const text = value.trim();
-    if (!canQueueGuidance || (!text && readyImages.length === 0)) return;
-    if (utf8Bytes(formatQuotedUserMessage(text, normalizedQuotedContext)) > maxTextBytes) {
-      setInlineError(textTooLargeMessage());
+    if (!canQueueGuidance) return;
+    const prompt = collectGuidancePrompt();
+    const error = queuedPromptError(prompt);
+    if (error) {
+      setInlineError(error);
       return;
     }
-    const queuedImages = readyImagesToQueuedImages(readyImages);
-    queuedPromptCounterRef.current += 1;
-    const id = `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`;
-    secondEnterPromptIdRef.current = id;
-    setQueuedPrompts((items) => [
-      ...items,
-      {
-        id,
-        text,
-        ...(activeTurnId ? { autoAfterTurnId: activeTurnId } : {}),
-        ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
-        ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
-        ...(activeSessionMentions.length > 0
-          ? { sessionMentions: activeSessionMentions }
-          : {}),
-      },
-    ]);
+    secondEnterPromptIdRef.current = prompt.id;
+    setQueuedPrompt(prompt);
     clear();
     clearComposerText();
     onQuotedContextChange?.(null);
-  }, [
-    activeSessionMentions,
-    activeTurnId,
-    canQueueGuidance,
-    clear,
-    clearComposerText,
-    maxTextBytes,
-    normalizedQuotedContext,
-    onQuotedContextChange,
-    readyImages,
-    textTooLargeMessage,
-    value,
-  ]);
+  }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, queuedPromptError, setQueuedPrompt]);
 
-  const removeQueuedPrompt = useCallback((id: string) => {
+  const removeQueuedPrompt = useCallback(() => {
     secondEnterPromptIdRef.current = null;
-    setQueuedPrompts((items) => items.filter((item) => item.id !== id));
+    setQueuedPrompt(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, []);
+  }, [setQueuedPrompt]);
 
-  const editQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
+  const editQueuedPrompt = useCallback((pending: QueuedPrompt) => {
+    const prompt = hasComposerContent || normalizedQuotedContext ? collectGuidancePrompt() : pending;
     secondEnterPromptIdRef.current = null;
-    setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
+    setQueuedPrompt(null);
     replaceMentionInput(prompt.text, prompt.text.length);
     setSelectedSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
@@ -2010,89 +2067,39 @@ export function ThreadComposer({
       clear();
     }
     resizeTextarea();
-  }, [clear, onQuotedContextChange, replaceMentionInput, resizeTextarea, restoreReadyImages]);
-
-  const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
-    if (dragId === targetId) return;
-    secondEnterPromptIdRef.current = null;
-    setQueuedPrompts((items) => {
-      const from = items.findIndex((item) => item.id === dragId);
-      const to = items.findIndex((item) => item.id === targetId);
-      if (from === -1 || to === -1) return items;
-      const next = [...items];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }, []);
-
-  const observeQueuedSend = useCallback((prompt: QueuedPrompt, result: void | boolean | Promise<void | boolean>) => {
-    const restore = (error?: unknown) => {
-      setQueuedPrompts((items) => (items.some((item) => item.id === prompt.id)
-        ? items
-        : [prompt, ...items]).map(pauseQueuedPrompt));
-      setInlineError(error instanceof Error ? error.message : "Message not sent; queued draft retained");
-    };
-    if (result instanceof Promise) void result.then((accepted) => { if (accepted === false) restore(); }).catch(restore);
-    else if (result === false) restore();
-  }, []);
+  }, [clear, collectGuidancePrompt, hasComposerContent, normalizedQuotedContext, onQuotedContextChange, replaceMentionInput, resizeTextarea, restoreReadyImages, setQueuedPrompt]);
 
   const sendQueuedPrompt = useCallback(
-    (prompt: QueuedPrompt) => {
+    (prompt: QueuedPrompt, extraOptions?: SendOptions) => {
+      if (interactionDisabled) return;
       secondEnterPromptIdRef.current = null;
+      const error = queuedPromptError(prompt);
+      if (error) {
+        setQueuedPrompt(pauseQueuedPrompt(prompt));
+        setInlineError(error);
+        return;
+      }
       const text = prompt.text.trim();
       const queuedImages = queuedImagesToSendImages(prompt.images);
-      setQueuedPrompts((items) => {
-        const remaining = items.filter((item) => item.id !== prompt.id);
-        return isStreaming ? remaining : remaining.map(waitForNextQueuedTurn);
-      });
-      if (text || queuedImages?.length) {
-        const options: SendOptions | undefined = (
-          prompt.quotedContext
-          || prompt.sessionMentions?.length
-          || isStreaming
-        )
-          ? {
-              ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-              ...(prompt.sessionMentions?.length
-                ? { sessionMentions: prompt.sessionMentions }
-                : {}),
-              ...(isStreaming ? { continueActiveTurn: true } : {}),
-            }
-          : undefined;
-        observeQueuedSend(prompt, onSend(text, queuedImages, options));
-      }
+      const options: SendOptions | undefined = (
+        extraOptions || prompt.quotedContext || prompt.sessionMentions?.length || isStreaming
+      )
+        ? {
+            ...extraOptions,
+            ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
+            ...(prompt.sessionMentions?.length ? { sessionMentions: prompt.sessionMentions } : {}),
+            ...(isStreaming ? { continueActiveTurn: true } : {}),
+          }
+        : undefined;
+      queuedPromptStore.send(prompt, () => (
+        options ? onSend(text, queuedImages, options)
+          : queuedImages?.length ? onSend(text, queuedImages)
+          : onSend(text)
+      ));
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
-    [isStreaming, onSend, observeQueuedSend],
+    [interactionDisabled, isStreaming, onSend, queuedPromptStore, queuedPromptError, setQueuedPrompt],
   );
-
-  const sendNextQueuedPrompt = useCallback(() => {
-    if (queuedPrompts.length === 0) return;
-    const nextPrompt = queuedPrompts.find((prompt) => prompt.text.trim());
-    if (!nextPrompt) {
-      setQueuedPrompts([]);
-      return;
-    }
-    setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id).map(waitForNextQueuedTurn));
-    const queuedImages = queuedImagesToSendImages(nextPrompt.images);
-    const options: SendOptions | undefined = (
-      nextPrompt.quotedContext || nextPrompt.sessionMentions?.length
-    )
-      ? {
-          ...(nextPrompt.quotedContext ? { quotedContext: nextPrompt.quotedContext } : {}),
-          ...(nextPrompt.sessionMentions?.length
-            ? { sessionMentions: nextPrompt.sessionMentions }
-            : {}),
-        }
-      : undefined;
-    const result = queuedImages?.length && options ? onSend(nextPrompt.text.trim(), queuedImages, options)
-      : queuedImages?.length ? onSend(nextPrompt.text.trim(), queuedImages)
-      : options ? onSend(nextPrompt.text.trim(), undefined, options)
-      : onSend(nextPrompt.text.trim());
-    observeQueuedSend(nextPrompt, result);
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [onSend, queuedPrompts, observeQueuedSend]);
 
   useEffect(() => {
     const previous = previousQueueRunRef.current;
@@ -2100,15 +2107,13 @@ export function ThreadComposer({
     if (!isStreaming) secondEnterPromptIdRef.current = null;
     // Switching to an idle session is not completion of the previous session's run.
     if (previous.key !== pendingQueueKey) return;
-    if (isStreaming || interactionDisabled || queuedPrompts.length === 0) return;
-    const first = queuedPrompts[0];
-    if (first.autoPaused) return;
-    const waitingTurnCompleted = queuedPromptStorageKey !== null && first.autoAfterTurnId !== undefined
-      ? completedTurnIds.includes(first.autoAfterTurnId)
+    if (isStreaming || interactionDisabled || !queuedPrompt || queuedPrompt.autoPaused) return;
+    const waitingTurnCompleted = queuedPromptStorageKey !== null && queuedPrompt.autoAfterTurnId !== undefined
+      ? completedTurnIds.includes(queuedPrompt.autoAfterTurnId)
       : previous.isStreaming;
     if (!waitingTurnCompleted) return;
-    sendNextQueuedPrompt();
-  }, [completedTurnIds, interactionDisabled, sendNextQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompts, queuedPromptStorageKey]);
+    sendQueuedPrompt(queuedPrompt);
+  }, [completedTurnIds, interactionDisabled, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt, queuedPromptStorageKey]);
 
   const submit = useCallback(() => {
     if (modelNeedsSetup) {
@@ -2166,7 +2171,6 @@ export function ThreadComposer({
       && onStop
     ) {
       handleStop();
-      setQueuedPrompts([]);
       clear();
       clearComposerText();
       onQuotedContextChange?.(null);
@@ -2175,14 +2179,29 @@ export function ThreadComposer({
     const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
+    if (!slashLifecycle) {
+      const prompt = collectGuidancePrompt();
+      const error = queuedPromptError(prompt);
+      if (error) {
+        setInlineError(error);
+        return;
+      }
+      if (queuedPrompt) {
+        sendQueuedPrompt(prompt, options);
+        if (draftKey) draftStore?.delete(draftKey);
+        clear();
+        clearComposerText(!hasTouchPrimaryPointer);
+        onQuotedContextChange?.(null);
+        return;
+      }
+    }
     const submittedDraft = draftKey ? draftStore?.get(draftKey) : undefined;
     const finishSend = () => {
       // A pending send can finish after this composer unmounts and a newer draft is started.
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      // Sending new guidance must not discard other messages still waiting.
-      if (!isStreaming || finalizeActiveTurn) setQueuedPrompts([]);
+      if (!isStreaming || finalizeActiveTurn) setQueuedPrompt(null);
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2222,6 +2241,11 @@ export function ThreadComposer({
     draftStore,
     clear,
     clearComposerText,
+    collectGuidancePrompt,
+    queuedPrompt,
+    queuedPromptError,
+    sendQueuedPrompt,
+    setQueuedPrompt,
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
@@ -2308,9 +2332,7 @@ export function ThreadComposer({
         if (!e.repeat) queueGuidancePrompt();
         return;
       }
-      const secondEnterPrompt = queuedPrompts.find(
-        (prompt) => prompt.id === secondEnterPromptIdRef.current,
-      );
+      const secondEnterPrompt = queuedPrompt?.id === secondEnterPromptIdRef.current ? queuedPrompt : null;
       if (
         isStreaming
         && value.length === 0
@@ -2398,7 +2420,7 @@ export function ThreadComposer({
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
-    && !normalizedQuotedContext && !queuedPrompts.length && !goalState?.active
+    && !normalizedQuotedContext && !queuedPrompt && !goalState?.active
     && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
   useLayoutEffect(() => {
     if (!compactWhenIdle || compactControls) return;
@@ -2566,29 +2588,18 @@ export function ThreadComposer({
             "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
-        {queuedPrompts.length > 0 ? (
-          <QueuedPromptStack
-            prompts={queuedPrompts}
-            isHero={isHero}
+        {queuedPrompt ? (
+          <QueuedPromptPreview
+            prompt={queuedPrompt}
+            disabled={interactionDisabled}
+            editDisabled={encoding || hasErrors}
             label={t("thread.composer.queued.label")}
             guideLabel={t("thread.composer.queued.guide")}
             deleteLabel={t("thread.composer.queued.delete")}
-            dragLabel={t("thread.composer.queued.drag")}
             editLabel={t("thread.composer.queued.edit")}
-            onGuide={sendQueuedPrompt}
+            onGuide={() => sendQueuedPrompt(queuedPrompt)}
             onDelete={removeQueuedPrompt}
-            onEdit={editQueuedPrompt}
-            onDragStart={(id) => {
-              secondEnterPromptIdRef.current = null;
-              draggedQueuedPromptIdRef.current = id;
-            }}
-            onDragEnd={() => {
-              draggedQueuedPromptIdRef.current = null;
-            }}
-            onDrop={(targetId) => {
-              const dragId = draggedQueuedPromptIdRef.current;
-              if (dragId) moveQueuedPrompt(dragId, targetId);
-            }}
+            onEdit={() => editQueuedPrompt(queuedPrompt)}
           />
         ) : null}
         {images.length > 0 ? (
@@ -2866,40 +2877,29 @@ export function ThreadComposer({
   );
 }
 
-function QueuedPromptStack({
-  prompts,
-  isHero,
+function QueuedPromptPreview({
+  prompt,
+  disabled,
+  editDisabled,
   label,
   guideLabel,
   deleteLabel,
-  dragLabel,
   editLabel,
   onGuide,
   onDelete,
   onEdit,
-  onDragStart,
-  onDragEnd,
-  onDrop,
 }: {
-  prompts: QueuedPrompt[];
-  isHero: boolean;
+  prompt: QueuedPrompt;
+  disabled: boolean;
+  editDisabled: boolean;
   label: string;
   guideLabel: string;
   deleteLabel: string;
-  dragLabel: string;
   editLabel: string;
-  onGuide: (prompt: QueuedPrompt) => void;
-  onDelete: (id: string) => void;
-  onEdit: (prompt: QueuedPrompt) => void;
-  onDragStart: (id: string) => void;
-  onDragEnd: () => void;
-  onDrop: (targetId: string) => void;
+  onGuide: () => void;
+  onDelete: () => void;
+  onEdit: () => void;
 }) {
-  const stripMaxHeight = Math.min(
-    320,
-    96 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4,
-  );
-
   return (
     <div
       role="group"
@@ -2909,150 +2909,57 @@ function QueuedPromptStack({
         "border border-black/[0.05] bg-popover/90 p-1.5",
         "shadow-[0_10px_28px_rgba(15,23,42,0.07)] backdrop-blur-md",
         "dark:border-white/[0.08] dark:bg-popover/90 dark:shadow-[0_14px_34px_rgba(0,0,0,0.30)]",
-        isHero ? "max-w-none" : "max-w-none",
       )}
-      style={{ "--composer-strip-max-height": `${stripMaxHeight}px` } as CSSProperties}
+      style={{ "--composer-strip-max-height": "224px" } as CSSProperties}
       aria-label={label}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-2 pb-1">
-        <span className="text-[11.5px] font-semibold text-foreground/75">{label}</span>
-      </div>
-      <div className="flex max-h-[216px] flex-col gap-1 overflow-y-auto">
-        {prompts.map((prompt) => (
-          <QueuedPromptRow
-            key={prompt.id}
-            prompt={prompt}
-            isHero={isHero}
-            guideLabel={guideLabel}
-            deleteLabel={deleteLabel}
-            dragLabel={dragLabel}
-            editLabel={editLabel}
-            onGuide={onGuide}
-            onDelete={onDelete}
-            onEdit={onEdit}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            onDrop={onDrop}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function QueuedPromptRow({
-  prompt,
-  isHero,
-  guideLabel,
-  deleteLabel,
-  dragLabel,
-  editLabel,
-  onGuide,
-  onDelete,
-  onEdit,
-  onDragStart,
-  onDragEnd,
-  onDrop,
-}: {
-  prompt: QueuedPrompt;
-  isHero: boolean;
-  guideLabel: string;
-  deleteLabel: string;
-  dragLabel: string;
-  editLabel: string;
-  onGuide: (prompt: QueuedPrompt) => void;
-  onDelete: (id: string) => void;
-  onEdit: (prompt: QueuedPrompt) => void;
-  onDragStart: (id: string) => void;
-  onDragEnd: () => void;
-  onDrop: (targetId: string) => void;
-}) {
-  const displayLabel = queuedPromptLabel(prompt);
-
-  return (
-    <div
-      data-queued-prompt-row="true"
-      onDragEnter={(event) => {
-        event.preventDefault();
-        onDrop(prompt.id);
-      }}
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        onDrop(prompt.id);
-      }}
-      onDragEnd={onDragEnd}
-      className={cn(
-        "queued-prompt-row group/queued flex min-h-8 items-center gap-1.5 rounded-control px-2 py-0.5",
-        "text-[13px] transition-colors hover:bg-muted/55 dark:hover:bg-white/[0.055]",
-        isHero && "text-[13.5px]",
-      )}
-    >
-      <span
-        draggable
-        role="button"
-        tabIndex={0}
-        aria-label={dragLabel}
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("text/plain", prompt.id);
-          suppressNativeDragPreview(event.dataTransfer);
-          onDragStart(prompt.id);
-        }}
-        onDragEnd={onDragEnd}
-        className={cn(
-          "inline-flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-lg",
-          "text-muted-foreground/45 transition-colors hover:text-muted-foreground",
-          "active:cursor-grabbing",
-        )}
-      >
-        <GripVertical className="pointer-events-none h-3.5 w-3.5" aria-hidden />
-      </span>
-      <div className="flex min-h-7 min-w-0 flex-1 items-center">
-        <p
-          title={displayLabel}
-          className={cn(
-            "line-clamp-3 whitespace-pre-wrap break-words font-medium leading-[1.28] text-foreground/88",
-            isHero && "text-[13.5px]",
-          )}
+      <div className="flex min-w-0 items-center gap-1 px-1 pb-1">
+        <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-foreground/75">{label}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          className="h-7 shrink-0 rounded-full px-2 text-[11.5px] font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:hover:bg-white/[0.07]"
+          onClick={onGuide}
         >
-          {displayLabel}
-        </p>
+          <CornerDownRight className="mr-1 h-3 w-3" aria-hidden />
+          {guideLabel}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={disabled || editDisabled}
+          aria-label={editLabel}
+          title={editLabel}
+          className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+          onClick={onEdit}
+        >
+          <EditIcon className="h-3.5 w-3.5" aria-hidden />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={disabled}
+          aria-label={deleteLabel}
+          className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 className="h-3 w-3" aria-hidden />
+        </Button>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 shrink-0 rounded-full px-2 text-[11.5px] font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:hover:bg-white/[0.07]"
-        onClick={() => onGuide(prompt)}
-      >
-        <CornerDownRight className="mr-1 h-3 w-3" aria-hidden />
-        {guideLabel}
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label={editLabel}
-        title={editLabel}
-        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-        onClick={() => onEdit(prompt)}
-      >
-        <EditIcon className="h-3.5 w-3.5" aria-hidden />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label={deleteLabel}
-        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-destructive"
-        onClick={() => onDelete(prompt.id)}
-      >
-        <Trash2 className="h-3 w-3" aria-hidden />
-      </Button>
+      <div className="max-h-40 overflow-y-auto px-2 pb-1 text-[13px]">
+        <p className="whitespace-pre-wrap break-words font-medium leading-relaxed text-foreground/88">
+          {queuedPromptLabel(prompt)}
+        </p>
+        {prompt.text && prompt.images?.length ? (
+          <p className="mt-1 break-words text-xs text-muted-foreground">
+            {prompt.images.map((image) => image.name).filter(Boolean).join(", ")}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

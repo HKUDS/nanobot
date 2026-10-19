@@ -54,8 +54,8 @@ export type AttachmentError =
   | "io";                // file read failed at the browser layer
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
-const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
-const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+export const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
 
 /** MIME whitelist — mirrors the server's and the ``<input accept>`` attr. */
 const ACCEPTED_IMAGE_MIMES: ReadonlySet<string> = new Set([
@@ -207,8 +207,9 @@ export interface UseAttachedImagesApi {
   /** Enqueue new files. Returns the list of rejected files so the caller can
    * surface inline errors. Files rejected client-side (wrong MIME, limit) are
    * *not* added to ``images`` — only recoverable read/encoding failures show
-   * up as error chips. */
-  enqueue: (files: Iterable<File>) => {
+   * up as error chips. Restoring an existing draft preserves overflow so users
+   * can remove files themselves; send validation still enforces ingress limits. */
+  enqueue: (files: Iterable<File>, options?: { restoringDraft: boolean }) => {
     rejected: Array<{ file: File; reason: AttachmentError }>;
   };
   remove: (id: string) => { nextFocusId: string | null };
@@ -269,7 +270,7 @@ export function useAttachedImages({
   }, []);
 
   const enqueue = useCallback(
-    (files: Iterable<File>) => {
+    (files: Iterable<File>, { restoringDraft = false } = {}) => {
       const rejected: Array<{ file: File; reason: AttachmentError }> = [];
       const toAdd: AttachedAttachment[] = [];
       let slot = maxAttachments - imagesRef.current.length;
@@ -291,16 +292,16 @@ export function useAttachedImages({
           rejected.push({ file, reason: "empty_file" });
           continue;
         }
-        if (kind === "file" && file.size > maxFileBytes) {
+        if (!restoringDraft && kind === "file" && file.size > maxFileBytes) {
           rejected.push({ file, reason: "too_large" });
           continue;
         }
-        if (slot <= 0) {
+        if (!restoringDraft && slot <= 0) {
           rejected.push({ file, reason: "too_many_attachments" });
           continue;
         }
         const nextDecodedBytes = kind === "image" ? Math.min(file.size, maxFileBytes) : file.size;
-        if (projectedDecodedBytes + nextDecodedBytes > maxTotalBytes) {
+        if (!restoringDraft && projectedDecodedBytes + nextDecodedBytes > maxTotalBytes) {
           rejected.push({ file, reason: "total_too_large" });
           continue;
         }
@@ -400,7 +401,6 @@ export function useAttachedImages({
   const restoreReadyImages = useCallback((restored: RestoredReadyAttachment[]) => {
     const toRestore = restored
       .filter((img) => acceptedAttachmentKind(dataUrlToFile(img.dataUrl, img.name)))
-      .slice(0, maxAttachments)
       .map((img): AttachedAttachment => {
         const file = dataUrlToFile(img.dataUrl, img.name);
         const kind = img.kind ?? kindFromDataUrl(img.dataUrl);
@@ -427,7 +427,7 @@ export function useAttachedImages({
       imagesRef.current = toRestore;
       return toRestore;
     });
-  }, [maxAttachments]);
+  }, []);
 
   // Final safety net: revoke any outstanding blob URLs on unmount. Safe
   // under StrictMode double-invoke because revoked blob URLs are only
