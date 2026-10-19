@@ -59,6 +59,31 @@ test("flowchart, sequence and state images remain readable across theme and narr
   await page.screenshot({ path: test.info().outputPath("multiple-dark-mobile.png"), fullPage: true });
 });
 
+test("twelve visible small diagrams render together and recolor without exhausting the shared budget", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 2300 });
+  await page.goto("/browser/fixture.html?case=diagrams&many");
+  const blocks = page.getByTestId("mermaid-block");
+  const images = blocks.locator("img");
+  await expect(blocks).toHaveCount(12);
+  await expect(images).toHaveCount(12);
+  for (const image of await images.all()) await loadedImage(image);
+  await expect(blocks.last()).toBeInViewport();
+  const before = await images.evaluateAll((elements) => elements.map((element) => (element as HTMLImageElement).src));
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect.poll(() => images.evaluateAll((elements, previous) => elements.length === previous.length
+    && elements.every((element, index) => {
+      const image = element as HTMLImageElement;
+      return image.src !== previous[index] && image.complete && image.naturalWidth > 0;
+    }), before)).toBe(true);
+  await expect(blocks.getByRole("status")).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("twelve-diagrams-dark.png"), fullPage: true });
+  await blocks.first().getByRole("button", { name: "Source", exact: true }).click();
+  await expect(images).toHaveCount(11);
+  await blocks.first().getByRole("button", { name: "Diagram", exact: true }).click();
+  await expect(images).toHaveCount(12);
+  await loadedImage(blocks.first().locator("img"));
+});
+
 test("syntax and source limits stay local; replacing source and switching conversations discards old images", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=diagrams&type=invalid&edit");
   const block = page.getByTestId("mermaid-block");

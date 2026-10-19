@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { requestDiagram, type DiagramRequest, type DiagramState } from "@/components/markdown-diagrams/runtime";
+import { requestDiagram, type DiagramPalette, type DiagramRequest, type DiagramState } from "@/components/markdown-diagrams/runtime";
 import type { DiagramInput, DiagramReply } from "@/components/markdown-diagrams/types";
 
 class RenderWorker {
@@ -106,6 +106,36 @@ describe("diagram runtime", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:diagram-0");
     job.controller.abort();
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps twelve small visible diagrams ready through growing and shrinking palettes", async () => {
+    const jobs = Array.from({ length: 12 }, () => start());
+    for (let index = 0; index < jobs.length; index++) {
+      RenderWorker.instances[index].reply(result);
+      expect(DecodedImage.instances).toHaveLength(index + 1);
+      DecodedImage.instances[index].onload?.();
+      await Promise.resolve();
+      expect(jobs[index].states.at(-1)?.kind).toBe("ready");
+    }
+    const palettes: DiagramPalette[] = [
+      { "--pele-bg": "hsl(210 40% 98%)", "--pele-fg": "hsl(222.2 84% 4.9%)", "--pele-accent": "rgb(12 34 56)" },
+      { "--pele-fg": "#eee" },
+    ];
+    for (const palette of palettes) {
+      const offset = DecodedImage.instances.length;
+      const before = jobs.map(({ states }) => states.at(-1));
+      jobs.forEach(({ request }) => request.setPalette(palette));
+      expect(DecodedImage.instances).toHaveLength(offset + jobs.length);
+      expect(jobs.map(({ states }) => states.at(-1))).toEqual(before);
+      for (let index = 0; index < jobs.length; index++) DecodedImage.instances[offset + index].onload?.();
+      await Promise.resolve();
+      expect(jobs.map(({ states }) => states.at(-1))).toEqual(jobs.map((_, index) => ({
+        kind: "ready", image: { url: `blob:diagram-${offset + index}`, width: 100, height: 50, label: "Example" },
+      })));
+    }
+    expect(RenderWorker.instances).toHaveLength(jobs.length);
+    jobs.forEach(({ controller }) => controller.abort());
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(36);
   });
 
   it("disposes a pending image on session change, suppressing its late decode", async () => {

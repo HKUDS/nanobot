@@ -22,6 +22,7 @@ const RUNNING_LIMIT = 2;
 const QUEUE_LIMIT = 4;
 const BYTE_LIMIT = 8 * OUTPUT_LIMIT;
 const PIXEL_LIMIT = 32_000_000;
+const PALETTE_LIMIT = 4096;
 // Reserve one largest replacement inside the totals so retained images can always be recolored.
 const ADMISSION_BYTE_LIMIT = BYTE_LIMIT - OUTPUT_LIMIT;
 const ADMISSION_PIXEL_LIMIT = PIXEL_LIMIT - MAX_PIXELS;
@@ -226,26 +227,31 @@ class Task implements DiagramRequest {
     this.decoding?.();
     const attempt = ++this.attempt;
     let blob: Blob;
+    let paletteBytes: number;
     try {
-      const style = escapeAttribute(`${template.style};${paletteStyle(this.palette)}`);
+      const palette = paletteStyle(this.palette);
+      paletteBytes = new Blob([palette]).size;
+      if (paletteBytes > PALETTE_LIMIT) { this.fail("limit"); return; }
+      const style = escapeAttribute(`${template.style};${palette}`);
       blob = new Blob([`<svg xmlns="http://www.w3.org/2000/svg" width="${template.width}" height="${template.height}" viewBox="0 0 ${template.width} ${template.height}" fill="var(--_fg)" style="${style}">${template.content}</svg>`], { type: "image/svg+xml" });
     } catch { this.fail("image"); return; }
     const pixels = template.width * template.height;
-    // Reserve each image's maximum encoded size so a new palette cannot grow steady-state usage.
-    // The visible image and its decoding replacement both count against the totals.
+    // Only the bounded palette can vary for this template. Its envelope stays constant
+    // across themes, preserving replacement headroom without charging small SVGs 1 MiB.
+    const reservedBytes = Math.min(blob.size - paletteBytes + PALETTE_LIMIT, OUTPUT_LIMIT);
     const byteLimit = this.asset ? BYTE_LIMIT : ADMISSION_BYTE_LIMIT;
     const pixelLimit = this.asset ? PIXEL_LIMIT : ADMISSION_PIXEL_LIMIT;
     if (blob.size > OUTPUT_LIMIT) { this.fail("limit"); return; }
-    if (retainedBytes + OUTPUT_LIMIT > byteLimit || retainedPixels + pixels > pixelLimit) {
+    if (retainedBytes + reservedBytes > byteLimit || retainedPixels + pixels > pixelLimit) {
       this.waitForCapacity(); return;
     }
     this.capacityBlocked = false;
-    retainedBytes += OUTPUT_LIMIT;
+    retainedBytes += reservedBytes;
     retainedPixels += pixels;
     let url: string;
     try { url = URL.createObjectURL(blob); }
     catch {
-      retainedBytes -= OUTPUT_LIMIT;
+      retainedBytes -= reservedBytes;
       retainedPixels -= pixels;
       this.fail("image"); return;
     }
@@ -254,7 +260,7 @@ class Task implements DiagramRequest {
       if (released) return;
       released = true;
       URL.revokeObjectURL(url);
-      retainedBytes -= OUTPUT_LIMIT;
+      retainedBytes -= reservedBytes;
       retainedPixels -= pixels;
       capacityChanged();
     };
