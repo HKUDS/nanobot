@@ -43,9 +43,18 @@ if [ "$RENDER" = "true" ]; then
     fi
     set -- "$@" --config "$config"
 elif [ "$NANOBOT_DOCKER_BOOTSTRAP" = "1" ] && { [ "$1" = "gateway" ] || [ "$1" = "serve" ]; }; then
-    config="$dir/config.json"
-    python -m nanobot.cli.docker_bootstrap "$config" || exit 1
-    set -- "$@" --config "$config"
+    # Explicit config selectors belong to the CLI; bootstrap only the default instance.
+    initialize_default=1
+    for argument in "$@"; do
+        case "$argument" in
+            --config|--config=*|-c*) initialize_default=0; break ;;
+        esac
+    done
+    if [ "$initialize_default" = "1" ]; then
+        config="$dir/config.json"
+        python -m nanobot.cli.docker_bootstrap "$config" || exit 1
+        set -- "$@" --config "$config"
+    fi
 fi
 
 exec nanobot "$@"

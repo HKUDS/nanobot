@@ -169,6 +169,55 @@ def main() -> None:
                         "-R", f"{os.getuid()}:{os.getgid()}", "/data",
                     ], check=True)
 
+        commands = {name: list(service["command"]) for name, service in config["services"].items()}
+        selected_path = "/home/nanobot/.nanobot/selected.json"
+        selectors = (
+            ("long", ["--config", selected_path]),
+            ("long-equals", [f"--config={selected_path}"]),
+            ("short", ["-c", selected_path]),
+            ("short-attached", [f"-c{selected_path}"]),
+        )
+        for service_name in ("nanobot-gateway", "nanobot-api"):
+            for label, selector in selectors:
+                data = root / f"{service_name}-{label}"
+                data.mkdir()
+                selected = data / "selected.json"
+                selected.write_text(json.dumps(saved), encoding="utf-8")
+                previous = selected.read_bytes()
+                for service in config["services"].values():
+                    service["volumes"] = [{
+                        "type": "bind", "source": str(data),
+                        "target": "/home/nanobot/.nanobot",
+                    }]
+                config["services"][service_name]["command"] = [*commands[service_name], *selector]
+                compose_path.write_text(json.dumps(config), encoding="utf-8")
+                try:
+                    run("up", "-d", "--no-deps", service_name)
+                    gateway = service_name == "nanobot-gateway"
+                    health = endpoint(service_name, 18790 if gateway else 8900)
+                    wait_for(health + "/health")
+                    if gateway:
+                        webui = endpoint(service_name, 8765)
+                        assert request(webui + "/webui/bootstrap", password)[0] == 200
+                    else:
+                        assert request(health + "/v1/models", api_key)[0] == 200
+                        assert request(health + "/v1/models", "changed-env")[0] == 401
+                    assert selected.read_bytes() == previous
+                    assert not (data / "config.json").exists()
+                    assert "[entrypoint] initialized" not in run("logs", "--no-color")
+                    print(f"PASS {service_name} {label}: explicit config preserved without default initialization")
+                except Exception:
+                    print(run("logs", "--no-color", "--tail", "80"), flush=True)
+                    raise
+                finally:
+                    subprocess.run([*compose, "down", "--volumes"], check=True)
+                    if os.name != "nt":
+                        subprocess.run([
+                            "docker", "run", "--rm", "--entrypoint", "chown",
+                            "-v", f"{data}:/data", args.image,
+                            "-R", f"{os.getuid()}:{os.getgid()}", "/data",
+                        ], check=True)
+
         readonly = root / "readonly"
         readonly.mkdir()
         result = subprocess.run([

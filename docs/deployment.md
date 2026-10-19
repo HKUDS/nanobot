@@ -95,7 +95,7 @@ docker compose logs
 
 On first boot, Compose initializes `~/.nanobot/config.json` with container bind addresses and random WebUI/API credentials. Open `http://HOST:8765`, enter the WebUI password printed in the first-boot logs, then configure your provider and model in **Settings → Models**. Send a message to verify the setup. No provider is required just to open the WebUI.
 
-Export `NANOBOT_WEB_TOKEN` or `NANOBOT_API_KEY` before the first startup to supply your own credentials. Compose forwards these variables into the containers. Existing configuration is left untouched, including credentials and bind addresses; changing these variables later does not rotate persisted credentials. If you reuse an existing configuration, check the [Docker bind and authentication settings](#docker) above.
+Export `NANOBOT_WEB_TOKEN` or `NANOBOT_API_KEY` before the first startup to supply your own credentials. Compose forwards these variables into the containers. Existing configuration is left untouched, including credentials and bind addresses; changing these variables later does not rotate persisted credentials. An explicit `--config` or `-c` selects a user-managed configuration and skips default-instance initialization. If you reuse an existing configuration, check the [Docker bind and authentication settings](#docker) above.
 
 The configuration and workspace persist in the `~/.nanobot` bind mount. Keep `agents.defaults.workspace` as a container path, normally `~/.nanobot/workspace`, rather than a host home-directory path. Other config `${VAR}` references require explicit `environment` entries in the CLI and gateway services; Compose does not forward arbitrary host variables.
 
