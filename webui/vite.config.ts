@@ -157,7 +157,12 @@ export default defineConfig(({ mode }) => {
       // Pre-bundle Dialog up front, including lazy settings/sheets. Excluding
       // it splits its layer/focus state from optimized Popover and DropdownMenu,
       // so nested overlays can dismiss the wrong layer in development.
-      include: ["@radix-ui/react-dialog"],
+      include: [
+        "@radix-ui/react-dialog",
+        // Vite's HTML scan does not follow the lazy Worker entry. Discovering
+        // these imports on first render would reload the page and lose UI state.
+        "pele/lazy", "saxes", "css-tree/parser", "css-tree/walker", "css-tree/generator",
+      ],
     },
     worker: { format: "es" },
     build: {

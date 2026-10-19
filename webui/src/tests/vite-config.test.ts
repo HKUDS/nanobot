@@ -19,6 +19,15 @@ describe("development overlay dependencies", () => {
   });
 });
 
+describe("development diagram Worker dependencies", () => {
+  it("pre-bundles Worker-only imports without a first-use page reload", () => {
+    const config = webuiConfig({ command: "serve", mode: "test" });
+    expect(config.optimizeDeps?.include).toEqual(expect.arrayContaining([
+      "pele/lazy", "saxes", "css-tree/parser", "css-tree/walker", "css-tree/generator",
+    ]));
+  });
+});
+
 describe("gzipWebuiAssets", () => {
   it("compresses finalized files after Rollup writes the bundle", async () => {
     const plugin = gzipWebuiAssets();
