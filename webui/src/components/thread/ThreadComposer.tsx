@@ -45,7 +45,11 @@ import {
   mcpPresetInitials,
   splitCapabilityMentionSegments,
 } from "@/components/CliAppMentionText";
-import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
+import {
+  composerMentionText,
+  isCapabilityMentionStart,
+  type CapabilityMentionSegment,
+} from "@/lib/composer-mention-text";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   ArrowUp,
@@ -138,7 +142,6 @@ import {
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
-import { composerMentionText } from "@/lib/composer-mention-text";
 import type { ComposerDraftStore } from "@/lib/composer-draft";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
@@ -430,7 +433,7 @@ function mentionInsertion(
   const to = Math.min(Math.max(end, from), value.length);
   const prefix = value.slice(0, from);
   const suffix = value.slice(to);
-  const leadingSpace = prefix && !/\s$/.test(prefix) ? " " : "";
+  const leadingSpace = prefix && !isCapabilityMentionStart(value, from) ? " " : "";
   const trailingSpace = /^\s/.test(suffix) ? "" : " ";
   const tokenStart = prefix.length + leadingSpace.length;
   const tokenEnd = tokenStart + name.length + 1;
@@ -1447,12 +1450,12 @@ export function ThreadComposer({
     if (interactionDisabled || cliAppMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
-    const match = /(?:^|\s)@([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
-    if (!match) return null;
+    const match = /@([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
+    if (!match || !isCapabilityMentionStart(value, match.index)) return null;
     const query = match[1].toLowerCase();
     return {
       query,
-      start: caret - query.length - 1,
+      start: match.index,
       end: caret,
     };
   }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);

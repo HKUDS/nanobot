@@ -653,6 +653,31 @@ describe("MessageBubble", () => {
     );
   });
 
+  it("preserves punctuation-separated session links and capability mentions in sent messages", () => {
+    const message: UIMessage = {
+      id: "u-punctuation-mentions",
+      role: "user",
+      content: "@bime、@luma，@luma；@zoom：@browserbase。",
+      sessionMentions: [
+        { id: "handle_00000000000000000000000000000001", name: "bime", session_key: "websocket:pricing", title: "Pricing" },
+        { id: "handle_00000000000000000000000000000002", name: "luma", session_key: "websocket:notes", title: "Notes" },
+      ],
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} cliApps={CLI_APPS} mcpPresets={MCP_PRESETS} />);
+
+    expect(screen.getByTestId("message-session-mention-bime").closest("a"))
+      .toHaveAttribute("href", "#/chat/websocket%3Apricing");
+    const repeated = screen.getAllByTestId("message-session-mention-luma");
+    expect(repeated).toHaveLength(2);
+    for (const token of repeated) {
+      expect(token.closest("a")).toHaveAttribute("href", "#/chat/websocket%3Anotes");
+    }
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
+    expect(screen.getByTestId("message-mcp-mention-browserbase")).toHaveTextContent("@Browserbase");
+  });
+
   it("renders installed CLI app mentions inside sent user messages", () => {
     const message: UIMessage = {
       id: "u-cli",

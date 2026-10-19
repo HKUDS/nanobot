@@ -2142,13 +2142,79 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("leaves unknown handles, partial names, titles and email addresses as plain text", () => {
+  it.each(["typed", "pasted"])("recognizes %s session handles separated by punctuation without spaces", async (entry) => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const targets = [session("pricing", "Pricing", "", "bime"), session("notes", "Notes", "", "luma")];
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input");
+    const text = "@bime、@luma，@luma";
+
+    if (entry === "typed") await user.type(input, text);
+    else {
+      await user.click(input);
+      await user.paste(text);
+    }
+
+    expect(screen.getByTestId("composer-session-mention-bime")).toHaveTextContent("@bime");
+    expect(screen.getAllByTestId("composer-session-mention-luma")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(text, undefined, {
+      sessionMentions: targets.map((target) => ({
+        id: target.handle?.id, name: target.handle?.name, session_key: target.key, title: target.title,
+      })),
+    });
+  });
+
+  it.each(["、", ",", "："])("completes a session handle after %s without inserting a leading space", (separator) => {
+    const onSend = vi.fn();
+    const targets = [session("pricing", "Pricing", "", "bime"), session("notes", "Notes", "", "luma")];
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input");
+    const text = `@bime${separator}@lu`;
+    fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
+
+    expect(screen.getByRole("option", { name: /@luma/i })).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input).toHaveValue(`@bime${separator}@luma `);
+    expect(screen.getByTestId("composer-session-mention-luma")).toHaveTextContent("@luma");
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(`@bime${separator}@luma`, undefined, {
+      sessionMentions: targets.map((target) => ({
+        id: target.handle?.id, name: target.handle?.name, session_key: target.key, title: target.title,
+      })),
+    });
+  });
+
+  it("previews and drops a session after punctuation without changing the surrounding text", () => {
+    const onSend = vi.fn();
+    const targets = [session("pricing", "Pricing", "", "bime"), session("notes", "Notes", "", "luma")];
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@bime、", selectionStart: 6 } });
+    const dataTransfer = { types: [SESSION_DRAG_TYPE], files: [], getData: () => targets[1].key };
+
+    fireEvent.dragOver(input, { dataTransfer });
+    expect(screen.getByTestId("composer-session-drag-preview")).toHaveTextContent("@luma");
+    expect(input).toHaveValue("@bime、");
+    fireEvent.drop(input, { dataTransfer });
+    expect(input).toHaveValue("@bime、@luma ");
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("@bime、@luma", undefined, {
+      sessionMentions: targets.map((target) => ({
+        id: target.handle?.id, name: target.handle?.name, session_key: target.key, title: target.title,
+      })),
+    });
+  });
+
+  it("leaves unknown handles, partial names, titles and embedded email or path handles as plain text", () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} sessions={[session("pricing", "Pricing", "", "bime")]} />);
-    const text = "@missing @bi @bimex @Pricing mail@bime";
-    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: text } });
+    const text = "@missing @bi @bimex @Pricing mail@bime word@bime /tmp/@bime";
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: text, selectionStart: text.length } });
 
     expect(screen.queryByTestId("composer-session-mention-bime")).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Mentions" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(onSend).toHaveBeenCalledWith(text, undefined, undefined);
   });
@@ -2303,13 +2369,13 @@ describe("ThreadComposer", () => {
     expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
   });
 
-  it("rejects more than eight typed session references without silently dropping them", () => {
+  it.each([" ", "、"])("rejects more than eight typed session references separated by %j without silently dropping them", (separator) => {
     const onSend = vi.fn();
     const targets = Array.from({ length: 9 }, (_, index) => session(`topic-${index}`, `Topic${index}`));
     render(<ThreadComposer onSend={onSend} sessions={targets} />);
     const input = screen.getByLabelText("Message input");
     const handles = targets.map((target) => `@${target.handle?.name}`);
-    fireEvent.change(input, { target: { value: handles.join(" ") } });
+    fireEvent.change(input, { target: { value: handles.join(separator) } });
 
     for (const target of targets) {
       expect(screen.getByTestId(`composer-session-mention-${target.handle?.name}`)).toBeInTheDocument();
@@ -2318,7 +2384,7 @@ describe("ThreadComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("A message can mention up to 8 chats");
 
-    fireEvent.change(input, { target: { value: handles.slice(1).join(" ") } });
+    fireEvent.change(input, { target: { value: handles.slice(1).join(separator) } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(onSend.mock.calls[0]?.[2].sessionMentions.map((mention: { session_key: string }) => mention.session_key))
       .toEqual(targets.slice(1).map((target) => target.key));
