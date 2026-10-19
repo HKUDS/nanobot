@@ -247,6 +247,26 @@ describe("merged waiting messages", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("keeps all legacy session targets after editing and refreshing an over-limit draft", () => {
+    const targets = Array.from({ length: 9 }, (_, index) => mention(`target${index}`));
+    const text = targets.map((item) => `@${item.name}`).join(" ");
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+      { id: "first", text: text.slice(0, text.lastIndexOf(" ")), sessionMentions: targets.slice(0, 8) },
+      { id: "second", text: "@target8", sessionMentions: targets.slice(8) },
+    ]));
+    const onSend = vi.fn();
+    const props = { onSend, pendingQueueKey: "chat-a", draftKey: "chat-a", persistDraft: true };
+    const view = render(<ThreadComposer {...props} draftStore={new ComposerDraftStore()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    view.unmount();
+    const refreshed = new ComposerDraftStore();
+    expect(refreshed.get("chat-a", true)?.sessionMentions).toEqual(targets);
+    render(<ThreadComposer {...props} draftStore={refreshed} />);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(screen.getByText("A message can mention up to 8 chats")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("retains the whole message after a rejected immediate send", () => {
     const onSend = vi.fn(() => false);
     const view = render(<ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />);
