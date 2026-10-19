@@ -597,6 +597,10 @@ class SessionManager:
         """Load a detached session snapshot without populating the runtime cache."""
         return self._store.load(key)
 
+    def read_session_version(self, key: str) -> tuple[str, int] | None:
+        """Return a cheap committed version, including delete/recreate identity."""
+        return self._store.read_version(key)
+
     def read_session_metadata(self, key: str) -> dict[str, Any] | None:
         """Read session metadata without loading the transcript."""
         return cast(dict[str, Any] | None, self._store.read_metadata(key))

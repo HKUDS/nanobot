@@ -134,7 +134,6 @@ from nanobot.webui.transcript import (
     build_session_thread_response,
     build_webui_thread_response,
     build_webui_trace_detail_response,
-    webui_display_revision,
     webui_transcript_revision,
 )
 from nanobot.webui.workspace_browser import browse_workspace_directories
@@ -1055,8 +1054,11 @@ class GatewayHTTPHandler:
             if isinstance(message, dict)
         ]
 
+    def _read_session_version(self, key: str) -> tuple[str, int] | None:
+        return self.session_manager.read_session_version(key) if self.session_manager is not None else None
+
     def _handle_prompt_index_get(self, request: WsRequest, key: str) -> Response:
-        from nanobot.webui.transcript import prompt_index_response
+        from nanobot.webui.transcript import prompt_index_response, prompt_index_revision
 
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -1065,15 +1067,16 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
+        revision = prompt_index_revision(decoded_key, self._read_session_version(decoded_key))
+        etag = _quoted_etag(revision) if revision else None
+        if etag and _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
+            return _http_response(b"", status=304, extra_headers=[*_NO_STORE_HEADERS, ("ETag", etag)])
         query = _parse_query(request.path)
         data = prompt_index_response(
             decoded_key, _query_first(query, "since"),
             session_messages_loader=lambda: self._read_session_messages(decoded_key),
+            session_version_loader=lambda: self._read_session_version(decoded_key),
         )
-        revision = data.get("revision")
-        etag = _quoted_etag(revision) if revision else None
-        if etag and _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
-            return _http_response(b"", status=304, extra_headers=[*_NO_STORE_HEADERS, ("ETag", etag)])
         headers = list(_NO_STORE_HEADERS)
         response_revision = data.get("revision")
         if response_revision:
@@ -1207,11 +1210,6 @@ class GatewayHTTPHandler:
         active_turn_transcript_persistence_failed = (
             websocket_turn_transcript_persistence_failed(chat_id)
         )
-        session_metadata = (
-            self.session_manager.read_session_metadata(decoded_key)
-            if self.session_manager is not None
-            else None
-        )
         revision_variant = {
             "active_turn_id": active_turn_id,
             "active_turn_started_at": active_turn_started_at,
@@ -1223,12 +1221,14 @@ class GatewayHTTPHandler:
             "direction": direction,
             "gateway_instance": self.tokens.instance_id,
             "limit": limit,
-            "session_updated_at": (
-                session_metadata.get("updated_at") if session_metadata is not None else None
-            ),
+            "session_version": self._read_session_version(decoded_key),
             "workspace_scope": scope.payload(),
         }
         initial_revision = webui_transcript_revision(decoded_key, variant=revision_variant)
+        if initial_revision is not None:
+            etag = _quoted_etag(initial_revision)
+            if _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
+                return _http_response(b"", status=304, extra_headers=[*_NO_STORE_HEADERS, ("ETag", etag)])
         build_started = time.perf_counter()
         replay_stats = diagnostics.transcript if diagnostics is not None else TranscriptReplayStats()
         data = build_webui_thread_response(
@@ -1240,6 +1240,7 @@ class GatewayHTTPHandler:
                 workspace_path=scope.project_path,
             ),
             session_messages_loader=lambda: self._read_session_messages(decoded_key),
+            session_version_loader=lambda: self._read_session_version(decoded_key),
             active_turn_started_at=active_turn_started_at,
             active_turn_id=active_turn_id,
             active_turn_transcript_persistence_failed=(
@@ -1256,26 +1257,12 @@ class GatewayHTTPHandler:
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
-        latest_session_metadata = (
-            self.session_manager.read_session_metadata(decoded_key)
-            if self.session_manager is not None
-            else None
-        )
-        revision_variant["session_updated_at"] = (
-            latest_session_metadata.get("updated_at")
-            if latest_session_metadata is not None
-            else None
-        )
+        revision_variant["session_version"] = self._read_session_version(decoded_key)
         final_revision = webui_transcript_revision(decoded_key, variant=revision_variant)
         response_headers = list(_NO_STORE_HEADERS)
         if final_revision is not None and final_revision == initial_revision:
-            display_revision = webui_display_revision(final_revision, replay_stats.canonical_backfill_revision)
-            assert display_revision is not None
-            etag = _quoted_etag(display_revision)
-            response_headers.append(("ETag", etag))
-            if _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
-                return _http_response(b"", status=304, extra_headers=response_headers)
-            data["revision"] = display_revision
+            response_headers.append(("ETag", _quoted_etag(final_revision)))
+            data["revision"] = final_revision
         return _http_json_response(
             data,
             accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),

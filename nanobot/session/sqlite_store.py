@@ -369,6 +369,12 @@ class SqliteSessionStore:
             if updated_at is not None:
                 db.execute("UPDATE sessions SET updated_at=? WHERE key=?", (updated_at.isoformat(), key))
 
+    def read_version(self, key: str) -> tuple[str, int] | None:
+        """Read the committed lifecycle and revision without decoding history or metadata."""
+        with self.transaction(write=False) as db:
+            row = db.execute("SELECT generation, revision FROM sessions WHERE key=?", (key,)).fetchone()
+            return (str(row[0]), int(row[1])) if row is not None else None
+
     def read_metadata(self, key: str) -> SessionMetadataPayload | None:
         with self.transaction(write=False) as db:
             row = db.execute("SELECT created_at, updated_at, metadata FROM sessions WHERE key=?", (key,)).fetchone()

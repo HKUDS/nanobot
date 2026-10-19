@@ -12,6 +12,7 @@ import shutil
 import threading
 import time
 import uuid
+from bisect import bisect_left
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
@@ -283,7 +284,6 @@ class TranscriptReplayStats:
     capped_by_bytes: bool = False
     capped_by_records: bool = False
     truncated_oversized_turn: bool = False
-    canonical_backfill_revision: str | None = None
 
 
 def _record_json_line(record: dict[str, Any]) -> str:
@@ -1765,23 +1765,6 @@ def _transcript_turn_signature(records: list[dict[str, Any]]) -> tuple[str, ...]
     return tuple(texts)
 
 
-def _find_unique_session_turn(
-    session_signatures: list[str],
-    signature: str,
-    start: int,
-) -> int | None:
-    if not signature:
-        return None
-    found: int | None = None
-    for index in range(start, len(session_signatures)):
-        if session_signatures[index] != signature:
-            continue
-        if found is not None:
-            return None
-        found = index
-    return found
-
-
 def _user_recovery_signature(event: dict[str, Any]) -> str:
     fields = {
         key: event[key]
@@ -2520,6 +2503,7 @@ def build_webui_thread_response(
     augment_assistant_text: Callable[[str], str] | None = None,
     session_messages: list[dict[str, Any]] | None = None,
     session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
+    session_version_loader: Callable[[], tuple[str, int] | None] | None = None,
     active_turn_started_at: float | None = None,
     active_turn_id: str | None = None,
     active_turn_transcript_persistence_failed: bool = False,
@@ -2540,13 +2524,21 @@ def build_webui_thread_response(
     )
     if not lines and active_turn_started_at is None:
         return None
-    view = None
+    session_turns: list[_SessionBackfillTurn] | None = None
+
+    def load_session_turns() -> list[_SessionBackfillTurn]:
+        nonlocal session_messages, session_turns
+        if session_turns is None:
+            if session_messages is None and session_messages_loader is not None:
+                session_messages = session_messages_loader()
+            session_turns = _session_backfill_turns(session_key, session_messages or [])
+        return session_turns
+
     if _needs_user_event_backfill(lines):
-        view = _build_prompt_view(
-            session_key, session_messages=session_messages,
-            session_messages_loader=session_messages_loader,
+        view, _ = _prompt_view_snapshot(
+            session_key, session_turns_loader=load_session_turns,
+            session_version_loader=session_version_loader,
         )
-        replay_stats.canonical_backfill_revision = view.canonical_revision
         recovered_lines: list[dict[str, Any]] = []
         selected_turns = _split_transcript_turns(lines)
         for turn in selected_turns:
@@ -2556,13 +2548,7 @@ def build_webui_thread_response(
             recovered_lines.extend(_with_backfilled_user(turn, user) if user is not None else turn)
         lines = recovered_lines
     if _needs_incomplete_turn_recovery(lines):
-        session_turns = view.session_turns if view is not None else None
-        if session_turns is None:
-            if session_messages is None and session_messages_loader is not None:
-                session_messages = session_messages_loader()
-            session_turns = _session_backfill_turns(session_key, session_messages or [])
-            replay_stats.canonical_backfill_revision = _canonical_backfill_revision(session_turns)
-        lines = _recover_incomplete_turns(lines, session_turns)
+        lines = _recover_incomplete_turns(lines, load_session_turns())
     lines = _ensure_replay_identities(lines)
     payload: dict[str, Any] = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
@@ -2617,10 +2603,9 @@ class _ChunkPromptView(NamedTuple):
 
 
 class _PromptView(NamedTuple):
-    prompts: list[PromptSummary]
+    prompts: tuple[PromptSummary, ...]
     backfilled_users: dict[int, dict[str, Any]]
-    session_turns: list[_SessionBackfillTurn] | None
-    canonical_revision: str | None
+    needs_canonical: bool
 
 
 def _assistant_signature_identity(signature: tuple[str, ...]) -> str:
@@ -2629,15 +2614,9 @@ def _assistant_signature_identity(signature: tuple[str, ...]) -> str:
     return hashlib.sha256(json.dumps(signature, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _canonical_backfill_revision(turns: list[_SessionBackfillTurn]) -> str:
-    return hashlib.sha256(json.dumps(turns, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:32]
-
-
-def webui_display_revision(revision: str | None, canonical_revision: str | None) -> str | None:
-    """Bind recovered display validators to the canonical snapshot actually used."""
-    if revision is None or canonical_revision is None:
-        return revision
-    return hashlib.sha256(f"{revision}\0{canonical_revision}".encode("ascii")).hexdigest()[:32]
+def prompt_index_revision(session_key: str, session_version: tuple[str, int] | None = None) -> str | None:
+    """Validate display inputs without reading canonical history or constructing a view."""
+    return webui_transcript_revision(session_key, variant={"session_version": session_version})
 
 
 def _prompt_summary(record: dict[str, Any], ordinal: int, answer: str) -> PromptSummary:
@@ -2703,8 +2682,7 @@ def _chunk_prompt_summaries(path: Path, identity: tuple[int, int, int], start: i
 def _build_prompt_view(
     session_key: str,
     *,
-    session_messages: list[dict[str, Any]] | None = None,
-    session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
+    session_turns_loader: Callable[[], list[_SessionBackfillTurn]] | None = None,
 ) -> _PromptView:
     raw_prompts: list[PromptSummary] = []
     candidates: list[_BackfillCandidate] = []
@@ -2724,23 +2702,28 @@ def _build_prompt_view(
         candidates.extend(chunk.candidates)
         start += count
     session_turns = None
-    canonical_revision = None
-    if any(not candidate.has_user and candidate.signature for candidate in candidates):
-        if session_messages is None and session_messages_loader is not None:
-            session_messages = session_messages_loader()
-        session_turns = _session_backfill_turns(session_key, session_messages or [])
-        canonical_revision = _canonical_backfill_revision(session_turns)
+    needs_canonical = any(not candidate.has_user and candidate.signature for candidate in candidates)
+    if needs_canonical and session_turns_loader is not None:
+        session_turns = session_turns_loader()
     entries: list[tuple[int, PromptSummary, dict[str, Any] | None]] = [
         (decode_transcript_cursor(prompt["cursor"]) or 0, prompt, None) for prompt in raw_prompts
     ]
     session_cursor = 0
-    session_signatures = [_assistant_signature_identity(turn.assistant_signature) for turn in session_turns or []]
+    signature_positions: dict[str, list[int]] = {}
+    for position, turn in enumerate(session_turns or []):
+        signature_positions.setdefault(_assistant_signature_identity(turn.assistant_signature), []).append(position)
     for candidate in candidates:
         if not session_turns:
             break
-        match = _find_unique_session_turn(session_signatures, candidate.signature, session_cursor)
-        if match is None:
+        positions = signature_positions.get(candidate.signature)
+        if not candidate.signature or not positions:
             continue
+        # Preserve unique-in-suffix matching without rescanning canonical history
+        # for each transcript turn. Ambiguous answers still cannot backfill a user.
+        offset = bisect_left(positions, session_cursor)
+        if offset != len(positions) - 1:
+            continue
+        match = positions[offset]
         session_cursor = match + 1
         if candidate.has_user:
             continue
@@ -2753,7 +2736,7 @@ def _build_prompt_view(
         prompts.append(prompt)
         if user is not None:
             backfilled_users[ordinal] = user
-    return _PromptView(prompts, backfilled_users, session_turns, canonical_revision)
+    return _PromptView(tuple(prompts), backfilled_users, needs_canonical)
 
 
 def build_prompt_index(
@@ -2762,13 +2745,53 @@ def build_prompt_index(
     session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
 ) -> list[PromptSummary]:
     """Read the display prompt directory; only missing-user turns load canonical history."""
-    return _build_prompt_view(session_key, session_messages_loader=session_messages_loader).prompts
+    view, _ = _prompt_view_snapshot(
+        session_key,
+        session_turns_loader=lambda: _session_backfill_turns(
+            session_key, (session_messages_loader() if session_messages_loader else None) or [],
+        ),
+    )
+    return list(view.prompts)
 
 
-# Short-lived response snapshots share the chunk summaries; they do not retain
-# full transcripts or write another durable representation of the conversation.
-_PROMPT_SNAPSHOTS: OrderedDict[tuple[Path, str], tuple[PromptSummary, ...]] = OrderedDict()
+# Bounded navigation snapshots retain summaries and recovered users, never full
+# canonical answers, transcripts, or a second durable conversation representation.
+_PROMPT_SNAPSHOTS: OrderedDict[tuple[Path, str], _PromptView] = OrderedDict()
 _PROMPT_SNAPSHOT_LOCK = threading.Lock()
+
+
+def _prompt_view_snapshot(
+    session_key: str,
+    *,
+    session_turns_loader: Callable[[], list[_SessionBackfillTurn]] | None = None,
+    session_version_loader: Callable[[], tuple[str, int] | None] | None = None,
+) -> tuple[_PromptView, str | None]:
+    path = webui_transcript_path(session_key)
+
+    def read_revision() -> str | None:
+        version = session_version_loader() if session_version_loader is not None else None
+        return prompt_index_revision(session_key, version)
+
+    revision = read_revision()
+    cache_key = (path, revision) if revision else None
+    if cache_key:
+        with _PROMPT_SNAPSHOT_LOCK:
+            cached = _PROMPT_SNAPSHOTS.get(cache_key)
+            if cached is not None and (not cached.needs_canonical or session_version_loader is not None):
+                _PROMPT_SNAPSHOTS.move_to_end(cache_key)
+                return cached, revision
+    view = _build_prompt_view(session_key, session_turns_loader=session_turns_loader)
+    # A caller supplying only messages cannot validate canonical changes. It may
+    # still use transcript chunk caches, but must not cache recovered snapshots.
+    if (view.needs_canonical and session_version_loader is None) or revision != read_revision():
+        return view, None
+    if cache_key:
+        with _PROMPT_SNAPSHOT_LOCK:
+            _PROMPT_SNAPSHOTS[cache_key] = view
+            _PROMPT_SNAPSHOTS.move_to_end(cache_key)
+            while len(_PROMPT_SNAPSHOTS) > 8:
+                _PROMPT_SNAPSHOTS.popitem(last=False)
+    return view, revision
 
 
 class PromptIndexResponse(TypedDict):
@@ -2782,26 +2805,26 @@ def prompt_index_response(
     previous_revision: str | None,
     *,
     session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
+    session_version_loader: Callable[[], tuple[str, int] | None] | None = None,
 ) -> PromptIndexResponse:
     path = webui_transcript_path(session_key)
-    transcript_revision = webui_transcript_revision(session_key)
-    view = _build_prompt_view(session_key, session_messages_loader=session_messages_loader)
-    revision = webui_display_revision(transcript_revision, view.canonical_revision)
-    current = tuple(view.prompts)
     with _PROMPT_SNAPSHOT_LOCK:
         previous = _PROMPT_SNAPSHOTS.get((path, previous_revision)) if previous_revision else None
-    # Do not label a read made across an append/rotation as one stable revision.
-    if transcript_revision != webui_transcript_revision(session_key):
+    view, revision = _prompt_view_snapshot(
+        session_key,
+        session_turns_loader=lambda: _session_backfill_turns(
+            session_key, (session_messages_loader() if session_messages_loader else None) or [],
+        ),
+        session_version_loader=session_version_loader,
+    )
+    current = view.prompts
+    if revision is None:
         return {"prompts": current, "replaceFrom": 0}
-    if revision:
-        with _PROMPT_SNAPSHOT_LOCK:
-            _PROMPT_SNAPSHOTS[path, revision] = current
-            _PROMPT_SNAPSHOTS.move_to_end((path, revision))
-            while len(_PROMPT_SNAPSHOTS) > 8:
-                _PROMPT_SNAPSHOTS.popitem(last=False)
+    if previous is not None and previous_revision == revision:
+        return {"prompts": (), "replaceFrom": len(current), "revision": revision}
     replace_from = 0
     if previous is not None:
-        for old, new in zip(previous, current):
+        for old, new in zip(previous.prompts, current):
             if old != new:
                 break
             replace_from += 1
