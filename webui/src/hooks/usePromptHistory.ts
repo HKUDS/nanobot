@@ -94,24 +94,21 @@ export function usePromptHistory(key: string | null, version: number, messages: 
 
   const indexed = useMemo(() => {
     const ids = new Set<string>();
-    const inputs = new Set<string>();
     const turns = new Map<string, PromptAnchor | null>();
     for (const prompt of index?.prompts ?? []) {
       ids.add(prompt.id);
-      if (prompt.inputId) inputs.add(prompt.inputId);
       if (prompt.turnId) turns.set(prompt.turnId, turns.has(prompt.turnId) ? null : prompt);
     }
-    return { ids, inputs, turns };
+    return { ids, turns };
   }, [index]);
   const localCache = useRef<{ index: typeof index; users: UIMessage[]; prompts: PromptAnchor[] }>();
   const prompts = useMemo(() => {
     if (!enabled) return userPromptAnchors(messages);
     if (!currentScope || index?.key !== key) return [];
     // Live rows can still have optimistic render ids after admission. Match the
-    // host's input identity, or an unambiguous original transport id, not text.
+    // host's unambiguous original transport id and content, not text alone.
     const users = messages.filter((message) => {
       if (message.role !== "user" || indexed.ids.has(message.id)) return false;
-      if (message.inputId) return !indexed.inputs.has(message.inputId);
       const admitted = message.turnId ? indexed.turns.get(message.turnId) : null;
       return !admitted || admitted.preview !== message.content.trim().slice(0, 320);
     });

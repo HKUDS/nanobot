@@ -135,9 +135,9 @@ describe("canonical thread event projection", () => {
 
 it("uses deterministic unknown replay time and preserves distinct same-text inputs", () => {
   const events: ThreadProjectionEvent[] = [
-    { event: "user_message", chat_id: "chat", text: "same", starts_turn: true, turn_id: "input-one", projection_id: "u1", input_id: "input-one" },
+    { event: "user_message", chat_id: "chat", text: "same", starts_turn: true, turn_id: "input-one", projection_id: "u1" },
     { event: "turn_end", chat_id: "chat", turn_id: "input-one" },
-    { event: "user_message", chat_id: "chat", text: "same", starts_turn: true, turn_id: "input-two", projection_id: "u2", input_id: "input-two" },
+    { event: "user_message", chat_id: "chat", text: "same", starts_turn: true, turn_id: "input-two", projection_id: "u2" },
   ];
   const messages = projectThreadEvents(events);
   expect(messages.map((message) => message.id)).toEqual(["u1", "u2"]);

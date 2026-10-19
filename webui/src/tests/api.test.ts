@@ -145,14 +145,6 @@ describe("webui API helpers", () => {
     await expect(fetchPromptIndex("tok", "websocket:chat-1", signal, cached)).rejects.toThrow("Invalid prompt index revision");
   });
 
-  it("preserves optional prompt input identity from the host", async () => {
-    const prompt = { id: "recovered-row", inputId: "original-input", preview: "question", answerPreview: "",
-      cursor: "cursor", turnId: "t1", createdAt: 1 };
-    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ prompts: [prompt] }) } as Response);
-    const result = await fetchPromptIndex("tok", "websocket:chat-1", new AbortController().signal);
-    expect(result.prompts).toEqual([prompt]);
-  });
-
   it("revalidates a cached WebUI thread and reuses it on 304", async () => {
     const cached = {
       schemaVersion: 3,

@@ -766,11 +766,7 @@ export function projectThreadEvent(
   };
 
   if (event.event === "user_message") {
-    if (options.persisted && event.input_id) {
-      if (state.messages.some((message) => message.role === "user" && message.inputId === event.input_id)) return state;
-    } else if (options.persisted && event.projection_id) {
-      if (state.messages.some((message) => message.id === event.projection_id)) return state;
-    } else if (event.provenance?.session_message) {
+    if (event.provenance?.session_message) {
       const messageId = event.provenance.session_message.message_id?.trim();
       if (!messageId || state.messages.some(
         (message) => message.sessionMessage?.message_id === messageId,
@@ -796,7 +792,6 @@ export function projectThreadEvent(
       content: event.text,
       createdAt: projectionCreatedAt(event, options),
       ...turn,
-      ...(event.input_id ? { inputId: event.input_id } : {}),
       ...(!options.persisted ? { deliveryStatus: "accepted" as const } : {}),
       ...(media?.length ? { media } : {}),
       ...(event.cli_apps?.length ? { cliApps: event.cli_apps } : {}),

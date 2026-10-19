@@ -1580,8 +1580,7 @@ def _session_user_event(
     if isinstance(input_id, str) and _WEBUI_TURN_ID_RE.fullmatch(input_id):
         event["turn_id"] = input_id
         event["turn_phase"] = "user"
-        signature = hashlib.sha256(_user_recovery_signature(event).encode("utf-8")).hexdigest()[:16]
-        event[_WEBUI_REPLAY_IDENTITY_KEY] = f"input:{session_key}:{input_id}:{signature}"
+        event[_WEBUI_REPLAY_IDENTITY_KEY] = f"input:{session_key}:{input_id}"
     elif canonical_position is not None:
         event[_WEBUI_REPLAY_IDENTITY_KEY] = f"canonical:{session_key}:message:{canonical_position}"
     return event
@@ -2188,7 +2187,6 @@ def _client_projection_event(
             **common,
             "text": record.get("text") if isinstance(record.get("text"), str) else "",
             "starts_turn": True,
-            "input_id": _user_input_identity(record),
         }
         raw_paths = record.get("media_paths")
         paths = [
@@ -2555,14 +2553,8 @@ def build_webui_thread_response(
             # Page selection assigns this absolute identity before any recovery.
             ordinal = int(turn[0][_WEBUI_REPLAY_IDENTITY_KEY].split(":")[1])
             user = view.backfilled_users.get(ordinal)
-            visible = [record for record in turn if _client_projection_event_id(record) not in view.suppressed_ids]
-            recovered_lines.extend(_with_backfilled_user(visible, user) if user is not None else visible)
-        first_ordinal = int(selected_turns[0][0][_WEBUI_REPLAY_IDENTITY_KEY].split(":")[1])
+            recovered_lines.extend(_with_backfilled_user(turn, user) if user is not None else turn)
         lines = recovered_lines
-        page["user_message_offset"] = sum(
-            (decode_transcript_cursor(prompt["cursor"]) or 0) < first_ordinal
-            for prompt in view.prompts
-        )
     if _needs_incomplete_turn_recovery(lines):
         session_turns = view.session_turns if view is not None else None
         if session_turns is None:
@@ -2605,7 +2597,6 @@ def build_webui_thread_response(
 
 class PromptSummary(TypedDict):
     id: str
-    inputId: str
     preview: str
     answerPreview: str
     createdAt: int
@@ -2617,7 +2608,6 @@ class _BackfillCandidate(NamedTuple):
     ordinal: int
     signature: str
     answer_preview: str
-    turn_id: str
     has_user: bool
 
 
@@ -2629,7 +2619,6 @@ class _ChunkPromptView(NamedTuple):
 class _PromptView(NamedTuple):
     prompts: list[PromptSummary]
     backfilled_users: dict[int, dict[str, Any]]
-    suppressed_ids: set[str]
     session_turns: list[_SessionBackfillTurn] | None
     canonical_revision: str | None
 
@@ -2651,25 +2640,9 @@ def webui_display_revision(revision: str | None, canonical_revision: str | None)
     return hashlib.sha256(f"{revision}\0{canonical_revision}".encode("ascii")).hexdigest()[:32]
 
 
-def _user_input_identity(record: dict[str, Any]) -> str:
-    provenance = normalize_session_message_ui_metadata(record.get("session_message"))
-    turn_id = record.get("turn_id")
-    if provenance:
-        origin = f"session-message:{provenance['message_id']}"
-    elif isinstance(turn_id, str) and turn_id:
-        origin = f"input:{turn_id}"
-    else:
-        origin = str(record.get(_WEBUI_REPLAY_IDENTITY_KEY) or _client_projection_event_id(record))
-    # Identity is provenance plus matching fields, never text alone. Conflicting
-    # records with a reused id remain distinct rather than being silently repaired.
-    digest = hashlib.sha256(f"{origin}\0{_user_recovery_signature(record)}".encode("utf-8"))
-    return f"input-{digest.hexdigest()[:24]}"
-
-
 def _prompt_summary(record: dict[str, Any], ordinal: int, answer: str) -> PromptSummary:
     return {
         "id": _client_projection_event_id(record),
-        "inputId": _user_input_identity(record),
         "preview": str(record.get("text") or "").strip()[:320],
         "answerPreview": answer,
         "createdAt": _valid_created_at_ms(record.get("created_at_ms")) or 0,
@@ -2695,14 +2668,26 @@ def _chunk_prompt_summaries(path: Path, identity: tuple[int, int, int], start: i
         records = _records_with_replay_identity(turn, turn_ordinal=ordinal)
         has_user = any(record.get("event") == "user" for record in records)
         signature = _transcript_turn_signature(records)
-        turn_ids = {value for record in records if isinstance(value := record.get("turn_id"), str) and value}
         candidates.append(_BackfillCandidate(
-            ordinal, _assistant_signature_identity(signature), signature[0][:240] if signature else "",
-            next(iter(turn_ids)) if len(turn_ids) == 1 else "", has_user,
+            ordinal, _assistant_signature_identity(signature), signature[0][:240] if signature else "", has_user,
         ))
+        seen_turns: set[str] = set()
+        seen_messages: set[str] = set()
         for index, record in enumerate(records):
             if record.get("event") != "user":
                 continue
+            turn_id = str(record.get("turn_id") or "")
+            # Match the client projector's existing per-turn delivery deduplication.
+            provenance = normalize_session_message_ui_metadata(record.get("session_message"))
+            if provenance:
+                message_id = str(provenance["message_id"])
+                if message_id in seen_messages:
+                    continue
+                seen_messages.add(message_id)
+            elif turn_id and turn_id in seen_turns:
+                continue
+            if turn_id:
+                seen_turns.add(turn_id)
             answer = ""
             for following in records[index + 1:]:
                 if following.get("event") == "user":
@@ -2748,7 +2733,6 @@ def _build_prompt_view(
     entries: list[tuple[int, PromptSummary, dict[str, Any] | None]] = [
         (decode_transcript_cursor(prompt["cursor"]) or 0, prompt, None) for prompt in raw_prompts
     ]
-    recorded_by_input = {prompt["inputId"]: prompt for prompt in reversed(raw_prompts)}
     session_cursor = 0
     session_signatures = [_assistant_signature_identity(turn.assistant_signature) for turn in session_turns or []]
     for candidate in candidates:
@@ -2762,28 +2746,14 @@ def _build_prompt_view(
             continue
         user = dict(session_turns[match].user_event)
         summary = _prompt_summary(user, candidate.ordinal, candidate.answer_preview)
-        if not user.get("turn_id") and candidate.turn_id:
-            # Known historical replay reused the original admission id on its
-            # answer. Only an earlier recorded user with identical fields proves
-            # that provenance; an execution id alone says nothing about guidance.
-            known = recorded_by_input.get(_user_input_identity({**user, "turn_id": candidate.turn_id}))
-            if known and (decode_transcript_cursor(known["cursor"]) or 0) < candidate.ordinal:
-                summary["inputId"] = known["inputId"]
         entries.append((candidate.ordinal, summary, user))
     prompts: list[PromptSummary] = []
     backfilled_users: dict[int, dict[str, Any]] = {}
-    suppressed_ids: set[str] = set()
-    seen: set[str] = set()
     for ordinal, prompt, user in sorted(entries, key=lambda entry: entry[0]):
-        if prompt["inputId"] in seen:
-            if user is None:
-                suppressed_ids.add(prompt["id"])
-            continue
-        seen.add(prompt["inputId"])
         prompts.append(prompt)
         if user is not None:
             backfilled_users[ordinal] = user
-    return _PromptView(prompts, backfilled_users, suppressed_ids, session_turns, canonical_revision)
+    return _PromptView(prompts, backfilled_users, session_turns, canonical_revision)
 
 
 def build_prompt_index(
