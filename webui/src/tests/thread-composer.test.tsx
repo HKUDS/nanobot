@@ -2324,37 +2324,35 @@ describe("ThreadComposer", () => {
       .toEqual(targets.slice(1).map((target) => target.key));
   });
 
-  it("releases the eight-session limit when a mention is removed", () => {
+  it.each(["palette", "drop"])("releases the eight-session limit for %s insertion when a mention is removed", (entry) => {
     const onSend = vi.fn();
-    render(
-      <ThreadComposer
-        onSend={onSend}
-        placeholder="Type your message..."
-        sessions={Array.from(
-          { length: 9 },
-          (_, index) => session(`topic-${index}`, `Topic${index}`),
-        )}
-      />,
-    );
-
+    const targets = Array.from({ length: 9 }, (_, index) => session(`topic-${index}`, `Topic${index}`, "", `ref${index}x`));
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
     const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
-    for (let index = 0; index < 8; index += 1) {
-      const value = `${input.value}${input.value ? " " : ""}@Topic${index}`;
-      fireEvent.change(input, { target: { value, selectionStart: value.length } });
-      fireEvent.keyDown(input, { key: "Tab" });
+    const text = `${targets.slice(0, 8).map((target) => `@${target.handle?.name}`).join(" ")} @ref8`;
+    fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
+    expect(screen.queryByRole("option", { name: /@ref8x/i })).not.toBeInTheDocument();
+    const dataTransfer = { types: [SESSION_DRAG_TYPE], files: [], getData: () => targets[8].key };
+    if (entry === "drop") {
+      fireEvent.dragOver(input, { dataTransfer });
+      expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
+      fireEvent.drop(input, { dataTransfer });
+      expect(input).toHaveValue(text);
     }
-    const replacement = `${input.value.replace("@Topic0 ", "")} @Topic8`;
-    fireEvent.change(input, {
-      target: { value: replacement, selectionStart: replacement.length },
-    });
-    fireEvent.keyDown(input, { key: "Tab" });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    const options = onSend.mock.calls[0]?.[2];
-    expect(options.sessionMentions).toHaveLength(8);
-    expect(options.sessionMentions.map((mention: { session_key: string }) => (
-      mention.session_key
-    ))).toEqual(expect.arrayContaining(["websocket:topic-8"]));
+    const replacement = input.value.replace("@ref0x ", "");
+    fireEvent.change(input, { target: { value: replacement, selectionStart: replacement.length } });
+    expect(screen.getByRole("option", { name: /@ref8x/i })).toBeInTheDocument();
+    if (entry === "palette") fireEvent.keyDown(input, { key: "Tab" });
+    else {
+      input.setSelectionRange(replacement.lastIndexOf("@"), replacement.length);
+      fireEvent.dragOver(input, { dataTransfer });
+      expect(screen.getByTestId("composer-session-drag-preview")).toHaveTextContent("@ref8x");
+      fireEvent.drop(input, { dataTransfer });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend.mock.calls[0]?.[2].sessionMentions.map((mention: { session_key: string }) => mention.session_key))
+      .toEqual(targets.slice(1).map((target) => target.key));
   });
 
   it.each(["typed", "selected"])("keeps a %s session stable across refreshes and queued guidance", (entry) => {
@@ -2377,16 +2375,15 @@ describe("ThreadComposer", () => {
       fireEvent.keyDown(input, { key: "Tab" });
     }
 
+    // The referenced chat was deleted and its handle reused by a new chat.
+    const replacement = session("a-new", "New plan", "", "Plan");
     rerender(
       <ThreadComposer
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
         placeholder="Type your message..."
-        sessions={[
-          { ...target, title: "Renamed plan" },
-          session("a-new", "Plan", target.preview),
-        ]}
+        sessions={[replacement]}
       />,
     );
 
@@ -2403,6 +2400,46 @@ describe("ThreadComposer", () => {
       }],
       continueActiveTurn: true,
     });
+  });
+
+  it.each(["palette", "drop"])("prevents %s insertion from retargeting a draft when a handle is reused", (entry) => {
+    const onSend = vi.fn();
+    const original = session("original", "Original plan", "", "bime");
+    const replacement = session("replacement", "New plan", "", "bime");
+    const composer = (target: ChatSummary) => <ThreadComposer onSend={onSend} sessions={[target]} />;
+    const { rerender } = render(composer(original));
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@bime " } });
+    rerender(composer(replacement));
+    const dataTransfer = { types: [SESSION_DRAG_TYPE], files: [], getData: () => replacement.key };
+
+    if (entry === "palette") {
+      fireEvent.change(input, { target: { value: "@bime @bi", selectionStart: 9 } });
+      expect(screen.queryByRole("option", { name: /@bime/i })).not.toBeInTheDocument();
+    } else {
+      fireEvent.dragOver(input, { dataTransfer });
+      expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
+      fireEvent.drop(input, { dataTransfer });
+      expect(input).toHaveValue("@bime ");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend.mock.calls[0]?.[2].sessionMentions).toEqual([{
+      id: original.handle?.id, name: "bime", session_key: original.key, title: original.title,
+    }]);
+
+    if (entry === "palette") {
+      fireEvent.change(input, { target: { value: "@bi", selectionStart: 3 } });
+      expect(screen.getByRole("option", { name: /@bime/i })).toBeInTheDocument();
+      fireEvent.keyDown(input, { key: "Tab" });
+    } else {
+      fireEvent.dragOver(input, { dataTransfer });
+      expect(screen.getByTestId("composer-session-drag-preview")).toHaveTextContent("@bime");
+      fireEvent.drop(input, { dataTransfer });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend.mock.calls[1]?.[2].sessionMentions).toEqual([{
+      id: replacement.handle?.id, name: "bime", session_key: replacement.key, title: replacement.title,
+    }]);
   });
 
   it("opens skills only from a $ reference and prioritizes the skill name", () => {

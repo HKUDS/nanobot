@@ -1502,7 +1502,7 @@ export function ThreadComposer({
         sessionDragInsertion.value,
         cliApps,
         mcpPresets,
-        [...sessionMentionCatalog, sessionDragPreview.mention],
+        sessionMentionCatalog,
       )
     : mentionInput.segments;
   const activeSessionMentions = useMemo(() => {
@@ -1533,15 +1533,17 @@ export function ThreadComposer({
       quotedContext,
     }, persistDraft);
   }, [activeSessionMentions, draftAttachmentsReady, draftKey, draftStore, images, persistDraft, quotedContext, draftText]);
+  const insertableSessionMentions = useMemo(() => availableSessionMentions.filter((mention) => {
+    const bound = activeSessionMentions.find(
+      (active) => active.name.toLowerCase() === mention.name.toLowerCase(),
+    );
+    return (!bound || bound.session_key === mention.session_key)
+      && (activeSessionMentions.length < SESSION_MENTIONS_LIMIT
+        || activeSessionMentions.some((active) => active.session_key === mention.session_key));
+  }), [activeSessionMentions, availableSessionMentions]);
   const filteredMentionCandidates = useMemo<MentionCandidate[]>(() => {
     if (!cliAppMention) return [];
-    const sessionCandidates: MentionCandidate[] = availableSessionMentions
-      .filter((mention) => (
-        activeSessionMentions.length < SESSION_MENTIONS_LIMIT
-        || activeSessionMentions.some(
-          (selected) => selected.session_key === mention.session_key,
-        )
-      ))
+    const sessionCandidates: MentionCandidate[] = insertableSessionMentions
       .filter((mention) => [
         mention.name,
         mention.title,
@@ -1614,7 +1616,7 @@ export function ThreadComposer({
       remaining -= extra;
     }
     return groups.flatMap(({ candidates }, index) => candidates.slice(0, counts[index]));
-  }, [activeSessionMentions, availableSessionMentions, cliAppMention, cliApps, mcpPresets, sessionMentionCatalog]);
+  }, [cliAppMention, cliApps, insertableSessionMentions, mcpPresets, sessionMentionCatalog]);
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
@@ -1752,7 +1754,6 @@ export function ThreadComposer({
     previousPendingQueueKeyRef.current = pendingQueueKey;
     secondEnterPromptIdRef.current = null;
     setValue("");
-    setBoundSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -1890,38 +1891,24 @@ export function ThreadComposer({
     [handleStop, isStreaming, onStop, recentSlashCommands, replaceMentionInput, resizeTextarea, skillQuery, value],
   );
 
-  const insertMentionCandidate = useCallback(
-    (candidate: MentionCandidate, start: number, end: number) => {
-      if (candidate.kind === "session") {
-        const alreadySelected = activeSessionMentions.some(
-          (mention) => mention.session_key === candidate.mention.session_key,
-        );
-        if (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT) return;
-        const name = candidate.name.toLowerCase();
-        setBoundSessionMentions([
-          ...activeSessionMentions.filter((mention) => (
-            mention.name.toLowerCase() !== name
-            && mention.session_key !== candidate.mention.session_key
-          )),
-          candidate.mention,
-        ]);
-      }
-      const insertion = mentionInsertion(value, candidate.name, start, end);
+  const insertMention = useCallback(
+    (name: string, start: number, end: number) => {
+      const insertion = mentionInsertion(value, name, start, end);
       replaceMentionInput(insertion.value, insertion.cursor);
       setCliAppMenuDismissed(true);
       setSlashMenuDismissed(false);
       setInlineError(null);
       resizeTextarea();
     },
-    [activeSessionMentions, replaceMentionInput, resizeTextarea, value],
+    [replaceMentionInput, resizeTextarea, value],
   );
 
   const chooseMentionCandidate = useCallback(
     (candidate: MentionCandidate) => {
       if (!cliAppMention) return;
-      insertMentionCandidate(candidate, cliAppMention.start, cliAppMention.end);
+      insertMention(candidate.name, cliAppMention.start, cliAppMention.end);
     },
-    [cliAppMention, insertMentionCandidate],
+    [cliAppMention, insertMention],
   );
 
   const handleSessionDrop = useCallback((event: React.DragEvent) => {
@@ -1932,30 +1919,14 @@ export function ThreadComposer({
     setSessionDragPreview(null);
     if (interactionDisabled) return true;
     const sessionKey = readDraggedSession(event.dataTransfer);
-    const mention = availableSessionMentions.find(
+    const mention = insertableSessionMentions.find(
       (candidate) => candidate.session_key === (sessionKey ?? preview?.mention.session_key),
     );
     if (!mention) return true;
     const caret = preview?.start ?? rawSelection().start;
-    insertMentionCandidate(
-      {
-        kind: "session",
-        name: mention.name,
-        displayName: mention.title || mention.name,
-        mention,
-      },
-      caret,
-      preview?.end ?? rawSelection().end,
-    );
+    insertMention(mention.name, caret, preview?.end ?? rawSelection().end);
     return true;
-  }, [
-    availableSessionMentions,
-    insertMentionCandidate,
-    interactionDisabled,
-    rawSelection,
-    sessionDragPreview,
-    value.length,
-  ]);
+  }, [insertableSessionMentions, insertMention, interactionDisabled, rawSelection, sessionDragPreview]);
 
   const previewSessionDrop = useCallback((event: React.DragEvent) => {
     if (!hasDraggedSession(event.dataTransfer)) return false;
@@ -1965,13 +1936,10 @@ export function ThreadComposer({
       return true;
     }
     const sessionKey = readDraggedSession(event.dataTransfer);
-    const mention = availableSessionMentions.find(
+    const mention = insertableSessionMentions.find(
       (candidate) => candidate.session_key === sessionKey,
     );
-    const alreadySelected = mention && activeSessionMentions.some(
-      (candidate) => candidate.session_key === mention.session_key,
-    );
-    if (!mention || (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT)) {
+    if (!mention) {
       event.dataTransfer.dropEffect = "none";
       setSessionDragPreview(null);
       return true;
@@ -1987,7 +1955,7 @@ export function ThreadComposer({
         : { mention, start, end }
     ));
     return true;
-  }, [activeSessionMentions, availableSessionMentions, interactionDisabled, rawSelection]);
+  }, [insertableSessionMentions, interactionDisabled, rawSelection]);
 
   useEffect(() => {
     if (!sessionDragPreview) return;
@@ -2001,7 +1969,6 @@ export function ThreadComposer({
 
   const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
-    setBoundSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
