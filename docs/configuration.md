@@ -2074,7 +2074,7 @@ AnySearch works out of the box with no key, via its anonymous quota (lower rate 
     "web": {
       "search": {
         "provider": "deepseek",
-        "apiKey": "${DEEPSEEK_API_KEY}"
+        "apiKey": "${DEEPSEEK_SEARCH_KEY}"
       }
     }
   }
@@ -2083,16 +2083,9 @@ AnySearch works out of the box with no key, via its anonymous quota (lower rate 
 
 </details>
 
-This provider calls the standalone [DeepSeek Search API](https://api-docs.deepseek.com/zh-cn/guides/search/) (`POST https://api.deepseek.com/v1/tools/search`). It is a separate web-search backend and is **not** the same as the provider-hosted web search that DeepSeek models can run inside a chat request; selecting `deepseek` here does not change the DeepSeek LLM provider or inject any tool into model requests.
+Create a key at [platform.deepseek.com](https://platform.deepseek.com). Set `tools.web.search.apiKey` directly or with a `${VAR_NAME}` reference. Missing credentials cause a configuration error, with no provider fallback.
 
-- Create a key at [platform.deepseek.com](https://platform.deepseek.com). The key can also come from the `DEEPSEEK_API_KEY` environment variable. Without a key, nanobot falls back to DuckDuckGo, like the other keyed search providers.
-- Billing is per successful request: ¥5 per 1,000 requests. Requests that fail, time out, or return no results are not billed. `count` only changes the number of results and not the price.
-- The account limit is 5 QPS. nanobot retries HTTP 408, 429, and 5xx responses once after one second before reporting the failure; other 4xx responses are not retried.
-- A query is limited to 128 Unicode characters. nanobot trims surrounding whitespace and truncates longer queries locally, so no request that would fail with HTTP 400 is sent.
-- Search syntax is passed through unchanged: `site:`, `-site:`, `-`, `-"..."`, `"..."`, `lang:`, `after:`, and `before:`. For example: `DeepSeek models site:github.com lang:zh after:2025`.
-- Results use the API's `summary`, falling back to `snippet` when a summary is missing. Each result's text is capped at 500 characters, because real responses can be several times longer than the documented 600–800, and ten uncapped summaries would cost around 10k tokens per call. The publication date is included when the API returns one.
-
-nanobot requests results without page bodies (`need_content: false`), so full page text is not added to the model's context. Use `web_fetch` when you need the page content.
+Queries are limited to 128 Unicode characters after trimming whitespace; longer queries are rejected. Pricing is ¥5 per 1,000 successful requests, with an account-wide limit of 5 QPS across API keys. See the [DeepSeek Search API documentation](https://api-docs.deepseek.com/zh-cn/guides/search/) for search syntax and billing details.
 
 #### `tools.web.search`
 

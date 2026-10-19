@@ -374,6 +374,42 @@ describe("Settings capabilities", () => {
     );
   });
 
+  it("requires an explicit DeepSeek search key before saving and preserves it on later edits", async () => {
+    let payload: SettingsPayload = settingsPayload();
+    payload.web_search.providers.push({
+      name: "deepseek", label: "DeepSeek", credential: "api_key",
+    });
+    requestMutationMock.mockImplementation(async (_method, update) => {
+      payload = { ...payload, web_search: {
+        ...payload.web_search, provider: update.provider, timeout: update.timeout,
+        api_key_hint: "sk-d...key",
+      } };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "browser", initialSettings: payload });
+
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "DuckDuckGo" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "DeepSeek" }));
+    expect(await screen.findByText("Add the required credential before saving.")).toBeVisible();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByPlaceholderText("Enter API key"), { target: { value: "sk-deepseek-search-key" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.web_search.update",
+      { provider: "deepseek", api_key: "sk-deepseek-search-key", max_results: 5, timeout: 30, use_jina_reader: true },
+      20_000,
+    ));
+    expect(await screen.findByText("sk-d...key")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    const timeout = screen.getAllByRole("spinbutton").find((input) => (input as HTMLInputElement).value === "30")!;
+    fireEvent.change(timeout, { target: { value: "45" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.web_search.update",
+      { provider: "deepseek", max_results: 5, timeout: 45, use_jina_reader: true },
+      20_000,
+    ));
+  });
+
   it("uses native host safety copy on the native surface", async () => {
     const payload = {
       ...settingsPayload(),

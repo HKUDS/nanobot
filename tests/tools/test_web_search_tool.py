@@ -5,7 +5,8 @@ import pytest
 
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.web import WebSearchTool
-from nanobot.config.schema import WebSearchConfig
+from nanobot.config.loader import resolve_config_env_vars
+from nanobot.config.schema import Config, WebSearchConfig
 
 
 def _tool(
@@ -52,7 +53,7 @@ def test_brave_with_api_key_remains_concurrency_safe():
         pytest.param("KEENABLE_API_KEY", False, True, "keenable", id="keenable"),
         pytest.param("SERPER_API_KEY", True, False, "serper", id="serper-fallback"),
         pytest.param("ANYSEARCH_API_KEY", False, True, "anysearch", id="anysearch"),
-        pytest.param("DEEPSEEK_API_KEY", True, False, "deepseek", id="deepseek-fallback"),
+        pytest.param("DEEPSEEK_API_KEY", False, True, "deepseek", id="deepseek-missing-key"),
     ],
 )
 def test_search_concurrency_without_api_key(
@@ -475,7 +476,7 @@ async def test_deepseek_search_empty_results(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_deepseek_search_uses_env_api_key(monkeypatch):
+async def test_deepseek_search_uses_explicit_env_reference(monkeypatch):
     async def mock_post(self, url, **kw):
         assert kw["headers"]["Authorization"] == "Bearer env-deepseek-key"
         return _response(json={
@@ -483,33 +484,57 @@ async def test_deepseek_search_uses_env_api_key(monkeypatch):
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "env-deepseek-key")
-    tool = _tool(provider="deepseek", api_key="")
+    monkeypatch.setenv("DEEPSEEK_SEARCH_KEY", "env-deepseek-key")
+    config = Config()
+    config.tools.web.search.provider = "deepseek"
+    config.tools.web.search.api_key = "${DEEPSEEK_SEARCH_KEY}"
+    tool = WebSearchTool(config=resolve_config_env_vars(config).tools.web.search)
     result = await tool.execute(query="env")
 
     assert "Env" in result
 
 
 @pytest.mark.asyncio
-async def test_deepseek_missing_key_falls_back_to_duckduckgo(monkeypatch):
-    class MockDDGS:
-        def __init__(self, **kw):
-            pass
+@pytest.mark.parametrize("environment_key", [None, "ambient-deepseek-key"])
+async def test_deepseek_missing_key_returns_error_without_searching(monkeypatch, environment_key):
+    async def unexpected_search(*args, **kwargs):
+        pytest.fail("Missing DeepSeek credentials must not send the query to another provider")
 
-        def text(self, query, max_results=5):
-            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+    monkeypatch.setattr(WebSearchTool, "_search_duckduckgo", unexpected_search)
+    monkeypatch.setattr(httpx.AsyncClient, "post", unexpected_search)
+    if environment_key is None:
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("DEEPSEEK_API_KEY", environment_key)
 
-    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    result = await _tool(provider="deepseek").execute(query="test")
 
-    tool = _tool(provider="deepseek", api_key="")
-    result = await tool.execute(query="test")
-
-    assert "DuckDuckGo fallback" in result
+    assert is_tool_error_result(result)
+    assert "tools.web.search.apiKey" in result
 
 
 @pytest.mark.asyncio
-async def test_deepseek_search_truncates_query_to_128_unicode_characters(monkeypatch):
+@pytest.mark.parametrize("query", [
+    "搜" * 129,
+    "🙂" * 129,
+    "DeepSeek Flash API vision reasoning tool calling context window input output "
+    "limits documentation and release notes October 2026 -site:example.com",
+])
+async def test_deepseek_search_rejects_long_queries_without_network(monkeypatch, query):
+    async def unexpected_post(*args, **kwargs):
+        pytest.fail("An overlong query must be rejected, not truncated and searched")
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", unexpected_post)
+    result = await _tool(provider="deepseek", api_key="deepseek-key").execute(query=query)
+
+    assert is_tool_error_result(result)
+    assert "128 Unicode characters" in result
+    assert "Shorten" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["搜" * 128, "🙂" * 128])
+async def test_deepseek_search_preserves_queries_at_unicode_limit(monkeypatch, query):
     captured: dict[str, object] = {}
 
     async def mock_post(self, url, **kw):
@@ -517,22 +542,9 @@ async def test_deepseek_search_truncates_query_to_128_unicode_characters(monkeyp
         return _response(json={"results": []})
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    tool = _tool(provider="deepseek", api_key="deepseek-key")
+    await _tool(provider="deepseek", api_key="deepseek-key").execute(query=f"  {query}  ")
 
-    # CJK characters are 3 UTF-8 bytes each, so byte-based truncation would
-    # land well below 128 characters (or split a code point).
-    await tool.execute(query="搜" * 200, count=1)
-    query_value = captured["query"]
-    assert isinstance(query_value, str)
-    assert len(query_value) == 128
-    assert query_value == "搜" * 128
-
-    # Emoji are astral-plane code points; Python counts each as one character.
-    await tool.execute(query="🙂" * 150, count=1)
-    emoji_query = captured["query"]
-    assert isinstance(emoji_query, str)
-    assert len(emoji_query) == 128
-    assert emoji_query == "🙂" * 128
+    assert captured["query"] == query
 
 
 @pytest.mark.asyncio

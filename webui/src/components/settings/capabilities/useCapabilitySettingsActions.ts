@@ -3,7 +3,7 @@ import type { TFunction } from "i18next";
 
 import {
   webSearchProviderAcceptsApiKey,
-  webSearchProviderRequiresApiKey,
+  webSearchDraftState,
 } from "@/components/settings/capabilities/WebSettings";
 import type { CapabilitySettingsState } from "@/components/settings/capabilities/useCapabilitySettingsState";
 import type {
@@ -151,17 +151,7 @@ export function useCapabilitySettingsActions({
     if (!provider) return;
     const apiKey = webSearchForm.apiKey?.trim() ?? "";
     const baseUrl = webSearchForm.baseUrl?.trim() ?? "";
-    const hasExistingSecret =
-      webSearchProviderAcceptsApiKey(provider) &&
-      webSearchForm.provider === settings.web_search.provider &&
-      !!settings.web_search.api_key_hint;
-
-    if (webSearchProviderRequiresApiKey(provider) && !apiKey && !hasExistingSecret) {
-      return;
-    }
-    if (provider.credential === "base_url" && !baseUrl) {
-      return;
-    }
+    if (webSearchDraftState(settings, webSearchForm).missingCredential) return;
 
     setError("web");
     setWebSearchSaving(true);

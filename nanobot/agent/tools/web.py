@@ -24,7 +24,11 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.agent.tools.web_config import WebFetchConfig, WebSearchConfig, WebToolsConfig
+from nanobot.agent.tools.web_config import (
+    WebFetchConfig,
+    WebSearchConfig,
+    WebToolsConfig,
+)
 from nanobot.utils.helpers import build_image_content_blocks
 
 # Shared constants
@@ -43,8 +47,7 @@ _DEEPSEEK_MAX_RESULTS = 50
 # Ten uncapped summaries would otherwise cost roughly 10k tokens per call.
 _DEEPSEEK_MAX_SUMMARY_CHARS = 500
 _DEEPSEEK_ERROR_DETAIL_MAX_CHARS = 300
-# One retry after a transient status, matching the Brave provider. A one-second
-# wait also puts the next attempt below the account-wide limit of 5 QPS.
+# One retry after a transient status; this does not coordinate account-wide QPS.
 _DEEPSEEK_RETRY_DELAY_S = 1.0
 _VOLCENGINE_SEARCH_API_URL = "https://open.feedcoopapi.com/search_api/web_search"
 _VOLCENGINE_TRAFFIC_TAG = "nanobot"
@@ -306,20 +309,6 @@ def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
     return "\n".join(lines)
 
 
-def _normalize_deepseek_query(query: str) -> str | None:
-    """Trim and clamp a query to the Search API's 1-128 character window.
-
-    Truncation counts Unicode code points, not bytes, so CJK and emoji queries
-    are cut at the documented boundary instead of splitting a multi-byte
-    sequence. Returns ``None`` when the query is only whitespace, which the API
-    rejects with HTTP 400.
-    """
-    normalized = query.strip()
-    if not normalized:
-        return None
-    return normalized[:_DEEPSEEK_MAX_QUERY_CHARS]
-
-
 def _deepseek_is_retryable(status_code: int) -> bool:
     """Transient statuses: 408, 429 and 5xx. Every other 4xx needs a new request."""
     return status_code in {408, 429} or status_code >= 500
@@ -493,9 +482,6 @@ class WebSearchTool(Tool):
             return "keenable"
         if provider == "anysearch":
             return "anysearch"
-        if provider == "deepseek":
-            api_key = self.config.api_key or os.environ.get("DEEPSEEK_API_KEY", "")
-            return "deepseek" if api_key else "duckduckgo"
         if provider == "serper":
             api_key = self.config.api_key or os.environ.get("SERPER_API_KEY", "")
             return "serper" if api_key else "duckduckgo"
@@ -947,14 +933,21 @@ class WebSearchTool(Tool):
         unrelated to DeepSeek models' provider-hosted search: it never injects
         a ``web_search`` tool into a chat completion request.
         """
-        api_key = self.config.api_key or os.environ.get("DEEPSEEK_API_KEY", "")
+        api_key = self.config.api_key
         if not api_key:
-            logger.warning("DEEPSEEK_API_KEY not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            return ToolResult.error(
+                "Error: DeepSeek search requires an API key. "
+                "Set tools.web.search.apiKey."
+            )
 
-        normalized_query = _normalize_deepseek_query(query)
-        if normalized_query is None:
+        normalized_query = query.strip()
+        if not normalized_query:
             return ToolResult.error("Error: DeepSeek search requires a non-blank query.")
+        if len(normalized_query) > _DEEPSEEK_MAX_QUERY_CHARS:
+            return ToolResult.error(
+                f"Error: DeepSeek search accepts at most {_DEEPSEEK_MAX_QUERY_CHARS} Unicode characters. "
+                "Shorten or split the query while preserving its search operators."
+            )
         payload = {
             "query": normalized_query,
             "count": min(max(n, 1), _DEEPSEEK_MAX_RESULTS),
@@ -989,7 +982,7 @@ class WebSearchTool(Tool):
                 if r.status_code == 401:
                     return ToolResult.error(
                         "Error: DeepSeek search rejected the API key (HTTP 401). "
-                        "Set a valid key in tools.web.search.apiKey or DEEPSEEK_API_KEY."
+                        "Set a valid key in tools.web.search.apiKey."
                     )
                 if r.status_code == 402:
                     return ToolResult.error(
@@ -999,7 +992,7 @@ class WebSearchTool(Tool):
                 if r.status_code == 429:
                     return ToolResult.error(
                         "Error: DeepSeek search rate limited after retry. The account "
-                        "limit is 5 QPS; retry later or reduce consecutive web_search calls."
+                        "limit is 5 QPS; retry later or reduce the frequency of concurrent web_search calls."
                     )
                 if _deepseek_is_retryable(r.status_code):
                     return ToolResult.error(
