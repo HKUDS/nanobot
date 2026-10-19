@@ -131,6 +131,83 @@ async def test_brave_search_returns_clear_rate_limit_after_retries(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_duckduckgo_retries_no_results_found_once(monkeypatch):
+    """ddgs raises 'No results found' for rate/anti-bot rejections; retry once like Brave."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    class FakeDDGS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("No results found.")
+            return [{"title": "Recovered", "href": "https://example.com", "body": "ok"}]
+
+    async def mock_sleep(delay: float):
+        sleeps.append(delay)
+
+    monkeypatch.setitem(__import__("sys").modules, "ddgs", type("M", (), {"DDGS": FakeDDGS})())
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="nanobot", count=1)
+
+    assert calls["n"] == 2
+    assert "Recovered" in result
+    assert sleeps == [1.0]
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_reports_rate_limit_after_retries(monkeypatch):
+    calls = {"n": 0}
+
+    class FakeDDGS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            raise RuntimeError("No results found.")
+
+    async def mock_sleep(delay: float):
+        return None
+
+    monkeypatch.setitem(__import__("sys").modules, "ddgs", type("M", (), {"DDGS": FakeDDGS})())
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="nanobot", count=1)
+
+    assert calls["n"] == 2
+    assert is_tool_error_result(result)
+    assert "rate-limited or blocked" in result
+    assert "No results found" in result
+    assert "consecutive web_search" in result
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_empty_list_is_genuine_no_results(monkeypatch):
+    class FakeDDGS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def text(self, query, max_results=5):
+            return []
+
+    monkeypatch.setitem(__import__("sys").modules, "ddgs", type("M", (), {"DDGS": FakeDDGS})())
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="nanobot", count=1)
+
+    assert result == "No results for: nanobot"
+    assert not is_tool_error_result(result)
+
+
+
+@pytest.mark.asyncio
 async def test_tavily_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert "tavily" in url

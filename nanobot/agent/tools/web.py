@@ -279,6 +279,18 @@ async def _stream_with_safe_redirects(
     )
 
 
+def _is_duckduckgo_transient_rejection(exc: BaseException) -> bool:
+    """True when ddgs reports a rate/anti-bot rejection as a misleading empty-result error."""
+    msg = str(exc).lower()
+    return (
+        "no results found" in msg
+        or "ratelimit" in msg
+        or "rate limit" in msg
+        or "too many requests" in msg
+        or "429" in msg
+    )
+
+
 def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
     """Format provider results into shared plaintext output."""
     if not items:
@@ -996,30 +1008,49 @@ class WebSearchTool(Tool):
         return _format_results(query, items, n)
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
-        try:
-            # DDGS.text performs synchronous requests; run it in a thread to avoid blocking the loop.
-            from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
+        # DDGS often raises "No results found" for rate/anti-bot rejections rather than
+        # returning an empty list. Retry once (mirrors Brave) and surface a clearer error.
+        last_error: BaseException | None = None
+        for attempt in range(2):
+            try:
+                # DDGS.text performs synchronous requests; run it in a thread to avoid blocking the loop.
+                from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
 
-            ddgs_type = cast(Any, DDGS)
-            ddgs = ddgs_type(timeout=10, proxy=self.proxy)
-            raw = await asyncio.wait_for(
-                asyncio.to_thread(ddgs.text, query, max_results=n),
-                timeout=self.config.timeout,
-            )
-            if not raw:
-                return f"No results for: {query}"
-            raw_items = cast(list[dict[str, Any]], raw)
-            items: list[dict[str, Any]] = [
-                {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
-                for r in raw_items
-            ]
-            return _format_results(query, items, n)
-        except Exception as e:
-            logger.warning(
-                "DuckDuckGo search failed: {}",
-                e if tool_log_content_allowed() else type(e).__name__,
-            )
-            return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
+                ddgs_type = cast(Any, DDGS)
+                ddgs = ddgs_type(timeout=10, proxy=self.proxy)
+                raw = await asyncio.wait_for(
+                    asyncio.to_thread(ddgs.text, query, max_results=n),
+                    timeout=self.config.timeout,
+                )
+                if not raw:
+                    return f"No results for: {query}"
+                raw_items = cast(list[dict[str, Any]], raw)
+                items: list[dict[str, Any]] = [
+                    {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
+                    for r in raw_items
+                ]
+                return _format_results(query, items, n)
+            except Exception as e:
+                last_error = e
+                if _is_duckduckgo_transient_rejection(e) and attempt == 0:
+                    logger.warning(
+                        "DuckDuckGo search rate-limited or blocked; retrying once in 1.0s: {}",
+                        e if tool_log_content_allowed() else type(e).__name__,
+                    )
+                    await asyncio.sleep(1.0)
+                    continue
+                logger.warning(
+                    "DuckDuckGo search failed: {}",
+                    e if tool_log_content_allowed() else type(e).__name__,
+                )
+                if _is_duckduckgo_transient_rejection(e):
+                    return ToolResult.error(
+                        "Error: DuckDuckGo search rate-limited or blocked after retry "
+                        f"(provider reported: {e}). "
+                        "Retry later or reduce consecutive web_search calls."
+                    )
+                return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
+        return ToolResult.error(f"Error: DuckDuckGo search failed ({last_error})")
 
     async def _search_bocha(self, query: str, n: int, freshness: str = "noLimit") -> str:
         api_key = self.config.api_key or os.environ.get("BOCHA_API_KEY", "")
