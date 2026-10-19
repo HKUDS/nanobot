@@ -211,6 +211,8 @@ To reference another topic, type or paste its complete handle (such as `@luma`),
 
 Ask nanobot to find, read, or send messages to other saved topics, including those in other projects. For example, “Summarize @luma” or “Send this update to @luma.” Mentioning a topic alone does not send a message to it.
 
+For large session lists, use `list_sessions(limit=20, offset=0)` and increase `offset` to read the next page. Handles are ordered alphabetically, the current session is excluded before pagination, and an empty list marks the end. Omitting both parameters returns the full list as before.
+
 On touch-primary phones and tablets, **Enter** inserts a newline; tap the send arrow to submit. This also applies when a coarse-pointer tablet has a hardware keyboard attached. On desktop, **Enter** sends and **Shift+Enter** adds a newline. An open slash-command or mention menu takes precedence: Enter selects its item.
 
 While a response is running, desktop Enter adds your input to one waiting message. Further inputs append in order, separated by newlines, with their attachments and references retained. The complete message is sent once the current response finishes. Press Enter again with an empty input or choose **Send now** to insert it immediately as guidance for the active turn. The send arrow also includes any waiting content when submitting a new draft. Use **Edit message** to revise the complete message or **Delete message** to discard it. If an addition would exceed the message limits, it stays in the input so you can revise it. The primary button shows **Stop** when there is no sendable draft; stopping or a failed send keeps the waiting message for manual sending.
