@@ -3,7 +3,32 @@ import react from "@vitejs/plugin-react";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { readStartupLayout, StartupSkeleton } from "./src/components/StartupSkeleton";
 import { componentGallery } from "./src/dev/gallery/inventory-plugin";
+
+function startupSkeleton(): Plugin {
+  return {
+    name: "nanobot-startup-skeleton",
+    transformIndexHtml: {
+      order: "post",
+      handler(html) {
+        if (!html.includes("<!--startup-shell-->")) return html;
+        const css = readFileSync(path.resolve(__dirname, "src/components/startup-skeleton.css"), "utf8");
+        const initialize = `var shell = document.querySelector('.startup-shell'); var layout = (${readStartupLayout.toString()})();
+          shell.dataset.startupSurface = layout.surface; shell.dataset.startupSection = layout.section;
+          shell.dataset.sidebarExpanded = String(layout.sidebarExpanded); shell.dataset.existingChat = String(layout.existingChat);
+          shell.dataset.calendarWeeks = String(layout.calendarWeeks);
+          shell.style.setProperty('--startup-sidebar-width', (layout.sidebarExpanded ? layout.sidebarWidth : 56) + 'px');`;
+        return html.replace("<!--startup-style-->", `<style>${css}</style>`)
+          .replace("<!--startup-shell-->", renderToStaticMarkup(createElement(StartupSkeleton)))
+          .replace("<!--startup-script-->", `<script>${initialize}</script>`)
+          .replace(/<link rel="stylesheet"/g, '<link rel="preload" as="style" data-app-stylesheet');
+      },
+    },
+  };
+}
 
 const GZIP_MIN_BYTES = 4 * 1024;
 const GZIP_ASSET_PATTERN = /\.(?:css|html|js|json|mjs|svg)$/i;
@@ -120,7 +145,7 @@ export default defineConfig(({ mode }) => {
   const hmrPath = "/__nanobot_vite_hmr";
 
   return {
-    plugins: [react(), componentGallery(path.resolve(__dirname, "..")), guardWebuiEntryChunk(), gzipWebuiAssets()],
+    plugins: [react(), startupSkeleton(), componentGallery(path.resolve(__dirname, "..")), guardWebuiEntryChunk(), gzipWebuiAssets()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

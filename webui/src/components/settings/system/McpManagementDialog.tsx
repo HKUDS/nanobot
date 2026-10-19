@@ -369,10 +369,17 @@ function ToolsPanel({
       <SkeletonStatus label={tx("settings.mcp.loadingTools", "Loading tools…")} className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="h-10 min-w-0 rounded-full bg-muted-foreground/20 sm:flex-1" />
-          <div className="flex h-8 items-center justify-between gap-4 sm:justify-end">
-            <div className="mr-auto h-3 w-20 rounded bg-muted-foreground/20 sm:mr-1" />
-            <div className="h-3 w-6 rounded bg-muted-foreground/20" />
-            <div className="h-3 w-9 rounded bg-muted-foreground/20" />
+          <div className="flex items-center justify-between gap-2 sm:justify-end">
+            <div className="relative mr-auto text-[13px] tabular-nums sm:mr-1">
+              <span className="invisible">{tx("settings.mcp.selectedCount", "{{count}} selected").replace("{{count}}", String(selectedToolCount))}</span>
+              <div className="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded bg-muted-foreground/20" />
+            </div>
+            {[tx("settings.mcp.allTools", "All"), tx("settings.mcp.noTools", "None")].map((label) => (
+              <div key={label} className="relative flex h-8 items-center px-2.5 text-[12.5px] font-semibold">
+                <span className="invisible">{label}</span>
+                <div className="absolute inset-x-2.5 top-1/2 h-3 -translate-y-1/2 rounded bg-muted-foreground/20" />
+              </div>
+            ))}
           </div>
         </div>
         <div className="overflow-hidden rounded-floating border border-border/55">

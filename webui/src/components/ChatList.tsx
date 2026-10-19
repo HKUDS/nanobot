@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/tooltip";
 import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
 import { SidebarTopicRename } from "@/components/SidebarTopicRename";
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import {
   SIDEBAR_SELECTION_ITEM_CLASS,
   SidebarSelectionHighlight,
@@ -258,6 +259,7 @@ interface ChatListProps {
   defaultWorkspacePath?: string | null;
   actionMenuPortalContainer?: HTMLElement | null;
   loading?: boolean;
+  initialLoading?: boolean;
   emptyLabel?: string;
 }
 
@@ -299,6 +301,7 @@ export const ChatList = memo(function ChatList({
   defaultWorkspacePath,
   actionMenuPortalContainer,
   loading,
+  initialLoading = loading,
   emptyLabel,
 }: ChatListProps) {
   const { t } = useTranslation();
@@ -573,11 +576,22 @@ export const ChatList = memo(function ChatList({
     for (const animation of layoutAnimationsRef.current.values()) animation.cancel();
   }, []);
 
-  if (loading && sessions.length === 0 && temporarySessions.length === 0) {
+  if (initialLoading && sessions.length === 0 && temporarySessions.length === 0) {
     return (
-      <div className="px-3 py-6 text-[12px] text-sidebar-muted-foreground">
-        {t("chat.loading")}
-      </div>
+      <SkeletonStatus label={t("chat.loading")} className="px-2 py-1.5">
+        <div className="flex h-8 items-center px-2"><div className="h-2.5 w-14 rounded bg-sidebar-muted-foreground/15" /></div>
+        <div className="space-y-0.5">
+          {[64, 76, 56, 70, 60, 72].map((width, index) => (
+            <div key={index} data-chat-skeleton-row className={cn("flex items-center gap-1 px-2", density === "compact" ? "h-[30px]" : "h-[34px]", "[@media(pointer:coarse)]:h-11")}>
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                <div className="h-2.5 w-10 shrink-0 rounded bg-sidebar-muted-foreground/15" />
+                <div className="h-3 rounded bg-sidebar-muted-foreground/20" style={{ width: `${width}%` }} />
+              </div>
+              <div className="h-4 w-4 shrink-0" /><div className="h-6 w-6 shrink-0" />
+            </div>
+          ))}
+        </div>
+      </SkeletonStatus>
     );
   }
 

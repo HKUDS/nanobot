@@ -86,6 +86,31 @@ describe("SessionInfoPopover", () => {
     expect(screen.getByRole("button", { name: "Session details" })).toHaveFocus();
   });
 
+  it("uses a skeleton for the initial request and keeps jobs while reopening and refreshing", async () => {
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const user = userEvent.setup();
+    const view = render(<SessionInfoPopover client={client} sessionKey="websocket:chat-1" token="tok" title="Release work" />);
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+    expect(screen.getByRole("status", { name: "Loading automations..." })).toHaveAttribute("aria-busy", "true");
+    await act(async () => finish(automationsResponse([automationJob()])));
+    expect(await screen.findByRole("button", { name: /Morning check/ })).toBeVisible();
+    await user.keyboard("{Escape}");
+    let fail!: (error: Error) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+    expect(screen.getByRole("button", { name: /Morning check/ })).toBeVisible();
+    expect(screen.queryByRole("status", { name: "Loading automations..." })).not.toBeInTheDocument();
+    await act(async () => fail(new Error("Refresh failed")));
+    expect(screen.getByRole("button", { name: /Morning check/ })).toBeVisible();
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    view.rerender(<SessionInfoPopover client={client} sessionKey="websocket:chat-2" token="tok" title="Other project" />);
+    expect(screen.queryByRole("button", { name: /Morning check/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading automations..." })).toBeVisible();
+    await act(async () => finish(automationsResponse([])));
+    expect(await screen.findByText("No automations in this session yet.")).toBeVisible();
+  });
+
   it("manages a session task through the shared detail dialog", async () => {
     const boundJob = { ...automationJob(), origin: {
       session_key: "websocket:chat-1", channel: "websocket", chat_id: "chat-1",

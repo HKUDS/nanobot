@@ -1459,12 +1459,12 @@
   .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
   .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
   .settings-footer-auto > :nth-child(2):empty { display: none; }
-  .settings-row:has(> .settings-control > [role="switch"]) {
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) {
     grid-template-columns: minmax(0, 1fr) auto;
     column-gap: 24px;
   }
-  .settings-row:has(> .settings-control > [role="switch"]) > :first-child { grid-column: 1; }
-  .settings-row:has(> .settings-control > [role="switch"]) > :nth-child(2) { grid-column: 2; }
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) > :first-child { grid-column: 1; }
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) > :nth-child(2) { grid-column: 2; }
   .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
   .settings-list-row { min-block-size: 60px; border-radius: var(--radius-control); }
   .settings-list-row:focus-visible { outline: none; }

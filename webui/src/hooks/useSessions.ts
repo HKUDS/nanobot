@@ -210,6 +210,7 @@ function cachedHistoryState(
 export function useSessions(): {
   sessions: ChatSummary[];
   loading: boolean;
+  initialLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   createChat: (
@@ -225,6 +226,7 @@ export function useSessions(): {
 } {
   const { client, token } = useClient();
   const [sessions, setSessions] = useState<ChatSummary[]>(readReloadSessions);
+  const [loadedOnce, setLoadedOnce] = useState(() => sessions.length > 0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
@@ -247,6 +249,7 @@ export function useSessions(): {
           refreshPendingRef.current = false;
           try {
             const rows = await listSessions(tokenRef.current);
+            setLoadedOnce(true);
             const serverKeys = new Set(rows.map((row) => row.key));
             setSessions((prev) => {
               const byKey = new Map(prev.map((row) => [row.key, row]));
@@ -379,6 +382,7 @@ export function useSessions(): {
   return {
     sessions,
     loading,
+    initialLoading: loading && !loadedOnce,
     error,
     refresh,
     createChat,

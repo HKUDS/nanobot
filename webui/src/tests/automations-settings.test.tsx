@@ -85,6 +85,20 @@ afterEach(() => {
 });
 
 describe("Automation task list and detail sheet", () => {
+  it("keeps the toolbar during initial loading and retains populated views during refresh", () => {
+    const view = render(<Harness payload={null} loading />);
+    expect(screen.getByRole("status", { name: "Loading automations..." })).toHaveAttribute("aria-busy", "true");
+    const toolbar = screen.getByRole("group", { name: "Task view" }).closest(".automation-panel-toolbar");
+    fireEvent.click(screen.getByRole("button", { name: /^Tasks$/ }));
+    expect(document.querySelectorAll("[data-automation-task-skeleton]")).toHaveLength(3);
+    view.rerender(<Harness loading />);
+    expect(screen.getByRole("button", { name: /PR watch/ })).toBeVisible();
+    expect(screen.queryByRole("status", { name: "Loading automations..." })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Task view" }).closest(".automation-panel-toolbar")).toBe(toolbar);
+    fireEvent.click(screen.getByRole("button", { name: /^Calendar$/ }));
+    expect(screen.getByRole("button", { name: /PR watch/ })).toBeVisible();
+  });
+
   it("keeps view selection and filters in one persistent panel toolbar", () => {
     render(<Harness />);
     const views = screen.getByRole("group", { name: "Task view" });

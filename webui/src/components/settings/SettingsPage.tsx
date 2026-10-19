@@ -1,10 +1,11 @@
-import { ChevronLeft, Loader2 } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
+import { SettingsSectionSkeleton } from "@/components/settings/shared/SettingsSectionSkeleton";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ImageGenerationSettings } from "@/components/settings/capabilities/ImageGenerationSettings";
@@ -162,7 +163,7 @@ export function SettingsPage({
     </RuntimeConfigSettings>
   );
 
-  const renderSection = (section: SettingsSectionKey, embedded = false): ReactNode => {
+  const renderSettingsSection = (section: SettingsSectionKey, embedded = false): ReactNode => {
     if (!settings) return null;
     switch (section) {
       case "capabilities": {
@@ -400,6 +401,40 @@ export function SettingsPage({
             </WebSettings>
           </div>
         );
+      case "runtime":
+        return (
+          <div className="settings-stack">
+            {runtimeConfiguration("runtime")}
+            <RuntimeSettings
+              form={modelState.form}
+              settings={settings}
+              onRestart={showSidebar ? undefined : restartViaSettingsSurface}
+              isRestarting={restartInProgress}
+              requiresRestartPending={pendingRestartSections.runtime}
+              apiService={systemState.apiService}
+              apiServiceLoading={systemState.apiServiceLoading}
+              apiServiceAction={systemState.apiServiceAction}
+              apiServiceError={systemState.apiServiceError}
+              langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
+              capabilitiesLoading={systemState.nanobotFeaturesLoading}
+              capabilityAction={systemState.nanobotFeatureAction}
+              capabilityError={systemState.nanobotFeaturesError}
+              onApiServiceAction={systemActions.handleApiServiceAction}
+              onInstallCapability={(name) => void systemActions.installCapabilities([name])}
+            />
+          </div>
+        );
+      case "memory":
+        return runtimeConfiguration("memory");
+      case "advanced":
+        return runtimeConfiguration("advanced");
+      default:
+        return null;
+    }
+  };
+
+  const renderSection = (section: SettingsSectionKey, embedded = false): ReactNode => {
+    switch (section) {
       case "channels":
         return (
           <ChannelsSettings
@@ -413,7 +448,7 @@ export function SettingsPage({
             nanobotFeatures={systemState.nanobotFeatures}
             loading={systemState.nanobotFeaturesLoading}
             actionKey={systemState.nanobotFeatureAction}
-            chatAppsDocsUrl={settings.docs?.chat_apps_url}
+            chatAppsDocsUrl={settings?.docs?.chat_apps_url}
             showBrandLogos={localPrefs.brandLogos}
             error={systemState.nanobotFeaturesError}
             requiresRestartPending={pendingRestartSections.runtime}
@@ -523,37 +558,12 @@ export function SettingsPage({
         );
       case "skills":
         return <SkillsCatalogSettings skills={skills} loading={skillsLoading} error={skillsError} />;
-      case "runtime":
-        return (
-          <div className="settings-stack">
-            {runtimeConfiguration("runtime")}
-            <RuntimeSettings
-              form={modelState.form}
-              settings={settings}
-              onRestart={showSidebar ? undefined : restartViaSettingsSurface}
-              isRestarting={restartInProgress}
-              requiresRestartPending={pendingRestartSections.runtime}
-              apiService={systemState.apiService}
-              apiServiceLoading={systemState.apiServiceLoading}
-              apiServiceAction={systemState.apiServiceAction}
-              apiServiceError={systemState.apiServiceError}
-              langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
-              capabilitiesLoading={systemState.nanobotFeaturesLoading}
-              capabilityAction={systemState.nanobotFeatureAction}
-              capabilityError={systemState.nanobotFeaturesError}
-              onApiServiceAction={systemActions.handleApiServiceAction}
-              onInstallCapability={(name) => void systemActions.installCapabilities([name])}
-            />
-          </div>
-        );
-      case "memory":
-        return runtimeConfiguration("memory");
-      case "advanced":
-        return runtimeConfiguration("advanced");
       default:
-        return null;
+        return renderSettingsSection(section, embedded);
     }
   };
+  const sectionReady = settings !== null || activeSection === "skills" || activeSection === "apps"
+    || activeSection === "channels" || activeSection === "automations";
 
   return (
     <DialogLayoutContext.Provider value={dialogLayoutAnchor}>
@@ -702,18 +712,15 @@ export function SettingsPage({
             </div>
           ) : null}
 
-          {loading ? (
-            <div className="flex h-48 items-center justify-center rounded-panel bg-settings-surface text-sm text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {t("settings.status.loading")}
-            </div>
-          ) : error && !settings ? (
+          {loading && !sectionReady ? (
+            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar} />
+          ) : error && !sectionReady ? (
             <SettingsGroup>
               <SettingsRow title={t("settings.status.loadError")}>
                 <span className="max-w-[520px] text-sm text-muted-foreground">{error}</span>
               </SettingsRow>
             </SettingsGroup>
-          ) : settings ? (
+          ) : sectionReady ? (
             <div
               className={cn(
                 "settings-stack",

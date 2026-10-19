@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Window } from "happy-dom";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { StartupSkeleton } from "@/components/StartupSkeleton";
 import { MessageBubble } from "@/components/MessageBubble";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -338,7 +340,8 @@ const ACCIDENTALLY_SPANISH_SETTINGS_KEYS = [
   "settings.image.missingCredential",
   "settings.oauth.signInHelp",
 ];
-const INDEX_HTML = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
+const INDEX_HTML = readFileSync(resolve(process.cwd(), "index.html"), "utf8")
+  .replace("<!--startup-shell-->", renderToStaticMarkup(<StartupSkeleton />));
 async function runPrebootLocale(storedLocale: string) {
   const preboot = new Window({
     url: "http://preboot.test",

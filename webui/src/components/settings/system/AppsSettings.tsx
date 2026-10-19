@@ -348,7 +348,8 @@ export function AppsCatalogSettings({
           </div>
         ) : null}
         {loading ? (
-          <CatalogSkeleton label={tx("settings.apps.loading", "Loading apps…")} layout="apps" />
+          <CatalogSkeleton label={tx("settings.apps.loading", "Loading apps…")} layout="apps"
+            appActionLabel={filter === "cli" ? undefined : tx("settings.mcp.manage", "Manage")} />
         ) : !items.length && !statusIsError ? (
           <div className="px-3 py-12 text-center text-sm text-muted-foreground">
             <p>{emptyTitle}</p>

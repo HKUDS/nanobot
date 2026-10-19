@@ -170,22 +170,6 @@ const RenameDialog = lazy(async () => {
   return { default: module.RenameDialog };
 });
 
-function SurfaceLoadingFallback({ label }: { label?: string }) {
-  const { t } = useTranslation();
-  return (
-    <div
-      aria-busy="true"
-      className="flex h-full w-full flex-col gap-5 px-5 py-8 sm:px-8 lg:px-12"
-    >
-      <span className="sr-only">{label ?? t("settings.status.loading")}</span>
-      <div className="h-4 w-20 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
-      <div className="h-9 w-48 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
-      <div className="mt-4 h-12 w-full max-w-3xl animate-pulse rounded-md bg-muted/55 motion-reduce:animate-none" />
-      <div className="h-28 w-full max-w-3xl animate-pulse rounded-md bg-muted/40 motion-reduce:animate-none" />
-    </div>
-  );
-}
-
 const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "capabilities",
   "overview",
@@ -1199,6 +1183,7 @@ function Shell({
   const {
     sessions,
     loading,
+    initialLoading: sessionsInitialLoading,
     error: sessionsError,
     refresh,
     createChat,
@@ -2760,6 +2745,7 @@ function Shell({
       ? (temporaryChatActive ? activeKey : activeSidebarKey)
       : null,
     loading: loading || sidebarStateLoading,
+    initialLoading: sessionsInitialLoading || sidebarStateLoading,
     newChatActive: !managingConnections && view === "chat" && activeKey === null,
     onNewChat,
     onSelect: onSelectSidebarItem,
@@ -2953,7 +2939,7 @@ function Shell({
               )}
             >
               <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
-                <Suspense fallback={<StartupShell embedded />}>
+                <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={hostSidebarOpen} />}>
                   <PaneWorkbench
                     panes={renderedWorkbenchPanes}
                     activePaneKey={renderedActivePaneKey}
@@ -3104,7 +3090,7 @@ function Shell({
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}
-                /> : <Suspense fallback={<SurfaceLoadingFallback />}>
+                /> : <Suspense fallback={<StartupShell embedded surface={view} sidebarExpanded={hostSidebarOpen} />}>
                   <SettingsView
                     registerExitGuard={registerSettingsExitGuard}
                     theme={theme}

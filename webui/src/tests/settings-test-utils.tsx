@@ -140,7 +140,9 @@ export function renderSettingsView(
       | "image"
       | "browser"
       | "runtime";
-    initialSettings?: SettingsPayload;
+    initialSettings?: SettingsPayload | null;
+    skills?: React.ComponentProps<typeof SettingsView>["skills"];
+    skillsLoading?: boolean;
     showSidebar?: boolean;
     mainNavigationExpanded?: boolean;
     onBackToChat?: () => void;
@@ -163,6 +165,8 @@ export function renderSettingsView(
         theme="light"
         initialSection={options.initialSection ?? "apps"}
         initialSettings={options.initialSettings}
+        skills={options.skills}
+        skillsLoading={options.skillsLoading}
         showSidebar={options.showSidebar}
         mainNavigationExpanded={options.mainNavigationExpanded}
         onToggleTheme={() => {}}

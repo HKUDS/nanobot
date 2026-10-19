@@ -164,6 +164,32 @@ describe("Settings system domains", () => {
     },
   );
 
+  it.each([
+    ["skills", "Loading skills…"],
+    ["apps", "Loading apps…"],
+    ["channels", "Loading channels…"],
+    ["automations", "Loading automations..."],
+  ] as const)("keeps the %s loading surface mounted when the settings snapshot arrives", async (initialSection, label) => {
+    let resolveSettings!: (value: Response) => void;
+    const pendingSettings = new Promise<Response>((resolve) => { resolveSettings = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? pendingSettings : new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection, initialSettings: null, skillsLoading: true, showSidebar: false });
+    const skeleton = screen.getByRole("status", { name: label });
+    expect(skeleton).toHaveAttribute("aria-busy", "true");
+    await act(async () => { resolveSettings(jsonResponse(settingsPayload())); });
+    expect(screen.getByRole("status", { name: label })).toBe(skeleton);
+  });
+
+  it("shows available skills while the unrelated settings snapshot is still pending", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "skills", initialSettings: null, showSidebar: false, skills: [{
+      name: "project-review", description: "Review a project.", source: "builtin", available: true, enabled: true,
+    }] });
+    expect(screen.getByRole("button", { name: "Open details for project-review" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Search installed skills" })).toBeVisible();
+  });
+
   it("keeps the regular settings page at its existing width", () => {
     renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
 
@@ -257,6 +283,32 @@ describe("Settings system domains", () => {
       expect(fallback.closest(".h-9")).toHaveClass("w-9", "rounded-[10px]");
     },
   );
+
+  it("loads only the skill detail body and preserves it while checking dependencies again", async () => {
+    const skill = { name: "pr-review", description: "Review pull requests", source: "builtin", available: false, enabled: true };
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+    render(<ClientProvider client={{} as never} token="tok"><SkillsCatalogSettings skills={[skill]} /></ClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Open details for pr-review" }));
+    const detail = screen.getByRole("dialog");
+    expect(within(detail).getByText("Review pull requests")).toBeVisible();
+    expect(within(detail).getByRole("status", { name: "Loading skill details..." })).toHaveAttribute("aria-busy", "true");
+    await act(async () => finish(jsonResponse({ ...skill, raw_markdown: "Review repository changes.", requirements: {
+      bins: ["gh"], env: [], missing_bins: ["gh"], missing_env: [],
+    } })));
+    const toggle = within(detail).getByRole("switch");
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    let fail!: (error: Error) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    fireEvent.click(within(detail).getByRole("button", { name: "Check again" }));
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    expect(toggle).toBeDisabled();
+    expect(within(detail).queryByRole("status", { name: "Loading skill details..." })).not.toBeInTheDocument();
+    await act(async () => fail(new Error("Read failed")));
+    expect(within(detail).getByRole("alert")).toHaveTextContent("Could not load skill details.");
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    expect(toggle).toBeEnabled();
+  });
 
   it("keeps skill group labels natural without changing grouping or filtering", () => {
     render(<ClientProvider client={{} as never} token="tok">

@@ -369,15 +369,16 @@ describe("App layout", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows only layout shadows while bootstrap is pending", () => {
-    vi.mocked(fetchBootstrap).mockReturnValueOnce(new Promise(() => {}));
-    render(<App />);
-    expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "true");
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveClass("startup-status");
-    expect(screen.queryByText("Loading nanobot…")).not.toBeInTheDocument();
-  });
+  it.each(["skills", "apps", "channels", "automations", "settings", "chat"]) (
+    "keeps the %s document skeleton while bootstrap is pending", (surface) => {
+      window.history.replaceState(null, "", `/#/${surface}`);
+      vi.mocked(fetchBootstrap).mockReturnValueOnce(new Promise(() => {}));
+      render(<App />);
+      expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "true");
+      expect(screen.getByRole("main")).toHaveAttribute("data-startup-surface", surface);
+      expect(screen.getByRole("status")).toHaveTextContent("Loading nanobot…");
+    },
+  );
 
   it.each([false, true])("enables task controls only when bootstrap advertises support: %s", async (supported) => {
     mockSessions = [{

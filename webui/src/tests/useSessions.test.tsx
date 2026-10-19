@@ -74,6 +74,20 @@ function wrap(
 }
 
 describe("useSessions", () => {
+  it("distinguishes initial loading from revalidating a successfully loaded empty list", async () => {
+    let finish!: (rows: Awaited<ReturnType<typeof api.listSessions>>) => void;
+    vi.mocked(api.listSessions).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useSessions(), { wrapper: wrap(fakeClient()) });
+    expect(result.current.initialLoading).toBe(true);
+    await act(async () => finish([]));
+    expect(result.current.initialLoading).toBe(false);
+    let refresh!: Promise<void>;
+    act(() => { refresh = result.current.refresh(); });
+    expect(result.current.loading).toBe(true);
+    expect(result.current.initialLoading).toBe(false);
+    await act(async () => { finish([]); await refresh; });
+  });
+
   it("shows tab-cached sessions while revalidating and removes server-deleted rows", async () => {
     activateReloadCache("ws://localhost:8765/");
     writeReloadCache("sessions", [{
@@ -86,6 +100,7 @@ describe("useSessions", () => {
     try {
       expect(result.current.sessions[0]?.key).toBe("websocket:cached");
       expect(result.current.loading).toBe(true);
+      expect(result.current.initialLoading).toBe(false);
       await act(async () => finish([]));
       expect(result.current.sessions).toEqual([]);
       expect(result.current.loading).toBe(false);
