@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { HoverHint } from "@/components/ui/hover-hint";
 import { ImageViewport } from "@/components/ui/image-viewport";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
@@ -118,11 +119,15 @@ export default function MermaidBlock({ source }: { source: string }) {
       <span className="mr-auto px-1 text-xs text-muted-foreground">Mermaid</span>
       <button type="button" aria-pressed={view === "diagram"} className={cn(buttonClass, view === "diagram" && "bg-muted text-foreground")} onClick={() => setView("diagram")}>{t("diagram.graph")}</button>
       <button type="button" aria-pressed={view === "source"} className={cn(buttonClass, view === "source" && "bg-muted text-foreground")} onClick={() => setView("source")}>{t("diagram.source")}</button>
-      <button type="button" className={buttonClass} title={t("diagram.copy")} aria-label={t("diagram.copy")} onClick={() => void copy()}>
-        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-      </button>
+      <HoverHint content={t("diagram.copy")}>
+        <button type="button" className={buttonClass} aria-label={t("diagram.copy")} onClick={() => void copy()}>
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+      </HoverHint>
       <Dialog open={open && !!image} onOpenChange={setOpen}>
-        <DialogTrigger asChild><button type="button" className={buttonClass} title={t("diagram.enlarge")} aria-label={t("diagram.enlarge")} disabled={!image}><Maximize2 className="h-3.5 w-3.5" /></button></DialogTrigger>
+        <HoverHint content={t("diagram.enlarge")}>
+          <DialogTrigger asChild><button type="button" className={buttonClass} aria-label={t("diagram.enlarge")} disabled={!image}><Maximize2 className="h-3.5 w-3.5" /></button></DialogTrigger>
+        </HoverHint>
         <DialogContent className="h-[85dvh] max-w-[min(96vw,90rem)] gap-0 overflow-hidden p-3 sm:p-4" aria-describedby={undefined}>
           <DialogTitle className="sr-only">{t("diagram.title")}</DialogTitle>
           {image && <div className="flex h-full min-h-0 flex-col gap-2 pt-6"><ImageViewport src={image.url} alt={image.label || t("diagram.title")} className="flex-1" /></div>}
