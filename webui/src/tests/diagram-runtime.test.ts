@@ -135,25 +135,41 @@ describe("diagram runtime", () => {
     expect(RenderWorker.instances).toHaveLength(2);
   });
 
-  it("waits for shared image capacity and resumes after another fence releases it", async () => {
-    const jobs = Array.from({ length: 5 }, () => start());
-    const large: DiagramReply = { kind: "image", template: { content: "<path/>", style: "fill:black", width: 4000, height: 2000, label: "Large graph" } };
-    for (let index = 0; index < 4; index++) {
+  it.each([
+    { budget: "pixels", content: "<path/>", width: 4000, height: 2000 },
+    { budget: "bytes", content: `<path d="M0 0${" L1 1".repeat(190_000)}"/>`, width: 100, height: 50 },
+  ])("reserves replacement $budget while a new fence waits for shared capacity", async ({ content, width, height }) => {
+    const jobs = Array.from({ length: 4 }, () => start());
+    const large: DiagramReply = { kind: "image", template: { content, style: "fill:black", width, height, label: "Large graph" } };
+    for (let index = 0; index < 3; index++) {
       RenderWorker.instances[index].reply(large);
       DecodedImage.instances[index].onload?.();
       await Promise.resolve();
       expect(jobs[index].states.at(-1)?.kind).toBe("ready");
     }
-    RenderWorker.instances[4].reply(large);
-    expect(jobs[4].states.at(-1)).toEqual({ kind: "waiting" });
-    expect(DecodedImage.instances).toHaveLength(4);
+    RenderWorker.instances[3].reply(large);
+    expect(jobs[3].states.at(-1)).toEqual({ kind: "waiting" });
+    expect(DecodedImage.instances).toHaveLength(3);
+
+    // A theme change must progress at full admission capacity without losing the visible images.
+    jobs.slice(0, 3).forEach(({ request }) => request.setPalette({ "--pele-fg": "#eeeeee" }));
+    for (let index = 0; index < 3; index++) {
+      expect(DecodedImage.instances).toHaveLength(4 + index);
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(`blob:diagram-${index}`);
+      DecodedImage.instances[3 + index].onload?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(jobs[index].states.at(-1)).toMatchObject({ kind: "ready", image: { url: `blob:diagram-${3 + index}` } });
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(`blob:diagram-${index}`);
+    }
+    expect(jobs[3].states.at(-1)).toEqual({ kind: "waiting" });
     jobs[0].controller.abort();
     await Promise.resolve();
-    expect(DecodedImage.instances).toHaveLength(5);
-    DecodedImage.instances[4].onload?.();
+    expect(DecodedImage.instances).toHaveLength(7);
+    DecodedImage.instances[6].onload?.();
     await Promise.resolve();
-    expect(jobs[4].states.at(-1)?.kind).toBe("ready");
-    expect(RenderWorker.instances).toHaveLength(5);
+    expect(jobs[3].states.at(-1)?.kind).toBe("ready");
+    expect(RenderWorker.instances).toHaveLength(4);
   });
 
   it("retains source-only failure when Worker is unavailable or source exceeds the budget", () => {
