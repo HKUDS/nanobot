@@ -52,7 +52,7 @@ The four network fields have different jobs:
 
 ### Webhook and networking requirements
 
-The native Linear Agent transport requires a webhook; there is no polling mode. The OAuth callback also needs to reach the same nanobot instance.
+OAuth connects and authorizes the Linear workspace. A webhook sends new Linear tasks to nanobot; this integration does not poll for tasks. Both the OAuth return address and webhook must reach the same nanobot instance.
 
 You do **not** need a public IP address when using an HTTPS tunnel such as Cloudflare Tunnel or Tailscale Funnel. On a publicly reachable server, Caddy, nginx, or another reverse proxy can provide HTTPS and forward requests to `127.0.0.1:3979`. Use a stable hostname for normal use: if the hostname changes, update **Public HTTPS URL** in nanobot and both registered URLs in the Linear app.
 

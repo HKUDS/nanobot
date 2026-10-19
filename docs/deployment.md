@@ -109,7 +109,7 @@ Set `publicWsUrl` to the browser-facing `wss://` endpoint when the tunnel sends 
 
 ### Docker Compose
 
-On a new Linux host, install Git and Docker with the Compose plugin, then get the repository. No host Python or host `nanobot` installation is required:
+On a new Linux host, install Git and Docker with the Compose plugin, then get the repository. You do not need to install Python or nanobot on the host:
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git

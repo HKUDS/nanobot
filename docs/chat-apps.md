@@ -315,9 +315,11 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 ```
 
 > `groupPolicy` controls how the bot responds in group channels:
-> - `"mention"` (default) — Only respond when @mentioned
-> - `"open"` — Respond to all messages DMs always respond when the sender is in `allowFrom`.
-> - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session. `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass. Discord threads under an allowed parent channel are also allowed; for Forum channels, allowing the parent Forum channel allows all threads/posts in that forum. `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies. `replyToMessage` defaults to `false`. Enable it to use Discord's native reply UI for responses.
+> - `"mention"` (default) — Reply only when someone @mentions the bot.
+> - `"open"` — Reply to all messages in group channels.
+> - In direct messages, the bot replies only when the sender is listed in `allowFrom`.
+>
+> For open group policy, create a private thread and @mention the bot to start a session there. Otherwise, the bot starts a session in both the thread and the channel where you created it. `allowChannels` restricts the bot to specific Discord channel IDs. The default empty list allows every channel the bot can see. Example: `["1234567890", "0987654321"]`. The `allowFrom` and `allowChannels` filters both apply. Threads under an allowed channel are also allowed; for Forum channels, allowing the parent Forum channel allows all its threads and posts. `streaming` defaults to `true`; disable it only if you want non-streaming replies. `replyToMessage` defaults to `false`; enable it to use Discord's native reply UI for responses.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator

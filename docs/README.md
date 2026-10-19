@@ -12,7 +12,8 @@ Use the graphical setup steps first when the WebUI exposes the setting. Expand *
 |---|---|---|
 | Terminals, Python, or API keys are new to you | [Beginner walkthrough](./start-without-technical-background.md) | The browser can send `Hello!` and receive a reply |
 | You are comfortable running commands | [Install and Quick Start](./quick-start.md) | `nanobot status` is healthy and the WebUI or CLI can get one reply |
-| Something already failed | [Troubleshooting](./troubleshooting.md) | You have isolated the problem to install, config, model, gateway, channel, or tool access |
+| nanobot will not start | [Troubleshooting: Installation Problems](./troubleshooting.md#installation-problems) | nanobot starts, or you know what to fix next |
+| The browser or chat app opens, but nanobot does not reply | [Troubleshooting: Provider and Model Problems](./troubleshooting.md#provider-and-model-problems), [WebUI Problems](./troubleshooting.md#webui-problems), or [Chat App Problems](./troubleshooting.md#chat-app-problems) | You have a working reply or a specific next step |
 
 The recommended first-run path is:
 

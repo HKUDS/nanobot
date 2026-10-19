@@ -45,7 +45,7 @@ The result should start with `Python 3.11` or a newer number. If the command is 
 
 ## 2. Prepare Your Model Details
 
-A chat website account is not automatically an API credential. nanobot needs a supported provider connection: an API key, a supported sign-in flow, or a local model server. Check the chosen service's billing and available models before using it.
+An account on a chat website does not automatically let nanobot use that service. Before you start, find out which AI service you will use, how nanobot can sign in (usually with an API key, sometimes with a supported sign-in flow), and the exact model name the service requires. Check the service's pricing and available models. Some services also require a URL; use it only if that service provides one.
 
 If you do not have a provider yet, here is one API-based example:
 
