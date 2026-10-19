@@ -1079,7 +1079,7 @@ export function ThreadComposer({
   const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
   const blurFrame = useRef<number | null>(null);
-  const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>(
+  const [boundSessionMentions, setBoundSessionMentions] = useState<SessionMention[]>(
     initialDraft?.sessionMentions ?? [],
   );
   const [sessionDragPreview, setSessionDragPreview] = useState<{
@@ -1466,9 +1466,13 @@ export function ThreadComposer({
     () => sessionMentionOptions(sessions),
     [sessions],
   );
+  const sessionMentionCatalog = useMemo(
+    () => [...availableSessionMentions, ...boundSessionMentions],
+    [availableSessionMentions, boundSessionMentions],
+  );
   const mentionSegments = useMemo(
-    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
-    [cliApps, mcpPresets, selectedSessionMentions, value],
+    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
+    [cliApps, mcpPresets, sessionMentionCatalog, value],
   );
   const editMentionInput = useCallback((next: string, cursor: number) => {
     secondEnterPromptIdRef.current = null;
@@ -1485,19 +1489,6 @@ export function ThreadComposer({
   });
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
   const draftText = composerMentionText(mentionInput.segments).raw;
-  useLayoutEffect(() => {
-    if (!draftKey || !draftStore || !draftAttachmentsReady) return;
-    if (!draftText && images.length === 0 && !quotedContext) {
-      draftStore.delete(draftKey);
-      return;
-    }
-    draftStore.set(draftKey, {
-      text: draftText,
-      files: images.map((image) => image.file),
-      sessionMentions: selectedSessionMentions,
-      quotedContext,
-    }, persistDraft);
-  }, [draftAttachmentsReady, draftKey, draftStore, images, persistDraft, quotedContext, selectedSessionMentions, draftText]);
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
         value,
@@ -1511,7 +1502,7 @@ export function ThreadComposer({
         sessionDragInsertion.value,
         cliApps,
         mcpPresets,
-        [...selectedSessionMentions, sessionDragPreview.mention],
+        [...sessionMentionCatalog, sessionDragPreview.mention],
       )
     : mentionInput.segments;
   const activeSessionMentions = useMemo(() => {
@@ -1522,6 +1513,26 @@ export function ThreadComposer({
       return [segment.mention];
     });
   }, [mentionSegments]);
+  useLayoutEffect(() => {
+    // Pin resolved identities so a catalog refresh cannot retarget an existing reference.
+    if (activeSessionMentions.length !== boundSessionMentions.length
+      || activeSessionMentions.some((mention, index) => mention !== boundSessionMentions[index])) {
+      setBoundSessionMentions(activeSessionMentions);
+    }
+  }, [activeSessionMentions, boundSessionMentions]);
+  useLayoutEffect(() => {
+    if (!draftKey || !draftStore || !draftAttachmentsReady) return;
+    if (!draftText && images.length === 0 && !quotedContext) {
+      draftStore.delete(draftKey);
+      return;
+    }
+    draftStore.set(draftKey, {
+      text: draftText,
+      files: images.map((image) => image.file),
+      sessionMentions: activeSessionMentions,
+      quotedContext,
+    }, persistDraft);
+  }, [activeSessionMentions, draftAttachmentsReady, draftKey, draftStore, images, persistDraft, quotedContext, draftText]);
   const filteredMentionCandidates = useMemo<MentionCandidate[]>(() => {
     if (!cliAppMention) return [];
     const sessionCandidates: MentionCandidate[] = availableSessionMentions
@@ -1542,7 +1553,7 @@ export function ThreadComposer({
         mention,
       }));
     const sessionNames = new Set(
-      availableSessionMentions.map((mention) => mention.name.toLowerCase()),
+      sessionMentionCatalog.map((mention) => mention.name.toLowerCase()),
     );
     const cliCandidates: MentionCandidate[] = cliApps
       .filter((app) => app.installed)
@@ -1603,7 +1614,7 @@ export function ThreadComposer({
       remaining -= extra;
     }
     return groups.flatMap(({ candidates }, index) => candidates.slice(0, counts[index]));
-  }, [activeSessionMentions, availableSessionMentions, cliAppMention, cliApps, mcpPresets]);
+  }, [activeSessionMentions, availableSessionMentions, cliAppMention, cliApps, mcpPresets, sessionMentionCatalog]);
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
@@ -1741,7 +1752,7 @@ export function ThreadComposer({
     previousPendingQueueKeyRef.current = pendingQueueKey;
     secondEnterPromptIdRef.current = null;
     setValue("");
-    setSelectedSessionMentions([]);
+    setBoundSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -1887,7 +1898,7 @@ export function ThreadComposer({
         );
         if (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT) return;
         const name = candidate.name.toLowerCase();
-        setSelectedSessionMentions([
+        setBoundSessionMentions([
           ...activeSessionMentions.filter((mention) => (
             mention.name.toLowerCase() !== name
             && mention.session_key !== candidate.mention.session_key
@@ -1990,7 +2001,7 @@ export function ThreadComposer({
 
   const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
-    setSelectedSessionMentions([]);
+    setBoundSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -2056,7 +2067,7 @@ export function ThreadComposer({
     secondEnterPromptIdRef.current = null;
     setQueuedPrompt(null);
     replaceMentionInput(prompt.text, prompt.text.length);
-    setSelectedSessionMentions(prompt.sessionMentions ?? []);
+    setBoundSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
