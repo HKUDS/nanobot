@@ -19,7 +19,6 @@ from .errors import (
     DecisionTimeoutError,
     DecisionTransportError,
     MissingCredentialsError,
-    UnsupportedDecisionFeatureError,
 )
 from .models import (
     ChoiceQuestion,
@@ -310,24 +309,21 @@ class StructuredDecisionClient:
                 protocol=self.protocol,
                 model=self.model,
             )
-            if capabilities is None:
-                raise UnsupportedDecisionFeatureError(
-                    f"Model {self.model!r} on provider {self.provider!r} "
-                    "does not support image input"
-                )
-            if len(images_tuple) > capabilities.max_images:
-                raise DecisionProtocolError(
-                    f"Model {self.model!r} accepts at most "
-                    f"{capabilities.max_images} images"
-                )
-            if capabilities.max_image_bytes is not None:
-                for index, image in enumerate(images_tuple):
-                    if len(image.data) > capabilities.max_image_bytes:
-                        raise DecisionProtocolError(
-                            f"Image at index {index} exceeds the "
-                            f"{capabilities.max_image_bytes}-byte size limit "
-                            f"for model {self.model!r}"
-                        )
+            # Missing entries are unknown, not unsupported; let the provider decide.
+            if capabilities is not None:
+                if len(images_tuple) > capabilities.max_images:
+                    raise DecisionProtocolError(
+                        f"Model {self.model!r} accepts at most "
+                        f"{capabilities.max_images} images"
+                    )
+                if capabilities.max_image_bytes is not None:
+                    for index, image in enumerate(images_tuple):
+                        if len(image.data) > capabilities.max_image_bytes:
+                            raise DecisionProtocolError(
+                                f"Image at index {index} exceeds the "
+                                f"{capabilities.max_image_bytes}-byte size limit "
+                                f"for model {self.model!r}"
+                            )
 
         return DecisionRequest(
             model=self.model,

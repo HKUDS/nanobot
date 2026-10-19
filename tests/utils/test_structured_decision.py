@@ -30,7 +30,6 @@ from nanobot.utils.structured_decision import (
     ScoreQuestion,
     StructuredDecisionClient,
     StructuredInput,
-    UnsupportedDecisionFeatureError,
 )
 from nanobot.utils.structured_decision import providers as decision_providers
 from nanobot.utils.structured_decision.providers import (
@@ -601,24 +600,68 @@ async def test_rejects_invalid_image_before_request(
         "unknown/decision-model",
     ],
 )
-async def test_rejects_images_for_models_outside_the_supported_capability_set(model: str):
+async def test_passes_images_to_provider_for_models_without_registered_capabilities(model: str):
+    request_count = 0
+    expected_state = [
+        "Inspect this image",
+        {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,eA=="},
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        payload = json.loads(request.content.decode())
+        assert payload["model"] == model
+        assert payload["state"] == expected_state
+        return httpx.Response(
+            200,
+            json={
+                "model": model,
+                "answers": {"check": {"type": "noul", "noul": 0.75}},
+            },
+        )
+
+    client = _make_client(model=model, transport=_Transport(handler))
+
+    result = await client.evaluate(
+        state="Inspect this image",
+        questions={"check": NoulQuestion(instructions="Is this valid?")},
+        images=[DecisionImage(content_type="image/png", data=b"x")],
+    )
+
+    assert request_count == 1
+    assert result.answers["check"] == NoulAnswer(type="noul", noul=0.75)
+
+
+@pytest.mark.asyncio
+async def test_surfaces_provider_error_for_unlisted_model_image():
     request_count = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal request_count
         request_count += 1
-        return httpx.Response(200, json={})
+        return httpx.Response(
+            400,
+            json={"detail": {"message": "Image input is not supported"}},
+        )
 
-    client = _make_client(model=model, transport=_Transport(handler))
+    client = _make_client(
+        model="unknown/decision-model",
+        transport=_Transport(handler),
+    )
 
-    with pytest.raises(UnsupportedDecisionFeatureError, match="does not support image input"):
+    with pytest.raises(DecisionHttpError) as exc_info:
         await client.evaluate(
             state="Inspect this image",
             questions={"check": NoulQuestion(instructions="Is this valid?")},
             images=[DecisionImage(content_type="image/png", data=b"x")],
         )
 
-    assert request_count == 0
+    assert request_count == 1
+    assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio
