@@ -2169,6 +2169,8 @@ To always use local conversion, turn off **Jina Reader** in the Web access setti
 
 </details>
 
+The `web_fetch` tool accepts a zero-based character `offset` into the extracted text, including any extracted title and excluding the untrusted-content banner. For long pages, request `web_fetch(url="...", maxChars=5000)`, then pass the returned `nextOffset` as `offset` to continue. `nextOffset` is null when no text remains; `totalLength` gives the extracted text length. Every chunk keeps the untrusted-content banner. Each call fetches the URL again, so content or extractor changes can shift offsets. Image results are unchanged.
+
 #### `tools.web.fetch`
 
 | Option | Type | Default | Description |
