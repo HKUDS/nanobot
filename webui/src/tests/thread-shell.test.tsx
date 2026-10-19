@@ -3290,20 +3290,22 @@ describe("ThreadShell", () => {
 
     act(() => client._emitSessionUpdate("layout-recheck", "thread"));
 
-    await waitFor(() => expect(historyCalls).toBe(2));
-    await waitFor(() =>
-      expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1),
-    );
-    expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
-    expect(screen.getByText("layout canonical answer")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(historyCalls).toBe(2);
+      expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
+      expect(screen.getByText("layout canonical answer")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    });
 
     act(() => client._emitSessionUpdate("layout-recheck", "thread"));
 
-    await waitFor(() => expect(historyCalls).toBe(3));
-    await waitFor(() => expect(screen.getByText("layout canonical answer")).toBeInTheDocument());
-    expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
-    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(historyCalls).toBe(3);
+      expect(screen.getByText("layout canonical answer")).toBeInTheDocument();
+      expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
+      expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("adopts a completed equal-length history when returning after an inactive outage", async () => {
