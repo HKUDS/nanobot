@@ -2210,6 +2210,25 @@
     "dismiss": "Abaikan",
     "continue": "Lanjutkan"
   },
+  "diagram": {
+    "graph": "Diagram",
+    "source": "Sumber",
+    "copy": "Salin sumber",
+    "enlarge": "Perbesar diagram",
+    "title": "Diagram Mermaid",
+    "preparing": "Menyiapkan diagram…",
+    "errors": {
+      "syntax": "Periksa sintaks diagram pada sumber.",
+      "unsupported": "Jenis diagram ini belum didukung. Lihat sumber.",
+      "policy": "Diagram memakai gaya atau sumber daya yang tidak didukung. Lihat sumber.",
+      "limit": "Diagram melampaui batas perenderan. Lihat sumber.",
+      "load": "Tidak dapat memuat perender diagram. Coba lagi.",
+      "deadline": "Perenderan diagram terlalu lama. Sederhanakan sumber atau coba lagi.",
+      "worker": "Tidak dapat merender diagram. Coba lagi.",
+      "image": "Tidak dapat menampilkan diagram. Coba lagi.",
+      "capability": "Browser ini tidak dapat merender diagram. Lihat sumber."
+    }
+  },
   "lightbox": {
     "viewAll": "Lihat semua {{count}} gambar",
     "zoomIn": "Perbesar",

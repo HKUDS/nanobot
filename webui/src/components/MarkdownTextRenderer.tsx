@@ -20,7 +20,8 @@ import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
 
 import { DisplayMath } from "@/components/DisplayMath";
 import { AttachmentTile } from "@/components/AttachmentTile";
-import { CodeBlock } from "@/components/CodeBlock";
+import { MarkdownCodeBlock } from "@/components/markdown-diagrams/MarkdownCodeBlock";
+import { MarkdownCodeContext } from "@/components/markdown-diagrams/context";
 import { WebLink } from "@/components/WebLink";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
@@ -559,12 +560,6 @@ function useFaviconFallback(host: string) {
   };
 }
 
-function isRenderedCodeBlock(value: ReactNode): boolean {
-  if (!isValidElement(value)) return false;
-  const props = value.props as { code?: unknown };
-  return value.type === CodeBlock || typeof props.code === "string";
-}
-
 function codeFenceFromPreChild(value: ReactNode): { code: string; language?: string } | null {
   if (!isValidElement(value)) return null;
   const props = value.props as { className?: unknown; children?: ReactNode };
@@ -609,19 +604,6 @@ export default function MarkdownTextRenderer({
     () => ({
       code({ className: cls, children: kids, node: _node, ...props }) {
         void _node;
-        const match = /language-(\w+)/.exec(cls || "");
-        if (match) {
-          const code = String(kids).replace(/\n$/, "");
-          return (
-            <CodeBlock
-              language={match[1]}
-              code={code}
-              className="my-3"
-              highlight={highlightCode}
-              showLineNumbers={code.includes("\n")}
-            />
-          );
-        }
         const raw = String(kids).replace(/\n$/, "");
         if (!documentPath && isLikelyFilePath(raw)) {
           return (
@@ -662,20 +644,10 @@ export default function MarkdownTextRenderer({
       pre({ children: markdownChildren }) {
         const kids = Children.toArray(markdownChildren);
         const lone = kids.length === 1 ? kids[0] : null;
-        /** Highlighted fences render ``CodeBlock`` (block shell); skip invalid ``<pre><div>``. */
-        if (isRenderedCodeBlock(lone)) {
-          return <>{markdownChildren}</>;
-        }
         const fence = codeFenceFromPreChild(lone);
         if (fence) {
           return (
-            <CodeBlock
-              language={fence.language || "text"}
-              code={fence.code}
-              className="my-3"
-              highlight={highlightCode}
-              showLineNumbers={fence.code.includes("\n")}
-            />
+            <MarkdownCodeBlock language={fence.language} code={fence.code} />
           );
         }
         return (
@@ -896,10 +868,11 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode, onOpenFilePreview, documentPath, t],
+    [onOpenFilePreview, documentPath, t],
   );
 
   return (
+    <MarkdownCodeContext.Provider value={{ streaming, highlight: highlightCode }}>
     <Streamdown
       key={needsMath && mathPlugin ? "math" : "text"}
       mode={streaming || preserveStreamingLayout ? "streaming" : "static"}
@@ -927,8 +900,9 @@ export default function MarkdownTextRenderer({
         className,
       )}
     >
-      {/* Streamdown 2.5 ignores repair-option changes in its memo comparator. */}
+      {/* Repair follows generation, independently of the preserved layout mode. */}
       {streaming ? remend(children, REMEND_OPTIONS) : children}
     </Streamdown>
+    </MarkdownCodeContext.Provider>
   );
 }

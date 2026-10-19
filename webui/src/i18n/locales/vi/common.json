@@ -2210,6 +2210,25 @@
     "dismiss": "Bỏ qua",
     "continue": "Tiếp tục"
   },
+  "diagram": {
+    "graph": "Sơ đồ",
+    "source": "Mã nguồn",
+    "copy": "Sao chép mã nguồn",
+    "enlarge": "Phóng to sơ đồ",
+    "title": "Sơ đồ Mermaid",
+    "preparing": "Đang chuẩn bị sơ đồ…",
+    "errors": {
+      "syntax": "Hãy kiểm tra cú pháp sơ đồ trong mã nguồn.",
+      "unsupported": "Chưa hỗ trợ loại sơ đồ này. Hãy xem mã nguồn.",
+      "policy": "Sơ đồ dùng kiểu hoặc tài nguyên không được hỗ trợ. Hãy xem mã nguồn.",
+      "limit": "Sơ đồ vượt quá giới hạn kết xuất. Hãy xem mã nguồn.",
+      "load": "Không thể tải bộ kết xuất sơ đồ. Hãy thử lại.",
+      "deadline": "Kết xuất sơ đồ quá thời gian. Hãy đơn giản hóa mã nguồn hoặc thử lại.",
+      "worker": "Không thể kết xuất sơ đồ. Hãy thử lại.",
+      "image": "Không thể hiển thị sơ đồ. Hãy thử lại.",
+      "capability": "Trình duyệt này không thể kết xuất sơ đồ. Hãy xem mã nguồn."
+    }
+  },
   "lightbox": {
     "viewAll": "Xem tất cả {{count}} ảnh",
     "zoomIn": "Phóng to",

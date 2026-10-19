@@ -18,6 +18,7 @@ import { HoverHint, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, Tr
 import { Disclosure } from "@/components/ui/disclosure";
 import { ExpandableText } from "@/components/ui/expandable-text";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
+import { ImageViewport } from "@/components/ui/image-viewport";
 import { Sample, type ComponentExample } from "./example";
 
 function Buttons() {
@@ -223,6 +224,12 @@ function StreamingLabels() {
   </div>;
 }
 
+function ImageViewports() {
+  return <div className="flex h-80 max-w-xl flex-col rounded-lg border p-3">
+    <ImageViewport src="/brand/nanobot_icon_512.png" alt="Nanobot" className="flex-1" />
+  </div>;
+}
+
 const base = "webui/src/components/ui/";
 export const foundationExamples: ComponentExample[] = [
   { title: "Button · 按钮", files: ["button"], Preview: Buttons,
@@ -274,6 +281,9 @@ export const foundationExamples: ComponentExample[] = [
   { title: "ExpandableText · 文本展开", files: ["expandable-text"], Preview: Expandable,
     description: "A line-limited preview of the same mounted text.", options: "The caller owns expanded. lines sets the collapsed line count; provide an accessible toggle.",
     code: '<ExpandableText expanded={expanded} lines={2} className="text-sm leading-6">{description}</ExpandableText>' },
+  { title: "ImageViewport · 图像视口", files: ["image-viewport"], Preview: ImageViewports,
+    description: "Image-local fit, zoom, pan and pinch controls.", options: "Supply a bounded className and remount for a different image identity. Set panWithArrows=false when a gallery owns arrow navigation.",
+    code: '<div className="flex h-80 flex-col"><ImageViewport src={url} alt={label} className="flex-1" /></div>' },
   { title: "StreamingLabelSheen · 流光文字", files: ["streaming-label-sheen"], Preview: StreamingLabels,
     description: "A shared text animation for active thinking and tool labels.", options: "active controls animation. String or number children supply the glyph overlay; reduced-motion settings are respected.",
     code: '<StreamingLabelSheen active={running}>Working…</StreamingLabelSheen>' },

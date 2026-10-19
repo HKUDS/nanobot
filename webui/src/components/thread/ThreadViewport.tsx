@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import { PromptRail } from "@/components/thread/PromptRail";
 import { SubagentThreadMessages, useHasSubagentContent } from "@/components/thread/SubagentTasks";
+import { DiagramScope } from "@/components/markdown-diagrams/context";
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
@@ -1028,6 +1029,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               )}
             >
               <div ref={messageContentRef} className="w-full">
+                <DiagramScope identity={conversationKey}>
                 <SubagentThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}
@@ -1047,6 +1049,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   onQuoteSelection={onQuoteSelection}
                   onActivityToggle={yieldCameraToUser}
                 />
+                </DiagramScope>
               </div>
               <div aria-hidden className="thread-message-end-gap shrink-0" />
               <div ref={bottomRef} aria-hidden className="h-px shrink-0" />

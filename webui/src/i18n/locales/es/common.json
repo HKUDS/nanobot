@@ -2211,6 +2211,25 @@
     "dismiss": "Descartar",
     "continue": "Continuar"
   },
+  "diagram": {
+    "graph": "Diagrama",
+    "source": "Código fuente",
+    "copy": "Copiar código fuente",
+    "enlarge": "Ampliar diagrama",
+    "title": "Diagrama Mermaid",
+    "preparing": "Preparando diagrama…",
+    "errors": {
+      "syntax": "Comprueba la sintaxis del diagrama en el código fuente.",
+      "unsupported": "Este tipo de diagrama no es compatible. Consulta el código fuente.",
+      "policy": "El diagrama usa estilos o recursos no compatibles. Consulta el código fuente.",
+      "limit": "El diagrama supera el límite de renderizado. Consulta el código fuente.",
+      "load": "No se pudo cargar el motor de diagramas. Inténtalo de nuevo.",
+      "deadline": "El renderizado tardó demasiado. Simplifica el código fuente o inténtalo de nuevo.",
+      "worker": "No se pudo generar el diagrama. Inténtalo de nuevo.",
+      "image": "No se pudo mostrar el diagrama. Inténtalo de nuevo.",
+      "capability": "Este navegador no puede generar diagramas. Consulta el código fuente."
+    }
+  },
   "lightbox": {
     "viewAll": "Ver las {{count}} imágenes",
     "zoomIn": "Acercar",

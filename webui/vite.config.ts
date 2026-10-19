@@ -32,7 +32,7 @@ function startupSkeleton(): Plugin {
 
 const GZIP_MIN_BYTES = 4 * 1024;
 const GZIP_ASSET_PATTERN = /\.(?:css|html|js|json|mjs|svg)$/i;
-const LAZY_FEATURE_CHUNK_PREFIXES = ["markdown-vendor-", "syntax-highlight-", "katex-"];
+const LAZY_FEATURE_CHUNK_PREFIXES = ["markdown-vendor-", "markdown-diagrams-", "MermaidBlock-", "syntax-highlight-", "katex-"];
 
 export function entryLazyFeatureImports(imports: string[]): string[] {
   return imports.filter((fileName) =>
@@ -108,8 +108,7 @@ export function webuiManualChunk(id: string): string | undefined {
   if (id.includes("node_modules/refractor/lang/")) {
     return;
   }
-  // Streamdown lazy-loads diagrams and highlighted code. Keep those modules
-  // outside the core markdown chunk so ordinary replies do not download them.
+  // Streamdown retains a lazy viewer shell, not the native Mermaid engine.
   if (id.includes("node_modules/streamdown/dist/mermaid-")) return "markdown-diagrams";
   if (id.includes("node_modules/streamdown/dist/highlighted-body-")) return "markdown-code";
   // Refractor reaches this HAST helper through hastscript. Keeping it with
@@ -160,6 +159,7 @@ export default defineConfig(({ mode }) => {
       // so nested overlays can dismiss the wrong layer in development.
       include: ["@radix-ui/react-dialog"],
     },
+    worker: { format: "es" },
     build: {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),
       emptyOutDir: true,

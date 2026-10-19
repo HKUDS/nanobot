@@ -2210,6 +2210,25 @@
     "dismiss": "略過",
     "continue": "繼續"
   },
+  "diagram": {
+    "graph": "圖形",
+    "source": "原始碼",
+    "copy": "複製原始碼",
+    "enlarge": "放大檢視",
+    "title": "Mermaid 圖表",
+    "preparing": "正在準備圖表…",
+    "errors": {
+      "syntax": "圖表語法有誤，請檢查原始碼。",
+      "unsupported": "尚不支援此類圖表，可檢視原始碼。",
+      "policy": "圖表含不支援的樣式或資源，可檢視原始碼。",
+      "limit": "圖表超出繪製限制，可檢視原始碼。",
+      "load": "圖表繪製器載入失敗，請重試。",
+      "deadline": "圖表繪製逾時，請簡化原始碼或重試。",
+      "worker": "圖表繪製失敗，請重試。",
+      "image": "圖表顯示失敗，請重試。",
+      "capability": "此瀏覽器無法繪製圖表，可檢視原始碼。"
+    }
+  },
   "lightbox": {
     "viewAll": "查看全部 {{count}} 張圖片",
     "zoomIn": "放大",

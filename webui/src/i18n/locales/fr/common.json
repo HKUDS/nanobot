@@ -2210,6 +2210,25 @@
     "dismiss": "Ignorer",
     "continue": "Continuer"
   },
+  "diagram": {
+    "graph": "Diagramme",
+    "source": "Source",
+    "copy": "Copier la source",
+    "enlarge": "Agrandir le diagramme",
+    "title": "Diagramme Mermaid",
+    "preparing": "Préparation du diagramme…",
+    "errors": {
+      "syntax": "Vérifiez la syntaxe du diagramme dans la source.",
+      "unsupported": "Ce type de diagramme n'est pas pris en charge. Consultez la source.",
+      "policy": "Ce diagramme utilise des styles ou ressources non pris en charge. Consultez la source.",
+      "limit": "Ce diagramme dépasse la limite de rendu. Consultez la source.",
+      "load": "Impossible de charger le moteur de diagrammes. Réessayez.",
+      "deadline": "Le rendu a pris trop de temps. Simplifiez la source ou réessayez.",
+      "worker": "Impossible de générer le diagramme. Réessayez.",
+      "image": "Impossible d'afficher le diagramme. Réessayez.",
+      "capability": "Ce navigateur ne peut pas générer le diagramme. Consultez la source."
+    }
+  },
   "lightbox": {
     "viewAll": "Voir les {{count}} images",
     "zoomIn": "Agrandir",

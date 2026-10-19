@@ -63,10 +63,12 @@ describe("entryLazyFeatureImports", () => {
       "assets/markdown-vendor-abc.js",
       "assets/syntax-highlight-def.js",
       "assets/katex-ghi.js",
+      "assets/MermaidBlock-jkl.js",
     ])).toEqual([
       "assets/markdown-vendor-abc.js",
       "assets/syntax-highlight-def.js",
       "assets/katex-ghi.js",
+      "assets/MermaidBlock-jkl.js",
     ]);
   });
 });
@@ -102,6 +104,7 @@ describe("webuiManualChunk", () => {
   });
 
   it("keeps Streamdown and its repair helper in the markdown chunk", () => {
+    expect(webuiManualChunk("/repo/webui/src/components/markdown-diagrams/context.tsx")).toBeUndefined();
     expect(webuiManualChunk("/repo/node_modules/streamdown/dist/index.js")).toBe(
       "markdown-vendor",
     );

@@ -2410,6 +2410,25 @@
     "dismiss": "忽略",
     "continue": "继续"
   },
+  "diagram": {
+    "graph": "图形",
+    "source": "源码",
+    "copy": "复制源码",
+    "enlarge": "放大查看",
+    "title": "Mermaid 图表",
+    "preparing": "正在准备图表…",
+    "errors": {
+      "syntax": "图表语法有误，请检查源码。",
+      "unsupported": "暂不支持此类图表，可查看源码。",
+      "policy": "图表含不支持的样式或资源，可查看源码。",
+      "limit": "图表超出渲染限制，可查看源码。",
+      "load": "图表渲染器加载失败，请重试。",
+      "deadline": "图表渲染超时，请简化源码或重试。",
+      "worker": "图表渲染失败，请重试。",
+      "image": "图表显示失败，请重试。",
+      "capability": "此浏览器无法渲染图表，可查看源码。"
+    }
+  },
   "lightbox": {
     "viewAll": "查看全部 {{count}} 张图片",
     "zoomIn": "放大",
