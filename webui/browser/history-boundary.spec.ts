@@ -11,7 +11,8 @@ function historyPage(start: number, count = 12, more = start > 0) {
 async function installHistory(page: Page, initialStart = 40, initialCount = 12) {
   const reads: string[] = [];
   const pending: Array<(value: "success" | "error") => void> = [];
-  let immediate = false;
+  let fastResponse = false;
+  let releaseFastResponse: (() => void) | null = null;
   await page.route("**/api/sessions/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/prompts")) return route.fulfill({ json: {
@@ -22,7 +23,9 @@ async function installHistory(page: Page, initialStart = 40, initialCount = 12) 
     const cursor = url.searchParams.get("before") ?? url.searchParams.get("after");
     if (cursor === null) return route.fulfill({ json: historyPage(initialStart, initialCount) });
     reads.push(url.search);
-    const outcome = immediate ? "success" : await new Promise<"success" | "error">((resolve) => pending.push(resolve));
+    const outcome = fastResponse
+      ? await new Promise<"success">((resolve) => { releaseFastResponse = () => resolve("success"); })
+      : await new Promise<"success" | "error">((resolve) => pending.push(resolve));
     if (outcome === "error") return route.fulfill({ status: 503, body: "History unavailable" });
     const start = url.searchParams.has("after") ? Number(cursor) : Math.max(0, Number(cursor) - 12);
     const count = url.searchParams.has("after") ? 12 : Number(cursor) - start;
@@ -30,7 +33,8 @@ async function installHistory(page: Page, initialStart = 40, initialCount = 12) 
   });
   return {
     reads,
-    respondImmediately: (value: boolean) => { immediate = value; },
+    useFastResponse: (value: boolean) => { fastResponse = value; },
+    releaseFastResponse: () => { releaseFastResponse?.(); releaseFastResponse = null; },
     complete: (outcome: "success" | "error" = "success") => pending.shift()?.(outcome),
   };
 }
@@ -68,14 +72,24 @@ async function displacement(body: Locator) {
 
 async function stableLayout(body: Locator) {
   await body.evaluate(async (node) => {
-    let previous = -1;
+    const frame = node.closest<HTMLElement>(".thread-viewport-frame")!;
+    const header = node.closest(".thread-viewport")!.querySelector<HTMLElement>(".thread-history-status");
+    const first = node.querySelector<HTMLElement>("[data-thread-display-unit]");
+    let previous: number[] | null = null;
     let stable = 0;
-    for (let i = 0; i < 120 && stable < 8; i++) {
+    for (let i = 0; i < 240 && stable < 8; i++) {
       await new Promise(requestAnimationFrame);
-      const value = node.scrollHeight + node.scrollTop;
-      stable = value === previous ? stable + 1 : 0;
+      const rect = (element: HTMLElement | null) => {
+        const box = element?.getBoundingClientRect();
+        return [box?.top ?? 0, box?.bottom ?? 0];
+      };
+      const transform = new DOMMatrix(getComputedStyle(node).transform).m42;
+      const value = [node.scrollHeight, node.scrollTop, transform, ...rect(frame), ...rect(header), ...rect(first)];
+      stable = previous && value.every((coordinate, index) => Math.abs(coordinate - previous![index]!) < 0.01)
+        ? stable + 1 : 0;
       previous = value;
     }
+    if (stable < 8) throw new Error("Thread history layout did not settle across frame and anchor geometry");
   });
 }
 
@@ -354,7 +368,8 @@ test("touch reveals a static partial ready header, arms only on release, and ret
     await touch("touchMove", 360);
     await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
     const scrolled = await historyGeometry(body, "Question 40");
-    expectSameScroll(held, scrolled, await body.evaluate((node) => node.scrollTop));
+    console.log("history-touch-native-scroll", JSON.stringify({ held, scrolled }));
+    expectSameScroll(held, scrolled, scrolled.scrollTop);
     expect(scrolled.visibleHeight).toBeGreaterThan(0);
     expect(scrolled.visibleHeight).toBeLessThan(48);
     await touch("touchEnd");
@@ -461,7 +476,8 @@ test("reduced-motion failure keeps its functional 48px slot and retry until natu
 
 test("fast responses reclaim completed slots and keep the next boundary loading", async ({ page }) => {
   const history = await installHistory(page);
-  history.respondImmediately(true);
+  history.useFastResponse(true);
+  await page.clock.install();
   await page.goto("/browser/fixture.html?case=history-boundary");
   const body = page.getByTestId("thread-message-region");
   const header = page.locator(".thread-history-status");
@@ -471,21 +487,32 @@ test("fast responses reclaim completed slots and keep the next boundary loading"
   await expect(header).toHaveAttribute("data-state", "ready");
   await expect(header).not.toBeInViewport();
   await body.hover();
-  const beforeFastRead = await historyGeometry(body, "Question 40");
+  await page.clock.pauseAt(Date.now());
   await page.mouse.wheel(0, -120);
+  await expect.poll(() => history.reads.length).toBe(1);
+  await expect(header).toHaveAttribute("data-state", "loading");
+  const beforeFastRead = await historyGeometry(body, "Question 40");
+  expect(beforeFastRead.slotHeight).toBe(48);
+  expect(Math.abs(beforeFastRead.transformY)).toBeGreaterThan(0);
+  history.releaseFastResponse();
   await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
   expect(history.reads).toHaveLength(1);
   await expect(header).toHaveCount(0);
   await expect(body.locator(".thread-history-slot")).toHaveCount(0);
-  await stableLayout(body);
   const afterFastRead = await historyGeometry(body, "Question 40");
   console.log("history-fast-completion-geometry", JSON.stringify({ before: beforeFastRead, after: afterFastRead }));
   await expectAnchorCoordinate(body, "Question 40", beforeFastRead.anchorTop);
   const fastSpacing = await historyBoundarySpacing(body, "Question 40", "Question 41");
   expect(Math.abs(fastSpacing.boundaryGap! - fastSpacing.referenceGap!)).toBeLessThan(1);
+  await page.clock.resume();
+  await stableLayout(body);
+  await expectAnchorCoordinate(body, "Question 40", beforeFastRead.anchorTop);
+  const settledFastSpacing = await historyBoundarySpacing(body, "Question 40", "Question 41");
+  expect(Math.abs(settledFastSpacing.boundaryGap! - settledFastSpacing.referenceGap!)).toBeLessThan(1);
+  await expect(page.locator(".thread-history-slot")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("history-fast-ready-hidden.png") });
 
-  history.respondImmediately(false);
+  history.useFastResponse(false);
   await positionAtTop(body);
   await stableLayout(body);
   const atNewHead = await historyGeometry(body, "Question 28");
@@ -699,16 +726,22 @@ test("navigation-window loading and errors remain visible and retry uses the nav
   const held = await expectHeld(body, "Question 38");
   await page.mouse.wheel(0, -80);
   await stableLayout(body);
+  const afterRetryPressure = await historyGeometry(body, "Question 38");
+  console.log("history-navigation-pressure-settled", JSON.stringify({ held, afterRetryPressure }));
+  await expectCoordinates(body, "Question 38", held);
   expect(history.reads).toHaveLength(3);
   history.complete("error");
   await page.getByRole("button", { name: "Loading failed. Retry", exact: true }).click();
   await expect.poll(() => history.reads.length).toBe(4);
+  const beforeRetryCompletion = await historyGeometry(body, "Question 38");
   history.complete();
   await expect(body.getByText("Question 26", { exact: true })).toBeAttached();
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
   await expect(page.locator(".thread-history-status")).toHaveCount(0);
   await expect(body.locator(".thread-history-slot")).toHaveCount(0);
   await stableLayout(body);
+  const afterRetryCompletion = await historyGeometry(body, "Question 38");
+  console.log("history-navigation-retry-completion", JSON.stringify({ beforeRetryCompletion, afterRetryCompletion }));
   await expectAnchorCoordinate(body, "Question 38", held.anchorTop);
   const navigationSpacing = await historyBoundarySpacing(body, "Question 38", "Question 39");
   expect(Math.abs(navigationSpacing.boundaryGap! - navigationSpacing.referenceGap!)).toBeLessThan(1);
