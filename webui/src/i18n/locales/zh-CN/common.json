@@ -2527,7 +2527,7 @@
     "editFailed": "未收到重发确认，请检查连接后重试。",
     "editFinishCurrent": "请先完成或取消当前编辑。",
     "editErrors": {
-      "edit_unavailable": "此会话或网关暂不支持编辑消息。",
+      "edit_shared_history": "共享历史不能在单个会话中编辑。",
       "edit_session_busy": "会话执行中，请结束后再编辑。",
       "edit_source_changed": "会话已发生变化，请取消后重新打开消息，编辑最新版本。",
       "edit_special_message": "暂不支持编辑此类特殊投递消息。",

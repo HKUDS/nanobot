@@ -2141,7 +2141,7 @@
     "editFailed": "Pengiriman ulang belum dikonfirmasi. Periksa koneksi lalu coba lagi.",
     "editFinishCurrent": "Selesaikan atau batalkan edit saat ini terlebih dahulu.",
     "editErrors": {
-      "edit_unavailable": "Pengeditan pesan tidak tersedia untuk percakapan atau gateway ini.",
+      "edit_shared_history": "Riwayat bersama tidak dapat diedit dari satu percakapan.",
       "edit_session_busy": "Tunggu hingga percakapan ini selesai berjalan sebelum mengedit.",
       "edit_source_changed": "Percakapan berubah. Batalkan dan buka kembali pesan untuk mengedit versi terbaru.",
       "edit_special_message": "Pesan pengiriman khusus ini tidak dapat diedit.",

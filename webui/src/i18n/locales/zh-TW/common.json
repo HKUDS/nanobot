@@ -2140,7 +2140,7 @@
     "editFailed": "尚未收到重新傳送確認，請檢查連線後重試。",
     "editFinishCurrent": "請先完成或取消目前的編輯。",
     "editErrors": {
-      "edit_unavailable": "此對話或閘道尚不支援編輯訊息。",
+      "edit_shared_history": "共用歷史無法在單一對話中編輯。",
       "edit_session_busy": "請等待此對話執行結束後再編輯。",
       "edit_source_changed": "對話已變更，請取消並重新開啟這則訊息再編輯。",
       "edit_special_message": "無法編輯此特殊投遞訊息。",

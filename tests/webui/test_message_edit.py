@@ -103,6 +103,23 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     assert "obsolete suffix" not in str((await manager.state.read(KEY)).messages)
 
 
+@pytest.mark.parametrize("phase", ["prepare", "replace"])
+async def test_shared_history_is_rejected_without_editing_a_display_only_session(editing, phase):
+    manager, host, submissions, _ = editing
+    before = await manager.state.read(KEY)
+    rows = transcript.read_transcript_lines(KEY)
+    prepared = await prepare(host, 1)
+    host.gateway.unified_session = True
+    with pytest.raises(HistoryEditError, match="edit_shared_history"):
+        if phase == "prepare":
+            await prepare(host, 1)
+        else:
+            await replace_webui_chat_input(host, payload(prepared))
+    assert (await manager.state.read(KEY)).messages == before.messages
+    assert transcript.read_transcript_lines(KEY) == rows
+    assert not submissions
+
+
 async def test_read_only_prepare_and_cancel_do_not_change_history(editing):
     manager, host, _, _ = editing
     before = await manager.state.read(KEY)

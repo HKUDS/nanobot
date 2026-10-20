@@ -139,8 +139,9 @@ async def prepare_webui_chat_edit(
             or not isinstance(message_id, str) or not isinstance(text, str)
             or (turn_id is not None and not isinstance(turn_id, str))):
         raise HistoryEditError("edit_invalid_request")
-    if gateway.unified_session or gateway.session_manager is None or gateway.replace_user_input is None:
-        raise HistoryEditError("edit_unavailable")
+    if gateway.unified_session:
+        raise HistoryEditError("edit_shared_history")
+    assert gateway.session_manager is not None
     if websocket_turn_wall_started_at(chat_id) is not None:
         raise HistoryEditError("edit_session_busy")
     key = webui_session_key(chat_id)
@@ -225,8 +226,10 @@ async def replace_webui_chat_input(
             or not isinstance(turn_id, str) or not turn_id or len(turn_id) > 128
             or not isinstance(raw_anchor, dict)):
         raise HistoryEditError("edit_invalid_request")
-    if gateway.unified_session or gateway.session_manager is None or gateway.replace_user_input is None:
-        raise HistoryEditError("edit_unavailable")
+    if gateway.unified_session:
+        raise HistoryEditError("edit_shared_history")
+    assert gateway.session_manager is not None
+    assert gateway.replace_user_input is not None
     if gateway.ingress.validate_text(text) is not None:
         raise HistoryEditError("edit_text_too_large")
     anchor_fields = cast(dict[str, Any], raw_anchor)
@@ -298,7 +301,7 @@ async def replace_webui_chat_input(
             event["created_at_ms"] = int(message.timestamp.timestamp() * 1000)
             with replace_transcript(
                 key, [*prefix, event], database=manager.sessions_dir / "sessions.sqlite3",
-                generation=session.generation,
+                generation=session.generation, previous_generation=anchor.generation,
             ):
                 yield
 

@@ -2527,7 +2527,7 @@
     "editFailed": "Resend not confirmed. Check the connection and retry.",
     "editFinishCurrent": "Finish or cancel the current edit first.",
     "editErrors": {
-      "edit_unavailable": "Message editing is unavailable for this conversation or gateway.",
+      "edit_shared_history": "Shared history cannot be edited from an individual conversation.",
       "edit_session_busy": "Wait for this conversation to finish before editing.",
       "edit_source_changed": "The conversation changed. Cancel and reopen the message to edit its latest version.",
       "edit_special_message": "This special-delivery message cannot be edited.",

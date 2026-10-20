@@ -2142,7 +2142,7 @@
     "editFailed": "No se ha confirmado el reenvío. Comprueba la conexión e inténtalo de nuevo.",
     "editFinishCurrent": "Termina o cancela la edición actual primero.",
     "editErrors": {
-      "edit_unavailable": "No se pueden editar mensajes en esta conversación o pasarela.",
+      "edit_shared_history": "El historial compartido no se puede editar desde una conversación individual.",
       "edit_session_busy": "Espera a que termine esta conversación antes de editar.",
       "edit_source_changed": "La conversación cambió. Cancela y vuelve a abrir el mensaje para editar su versión actual.",
       "edit_special_message": "Este mensaje de entrega especial no se puede editar.",

@@ -2141,7 +2141,7 @@
     "editFailed": "Renvoi non confirmé. Vérifiez la connexion et réessayez.",
     "editFinishCurrent": "Terminez ou annulez d’abord la modification en cours.",
     "editErrors": {
-      "edit_unavailable": "La modification des messages est indisponible pour cette conversation ou passerelle.",
+      "edit_shared_history": "L’historique partagé ne peut pas être modifié depuis une seule conversation.",
       "edit_session_busy": "Attendez la fin de l’exécution de cette conversation avant de modifier.",
       "edit_source_changed": "La conversation a changé. Annulez puis rouvrez le message à modifier.",
       "edit_special_message": "Ce message à diffusion spéciale ne peut pas être modifié.",

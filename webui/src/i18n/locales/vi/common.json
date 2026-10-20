@@ -2141,7 +2141,7 @@
     "editFailed": "Chưa xác nhận được việc gửi lại. Kiểm tra kết nối rồi thử lại.",
     "editFinishCurrent": "Hãy hoàn tất hoặc hủy bản chỉnh sửa hiện tại trước.",
     "editErrors": {
-      "edit_unavailable": "Không thể chỉnh sửa tin nhắn trong cuộc trò chuyện hoặc gateway này.",
+      "edit_shared_history": "Không thể chỉnh sửa lịch sử dùng chung từ một cuộc trò chuyện riêng lẻ.",
       "edit_session_busy": "Hãy đợi cuộc trò chuyện này chạy xong trước khi chỉnh sửa.",
       "edit_source_changed": "Cuộc trò chuyện đã thay đổi. Hãy hủy và mở lại tin nhắn để chỉnh sửa phiên bản mới nhất.",
       "edit_special_message": "Không thể chỉnh sửa tin nhắn được gửi theo cách đặc biệt này.",

@@ -72,7 +72,7 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     return t(`message.editErrors.${code}`, { defaultValue: t("message.editFailed") });
   };
   const reason = (message: UIMessage): string | null => {
-    if (!enabled || !chatId) return t("message.editErrors.edit_unavailable");
+    if (!enabled || !chatId) return t("message.editErrors.edit_plain_text_only");
     if (busy) return t("message.editErrors.edit_session_busy");
     if (draft && draft.message.id !== message.id) return t("message.editFinishCurrent");
     if (message.deliveryStatus === "sending" || message.deliveryStatus === "failed") return t("message.editErrors.edit_plain_text_only");

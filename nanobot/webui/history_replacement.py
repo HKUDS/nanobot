@@ -12,7 +12,7 @@ import os
 import shutil
 import sqlite3
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Any, Concatenate, ParamSpec, TypeVar
@@ -84,14 +84,15 @@ def _recover(key: str, journal: Path, paths: tuple[Path, ...]) -> None:
     if stage.parent != journal.parent or not stage.name.startswith(".edit-"):
         raise ValueError("invalid history-edit journal")
     # Read-only and independent of the session owner's connection/transaction.
-    with sqlite3.connect(Path(data["database"]).as_uri() + "?mode=ro", uri=True, timeout=5) as db:
+    with closing(sqlite3.connect(Path(data["database"]).as_uri() + "?mode=ro", uri=True, timeout=5)) as db:
         row = db.execute("SELECT generation FROM sessions WHERE key=?", (key,)).fetchone()
-    if row and row[0] == data["generation"]:
-        # All new files were installed before the SQLite commit.
-        _finish(journal, stage)
-    else:
+    if row is None or row[0] not in (data["previous_generation"], data["generation"]):
+        # Deletion or recreation retires both sides of this edit transaction.
+        for path in paths:
+            _remove(path)
+    elif row[0] == data["previous_generation"]:
         _restore(stage, paths)
-        _finish(journal, stage)
+    _finish(journal, stage)
 
 
 @contextmanager
@@ -112,7 +113,7 @@ def guarded_transcript(function: Callable[Concatenate[str, _P], _T]) -> Callable
 
 @contextmanager
 def replace_transcript(
-    key: str, rows: list[dict[str, Any]], *, database: Path, generation: str,
+    key: str, rows: list[dict[str, Any]], *, database: Path, generation: str, previous_generation: str,
 ) -> Generator[None]:
     """Install prepared rows; retain rollback material until SQLite settles."""
     from nanobot.webui.transcript import write_transcript_records_to_path
@@ -132,6 +133,7 @@ def replace_transcript(
                     shutil.copy2(path, stage / f"old-{index}")
             atomic_write_lines(journal, [json.dumps({
                 "stage": stage.name, "database": str(database), "generation": generation,
+                "previous_generation": previous_generation,
             })])
             journal_written = True
             os.replace(stage / "new.jsonl", paths[0])

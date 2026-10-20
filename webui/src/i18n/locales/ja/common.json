@@ -2141,7 +2141,7 @@
     "editFailed": "再送信を確認できませんでした。接続を確認して再試行してください。",
     "editFinishCurrent": "先に現在の編集を完了またはキャンセルしてください。",
     "editErrors": {
-      "edit_unavailable": "この会話またはゲートウェイではメッセージを編集できません。",
+      "edit_shared_history": "共有履歴は個別の会話から編集できません。",
       "edit_session_busy": "この会話の処理が完了してから編集してください。",
       "edit_source_changed": "会話が変更されました。キャンセルしてメッセージを開き直してください。",
       "edit_special_message": "この特殊な配信メッセージは編集できません。",

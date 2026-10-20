@@ -2141,7 +2141,7 @@
     "editFailed": "다시 보내기를 확인하지 못했습니다. 연결을 확인하고 다시 시도하세요.",
     "editFinishCurrent": "먼저 현재 편집을 완료하거나 취소하세요.",
     "editErrors": {
-      "edit_unavailable": "이 대화 또는 게이트웨이에서는 메시지를 편집할 수 없습니다.",
+      "edit_shared_history": "공유 기록은 개별 대화에서 편집할 수 없습니다.",
       "edit_session_busy": "이 대화의 실행이 끝난 후 편집하세요.",
       "edit_source_changed": "대화가 변경되었습니다. 취소한 후 메시지를 다시 열어 편집하세요.",
       "edit_special_message": "이 특수 전달 메시지는 편집할 수 없습니다.",

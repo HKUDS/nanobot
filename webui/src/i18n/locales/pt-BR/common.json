@@ -2335,7 +2335,7 @@
     "editFailed": "O reenvio não foi confirmado. Verifique a conexão e tente novamente.",
     "editFinishCurrent": "Conclua ou cancele a edição atual primeiro.",
     "editErrors": {
-      "edit_unavailable": "A edição de mensagens não está disponível para esta conversa ou gateway.",
+      "edit_shared_history": "O histórico compartilhado não pode ser editado em uma conversa individual.",
       "edit_session_busy": "Aguarde a execução desta conversa terminar antes de editar.",
       "edit_source_changed": "A conversa mudou. Cancele e abra a mensagem novamente para editar a versão atual.",
       "edit_special_message": "Esta mensagem de entrega especial não pode ser editada.",
