@@ -177,9 +177,11 @@ In Restricted mode, ordinary file and shell work stays inside the selected proje
 
 The composer supports text, attachments (images, documents, and videos), slash commands and `@` mentions. With voice transcription configured, the empty composer offers voice input; transcription is added to the draft before sending.
 
-Choose or drop MP4, WebM, or MOV files to upload a video (one per message, up to 20 MiB). Paste a standalone file path to attach a file the gateway can read in the topic's workspace and access mode; quotes and spaces are supported, and relative paths resolve from that workspace. A successful check replaces the path with an attachment; a failed check leaves the pasted text in your draft. Native TUI also accepts pasted paths; clipboard images continue to upload.
+Choose or drop MP4, WebM, or MOV videos into the composer (one per message, up to 20 MiB). You can play them in WebUI; the Agent cannot directly analyze their contents yet.
 
-Local references use the original file without uploading or copying its contents. Removing an attachment or deleting a topic leaves the original intact. Sending checks the file again; later source changes are read from that path, and moved or deleted files become unavailable. Browser file selection and clipboard screenshots still upload their contents. Videos can be replayed in WebUI, but the Agent currently receives an attachment path rather than native video input; attachment playback does not imply video understanding (NAN-190).
+To attach a file on the connected nanobot host, paste its path on its own. Quoted paths and spaces are supported; relative paths start from the topic's workspace. The topic's access permissions apply. If attaching fails, the text stays in your draft.
+
+Files attached by path reflect changes to the original file and become unavailable if it is moved or deleted. Removing an attachment or deleting a topic does not delete the original.
 
 To reference another topic, type or paste its complete handle (such as `@luma`), choose it from the `@` menu, or drag it from the sidebar into the composer. Recognized handles are highlighted; unknown handles remain plain text. You can reference up to eight different topics in one message.
 
