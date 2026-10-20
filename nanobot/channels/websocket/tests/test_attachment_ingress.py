@@ -8,6 +8,7 @@ import aiohttp
 import pytest
 from websockets.asyncio.client import connect
 
+from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.loader import load_config
@@ -22,7 +23,8 @@ async def gateway(tmp_path, monkeypatch):
     bus = MessageBus()
     config = WebSocketConfig(port=0, path="/ws", token="test-secret", max_message_bytes=1048576)
     services = build_gateway_services(
-        config=config, bus=bus, session_manager=SessionManager(tmp_path),
+        config=config, bus=bus, executions=ExecutionLifecycle(bus),
+        session_manager=SessionManager(tmp_path),
         static_dist_path=None, workspace_path=tmp_path,
         default_restrict_to_workspace=True, runtime_model_name=None,
         runtime_surface="browser", runtime_capabilities_overrides=None,

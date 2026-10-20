@@ -4,6 +4,7 @@ from functools import partial
 
 import pytest
 
+from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.queue import MessageBus
@@ -118,7 +119,7 @@ async def webui_delivery(delivery, tmp_path, monkeypatch):
         "enabled": True, "allowFrom": ["*"], "host": "127.0.0.1", "port": 0,
     })
     gateway = build_gateway_services(
-        config=config, bus=bus, session_manager=sessions, static_dist_path=None,
+        config=config, bus=bus, executions=ExecutionLifecycle(bus), session_manager=sessions, static_dist_path=None,
         workspace_path=sessions.workspace, default_restrict_to_workspace=True,
         runtime_model_name=None, runtime_surface="browser", runtime_capabilities_overrides=None,
         config_path=data / "config.json",

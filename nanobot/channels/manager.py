@@ -46,6 +46,7 @@ from nanobot.utils.restart import (
 )
 
 if TYPE_CHECKING:
+    from nanobot.agent.execution import ExecutionControl
     from nanobot.agent.subagent import SubagentManager
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
@@ -102,6 +103,7 @@ class ChannelManager:
         bus: MessageBus,
         *,
         session_manager: "SessionManager | None" = None,
+        executions: ExecutionControl | None = None,
         cron_service: CronService | None = None,
         local_trigger_store: LocalTriggerStore | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
@@ -130,6 +132,7 @@ class ChannelManager:
         self._config_path = config_path.expanduser().resolve(strict=False)
         self.bus = bus
         self._session_manager = session_manager
+        self._executions = executions
         self._cron_service = cron_service
         self._local_trigger_store = local_trigger_store
         self._webui_runtime_model_name = webui_runtime_model_name
@@ -208,12 +211,15 @@ class ChannelManager:
             from nanobot.channels.websocket.runtime import WebSocketConfig
             from nanobot.webui.gateway_services import build_gateway_services
 
+            if self._executions is None:
+                raise ValueError("WebSocket runtime requires an execution control port")
             parsed = WebSocketConfig.model_validate(section)
             static_path = _default_webui_dist() if self._webui_static_dist else None
             workspace = Path(self.config.workspace_path)
             gateway = build_gateway_services(
                 config=parsed,
                 bus=self.bus,
+                executions=self._executions,
                 session_manager=self._session_manager,
                 static_dist_path=static_path,
                 workspace_path=workspace,

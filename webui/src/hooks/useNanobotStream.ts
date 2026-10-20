@@ -1,5 +1,5 @@
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
@@ -13,7 +13,6 @@ import type { RunState, StreamError } from "@/lib/nanobot-client";
 import {
   clearThreadProjectionActivity,
   closeThreadProjectionAnswer,
-  finalizeStreamedTurn,
   resetThreadProjectionCursor,
   turnFieldsFromEvent,
 } from "@/lib/thread-event-projection";
@@ -500,6 +499,27 @@ export function useNanobotStream(
     pending.owner.finishRead(pending.read);
     if (transcriptRef.current === pending.owner) publishHistory();
   }, [publishHistory]);
+  const canonicalCommitRef = useRef<{
+    owner: ThreadTranscript;
+    messages: UIMessage[];
+    generation: number;
+    ownRead: boolean;
+    canonical: ReturnType<typeof persistedCanonicalRunState>;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const commit = canonicalCommitRef.current;
+    if (!commit || !chatId || commit.owner !== transcriptRef.current) return;
+    if (commit.messages !== messages) return;
+    canonicalCommitRef.current = null;
+    const { completedTurnIds, snapshot } = commit.canonical;
+    if (commit.ownRead && !snapshot.hasPendingToolCalls
+      && client.canReconcileCanonicalCompletion(chatId, commit.generation, completedTurnIds, snapshot)
+      && client.reconcileCanonicalCompletion(chatId, commit.generation, completedTurnIds, snapshot)) {
+      setRetryStatus(null);
+      clearPendingStreamWork();
+      transcriptRef.current.projection = resetThreadProjectionCursor(transcriptRef.current.projection, messages);
+    } else client.fenceCanonicalCompletedTurns(chatId, commit.canonical.completedTurnIds);
+  }, [chatId, client, messages, historyState.version, clearPendingStreamWork]);
   const latestReadOwnerRef = useRef<ThreadTranscript>();
   const detailRequestsRef = useRef(new Map<string, Promise<{ ref: string; events: ThreadProjectionEvent[] } | null>>());
 
@@ -519,8 +539,6 @@ export function useNanobotStream(
       flushPendingStreamEvents();
       const decision = ownRead ? read : owner.begin(seed ? "initial" : "latest");
       const canonical = body ? persistedCanonicalRunState(body) : null;
-      const settle = chatId && canonical && !canonical.snapshot.hasPendingToolCalls
-        && client.canReconcileCanonicalCompletion(chatId, generation, canonical.completedTurnIds, canonical.snapshot);
       const accepted = owner.accept(body, decision);
       // Commit the received owner before cache listeners/ledger callbacks can reenter.
       setMessages(owner.messages);
@@ -531,17 +549,8 @@ export function useNanobotStream(
         else webuiThreadCache.delete(historyKey);
         publishing = false;
       }
-      if (ownRead && chatId && canonical) {
-        if (accepted && settle && client.reconcileCanonicalCompletion(chatId, generation,
-          canonical.completedTurnIds, canonical.snapshot)) {
-          setIsStreaming(false);
-          setRunStartedAt(null);
-          setRetryStatus(null);
-        } else client.fenceCanonicalCompletedTurns(chatId, canonical.completedTurnIds);
-      }
-      if (accepted && owner.paging.hasPendingToolCalls && chatId
-        && !(owner.paging.activeTurnId && client.isRunCompleted(chatId, owner.paging.activeTurnId))) {
-        setIsStreaming(true);
+      if (accepted && chatId && canonical) {
+        canonicalCommitRef.current = { owner, messages: owner.messages, generation, ownRead, canonical };
       }
     };
     const cached = webuiThreadCache.get(historyKey);

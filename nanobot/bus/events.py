@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
-from uuid import uuid4
 
 from nanobot.bus.delivery import DeliveryRequest
 
@@ -28,12 +27,11 @@ INBOUND_META_TURN_ID = "webui_turn_id"
 INBOUND_META_LOCAL_MEDIA = "local_media_paths"
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExecutionAdmission:
-    """One accepted root carries its Stop intent through transport and scheduling."""
+    """Opaque runtime-issued identity; lifecycle state never leaves its owner."""
 
-    execution_id: str = field(default_factory=lambda: uuid4().hex)
-    stop_requested: bool = False
+    execution_id: str
 
 
 @dataclass

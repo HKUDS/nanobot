@@ -15,14 +15,14 @@ from typing import Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.bus.events import (
-    INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_EXECUTION_ID,
-    INBOUND_META_STOP_EXECUTION_ID,
+    INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_USER_SHELL,
     ExecutionAdmission,
+    InboundMessage,
 )
+from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.runtime_context import (
@@ -533,22 +533,15 @@ class WebUICommandRouter:
         ):
             return WebUIRequestResult(status=400, message="invalid run owners")
         try:
-            policy = self._temporary_chats.message_policy(connection, chat_id, "/stop")
+            self._temporary_chats.message_policy(connection, chat_id, "/stop")
             await self._workspaces.async_scope_for_session_key(webui_session_key(chat_id))
         except (TemporaryChatError, WorkspaceScopeError):
             return WebUIRequestResult(status=403, message="access_denied")
         session_key = webui_session_key(chat_id)
         for owner in dict.fromkeys(cast(list[str], run_ids)):
-            execution_key = self.gateway.runs.request_stop(session_key, owner)
-            if execution_key is None:
-                continue
-            await self._transport.webui_dispatch_message(
-                sender_id=client_id, chat_id=chat_id, content="/stop", media=None,
-                metadata={INBOUND_META_STOP_EXECUTION_ID: owner}, is_dm=False,
-                session_key=execution_key,
-                require_existing_session=policy.require_existing_session if policy is not None else False,
-                session_generation=policy.session_generation if policy is not None else None,
-            )
+            execution_key = self.gateway.runs.execution_session_key(session_key, owner)
+            if execution_key is not None:
+                await self.gateway.executions.request_stop(execution_key, owner)
         return WebUIRequestResult(result={
             "chat_id": chat_id, "run_state": self.gateway.runs.snapshot(session_key),
         })
@@ -821,8 +814,13 @@ class WebUICommandRouter:
             )
         )
         if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
-            execution_admission = self.gateway.runs.admit_if_idle(
-                admission_session_key, turn_id, execution_session_key,
+            execution_admission = await self.gateway.executions.reserve_if_idle(
+                InboundMessage(
+                    channel="websocket", sender_id=client_id, chat_id=chat_id,
+                    content=dispatch_content, media=media_paths, metadata=metadata,
+                    session_key_override=admission_session_key,
+                ),
+                execution_session_key,
             )
             if execution_admission is not None:
                 queued_owner = execution_admission.execution_id
@@ -925,9 +923,9 @@ class WebUICommandRouter:
             )
             raise
         finally:
-            if not accepted and queued_owner is not None:
-                self.gateway.runs.finish(admission_session_key, queued_owner, "failed")
-                clear_websocket_turn_if_current(chat_id, queued_owner)
+            if not accepted and execution_admission is not None:
+                await self.gateway.executions.reject(execution_admission)
+                clear_websocket_turn_if_current(chat_id, execution_admission.execution_id)
 
         media = self._media.augment_transcript_user_media(
             media_paths, local_paths=[item["path"] for item in local],

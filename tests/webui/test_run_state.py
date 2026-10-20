@@ -1,6 +1,5 @@
 """Authoritative snapshots are execution observations, not transcript projections."""
 
-from nanobot.bus.events import ExecutionAdmission
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, TurnExecutionChanged
 from nanobot.webui.client_contract import CORE_CAPABILITY, RUN_STATE_CAPABILITY, webui_contract
@@ -13,14 +12,14 @@ async def fact(bus, owner, phase, *, key="websocket:chat", channel="websocket", 
             channel=channel, chat_id="chat", session_key=key,
             metadata={"webui_turn_id": f"turn-{owner}"},
         ),
-        admission=ExecutionAdmission(owner), phase=phase, **kwargs,
+        execution_id=owner, phase=phase, **kwargs,
     ))
 
 
-def test_idle_snapshot_is_explicit_and_restart_identity_is_not_shared():
-    old = RunStateAuthority(MessageBus(), "old-gateway")
-    owner = old.admit_if_idle("websocket:chat", "turn", "websocket:chat")
-    assert owner is not None
+async def test_idle_snapshot_is_explicit_and_restart_identity_is_not_shared():
+    bus = MessageBus()
+    old = RunStateAuthority(bus, "old-gateway")
+    await fact(bus, "old-owner", "queued")
     new = RunStateAuthority(MessageBus(), "new-gateway")
     assert new.snapshot("websocket:chat") == {
         "instance_id": "new-gateway", "revision": 0, "runs": [], "completed": [],
@@ -83,7 +82,12 @@ async def test_system_facts_are_keyed_by_target_not_source_channel_or_chat():
     await fact(bus, "system-A", "running", key="websocket:target", channel="system")
     assert authority.snapshot("websocket:chat")["runs"] == []
     assert authority.snapshot("websocket:target")["runs"][0]["run_id"] == "system-A"
+    snapshot = authority.snapshot("websocket:target")
+    assert authority.execution_session_key("websocket:target", "system-A") == "websocket:target"
+    assert authority.execution_session_key("websocket:chat", "system-A") is None
+    assert authority.snapshot("websocket:target") == snapshot
     await fact(bus, "system-A", "exited", key="websocket:target", channel="system")
+    assert authority.execution_session_key("websocket:target", "system-A") is None
     assert authority.snapshot("websocket:target")["completed"][0]["outcome"] == "unknown"
     await fact(bus, "internal", "queued", key="cron:job", channel="system")
     assert authority.snapshot("cron:job")["runs"] == []

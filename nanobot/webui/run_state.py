@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Literal, TypedDict
 
-from nanobot.bus.events import INBOUND_META_TURN_ID, ExecutionAdmission
+from nanobot.bus.events import INBOUND_META_TURN_ID
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import ExecutionOutcome, TurnExecutionChanged
 from nanobot.session.keys import UNIFIED_SESSION_KEY
@@ -39,7 +39,7 @@ class ServerRunSnapshot(TypedDict):
 
 @dataclass
 class _Run:
-    admission: ExecutionAdmission
+    execution_id: str
     turn_id: str | None
     execution_session_key: str
     phase: RunPhase = "queued"
@@ -47,7 +47,7 @@ class _Run:
 
     def payload(self) -> ServerRun:
         return ServerRun(
-            run_id=self.admission.execution_id, turn_id=self.turn_id,
+            run_id=self.execution_id, turn_id=self.turn_id,
             phase=self.phase, started_at=self.started_at,
         )
 
@@ -107,31 +107,25 @@ class RunStateAuthority:
         for listener in tuple(self._listeners):
             listener(session_key, self._snapshot(session_key))
 
-    def admit_if_idle(
-        self, session_key: str, turn_id: str | None, execution_session_key: str,
-    ) -> ExecutionAdmission | None:
-        """Reserve an accepted transport root before it reaches the bus worker."""
+    def execution_session_key(self, session_key: str, run_id: str) -> str | None:
+        """Resolve an observed owner's execution scope without mutating intent."""
         with self._lock:
-            if self._runs.get(session_key):
-                return None
-            admission = ExecutionAdmission()
-            self._admit(session_key, admission, turn_id, execution_session_key)
-            return admission
+            run = self._runs.get(session_key, {}).get(run_id)
+            return run.execution_session_key if run is not None else None
 
-    def _admit(
-        self, session_key: str, admission: ExecutionAdmission, turn_id: str | None,
+    def _queued(
+        self, session_key: str, run_id: str, turn_id: str | None,
         execution_session_key: str,
     ) -> None:
-        run_id = admission.execution_id
         if run_id in self._runs.get(session_key, {}):
             return
         # An ended owner's delayed status/admission must not resurrect it.
         if any(receipt["run_id"] == run_id for receipt in self._completed.get(session_key, ())):
             return
-        self._runs.setdefault(session_key, {})[run_id] = _Run(admission, turn_id, execution_session_key)
+        self._runs.setdefault(session_key, {})[run_id] = _Run(run_id, turn_id, execution_session_key)
         self._changed(session_key)
 
-    def finish(
+    def _finish(
         self, session_key: str, run_id: str, outcome: ExecutionOutcome,
     ) -> None:
         with self._lock:
@@ -152,19 +146,6 @@ class RunStateAuthority:
                 self._completed.popitem(last=False)
             self._changed(session_key)
 
-    def request_stop(self, session_key: str, run_id: str) -> str | None:
-        """Bind request intent to the same admission the scheduler will consume."""
-        with self._lock:
-            run = self._runs.get(session_key, {}).get(run_id)
-            if run is None:
-                return None
-            run.admission.stop_requested = True
-            return run.execution_session_key
-
-    def has_runs(self, session_key: str) -> bool:
-        with self._lock:
-            return bool(self._runs.get(session_key))
-
     def _execution_changed(self, event: TurnExecutionChanged) -> None:
         context = event.context
         session_key = context.session_key
@@ -175,14 +156,14 @@ class RunStateAuthority:
         with self._lock:
             if event.phase == "queued":
                 turn_id = context.metadata.get(INBOUND_META_TURN_ID)
-                self._admit(
-                    session_key, event.admission,
+                self._queued(
+                    session_key, event.execution_id,
                     turn_id if isinstance(turn_id, str) and turn_id else None,
                     context.session_key,
                 )
                 return
             if event.phase == "injected" or event.phase == "rejected" or event.phase == "exited":
-                self.finish(session_key, event.execution_id, event.outcome)
+                self._finish(session_key, event.execution_id, event.outcome)
                 return
             run = self._runs.get(session_key, {}).get(event.execution_id)
             if run is None or run.phase == "stopping":

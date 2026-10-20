@@ -21,6 +21,7 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import TurnExecutionChanged
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
@@ -1385,6 +1386,7 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
     tmp_path: Path,
 ) -> None:
     loop = _make_full_loop(tmp_path)
+    loop.provider.aclose = AsyncMock()
     session = loop.sessions.get_or_create("feishu:c-auto")
     session.metadata[GOAL_STATE_KEY] = {
         "status": "active",
@@ -1409,43 +1411,54 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
-    pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
+    first_exited, release_fifo = asyncio.Event(), asyncio.Event()
 
-    first = await loop._process_message(
-        InboundMessage(
-            channel="feishu",
-            sender_id="u1",
-            chat_id="c-auto",
-            content="start the goal",
-        ),
-        pending_queue=pending,
-    )
+    async def pause_after_first_root(event: TurnExecutionChanged) -> None:
+        if event.phase == "exited" and not first_exited.is_set():
+            first_exited.set()
+            await release_fifo.wait()
 
-    assert first is None
-    queued = pending.get_nowait()
-    assert queued.sender_id == "system:continuation"
-    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
-    assert "Finish the long goal." in queued.content
+    loop.bus.subscribe(pause_after_first_root, TurnExecutionChanged)
+    msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="c-auto", content="start the goal")
+    try:
+        await loop._enqueue_session_message(msg)
+        worker, = loop._active_tasks[msg.session_key]
+        pending = loop._pending_queues[msg.session_key]
+        await asyncio.wait_for(first_exited.wait(), timeout=3)
+        queued = pending.get_nowait()
+        pending.put_nowait(queued)
+        assert queued.sender_id == "system:continuation"
+        assert queued.metadata[INTERNAL_CONTINUATION_META] is True
+        assert "Finish the long goal." in queued.content
+        assert queued.execution_admission is not None
+        assert queued.execution_admission != msg.execution_admission
 
-    session = loop.sessions.get_or_create("feishu:c-auto")
-    assert "Finish the long goal." in str(session.messages[0]["content"])
-    assert [
-        {k: v for k, v in m.items() if k in {"role", "content"}}
-        for m in map(public_history_message, session.messages)
-    ] == [{"role": "user", "content": "start the goal"}]
+        session = loop.sessions.get_or_create(msg.session_key)
+        assert "Finish the long goal." in str(session.messages[0]["content"])
+        assert [
+            {k: v for k, v in m.items() if k in {"role", "content"}}
+            for m in map(public_history_message, session.messages)
+        ] == [{"role": "user", "content": "start the goal"}]
 
-    second = await loop._process_message(queued, pending_queue=asyncio.Queue())
-
-    assert second is not None
-    assert second.content == "done"
-    session = loop.sessions.get_or_create("feishu:c-auto")
-    assert [
-        {k: v for k, v in m.items() if k in {"role", "content"}}
-        for m in map(public_history_message, session.messages)
-    ] == [
-        {"role": "user", "content": "start the goal"},
-        {"role": "assistant", "content": "done"},
-    ]
+        release_fifo.set()
+        await asyncio.wait_for(worker, timeout=3)
+        session = loop.sessions.get_or_create(msg.session_key)
+        assert [
+            {k: v for k, v in m.items() if k in {"role", "content"}}
+            for m in map(public_history_message, session.messages)
+        ] == [
+            {"role": "user", "content": "start the goal"},
+            {"role": "assistant", "content": "done"},
+        ]
+        replies = []
+        while not loop.bus.outbound.empty():
+            reply = loop.bus.outbound.get_nowait()
+            if reply.event is None and reply.content:
+                replies.append(reply.content)
+        assert replies == ["done"]
+    finally:
+        release_fifo.set()
+        await loop.aclose()
 
 
 @pytest.mark.asyncio

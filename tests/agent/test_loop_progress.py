@@ -691,14 +691,13 @@ class TestToolEventProgress:
 
         loop._process_message = cancel_after_merge  # type: ignore[method-assign]
 
-        with pytest.raises(asyncio.CancelledError):
-            await run_session(loop, InboundMessage(
-                channel="websocket",
-                sender_id="u1",
-                chat_id="chat1",
-                content="give a long answer",
-                metadata={"_wants_stream": True},
-            ))
+        await run_session(loop, InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="give a long answer",
+            metadata={"_wants_stream": True},
+        ))
 
         outbound = []
         while bus.outbound_size > 0:

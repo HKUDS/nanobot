@@ -162,8 +162,7 @@ describe("useNanobotStream", () => {
   it("resumes a merge_next cached snapshot including reasoning queued before detach", () => {
     const fake = fakeClient();
     const cache = new ThreadMessageCache(() => false);
-    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
-      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, undefined, undefined, { key: null, cache }), { wrapper: wrap(fake.client) });
     act(() => {
       fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
       fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: "First ", resuming: true, merge_next: true });
@@ -172,8 +171,7 @@ describe("useNanobotStream", () => {
     first.unmount();
     const snapshot = cache.get("checkpoint")!;
     expect(snapshot.projection.messages[0].reasoning).toBe("Queued ");
-    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
-      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, undefined, undefined, { key: null, cache }), { wrapper: wrap(fake.client) });
     act(() => {
       fake.emit("checkpoint", { event: "reasoning_delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 4, text: "Continue reasoning" });
       fake.emit("checkpoint", { event: "reasoning_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 5 });
@@ -212,8 +210,7 @@ describe("useNanobotStream", () => {
   it("captures the first sequence of coalesced chunks before a paint", () => {
     const fake = fakeClient();
     const cache = new ThreadMessageCache(() => false);
-    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
-      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, undefined, undefined, { key: null, cache }), { wrapper: wrap(fake.client) });
     act(() => {
       fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
       fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: "last" });
@@ -225,8 +222,7 @@ describe("useNanobotStream", () => {
     expect(snapshot.projection.messages[0]).toMatchObject({
       content: "First last", streamId: "answer", projectionStartSeq: 1, turnSeq: 2,
     });
-    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
-      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, undefined, undefined, { key: null, cache }), { wrapper: wrap(fake.client) });
     act(() => {
       fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 3, response_sources: [] });
     });
@@ -242,19 +238,17 @@ describe("useNanobotStream", () => {
   it("retains side-channel ownership when restoring an active answer from cache", async () => {
     const fake = fakeClient();
     const cache = new ThreadMessageCache(() => false);
-    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
-      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, undefined, undefined, { key: null, cache }), { wrapper: wrap(fake.client) });
     act(() => {
       fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", text: "Active answer" });
     });
     await flushStreamFrame();
     act(() => { first.result.current.send("/model", undefined, { sideChannel: true }); });
-    const commandTurn = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+    const commandTurn = fake.client.sendMessage.mock.calls.at(-1)![3]!.turnId!;
     first.unmount();
     const snapshot = cache.get("checkpoint")!;
     expect(snapshot.sideChannelTurnIds.has(commandTurn)).toBe(true);
-    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
-      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, undefined, undefined, { key: null, cache }), { wrapper: wrap(fake.client) });
     act(() => {
       fake.emit("checkpoint", { event: "message", chat_id: "checkpoint", turn_id: commandTurn, text: "Current model" });
       fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", text: " continued" });

@@ -300,6 +300,7 @@ async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_pat
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
+    from nanobot.agent.execution import ExecutionLifecycle
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.webui.gateway_services import build_gateway_services
@@ -310,8 +311,9 @@ async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_pat
     key = "websocket:busy"
     await state.get(key)
     await state.update_metadata(key, {"title": "committed"})
+    bus = MessageBus()
     gateway = build_gateway_services(
-        config=WebSocketConfig(), bus=MessageBus(), session_manager=manager,
+        config=WebSocketConfig(), bus=bus, executions=ExecutionLifecycle(bus), session_manager=manager,
         static_dist_path=None, workspace_path=tmp_path / "workspace",
         default_restrict_to_workspace=True, runtime_model_name=lambda: "test-model",
         runtime_surface="gateway", runtime_capabilities_overrides=None,

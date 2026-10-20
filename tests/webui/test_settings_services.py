@@ -3,10 +3,11 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.agent.execution import ExecutionLifecycle
+from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
@@ -36,9 +37,11 @@ class _Flow:
 
 
 def _gateway(config_path: Path, workspace: Path):
+    bus = MessageBus()
     return build_gateway_services(
         config=WebSocketConfig(),
-        bus=MagicMock(),
+        bus=bus,
+        executions=ExecutionLifecycle(bus),
         session_manager=None,
         static_dist_path=None,
         workspace_path=workspace,

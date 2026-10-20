@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from nanobot.bus.events import INBOUND_META_EXECUTION_ID, ExecutionAdmission, InboundMessage
+from nanobot.bus.events import InboundMessage
 from nanobot.events import AgentEvent
 from nanobot.providers.base import LLMUsage
 
@@ -66,14 +66,10 @@ class TurnExecutionChanged(AgentEvent):
     """One admitted execution owner changed phase, independently of delivery/storage."""
 
     context: RuntimeEventContext
-    admission: ExecutionAdmission
+    execution_id: str
     phase: Literal["queued", "running", "stopping", "injected", "rejected", "exited"]
     started_at: float | None = None
     outcome: ExecutionOutcome = "unknown"
-
-    @property
-    def execution_id(self) -> str:
-        return self.admission.execution_id
 
 
 @dataclass(frozen=True)
@@ -267,21 +263,11 @@ class RuntimeEventPublisher:
             )
         )
 
-    async def execution_queued(
-        self, msg: InboundMessage, session_key: str, *, new_owner: bool = False,
-    ) -> ExecutionAdmission:
-        if new_owner or msg.execution_admission is None:
-            msg.execution_admission = ExecutionAdmission()
-        admission = msg.execution_admission
-        msg.metadata[INBOUND_META_EXECUTION_ID] = admission.execution_id
-        await self.execution_changed(msg, session_key, admission, "queued")
-        return admission
-
     async def execution_changed(
         self,
         msg: InboundMessage,
         session_key: str,
-        admission: ExecutionAdmission,
+        execution_id: str,
         phase: Literal["queued", "running", "stopping", "injected", "rejected", "exited"],
         *,
         started_at: float | None = None,
@@ -295,7 +281,7 @@ class RuntimeEventPublisher:
                 metadata=msg.metadata,
                 session_generation=msg.session_generation,
             ),
-            admission=admission,
+            execution_id=execution_id,
             phase=phase,
             started_at=started_at,
             outcome=outcome,

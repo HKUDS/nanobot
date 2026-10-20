@@ -9,7 +9,6 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -20,6 +19,8 @@ from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Request
 
+from nanobot.agent.execution import ExecutionLifecycle
+from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.webui import remote_ssh
@@ -44,8 +45,10 @@ async def remote(tmp_path, monkeypatch):
         (assets / "assets" / name).write_text("local client asset", encoding="utf-8")
     monkeypatch.setattr("nanobot.webui.remote_proxy.LocalClientAssets", lambda: LocalClientAssets(assets))
     config = WebSocketConfig(host="127.0.0.1", token_issue_secret=ROOT, path="/custom/ws")
+    bus = MessageBus()
     services = build_gateway_services(
-        config=config, bus=MagicMock(), session_manager=None, static_dist_path=None,
+        config=config, bus=bus, executions=ExecutionLifecycle(bus),
+        session_manager=None, static_dist_path=None,
         workspace_path=tmp_path, config_path=tmp_path / "config.json",
         default_restrict_to_workspace=False, runtime_model_name=None,
         runtime_surface="browser", runtime_capabilities_overrides=None,

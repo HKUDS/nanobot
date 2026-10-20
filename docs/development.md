@@ -154,3 +154,13 @@ At minimum, cover:
 6. Update user-facing docs.
 
 Add the provider to [`configuration.md`](./configuration.md) where users choose `transcription.provider`, but keep implementation details in this development guide.
+
+## Session execution lifecycle
+
+`AgentLoop` owns one FIFO worker and inbox per scheduled session. Each root executes in a separate task awaited by that worker. A targeted Stop cancels only the root; the worker settles stream/checkpoint work and awaits the existing subagent/exec cancellation contracts before taking the next input from the same inbox. Subagent cancellation retains its bounded wait: resistant child work remains tracked by the subagent manager rather than being declared physically terminated. Session discard and gateway shutdown may cancel the worker itself. Shutdown preserves durable recovery journals; an explicit Stop acknowledges only the stopped root's follow-ups, not inputs behind an independently admitted successor.
+
+`nanobot.agent.execution.ExecutionLifecycle` is the authority for root identities, early transport reservations, Stop intent and physical exit. A reservation carries a frozen identity, not shared mutable state. Adapters use its narrow `ExecutionControl` port on the gateway event loop. A WebUI gateway must receive the same lifecycle instance as its `AgentLoop`; it must not create a second owner. HTTP threads read locked projection snapshots and never manipulate asyncio tasks or queues. Stop acknowledgement means the intent was accepted, not that cleanup has finished.
+
+`RuntimeEventPublisher` publishes execution facts with scalar identities; it neither admits work nor controls it. `RunStateAuthority` projects those facts into the existing instance/revision snapshots and bounded receipts. It cannot create a root or set Stop intent. Inputs classified as steering retire any provisional receipt without giving that receipt permission to cancel the real root. Independent inputs are FIFO barriers, including when they arrive while another root is stopping.
+
+Internal continuation policy prepares an input without writing an inbox or minting an owner. `AgentLoop` admits that input through the ordinary enqueue boundary, then commits the previous slice's continuation bookkeeping. The successor is admitted before the preceding root exits, so observers do not see an artificial idle gap. Execution state remains separate from history persistence, final-result delivery and connection freshness; this does not unify the direct-call and scheduled runtime entrypoints.

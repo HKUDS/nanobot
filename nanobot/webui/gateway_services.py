@@ -26,6 +26,7 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
 
 if TYPE_CHECKING:
+    from nanobot.agent.execution import ExecutionControl
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
@@ -43,6 +44,7 @@ class GatewayServices:
     settings: WebUISettingsServices
     tokens: GatewayTokenStore
     runs: RunStateAuthority
+    executions: ExecutionControl
     media: WebUIMediaGateway
     uploads: AttachmentHTTP
     ingress: WebUIIngressPolicy
@@ -62,6 +64,7 @@ def build_gateway_services(
     *,
     config: WebSocketConfig,
     bus: MessageBus,
+    executions: ExecutionControl,
     session_manager: SessionManager | None,
     static_dist_path: Path | None,
     workspace_path: Path,
@@ -168,6 +171,7 @@ def build_gateway_services(
         settings=settings,
         tokens=tokens,
         runs=runs,
+        executions=executions,
         media=media,
         uploads=uploads,
         ingress=ingress,

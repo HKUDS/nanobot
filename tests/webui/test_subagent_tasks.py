@@ -10,6 +10,7 @@ import pytest
 from websockets.datastructures import Headers
 from websockets.http11 import Request
 
+from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.bus.queue import MessageBus
@@ -31,7 +32,8 @@ async def test_webui_task_access_and_targeted_idempotent_cancel(tmp_path):
     provider.generation = GenerationSettings()
     runtime = LLMRuntime.capture(provider, "test", context_window_tokens=128000)
     gateway = build_gateway_services(
-        config=WebSocketConfig(), bus=bus, session_manager=SessionManager(tmp_path),
+        config=WebSocketConfig(), bus=bus, executions=ExecutionLifecycle(bus),
+        session_manager=SessionManager(tmp_path),
         static_dist_path=None, workspace_path=tmp_path, default_restrict_to_workspace=True,
         config_path=tmp_path / "config.json", runtime_model_name=None,
         runtime_surface="gateway", runtime_capabilities_overrides=None,

@@ -86,7 +86,7 @@ async def runtime(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterat
         session_manager=sessions, unified_session=unified,
     )
     manager = ChannelManager(
-        config, bus, session_manager=sessions, webui_static_dist=False,
+        config, bus, executions=loop.executions, session_manager=sessions, webui_static_dist=False,
         config_path=tmp_path / "config.json",
     )
     channel = manager.channels["websocket"]

@@ -10,12 +10,8 @@ import pytest
 from websockets.datastructures import Headers
 from websockets.http11 import Request
 
-from nanobot.bus.events import (
-    INBOUND_META_EXECUTION_ID,
-    INBOUND_META_STOP_EXECUTION_ID,
-    ExecutionAdmission,
-    OutboundMessage,
-)
+from nanobot.agent.execution import ExecutionLifecycle
+from nanobot.bus.events import INBOUND_META_EXECUTION_ID, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, TurnExecutionChanged
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
@@ -57,7 +53,8 @@ async def channel(tmp_path, monkeypatch, request):
     config = WebSocketConfig(allow_from=["client"])
     bus = MessageBus()
     gateway = build_gateway_services(
-        config=config, bus=bus, session_manager=sessions, static_dist_path=None,
+        config=config, bus=bus, executions=ExecutionLifecycle(bus),
+        session_manager=sessions, static_dist_path=None,
         workspace_path=tmp_path, default_restrict_to_workspace=True,
         config_path=tmp_path / "config.json", runtime_model_name=None,
         runtime_surface="browser", runtime_capabilities_overrides=None,
@@ -91,7 +88,7 @@ async def execution(channel, owner, phase, *, chat_id="background", **kwargs):
     await channel.bus.publish(TurnExecutionChanged(
         context=RuntimeEventContext(
             channel="websocket", chat_id=chat_id, session_key=webui_session_key(chat_id),
-        ), admission=ExecutionAdmission(owner), phase=phase, **kwargs,
+        ), execution_id=owner, phase=phase, **kwargs,
     ))
     await flush(channel)
 
@@ -200,7 +197,42 @@ async def test_transport_acceptance_registers_queued_root_but_not_steering_input
         clear_websocket_turns(chat_id)
 
 
-async def test_stop_request_is_correlated_cached_and_cannot_stop_new_owner(channel):
+@pytest.mark.parametrize("failure", ["persistence", "dispatch"])
+async def test_failed_transport_admission_retires_its_reservation_before_retry(channel, monkeypatch, failure):
+    connection = Connection()
+    chat_id, key = "retry-admission", webui_session_key("retry-admission")
+    envelope = {
+        "type": "message", "chat_id": chat_id, "webui": True,
+        "turn_id": "retry-input", "content": "hello",
+    }
+    try:
+        with monkeypatch.context() as patch:
+            target, method = (
+                (channel.gateway.workspaces, "persist_scope")
+                if failure == "persistence" else (channel.bus, "publish_inbound")
+            )
+            patch.setattr(target, method, AsyncMock(side_effect=RuntimeError("admission failed")))
+            with pytest.raises(RuntimeError, match="admission failed"):
+                await dispatch(channel, connection, envelope)
+        rejected = channel.gateway.runs.snapshot(key)
+        assert rejected["runs"] == []
+        assert len(rejected["completed"]) == 1
+        receipt = rejected["completed"][0]
+        assert receipt["outcome"] == "failed" and receipt["turn_id"] == "retry-input"
+        assert channel.gateway.runs.execution_session_key(key, receipt["run_id"]) is None
+        assert channel.bus.inbound.empty()
+        await dispatch(channel, connection, envelope)
+        accepted = channel.bus.inbound.get_nowait()
+        assert accepted.execution_admission is not None
+        assert accepted.execution_admission.execution_id != receipt["run_id"]
+        assert channel.gateway.runs.snapshot(key)["runs"][0]["run_id"] == accepted.execution_admission.execution_id
+    finally:
+        clear_websocket_turns(chat_id)
+
+
+async def test_stop_request_is_correlated_cached_and_cannot_stop_new_owner(channel, monkeypatch):
+    stop = AsyncMock(return_value=True)
+    monkeypatch.setattr(channel.gateway.executions, "request_stop", stop)
     connection = Connection()
     channel.gateway.endpoint.webui_connections.add(cast(Any, connection))
     await dispatch(channel, connection, {"type": "watch_runs", "chat_ids": ["background"]})
@@ -214,9 +246,8 @@ async def test_stop_request_is_correlated_cached_and_cannot_stop_new_owner(chann
     response = next(event for event in connection.sent if event["event"] == "webui_response")
     assert response["request_id"] == "stop-A" and response["ok"] is True
     assert response["result"]["run_state"]["runs"][0]["phase"] == "running"
-    stop = channel.bus.inbound.get_nowait()
-    assert stop.metadata[INBOUND_META_STOP_EXECUTION_ID] == "A"
-    assert stop.session_key == "websocket:background"
+    stop.assert_awaited_once_with("websocket:background", "A")
+    assert channel.bus.inbound.empty()
     await execution(channel, "A", "exited", outcome="completed")
     await execution(channel, "B", "queued")
     await dispatch(channel, connection, envelope)
@@ -224,6 +255,7 @@ async def test_stop_request_is_correlated_cached_and_cannot_stop_new_owner(chann
     await dispatch(channel, connection, {**envelope, "request_id": "retry-A"})
     assert channel.bus.inbound.empty()
     assert channel.gateway.runs.snapshot("websocket:background")["runs"][0]["run_id"] == "B"
+    stop.assert_awaited_once()
     await dispatch(channel, connection, {
         **envelope, "request_id": "denied-stop",
     }, client_id="denied")
@@ -243,6 +275,7 @@ async def test_execution_idle_is_independent_of_canonical_transcript_failure(cha
         bus=channel.bus, provider=provider,
         workspace=channel.gateway.workspaces.default_scope().project_path,
         model="test", session_manager=channel.gateway.session_manager,
+        executions=channel.gateway.executions,
     )
     loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(loop.sessions)
     coordinator = WebuiTurnCoordinator(channel.bus, loop.sessions, lambda coro: coro.close())
@@ -252,7 +285,7 @@ async def test_execution_idle_is_independent_of_canonical_transcript_failure(cha
         return OutboundMessage(channel="websocket", chat_id=chat_id, content="answer", metadata=kwargs["delivery"].route.metadata)
 
     monkeypatch.setattr(loop, "_process_message", process)
-    monkeypatch.setattr(channel._transcripts, "prepare_and_append", lambda *args, **kwargs: False)
+    monkeypatch.setattr(channel._transcripts, "prepare_and_append", AsyncMock(return_value=False))
     try:
         await dispatch(channel, connection, {
             "type": "message", "chat_id": chat_id, "webui": True,
@@ -324,9 +357,8 @@ async def test_state_watch_uses_bounded_backpressure_without_blocking_runtime(ch
     async with asyncio.timeout(2):
         for index in range(300):
             context = RuntimeEventContext(channel="websocket", chat_id="background", session_key="websocket:background")
-            admission = ExecutionAdmission(str(index))
-            await channel.bus.publish(TurnExecutionChanged(context, admission, "queued"))
-            await channel.bus.publish(TurnExecutionChanged(context, admission, "exited", outcome="completed"))
+            await channel.bus.publish(TurnExecutionChanged(context, str(index), "queued"))
+            await channel.bus.publish(TurnExecutionChanged(context, str(index), "exited", outcome="completed"))
     assert channel.gateway.runs.snapshot("websocket:background")["runs"] == []
     if channel._outbound_retire_tasks:
         await asyncio.gather(*tuple(channel._outbound_retire_tasks))
@@ -334,7 +366,9 @@ async def test_state_watch_uses_bounded_backpressure_without_blocking_runtime(ch
     assert cast(Any, connection) not in channel._run_watches
 
 
-async def test_cached_stop_response_cannot_cross_temporary_chat_owners(channel):
+async def test_cached_stop_response_cannot_cross_temporary_chat_owners(channel, monkeypatch):
+    stop = AsyncMock(return_value=True)
+    monkeypatch.setattr(channel.gateway.executions, "request_stop", stop)
     owner, stranger = Connection(), Connection()
     for connection in (owner, stranger):
         channel.gateway.endpoint.webui_connections.add(cast(Any, connection))
@@ -347,10 +381,11 @@ async def test_cached_stop_response_cannot_cross_temporary_chat_owners(channel):
     }
     await dispatch(channel, owner, request)
     assert owner.sent[-1]["event"] == "webui_response" and owner.sent[-1]["ok"] is True
-    assert channel.bus.inbound.get_nowait().metadata[INBOUND_META_STOP_EXECUTION_ID] == "private-owner"
+    stop.assert_awaited_once_with(webui_session_key(chat_id), "private-owner")
     await dispatch(channel, stranger, request)
     assert stranger.sent[-1]["error"]["status"] == 403
     assert "result" not in stranger.sent[-1]
+    stop.assert_awaited_once()
     assert channel.bus.inbound.empty()
 
 
@@ -368,6 +403,7 @@ def execution_loop(channel):
         workspace=channel.gateway.workspaces.default_scope().project_path,
         model="test", session_manager=channel.gateway.session_manager,
         unified_session=channel.gateway.unified_session,
+        executions=channel.gateway.executions,
     )
     loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(loop.sessions)
     coordinator = WebuiTurnCoordinator(channel.bus, loop.sessions, lambda coro: coro.close())
@@ -381,6 +417,7 @@ async def drain_execution(loop):
             await asyncio.sleep(0)
 
 
+@pytest.mark.parametrize("channel", [False, True], indirect=True)
 async def test_stop_during_scope_persistence_cancels_the_accepted_root(channel, monkeypatch):
     origin, other_tab = Connection(), Connection()
     channel.gateway.endpoint.webui_connections.update((cast(Any, origin), cast(Any, other_tab)))
@@ -415,9 +452,7 @@ async def test_stop_during_scope_persistence_cancels_the_accepted_root(channel, 
         assert response["ok"] is True
         # A request ACK is not a claim of physical exit while admission is blocked.
         assert response["result"]["run_state"]["runs"][0]["run_id"] == owner
-        stop = await channel.bus.consume_inbound()
-        assert stop.metadata[INBOUND_META_STOP_EXECUTION_ID] == owner
-        await loop._dispatch_inbound(stop)
+        assert channel.bus.inbound.empty()
         release.set()
         await asyncio.wait_for(sending, 2)
         await loop._dispatch_inbound(await channel.bus.consume_inbound())

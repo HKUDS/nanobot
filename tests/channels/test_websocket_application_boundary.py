@@ -11,6 +11,7 @@ import pytest
 from websockets.datastructures import Headers
 from websockets.http11 import Request, Response
 
+from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket import runtime
@@ -28,6 +29,7 @@ async def channel(tmp_path, monkeypatch):
     gateway = build_gateway_services(
         config=config,
         bus=bus,
+        executions=ExecutionLifecycle(bus),
         session_manager=None,
         static_dist_path=None,
         workspace_path=tmp_path,

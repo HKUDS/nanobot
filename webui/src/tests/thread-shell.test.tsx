@@ -3396,6 +3396,7 @@ describe("ThreadShell", () => {
       return {
         ...streamedThreadPayload(chatId, rows, includeNewer ? [turnId, newerTurnId] : [turnId]),
         has_pending_tool_calls: false,
+        ...(includeNewer ? { run_state: idleRunState() } : {}),
       };
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -3429,6 +3430,12 @@ describe("ThreadShell", () => {
     // Another tab starts a newer turn while this read is pending. Its running
     // status invalidates settlement before the pure preflight runs.
     act(() => {
+      // Keep both owners registered until the pending canonical read commits;
+      // exiting the old owner would trigger an independent completion refresh.
+      client._updateRuns(chatId, [
+        { run_id: `run:${turnId}`, turn_id: turnId, phase: "running", started_at: 2_200 },
+        { run_id: `run:${newerTurnId}`, turn_id: newerTurnId, phase: "running", started_at: 2_300 },
+      ]);
       for (const event of streamedThreadPayload(chatId, [
         { role: "user", content: "newer layout question", turnId: newerTurnId },
       ]).events) client._emitChat(chatId, event);
