@@ -68,6 +68,12 @@ Ask nanobot to pause a scheduled task instead of removing it. The agent can use 
 
 Disabling affects future runs. It does not cancel a running task or recall an already queued result. System-managed heartbeat and Dream jobs remain protected; change their configuration instead.
 
+### Inspect Recent Runs
+
+Ask nanobot, "Show the last five runs of my daily report." The agent can use `cron(action="history", job_id="...", limit=5)` to read the retained execution time, status, duration, and error for that task. Results are newest first, using the task's timezone or the runtime default. The default is five records; `limit` accepts 1–20.
+
+This also works for disabled tasks and does not change their schedule or state. Only retained execution records are available: deleted jobs and automatically deleted one-time tasks cannot be queried. Run history does not include the generated reply or confirm message delivery.
+
 ### Scheduled Result Delivery
 
 The gateway saves final scheduled messages before it accepts them into the outgoing queue. This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and saved chat history keep their existing behavior. External channels receive a complete scheduled reply instead of a streamed reply. Ordinary chat streaming is unchanged.

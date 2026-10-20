@@ -76,3 +76,9 @@ Use `tz` with `cron_expr` to schedule in a specific IANA timezone. New tasks use
 Use `cron(action="update", job_id="...", cron_expr="0 10 * * *")` to change an existing task. Supply only the fields to change: `name`, `message`, or exactly one of `every_seconds`, `cron_expr`, and `at`. Omitted fields keep their values; empty names and instructions are rejected. A cron edit retains the existing timezone unless `tz` is supplied with `cron_expr`. Naive `at` values use the runtime default timezone.
 
 Updates preserve the task ID, linked chat, history, enabled state, and automatic-deletion setting. Changing only the name or instruction does not move the next run. System-managed tasks cannot be edited.
+
+## Run History
+
+Use `cron(action="history", job_id="...", limit=5)` to inspect recent executions, newest first. Each entry includes its time, status, duration in milliseconds, and any error. `job_id` is required; `limit` defaults to 5 and accepts 1–20. Listing jobs still shows only the last run.
+
+History can be inspected for disabled jobs too. The scheduler retains at most 20 runs per job; deleted jobs, including automatically deleted one-time tasks, cannot be queried. This reads execution records, not task output or delivery receipts.

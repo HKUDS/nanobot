@@ -22,7 +22,9 @@ from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 _CRON_PARAMETERS = tool_parameters_schema(
-    action=StringSchema("Action to perform", enum=["add", "list", "remove", "update", "enable", "disable"]),
+    action=StringSchema(
+        "Action to perform", enum=["add", "list", "remove", "update", "enable", "disable", "history"]
+    ),
     name=StringSchema("Job label; generated from message for add if omitted."),
     message=StringSchema(
         "REQUIRED when action='add': non-empty instruction to execute when the job triggers. "
@@ -43,9 +45,11 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "Naive values use the tool's default timezone."
     ),
     job_id=StringSchema(
-        "REQUIRED when action='remove', 'update', 'enable', or 'disable'. Job ID (obtain via action='list')."
+        "REQUIRED when action='remove', 'update', 'enable', 'disable', or 'history'. "
+        "Job ID (obtain via action='list')."
     ),
     include_disabled=BooleanSchema(description="Include disabled jobs when action='list'."),
+    limit=IntegerSchema(description="Maximum runs for action='history'; defaults to 5.", minimum=1, maximum=20),
     required=["action"],
     description=(
         "add requires exactly one schedule: every_seconds, cron_expr, or at. "
@@ -113,7 +117,7 @@ class CronTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Schedule reminders and recurring tasks. Actions: add, list, remove, update, enable, disable. "
+            "Schedule reminders and recurring tasks. Actions: add, list, remove, update, enable, disable, history. "
             f"New cron schedules and naive ISO times default to {self._default_timezone}. "
             "Updates retain the existing cron timezone when tz is omitted."
         )
@@ -123,7 +127,7 @@ class CronTool(Tool):
         action = params.get("action")
         if action == "add" and not str(params.get("message") or "").strip():
             errors.append("message is required when action='add'")
-        if action in {"remove", "update", "enable", "disable"} and not str(params.get("job_id") or "").strip():
+        if action in {"remove", "update", "enable", "disable", "history"} and not str(params.get("job_id") or "").strip():
             errors.append(f"job_id is required when action='{action}'")
         return errors
 
@@ -138,6 +142,7 @@ class CronTool(Tool):
         at: str | None = None,
         job_id: str | None = None,
         include_disabled: bool = False,
+        limit: int = 5,
     ) -> str:
         if action == "add":
             request = current_request_context()
@@ -152,6 +157,8 @@ class CronTool(Tool):
             return self._update_job(job_id, name, message, every_seconds, cron_expr, tz, at)
         elif action in {"enable", "disable"}:
             return self._set_job_enabled(job_id, enabled=action == "enable")
+        elif action == "history":
+            return self._job_history(job_id, limit)
         return f"Unknown action: {action}"
 
     def _add_job(
@@ -339,6 +346,23 @@ class CronTool(Tool):
             return ToolResult.error("Error: job has no linked chat; recreate it from a chat session")
         self._cron.enable_job(job_id, enabled=enabled)
         return f"{'Enabled' if enabled else 'Disabled'} job {job_id}"
+
+    def _job_history(self, job_id: str | None, limit: int) -> str:
+        if not job_id:
+            return ToolResult.error("Error: job_id is required for history")
+        job = self._cron.get_job(job_id)
+        if job is None:
+            return ToolResult.error(f"Error: job {job_id} not found")
+        if not job.state.run_history:
+            return f"No recorded runs for job {job_id}."
+        lines = [f"Recent runs for '{job.name}' (id: {job.id}), newest first:"]
+        display_tz = self._display_timezone(job.schedule)
+        for run in reversed(job.state.run_history[-limit:]):
+            timestamp = self._format_timestamp(run.run_at_ms, display_tz)
+            lines.append(f"- {timestamp} — {run.status} ({run.duration_ms}ms)")
+            if run.error:
+                lines.append(f"  Error: {run.error}")
+        return "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
         if not job_id:
