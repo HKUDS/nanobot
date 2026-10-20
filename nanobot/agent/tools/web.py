@@ -1181,29 +1181,77 @@ class WebSearchTool(Tool):
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
-            # DDGS.text performs synchronous requests; run it in a thread to avoid blocking the loop.
             from ddgs import DDGS  # pyright: ignore[reportUnknownVariableType]
-
-            ddgs_type = cast(Any, DDGS)
-            ddgs = ddgs_type(timeout=10, proxy=self.proxy)
-            raw = await asyncio.wait_for(
-                asyncio.to_thread(ddgs.text, query, max_results=n),
-                timeout=self.config.timeout,
-            )
-            if not raw:
-                return f"No results for: {query}"
-            raw_items = cast(list[dict[str, Any]], raw)
-            items: list[dict[str, Any]] = [
-                {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
-                for r in raw_items
-            ]
-            return _format_results(query, items, n)
-        except Exception as e:
-            logger.warning(
-                "DuckDuckGo search failed: {}",
-                e if tool_log_content_allowed() else type(e).__name__,
-            )
+        except ImportError as e:
             return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
+
+        # ddgs wraps every upstream failure (including anonymous rate/anti-bot
+        # rejections, which surface as "No results found") in DDGSException.
+        try:
+            from ddgs.exceptions import DDGSException  # pyright: ignore[reportUnknownVariableType]
+        except ImportError:
+            try:
+                from ddgs import DDGSException  # pyright: ignore[reportUnknownVariableType]
+            except ImportError:  # pragma: no cover - only on unexpected ddgs versions
+
+                class DDGSException(Exception):  # type: ignore[no-redef]
+                    pass
+
+        ddgs_type = cast(Any, DDGS)
+        attempts = 1 + max(0, self.config.retries)
+        backoff = max(0.1, self.config.retry_backoff)
+
+        raw: list[Any] | None = None
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                # DDGS.text performs synchronous requests; run it in a thread to avoid blocking the loop.
+                ddgs = ddgs_type(timeout=10, proxy=self.proxy)
+                raw = await asyncio.wait_for(
+                    asyncio.to_thread(ddgs.text, query, max_results=n),
+                    timeout=self.config.timeout,
+                )
+                # A falsy result is a genuine empty result set, not a failure:
+                # only exceptions are retried.
+                break
+            except Exception as e:
+                last_error = e
+                if attempt < attempts:
+                    delay = backoff * (2 ** (attempt - 1))
+                    logger.warning(
+                        "DuckDuckGo search attempt {}/{} failed: {}; retrying in {:.1f}s",
+                        attempt,
+                        attempts,
+                        e if tool_log_content_allowed() else type(e).__name__,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+
+        if raw is None:
+            # Every attempt raised. Anonymous DuckDuckGo rejections masquerade as
+            # "No results found" errors; report them as rejections instead of a
+            # search failure so the agent does not relay "nothing found" to the user.
+            assert last_error is not None
+            detail = last_error if tool_log_content_allowed() else type(last_error).__name__
+            logger.warning("DuckDuckGo search failed after {} attempt(s): {}", attempts, detail)
+            if isinstance(last_error, DDGSException) or "no results found" in str(last_error).lower():
+                return ToolResult.error(
+                    f"Error: DuckDuckGo search rejected after {attempts} attempt(s) "
+                    f"(upstream rate-limit/anti-bot, not an empty result; last error: {last_error}). "
+                    "Space out web_search calls or configure an API-key provider via tools.web.search."
+                )
+            return ToolResult.error(
+                f"Error: DuckDuckGo search failed after {attempts} attempt(s) ({last_error})"
+            )
+
+        if not raw:
+            return f"No results for: {query}"
+        raw_items = cast(list[dict[str, Any]], raw)
+        items: list[dict[str, Any]] = [
+            {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
+            for r in raw_items
+        ]
+        return _format_results(query, items, n)
 
     async def _search_bocha(self, query: str, n: int, freshness: str = "noLimit") -> str:
         api_key = self.config.api_key or os.environ.get("BOCHA_API_KEY", "")

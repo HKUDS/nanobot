@@ -1308,9 +1308,160 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
     monkeypatch.setattr("ddgs.DDGS", HangingDDGS)
     tool = _tool(provider="duckduckgo")
     tool.config.timeout = 0.2
+    tool.config.retries = 0
     result = await tool.execute(query="test")
     gate.set()
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_retries_transient_rejection(monkeypatch):
+    """Back-to-back anonymous searches hit upstream rate/anti-bot rejections that
+    surface as DDGSException("No results found"); a short retry must absorb them."""
+    from ddgs.exceptions import DDGSException
+
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def mock_sleep(delay: float):
+        sleeps.append(delay)
+
+    class FlakyThenOkDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise DDGSException("No results found")
+            return [{"title": "Recovered", "href": "https://ddg.example", "body": "ok"}]
+
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr("ddgs.DDGS", FlakyThenOkDDGS)
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="test")
+
+    assert calls["n"] == 3
+    assert sleeps == [1.0, 2.0]
+    assert "Recovered" in result
+    assert not is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_rejection_is_reported_as_rejection_not_empty(monkeypatch):
+    """A persistent rejection must not read as "no results" to the calling agent."""
+    from ddgs.exceptions import DDGSException
+
+    calls = {"n": 0}
+
+    async def mock_sleep(delay: float):
+        return None
+
+    class RejectingDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            raise DDGSException("No results found")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr("ddgs.DDGS", RejectingDDGS)
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="test")
+
+    assert calls["n"] == 3
+    assert is_tool_error_result(result)
+    assert "rejected" in result
+    assert "not an empty result" in result
+    assert "Space out web_search calls" in result
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_genuine_empty_results_are_not_retried(monkeypatch):
+    """A successful empty result set is an answer, not a failure: no retry."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def mock_sleep(delay: float):
+        sleeps.append(delay)
+
+    class EmptyDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            return []
+
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr("ddgs.DDGS", EmptyDDGS)
+
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="test")
+
+    assert calls["n"] == 1
+    assert sleeps == []
+    assert result == "No results for: test"
+    assert not is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_retries_zero_keeps_single_attempt(monkeypatch):
+    """retries=0 restores the pre-retry single-shot behaviour."""
+    from ddgs.exceptions import DDGSException
+
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def mock_sleep(delay: float):
+        sleeps.append(delay)
+
+    class RejectingDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            calls["n"] += 1
+            raise DDGSException("No results found")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr("ddgs.DDGS", RejectingDDGS)
+
+    tool = WebSearchTool(config=WebSearchConfig(provider="duckduckgo", retries=0))
+    result = await tool.execute(query="test")
+
+    assert calls["n"] == 1
+    assert sleeps == []
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_backoff_is_configurable(monkeypatch):
+    from ddgs.exceptions import DDGSException
+
+    sleeps: list[float] = []
+
+    async def mock_sleep(delay: float):
+        sleeps.append(delay)
+
+    class RejectingDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            raise DDGSException("No results found")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr("ddgs.DDGS", RejectingDDGS)
+
+    tool = WebSearchTool(config=WebSearchConfig(provider="duckduckgo", retry_backoff=0.5))
+    result = await tool.execute(query="test")
+
+    assert sleeps == [0.5, 1.0]
+    assert is_tool_error_result(result)
 
 
 @pytest.mark.asyncio

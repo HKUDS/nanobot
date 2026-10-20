@@ -12,6 +12,8 @@ class WebSearchConfig(Base):
     base_url: str = ""
     max_results: int = 5
     timeout: int = 30
+    retries: int = 2
+    retry_backoff: float = 1.0
 
 
 class WebFetchConfig(Base):
