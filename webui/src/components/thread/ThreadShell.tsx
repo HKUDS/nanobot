@@ -943,6 +943,9 @@ export function ThreadShell({
   const normalizedHistory = useMemo(() => projectWebuiThreadMessages(historical), [historical]);
   // The response can arrive one commit before its messages reach the viewport.
   const initialHistoryLoading = loading || (normalizedHistory.length > 0 && displayMessages.length === 0);
+  const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
+  const updateNavigationMessages = promptNavigation.updateMessages;
+
   const olderPageProjectionPending = Boolean(
     olderPageStartRef.current?.historyKey === historyKey
     && olderPageStartRef.current.client === client
@@ -971,8 +974,6 @@ export function ThreadShell({
       olderPageStartRef.current = null;
     }
   }, [client, displayMessages, historyKey, loadingOlder, olderError, olderPageProjectionPending, normalizedHistory]);
-  const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
-  const updateNavigationMessages = promptNavigation.updateMessages;
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const requestKey = historyKey;
