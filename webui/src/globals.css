@@ -647,7 +647,7 @@
     height: 24px;
     color: hsl(var(--destructive));
   }
-  .thread-history-status:not([data-state="loading"]) .thread-history-blocks > span {
+  .thread-history-status:not([data-state="loading"]):not([data-state="error"]) .thread-history-blocks > span {
     animation: none;
     transform: none;
   }

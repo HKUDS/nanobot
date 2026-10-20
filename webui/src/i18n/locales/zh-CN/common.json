@@ -2199,8 +2199,7 @@
     "history": {
       "loading": "正在加载更早的消息…",
       "exhausted": "没有更早的消息",
-      "retryLabel": "加载失败，重试",
-      "scrollUp": "向上滚动以继续加载更早消息"
+      "retryLabel": "加载失败，重试"
     },
     "forkedFromHistory": "从历史消息分叉",
     "promptNavigator": {

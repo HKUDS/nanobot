@@ -2199,8 +2199,7 @@
     "history": {
       "loading": "Loading earlier messages…",
       "exhausted": "No earlier messages",
-      "retryLabel": "Loading failed. Retry",
-      "scrollUp": "Scroll up to continue loading earlier messages"
+      "retryLabel": "Loading failed. Retry"
     },
     "forkedFromHistory": "Forked from history",
     "promptNavigator": {

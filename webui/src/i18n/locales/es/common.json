@@ -2000,8 +2000,7 @@
     "history": {
       "loading": "Cargando mensajes anteriores…",
       "exhausted": "No hay mensajes anteriores",
-      "retryLabel": "Error al cargar. Reintentar",
-      "scrollUp": "Desplázate hacia arriba para seguir cargando mensajes anteriores"
+      "retryLabel": "Error al cargar. Reintentar"
     },
     "forkedFromHistory": "Bifurcado desde el historial",
     "promptNavigator": {

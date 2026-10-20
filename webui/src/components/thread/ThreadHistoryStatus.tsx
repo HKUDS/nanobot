@@ -8,16 +8,14 @@ interface ThreadHistoryStatusProps {
   loading: boolean;
   error: string | null;
   exhausted?: boolean;
-  requiresBoundary?: boolean;
   onRetry: () => void;
   className?: string;
 }
 
-export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatusProps>(function ThreadHistoryStatus({ loading, error, exhausted = false, requiresBoundary = false, onRetry, className }, ref) {
+export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatusProps>(function ThreadHistoryStatus({ loading, error, exhausted = false, onRetry, className }, ref) {
   const { t } = useTranslation();
   const state = loading ? "loading" : error ? "error" : exhausted ? "exhausted" : "ready";
-  const scrollUp = state === "ready" && requiresBoundary;
-  const label = t(scrollUp ? "thread.history.scrollUp" : state === "error" ? "thread.history.retryLabel" : state === "ready" ? "thread.loadEarlier" : `thread.history.${state}`);
+  const label = state === "ready" ? undefined : t(state === "error" ? "thread.history.retryLabel" : `thread.history.${state}`);
   // Blocks adapted from loading.dev (MIT); see THIRD_PARTY_NOTICES.md.
   const blocks = <span aria-hidden="true" className="thread-history-blocks">
     {Array.from({ length: 9 }, (_, index) => <span key={index}
@@ -31,16 +29,16 @@ export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatu
       data-state={state}
     >
       <div role="status" aria-live="polite" aria-atomic="true">
-        {state === "exhausted" || scrollUp ? (
+        {state === "exhausted" ? (
           <span className="text-xs">{label}</span>
-        ) : (
+        ) : state === "ready" ? blocks : (
           <HoverHint content={state === "error" ? error : label} side="bottom">
             {loading ? (
               <div tabIndex={0} aria-label={label} className="thread-history-control pointer-events-auto rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 {blocks}<span className="sr-only">{label}</span>
               </div>
             ) : (
-              <button type="button" aria-label={state === "error" ? label : t("thread.loadEarlier")} onClick={onRetry}
+              <button type="button" aria-label={label} onClick={onRetry}
                 className="thread-history-control pointer-events-auto rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 {blocks}<span className="sr-only">{label}</span>
               </button>

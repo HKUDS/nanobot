@@ -40,14 +40,12 @@ it("loads the complete index without bodies, reads bounded windows and leaves li
   expect(api.fetchWebuiThread).not.toHaveBeenCalled();
   await act(async () => result.current.jump("u500"));
   expect(result.current.window?.userMessageOffset).toBe(500);
-  expect(result.current.window?.olderAtBoundaryOnly).toBe(false);
   expect(result.current.target?.id).toBe("u500");
   rerender({ messages: [...latest, { id: "live", role: "assistant", content: "new output", createdAt: 2001 }] });
   expect(result.current.window?.messages).toHaveLength(2);
   for (let i = 0; i < 8; i++) await act(async () => result.current.newer());
   expect(result.current.window?.messages).toHaveLength(6);
   expect(result.current.window?.userMessageOffset).toBe(506);
-  expect(result.current.window?.olderAtBoundaryOnly).toBe(true);
   await act(async () => result.current.older());
   expect(result.current.window?.userMessageOffset).toBe(505);
   expect(result.current.window?.messages).toHaveLength(6);
@@ -55,6 +53,27 @@ it("loads the complete index without bodies, reads bounded windows and leaves li
   act(() => result.current.latest());
   expect(result.current.window).toBeNull();
   expect(latest).toHaveLength(1);
+});
+
+it.each(["older", "newer"] as const)("keeps one pending %s page when boundary inputs arrive before the next render", async (operation) => {
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  let finish!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const load = result.current[operation];
+  act(() => {
+    load();
+    load();
+  });
+  expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2);
+  const options = vi.mocked(api.fetchWebuiThread).mock.lastCall?.[2];
+  if (typeof options !== "object") throw new Error("expected page options");
+  expect(options.signal?.aborted).toBe(false);
+  expect(result.current.loading).toBe(true);
+  await act(async () => finish(page(operation === "older" ? 9 : 11)));
+  expect(result.current.loading).toBe(false);
+  expect(result.current.window?.messages).toHaveLength(4);
 });
 
 it("keeps the current page on failure and offers retry; superseded jumps and session reads cannot win", async () => {

@@ -1999,8 +1999,7 @@
     "history": {
       "loading": "Chargement des messages précédents…",
       "exhausted": "Aucun message plus ancien",
-      "retryLabel": "Échec du chargement. Réessayer",
-      "scrollUp": "Faites défiler vers le haut pour charger les messages précédents"
+      "retryLabel": "Échec du chargement. Réessayer"
     },
     "forkedFromHistory": "Bifurqué depuis l'historique",
     "promptNavigator": {

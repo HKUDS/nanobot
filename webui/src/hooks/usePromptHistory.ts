@@ -22,8 +22,6 @@ export interface PromptHistoryNavigation {
     userMessageOffset: number;
     hasMoreBefore: boolean;
     hasMoreAfter: boolean;
-    /** A full window must advance at its boundary, not evict a retained reader. */
-    olderAtBoundaryOnly: boolean;
     forkBoundaryMessageCount: number | null;
   } | null;
   target: { id: string; sequence: number } | null;
@@ -137,7 +135,8 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   }, []);
 
   const read = useCallback(async (cursor: string, direction: "before" | "after", id?: string) => {
-    if (!key) return;
+    // Boundary inputs can arrive before loading renders; only a new jump supersedes a read.
+    if (!key || (!id && request.current)) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -184,7 +183,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
     return { messages: pages.flatMap((page) => page.messages),
       userMessageOffset: first?.user_message_offset ?? 0,
       hasMoreBefore: first?.has_more_before === true, hasMoreAfter: last?.has_more_after === true,
-      olderAtBoundaryOnly: pages.length >= HISTORY_PAGE_LIMIT, forkBoundaryMessageCount: boundary };
+      forkBoundaryMessageCount: boundary };
   }, [currentScope, pages, first, last]);
 
   return { prompts, window, target: currentScope ? target : null, loading: currentScope && loading,
@@ -195,7 +194,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       const prompt = prompts.find((item) => item.id === id);
       if (enabled && prompt?.cursor) void read(prompt.cursor, "after", id);
     },
-    older: () => { if (!loading && first?.before_cursor) void read(first.before_cursor, "before"); },
-    newer: () => { if (!loading && last?.after_cursor) void read(last.after_cursor, "after"); },
+    older: () => { if (first?.before_cursor) void read(first.before_cursor, "before"); },
+    newer: () => { if (last?.after_cursor) void read(last.after_cursor, "after"); },
   };
 }

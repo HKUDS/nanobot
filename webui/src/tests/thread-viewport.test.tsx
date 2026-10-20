@@ -1517,7 +1517,6 @@ describe("ThreadViewport", () => {
     expect(screen.queryByText(`message ${firstVisible - 1}`)).not.toBeInTheDocument();
     expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
     expect(screen.getByText("message 299")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Load earlier messages" })).toBeInTheDocument();
   });
 
   it("automatically expands earlier local history near the top", () => {
@@ -1677,7 +1676,6 @@ describe("ThreadViewport", () => {
   describe.each(["wheel", "touch"] as const)("%s history boundary", (input) => {
     it.each([
       { loadingOlder: true },
-      { olderError: "offline" },
       { conversationReady: false },
       { hasMoreBefore: false },
     ])("keeps history blocked: %o", (blocked) => {
@@ -1714,7 +1712,7 @@ describe("ThreadViewport", () => {
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
   });
 
-  it("pauses automatic history requests after a failure and exposes retry", () => {
+  it.each(["wheel", "touch", "keyboard"] as const)("pauses automatic requests after failure but accepts another %s boundary gesture", (input) => {
     const onLoadOlder = vi.fn();
 
     const { container } = render(
@@ -1737,7 +1735,8 @@ describe("ThreadViewport", () => {
     });
 
     expect(onLoadOlder).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Loading failed. Retry" }));
+    expect(screen.getByRole("button", { name: "Loading failed. Retry" }).querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    dispatchHistoryInput(scroller, input);
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
   });
 
@@ -2011,7 +2010,7 @@ describe("ThreadViewport", () => {
     const latest = vi.fn();
     const navigation = { prompts: [{ id: "u1", label: "hello", preview: "hello", answerPreview: "", createdAt: 1, index: 0 }],
       window: { messages: [{ id: "old", role: "user" as const, content: "old question", createdAt: 0 }],
-        userMessageOffset: 0, hasMoreBefore: false, hasMoreAfter: true, olderAtBoundaryOnly: false, forkBoundaryMessageCount: null },
+        userMessageOffset: 0, hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
       target: null, operation: null, loading: false, error: null, jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest, retry: vi.fn(), updateMessages: vi.fn() };
     const view = render(<ThreadViewport ref={viewportRef} messages={messages} isStreaming={false} composer={<div />} navigation={navigation} />);
     act(() => viewportRef.current?.jumpToUserPrompt("u1"));
@@ -2027,7 +2026,7 @@ describe("ThreadViewport", () => {
       }))];
     render(<ThreadViewport messages={messages} isStreaming={false} composer={<div />}
       navigation={{ prompts: [], window: { messages: history, userMessageOffset: 0,
-        hasMoreBefore: false, hasMoreAfter: true, olderAtBoundaryOnly: false, forkBoundaryMessageCount: null },
+        hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
       target: { id: "old-user", sequence: 1 }, operation: null, loading: false, error: null,
       jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), updateMessages: vi.fn() }} />);
     await waitFor(() => expect(screen.getByText("Large old turn")).toBeInTheDocument());

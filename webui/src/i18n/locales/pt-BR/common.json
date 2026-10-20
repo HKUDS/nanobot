@@ -2013,8 +2013,7 @@
     "history": {
       "loading": "Carregando mensagens anteriores…",
       "exhausted": "Não há mensagens anteriores",
-      "retryLabel": "Falha ao carregar. Tentar novamente",
-      "scrollUp": "Role para cima para continuar carregando mensagens anteriores"
+      "retryLabel": "Falha ao carregar. Tentar novamente"
     },
     "forkedFromHistory": "Bifurcado a partir do histórico",
     "promptNavigator": {
