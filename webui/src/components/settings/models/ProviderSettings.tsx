@@ -4,12 +4,9 @@ import {
   ChevronDown,
   ChevronLeft,
   Clipboard,
-  Eye,
-  EyeOff,
   ExternalLink,
   Globe2,
   Loader2,
-  Pencil,
   Plus,
   Zap,
 } from "lucide-react";
@@ -23,6 +20,8 @@ import { CapabilityInstallNotice } from "@/components/settings/shared/SettingsCo
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
+import { SavedSecret } from "@/components/settings/SavedSecret";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Button } from "@/components/ui/button";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import {
@@ -828,59 +827,33 @@ export function ProvidersSettings({
                   <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                     {t("settings.byok.apiKey")}
                   </span>
-                  <div className="relative">
-                    {editingKey ? (
-                      <>
-                        <Input
-                          type={keyVisible ? "text" : "password"}
-                          value={form.apiKey}
-                          onChange={(event) =>
-                            onChangeProviderForm(provider.name, { apiKey: event.target.value })
-                          }
-                          placeholder={
-                            provider.api_key_hint
-                              ? t("settings.byok.apiKeyConfiguredPlaceholder")
-                              : t("settings.byok.apiKeyPlaceholder")
-                          }
-                          className="h-9 rounded-full pr-11 text-[13px]"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => onToggleProviderKey(provider.name)}
-                          aria-label={
-                            keyVisible
-                              ? t("settings.byok.hideApiKey")
-                              : t("settings.byok.showApiKey")
-                          }
-                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
-                        >
-                          {keyVisible ? (
-                            <EyeOff className="h-3.5 w-3.5" aria-hidden />
-                          ) : (
-                            <Eye className="h-3.5 w-3.5" aria-hidden />
-                          )}
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-[13px] text-muted-foreground">
-                          {provider.api_key_hint ?? t("settings.byok.configuredKeyHint")}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => onToggleProviderKeyEditing(provider.name)}
-                          aria-label={t("settings.actions.edit")}
-                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
-                        >
-                          <Pencil className="h-3.5 w-3.5" aria-hidden />
-                        </Button>
-                      </>
-                    )}
-                  </div>
+                  {editingKey ? (
+                    <SecretInput
+                      value={form.apiKey}
+                      onChange={(event) =>
+                        onChangeProviderForm(provider.name, { apiKey: event.target.value })
+                      }
+                      placeholder={
+                        provider.api_key_hint
+                          ? t("settings.byok.apiKeyConfiguredPlaceholder")
+                          : t("settings.byok.apiKeyPlaceholder")
+                      }
+                      className="h-9 rounded-full pr-11 text-[13px]"
+                      visible={keyVisible}
+                      onToggle={() => onToggleProviderKey(provider.name)}
+                      toggleLabel={
+                        keyVisible
+                          ? t("settings.byok.hideApiKey")
+                          : t("settings.byok.showApiKey")
+                      }
+                    />
+                  ) : (
+                    <SavedSecret
+                      hint={provider.api_key_hint ?? t("settings.byok.configuredKeyHint")}
+                      editLabel={t("settings.actions.edit")}
+                      onEdit={() => onToggleProviderKeyEditing(provider.name)}
+                    />
+                  )}
                 </label>
                 <label className="block space-y-1.5">
                   <span className="block px-3 text-[12px] font-medium text-muted-foreground">
@@ -1001,42 +974,28 @@ export function ProvidersSettings({
           <span className="block px-3 text-[12px] font-medium text-muted-foreground">
             {t("settings.byok.apiKey")}
           </span>
-          <div className="relative">
-            <Input
-              type={customProviderKeyVisible ? "text" : "password"}
-              value={customProviderDraft.apiKey}
-              onChange={(event) =>
-                setCustomProviderDraft((current) => ({
-                  ...current,
-                  apiKey: event.target.value,
-                }))
-              }
-              placeholder={t("settings.byok.apiKeyPlaceholder")}
-              autoCapitalize="none"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              className="h-9 rounded-full pr-11 text-[13px]"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => setCustomProviderKeyVisible((visible) => !visible)}
-              aria-label={
-                customProviderKeyVisible
-                  ? t("settings.byok.hideApiKey")
-                  : t("settings.byok.showApiKey")
-              }
-              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
-            >
-              {customProviderKeyVisible ? (
-                <EyeOff className="h-3.5 w-3.5" aria-hidden />
-              ) : (
-                <Eye className="h-3.5 w-3.5" aria-hidden />
-              )}
-            </Button>
-          </div>
+          <SecretInput
+            value={customProviderDraft.apiKey}
+            onChange={(event) =>
+              setCustomProviderDraft((current) => ({
+                ...current,
+                apiKey: event.target.value,
+              }))
+            }
+            placeholder={t("settings.byok.apiKeyPlaceholder")}
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            className="h-9 rounded-full pr-11 text-[13px]"
+            visible={customProviderKeyVisible}
+            onToggle={() => setCustomProviderKeyVisible((visible) => !visible)}
+            toggleLabel={
+              customProviderKeyVisible
+                ? t("settings.byok.hideApiKey")
+                : t("settings.byok.showApiKey")
+            }
+          />
         </label>
         <ProviderAdvancedOptions
           fields={CUSTOM_PROVIDER_ADVANCED_FIELDS}

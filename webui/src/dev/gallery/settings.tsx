@@ -18,6 +18,8 @@ import { ProviderParameterFields, type RequestParameterDraft } from "@/component
 import { ProviderSearchList } from "@/components/settings/models/ProviderSearchList";
 import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
 import { OverviewSettings } from "@/components/settings/overview/OverviewSettings";
+import { SavedSecret } from "@/components/settings/SavedSecret";
+import { SecretInput } from "@/components/ui/secret-input";
 import { SettingsSidebar } from "@/components/settings/SettingsSidebar";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
 import { ModelIdPicker, ProviderPicker, ProviderPickerIcon } from "@/components/settings/shared/ModelControls";
@@ -362,7 +364,29 @@ function AutomationCalendarPreview() {
 }
 
 const components = "webui/src/components/settings/";
+function SavedSecrets() {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [visible, setVisible] = useState(false);
+  return <div className="space-y-4">
+    {editing ? <SecretInput aria-label="Replacement example key" value={draft}
+      onChange={(event) => setDraft(event.target.value)} visible={visible}
+      onToggle={() => setVisible((current) => !current)}
+      toggleLabel={visible ? "Hide replacement key" : "Show replacement key"}
+      placeholder="Enter a replacement key" className="h-9 pr-11" />
+      : <SavedSecret hint="••••example" editLabel="Edit example key" onEdit={() => setEditing(true)} />}
+    <Button type="button" variant="outline" onClick={() => {
+      setDraft(""); setVisible(false); setEditing(false);
+    }}>Reset example</Button>
+    <SavedSecret hint="••••disabled" editLabel="Edit disabled key" onEdit={() => {}} disabled />
+  </div>;
+}
+
 export const settingsExamples: ComponentExample[] = [
+  { title: "SavedSecret · 已保存密钥", files: ["SavedSecret"],
+    Preview: SavedSecrets, description: "A masked saved hint with an explicit edit entry.",
+    options: "hint is display text. onEdit changes the caller's edit state; a replacement starts with an empty draft.",
+    code: '<SavedSecret hint="••••example" editLabel="Edit key" onEdit={startEditing} />' },
   { title: "Model pickers · 模型选择", files: ["shared/ModelControls", "models/ReasoningEffortPicker"], Preview: ModelPickerPreview,
     description: "选择服务商、搜索或输入模型 ID，并调整推理强度。",
     options: "ProviderPicker 的值与操作由调用方提供。ModelIdPicker 的 models 参数可提供固定目录；ReasoningEffortPicker 的 savedValues 提供已有选项。",

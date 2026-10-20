@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Input, SearchInput } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleButton } from "@/components/ui/toggle-button";
@@ -50,6 +51,28 @@ function Inputs() {
       <p id="gallery-input-error" className="text-xs text-destructive">Enter a project name.</p></Sample>
     <Sample label="Disabled"><Input aria-label="Disabled name" disabled defaultValue="Unavailable" /></Sample>
   </div>;
+}
+
+function SecretInputs() {
+  const [value, setValue] = useState("gallery-example-key");
+  const [visible, setVisible] = useState(false);
+  const [disabled, setDisabled] = useState(false);
+  const [submissions, setSubmissions] = useState(0);
+  return <form className="space-y-4" onSubmit={(event) => {
+    event.preventDefault(); setSubmissions((count) => count + 1);
+  }}>
+    <SecretInput aria-label="Example secret" value={value} disabled={disabled}
+      onChange={(event) => setValue(event.target.value)} visible={visible}
+      onToggle={() => setVisible((current) => !current)}
+      toggleLabel={visible ? "Hide example secret" : "Show example secret"}
+      className="pr-11" />
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={disabled} onChange={(event) => setDisabled(event.target.checked)} />
+      Disable input and visibility button
+    </label>
+    <Button type="submit" disabled={disabled}>Submit example</Button>
+    <p role="status" className="text-sm text-muted-foreground">Submissions: {submissions}</p>
+  </form>;
 }
 
 function Textareas() {
@@ -239,6 +262,10 @@ export const foundationExamples: ComponentExample[] = [
   { title: "Input · 输入框", files: ["input"], Preview: Inputs,
     description: "Text entry and the shared search-field variant.", options: "Use Input for regular fields and SearchInput for search. Supply a label and describe invalid input.",
     code: '<Input aria-label="Project name" value={name} onChange={event => setName(event.target.value)} />' },
+  { title: "SecretInput · 密钥输入", files: ["secret-input"], Preview: SecretInputs,
+    description: "Controlled secret entry and visibility without a save transaction.",
+    options: "The caller owns value, visible and callbacks. Native input props and refs pass through. showToggle can hide the button for empty channel drafts.",
+    code: '<SecretInput value={draft} onChange={event => setDraft(event.target.value)} visible={visible} onToggle={toggle} toggleLabel="Show secret" className="pr-11" />' },
   { title: "Textarea · 多行输入", files: ["textarea"], Preview: Textareas,
     description: "Multiline text using the shared focus treatment.", options: "Accepts native textarea props: value, onChange, rows and disabled.", code: '<Textarea aria-label="Notes" value={notes} onChange={event => setNotes(event.target.value)} />' },
   { title: "ToggleButton · 开关", files: ["toggle-button"], Preview: Switches,

@@ -1,3 +1,5 @@
+import { useState } from "react";
+import userEvent from "@testing-library/user-event";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -125,6 +127,42 @@ describe("CredentialForm", () => {
     expect(password).toHaveAccessibleDescription("Required to complete setup.");
     fireEvent.click(screen.getByRole("button", { name: "Remove credentials" }));
     expect(onClearSecret).toHaveBeenCalledWith("channels.matrix.password", true);
+  });
+
+  it("keeps saved hints out of drafts and preserves blur, visibility and clear/keep actions", async () => {
+    const key = "channels.matrix.password";
+    const onFieldBlur = vi.fn();
+    const onSubmit = vi.fn();
+    function Editor() {
+      const [value, setValue] = useState("");
+      const [visible, setVisible] = useState(false);
+      const [cleared, setCleared] = useState(false);
+      return <form onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+        <CredentialForm fields={[fields[0]!]} values={{ [key]: value }}
+          configuredFields={new Set([key])} visibleSecrets={{ [key]: visible }}
+          onChange={(_, draft) => setValue(draft)} onFieldBlur={onFieldBlur}
+          onToggleSecret={() => setVisible((current) => !current)}
+          clearedSecrets={new Set(cleared ? [key] : [])} showSecretActions
+          onClearSecret={(_, clear) => setCleared(clear)} />
+      </form>;
+    }
+    const user = userEvent.setup();
+    render(<Editor />);
+    const input = screen.getByLabelText("Password");
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "Saved secret");
+    await user.type(input, "replacement");
+    await user.click(screen.getByRole("button", { name: "Show secret" }));
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveValue("replacement");
+    expect(onFieldBlur).toHaveBeenCalledWith(key);
+    expect(onSubmit).toHaveBeenCalledTimes(0);
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: "Remove credentials" }));
+    expect(screen.getByText("Will be removed")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Keep credentials" }));
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "Saved secret");
   });
 
   it("uses null only for an explicitly cleared secret", () => {

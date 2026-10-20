@@ -1,7 +1,6 @@
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
-import { Eye, EyeOff, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ProviderPicker } from "@/components/settings/shared/ModelControls";
@@ -15,7 +14,8 @@ import {
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
 import { ToggleButton } from "@/components/ui/toggle-button";
-import { Button } from "@/components/ui/button";
+import { SavedSecret } from "@/components/settings/SavedSecret";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Input } from "@/components/ui/input";
 import type {
   NanobotFeatureInfo,
@@ -176,57 +176,31 @@ export function WebSettings({
               title={t("settings.byok.apiKey")}
               description={t("settings.byok.webSearch.apiKeyHelp")}
             >
-              <div className="relative w-full">
-                {showKeyInput ? (
-                  <>
-                    <Input
-                      type={keyVisible ? "text" : "password"}
-                      value={form.apiKey ?? ""}
-                      onChange={(event) =>
-                        onChangeForm((prev) => ({ ...prev, apiKey: event.target.value }))
-                      }
-                      placeholder={
-                        hasExistingSecret
-                          ? t("settings.byok.apiKeyConfiguredPlaceholder")
-                          : t("settings.byok.apiKeyPlaceholder")
-                      }
-                      className="h-9 rounded-full pr-11 text-[13px]"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={onToggleKey}
-                      aria-label={
-                        keyVisible ? t("settings.byok.hideApiKey") : t("settings.byok.showApiKey")
-                      }
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
-                    >
-                      {keyVisible ? (
-                        <EyeOff className="h-3.5 w-3.5" aria-hidden />
-                      ) : (
-                        <Eye className="h-3.5 w-3.5" aria-hidden />
-                      )}
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-[13px] text-muted-foreground">
-                      {settings.web_search.api_key_hint ?? t("settings.byok.configuredKeyHint")}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={onToggleKeyEditing}
-                      aria-label={t("settings.actions.edit")}
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
-                    >
-                      <Pencil className="h-3.5 w-3.5" aria-hidden />
-                    </Button>
-                  </>
-                )}
-              </div>
+              {showKeyInput ? (
+                <SecretInput
+                  value={form.apiKey ?? ""}
+                  onChange={(event) =>
+                    onChangeForm((prev) => ({ ...prev, apiKey: event.target.value }))
+                  }
+                  placeholder={
+                    hasExistingSecret
+                      ? t("settings.byok.apiKeyConfiguredPlaceholder")
+                      : t("settings.byok.apiKeyPlaceholder")
+                  }
+                  className="h-9 rounded-full pr-11 text-[13px]"
+                  visible={keyVisible}
+                  onToggle={onToggleKey}
+                  toggleLabel={
+                    keyVisible ? t("settings.byok.hideApiKey") : t("settings.byok.showApiKey")
+                  }
+                />
+              ) : (
+                <SavedSecret
+                  hint={settings.web_search.api_key_hint ?? t("settings.byok.configuredKeyHint")}
+                  editLabel={t("settings.actions.edit")}
+                  onEdit={onToggleKeyEditing}
+                />
+              )}
             </SettingsRow>
           ) : null}
 
