@@ -2123,7 +2123,7 @@ describe("Settings channels", () => {
     ));
     expect(await screen.findByText("Configured")).toBeInTheDocument();
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(screen.queryByText(/other instances need the new App Secret/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rebinding may interrupt other apps/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByLabelText("App ID")).toHaveValue("1024");
     expect(screen.getByLabelText("Acknowledgement message")).toHaveValue("⏳ Processing...");
@@ -2168,16 +2168,16 @@ describe("Settings channels", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
     const rebind = await screen.findByRole("button", { name: "Rebind bot" });
-    expect(screen.queryByText(/other instances need the new App Secret/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rebinding may interrupt other apps/)).not.toBeInTheDocument();
     expect(requestMutationMock).not.toHaveBeenCalled();
     rebind.focus();
     fireEvent.click(rebind);
     const confirmation = await screen.findByRole("alertdialog", { name: "Rebind bot" });
-    expect(confirmation).toHaveTextContent("After rebinding succeeds, other instances need the new App Secret.");
+    expect(confirmation).toHaveTextContent("Rebinding may interrupt other apps using this QQ bot. If the App Secret is reset, the old secret becomes invalid and those apps need the new secret.");
     expect(requestMutationMock).not.toHaveBeenCalled();
     fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
-    expect(screen.queryByText(/other instances need the new App Secret/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rebinding may interrupt other apps/)).not.toBeInTheDocument();
     expect(rebind).toHaveFocus();
     expect(requestMutationMock).not.toHaveBeenCalled();
 

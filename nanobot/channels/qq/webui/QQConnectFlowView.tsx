@@ -119,7 +119,7 @@ export function QQConnectFlowView({
         <AlertDialogHeader>
           <AlertDialogTitle>{labels.scanAgain}</AlertDialogTitle>
           <AlertDialogDescription>
-            {tx("custom.scanAgainWarning", "After rebinding succeeds, other instances need the new App Secret.")}
+            {tx("custom.scanAgainWarning", "Rebinding may interrupt other apps using this QQ bot. If the App Secret is reset, the old secret becomes invalid and those apps need the new secret.")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

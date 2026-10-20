@@ -54,7 +54,7 @@
     "stopped": "キャンセル済み",
     "connecting": "QR コードを準備中…",
     "qrAlt": "QQ 連携用 QR コード",
-    "scanAgainWarning": "再連携に成功すると、他のインスタンスでも新しい App Secret が必要になります。",
+    "scanAgainWarning": "再連携すると、この QQ ボットを利用する他のアプリの接続が切れる可能性があります。App Secret がリセットされた場合、古いシークレットは無効になり、他のアプリでも新しいシークレットへの更新が必要です。",
     "configured": "設定済み",
     "bind": "QQ ボットと連携",
     "rebind": "ボットと再連携",

@@ -54,7 +54,7 @@
     "stopped": "취소됨",
     "connecting": "QR 코드 준비 중…",
     "qrAlt": "QQ 연동 QR 코드",
-    "scanAgainWarning": "재연동에 성공하면 다른 인스턴스에도 새 App Secret이 필요합니다.",
+    "scanAgainWarning": "재연동하면 이 QQ 봇을 사용하는 다른 앱의 연결이 끊길 수 있습니다. App Secret이 재설정되면 기존 시크릿이 무효화되므로 다른 앱도 새 시크릿으로 업데이트해야 합니다.",
     "configured": "구성됨",
     "bind": "QQ 봇 연동",
     "rebind": "봇 다시 연동",

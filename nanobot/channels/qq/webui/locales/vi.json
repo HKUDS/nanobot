@@ -54,7 +54,7 @@
     "stopped": "Đã hủy",
     "connecting": "Đang chuẩn bị mã QR…",
     "qrAlt": "Mã QR liên kết QQ",
-    "scanAgainWarning": "Sau khi liên kết lại thành công, các phiên bản khác cần App Secret mới.",
+    "scanAgainWarning": "Liên kết lại có thể làm gián đoạn các ứng dụng khác đang dùng bot QQ này. Nếu App Secret được đặt lại, khóa cũ sẽ mất hiệu lực và các ứng dụng đó cần cập nhật khóa mới.",
     "configured": "Đã cấu hình",
     "bind": "Liên kết bot QQ",
     "rebind": "Liên kết lại bot",

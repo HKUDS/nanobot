@@ -54,7 +54,7 @@
     "stopped": "Annulé",
     "connecting": "Préparation du QR code…",
     "qrAlt": "QR code d'association QQ",
-    "scanAgainWarning": "Une fois la nouvelle association réussie, les autres instances auront besoin du nouvel App Secret.",
+    "scanAgainWarning": "Une nouvelle association peut interrompre les autres applications utilisant ce bot QQ. Si son App Secret est réinitialisé, l’ancien secret devient invalide et ces applications doivent utiliser le nouveau.",
     "configured": "Configuré",
     "bind": "Associer le bot QQ",
     "rebind": "Réassocier le bot",

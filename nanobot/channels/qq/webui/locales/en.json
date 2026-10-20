@@ -54,7 +54,7 @@
     "connected": "Binding complete",
     "stopped": "Cancelled",
     "connecting": "Preparing QR code…",
-    "scanAgainWarning": "After rebinding succeeds, other instances need the new App Secret.",
+    "scanAgainWarning": "Rebinding may interrupt other apps using this QQ bot. If the App Secret is reset, the old secret becomes invalid and those apps need the new secret.",
     "configured": "Configured",
     "bind": "Bind QQ bot",
     "rebind": "Rebind bot",

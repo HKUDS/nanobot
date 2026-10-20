@@ -54,7 +54,7 @@
     "stopped": "已取消",
     "connecting": "產生中…",
     "qrAlt": "QQ 綁定 QR code",
-    "scanAgainWarning": "重新綁定成功後，其他實例需更新 App Secret。",
+    "scanAgainWarning": "重新綁定可能中斷其他軟體與此 QQ 機器人的連線。若 App Secret 被重設，舊金鑰將失效，使用舊金鑰的軟體也需更新金鑰。",
     "configured": "已設定",
     "bind": "綁定機器人",
     "rebind": "重新綁定",

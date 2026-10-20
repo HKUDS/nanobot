@@ -247,10 +247,10 @@ it("previews QQ QR states and retries without connecting to the portal", async (
   await userEvent.click(preview.getByRole("combobox", { name: "QQ connection state" }));
   await userEvent.click(screen.getByRole("option", { name: "succeeded" }));
   expect(preview.getByText("Configured")).toBeVisible();
-  expect(preview.queryByText(/other instances need the new App Secret/)).not.toBeInTheDocument();
+  expect(preview.queryByText(/Rebinding may interrupt other apps/)).not.toBeInTheDocument();
   await userEvent.click(preview.getByRole("button", { name: "Rebind bot" }));
   const confirmation = screen.getByRole("alertdialog", { name: "Rebind bot" });
-  expect(confirmation).toHaveTextContent("After rebinding succeeds, other instances need the new App Secret.");
+  expect(confirmation).toHaveTextContent("Rebinding may interrupt other apps using this QQ bot. If the App Secret is reset, the old secret becomes invalid and those apps need the new secret.");
   await userEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
   expect(preview.getByText("Configured")).toBeVisible();
   expect(fetch).toHaveBeenCalledTimes(1);
