@@ -119,7 +119,7 @@ To use work from another topic, mention it with `@` and tell nanobot what you ne
 
 The message timeline shows replies and agent activity. Expand the **Worked for** section to inspect the reasoning and tool activity for a completed turn.
 
-To load earlier messages, scroll past the oldest loaded message, or pull down far enough and release on touch devices. The loading indicator settles into view while the request runs. When loading finishes, its animation stops but the expanded area stays in place; scroll toward newer messages to move it naturally out of view. If loading fails, the blocks turn red; hover for error details, then pull again or select the red blocks to load again. If there are no earlier messages, pulling at the boundary briefly shows **No earlier messages**.
+To load earlier messages, scroll past the oldest loaded message, or pull down far enough and release on touch devices. The muted loading indicator settles into view while the request runs. When loading succeeds, the indicator and its temporary space disappear and normal message spacing returns. If loading fails, the blocks turn red; hover for error details, then pull again or select the red blocks to retry. If there are no earlier messages, pulling at the real history boundary briefly shows **No earlier messages**.
 
 If the connection drops, the host control shows **Reconnecting**. Tasks in persistent topics can continue during the interruption. After reconnecting, task indicators and completed replies update automatically, including topics you have switched away from. Some text generated while disconnected may appear only after the task finishes. [Temporary chats](#temporary-chats) end when their connection is lost.
 

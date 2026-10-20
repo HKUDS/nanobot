@@ -626,7 +626,7 @@
   }
   /* loading.dev Blocks, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
   .thread-history-blocks {
-    color: #d35e14;
+    color: hsl(var(--muted-foreground));
     display: grid;
     width: 20px;
     height: 20px;

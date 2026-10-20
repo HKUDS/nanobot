@@ -1773,6 +1773,7 @@ describe("ThreadViewport", () => {
     fireEvent.touchMove(scroller, touch(240));
     expect(historyPull(scroller)).toBeGreaterThan(0);
     expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    expect(container.querySelector(".thread-history-status")).not.toHaveClass("invisible");
     expect(onLoadOlder).not.toHaveBeenCalled();
     fireEvent.touchEnd(scroller);
     expect(historyPull(scroller)).toBeGreaterThan(0);
@@ -1788,10 +1789,18 @@ describe("ThreadViewport", () => {
     fireEvent.scroll(scroller);
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Loading earlier messages…")).toBeInTheDocument();
-    rerender(<ThreadViewport {...props} />);
+    rerender(<ThreadViewport {...props} loadingOlder />);
+    expect(container.querySelector(".thread-history-slot")).toBeInTheDocument();
+    const prepended = [
+      { ...messages[0], id: "older-u0", content: "Earlier message" },
+      ...messages,
+    ];
+    rerender(<ThreadViewport {...props} messages={prepended} />);
     await waitFor(() => expect(historyPull(scroller)).toBe(0));
-    expect(container.querySelector(".thread-history-slot")).toHaveStyle({ height: "48px" });
+    expect(container.querySelector(".thread-history-slot")).not.toBeInTheDocument();
     expect(container.querySelector(".thread-history-status")).toHaveAttribute("data-state", "ready");
+    expect(container.querySelector(".thread-history-status")).toHaveClass("invisible");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
   });
 

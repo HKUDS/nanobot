@@ -8,13 +8,15 @@ interface ThreadHistoryStatusProps {
   loading: boolean;
   error: string | null;
   exhausted?: boolean;
+  preview?: boolean;
   onRetry: () => void;
   className?: string;
 }
 
-export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatusProps>(function ThreadHistoryStatus({ loading, error, exhausted = false, onRetry, className }, ref) {
+export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatusProps>(function ThreadHistoryStatus({ loading, error, exhausted = false, preview = false, onRetry, className }, ref) {
   const { t } = useTranslation();
   const state = loading ? "loading" : error ? "error" : exhausted ? "exhausted" : "ready";
+  const hidden = state === "ready" && !preview;
   const label = state === "ready" ? undefined : t(state === "error" ? "thread.history.retryLabel" : `thread.history.${state}`);
   // Blocks adapted from loading.dev (MIT); see THIRD_PARTY_NOTICES.md.
   const blocks = <span aria-hidden="true" className="thread-history-blocks">
@@ -25,7 +27,8 @@ export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatu
   return (
     <div
       ref={ref}
-      className={cn("thread-history-status thread-message-row pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center", className)}
+      className={cn("thread-history-status thread-message-row pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center", hidden && "invisible", className)}
+      aria-hidden={hidden || undefined}
       data-state={state}
     >
       <div role="status" aria-live="polite" aria-atomic="true">

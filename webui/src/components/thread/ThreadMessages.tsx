@@ -180,8 +180,9 @@ export function ThreadMessages({
   let nextUserIndex = hiddenUserMessageCount;
   const preludeIndex = Math.max(0, beforeUnit ? unitKeys.indexOf(beforeUnit.key) : 0);
   const inset = topInset > 0 ? <div aria-hidden style={{ height: topInset }} /> : null;
-  const renderPrelude = (prefix: ReactNode, marginTop?: string) => prefix || inset || beforeMessages
-    ? <div key="thread-prelude" className={cn("flow-root", marginTop)}>{prefix}{inset}{beforeMessages}</div> : null;
+  const preludeInset = preludeIndex === 0 ? inset : null;
+  const renderPrelude = (prefix: ReactNode, marginTop?: string) => prefix || preludeInset || beforeMessages
+    ? <div key="thread-prelude" className={cn("flow-root", marginTop)}>{prefix}{preludeInset}{beforeMessages}</div> : null;
 
   return (
     <div ref={messageListRef} className="flex w-full flex-col">

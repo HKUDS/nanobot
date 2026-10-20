@@ -16,12 +16,27 @@ describe("ThreadHistoryStatus", () => {
     expect(container.firstElementChild).toHaveAttribute("data-state", "exhausted");
   });
 
-  it("retains decorative Blocks after completion without offering another loading action", () => {
+  it("hides completed feedback without offering another loading action", () => {
     const onRetry = vi.fn();
     const { container, rerender } = render(<ThreadHistoryStatus loading error={null} onRetry={onRetry} />);
     expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
     rerender(<ThreadHistoryStatus loading={false} error={null} onRetry={onRetry} />);
     expect(container.firstElementChild).toHaveAttribute("data-state", "ready");
+    expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
+    expect(container.firstElementChild).toHaveClass("invisible");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(onRetry).not.toHaveBeenCalled();
+    rerender(<ThreadHistoryStatus loading error={null} onRetry={onRetry} />);
+    expect(container.firstElementChild).not.toHaveClass("invisible");
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("shows decorative Blocks while previewing a pull without offering a loading action", () => {
+    const onRetry = vi.fn();
+    const { container } = render(<ThreadHistoryStatus loading={false} error={null} preview onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "ready");
+    expect(container.firstElementChild).not.toHaveClass("invisible");
     const blocks = screen.getByRole("status").querySelector(".thread-history-blocks")!;
     expect(blocks.children).toHaveLength(9);
     expect(blocks).toHaveAttribute("aria-hidden", "true");
