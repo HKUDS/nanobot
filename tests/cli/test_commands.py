@@ -103,6 +103,9 @@ class _GatewayAgentContractStub:
     async def discard_session(self, _session_key: str) -> None:
         pass
 
+    async def replace_user_input(self, *_args: object) -> None:
+        pass
+
     @staticmethod
     def mcp_runtime_status() -> dict[str, str]:
         return {}
