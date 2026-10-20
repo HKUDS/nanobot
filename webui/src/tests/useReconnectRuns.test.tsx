@@ -345,7 +345,7 @@ describe("durable run recovery", () => {
 
   it.each(["failed read", "missing activity state"])("leaves %s unresolved", async (failure) => {
     const body = completedThread();
-    delete body.has_pending_tool_calls;
+    Reflect.deleteProperty(body, "has_pending_tool_calls");
     body.events = body.events.slice(0, 2);
     const fetchMock = failure === "failed read"
       ? vi.fn().mockRejectedValue(new Error("offline"))
@@ -390,7 +390,7 @@ describe("durable run recovery", () => {
 
   it("accepts an explicit completed turn when an older host omits activity metadata", async () => {
     const body = completedThread();
-    delete body.has_pending_tool_calls;
+    Reflect.deleteProperty(body, "has_pending_tool_calls");
     body.completed_turn_ids = ["turn-old"];
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(body)));
     const { client, running, reopen, close } = setup();

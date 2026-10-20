@@ -288,7 +288,7 @@ describe("SettingsView Apps catalog", () => {
       "Fix connection",
     );
 
-    await act(() => i18n.changeLanguage("zh-CN"));
+    await act(async () => { await i18n.changeLanguage("zh-CN"); });
     expect(within(row as HTMLElement).getByText("连接失败。")).toBeInTheDocument();
     const manage = within(row as HTMLElement).getByRole("button", { name: "管理 Xmind" });
     expect(manage).toHaveTextContent("修复连接");
@@ -306,7 +306,7 @@ describe("SettingsView Apps catalog", () => {
       { name: "xmind", reset: true, use_proxy: "false" },
       30_000,
     ));
-    await act(() => i18n.changeLanguage("en"));
+    await act(async () => { await i18n.changeLanguage("en"); });
   });
 
   it("keeps an OAuth runtime failure visible after credentials are cleared", async () => {
