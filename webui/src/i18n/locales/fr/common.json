@@ -2138,7 +2138,6 @@
     "fallbackResponse": "Cette réponse utilise un modèle de secours : {{preset}}.",
     "editMessage": "Modifier le message",
     "confirmEditResend": "Renvoyer",
-    "editReplacesSuffix": "Ce message et les suivants seront remplacés. Les actions effectuées restent en vigueur.",
     "editFailed": "Renvoi non confirmé. Vérifiez la connexion et réessayez.",
     "editFinishCurrent": "Terminez ou annulez d’abord la modification en cours.",
     "editErrors": {

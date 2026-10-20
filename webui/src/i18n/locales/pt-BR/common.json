@@ -2332,7 +2332,6 @@
     "fallbackResponse": "Esta resposta usa um modelo alternativo: {{preset}}.",
     "editMessage": "Editar mensagem",
     "confirmEditResend": "Reenviar",
-    "editReplacesSuffix": "Esta mensagem e as seguintes serão substituídas. As ações realizadas continuam em vigor.",
     "editFailed": "O reenvio não foi confirmado. Verifique a conexão e tente novamente.",
     "editFinishCurrent": "Conclua ou cancele a edição atual primeiro.",
     "editErrors": {

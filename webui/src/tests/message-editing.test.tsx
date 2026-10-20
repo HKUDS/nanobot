@@ -91,6 +91,7 @@ describe("message editing", () => {
     await screen.findByRole("alert");
     expect(input).toHaveValue("keep this edit");
     expect(screen.getByRole("alert")).toHaveTextContent("conversation changed");
+    expect(input).toHaveAccessibleDescription(screen.getByRole("alert").textContent!);
     const submitted = requests.mock.calls[1][1];
     requests.mockResolvedValueOnce({ accepted: true });
     fireEvent.click(screen.getByRole("button", { name: "Resend" }));

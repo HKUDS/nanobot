@@ -2138,7 +2138,6 @@
     "fallbackResponse": "Balasan ini beralih ke model cadangan dan dijawab oleh {{preset}}.",
     "editMessage": "Edit pesan",
     "confirmEditResend": "Kirim ulang",
-    "editReplacesSuffix": "Pesan ini dan pesan berikutnya akan diganti. Tindakan yang sudah dilakukan tetap berlaku.",
     "editFailed": "Pengiriman ulang belum dikonfirmasi. Periksa koneksi lalu coba lagi.",
     "editFinishCurrent": "Selesaikan atau batalkan edit saat ini terlebih dahulu.",
     "editErrors": {

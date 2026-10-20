@@ -2524,7 +2524,6 @@
     "fallbackResponse": "本条回复已切换至备用模型，由 {{preset}} 回答。",
     "editMessage": "编辑消息",
     "confirmEditResend": "重新发送",
-    "editReplacesSuffix": "替换此条及后续对话，已执行操作仍生效。",
     "editFailed": "未收到重发确认，请检查连接后重试。",
     "editFinishCurrent": "请先完成或取消当前编辑。",
     "editErrors": {

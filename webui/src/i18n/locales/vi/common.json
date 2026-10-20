@@ -2138,7 +2138,6 @@
     "fallbackResponse": "Phản hồi này đã chuyển sang mô hình dự phòng, do {{preset}} trả lời.",
     "editMessage": "Chỉnh sửa tin nhắn",
     "confirmEditResend": "Gửi lại",
-    "editReplacesSuffix": "Tin nhắn này và các tin nhắn sau sẽ được thay thế. Các thao tác đã thực hiện vẫn có hiệu lực.",
     "editFailed": "Chưa xác nhận được việc gửi lại. Kiểm tra kết nối rồi thử lại.",
     "editFinishCurrent": "Hãy hoàn tất hoặc hủy bản chỉnh sửa hiện tại trước.",
     "editErrors": {

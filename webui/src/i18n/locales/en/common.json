@@ -2524,7 +2524,6 @@
     "fallbackResponse": "This reply switched to a fallback model, answered by {{preset}}.",
     "editMessage": "Edit message",
     "confirmEditResend": "Resend",
-    "editReplacesSuffix": "Replaces this and later messages. Completed actions stay in effect.",
     "editFailed": "Resend not confirmed. Check the connection and retry.",
     "editFinishCurrent": "Finish or cancel the current edit first.",
     "editErrors": {

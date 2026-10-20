@@ -2138,7 +2138,6 @@
     "fallbackResponse": "この返信では代替モデルに切り替わり、{{preset}} が回答しています。",
     "editMessage": "メッセージを編集",
     "confirmEditResend": "再送信",
-    "editReplacesSuffix": "このメッセージ以降を置き換えます。実行済みの操作はそのまま有効です。",
     "editFailed": "再送信を確認できませんでした。接続を確認して再試行してください。",
     "editFinishCurrent": "先に現在の編集を完了またはキャンセルしてください。",
     "editErrors": {

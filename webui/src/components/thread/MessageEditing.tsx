@@ -125,7 +125,6 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
   const editing = useMessageEditing();
   const { t } = useTranslation();
   const input = useRef<HTMLTextAreaElement>(null);
-  const descriptionId = useId();
   const errorId = useId();
   const id = editing?.draft?.message.id;
   useLayoutEffect(() => { input.current?.focus({ preventScroll: true }); }, [id]);
@@ -138,18 +137,17 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
     <div className="relative min-w-0 [text-autospace:no-autospace]">
       <div aria-hidden className="invisible whitespace-pre-wrap [overflow-wrap:anywhere]">{draft.text + "\u200b"}</div>
       <textarea ref={input} aria-label={t("message.editMessage")} value={draft.text}
-        aria-describedby={`${descriptionId}${error ? ` ${errorId}` : ""}`} aria-invalid={!!error}
+        aria-describedby={error ? errorId : undefined} aria-invalid={!!error}
         disabled={draft.submitting}
         onChange={(event) => change(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); cancel(); } }}
         className="absolute inset-0 block h-full w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 [font:inherit] text-inherit outline-none" />
     </div>
-    <p id={descriptionId} className="mt-2 text-xs leading-5 text-muted-foreground">{t("message.editReplacesSuffix")}</p>
     {error ? <p id={errorId} role="alert" className="mt-2 text-xs leading-5 text-destructive">{error}</p> : null}
     <div className="mt-2 flex flex-wrap justify-end gap-1.5">
       <Button type="button" size="sm" variant="ghost" disabled={draft.submitting} onClick={cancel}
         className="max-md:min-h-11">{t("common.cancel")}</Button>
-      <Button type="submit" size="sm" aria-describedby={descriptionId}
+      <Button type="submit" size="sm"
         disabled={sourceMissing || busy || draft.preparing || draft.submitting || !draft.anchor || !draft.text.trim()}
         className="max-md:min-h-11">{t("message.confirmEditResend")}</Button>
     </div>
