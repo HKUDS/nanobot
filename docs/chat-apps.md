@@ -919,6 +919,8 @@ nanobot gateway
 > Here we use [wecom-aibot-sdk-python](https://github.com/chengyongru/wecom_aibot_sdk) (community Python version of the official [@wecom/aibot-node-sdk](https://www.npmjs.com/package/@wecom/aibot-node-sdk)).
 >
 > Uses **WebSocket** long connection — no public IP required.
+>
+> Handles text, image, voice, file, video, and mixed (image + text) messages. When the sender replies to another message, the quoted text is passed to the model as reply context.
 
 **1. Enable WeCom support**
 
