@@ -700,7 +700,7 @@ describe("ChatList", () => {
     );
 
     const tabButton = screen.getByRole("button", { name: "Group: Root topic" });
-    const tabGroup = tabButton.closest("[data-sidebar-tab-group]")!;
+    const tabGroup = tabButton.closest<HTMLElement>("[data-sidebar-tab-group]")!;
     const tabHeader = tabButton.closest("[data-workbench-tab]")!;
     const tabSurface = tabButton.closest("[data-workbench-tab-surface]")!;
     expect(tabGroup).toHaveAttribute("data-sidebar-tab-group", "true");

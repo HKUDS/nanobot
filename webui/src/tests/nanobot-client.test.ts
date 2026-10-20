@@ -525,9 +525,9 @@ describe("NanobotClient", () => {
   });
 
   it("uses the host socket bridge for native host URLs", async () => {
-    let socketEventHandler:
-      | ((event: { id: string; type: "open" | "close" | "error"; message?: string }) => void)
-      | null = null;
+    const socketEvents: {
+      handler?: (event: { id: string; type: "open" | "close" | "error"; message?: string }) => void;
+    } = {};
     const openSocket = vi.fn(async () => "host-socket-1");
     Object.defineProperty(window, "nanobotHost", {
       configurable: true,
@@ -536,7 +536,7 @@ describe("NanobotClient", () => {
         sendSocket: vi.fn(async () => undefined),
         closeSocket: vi.fn(async () => undefined),
         onSocketEvent: vi.fn((handler) => {
-          socketEventHandler = handler;
+          socketEvents.handler = handler;
           return vi.fn();
         }),
       },
@@ -550,7 +550,7 @@ describe("NanobotClient", () => {
 
     client.connect();
     await Promise.resolve();
-    socketEventHandler?.({ id: "host-socket-1", type: "open" });
+    socketEvents.handler?.({ id: "host-socket-1", type: "open" });
 
     expect(openSocket).toHaveBeenCalledWith("nanobot-host://engine/");
     expect(status).toHaveBeenLastCalledWith("open");
@@ -1488,6 +1488,8 @@ describe("NanobotClient", () => {
             explicit: true,
             title: "Research",
             paneKeys: ["websocket:a", "websocket:b"],
+            layoutPaneKeys: ["websocket:a", "websocket:b"],
+            splitRatios: [0.5, 0.5],
             layout: "columns",
           },
         },
@@ -2396,14 +2398,14 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     client.sendMessage("chat-x", "look", [
-      { data_url: "data:image/png;base64,AAAA", name: "shot.png" },
+      { reference: "uploaded-shot", name: "shot.png" },
     ]);
     const lastFrame = JSON.parse(lastSocket().sent.at(-1) as string);
     expect(lastFrame).toEqual({
       type: "message",
       chat_id: "chat-x",
       content: "look",
-      media: [{ data_url: "data:image/png;base64,AAAA", name: "shot.png" }],
+      media: [{ reference: "uploaded-shot", name: "shot.png" }],
       webui: true,
     });
   });

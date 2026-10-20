@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ClientProvider } from "@/providers/ClientProvider";
+import type { McpPresetInfo } from "@/lib/types";
 import { __clearLogoFallbackCacheForTests } from "@/hooks/useLogoFallback";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
@@ -29,6 +30,8 @@ const agentPlugin = {
   display_name: "Computer Use",
   category: "Plugin",
   description: "Control the desktop with a live preview.",
+  docs_url: "",
+  note: "",
   requires: "screen-recording, accessibility",
   transport: "stdio",
   install_supported: false,
@@ -38,8 +41,9 @@ const agentPlugin = {
   available: false,
   status: "disabled",
   required_fields: [],
+  connection_summary: "",
   source: "agent-plugin",
-};
+} satisfies McpPresetInfo;
 
 function selectAutomationFilter(name: string) {
   fireEvent.pointerDown(screen.getByRole("button", { name: /^Filter/ }), { button: 0, ctrlKey: false });
@@ -72,7 +76,7 @@ describe("Settings system domains", () => {
       ...settingsPayload(), requires_restart: true,
     }, onRestart: restart });
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restart", exact: true }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restart" }));
     expect(restart).toHaveBeenCalledTimes(1);
   });
 
@@ -93,11 +97,11 @@ describe("Settings system domains", () => {
       },
     });
     const sidebar = screen.getByRole("complementary");
-    const restart = within(sidebar).getByRole("button", { name: "Restart", exact: true });
+    const restart = within(sidebar).getByRole("button", { name: "Restart" });
     for (const section of ["Capabilities", "Models", "Advanced", "System"]) {
-      fireEvent.click(within(sidebar).getByRole("button", { name: section, exact: true }));
+      fireEvent.click(within(sidebar).getByRole("button", { name: section }));
       await waitFor(() => {
-        expect(screen.getAllByRole("button", { name: "Restart", exact: true })).toEqual([restart]);
+        expect(screen.getAllByRole("button", { name: "Restart" })).toEqual([restart]);
         expect(screen.getAllByText("Saved. Restart to apply changes.")).toHaveLength(1);
         expect(within(sidebar).getByText("Saved. Restart to apply changes.")).toBeVisible();
       });
@@ -233,7 +237,7 @@ describe("Settings system domains", () => {
       expect(title.nextElementSibling).not.toHaveClass(className);
     }
 
-    fireEvent.click(screen.getByRole("button", { name: "MCP", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
     const mcpTitle = screen.getByRole("heading", { name: "MCP tools" });
     expect(mcpTitle.parentElement).toHaveClass("settings-section-heading");
     expect(mcpTitle.nextElementSibling).toHaveTextContent("0");
@@ -265,7 +269,7 @@ describe("Settings system domains", () => {
       }));
       renderSettingsView({ initialSection: "apps", initialSettings: settingsPayload() });
       await screen.findByText("AnyGen");
-      if (kind === "mcp") fireEvent.click(screen.getByRole("button", { name: "MCP", exact: true }));
+      if (kind === "mcp") fireEvent.click(screen.getByRole("button", { name: "MCP" }));
       const row = (await screen.findByText(name)).closest("article")!;
       const image = row.querySelector("img")!;
       expect(image).toHaveAttribute("src", logoUrl);
@@ -319,7 +323,7 @@ describe("Settings system domains", () => {
       ]} />
     </ClientProvider>);
     for (const name of ["Custom", "Built-in", "Other"]) {
-      const title = screen.getByRole("heading", { name, exact: true });
+      const title = screen.getByRole("heading", { name });
       expect(title).toHaveClass("text-[13px]", "font-medium", "leading-5");
       for (const className of ["uppercase", "tracking-[0.08em]"]) {
         expect(title).not.toHaveClass(className);
@@ -433,7 +437,7 @@ describe("Settings system domains", () => {
     }));
     renderSettingsView({ initialSection: "automations", initialSettings: settingsPayload(), showSidebar: false });
 
-    const trigger = await screen.findByRole("button", { name: "Filter", exact: true });
+    const trigger = await screen.findByRole("button", { name: "Filter" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     const menu = screen.getByRole("menu", { name: "Filter" });
@@ -736,7 +740,7 @@ describe("Settings system domains", () => {
     expect(screen.getByLabelText("User ID")).toBeInTheDocument();
     expect(screen.getByLabelText("Device ID")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
 
     await waitFor(() =>

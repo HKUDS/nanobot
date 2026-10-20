@@ -629,7 +629,6 @@ describe("ThreadComposer", () => {
         modelPresets={[
           {
             name: "gpt-5-6-sol",
-            label: "gpt-5.6-sol",
             model: "openai-codex/gpt-5.6-sol",
             provider: "openai_codex",
           },
@@ -993,7 +992,9 @@ describe("ThreadComposer", () => {
       "running",
       [new Float32Array([0, 0.5, -0.5])],
     );
-    const onTranscribeAudio = vi.fn(async () => "mimo voice");
+    const onTranscribeAudio = vi.fn<NonNullable<React.ComponentProps<typeof ThreadComposer>["onTranscribeAudio"]>>(
+      async () => "mimo voice",
+    );
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -1029,9 +1030,9 @@ describe("ThreadComposer", () => {
 
   it("does not start duplicate voice recordings while microphone access is pending", async () => {
     const { getUserMedia, stopTrack } = mockVoiceRecorder();
-    let resolveStream: ((stream: MediaStream) => void) | undefined;
+    let resolveStream: ((stream: Awaited<ReturnType<typeof getUserMedia>>) => void) | undefined;
     getUserMedia.mockImplementation(() => new Promise((resolve) => {
-      resolveStream = resolve as (stream: MediaStream) => void;
+      resolveStream = resolve;
     }));
     const onTranscribeAudio = vi.fn(async () => "one recording");
     render(
@@ -1049,7 +1050,7 @@ describe("ThreadComposer", () => {
     expect(getUserMedia).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveStream?.({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream);
+      resolveStream?.({ getTracks: () => [{ stop: stopTrack }] });
     });
     expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
     await waitForVoiceCapture();
@@ -3011,7 +3012,7 @@ describe("ThreadComposer", () => {
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
       () => rect({ top: landscape ? 44 : 274, width: landscape ? 744 : 388, height: 112 }),
     );
-    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLDivElement) {
       return this.id === "root"
         ? rect({ top: 0, width: landscape ? 776 : 420, height: landscape ? 128 : 396 })
         : rect({ top: landscape ? 44 : 0, width: landscape ? 776 : 420, height: landscape ? 84 : 396 });

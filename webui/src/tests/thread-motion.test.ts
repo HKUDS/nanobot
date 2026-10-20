@@ -19,17 +19,17 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     promptTop: 404,
     ...initial,
   };
-  const scheduler: ThreadMotionScheduler = {
-    request: vi.fn((callback) => {
+  const scheduler = {
+    request: vi.fn<ThreadMotionScheduler["request"]>((callback) => {
       const id = nextFrameId;
       nextFrameId += 1;
       frames.set(id, callback);
       return id;
     }),
-    cancel: vi.fn((id) => {
+    cancel: vi.fn<ThreadMotionScheduler["cancel"]>((id) => {
       frames.delete(id);
     }),
-  };
+  } satisfies ThreadMotionScheduler;
   const camera = {
     cancel: vi.fn(() => {
       cameraFollowing = false;

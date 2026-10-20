@@ -87,7 +87,7 @@ jobs:
                   tui_required=true
                   docker_required=true
                   ;;
-                webui/*|nanobot/channels/*/webui/*)
+                webui/*|nanobot/channels/*/webui/*|nanobot/channels/*/tests/webui/*)
                   webui_required=true
                   # The Docker image builds and bundles both WebUI trees.
                   docker_required=true
@@ -311,6 +311,10 @@ jobs:
       - name: Lint WebUI
         working-directory: webui
         run: bun run lint
+
+      - name: Type check WebUI and unit tests
+        working-directory: webui
+        run: bun run typecheck
 
       - name: Test WebUI
         working-directory: webui

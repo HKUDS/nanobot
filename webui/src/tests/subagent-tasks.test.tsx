@@ -30,8 +30,8 @@ function emitTask(snapshot: SubagentTaskSnapshot, chatId = "a") {
   act(() => { chatHandlers.get(chatId)?.forEach((handler) => handler({ event: "subagent_task", chat_id: chatId, task: snapshot })); });
 }
 const messages: UIMessage[] = [
-  { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a" },
-  { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a" },
+  { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a", createdAt: 100_000 },
+  { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a", createdAt: 101_000 },
 ];
 
 function task(overrides: Partial<SubagentTaskSnapshot> = {}): SubagentTaskSnapshot {
@@ -337,7 +337,7 @@ describe("session-owned task UI", () => {
   });
 
   it("anchors replay once when multiple prompts share a turn and preserves row order", async () => {
-    const replay = [...messages, { id: "followup", role: "user", content: "Focus on errors", turnId: "turn-a" } satisfies UIMessage];
+    const replay = [...messages, { id: "followup", role: "user", content: "Focus on errors", turnId: "turn-a", createdAt: 102_000 } satisfies UIMessage];
     const keys = unitKeysForDisplay(buildDisplayUnits(replay));
     expect(new Set(keys).size).toBe(keys.length);
     vi.mocked(fetch).mockImplementation(async () => response([
@@ -362,7 +362,7 @@ describe("session-owned task UI", () => {
 
   it("prefers the exact initiating follow-up over a turn fallback", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([task({ origin_message_id: "followup" })]));
-    render(layout({ threadMessages: [...messages, { id: "followup", role: "user", content: "Check more", turnId: "turn-a" }] }));
+    render(layout({ threadMessages: [...messages, { id: "followup", role: "user", content: "Check more", turnId: "turn-a", createdAt: 102_000 }] }));
     await screen.findByRole("button", { name: /Config check Running/ });
     const group = screen.getByRole("region", { name: "Subtasks" });
     expect(screen.getByText("Check more").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -408,7 +408,7 @@ describe("session-owned task UI", () => {
     await user.click(within(otherWork).getByRole("button", { name: /Earlier check Running/ }));
     const detail = screen.getByRole("dialog", { name: "Earlier check" });
     view.rerender(layout({ threadMessages: [
-      { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn" },
+      { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
       ...messages,
     ] }));
     expect(detail).toBeVisible();

@@ -167,10 +167,10 @@ describe("SessionInfoPopover", () => {
 
     await user.click(screen.getByRole("button", { name: "Session details" }));
     await user.click(await screen.findByRole("button", { name: /Morning check/ }));
-    await user.click(screen.getByRole("button", { name: "Edit", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("dialog", { name: "Edit task" });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    await user.click(within(editor).getByRole("button", { name: "Cancel", exact: true }));
+    await user.click(within(editor).getByRole("button", { name: "Cancel" }));
 
     expect(await screen.findByRole("dialog", { name: "Morning check" })).toBeVisible();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);

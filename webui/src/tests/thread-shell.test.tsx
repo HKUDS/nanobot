@@ -304,11 +304,7 @@ function httpJson(body: unknown) {
     && "messages" in body
       ? canonicalThreadPayload(body as never)
       : body;
-  return {
-    ok: true,
-    status: 200,
-    json: async () => normalized,
-  };
+  return Response.json(normalized);
 }
 
 function traceDetailThread(
@@ -361,9 +357,7 @@ function restoreDocumentVisibility(
   if (descriptor) {
     Object.defineProperty(document, "visibilityState", descriptor);
   } else {
-    delete (document as Document & {
-      visibilityState?: DocumentVisibilityState;
-    }).visibilityState;
+    Reflect.deleteProperty(document, "visibilityState");
   }
 }
 
@@ -1738,7 +1732,7 @@ describe("ThreadShell", () => {
       completed_turn_ids: [],
     });
     vi.mocked(fetch).mockImplementation(async (input) => (
-      String(input).includes("/webui-thread") ? initialHistory
+      String(input).includes("/webui-thread") ? initialHistory.clone()
         : { ok: false, status: 404, json: async () => ({}) }
     ) as Response);
     render(wrap(client, <ThreadShell session={session(chatId)} title="Queued chat" onToggleSidebar={() => {}} />));
@@ -1778,7 +1772,7 @@ describe("ThreadShell", () => {
       act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: nextTurnId }));
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
     } finally {
-      await act(async () => { finishRefresh(initialHistory as Response); });
+      await act(async () => { finishRefresh(initialHistory.clone()); });
     }
   });
 
@@ -4597,7 +4591,6 @@ describe("ThreadShell", () => {
             (event) => event.event === "message" && event.text === "answer",
           );
           if (answer?.event === "message") answer.media_urls = [{
-            kind: "image",
             url: "/api/media/stable/image",
             name: "answer.png",
           }];
@@ -4651,7 +4644,6 @@ describe("ThreadShell", () => {
             (event) => event.event === "message" && event.text === "answer",
           );
           if (answer?.event === "message") answer.media_urls = [{
-            kind: "image",
             url: "/api/media/stable/token-image",
             name: "token-answer.png",
           }];

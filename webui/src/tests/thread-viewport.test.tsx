@@ -57,7 +57,7 @@ function mockScrollGeometry(scroller: HTMLElement, height: number, viewport: num
   });
 }
 
-interface ResizeObserverInstance {
+interface ResizeObserverInstance extends ResizeObserver {
   elements: Element[];
   callback: ResizeObserverCallback;
   disconnect: ReturnType<typeof vi.fn>;
@@ -119,7 +119,7 @@ function stubVisualViewport({
 function stubResizeObserver() {
   const original = globalThis.ResizeObserver;
   const observers: ResizeObserverInstance[] = [];
-  class MockResizeObserver {
+  class MockResizeObserver implements ResizeObserverInstance {
     elements: Element[] = [];
     callback: ResizeObserverCallback;
     disconnect = vi.fn();
@@ -131,6 +131,10 @@ function stubResizeObserver() {
 
     observe(element: Element) {
       this.elements.push(element);
+    }
+
+    unobserve(element: Element) {
+      this.elements = this.elements.filter((candidate) => candidate !== element);
     }
   }
   vi.stubGlobal("ResizeObserver", MockResizeObserver);
@@ -717,7 +721,7 @@ describe("ThreadViewport", () => {
       expect(contentObserver).toBeDefined();
 
       act(() => {
-        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+        contentObserver!.callback([], contentObserver!);
       });
       await flushAnimationFrame();
 
@@ -815,7 +819,7 @@ describe("ThreadViewport", () => {
         value: 1948,
       });
       act(() => {
-        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+        contentObserver!.callback([], contentObserver!);
       });
       expect(followTo).toHaveBeenCalledTimes(1);
       expect(followTo).toHaveBeenLastCalledWith(1448);
@@ -854,7 +858,7 @@ describe("ThreadViewport", () => {
         value: 2560,
       });
       act(() => {
-        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+        contentObserver!.callback([], contentObserver!);
       });
       await flushAnimationFrame();
       expect(followTo).not.toHaveBeenCalled();
@@ -1007,7 +1011,7 @@ describe("ThreadViewport", () => {
       expect(composerObserver).toBeDefined();
 
       act(() => {
-        composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
+        composerObserver!.callback([], composerObserver!);
       });
       await flushAnimationFrame();
 
@@ -1117,7 +1121,7 @@ describe("ThreadViewport", () => {
         value: 1228,
       });
       act(() => {
-        composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
+        composerObserver!.callback([], composerObserver!);
       });
       await flushAnimationFrame();
 
@@ -1129,7 +1133,7 @@ describe("ThreadViewport", () => {
         value: 1268,
       });
       act(() => {
-        composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
+        composerObserver!.callback([], composerObserver!);
       });
       await flushAnimationFrame();
 
@@ -1171,6 +1175,13 @@ describe("ThreadViewport", () => {
       followTo.mockClear();
 
       const composerDock = screen.getByTestId("thread-composer-dock");
+      const composerEntry: ResizeObserverEntry = {
+        target: composerDock,
+        contentRect: composerDock.getBoundingClientRect(),
+        borderBoxSize: [],
+        contentBoxSize: [],
+        devicePixelContentBoxSize: [],
+      };
       const composerObserver = resizeObserver.observers.find(
         (observer) => observer.elements.includes(composerDock),
       );
@@ -1182,8 +1193,8 @@ describe("ThreadViewport", () => {
 
       act(() => {
         composerObserver!.callback(
-          [{ target: composerDock }] as ResizeObserverEntry[],
-          composerObserver as unknown as ResizeObserver,
+          [composerEntry],
+          composerObserver!,
         );
       });
       await flushAnimationFrame();
@@ -1204,8 +1215,8 @@ describe("ThreadViewport", () => {
       });
       act(() => {
         composerObserver!.callback(
-          [{ target: composerDock }] as ResizeObserverEntry[],
-          composerObserver as unknown as ResizeObserver,
+          [composerEntry],
+          composerObserver!,
         );
       });
       await flushAnimationFrame();
@@ -1625,7 +1636,7 @@ describe("ThreadViewport", () => {
 
       const firstVisible = 300 - INITIAL_HISTORY_WINDOW;
       const anchor = screen.getByText(`message ${firstVisible}`)
-        .closest<HTMLElement>("[data-thread-display-unit]");
+        .closest<HTMLElement>("[data-thread-display-unit]")!;
       expect(anchor).not.toBeNull();
       hitTarget = anchor;
       let anchorDocumentTop = 200;
@@ -1661,7 +1672,7 @@ describe("ThreadViewport", () => {
       );
       expect(observer).toBeDefined();
       act(() => {
-        observer?.callback([], observer as unknown as ResizeObserver);
+        observer?.callback([], observer);
       });
 
       expect(scroller.scrollTop).toBe(260);
@@ -2265,7 +2276,7 @@ describe("ThreadViewport", () => {
         value: 3000,
       });
       act(() => {
-        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+        contentObserver!.callback([], contentObserver!);
       });
       await flushAnimationFrame();
 
@@ -2327,7 +2338,7 @@ describe("ThreadViewport", () => {
         value: 3000,
       });
       act(() => {
-        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+        contentObserver!.callback([], contentObserver!);
       });
       await waitFor(() => expect(scroller.scrollTop).toBe(2400));
 
@@ -2345,7 +2356,7 @@ describe("ThreadViewport", () => {
         value: 3400,
       });
       act(() => {
-        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
+        contentObserver!.callback([], contentObserver!);
       });
       await flushAnimationFrame();
 

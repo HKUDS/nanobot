@@ -162,7 +162,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText(`Reading file ${path}`)).toBeInTheDocument();
     expect(screen.getByLabelText("Using Blender, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByLabelText("Opening example.com, Browserbase")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
 
     await act(async () => setAppLanguage("zh-CN"));
@@ -171,7 +171,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText(`正在读取文件 ${path}`)).toBeInTheDocument();
     expect(screen.getByLabelText("正在使用 Blender, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByLabelText("正在打开 example.com, Browserbase")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "编辑", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "编辑" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
 
     await act(async () => setAppLanguage("ja"));
@@ -180,7 +180,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText(`${path} ファイルを読み取り中`)).toBeInTheDocument();
     expect(screen.getByLabelText("Blender を使用中, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByLabelText("example.com 開いています, Browserbase")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "編集", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "編集" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference").closest('[data-testid="activity-step"]'))
       .toHaveAttribute("aria-label", `${path} 編集`);
   });
@@ -536,7 +536,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    assertBetween(screen.getByRole("img", { name: "Editing", exact: true }));
+    assertBetween(screen.getByRole("img", { name: "Editing" }));
 
     rerender(
       <AgentActivityCluster
@@ -546,7 +546,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    assertBetween(screen.getByRole("img", { name: "Edited", exact: true }));
+    assertBetween(screen.getByRole("img", { name: "Edited" }));
   });
 
   it.each(["diff", "collapsed_diff"] as const)(
@@ -677,7 +677,7 @@ describe("AgentActivityCluster", () => {
       expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
       expect(screen.getByText("return <Old />;")).toBeInTheDocument();
       expect(screen.getByText("return <New />;")).toBeInTheDocument();
-      expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
       expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
       expect(screen.getAllByTestId("activity-diff-pair")).toHaveLength(1);
 
@@ -685,7 +685,7 @@ describe("AgentActivityCluster", () => {
         writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, fileEditDisplayMode: "summary" });
       });
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
-      expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
 
       act(() => {
         writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, fileEditDisplayMode: "diff" });
@@ -978,10 +978,10 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
-      expect(screen.getByRole("img", { name: "Created", exact: true }).querySelector("svg"))
+      expect(screen.getByRole("img", { name: "Created" }).querySelector("svg"))
         .toHaveClass("lucide-file-text");
       expect(screen.getByLabelText("Created tmp.txt")).toBeInTheDocument();
-      expect(screen.queryByRole("img", { name: "Edited", exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: "Edited" })).not.toBeInTheDocument();
       expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("tmp.txt");
       expect(!!screen.queryByTestId("file-edit-diff")).toBe(hasDiff);
     } finally {
@@ -1017,9 +1017,9 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByRole("img", { name: "Deleted", exact: true }).querySelector("svg"))
+    expect(screen.getByRole("img", { name: "Deleted" }).querySelector("svg"))
       .toHaveClass("lucide-file-code2");
-    expect(screen.queryByRole("img", { name: "Edited", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Edited" })).not.toBeInTheDocument();
   });
 
   it("renders file-only edits without a redundant disclosure", () => {
@@ -1051,9 +1051,9 @@ describe("AgentActivityCluster", () => {
 
     expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
     expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
-    const marker = screen.getByRole("img", { name: "Edited", exact: true });
+    const marker = screen.getByRole("img", { name: "Edited" });
     expect(marker.querySelector("svg")).toHaveClass("lucide-file-code2");
     expect(marker.closest('[data-testid="activity-step"]')?.querySelectorAll("svg")).toHaveLength(1);
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
@@ -1804,7 +1804,7 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
     expect(screen.queryByText("+0")).not.toBeInTheDocument();
     expect(screen.queryByText("-0")).not.toBeInTheDocument();
   });
@@ -1899,7 +1899,7 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    const row = screen.getByRole("img", { name: "Could not edit", exact: true }).closest('[data-testid="activity-step"]');
+    const row = screen.getByRole("img", { name: "Could not edit" }).closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
     expect(row).not.toHaveAttribute("title");
     expect(screen.queryByText("Target text was not found in angry-birds.html.")).not.toBeInTheDocument();
@@ -1933,7 +1933,7 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    const row = screen.getByRole("img", { name: "Could not edit", exact: true }).closest('[data-testid="activity-step"]');
+    const row = screen.getByRole("img", { name: "Could not edit" }).closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
     expect(row).not.toHaveAttribute("title");
     expect(screen.queryByText("No permission to change this location.")).not.toBeInTheDocument();
@@ -2014,7 +2014,7 @@ describe("AgentActivityCluster", () => {
       const fileRefs = screen.getAllByTestId("activity-file-reference");
       expect(fileRefs).toHaveLength(3);
       expect(fileRefs.every((ref) => ref.textContent?.includes("minecraft-fps/index.html"))).toBe(true);
-      const failedRow = screen.getByRole("img", { name: "Could not edit", exact: true }).closest(
+      const failedRow = screen.getByRole("img", { name: "Could not edit" }).closest(
         '[data-testid="activity-step"]',
       );
       expect(failedRow).toBeInTheDocument();
@@ -2072,8 +2072,8 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Could not edit", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Could not edit" })).toBeInTheDocument();
     expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(2);
   });
 

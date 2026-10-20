@@ -48,9 +48,9 @@ it("finds a shared component by its name and renders its working variants", asyn
   await screen.findByRole("heading", { name: "Button · 按钮" });
   await userEvent.type(screen.getByRole("searchbox", { name: "Search components" }), "toggle-button");
   expect(screen.getByRole("link", { name: /toggle-button/ })).toHaveAttribute("href", expect.stringContaining("toggle-button"));
-  await userEvent.click(screen.getByRole("button", { name: "destructive", exact: true }));
+  await userEvent.click(screen.getByRole("button", { name: "destructive" }));
   expect(screen.getByText("Button clicks: 1")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Unavailable", exact: true })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Unavailable" })).toBeDisabled();
 });
 
 it("lets the developer retry a failed inventory request", async () => {
@@ -134,7 +134,7 @@ it("switches the chat list preview between ready, loading, empty and archived st
   const preview = within(screen.getByRole("region", { name: "Component preview" }));
   const setMode = async (mode: string) => {
     await userEvent.click(preview.getByRole("combobox", { name: "会话列表状态" }));
-    await userEvent.click(screen.getByRole("option", { name: mode, exact: true }));
+    await userEvent.click(screen.getByRole("option", { name: mode }));
   };
 
   expect(preview.getByRole("button", { name: "@design 组件设计" })).toBeVisible();
@@ -183,21 +183,21 @@ it("uses the real provider manager and saves a new provider entirely in preview 
   const preview = within(screen.getByRole("region", { name: "Component preview" }));
   await userEvent.click(preview.getByRole("button", { name: "Manage providers" }));
   let dialog = within(screen.getByRole("dialog", { name: "Manage providers" }));
-  expect(dialog.getByRole("button", { name: "Anthropic", exact: true })).toBeVisible();
+  expect(dialog.getByRole("button", { name: "Anthropic" })).toBeVisible();
   expect(dialog.getByTestId("provider-logo-anthropic")).toBeVisible();
-  expect(dialog.queryByRole("button", { name: "OpenAI", exact: true })).not.toBeInTheDocument();
+  expect(dialog.queryByRole("button", { name: "OpenAI" })).not.toBeInTheDocument();
 
-  await userEvent.click(dialog.getByRole("button", { name: "Add provider", exact: true }));
-  await userEvent.click(screen.getByRole("option", { name: "OpenAI", exact: true }));
+  await userEvent.click(dialog.getByRole("button", { name: "Add provider" }));
+  await userEvent.click(screen.getByRole("option", { name: "OpenAI" }));
   dialog = within(screen.getByRole("dialog", { name: "OpenAI" }));
   await userEvent.type(dialog.getByLabelText("API key", { selector: "input" }), "gallery-example-key");
   const apiURL = dialog.getByLabelText("API URL");
   await userEvent.clear(apiURL);
   await userEvent.type(apiURL, "https://preview.example/v1");
-  await userEvent.click(dialog.getByRole("button", { name: "Add provider", exact: true }));
+  await userEvent.click(dialog.getByRole("button", { name: "Add provider" }));
 
   dialog = within(await screen.findByRole("dialog", { name: "Manage providers" }));
-  await userEvent.click(dialog.getByRole("button", { name: "OpenAI", exact: true }));
+  await userEvent.click(dialog.getByRole("button", { name: "OpenAI" }));
   expect(screen.getByLabelText("API URL")).toHaveValue("https://preview.example/v1");
   await userEvent.keyboard("{Escape}{Escape}");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -216,13 +216,13 @@ it("renders a registered channel's real secret fields and enable action without 
   const preview = within(screen.getByRole("region", { name: "Component preview" }));
   const token = preview.getByLabelText("Bot token", { selector: "input" });
   expect(token).toHaveAttribute("type", "password");
-  await userEvent.click(preview.getByRole("switch", { name: "Enable channel", exact: true }));
+  await userEvent.click(preview.getByRole("switch", { name: "Enable channel" }));
   expect(token).toHaveAttribute("aria-invalid", "true");
-  expect(preview.getByRole("switch", { name: "Enable channel", exact: true })).not.toBeChecked();
+  expect(preview.getByRole("switch", { name: "Enable channel" })).not.toBeChecked();
   await userEvent.type(token, "gallery-example-token");
-  await userEvent.click(preview.getByRole("switch", { name: "Enable channel", exact: true }));
-  expect(preview.getByRole("switch", { name: "Enable channel", exact: true })).toBeChecked();
-  await userEvent.click(preview.getByRole("button", { name: "Advanced", exact: true }));
+  await userEvent.click(preview.getByRole("switch", { name: "Enable channel" }));
+  expect(preview.getByRole("switch", { name: "Enable channel" })).toBeChecked();
+  await userEvent.click(preview.getByRole("button", { name: "Advanced" }));
   expect(preview.getByRole("group", { name: "Connection mode" })).toBeVisible();
   expect(preview.getByRole("radio", { name: "Long polling" })).toBeChecked();
   expect(fetch).toHaveBeenCalledTimes(1);

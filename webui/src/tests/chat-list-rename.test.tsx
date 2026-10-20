@@ -49,13 +49,13 @@ function RenameCase({
 
 async function startRename(contextMenu = false, title = "Review") {
   if (contextMenu) {
-    fireEvent.contextMenu(screen.getByRole("button", { name: title, exact: true }));
+    fireEvent.contextMenu(screen.getByRole("button", { name: title }));
   } else {
     fireEvent.pointerDown(screen.getByRole("button", { name: `Topic actions for ${title}` }), {
       button: 0, ctrlKey: false,
     });
   }
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Rename", exact: true }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
   return screen.getByRole("textbox", { name: "Topic name" });
 }
 
@@ -85,11 +85,11 @@ describe("inline sidebar topic rename", () => {
     expect(save).toHaveBeenCalledWith(topic.key, "Updated name");
     expect(input).toHaveAttribute("readonly");
     expect(input.closest("form")).toHaveAttribute("aria-busy", "true");
-    expect(screen.queryByRole("button", { name: "Updated name", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Updated name" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
     await act(async () => { confirm(); });
-    expect(await screen.findByRole("button", { name: "Updated name", exact: true })).toHaveFocus();
+    expect(await screen.findByRole("button", { name: "Updated name" })).toHaveFocus();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
   });
@@ -108,7 +108,7 @@ describe("inline sidebar topic rename", () => {
     expect(current).toBeInTheDocument();
     expect(current).toHaveValue("Newer draft");
     fireEvent.keyDown(current, { key: "Escape" });
-    expect(screen.getByRole("button", { name: "First saved title", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "First saved title" })).toBeInTheDocument();
   });
 
   it("retains a failed draft and allows retrying the same name", async () => {
@@ -121,8 +121,8 @@ describe("inline sidebar topic rename", () => {
     expect(input).toHaveValue("  Keep this draft  ");
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
-    expect(await screen.findByRole("button", { name: "Keep this draft", exact: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("button", { name: "Keep this draft" })).toBeInTheDocument();
     expect(save).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -136,7 +136,7 @@ describe("inline sidebar topic rename", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     await screen.findByRole("alert");
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(screen.getByRole("button", { name: "Review", exact: true })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Review" })).toHaveFocus();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(save).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe("inline sidebar topic rename", () => {
     const input = await startRename();
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(save).not.toHaveBeenCalled();
     fireEvent.compositionStart(input);
     fireEvent.change(input, { target: { value: "新的话题" } });
@@ -160,7 +160,7 @@ describe("inline sidebar topic rename", () => {
     fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
     expect(save).not.toHaveBeenCalled();
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "新的话题", exact: true })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "新的话题" })).toBeInTheDocument();
     expect(save).toHaveBeenCalledTimes(1);
   });
 
@@ -169,7 +169,7 @@ describe("inline sidebar topic rename", () => {
     const save = vi.fn().mockResolvedValue(undefined);
     render(<RenameCase save={save} />);
     await startRename();
-    const cancel = screen.getByRole("button", { name: "Cancel", exact: true });
+    const cancel = screen.getByRole("button", { name: "Cancel" });
     cancel.focus();
     await user.keyboard("{Enter}");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();

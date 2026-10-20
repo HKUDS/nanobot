@@ -8,6 +8,7 @@
     "gallery": "vite --open /gallery.html",
     "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",

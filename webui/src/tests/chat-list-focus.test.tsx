@@ -64,7 +64,7 @@ describe("sidebar action focus", () => {
   ])("returns Escape focus to %s and allows continued tabbing", async (name) => {
     const user = userEvent.setup();
     render(<SidebarFocusCase />);
-    const trigger = screen.getByRole("button", { name, exact: true });
+    const trigger = screen.getByRole("button", { name });
     trigger.focus();
     await user.keyboard("{Enter}");
     await screen.findByRole("menu");
@@ -84,7 +84,7 @@ describe("sidebar action focus", () => {
     await user.keyboard("{Enter}{Escape}");
     await waitFor(() => expect(trigger).toHaveFocus());
     await user.keyboard("{Enter}");
-    await user.click(await screen.findByRole("menuitem", { name: "Rename", exact: true }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
     const input = await screen.findByPlaceholderText("Topic name");
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     await waitFor(() => expect(input).toHaveFocus());
@@ -92,7 +92,7 @@ describe("sidebar action focus", () => {
     expect(input).toHaveValue("Updated");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Review", exact: true })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Review" })).toHaveFocus();
   });
 
   it("keeps an outside click focused on its destination", async () => {
@@ -114,7 +114,7 @@ describe("sidebar action focus", () => {
     const trigger = screen.getByRole("button", { name: "Topic actions for Review" });
     trigger.focus();
     await user.keyboard("{Enter}");
-    const move = await screen.findByRole("menuitem", { name: "Move to", exact: true });
+    const move = await screen.findByRole("menuitem", { name: "Move to" });
     act(() => move.focus());
     await user.keyboard("{ArrowRight}");
     await screen.findByRole("menuitem", { name: "Group 2/4" });
@@ -129,14 +129,14 @@ describe("sidebar action focus", () => {
     const trigger = screen.getByRole("button", { name: "Topic actions for Review" });
     trigger.focus();
     await user.keyboard("{Enter}");
-    const move = await screen.findByRole("menuitem", { name: "Move to", exact: true });
+    const move = await screen.findByRole("menuitem", { name: "Move to" });
     act(() => move.focus());
     await user.keyboard("{ArrowRight}");
     await screen.findByRole("menuitem", { name: "Group 2/4" });
     await user.keyboard("{ArrowLeft}");
     await waitFor(() => expect(move).toHaveFocus());
     expect(screen.queryByRole("menuitem", { name: "Group 2/4" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "Rename", exact: true }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const input = await screen.findByPlaceholderText("Topic name");
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(input).toHaveFocus();
@@ -148,7 +148,7 @@ describe("sidebar action focus", () => {
     const trigger = screen.getByRole("button", { name: "Topic actions for Review" });
     trigger.focus();
     await user.keyboard("{Enter}");
-    await user.click(await screen.findByRole("menuitem", { name: "Select", exact: true }));
+    await user.click(await screen.findByRole("menuitem", { name: "Select" }));
     await waitFor(() => expect(trigger).not.toBeInTheDocument());
     expect(trigger).not.toHaveFocus();
     await user.keyboard("{Escape}");

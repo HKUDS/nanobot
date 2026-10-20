@@ -448,7 +448,7 @@ describe("App layout", () => {
     expect(await screen.findByRole("heading", { name: "连接到 nanobot" }))
       .toBeInTheDocument();
     expect(screen.getByLabelText("WebUI 密码")).toHaveValue("draft-password");
-    expect(screen.getByRole("button", { name: "连接", exact: true })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "连接" })).toBeEnabled();
     expect(document.documentElement.lang).toBe("zh-CN");
     expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
     expect(fetchBootstrap).toHaveBeenCalledTimes(1);
@@ -754,7 +754,7 @@ describe("App layout", () => {
     expect(window.location.hash).toBe(originalHash);
     expect(document.title).toBe(originalTitle);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     expect(window.location.hash).toBe("#/new");
     expect(screen.queryByRole("textbox", { name: "SSH address" })).not.toBeInTheDocument();
@@ -1090,6 +1090,8 @@ describe("App layout", () => {
       key: "websocket:existing-chat",
       channel: "websocket",
       chatId: "existing-chat",
+      createdAt: null,
+      updatedAt: null,
       preview: "Existing topic",
       workspaceScope: projectScope,
     }];
@@ -1264,16 +1266,16 @@ describe("App layout", () => {
     window.history.replaceState(null, "", "/#/settings?section=runtime");
     mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Restart", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
     expect(sendSystemCommandSpy).toHaveBeenCalledWith("restart-fixture", "/restart");
-    expect(screen.getByRole("button", { name: "Restarting...", exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restarting..." })).toBeDisabled();
     act(() => {
       if (clearWhen === "before disconnect") localStorage.removeItem("nanobot-webui.restartStartedAt");
       for (const handler of statusHandlers) handler("reconnecting");
       localStorage.removeItem("nanobot-webui.restartStartedAt");
       for (const handler of statusHandlers) handler("open");
     });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Restart", exact: true })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restart" })).toBeEnabled());
     expect(createChatSpy).not.toHaveBeenCalled();
   });
 
@@ -1843,11 +1845,11 @@ describe("App layout", () => {
     );
     await user.keyboard("{Escape}");
     expect(detail.getByRole("button", { name: "More actions" })).toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /WeChat quiz/ }));
     expect(screen.getByText("WeChat")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
     expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /heartbeat/ })).not.toBeInTheDocument();
@@ -1887,7 +1889,7 @@ describe("App layout", () => {
     });
     render(<App />);
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
-    await within(sidebar).findByRole("button", { name: "推特大战场", exact: true });
+    await within(sidebar).findByRole("button", { name: "推特大战场" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
     fireEvent.click(await screen.findByRole("button", { name: /Drink water/ }));
     const dialog = screen.getByRole("dialog", { name: "Drink water" });
@@ -1964,9 +1966,9 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
     const runDetail = within(screen.getByRole("dialog", { name: "Past one-shot" }));
     expect(runDetail.getByText("Completed")).toBeVisible();
-    expect(runDetail.queryByRole("button", { name: "Edit", exact: true })).not.toBeInTheDocument();
-    fireEvent.click(runDetail.getByRole("button", { name: "Close", exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Tasks", exact: true }));
+    expect(runDetail.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    fireEvent.click(runDetail.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
     fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByRole("dialog", { name: "Edit task" });
@@ -2590,10 +2592,10 @@ describe("App layout", () => {
       addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(),
       removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
     })));
-    let persisted: SidebarStatePayload | null = null;
-    mockFetchRoutes({ "/api/webui/sidebar-state": () => persisted ?? {} });
+    const persisted: { state?: SidebarStatePayload } = {};
+    mockFetchRoutes({ "/api/webui/sidebar-state": () => persisted.state ?? {} });
     setSidebarStateSpy.mockImplementation(async (state: SidebarStatePayload) => {
-      persisted = state;
+      persisted.state = state;
       return state;
     });
     const firstRender = render(<App />);
@@ -2604,7 +2606,7 @@ describe("App layout", () => {
     const sheet = await screen.findByRole("dialog");
     const startRename = async () => {
       await user.click(within(sheet).getByRole("button", { name: "Topic actions for Existing chat" }));
-      await user.click(await within(sheet).findByRole("menuitem", { name: "Rename", exact: true }));
+      await user.click(await within(sheet).findByRole("menuitem", { name: "Rename" }));
       return within(sheet).getByRole("textbox", { name: "Topic name" });
     };
     const firstInput = await startRename();
@@ -2625,15 +2627,15 @@ describe("App layout", () => {
     await user.keyboard("{Enter}");
     expect(await within(sheet).findByRole("alert")).toHaveTextContent("Couldn't save the name. Try again.");
     expect(input).toHaveValue("Renamed topic");
-    expect(persisted?.title_overrides["websocket:chat-a"]).toBeUndefined();
+    expect(persisted.state?.title_overrides["websocket:chat-a"]).toBeUndefined();
     await user.keyboard("{Enter}");
-    expect(await within(sheet).findByRole("button", { name: "Renamed topic", exact: true })).toBeInTheDocument();
-    expect(persisted?.title_overrides["websocket:chat-a"]).toBe("Renamed topic");
+    expect(await within(sheet).findByRole("button", { name: "Renamed topic" })).toBeInTheDocument();
+    expect(persisted.state?.title_overrides["websocket:chat-a"]).toBe("Renamed topic");
     expect(window.location.hash).toBe(route);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     firstRender.unmount();
     render(<App />);
-    expect(await screen.findByRole("button", { name: "Renamed topic", exact: true })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Renamed topic" })).toBeInTheDocument();
   });
 
   it("retries a failed sidebar read before enabling edits without losing saved state", async () => {
@@ -2787,7 +2789,7 @@ describe("App layout", () => {
     sessionsFail = false;
     act(() => sessionUpdateHandlers.forEach((handler) => handler("chat-a")));
     await within(sidebar).findByRole("button", { name: "Group: Saved group" });
-    expect(await within(sidebar).findByRole("button", { name: "Saved B", exact: true })).toBeInTheDocument();
+    expect(await within(sidebar).findByRole("button", { name: "Saved B" })).toBeInTheDocument();
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
       ...saved,
       view: expect.objectContaining(saved.view),
@@ -3127,15 +3129,15 @@ describe("App layout", () => {
       .getByRole("button", { name: "Settings" }));
     const nav = await screen.findByRole("navigation", { name: "Settings sections" });
     for (const name of ["Overview", "Appearance", "Models", "Capabilities", "System", "Advanced", "About"]) {
-      expect(within(nav).getByRole("button", { name, exact: true })).toBeInTheDocument();
+      expect(within(nav).getByRole("button", { name })).toBeInTheDocument();
     }
-    fireEvent.click(within(nav).getByRole("button", { name: "Appearance", exact: true }));
+    fireEvent.click(within(nav).getByRole("button", { name: "Appearance" }));
     expect(await screen.findByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
-    fireEvent.click(within(nav).getByRole("button", { name: "Models", exact: true }));
+    fireEvent.click(within(nav).getByRole("button", { name: "Models" }));
     expect(await screen.findByText("Model presets")).toBeInTheDocument();
-    fireEvent.click(within(nav).getByRole("button", { name: "Capabilities", exact: true }));
+    fireEvent.click(within(nav).getByRole("button", { name: "Capabilities" }));
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeInTheDocument();
-    fireEvent.click(within(nav).getByRole("button", { name: "About", exact: true }));
+    fireEvent.click(within(nav).getByRole("button", { name: "About" }));
     expect(await screen.findByRole("button", { name: "Check for updates" })).toBeInTheDocument();
   });
 
@@ -3173,7 +3175,7 @@ describe("App layout", () => {
     expect(systemSection).not.toBeNull();
     const system = within(systemSection as HTMLElement);
     expect(system.getByText("Timezone")).toBeInTheDocument();
-    expect(within(screen.getByRole("complementary")).getByRole("button", { name: "Restart", exact: true })).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).getByRole("button", { name: "Restart" })).toBeInTheDocument();
     expect(
       system.queryByText("Restart nanobot to apply runtime changes."),
     ).not.toBeInTheDocument();
@@ -3208,11 +3210,9 @@ describe("App layout", () => {
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
     const overviewButton = within(settingsNav).getByRole("button", {
       name: "Overview",
-      exact: true,
     });
     const modelsButton = within(settingsNav).getByRole("button", {
       name: "Models",
-      exact: true,
     });
     const settingsHighlight = within(settingsNav).getByTestId(
       "settings-selection-highlight",
@@ -3233,7 +3233,6 @@ describe("App layout", () => {
 
     const voiceButton = within(settingsNav).getByRole("button", {
       name: "Capabilities",
-      exact: true,
     });
     fireEvent.click(voiceButton);
 
@@ -4235,7 +4234,7 @@ describe("App layout", () => {
         expires_in: 300,
       });
     vi.mocked(deriveWsUrl).mockImplementation(
-      (_wsPath: string, token: string) => `ws://test?token=${token}`,
+      (_wsPath, token) => `ws://test?token=${token}`,
     );
 
     const { unmount } = render(<App />);
@@ -4372,9 +4371,7 @@ describe("App layout", () => {
       if (visibilityDescriptor) {
         Object.defineProperty(document, "visibilityState", visibilityDescriptor);
       } else {
-        delete (document as Document & {
-          visibilityState?: DocumentVisibilityState;
-        }).visibilityState;
+        Reflect.deleteProperty(document, "visibilityState");
       }
     }
   });

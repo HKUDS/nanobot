@@ -787,6 +787,7 @@ describe("MessageBubble", () => {
         id: "saved-app-name",
         role: "user",
         content: `Use @${name} please`,
+        createdAt: 1,
         ...(kind === "cli" ? {
           cliApps: [{ name, display_name: displayName, category: "test", entry_point: name }],
         } : {
@@ -808,12 +809,12 @@ describe("MessageBubble", () => {
     const copy = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(true);
     try {
       render(<ThreadMessages messages={[{
-        id: "copy-display-name", role: "user", content: "Please use @drawio",
+        id: "copy-display-name", role: "user", content: "Please use @drawio", createdAt: 1,
         cliApps: [{ name: "drawio", display_name: "Draw.io", category: "diagram", entry_point: "drawio" }],
       }]} />);
       expect(screen.getByTestId("message-cli-mention-drawio")).toHaveTextContent("@Draw.io");
       fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
-      fireEvent.click(screen.getByRole("button", { name: "Copy", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
       await waitFor(() => expect(copy).toHaveBeenCalledWith("Please use @drawio"));
     } finally {
       copy.mockRestore();

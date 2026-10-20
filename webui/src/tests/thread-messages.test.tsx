@@ -28,8 +28,8 @@ function assistantActionCounts(root: ParentNode = document) {
     const row = body.closest<HTMLElement>("[data-thread-display-unit]")!;
     if (!row.querySelector("[data-message-block-menu-trigger]")) continue;
     const { menu } = openMessageBlockMenu(row);
-    counts.copy += within(menu).queryAllByRole("button", { name: "Copy", exact: true }).length;
-    counts.fork += within(menu).queryAllByRole("button", { name: "New chat from here", exact: true }).length;
+    counts.copy += within(menu).queryAllByRole("button", { name: "Copy" }).length;
+    counts.fork += within(menu).queryAllByRole("button", { name: "New chat from here" }).length;
     fireEvent.keyDown(menu, { key: "Escape" });
   }
   return counts;
@@ -86,7 +86,7 @@ describe("ThreadMessages", () => {
         const assertIndependentDiff = () => {
           const diff = screen.getByTestId("file-edit-diff");
           expect(diff).toBeVisible();
-          expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
+          expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
           expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
             .toBeNull();
           expect(screen.getByText("File updated")).toBeVisible();
@@ -94,7 +94,7 @@ describe("ThreadMessages", () => {
         };
         assertIndependentDiff();
         openAssistantBlockMenu(container);
-        const disclosure = screen.getByRole("button", { name: "Worked for 5s", exact: true });
+        const disclosure = screen.getByRole("button", { name: "Worked for 5s" });
         expect(disclosure).toHaveAttribute("aria-expanded", "false");
         const detailsId = disclosure.getAttribute("aria-controls")!;
         expect(container.querySelectorAll(`[id="${detailsId}"]`)).toHaveLength(1);
@@ -260,7 +260,7 @@ describe("ThreadMessages", () => {
         content: "question",
         createdAt: 1,
         turnId,
-        turnPhase: "prompt",
+        turnPhase: "user",
       },
       {
         id: "live-answer",
@@ -313,7 +313,7 @@ describe("ThreadMessages", () => {
             content: "next question",
             createdAt: 3,
             turnId: "turn-2",
-            turnPhase: "prompt",
+            turnPhase: "user",
           },
         ]}
         isStreaming
@@ -334,7 +334,7 @@ describe("ThreadMessages", () => {
       content: "research this",
       createdAt: 1,
       turnId,
-      turnPhase: "prompt",
+      turnPhase: "user",
       turnSeq: 0,
     };
     const commentary: UIMessage = {

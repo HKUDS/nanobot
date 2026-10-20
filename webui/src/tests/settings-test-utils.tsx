@@ -125,33 +125,22 @@ export function settingsPayload(): SettingsPayload {
   };
 }
 
-export function renderSettingsView(
-  options: {
-    client?: NanobotClient;
-    initialSection?:
-      | "overview"
-      | "appearance"
-      | "apps"
-      | "skills"
-      | "channels"
-      | "automations"
-      | "advanced"
-      | "models"
-      | "image"
-      | "browser"
-      | "runtime";
-    initialSettings?: SettingsPayload | null;
-    skills?: React.ComponentProps<typeof SettingsView>["skills"];
-    skillsLoading?: boolean;
-    showSidebar?: boolean;
-    mainNavigationExpanded?: boolean;
-    onBackToChat?: () => void;
-    onSettingsChange?: (payload: SettingsPayload) => void;
-    onStartAutomationChat?: React.ComponentProps<typeof SettingsView>["onStartAutomationChat"];
-    onNativeEngineRestart?: () => Promise<string>;
-    onRestart?: () => void;
-  } = {},
-) {
+type SettingsViewTestOptions = Partial<Pick<
+  React.ComponentProps<typeof SettingsView>,
+  | "initialSection"
+  | "initialSettings"
+  | "skills"
+  | "skillsLoading"
+  | "showSidebar"
+  | "mainNavigationExpanded"
+  | "onBackToChat"
+  | "onSettingsChange"
+  | "onStartAutomationChat"
+  | "onNativeEngineRestart"
+  | "onRestart"
+>> & { client?: NanobotClient };
+
+export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
     <ClientProvider client={options.client ?? {
       requestMutation: requestMutationMock,

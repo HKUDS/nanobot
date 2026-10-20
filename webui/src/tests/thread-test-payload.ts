@@ -115,11 +115,17 @@ function messageEvents(message: UIMessage): ThreadProjectionEvent[] {
       ...eventBase(message, ":reasoning-end"),
     });
   }
+  const media = message.media?.map((attachment) => {
+    if (attachment.url === undefined) {
+      throw new Error("Assistant history media fixtures require a resolved URL");
+    }
+    return { ...attachment, url: attachment.url };
+  });
   events.push({
     event: "message",
     ...base,
     text: message.content,
-    ...(message.media?.length ? { media_urls: message.media } : {}),
+    ...(media?.length ? { media_urls: media } : {}),
     ...(message.latencyMs !== undefined ? { latency_ms: message.latencyMs } : {}),
   });
   const completion = completionEvent(message);
@@ -128,27 +134,26 @@ function messageEvents(message: UIMessage): ThreadProjectionEvent[] {
 }
 
 export function canonicalThreadPayload(
+  payload: WebuiThreadPersistedPayload | MessageFixturePayload,
+): WebuiThreadPersistedPayload;
+export function canonicalThreadPayload(
+  payload: WebuiThreadPersistedPayload | MessageFixturePayload | null,
+): WebuiThreadPersistedPayload | null;
+export function canonicalThreadPayload(
   payload: WebuiThreadPersistedPayload | MessageFixturePayload | null,
 ): WebuiThreadPersistedPayload | null {
   if (payload === null || "events" in payload) return payload;
-  const events = payload.messages.flatMap(messageEvents);
-  const boundary = payload.fork_boundary_message_count;
+  const { messages, fork_boundary_message_count: boundary, ...rest } = payload;
+  const events = messages.flatMap(messageEvents);
   const forkBoundaryEventIndex = typeof boundary === "number"
-    ? payload.messages.slice(0, boundary).flatMap(messageEvents).length
+    ? messages.slice(0, boundary).flatMap(messageEvents).length
     : undefined;
-  const rest = { ...payload } as Record<string, unknown>;
-  delete rest.messages;
-  delete rest.fork_boundary_message_count;
-  const canonical = payload as unknown as Record<string, unknown>;
-  delete canonical.messages;
-  delete canonical.fork_boundary_message_count;
-  Object.assign(canonical, {
+  return {
     ...rest,
     projection: "events",
     events,
     ...(forkBoundaryEventIndex !== undefined
       ? { fork_boundary_event_index: forkBoundaryEventIndex }
       : {}),
-  });
-  return payload as unknown as WebuiThreadPersistedPayload;
+  };
 }

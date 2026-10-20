@@ -296,7 +296,7 @@ describe("Linear channel UI", () => {
     } finally {
       vi.useRealTimers();
     }
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(actionCalls()).toHaveLength(1));
     const params = actionCalls()[0][1] as { values: Record<string, unknown> };
     expect(params.values).toEqual({ "channels.linear.clientSecret": "replacement-secret" });
@@ -317,7 +317,7 @@ describe("Linear channel UI", () => {
       fireEvent.change(screen.getByLabelText("OAuth client secret", { exact: true, selector: "input" }), {
         target: { value: "discarded-draft" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       expect(screen.getAllByText("Saved", { exact: true })).toHaveLength(2);
       expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled();
       await act(async () => { await vi.advanceTimersByTimeAsync(750); });
@@ -340,11 +340,11 @@ describe("Linear channel UI", () => {
     fireEvent.change(screen.getByLabelText("OAuth client secret", { exact: true, selector: "input" }), {
       target: { value: "retry-draft" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not confirm the save");
     expect(screen.getByLabelText("OAuth client secret", { exact: true, selector: "input" })).toHaveValue("retry-draft");
     expect(screen.queryByText("Settings saved.")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getAllByText("Saved", { exact: true })).toHaveLength(2);
   });
 
@@ -362,7 +362,7 @@ describe("Linear channel UI", () => {
     fireEvent.change(input, { target: { value: "first-secret" } });
     expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
     expect(requestMutationMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Replace OAuth client secret" })).toHaveFocus());
     expect(screen.getAllByText("Saved", { exact: true })).toHaveLength(2);
     expect(screen.queryByDisplayValue("first-secret")).not.toBeInTheDocument();
@@ -388,12 +388,12 @@ describe("Linear channel UI", () => {
       target: { value: "client-draft" },
     });
     fireEvent.change(webhook, { target: { value: "unfinished-webhook" } });
-    fireEvent.click(within(clientGroup).getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(within(clientGroup).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Replace OAuth client secret" })).toBeEnabled());
     expect(actionCalls()).toHaveLength(1);
     expect(actionCalls()[0][1].values).toEqual({ "channels.linear.clientSecret": "client-draft" });
     expect(webhook).toHaveValue("unfinished-webhook");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getAllByText("Saved", { exact: true })).toHaveLength(2);
   });
 
@@ -409,9 +409,9 @@ describe("Linear channel UI", () => {
     fireEvent.change(screen.getByLabelText("OAuth client secret", { exact: true, selector: "input" }), {
       target: { value: "keep-draft" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(dialog).toBeVisible();
     expect(actionCalls()).toHaveLength(1);
     await act(async () => failSave(new Error("Network unavailable")));
@@ -449,10 +449,10 @@ describe("Linear channel UI", () => {
       target: { value: "replacement-client" },
     });
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(actionCalls()).toHaveLength(1);
     expect(dialog).toBeVisible();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(actionCalls()).toHaveLength(1);
     finishSave?.({ saved: true, nanobot_features: { features: [{
       ...feature, config_values: { ...feature.config_values, "channels.linear.clientId": "replacement-client" },
@@ -470,7 +470,7 @@ describe("Linear channel UI", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "OAuth client ID" }), {
       target: { value: "replacement-client" },
     });
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Connection lost");
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toHaveValue("replacement-client");
@@ -523,7 +523,7 @@ describe("Linear channel UI", () => {
     expect(await screen.findByText(/No workspaces are authorized/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Connect another workspace" })).not.toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(open);
     expect(within(screen.getByRole("dialog")).getByText("Channel running", { exact: true })).toBeVisible();
@@ -694,7 +694,7 @@ describe("Linear channel UI", () => {
     // A second reconnect must revalidate even while the display cache is fresh.
     act(() => { onStatus?.("reconnecting"); onStatus?.("open"); });
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(3));
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(unsubscribe).toHaveBeenCalled();
   });
 

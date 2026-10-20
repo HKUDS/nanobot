@@ -108,7 +108,7 @@ describe("Settings providers", () => {
     await user.click(screen.getByRole("option", { name: "Configure OpenAI Codex…" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("dialog", { name: "New preset" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("OAuth draft");
     expect(picker).toHaveTextContent("OpenAI Codex");
@@ -158,7 +158,7 @@ describe("Settings providers", () => {
     await user.click(providerPicker);
     await user.click(screen.getByRole("option", { name: "Add provider" }));
     await user.click(custom
-      ? screen.getByRole("button", { name: "Custom", exact: true })
+      ? screen.getByRole("button", { name: "Custom" })
       : screen.getByRole("option", { name: "Moonshot" }));
     if (custom) {
       await user.type(screen.getByPlaceholderText("My model provider"), "Company");
@@ -212,13 +212,13 @@ describe("Settings providers", () => {
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     await user.type(screen.getByRole("combobox"), "does-not-exist");
     expect(screen.getByRole("status")).toHaveTextContent("No providers match this search.");
-    await user.click(screen.getByRole("button", { name: "Custom", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Custom" }));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     await user.type(screen.getByPlaceholderText("My model provider"), "Unsaved gateway");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     expect(screen.getByRole("combobox")).toHaveValue("");
-    await user.click(screen.getByRole("button", { name: "Custom", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Custom" }));
     expect(screen.getByPlaceholderText("My model provider")).toHaveValue("");
     expect(requestMutationMock).not.toHaveBeenCalled();
   });
@@ -233,7 +233,7 @@ describe("Settings providers", () => {
     const dialog = screen.getByRole("dialog", { name: "Add provider" });
     expect(dialog).toHaveClass("rounded-t-3xl", "bottom-0");
     expect(screen.getByRole("combobox")).not.toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "Custom", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
     expect(screen.getByRole("dialog", { name: "Custom" })).toBe(dialog);
   });
 
@@ -251,8 +251,8 @@ describe("Settings providers", () => {
     await user.type(screen.getByPlaceholderText("Enter API key"), "test-key");
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
-    expect(screen.getByRole("button", { name: "Moonshot", exact: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Moonshot", exact: true })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Moonshot" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Moonshot" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     expect(screen.queryByRole("option", { name: "Moonshot" })).not.toBeInTheDocument();
   });
@@ -265,7 +265,7 @@ describe("Settings providers", () => {
     renderProviderManager({ initialSection: "models", initialSettings: payload });
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     await user.click(custom
-      ? screen.getByRole("button", { name: "Custom", exact: true })
+      ? screen.getByRole("button", { name: "Custom" })
       : screen.getByRole("option", { name: "Moonshot" }));
     const dialog = screen.getByRole("dialog");
     if (custom) {
@@ -281,12 +281,12 @@ describe("Settings providers", () => {
     await user.click(within(dialog).getByRole("button", { name: "Back to providers" }));
     expect(screen.getByRole("dialog", { name: "Add provider" })).toBe(dialog);
     await user.click(custom
-      ? screen.getByRole("button", { name: "Custom", exact: true })
+      ? screen.getByRole("button", { name: "Custom" })
       : screen.getByRole("option", { name: "Moonshot" }));
     expect(screen.getByPlaceholderText("Enter API key")).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
-    expect(screen.queryByRole("button", { name: "Moonshot", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Moonshot" })).not.toBeInTheDocument();
   });
 
   it("keeps provider labels and keyboard configuration accessible with decorative logos", async () => {
@@ -308,7 +308,7 @@ describe("Settings providers", () => {
     };
     renderProviderManager({ initialSection: "models", initialSettings: payload });
 
-    const provider = await screen.findByRole("button", { name: "OpenAI Codex", exact: true });
+    const provider = await screen.findByRole("button", { name: "OpenAI Codex" });
     expect(within(provider).getByText("Configure")).toBeInTheDocument();
     expect(within(provider).queryByRole("img")).not.toBeInTheDocument();
     provider.focus();
@@ -316,7 +316,7 @@ describe("Settings providers", () => {
     expect(await screen.findByRole("dialog", { name: "OpenAI Codex" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
-    expect(screen.getByRole("button", { name: "OpenAI Codex", exact: true })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "OpenAI Codex" })).toHaveFocus();
     expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
@@ -327,7 +327,7 @@ describe("Settings providers", () => {
       name: "xai_grok",
       label: "xAI Grok",
       configured: false,
-      auth_type: "oauth" as const,
+      auth_type: "oauth",
       api_key_required: false,
       api_key_hint: null,
       api_base: null,
@@ -336,7 +336,7 @@ describe("Settings providers", () => {
       oauth_account: null,
       oauth_expires_at: null,
       oauth_login_supported: true,
-    };
+    } satisfies SettingsPayload["providers"][number];
     const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
     const signedIn: SettingsPayload = {
       ...payload,
@@ -442,7 +442,7 @@ describe("Settings providers", () => {
         name: "xai_grok",
         label: "xAI Grok",
         configured: false,
-        auth_type: "oauth" as const,
+        auth_type: "oauth",
         api_key_required: false,
         api_key_hint: null,
         api_base: null,
@@ -451,7 +451,7 @@ describe("Settings providers", () => {
         oauth_account: null,
         oauth_expires_at: null,
         oauth_login_supported: true,
-      };
+      } satisfies SettingsPayload["providers"][number];
       const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
       const authorization = {
         status: "authorization_required",
@@ -521,7 +521,7 @@ describe("Settings providers", () => {
       name: "openai_codex",
       label: "OpenAI Codex",
       configured: false,
-      auth_type: "oauth" as const,
+      auth_type: "oauth",
       api_key_required: false,
       api_key_hint: null,
       api_base: null,
@@ -530,7 +530,7 @@ describe("Settings providers", () => {
       oauth_account: null,
       oauth_expires_at: null,
       oauth_login_supported: true,
-    };
+    } satisfies SettingsPayload["providers"][number];
     const payload: SettingsPayload = { ...base, providers: [codexProvider] };
     const signedIn: SettingsPayload = {
       ...payload,
@@ -599,7 +599,7 @@ describe("Settings providers", () => {
         name: "openai_codex",
         label: "OpenAI Codex",
         configured: false,
-        auth_type: "oauth" as const,
+        auth_type: "oauth",
         api_key_required: false,
         api_key_hint: null,
         api_base: null,
@@ -608,7 +608,7 @@ describe("Settings providers", () => {
         oauth_account: null,
         oauth_expires_at: null,
         oauth_login_supported: true,
-      };
+      } satisfies SettingsPayload["providers"][number];
       const payload: SettingsPayload = { ...base, providers: [codexProvider] };
       const signedIn: SettingsPayload = {
         ...payload,
@@ -928,11 +928,11 @@ describe("Settings providers", () => {
     fireEvent.click(screen.getByRole("button", { name: /^DeepSeek/ }));
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to providers" }));
-    fireEvent.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI" }));
     fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(
-      screen.getByRole("button", { name: "OpenAI", exact: true }),
+      screen.getByRole("button", { name: "OpenAI" }),
     ).toBeVisible());
 
     await waitFor(() => {
@@ -999,7 +999,7 @@ describe("Settings providers", () => {
 
     renderProviderManager({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click(await screen.findByRole("button", { name: "OpenAI", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "OpenAI" }));
     const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
     expect(searchSwitch).toHaveAttribute("aria-checked", "true");
     fireEvent.click(searchSwitch);
@@ -1120,7 +1120,7 @@ describe("Settings providers", () => {
       fireEvent.click(screen.getByRole("button", { name: `${title} Not configured Edit` }));
       const editor = screen.getByRole("dialog", { name: title });
       fireEvent.change(within(editor).getByRole("textbox", { name: title }), { target: { value } });
-      fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+      fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
       await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).not.toBeInTheDocument());
     }
     fireEvent.change(screen.getByLabelText("Network proxy"), {
@@ -1192,7 +1192,7 @@ describe("Settings providers", () => {
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
     expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.create", expect.objectContaining({ api }), 20_000);
-    await user.click(screen.getByRole("button", { name: "Tenant", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Tenant" }));
     await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Anthropic Messages");
     await user.click(screen.getByRole("switch", { name: "Responses" }));
@@ -1202,7 +1202,7 @@ describe("Settings providers", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
       provider: "tenant", api: { supported_apis: ["anthropic_messages", "responses"], preferred_api: "responses" },
     }), 20_000));
-    await user.click(screen.getByRole("button", { name: "Tenant", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Tenant" }));
     await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Responses");
   });
@@ -1230,28 +1230,28 @@ describe("Settings providers", () => {
       return payload;
     });
     renderProviderManager({ initialSection: "models", initialSettings: payload });
-    await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
     expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Responses");
     await user.click(screen.getByRole("combobox", { name: "Default API" }));
-    await user.click(screen.getByRole("option", { name: "Chat Completions", exact: true }));
+    await user.click(screen.getByRole("option", { name: "Chat Completions" }));
     await user.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
     expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
       provider: "openai", api: { supported_apis: ["chat_completions"], preferred_api: "chat_completions" },
     }), 20_000);
-    await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
     await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Chat Completions");
     await user.click(screen.getByRole("combobox", { name: "Default API" }));
-    await user.click(screen.getByRole("option", { name: "Auto", exact: true }));
+    await user.click(screen.getByRole("option", { name: "Auto" }));
     await user.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
     expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
       provider: "openai", api: null,
     }), 20_000);
-    await user.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
     await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Auto");
   });
@@ -1265,7 +1265,7 @@ describe("Settings providers", () => {
       extra_body: { tools: [{ type: "web_search" }] },
     }];
     renderProviderManager({ initialSection: "models", initialSettings: payload });
-    fireEvent.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI" }));
     expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "OpenAI web search" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("API URL"), { target: { value: "https://gateway.test/v1" } });

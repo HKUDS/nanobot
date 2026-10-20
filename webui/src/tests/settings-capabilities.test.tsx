@@ -24,16 +24,16 @@ describe("Settings capabilities", () => {
     }));
     requestMutationMock.mockRejectedValueOnce(new Error("Could not save. Try again."));
     renderSettingsView({ initialSection: "image", initialSettings: payload });
-    expect(screen.getByRole("combobox", { name: "SenseNova", exact: true })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Provider", exact: true })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "SenseNova" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Provider" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     fireEvent.click(screen.getByRole("button", { name: "Body parameters Use provider settings Edit" }));
     const editor = screen.getByRole("dialog", { name: "Body parameters" });
     fireEvent.change(within(editor).getByRole("textbox", { name: "Body parameters" }), { target: { value: '{"watermark":false}' } });
-    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
     expect(await within(editor).findByRole("alert")).toHaveTextContent("Could not save. Try again.");
     expect(within(editor).getByRole("textbox")).toHaveValue('{"watermark":false}');
-    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.image_generation.update",
       expect.objectContaining({ provider: "custom-sensenova", extra_body: '{"watermark":false}' }),
@@ -64,7 +64,7 @@ describe("Settings capabilities", () => {
       fireEvent.click(within(screen.getByRole("region", { name })).getByRole("button", { name: "Configure" }));
       const dialog = screen.getByRole("dialog", { name });
       expect(within(dialog).getAllByRole("combobox").length).toBeGreaterThan(0);
-      fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
       expect(screen.getByRole("switch", { name })).not.toBeChecked();
     }
     expect(requestMutationMock).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ describe("Settings capabilities", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
     const image = within(screen.getByRole("dialog", { name: "Image generation" }));
     await waitFor(() => expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation."));
-    fireEvent.click(image.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(image.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("region", { name: "Image generation" })).toContainElement(screen.getByRole("alert"));
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
@@ -131,13 +131,13 @@ describe("Settings capabilities", () => {
     payload.runtime_config = { "tools.web.enable": true, "agents.defaults.dream.enabled": true };
     renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
     expect(screen.getAllByRole("switch")).toHaveLength(4);
-    expect(screen.getByRole("button", { name: "Capabilities", exact: true })).toHaveAttribute("aria-current", "page");
-    const editor = screen.getByRole("button", { name: "Image generation", exact: true });
+    expect(screen.getByRole("button", { name: "Capabilities" })).toHaveAttribute("aria-current", "page");
+    const editor = screen.getByRole("button", { name: "Image generation" });
     expect(editor).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(editor);
     expect(editor).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("combobox", { name: "OpenRouter", exact: true })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    expect(screen.getByRole("combobox", { name: "OpenRouter" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeChecked();
     expect(requestMutationMock).not.toHaveBeenCalled();
   });
@@ -159,7 +159,7 @@ describe("Settings capabilities", () => {
       "settings.image_generation.update", expect.objectContaining({ enabled: true }), 20_000,
     ));
     expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.image_generation.update", expect.objectContaining({
@@ -309,7 +309,7 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
     fireEvent.click(within(screen.getByRole("region", { name: "Web access" })).getByRole("button", { name: "Configure" }));
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    const proxy = screen.getByRole("textbox", { name: "Web proxy", exact: true });
+    const proxy = screen.getByRole("textbox", { name: "Web proxy" });
     expect(proxy).toHaveValue("http://old-proxy.example:8080");
     fireEvent.change(proxy, { target: { value: "http://new-proxy.example:7890" } });
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
@@ -320,10 +320,10 @@ describe("Settings capabilities", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.runtime_config.update", { values: { "tools.web.proxy": null } }, 20_000,
     ));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close" }));
     expect(screen.getByRole("switch", { name: "Web access" })).not.toBeChecked();
-    fireEvent.click(screen.getByRole("button", { name: "Advanced", exact: true }));
-    expect(screen.queryByRole("textbox", { name: "Web proxy", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.queryByRole("textbox", { name: "Web proxy" })).not.toBeInTheDocument();
   });
 
   it("saves optional-key web search providers without an API key", async () => {

@@ -4,10 +4,7 @@ import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
-function settingsPayloadWithBackup(): {
-  payload: SettingsPayload;
-  backupPreset: SettingsPayload["model_presets"][number];
-} {
+function settingsPayloadWithBackup() {
   const base = settingsPayload();
   const backupPreset = {
     ...base.model_presets[0],
@@ -36,7 +33,7 @@ function settingsPayloadWithBackup(): {
           configured: true,
         },
       ],
-    },
+    } satisfies SettingsPayload,
   };
 }
 
@@ -103,8 +100,8 @@ async function openModelPicker() {
 }
 
 function returnToPresetEditor() {
-  const advanced = screen.queryByRole("dialog", { name: "Advanced options", exact: true });
-  if (advanced) fireEvent.click(within(advanced).getByRole("button", { name: "Close", exact: true }));
+  const advanced = screen.queryByRole("dialog", { name: "Advanced options" });
+  if (advanced) fireEvent.click(within(advanced).getByRole("button", { name: "Close" }));
 }
 
 function presetSaveButton() {
@@ -133,19 +130,19 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models" });
     await openPresetAdvancedOptions();
     fireEvent.click(screen.getByRole("button", { name: "Headers Use provider settings Edit" }));
-    let editor = screen.getByRole("dialog", { name: "Headers", exact: true });
+    let editor = screen.getByRole("dialog", { name: "Headers" });
     fireEvent.change(within(editor).getByRole("textbox", { name: "Headers" }), { target: { value: '{"X-Route":"preset"}' } });
-    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
     expect(await within(editor).findByRole("alert")).toHaveTextContent("Could not save. Try again.");
     expect(within(editor).getByRole("textbox")).toHaveValue('{"X-Route":"preset"}');
-    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.model_configuration.update", { name: "primary", extra_headers: '{"X-Route":"preset"}' }, 20_000,
     ));
     fireEvent.click(await screen.findByRole("button", { name: "Headers Entries: 1 Edit" }));
-    editor = screen.getByRole("dialog", { name: "Headers", exact: true });
+    editor = screen.getByRole("dialog", { name: "Headers" });
     fireEvent.change(within(editor).getByRole("textbox", { name: "Headers" }), { target: { value: "" } });
-    fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.model_configuration.update", { name: "primary", extra_headers: "" }, 20_000,
     ));
@@ -186,7 +183,7 @@ describe("Settings models", () => {
       20_000,
     ));
     await waitFor(() => expect(presetSaveButton()).toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await openPresetAdvancedOptions();
     expect(screen.getByLabelText("API connection")).toHaveTextContent("Responses");
     fireEvent.click(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" }));
@@ -198,7 +195,7 @@ describe("Settings models", () => {
       20_000,
     ));
     await waitFor(() => expect(presetSaveButton()).toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await openPresetAdvancedOptions();
     expect(screen.getByRole("switch", { name: "Try Chat Completions if Responses is unsupported" })).toBeChecked();
     await openPopover(screen.getByLabelText("API connection"));
@@ -247,7 +244,7 @@ describe("Settings models", () => {
       20_000,
     ));
     await waitFor(() => expect(presetSaveButton()).toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await openPresetAdvancedOptions();
     expect(screen.getByLabelText("API connection")).toHaveTextContent("Anthropic Messages");
     expect(presetSaveButton()).toBeDisabled();
@@ -628,7 +625,7 @@ describe("Settings models", () => {
 
     fireEvent.click(advanced);
 
-    expect(within(screen.getByRole("dialog", { name: "Advanced options", exact: true })).getByText("Context window")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog", { name: "Advanced options" })).getByText("Context window")).toBeInTheDocument();
     expect(screen.getByText("Temperature")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue("200k");
     returnToPresetEditor();
@@ -752,7 +749,7 @@ describe("Settings models", () => {
       within(editor).getByText("Cannot delete the primary model"),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
   });
 
   it("opens advanced options in a separate dialog and preserves the preset draft", async () => {
@@ -760,14 +757,14 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
     await togglePresetEditor();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
-    const advanced = screen.getByRole("dialog", { name: "Advanced options", exact: true });
+    const advanced = screen.getByRole("dialog", { name: "Advanced options" });
     fireEvent.change(within(advanced).getByLabelText("Context window"), { target: { value: "128k" } });
-    fireEvent.click(within(advanced).getByRole("button", { name: "Close", exact: true }));
-    expect(screen.queryByRole("dialog", { name: "Advanced options", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(within(advanced).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Advanced options" })).not.toBeInTheDocument();
     expect(screen.getByTestId("model-preset-editor")).toBeVisible();
     expect(requestMutationMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
-    expect(within(screen.getByRole("dialog", { name: "Advanced options", exact: true })).getByLabelText("Context window")).toHaveValue("128k");
+    expect(within(screen.getByRole("dialog", { name: "Advanced options" })).getByLabelText("Context window")).toHaveValue("128k");
   });
 
   it.each([true, false])("closes the preset editor only after deletion succeeds (success: %s)", async (success) => {
@@ -780,10 +777,10 @@ describe("Settings models", () => {
     });
     else requestMutationMock.mockRejectedValueOnce(new Error("Delete failed"));
     renderSettingsView({ initialSection: "models", initialSettings: payload });
-    fireEvent.click(within(screen.getByTestId("model-call-order-row-backup")).getByRole("button", { name: "Configure", exact: true }));
-    fireEvent.click(within(screen.getByTestId("model-preset-editor")).getByRole("button", { name: "Delete", exact: true }));
+    fireEvent.click(within(screen.getByTestId("model-call-order-row-backup")).getByRole("button", { name: "Configure" }));
+    fireEvent.click(within(screen.getByTestId("model-preset-editor")).getByRole("button", { name: "Delete" }));
     const confirmation = screen.getByRole("dialog", { name: "Delete model preset?" });
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete", exact: true }));
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.model_configuration.delete", { name: "backup" }, 20_000,
     ));
@@ -791,7 +788,7 @@ describe("Settings models", () => {
       await waitFor(() => expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument());
       expect(screen.queryByTestId("model-call-order-row-backup")).not.toBeInTheDocument();
     } else {
-      await waitFor(() => expect(within(confirmation).getByRole("button", { name: "Delete", exact: true })).toBeEnabled());
+      await waitFor(() => expect(within(confirmation).getByRole("button", { name: "Delete" })).toBeEnabled());
       expect(screen.getByTestId("model-preset-editor")).toBeInTheDocument();
     }
   });
@@ -802,8 +799,8 @@ describe("Settings models", () => {
     payload.model_presets[0].max_tokens = 32_768;
     renderSettingsView({ initialSection: "models", initialSettings: payload, showSidebar });
 
-    expect(screen.queryAllByRole("heading", { name: "Models", exact: true })).toHaveLength(showSidebar ? 0 : 1);
-    expect(screen.getByRole("heading", { name: "Model presets", exact: true })).toHaveClass("settings-section-title");
+    expect(screen.queryAllByRole("heading", { name: "Models" })).toHaveLength(showSidebar ? 0 : 1);
+    expect(screen.getByRole("heading", { name: "Model presets" })).toHaveClass("settings-section-title");
     expect(screen.queryByRole("heading", { name: "Fallback presets" })).not.toBeInTheDocument();
     const summary = within(screen.getByTestId("model-call-order-row-primary"));
     expect(summary.getByText(`${payload.model_presets[0].model} 256K Default`)).toBeInTheDocument();
@@ -863,8 +860,8 @@ describe("Settings models", () => {
     fireEvent.change(screen.getByLabelText("Temperature"), {
       target: { value: "0.4" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     const centers = mockPresetRowLayout();
     const draggedRow = screen.getByTestId(`model-call-order-row-${name}`);
     fireEvent.pointerDown(draggedRow, { button: 0, clientY: centers[from], pointerId: 1 });
@@ -885,7 +882,7 @@ describe("Settings models", () => {
     const newPrimary = screen.getByTestId("model-call-order-row-backup");
     expect(within(newPrimary).getByText("Primary")).toBeInTheDocument();
     expect(within(newPrimary).getByText(`${backupPreset.model} 200K Default`)).toBeInTheDocument();
-    fireEvent.click(within(screen.getByTestId("model-call-order-row-primary")).getByRole("button", { name: "Configure", exact: true }));
+    fireEvent.click(within(screen.getByTestId("model-call-order-row-primary")).getByRole("button", { name: "Configure" }));
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     expect(screen.getByLabelText("Temperature")).toHaveValue(0.4);
     expect(presetSaveButton()).toBeEnabled();
@@ -979,8 +976,8 @@ describe("Settings models", () => {
     fireEvent.click(secondBackupTrigger);
     expect(screen.getAllByTestId("model-preset-editor")).toHaveLength(1);
     expect(screen.getByRole("dialog", { name: "backup" })).toContainElement(screen.getByTestId("model-preset-editor"));
-    expect(screen.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     const centers = mockPresetRowLayout();
     fireEvent.pointerDown(primaryRow, { button: 0, clientY: centers[1], pointerId: 1 });
@@ -1179,7 +1176,7 @@ describe("Settings models", () => {
       );
     });
     const writerRow = await screen.findByTestId("model-call-order-row-Writer");
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(within(writerRow).getByRole("switch", { name: "Disable preset" })).toBeChecked();
     expect(screen.getAllByText("Writer").length).toBeGreaterThan(0);
   });
@@ -1567,9 +1564,9 @@ describe("Settings models", () => {
     const providerPicker = await screen.findByRole("combobox", { name: /DeepSeek/ });
     fireEvent.keyDown(providerPicker, { key: "ArrowDown" });
 
-    expect(await screen.findByRole("option", { name: "DeepSeek", exact: true })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "OpenAI Codex", exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "GitHub Copilot", exact: true })).not.toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "DeepSeek" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "OpenAI Codex" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "GitHub Copilot" })).not.toBeInTheDocument();
   });
 
   it("does not fetch model lists for unsigned OAuth providers", async () => {
@@ -1938,7 +1935,7 @@ describe("Settings models", () => {
     );
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     await waitFor(() => expect(modelInput).toHaveFocus());
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(within(screen.getByTestId("model-call-order-row-primary")).getAllByRole("button")[0]).toBeVisible());
   });
 
@@ -2057,15 +2054,15 @@ describe("Settings models", () => {
     await togglePresetEditor();
     const input = screen.getByRole("combobox", { name: "Reasoning effort" });
     fireEvent.click(input);
-    fireEvent.click(await screen.findByRole("option", { name: "max", exact: true }));
+    fireEvent.click(await screen.findByRole("option", { name: "max" }));
     await waitFor(() => expect(input).toHaveValue("max"));
     fireEvent.click(input);
-    expect(screen.queryByRole("option", { name: "ultra", exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "medium", exact: true })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("option", { name: "none", exact: true }));
+    expect(screen.queryByRole("option", { name: "ultra" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "medium" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "none" }));
     await waitFor(() => expect(input).toHaveValue("none"));
     fireEvent.click(input);
-    fireEvent.click(screen.getByRole("option", { name: "Default", exact: true }));
+    fireEvent.click(screen.getByRole("option", { name: "Default" }));
     await waitFor(() => expect(input).toHaveValue(""));
     fireEvent.click(input);
     fireEvent.change(input, { target: { value: "provider-native-mode" } });
