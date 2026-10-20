@@ -6,6 +6,7 @@ import { copyWithSystemClipboard } from "../../platform/clipboard"
 import { hideScrollbars } from "../scrollbox"
 import { diagramCellSize, diagramProtocol, type DiagramOwner, type MermaidBlock } from "./block"
 import { diagramFrame } from "./geometry"
+import { diagramLayoutKey, type DiagramLayoutLease } from "./cache"
 import type { DiagramImage, DiagramLayout } from "./types"
 
 /** A read-only overlay: opening it never edits the composer or transcript scroll. */
@@ -23,7 +24,7 @@ export class DiagramViewer {
   private releaseWorker: (() => void) | null = null
   private native: NativeImage | null = null
   private item: MermaidBlock | null = null
-  private layout: DiagramLayout | null = null
+  private layoutLease: DiagramLayoutLease | null = null
   private frameKey = ""
   private wantedKey = ""
   private picture: ImageRenderable | null = null
@@ -66,6 +67,7 @@ export class DiagramViewer {
   }
 
   get visible(): boolean { return this.root.visible }
+  private get layout(): DiagramLayout | null { return this.layoutLease?.layout ?? null }
 
   show(items: MermaidBlock[], selected: number): void {
     this.items = items
@@ -86,8 +88,8 @@ export class DiagramViewer {
     this.sourceText.content = ""
   }
 
-  clear(): void { this.hide(); this.releaseImage() }
-  evict(item: MermaidBlock): void { if (this.item === item) { this.releaseImage(); this.showMode() } }
+  clear(): void { this.hide(); this.releaseImage(); this.item = null }
+  evict(item: MermaidBlock): void { if (this.item === item) { this.item = null; this.releaseImage(); this.showMode() } }
 
   setTheme(): void {
     const colors = this.owner.colors()
@@ -137,7 +139,7 @@ export class DiagramViewer {
     if (!reuse) {
       this.releaseImage()
       this.item = item ?? null
-      this.layout = item?.renderedLayout ?? null
+      this.layoutLease = item?.borrowLayout() ?? null
       this.zoom = 1
       this.panX = this.panY = 0
     }
@@ -189,7 +191,7 @@ export class DiagramViewer {
     const viewport = { width: this.viewport.width * cellWidth, height: this.viewport.height * cellHeight, cellWidth, cellHeight }
     this.panX = Math.max(0, Math.min(1, this.panX))
     this.panY = Math.max(0, Math.min(1, this.panY))
-    this.layout ??= item.layoutFor(viewport.width)
+    this.layoutLease ??= this.owner.layouts.acquire(diagramLayoutKey({ source: item.source, width: viewport.width, colors: this.owner.colors() }))
     const frame = this.layout ? diagramFrame(this.layout, viewport, this.zoom, this.panX, this.panY) : null
     const key = JSON.stringify(frame ?? [viewport, this.zoom, this.panX, this.panY])
     this.wantedKey = key
@@ -212,7 +214,7 @@ export class DiagramViewer {
       if (this.request !== request || !this.visible) return
       if ("layout" in image) {
         const rendered = image.layout as DiagramLayout
-        this.layout = item.keepLayout(rendered, viewport.width)
+        this.layoutLease = this.owner.layouts.store(diagramLayoutKey({ source: item.source, width: viewport.width, colors: this.owner.colors() }), rendered)
       }
       if (this.wantedKey === key && (layout || initialFit)) {
         this.installImage(image, cellWidth, cellHeight, protocol)
@@ -278,8 +280,8 @@ export class DiagramViewer {
     if (this.picture) { this.viewport.remove(this.picture); this.picture.destroyRecursively(); this.picture = null }
     this.native?.dispose()
     this.native = null
-    this.item = null
-    this.layout = null
+    this.layoutLease?.release()
+    this.layoutLease = null
     this.frameKey = this.wantedKey = ""
     if (this.pixels) this.owner.release(this.pixels)
     this.pixels = 0

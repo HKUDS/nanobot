@@ -180,6 +180,12 @@ test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("source-only and cancelled
     expect(second.killed).toBe(true)
     expect(setup.captureCharFrame()).toContain("Rendering cancelled")
     expect(setup.captureCharFrame()).toContain("A[中文长标签 English]")
+    setup.mockInput.pressKey("s")
+    await setup.flush()
+    await waitUntil(() => images(transcript.diagrams.viewer.root).some(image => image.image !== null), 5000)
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("150% fit")
+    expect(spawn).toHaveBeenCalledTimes(3)
     transcript.reset({ workspace: "next session", version: "test" })
     expect(transcript.diagrams.layouts.retainedBytes).toBe(0)
   } finally { transcript.diagrams.jobs.dispose(); spawn.mockRestore() }
@@ -227,3 +233,60 @@ test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("offscreen return and cell
     expect(transcript.diagrams.layouts.retainedBytes).toBe(0)
   } finally { render.mockRestore(); raster.mockRestore() }
 }, 20_000)
+
+
+test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("viewer navigation releases old layout pins under the real transcript budget", async () => {
+  setup = await createTestRenderer({ width: 100, height: 42 })
+  Object.defineProperty(setup.renderer, "capabilities", { value: { kitty_graphics: true, multiplexer: "none", image_protocol: "auto" } })
+  Object.defineProperty(setup.renderer, "resolution", { value: { width: 1000, height: 840 } })
+  const app = mount(setup)
+  const transcript = (app as unknown as { transcript: Transcript }).transcript
+  for (let index = 0; index < 8; index++) {
+    const source = `flowchart TD\n${Array.from({ length: 40 }, (_, i) => `A${i}["数据库请求处理权限验证任务执行记录完成 ${index}-${i}"]`).join("\n")}\n${Array.from({ length: 39 }, (_, i) => `A${i} --> A${i + 1}`).join("\n")}`
+    app.accept({ event: "stream_end", chat_id: "chat", text: `Graph ${index + 1}\n\n\`\`\`mermaid\n${source}\n\`\`\`\n\nEnd of graph ${index + 1}` })
+  }
+  await setup.flush()
+  await waitUntil(() => images(transcript.root).some(image => image.image !== null), 5000)
+  const preview = images(transcript.root)[0]!
+  setup.mockInput.pressKey("\x07")
+  await setup.flush()
+  const note = setup.renderer.root.findDescendantById("diagrams-note") as TextRenderable
+  const ready = () => images(transcript.diagrams.viewer.root).some(image => image.image !== null)
+    || note.content.chunks.some(chunk => chunk.text.includes("original source"))
+  await waitUntil(ready, 5000)
+  expect(images(transcript.diagrams.viewer.root)).toHaveLength(1)
+  for (const direction of ["[", "]"]) {
+    for (let index = 0; index < 7; index++) {
+      setup.mockInput.pressKey(direction)
+      await setup.flush()
+      await waitUntil(ready, 5000)
+      expect(images(transcript.diagrams.viewer.root)).toHaveLength(1)
+      expect(transcript.diagrams.layouts.retainedBytes).toBeLessThanOrEqual(4_000_000)
+    }
+  }
+  expect(preview.visible).toBe(false)
+  setup.mockInput.pressKey("q")
+  await setup.flush()
+  expect(images(transcript.root)[0]).toBe(preview)
+  expect(preview.visible).toBe(true)
+}, 25_000)
+
+
+test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("source/image retry after a parser failure keeps the original source visible", async () => {
+  setup = await createTestRenderer({ width: 100, height: 42 })
+  Object.defineProperty(setup.renderer, "capabilities", { value: { kitty_graphics: true, multiplexer: "none", image_protocol: "auto" } })
+  const app = mount(setup)
+  const transcript = (app as unknown as { transcript: Transcript }).transcript
+  app.accept({ event: "stream_end", chat_id: "chat", text: "```mermaid\ngraph TD\n A -->\n```" })
+  await setup.flush()
+  setup.mockInput.pressKey("\x07")
+  await setup.flush()
+  const sourceScroll = setup.renderer.root.findDescendantById("diagrams-source-scroll")!
+  await waitUntil(() => sourceScroll.visible && transcript.diagrams.jobs.idle, 5000)
+  setup.mockInput.pressKey("s")
+  await setup.flush()
+  await waitUntil(() => sourceScroll.visible && transcript.diagrams.jobs.idle, 5000)
+  await setup.flush()
+  expect(setup.captureCharFrame()).toContain("original source")
+  expect(setup.captureCharFrame()).toContain("A -->")
+}, 15_000)

@@ -76,7 +76,11 @@ export class MermaidBlock extends BoxRenderable {
       ? this.native.retain() : null
   }
 
-  layoutFor(width: number): DiagramLayout | null {
+  borrowLayout(): DiagramLayoutLease | null {
+    return this.layoutLease ? this.owner.layouts.acquire(this.layoutLease.key) : null
+  }
+
+  private layoutFor(width: number): DiagramLayout | null {
     const key = diagramLayoutKey({ source: this.source, width, colors: this.owner.colors() })
     if (this.layoutLease?.key !== key) {
       this.layoutLease?.release()
@@ -85,7 +89,7 @@ export class MermaidBlock extends BoxRenderable {
     return this.renderedLayout
   }
 
-  keepLayout(layout: DiagramLayout, width: number): DiagramLayout {
+  private keepLayout(layout: DiagramLayout, width: number): DiagramLayout {
     if (this.renderedLayout === layout) return layout
     this.layoutLease?.release()
     this.layoutLease = null
