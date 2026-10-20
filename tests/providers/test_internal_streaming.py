@@ -214,6 +214,7 @@ async def test_runner_streams_past_old_wall_limit_with_optional_ui(
 @pytest.mark.parametrize("finalize", [False, True], ids=["model-request", "finalization"])
 async def test_chat_only_provider_still_has_a_timeout(monkeypatch, finalize):
     monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0.05")
+    started = asyncio.Event()
 
     class ChatOnlyProvider(LLMProvider):
         _CHAT_RETRY_DELAYS = ()
@@ -232,17 +233,24 @@ async def test_chat_only_provider_still_has_a_timeout(monkeypatch, finalize):
                     content=None, finish_reason="tool_calls",
                     tool_calls=[ToolCallRequest(id="call", name="missing", arguments={})],
                 )
+            started.set()
             await asyncio.Event().wait()
 
     provider = ChatOnlyProvider()
-    result = await asyncio.wait_for(AgentRunner().run(AgentRunSpec(
+    task = asyncio.create_task(AgentRunner().run(AgentRunSpec(
         initial_messages=[{"role": "user", "content": "work"}],
         tools=ToolRegistry(),
         runtime=LLMRuntime.capture(provider, "test", context_window_tokens=128_000),
         max_iterations=1, max_tool_result_chars=1_000,
         consolidate_history=failed_test_consolidator,
         max_iterations_message="Tool budget exhausted.",
-    )), timeout=1)
+    )))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        result = await asyncio.wait_for(task, timeout=1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
     assert provider.calls == (2 if finalize else 1)
     assert result.stop_reason == ("max_iterations" if finalize else "error")
     if finalize:
