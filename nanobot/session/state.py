@@ -981,7 +981,7 @@ class SessionState:
                 copied = self._store.copy_history_prefix(source_key, target, before_user_index)
                 if not copied and history_projection is not None:
                     facts = history_projection(target)
-                    facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY))
+                    facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
                     self._store.append_history(target.key, facts, expected_generation=target.generation)
                 return target
 

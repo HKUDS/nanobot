@@ -519,7 +519,7 @@ class SqliteSessionStore:
         facts = self.project_history(source_key, select)
         if facts is None:
             return False
-        facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY))
+        facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
         self.append_history(target.key, facts, expected_generation=target.generation)
         return True
 

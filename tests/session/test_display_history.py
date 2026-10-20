@@ -325,3 +325,34 @@ async def test_legacy_activity_without_record_timestamps_preserves_file_time(tmp
     assert datetime.fromisoformat(rows[0]["updated_at"]).timestamp() == 1760000000
     assert rows[0]["preview"] == "historical display activity"
     await sessions.state.aclose()
+
+
+@pytest.mark.parametrize("stored_display", [False, True])
+async def test_new_fork_activity_uses_creation_time_not_inherited_history(tmp_path, stored_display):
+    from datetime import datetime
+
+    from nanobot.webui.session_list_index import list_webui_sessions
+
+    sessions = _manager(tmp_path)
+    source = await sessions.state.get("websocket:old-source")
+    old_time = datetime(2020, 1, 1)
+    source.add_message("user", "old question", timestamp=old_time.isoformat())
+    source.add_message("assistant", "old answer", timestamp=old_time.isoformat())
+    await sessions.state.finish_turn(source)
+    if stored_display:
+        old_ms = int(old_time.timestamp() * 1000)
+        await sessions.state.append_history(source.key, [
+            HistoryFact(HistoryKind.INPUT, {"text": "old question"}, created_at_ms=old_ms),
+            HistoryFact(HistoryKind.ANSWER, {"text": "old answer"}, created_at_ms=old_ms),
+            HistoryFact(HistoryKind.COMPLETION, created_at_ms=old_ms),
+        ], expected_generation=source.generation)
+    forked = await create_webui_chat_fork(sessions, source_chat_id="old-source", before_user_index=1)
+    assert forked is not None
+    _, fork_key = forked
+    fork = await sessions.state.get(fork_key)
+    facts = await sessions.state.project_history(fork_key, lambda history: history.all_facts())
+    assert facts[-1].kind is HistoryKind.FORK_BOUNDARY
+    assert facts[-1].created_at_ms == int(fork.created_at.timestamp() * 1000)
+    rows = list_webui_sessions(sessions, await sessions.state.list_metadata())
+    assert rows[0]["key"] == fork_key
+    await sessions.state.aclose()
