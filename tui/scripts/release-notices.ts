@@ -92,7 +92,6 @@ async function readPackageNotice(path: string): Promise<PackageNotice> {
       ["fontkit@2.0.4", "README.md"], ["dfa@1.2.0", "README.md"], ["brotli@1.3.3", "readme.md"],
     ]).get(`${manifest.name}@${manifest.version}`)
     if (readme && manifest.license === "MIT") licenseNames.push(readme)
-    // resvg's platform tarballs omit the MPL text shipped by the matching wrapper.
     else if (typeof manifest.name === "string" && manifest.name.startsWith("@resvg/resvg-js-") && manifest.version === "2.6.2") {
       const wrapper = JSON.parse(await readFile(join(path, "..", "resvg-js", "package.json"), "utf8")) as PackageManifest
       if (wrapper.version !== manifest.version || wrapper.license !== manifest.license) throw new Error("resvg native license version mismatch")
@@ -123,7 +122,7 @@ const sections = [
   "Runtime: Bun 1.3.13",
   "The release archive also contains SOURCE_OFFER.md, RELINKING.md, and the complete TUI application source.",
   "fontkit 2.0.4, dfa 1.2.0 and brotli 1.3.3 declare MIT in their included README notices.",
-  "resvg's unmodified platform binding uses the MPL-2.0 text from its version-matched wrapper; upstream source is listed in RELINKING.md.",
+  "resvg's unmodified native binding includes its upstream MPL-2.0 text; source is listed in RELINKING.md.",
   "",
   "===== nanobot project license =====",
   "",

@@ -4,7 +4,9 @@ import {
 } from "@opentui/core"
 import { copyWithSystemClipboard } from "../../platform/clipboard"
 import { hideScrollbars } from "../scrollbox"
-import { diagramProtocol, type DiagramOwner, type MermaidBlock } from "./block"
+import { diagramCellSize, diagramProtocol, type DiagramOwner, type MermaidBlock } from "./block"
+import { diagramFrame } from "./geometry"
+import type { DiagramImage, DiagramLayout } from "./types"
 
 /** A read-only overlay: opening it never edits the composer or transcript scroll. */
 export class DiagramViewer {
@@ -18,7 +20,12 @@ export class DiagramViewer {
   private items: MermaidBlock[] = []
   private selected = 0
   private request: AbortController | null = null
-  private original: NativeImage | null = null
+  private releaseWorker: (() => void) | null = null
+  private native: NativeImage | null = null
+  private item: MermaidBlock | null = null
+  private layout: DiagramLayout | null = null
+  private frameKey = ""
+  private wantedKey = ""
   private picture: ImageRenderable | null = null
   private pixels = 0
   private zoom = 1
@@ -70,24 +77,31 @@ export class DiagramViewer {
   hide(): void {
     this.root.visible = false
     this.revision++
-    this.releaseImage()
+    this.request?.abort()
+    this.request = null
+    this.owner.restorePreviews()
+    this.releaseWorker?.()
+    this.releaseWorker = null
     this.items = []
     this.sourceText.content = ""
   }
+
+  clear(): void { this.hide(); this.releaseImage() }
+  evict(item: MermaidBlock): void { if (this.item === item) { this.releaseImage(); this.showMode() } }
 
   setTheme(): void {
     const colors = this.owner.colors()
     this.header.fg = colors.foreground
     this.sourceText.fg = colors.foreground
     this.note.fg = this.footer.fg = colors.muted
-    if (this.visible) this.load()
+    if (this.visible) this.load(true)
   }
 
   handleKey(key: KeyEvent): void {
     if (key.name === "escape" || (!key.ctrl && key.name === "q")) { this.hide(); this.onClose?.(); return }
     if (key.ctrl || key.meta) return
     if (key.name === "c") { void this.copy(); return }
-    if (key.name === "s") { this.sourceMode = !this.sourceMode; this.showMode(); return }
+    if (key.name === "s") { this.sourceMode = !this.sourceMode; this.showMode(); this.paint(); return }
     if (key.name === "x") {
       this.releaseImage()
       this.sourceMode = true
@@ -95,7 +109,7 @@ export class DiagramViewer {
       this.showMode()
       return
     }
-    if (key.name === "r") { this.load(); return }
+    if (key.name === "r") { this.load(true); return }
     if (this.items.length && (key.name === "[" || key.name === "]")) {
       this.selected = (this.selected + (key.name === "[" ? -1 : 1) + this.items.length) % this.items.length
       this.load()
@@ -116,12 +130,17 @@ export class DiagramViewer {
     this.paint()
   }
 
-  private load(): void {
+  private load(force = false): void {
     const item = this.items[this.selected]
     this.revision++
-    this.releaseImage()
-    this.zoom = 1
-    this.panX = this.panY = 0
+    const reuse = !force && item === this.item && this.layout === item?.renderedLayout && this.picture
+    if (!reuse) {
+      this.releaseImage()
+      this.item = item ?? null
+      this.layout = item?.renderedLayout ?? null
+      this.zoom = 1
+      this.panX = this.panY = 0
+    }
     this.sourceMode = false
     this.header.content = this.items.length ? `Mermaid ${this.selected + 1}/${this.items.length}` : "Mermaid"
     this.sourceText.content = item?.source || "No Mermaid diagrams in this conversation."
@@ -140,27 +159,20 @@ export class DiagramViewer {
       this.showMode()
       return
     }
-    this.note.content = "Rendering… · x cancel · s source"
-    const request = new AbortController()
-    this.request = request
-    void this.owner.jobs.render({ source: item.source, width: Math.min(1600, Math.max(100, this.renderer.width * 10)), scale: 2, colors: this.owner.colors() }, request.signal)
-      .then(image => {
-        if (this.request !== request || !this.visible) return
-        // Reserve both the original and one worst-case extracted view.
-        const pixels = image.width * image.height * 2
-        if (!this.owner.reserve(pixels)) throw new Error("Visible image memory limit")
-        this.pixels = pixels
-        this.original = NativeImage.decode(image.png)
-        this.paint()
-      })
-      .catch(error => {
-        if (this.request !== request || request.signal.aborted || !this.visible) return
-        this.fail(error instanceof Error ? error.message : "Rendering failed")
-      })
-      .finally(() => { if (this.request === request) this.request = null })
+    if (reuse) this.describeFrame()
+    else this.note.content = "Rendering… · x cancel · s source"
+    this.paint()
   }
 
   private showMode(): void {
+    if (this.visible && !this.sourceMode && this.item?.settled && diagramProtocol(this.renderer)) {
+      this.releaseWorker ??= this.owner.jobs.retainWorker()
+    } else {
+      this.request?.abort()
+      this.request = null
+      this.releaseWorker?.()
+      this.releaseWorker = null
+    }
     this.sourceScroll.visible = this.sourceMode
     this.viewport.visible = !this.sourceMode
     this.footer.content = !this.items.length ? "q/esc back" : this.renderer.width < 85
@@ -170,33 +182,75 @@ export class DiagramViewer {
   }
 
   private paint(): void {
-    const original = this.original
+    const item = this.item
     const protocol = diagramProtocol(this.renderer)
-    if (!original || !protocol || !this.visible || this.viewport.width < 1 || this.viewport.height < 1) return
-    const cellWidth = this.renderer.resolution ? this.renderer.resolution.width / this.renderer.width : 10
-    const cellHeight = this.renderer.resolution ? this.renderer.resolution.height / this.renderer.height : 20
-    const width = this.viewport.width * cellWidth
-    const height = this.viewport.height * cellHeight
-    const fit = Math.min(width / original.width, height / original.height)
-    const scale = fit * this.zoom
-    const cropWidth = Math.min(original.width, Math.max(1, Math.floor(width / scale)))
-    const cropHeight = Math.min(original.height, Math.max(1, Math.floor(height / scale)))
+    if (!item?.settled || !protocol || !this.visible || this.sourceMode || this.viewport.width < 1 || this.viewport.height < 1) return
+    const { width: cellWidth, height: cellHeight } = diagramCellSize(this.renderer)
+    const viewport = { width: this.viewport.width * cellWidth, height: this.viewport.height * cellHeight, cellWidth, cellHeight }
     this.panX = Math.max(0, Math.min(1, this.panX))
     this.panY = Math.max(0, Math.min(1, this.panY))
-    const crop = original.extract({
-      left: Math.round((original.width - cropWidth) * this.panX), top: Math.round((original.height - cropHeight) * this.panY),
-      width: cropWidth, height: cropHeight,
+    this.layout ??= item.layoutFor(viewport.width)
+    const frame = this.layout ? diagramFrame(this.layout, viewport, this.zoom, this.panX, this.panY) : null
+    const key = JSON.stringify(frame ?? [viewport, this.zoom, this.panX, this.panY])
+    this.wantedKey = key
+    if (this.frameKey === key || this.request) return
+    const borrowed = frame && item.borrowImage(frame)
+    if (borrowed) {
+      this.installImage(borrowed, cellWidth, cellHeight, protocol)
+      this.frameKey = key
+      this.describeFrame()
+      return
+    }
+    const request = new AbortController()
+    this.request = request
+    const layout = this.layout
+    const initialFit = this.zoom === 1 && this.panX === 0 && this.panY === 0
+    const work = layout
+      ? this.owner.jobs.raster(layout, diagramFrame(layout, viewport, this.zoom, this.panX, this.panY), request.signal)
+      : this.owner.jobs.render({ source: item.source, width: viewport.width, scale: 1, viewport, colors: this.owner.colors() }, request.signal)
+    void work.then(image => {
+      if (this.request !== request || !this.visible) return
+      if ("layout" in image) {
+        const rendered = image.layout as DiagramLayout
+        this.layout = item.keepLayout(rendered, viewport.width)
+      }
+      if (this.wantedKey === key && (layout || initialFit)) {
+        this.installImage(image, cellWidth, cellHeight, protocol)
+        this.frameKey = JSON.stringify(frame ?? diagramFrame(this.layout!, viewport, this.zoom, this.panX, this.panY))
+        this.describeFrame()
+      }
+    }).catch(error => {
+      if (this.request !== request || request.signal.aborted || !this.visible) return
+      this.fail(error instanceof Error ? error.message : "Rendering failed")
+    }).finally(() => {
+      if (this.request !== request) return
+      this.request = null
+      // At most one frame in flight. Rapid keys replace demand, not the process or queue.
+      this.paint()
     })
+  }
+
+  private describeFrame(): void {
+    this.note.content = `${Math.round(this.zoom * 100)}% fit · ${this.layout!.width}×${this.layout!.height}px · pan ${Math.round(this.panX * 100)}%,${Math.round(this.panY * 100)}%`
+  }
+
+  private installImage(image: DiagramImage | NativeImage, cellWidth: number, cellHeight: number, protocol: "kitty" | "sixel"): void {
+    const pixels = image instanceof NativeImage ? 0 : image.width * image.height
+    if (!this.owner.reserve(pixels)) throw new Error("Visible image memory limit")
+    let native: NativeImage
+    try { native = image instanceof NativeImage ? image : NativeImage.decode(image.png) }
+    catch (error) { this.owner.release(pixels); throw error }
     if (this.picture) { this.viewport.remove(this.picture); this.picture.destroyRecursively() }
+    this.native?.dispose()
+    this.owner.release(this.pixels)
+    this.native = native
+    this.pixels = pixels
     this.picture = new ImageRenderable(this.renderer, {
-      id: "diagrams-picture", source: crop,
-      width: Math.max(1, Math.min(this.viewport.width, Math.ceil(cropWidth * scale / cellWidth))),
-      height: Math.max(1, Math.min(this.viewport.height, Math.ceil(cropHeight * scale / cellHeight))),
+      id: "diagrams-picture", source: native,
+      width: Math.round(image.width / cellWidth), height: Math.round(image.height / cellHeight),
       protocol, fit: "fill", onError: () => this.fail("Terminal image load failed"),
     })
-    crop.dispose()
     this.viewport.add(this.picture)
-    this.note.content = `${Math.round(this.zoom * 100)}% fit · ${original.width}×${original.height}px · pan ${Math.round(this.panX * 100)}%,${Math.round(this.panY * 100)}%`
   }
 
   private fail(message: string): void {
@@ -222,8 +276,11 @@ export class DiagramViewer {
     this.request?.abort()
     this.request = null
     if (this.picture) { this.viewport.remove(this.picture); this.picture.destroyRecursively(); this.picture = null }
-    this.original?.dispose()
-    this.original = null
+    this.native?.dispose()
+    this.native = null
+    this.item = null
+    this.layout = null
+    this.frameKey = this.wantedKey = ""
     if (this.pixels) this.owner.release(this.pixels)
     this.pixels = 0
   }

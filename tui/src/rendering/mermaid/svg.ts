@@ -11,7 +11,7 @@ const parse: typeof import("css-tree").parse = parseRuntime
 const walk: typeof import("css-tree").walk = walkRuntime
 const generate: typeof import("css-tree").generate = generateRuntime
 import type { DiagramInput } from "./types"
-import { OUTPUT_LIMIT } from "./types"
+import { DIAGRAM_FONT_SIZE, OUTPUT_LIMIT } from "./types"
 
 const elements = new Set([
   "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
@@ -86,7 +86,7 @@ export function resolveDiagramSvg(svg: string, input: DiagramInput, family: stri
     }
   }
   root.setAttribute("font-family", family)
-  root.setAttribute("font-size", "18")
+  root.setAttribute("font-size", String(DIAGRAM_FONT_SIZE))
   const output = new XMLSerializer().serializeToString(document)
   if (Buffer.byteLength(output) > OUTPUT_LIMIT) throw new Error("SVG output limit")
   return output
