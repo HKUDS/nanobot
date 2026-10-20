@@ -1194,7 +1194,7 @@ class WebSearchTool(Tool):
                 from ddgs import DDGSException  # pyright: ignore[reportUnknownVariableType]
             except ImportError:  # pragma: no cover - only on unexpected ddgs versions
 
-                class DDGSException(Exception):  # type: ignore[no-redef]
+                class DDGSException(Exception):  # type: ignore[no-redef]  # noqa: N818
                     pass
 
         ddgs_type = cast(Any, DDGS)
