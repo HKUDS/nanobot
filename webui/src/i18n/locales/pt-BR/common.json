@@ -1976,8 +1976,6 @@
     "history": {
       "loading": "Carregando mensagens anteriores…",
       "exhausted": "Não há mensagens anteriores",
-      "error": "Falha ao carregar.",
-      "retry": "Tentar novamente",
       "retryLabel": "Falha ao carregar. Tentar novamente"
     },
     "forkedFromHistory": "Bifurcado a partir do histórico",

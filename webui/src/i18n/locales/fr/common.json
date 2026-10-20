@@ -1962,8 +1962,6 @@
     "history": {
       "loading": "Chargement des messages précédents…",
       "exhausted": "Aucun message plus ancien",
-      "error": "Échec du chargement.",
-      "retry": "Réessayer",
       "retryLabel": "Échec du chargement. Réessayer"
     },
     "forkedFromHistory": "Bifurqué depuis l'historique",

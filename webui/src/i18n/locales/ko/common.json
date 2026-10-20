@@ -1962,8 +1962,6 @@
     "history": {
       "loading": "이전 메시지를 불러오는 중…",
       "exhausted": "이전 메시지가 없습니다",
-      "error": "불러오지 못했습니다.",
-      "retry": "다시 시도",
       "retryLabel": "불러오지 못했습니다. 다시 시도"
     },
     "forkedFromHistory": "기록에서 분기됨",

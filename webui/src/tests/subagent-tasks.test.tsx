@@ -174,21 +174,34 @@ describe("session-owned task UI", () => {
     expect(await within(screen.getByRole("dialog")).findByText("Latest child response")).toBeVisible();
   });
 
-  it("retries a failed history read through the shared history controls", async () => {
-    let offline = true;
+  it("shares history loading, actual failure details and keyboard retry with the main thread", async () => {
+    let rejectRead!: (reason: Error) => void;
+    let resolveRead!: (value: Response) => void;
+    let reads = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (!url.endsWith("/webui-thread")) return response([task()]);
-      if (offline) throw new Error("offline");
-      return childThread("Recovered child response");
+      reads += 1;
+      return new Promise<Response>((resolve, reject) => { resolveRead = resolve; rejectRead = reject; });
     }));
     const user = userEvent.setup();
     render(layout({ historyEnabled: true }));
     await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
     const detail = screen.getByRole("dialog");
-    expect(await within(detail).findByRole("alert")).toHaveTextContent("Loading failed.");
-    offline = false;
-    await user.click(within(detail).getByRole("button", { name: "Retry" }));
+    const loading = within(detail).getByRole("status");
+    expect(loading.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    expect(loading.closest(".thread-history-status")).toHaveAttribute("data-state", "loading");
+    await act(async () => { rejectRead(new Error("offline")); });
+    const retry = await within(detail).findByRole("button", { name: "Loading failed. Retry" });
+    expect(retry.closest(".thread-history-status")).toHaveAttribute("data-state", "error");
+    expect(retry.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    act(() => { retry.focus(); });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("offline");
+    await user.keyboard("{Enter}");
+    expect(reads).toBe(2);
+    expect(within(detail).getByRole("status").closest(".thread-history-status")).toHaveAttribute("data-state", "loading");
+    await act(async () => { resolveRead(childThread("Recovered child response")); });
     expect(await within(detail).findByText("Recovered child response")).toBeVisible();
+    expect(within(detail).queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("keeps the same work block under its prompt, folds completed work and restores it after refresh", async () => {

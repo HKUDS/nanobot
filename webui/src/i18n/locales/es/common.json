@@ -1963,8 +1963,6 @@
     "history": {
       "loading": "Cargando mensajes anteriores…",
       "exhausted": "No hay mensajes anteriores",
-      "error": "Error al cargar.",
-      "retry": "Reintentar",
       "retryLabel": "Error al cargar. Reintentar"
     },
     "forkedFromHistory": "Bifurcado desde el historial",

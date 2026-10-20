@@ -105,7 +105,7 @@ function SubagentPreview() {
   return <div className="space-y-4">
     <StatePicker label="子任务会话状态" value={mode} options={["ready", "running", "loading", "error"]} onChange={setMode} />
     <div className="max-h-96 overflow-y-auto rounded-control border py-4">
-      <SubagentThreadView messages={messages} loading={mode === "loading"} failed={mode === "error"} isStreaming={mode === "running"}
+      <SubagentThreadView messages={messages} loading={mode === "loading"} error={mode === "error" ? "示例历史加载失败。" : null} isStreaming={mode === "running"}
         activeTurnId={mode === "running" ? "gallery-child-turn" : null} runStartedAt={startedAt / 1000}
         onRetry={() => { setRetries((value) => value + 1); setMode("ready"); }} />
     </div>
@@ -124,6 +124,6 @@ export const contentExamples: ComponentExample[] = [
     description: "查看任务列表，编辑、停用和删除任务，并切换加载和错误状态。", options: "jobs、loading、loadFailed 和 now 来自调用方；onAction 与 onEdit 返回更新后的任务快照；界面负责弹窗衔接、焦点恢复和操作反馈。",
     code: '<SessionInfoPopoverView title={title} jobs={jobs} loading={loading} loadFailed={failed} now={now} onAction={act} onEdit={edit} onOpenCalendar={openCalendar} />' },
   { title: "SubagentThreadView · 子任务消息", files: ["webui/src/components/thread/SubagentThreadView.tsx"], Preview: SubagentPreview,
-    description: "查看子任务消息、推理活动、加载和失败状态，试用重试回调。", options: "messages 已由运行时投影；loading 和 failed 控制提示；isStreaming 与 activeTurnId 决定当前活动。界面不获取任务历史。",
-    code: '<SubagentThreadView messages={messages} loading={loading} failed={failed} isStreaming={running} runStartedAt={startedAt} onRetry={retry} />' },
+    description: "查看子任务消息、推理活动、加载和失败状态，试用重试回调。", options: "messages 已由运行时投影；loading 和 error 复用历史加载组件；isStreaming 与 activeTurnId 决定当前活动。界面不获取任务历史。",
+    code: '<SubagentThreadView messages={messages} loading={loading} error={error} isStreaming={running} runStartedAt={startedAt} onRetry={retry} />' },
 ];

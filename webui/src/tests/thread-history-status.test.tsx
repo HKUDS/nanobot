@@ -34,7 +34,7 @@ describe("ThreadHistoryStatus", () => {
     const { container, rerender } = render(<ThreadHistoryStatus loading={false} error="offline" onRetry={onRetry} />);
     const retry = screen.getByRole("button", { name: "Loading failed. Retry" });
     expect(retry.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
-    expect(screen.getByText("Loading failed.")).toHaveClass("sr-only");
+    expect(screen.getByText("Loading failed. Retry")).toHaveClass("sr-only");
     fireEvent.focus(retry);
     expect(screen.getByRole("tooltip")).toHaveTextContent("offline");
     fireEvent.click(retry);

@@ -1962,8 +1962,6 @@
     "history": {
       "loading": "以前のメッセージを読み込み中…",
       "exhausted": "これより前のメッセージはありません",
-      "error": "読み込みに失敗しました。",
-      "retry": "再試行",
       "retryLabel": "読み込みに失敗しました。再試行"
     },
     "forkedFromHistory": "履歴から分岐",

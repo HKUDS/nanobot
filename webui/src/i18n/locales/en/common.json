@@ -2162,8 +2162,6 @@
     "history": {
       "loading": "Loading earlier messages…",
       "exhausted": "No earlier messages",
-      "error": "Loading failed.",
-      "retry": "Retry",
       "retryLabel": "Loading failed. Retry"
     },
     "forkedFromHistory": "Forked from history",

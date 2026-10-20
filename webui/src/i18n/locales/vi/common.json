@@ -1962,8 +1962,6 @@
     "history": {
       "loading": "Đang tải tin nhắn trước đó…",
       "exhausted": "Không có tin nhắn trước đó",
-      "error": "Tải thất bại.",
-      "retry": "Thử lại",
       "retryLabel": "Tải thất bại. Thử lại"
     },
     "forkedFromHistory": "Tách nhánh từ lịch sử",

@@ -2162,8 +2162,6 @@
     "history": {
       "loading": "正在加载更早的消息…",
       "exhausted": "没有更早的消息",
-      "error": "加载失败",
-      "retry": "重试",
       "retryLabel": "加载失败，重试"
     },
     "forkedFromHistory": "从历史消息分叉",
