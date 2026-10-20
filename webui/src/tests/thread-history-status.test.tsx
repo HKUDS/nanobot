@@ -12,25 +12,35 @@ describe("ThreadHistoryStatus", () => {
     expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
 
     rerender(<ThreadHistoryStatus {...props} loading={false} exhausted />);
-    expect(screen.getByText("Start of conversation")).toHaveClass("sr-only");
+    expect(screen.getByText("No earlier messages")).toHaveClass("text-xs");
     expect(container.firstElementChild).toHaveAttribute("data-state", "exhausted");
-    expect(screen.getByRole("status").querySelectorAll("path")).toHaveLength(1);
   });
 
-  it("offers keyboard-accessible loading and explains an armed touch pull", () => {
+  it("uses one loading display before and during a request while preserving keyboard activation", () => {
     const onRetry = vi.fn();
-    const { rerender } = render(<ThreadHistoryStatus loading={false} error={null} onRetry={onRetry} />);
-    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+    const { container, rerender } = render(<ThreadHistoryStatus loading={false} error={null} onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
+    const load = screen.getByRole("button", { name: "Load earlier messages" });
+    expect(load.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    fireEvent.click(load);
     expect(onRetry).toHaveBeenCalledTimes(1);
-    rerender(<ThreadHistoryStatus loading={false} error={null} armed onRetry={onRetry} />);
-    expect(screen.getByText("Release to load earlier messages")).toHaveClass("sr-only");
+    rerender(<ThreadHistoryStatus loading error={null} onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
   });
 
-  it("offers an explicit retry after loading earlier history fails", () => {
+  it("offers error Blocks with the actual failure on keyboard focus and resumes loading on retry", () => {
     const onRetry = vi.fn();
-    render(<ThreadHistoryStatus loading={false} error="offline" onRetry={onRetry} />);
-    expect(screen.getByText("Loading failed.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const { container, rerender } = render(<ThreadHistoryStatus loading={false} error="offline" onRetry={onRetry} />);
+    const retry = screen.getByRole("button", { name: "Loading failed. Retry" });
+    expect(retry.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    expect(screen.getByText("Loading failed.")).toHaveClass("sr-only");
+    fireEvent.focus(retry);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("offline");
+    fireEvent.click(retry);
     expect(onRetry).toHaveBeenCalledTimes(1);
+    rerender(<ThreadHistoryStatus loading error={null} onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
   });
 });

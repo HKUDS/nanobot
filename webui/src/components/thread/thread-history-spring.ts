@@ -8,7 +8,7 @@ const FREQUENCY = 22;
 const DAMPING_RATIO = 0.78;
 
 interface HistorySpringOptions {
-  onUpdate: (distance: number, armed: boolean) => void;
+  onUpdate: (distance: number) => void;
   scheduler?: ThreadCameraScheduler;
   prefersReducedMotion?: () => boolean;
 }
@@ -100,10 +100,7 @@ export class ThreadHistorySpring {
   }
 
   private publish(): void {
-    this.options.onUpdate(
-      this.reducedMotion() ? 0 : Math.max(0, this.distance),
-      this.dragging && this.distance >= HISTORY_PULL_TRIGGER_PX,
-    );
+    this.options.onUpdate(this.reducedMotion() ? 0 : Math.max(0, this.distance));
   }
 
   private stopFrame(): void {

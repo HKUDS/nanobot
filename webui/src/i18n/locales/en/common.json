@@ -2161,11 +2161,10 @@
     "loadEarlier": "Load earlier messages",
     "history": {
       "loading": "Loading earlier messages…",
-      "available": "Earlier messages available",
-      "armed": "Release to load earlier messages",
-      "exhausted": "Start of conversation",
+      "exhausted": "No earlier messages",
       "error": "Loading failed.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "retryLabel": "Loading failed. Retry"
     },
     "forkedFromHistory": "Forked from history",
     "promptNavigator": {

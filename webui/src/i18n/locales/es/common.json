@@ -1962,11 +1962,10 @@
     "loadEarlier": "Cargar mensajes anteriores",
     "history": {
       "loading": "Cargando mensajes anteriores…",
-      "available": "Hay mensajes anteriores disponibles",
-      "armed": "Suelta para cargar mensajes anteriores",
-      "exhausted": "Inicio de la conversación",
+      "exhausted": "No hay mensajes anteriores",
       "error": "Error al cargar.",
-      "retry": "Reintentar"
+      "retry": "Reintentar",
+      "retryLabel": "Error al cargar. Reintentar"
     },
     "forkedFromHistory": "Bifurcado desde el historial",
     "promptNavigator": {

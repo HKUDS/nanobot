@@ -1756,7 +1756,7 @@ describe("ThreadViewport", () => {
     });
 
     expect(onLoadOlder).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Loading failed. Retry" }));
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
   });
 
@@ -1792,7 +1792,7 @@ describe("ThreadViewport", () => {
     fireEvent.touchStart(scroller, touch(200));
     fireEvent.touchMove(scroller, touch(240));
     expect(historyPull(scroller)).toBeGreaterThan(0);
-    expect(screen.getByRole("status").querySelector("svg")).not.toBeNull();
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
     expect(onLoadOlder).not.toHaveBeenCalled();
     fireEvent.touchEnd(scroller);
     expect(historyPull(scroller)).toBeGreaterThan(0);
@@ -1801,7 +1801,7 @@ describe("ThreadViewport", () => {
     fireEvent.touchStart(scroller, touch(200));
     fireEvent.touchMove(scroller, touch(300));
     expect(onLoadOlder).not.toHaveBeenCalled();
-    expect(screen.getByText("Release to load earlier messages")).toBeInTheDocument();
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
     fireEvent.touchEnd(scroller);
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
     rerender(<ThreadViewport {...props} loadingOlder />);
@@ -1852,7 +1852,7 @@ describe("ThreadViewport", () => {
       onLoadOlder={onLoadOlder} />);
     fireEvent.wheel(getScroller(container), { deltaY: -100 });
     expect(screen.getByText("hello")).toBeVisible();
-    expect(screen.getByText("Start of conversation")).toBeInTheDocument();
+    expect(screen.getByText("No earlier messages")).toBeVisible();
     await waitFor(() => expect(historyPull(getScroller(container))).toBeGreaterThan(0));
     expect(onLoadOlder).not.toHaveBeenCalled();
   });

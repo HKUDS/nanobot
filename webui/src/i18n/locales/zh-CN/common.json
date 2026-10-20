@@ -2161,11 +2161,10 @@
     "loadEarlier": "加载更早消息",
     "history": {
       "loading": "正在加载更早的消息…",
-      "available": "还有更早的消息",
-      "armed": "松开加载更早消息",
-      "exhausted": "已到对话开头",
+      "exhausted": "没有更早的消息",
       "error": "加载失败",
-      "retry": "重试"
+      "retry": "重试",
+      "retryLabel": "加载失败，重试"
     },
     "forkedFromHistory": "从历史消息分叉",
     "promptNavigator": {

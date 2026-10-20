@@ -1961,11 +1961,10 @@
     "loadEarlier": "Muat pesan sebelumnya",
     "history": {
       "loading": "Memuat pesan sebelumnya…",
-      "available": "Pesan sebelumnya tersedia",
-      "armed": "Lepaskan untuk memuat pesan sebelumnya",
-      "exhausted": "Awal percakapan",
+      "exhausted": "Tidak ada pesan sebelumnya",
       "error": "Gagal memuat.",
-      "retry": "Coba lagi"
+      "retry": "Coba lagi",
+      "retryLabel": "Gagal memuat. Coba lagi"
     },
     "forkedFromHistory": "Cabang dari riwayat",
     "promptNavigator": {

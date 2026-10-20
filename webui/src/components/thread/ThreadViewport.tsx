@@ -18,7 +18,7 @@ import { DiagramScope } from "@/components/markdown-diagrams/context";
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
-import { HISTORY_PULL_LIMIT_PX, ThreadHistorySpring } from "@/components/thread/thread-history-spring";
+import { ThreadHistorySpring } from "@/components/thread/thread-history-spring";
 import {
   ThreadMotionCoordinator,
   type ThreadMotionGeometry,
@@ -237,7 +237,6 @@ function readSoftKeyboardInsetBottom(container: HTMLElement | null): number {
 
 function setHistoryStatusTravel(element: HTMLDivElement | null, distance: number): void {
   element?.style.setProperty("--history-pull", `${distance}px`);
-  element?.style.setProperty("--history-tension", String(distance / HISTORY_PULL_LIMIT_PX));
 }
 
 export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportProps>(function ThreadViewport({
@@ -302,8 +301,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const composerDockHeightRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const [atHistoryTop, setAtHistoryTop] = useState(false);
-  const [historyArmed, setHistoryArmed] = useState(false);
-  const historyArmedRef = useRef(false);
   const historyInputRef = useRef<"touch" | "other">("other");
   const historyTouchRef = useRef<{
     lastY: number; startX: number; startY: number; pulling: boolean; horizontal: boolean;
@@ -313,7 +310,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const historySpringRef = useRef<ThreadHistorySpring | null>(null);
   if (historySpringRef.current === null) {
     historySpringRef.current = new ThreadHistorySpring({
-      onUpdate: (distance, armed) => {
+      onUpdate: (distance) => {
         // Presentation travel never becomes a scrollTop destination or an anchor correction.
         historyDistanceRef.current = distance;
         if (messageRegionRef.current) {
@@ -321,10 +318,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         }
         // Keep animated custom properties out of the inherited message tree.
         setHistoryStatusTravel(historyStatusRef.current, distance);
-        if (historyArmedRef.current !== armed) {
-          historyArmedRef.current = armed;
-          setHistoryArmed(armed);
-        }
       },
     });
   }
@@ -1168,7 +1161,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             ref={setHistoryStatus}
             loading={loadingOlder}
             exhausted={!hasMoreBefore && hiddenMessageCount === 0}
-            armed={historyArmed}
             error={olderError}
             onRetry={loadEarlierMessages}
           />

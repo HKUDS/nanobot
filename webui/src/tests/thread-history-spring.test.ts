@@ -5,7 +5,6 @@ function harness(reduced = false) {
   let now = 0;
   let nextId = 0;
   let distance = 0;
-  let armed = false;
   const frames = new Map<number, FrameRequestCallback>();
   const scheduler = {
     now: () => now,
@@ -13,7 +12,7 @@ function harness(reduced = false) {
     cancel: (id: number) => { frames.delete(id); },
   };
   const spring = new ThreadHistorySpring({ scheduler, prefersReducedMotion: () => reduced,
-    onUpdate: (next, ready) => { distance = next; armed = ready; } });
+    onUpdate: (next) => { distance = next; } });
   const advance = (milliseconds = 16) => {
     now += milliseconds;
     const callbacks = [...frames.values()];
@@ -22,7 +21,7 @@ function harness(reduced = false) {
     return distance;
   };
   const settle = () => { for (let i = 0; i < 100 && frames.size; i++) advance(); };
-  return { spring, scheduler, advance, settle, frames, distance: () => distance, armed: () => armed };
+  return { spring, scheduler, advance, settle, frames, distance: () => distance };
 }
 
 describe("history boundary spring", () => {
@@ -46,7 +45,6 @@ describe("history boundary spring", () => {
     const h = harness();
     h.spring.startTouch();
     h.spring.moveTouch(120);
-    expect(h.armed()).toBe(true);
     expect(h.spring.endTouch()).toBe(true);
     h.spring.setLoading(true);
     h.settle();
@@ -93,7 +91,6 @@ describe("history boundary spring", () => {
     h.spring.startTouch();
     h.spring.moveTouch(120);
     expect(h.distance()).toBe(0);
-    expect(h.armed()).toBe(true);
     expect(h.spring.endTouch()).toBe(true);
     h.spring.setLoading(true);
     expect(h.frames.size).toBe(0);

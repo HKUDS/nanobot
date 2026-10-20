@@ -548,19 +548,9 @@
     align-items: center;
     justify-content: center;
   }
-  .thread-history-line {
-    width: 120px;
-    height: 32px;
-    overflow: visible;
-  }
-  .thread-history-elastic {
-    transform: scaleX(calc(1 + var(--history-tension, 0) * 0.65)) scaleY(calc(0.08 + var(--history-tension, 0) * 0.92));
-  }
-  .thread-history-status[data-state="armed"] {
-    color: hsl(var(--foreground));
-  }
   /* loading.dev Blocks, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
   .thread-history-blocks {
+    color: #d35e14;
     display: grid;
     width: 20px;
     height: 20px;
@@ -572,6 +562,15 @@
     background: currentColor;
     border-radius: 1.25px;
     animation: thread-history-blocks 1300ms ease-in-out infinite;
+  }
+  .thread-history-status[data-state="error"] .thread-history-blocks {
+    width: 24px;
+    height: 24px;
+    color: hsl(var(--destructive));
+  }
+  .thread-history-status[data-state="error"] .thread-history-blocks > span {
+    animation: none;
+    transform: none;
   }
   @keyframes thread-history-blocks {
     0%, 70%, 100% { transform: scale(1); }

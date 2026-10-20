@@ -1961,11 +1961,10 @@
     "loadEarlier": "Tải tin nhắn trước đó",
     "history": {
       "loading": "Đang tải tin nhắn trước đó…",
-      "available": "Có tin nhắn trước đó",
-      "armed": "Thả để tải tin nhắn trước đó",
-      "exhausted": "Đầu cuộc trò chuyện",
+      "exhausted": "Không có tin nhắn trước đó",
       "error": "Tải thất bại.",
-      "retry": "Thử lại"
+      "retry": "Thử lại",
+      "retryLabel": "Tải thất bại. Thử lại"
     },
     "forkedFromHistory": "Tách nhánh từ lịch sử",
     "promptNavigator": {

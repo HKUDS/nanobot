@@ -1975,11 +1975,10 @@
     "loadEarlier": "Carregar mensagens anteriores",
     "history": {
       "loading": "Carregando mensagens anteriores…",
-      "available": "Há mensagens anteriores disponíveis",
-      "armed": "Solte para carregar mensagens anteriores",
-      "exhausted": "Início da conversa",
+      "exhausted": "Não há mensagens anteriores",
       "error": "Falha ao carregar.",
-      "retry": "Tentar novamente"
+      "retry": "Tentar novamente",
+      "retryLabel": "Falha ao carregar. Tentar novamente"
     },
     "forkedFromHistory": "Bifurcado a partir do histórico",
     "promptNavigator": {
