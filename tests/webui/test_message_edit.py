@@ -126,7 +126,7 @@ async def test_rejection_preserves_the_effective_history(editing, monkeypatch, f
     if failure == "sql":
         monkeypatch.setattr(manager._store, "replace_generation", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
     if failure == "install":
-        monkeypatch.setattr(transcript, "_write_records_to_path", lambda *_args: (_ for _ in ()).throw(OSError("disk full")))
+        monkeypatch.setattr(transcript, "write_transcript_records_to_path", lambda *_args: (_ for _ in ()).throw(OSError("disk full")))
     with pytest.raises((HistoryEditError, OSError)):
         await replace_webui_chat_input(host, payload(prepared))
     after = await manager.state.read(KEY)

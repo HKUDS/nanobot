@@ -11,7 +11,7 @@ import json
 import os
 import shutil
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
@@ -95,7 +95,7 @@ def _recover(key: str, journal: Path, paths: tuple[Path, ...]) -> None:
 
 
 @contextmanager
-def transcript_access(key: str) -> Iterator[None]:
+def transcript_access(key: str) -> Generator[None]:
     lock_path, journal, paths = _paths(key)
     with _lock(lock_path):
         _recover(key, journal, paths)
@@ -113,9 +113,9 @@ def guarded_transcript(function: Callable[Concatenate[str, _P], _T]) -> Callable
 @contextmanager
 def replace_transcript(
     key: str, rows: list[dict[str, Any]], *, database: Path, generation: str,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Install prepared rows; retain rollback material until SQLite settles."""
-    from nanobot.webui.transcript import _write_records_to_path
+    from nanobot.webui.transcript import write_transcript_records_to_path
 
     lock_path, journal, paths = _paths(key)
     with _lock(lock_path):
@@ -124,7 +124,7 @@ def replace_transcript(
         stage.mkdir()
         journal_written = False
         try:
-            _write_records_to_path(stage / "new.jsonl", rows)
+            write_transcript_records_to_path(stage / "new.jsonl", rows)
             for index, path in enumerate(paths):
                 if path.is_dir():
                     shutil.copytree(path, stage / f"old-{index}")

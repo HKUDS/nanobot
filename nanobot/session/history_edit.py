@@ -8,7 +8,7 @@ import re
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from nanobot.bus.events import InboundMessage
 from nanobot.runtime_context import (
@@ -39,7 +39,7 @@ def ordinary_text_error(message: dict[str, Any]) -> str | None:
     if not isinstance(text, str) or not text.strip():
         return "edit_plain_text_only"
     context = message.get(RUNTIME_CONTEXT_HISTORY_META)
-    sources = context.get("sources", []) if isinstance(context, dict) else []
+    sources: list[str] = cast(dict[str, Any], context).get("sources", []) if isinstance(context, dict) else []
     if WEBUI_QUOTE_SOURCE in sources or text.startswith("> [!QUOTE]"):
         return "edit_context_unsupported"
     if any(source in sources for source in ("session_mentions", "cli_apps", "mcp_presets")):

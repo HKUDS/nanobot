@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger
 
@@ -196,8 +196,8 @@ async def replace_webui_chat_input(
     channel: WebUIForkHost, payload: Mapping[str, Any],
 ) -> dict[str, Any]:
     """The replace branch of fork_chat: accept and execute in the same session."""
+    from collections.abc import Generator
     from contextlib import contextmanager
-    from typing import Iterator
 
     from nanobot.bus.events import InboundMessage
     from nanobot.session.history_edit import HistoryEditAnchor, HistoryEditError
@@ -229,23 +229,28 @@ async def replace_webui_chat_input(
         raise HistoryEditError("edit_unavailable")
     if gateway.ingress.validate_text(text) is not None:
         raise HistoryEditError("edit_text_too_large")
-    try:
-        anchor = HistoryEditAnchor(**{name: raw_anchor[name] for name in (
-            "generation", "revision", "user_index", "message_digest",
-        )})
-    except (KeyError, TypeError):
-        raise HistoryEditError("edit_invalid_request") from None
-    if (not isinstance(anchor.generation, str) or not isinstance(anchor.message_digest, str)
-            or isinstance(anchor.revision, bool) or not isinstance(anchor.revision, int)
-            or isinstance(anchor.user_index, bool) or not isinstance(anchor.user_index, int)
-            or isinstance(raw_anchor.get("transcript_user_index"), bool)
-            or not isinstance(raw_anchor.get("transcript_user_index"), int)):
+    anchor_fields = cast(dict[str, Any], raw_anchor)
+    generation, revision, user_index, digest = (
+        anchor_fields.get("generation"), anchor_fields.get("revision"),
+        anchor_fields.get("user_index"), anchor_fields.get("message_digest"),
+    )
+    transcript_user_index = anchor_fields.get("transcript_user_index")
+    display_message_id = anchor_fields.get("display_message_id", "")
+    display_turn_id = anchor_fields.get("display_turn_id")
+    if (not isinstance(generation, str) or not isinstance(digest, str)
+            or isinstance(revision, bool) or not isinstance(revision, int)
+            or isinstance(user_index, bool) or not isinstance(user_index, int)
+            or isinstance(transcript_user_index, bool) or not isinstance(transcript_user_index, int)
+            or not isinstance(display_message_id, str)
+            or (display_turn_id is not None and not isinstance(display_turn_id, str))):
         raise HistoryEditError("edit_invalid_request")
+    anchor = HistoryEditAnchor(generation, revision, user_index, digest)
     key = webui_session_key(chat_id)
     manager = gateway.session_manager
     source = await manager.state.read(key)
-    receipt = source.metadata.get("history_edit_receipt") if source is not None else None
-    if isinstance(receipt, dict) and receipt.get("turn_id") == turn_id:
+    raw_receipt = source.metadata.get("history_edit_receipt") if source is not None else None
+    receipt = cast(dict[str, Any], raw_receipt) if isinstance(raw_receipt, dict) else None
+    if receipt is not None and receipt.get("turn_id") == turn_id:
         if (receipt.get("text"), receipt.get("source_generation"), receipt.get("source_revision")) != (
             text, anchor.generation, anchor.revision,
         ):
@@ -264,12 +269,12 @@ async def replace_webui_chat_input(
     committed = False
 
     @contextmanager
-    def projection(session: Session) -> Iterator[None]:
+    def projection(session: Session) -> Generator[None]:
         with transcript_access(key):
-            if webui_transcript_revision(key) != raw_anchor.get("transcript_revision"):
+            if webui_transcript_revision(key) != anchor_fields.get("transcript_revision"):
                 raise HistoryEditError("edit_source_changed")
-            target = transcript_edit_target(key, raw_anchor.get("display_message_id", ""), raw_anchor.get("display_turn_id"))
-            if target is None or target[1] != raw_anchor["transcript_user_index"] or source is None:
+            target = transcript_edit_target(key, display_message_id, display_turn_id)
+            if target is None or target[1] != transcript_user_index or source is None:
                 raise HistoryEditError("edit_source_changed")
             from nanobot.runtime_context import public_history_message
             from nanobot.session.manager import history_prefix_boundary
@@ -281,7 +286,7 @@ async def replace_webui_chat_input(
                     or target[0].get("turn_id") != original.get("webui_turn_id")):
                 raise HistoryEditError("edit_source_changed")
             lines = read_transcript_lines(key)
-            prefix = transcript_prefix_before_user_index(lines, raw_anchor["transcript_user_index"])
+            prefix = transcript_prefix_before_user_index(lines, transcript_user_index)
             if prefix is None:
                 raise HistoryEditError("edit_source_changed")
             retired_turn_ids.extend(list(dict.fromkeys(
