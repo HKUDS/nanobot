@@ -666,10 +666,12 @@ describe("Settings models", () => {
     await togglePresetEditor();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     const input = screen.getByRole("textbox", { name: "Context window" });
+    vi.useFakeTimers();
     fireEvent.change(input, { target: { value } });
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveAccessibleDescription("Enter a positive token count, such as 200k, 1m, or 131072.");
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    await act(() => vi.advanceTimersByTimeAsync(750));
+    vi.useRealTimers();
     expect(requestMutationMock).not.toHaveBeenCalled();
     expect(input).toHaveValue(value);
     returnToPresetEditor();
@@ -700,10 +702,12 @@ describe("Settings models", () => {
     input = screen.getByRole("textbox", { name: "Max output tokens" });
     expect(input).toHaveValue("32k");
     requestMutationMock.mockClear();
+    vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "" } });
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(presetSaveButton()).toBeDisabled();
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    await act(() => vi.advanceTimersByTimeAsync(750));
+    vi.useRealTimers();
     expect(requestMutationMock).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: "8.192k" } });
     returnToPresetEditor();
