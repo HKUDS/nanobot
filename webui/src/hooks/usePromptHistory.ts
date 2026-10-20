@@ -13,6 +13,8 @@ interface HistoryPage {
   body: WebuiThreadPersistedPayload;
 }
 
+const HISTORY_PAGE_LIMIT = 3;
+
 export interface PromptHistoryNavigation {
   prompts: PromptAnchor[];
   window: {
@@ -20,9 +22,13 @@ export interface PromptHistoryNavigation {
     userMessageOffset: number;
     hasMoreBefore: boolean;
     hasMoreAfter: boolean;
+    /** A full window must advance at its boundary, not evict a retained reader. */
+    olderAtBoundaryOnly: boolean;
     forkBoundaryMessageCount: number | null;
   } | null;
   target: { id: string; sequence: number } | null;
+  /** Pending or failed page read; index errors have no page operation. */
+  operation: "jump" | "older" | "newer" | null;
   loading: boolean;
   error: string | null;
   jump: (id: string) => void;
@@ -42,6 +48,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   const indexSnapshot = useRef<PromptIndex>();
   const [pages, setPages] = useState<HistoryPage[]>([]);
   const [target, setTarget] = useState<PromptHistoryNavigation["target"]>(null);
+  const [operation, setOperation] = useState<PromptHistoryNavigation["operation"]>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
@@ -134,6 +141,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
+    setOperation(id ? "jump" : direction === "before" ? "older" : "newer");
     setLoading(true);
     setError(null);
     retry.current = () => { void read(cursor, direction, id); };
@@ -150,7 +158,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       }
       // At most three bounded server pages, even after many navigations.
       setPages((previous) => id ? [page] : direction === "before"
-        ? [page, ...previous].slice(0, 3) : [...previous, page].slice(-3));
+        ? [page, ...previous].slice(0, HISTORY_PAGE_LIMIT) : [...previous, page].slice(-HISTORY_PAGE_LIMIT));
       if (id) setTarget({ id, sequence: ++sequence.current });
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
@@ -176,10 +184,11 @@ export function usePromptHistory(key: string | null, version: number, messages: 
     return { messages: pages.flatMap((page) => page.messages),
       userMessageOffset: first?.user_message_offset ?? 0,
       hasMoreBefore: first?.has_more_before === true, hasMoreAfter: last?.has_more_after === true,
-      forkBoundaryMessageCount: boundary };
+      olderAtBoundaryOnly: pages.length >= HISTORY_PAGE_LIMIT, forkBoundaryMessageCount: boundary };
   }, [currentScope, pages, first, last]);
 
   return { prompts, window, target: currentScope ? target : null, loading: currentScope && loading,
+    operation: currentScope && (loading || error) ? operation : null,
     error: currentScope ? error ?? indexError : null, cancel, latest, updateMessages,
     retry: () => error ? retry.current() : setRefresh((value) => value + 1),
     jump: (id) => {

@@ -8,14 +8,16 @@ interface ThreadHistoryStatusProps {
   loading: boolean;
   error: string | null;
   exhausted?: boolean;
+  requiresBoundary?: boolean;
   onRetry: () => void;
   className?: string;
 }
 
-export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatusProps>(function ThreadHistoryStatus({ loading, error, exhausted = false, onRetry, className }, ref) {
+export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatusProps>(function ThreadHistoryStatus({ loading, error, exhausted = false, requiresBoundary = false, onRetry, className }, ref) {
   const { t } = useTranslation();
-  const state = !loading && error ? "error" : !loading && exhausted ? "exhausted" : "loading";
-  const label = t(state === "error" ? "thread.history.retryLabel" : `thread.history.${state}`);
+  const state = loading ? "loading" : error ? "error" : exhausted ? "exhausted" : "ready";
+  const scrollUp = state === "ready" && requiresBoundary;
+  const label = t(scrollUp ? "thread.history.scrollUp" : state === "error" ? "thread.history.retryLabel" : state === "ready" ? "thread.loadEarlier" : `thread.history.${state}`);
   // Blocks adapted from loading.dev (MIT); see THIRD_PARTY_NOTICES.md.
   const blocks = <span aria-hidden="true" className="thread-history-blocks">
     {Array.from({ length: 9 }, (_, index) => <span key={index}
@@ -29,7 +31,7 @@ export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatu
       data-state={state}
     >
       <div role="status" aria-live="polite" aria-atomic="true">
-        {state === "exhausted" ? (
+        {state === "exhausted" || scrollUp ? (
           <span className="text-xs">{label}</span>
         ) : (
           <HoverHint content={state === "error" ? error : label} side="bottom">

@@ -1999,7 +1999,8 @@
     "history": {
       "loading": "Memuat pesan sebelumnya…",
       "exhausted": "Tidak ada pesan sebelumnya",
-      "retryLabel": "Gagal memuat. Coba lagi"
+      "retryLabel": "Gagal memuat. Coba lagi",
+      "scrollUp": "Gulir ke atas untuk terus memuat pesan sebelumnya"
     },
     "forkedFromHistory": "Cabang dari riwayat",
     "promptNavigator": {

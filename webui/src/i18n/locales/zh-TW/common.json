@@ -1999,7 +1999,8 @@
     "history": {
       "loading": "正在載入更早的訊息…",
       "exhausted": "沒有更早的訊息",
-      "retryLabel": "載入失敗，重試"
+      "retryLabel": "載入失敗，重試",
+      "scrollUp": "向上捲動以繼續載入更早訊息"
     },
     "forkedFromHistory": "從歷史訊息建立分支",
     "promptNavigator": {

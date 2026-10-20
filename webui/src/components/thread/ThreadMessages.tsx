@@ -23,6 +23,7 @@ import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } 
 interface ThreadMessagesProps {
   messages: UIMessage[];
   beforeMessages?: ReactNode;
+  beforeUnit?: { key: string; content: ReactNode };
   afterUserMessage?: (message: UIMessage) => ReactNode;
   afterMessages?: ReactNode;
   temporary?: boolean;
@@ -81,6 +82,7 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
 export function ThreadMessages({
   messages,
   beforeMessages,
+  beforeUnit,
   afterUserMessage,
   afterMessages,
   temporary = false,
@@ -233,14 +235,16 @@ export function ThreadMessages({
           && unit.message.deliveryStatus !== "failed"
         ) nextUserIndex += 1;
 
+        const prefix = beforeUnit?.key === unitKeys[index] ? beforeUnit.content : null;
         return (
           <Fragment key={unitKeys[index]}>
+          {prefix ? <div className={marginTop}>{prefix}</div> : null}
           <ThreadDisplayUnit
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
             unit={unit}
             mobileActions={mobileActions}
-            marginTop={marginTop}
+            marginTop={prefix ? "" : marginTop}
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             suppressActivity={suppressActivity}

@@ -607,9 +607,18 @@
   }
 
   .thread-history-status {
-    height: calc(48px + var(--history-pull, 0px));
+    height: 48px;
     background: linear-gradient(hsl(var(--background)) 35%, hsl(var(--background) / 0));
     color: hsl(var(--muted-foreground));
+  }
+  .thread-history-reveal {
+    transform: translateY(calc(var(--history-pull, 0px) - 100%));
+  }
+  .thread-history-reveal:focus-within {
+    transform: none;
+  }
+  .thread-history-inline {
+    top: -48px;
   }
   .thread-history-control {
     display: flex;
@@ -638,7 +647,7 @@
     height: 24px;
     color: hsl(var(--destructive));
   }
-  .thread-history-status[data-state="error"] .thread-history-blocks > span {
+  .thread-history-status:not([data-state="loading"]) .thread-history-blocks > span {
     animation: none;
     transform: none;
   }
@@ -647,6 +656,9 @@
     35% { transform: scale(0); }
   }
   @media (prefers-reduced-motion: reduce) {
+    .thread-history-feedback {
+      transform: none;
+    }
     .thread-history-blocks > span {
       animation: none;
       transform: scale(0.8);

@@ -1999,7 +1999,8 @@
     "history": {
       "loading": "以前のメッセージを読み込み中…",
       "exhausted": "これより前のメッセージはありません",
-      "retryLabel": "読み込みに失敗しました。再試行"
+      "retryLabel": "読み込みに失敗しました。再試行",
+      "scrollUp": "上へスクロールして、さらに前のメッセージを読み込みます"
     },
     "forkedFromHistory": "履歴から分岐",
     "promptNavigator": {

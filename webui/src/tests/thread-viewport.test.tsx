@@ -49,7 +49,7 @@ function dispatchHistoryInput(scroller: HTMLElement, input: "wheel" | "touch" | 
   if (input === "keyboard") fireEvent.keyDown(scroller, { key: "PageUp" });
   if (input === "touch") {
     fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
-    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 380 }] });
     fireEvent.touchEnd(scroller);
   }
 }
@@ -1780,7 +1780,7 @@ describe("ThreadViewport", () => {
     await waitFor(() => expect(historyPull(scroller)).toBe(0));
 
     fireEvent.touchStart(scroller, touch(200));
-    fireEvent.touchMove(scroller, touch(300));
+    fireEvent.touchMove(scroller, touch(380));
     expect(onLoadOlder).not.toHaveBeenCalled();
     expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
     fireEvent.touchEnd(scroller);
@@ -1791,6 +1791,9 @@ describe("ThreadViewport", () => {
     expect(screen.getByText("Loading earlier messages…")).toBeInTheDocument();
     rerender(<ThreadViewport {...props} />);
     await waitFor(() => expect(historyPull(scroller)).toBe(0));
+    expect(container.querySelector(".thread-history-slot")).toHaveStyle({ height: "48px" });
+    expect(container.querySelector(".thread-history-status")).toHaveAttribute("data-state", "ready");
+    expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
   });
 
   it("does not fetch on touch scroll alone or horizontal gestures and clears pull on session change", () => {
@@ -2008,8 +2011,8 @@ describe("ThreadViewport", () => {
     const latest = vi.fn();
     const navigation = { prompts: [{ id: "u1", label: "hello", preview: "hello", answerPreview: "", createdAt: 1, index: 0 }],
       window: { messages: [{ id: "old", role: "user" as const, content: "old question", createdAt: 0 }],
-        userMessageOffset: 0, hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
-      target: null, loading: false, error: null, jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest, retry: vi.fn(), updateMessages: vi.fn() };
+        userMessageOffset: 0, hasMoreBefore: false, hasMoreAfter: true, olderAtBoundaryOnly: false, forkBoundaryMessageCount: null },
+      target: null, operation: null, loading: false, error: null, jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest, retry: vi.fn(), updateMessages: vi.fn() };
     const view = render(<ThreadViewport ref={viewportRef} messages={messages} isStreaming={false} composer={<div />} navigation={navigation} />);
     act(() => viewportRef.current?.jumpToUserPrompt("u1"));
     expect(latest).toHaveBeenCalledOnce();
@@ -2024,8 +2027,8 @@ describe("ThreadViewport", () => {
       }))];
     render(<ThreadViewport messages={messages} isStreaming={false} composer={<div />}
       navigation={{ prompts: [], window: { messages: history, userMessageOffset: 0,
-        hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
-      target: { id: "old-user", sequence: 1 }, loading: false, error: null,
+        hasMoreBefore: false, hasMoreAfter: true, olderAtBoundaryOnly: false, forkBoundaryMessageCount: null },
+      target: { id: "old-user", sequence: 1 }, operation: null, loading: false, error: null,
       jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), updateMessages: vi.fn() }} />);
     await waitFor(() => expect(screen.getByText("Large old turn")).toBeInTheDocument());
   });

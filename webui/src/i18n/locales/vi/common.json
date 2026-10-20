@@ -1999,7 +1999,8 @@
     "history": {
       "loading": "Đang tải tin nhắn trước đó…",
       "exhausted": "Không có tin nhắn trước đó",
-      "retryLabel": "Tải thất bại. Thử lại"
+      "retryLabel": "Tải thất bại. Thử lại",
+      "scrollUp": "Cuộn lên để tiếp tục tải tin nhắn trước đó"
     },
     "forkedFromHistory": "Tách nhánh từ lịch sử",
     "promptNavigator": {

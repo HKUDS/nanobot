@@ -40,12 +40,14 @@ it("loads the complete index without bodies, reads bounded windows and leaves li
   expect(api.fetchWebuiThread).not.toHaveBeenCalled();
   await act(async () => result.current.jump("u500"));
   expect(result.current.window?.userMessageOffset).toBe(500);
+  expect(result.current.window?.olderAtBoundaryOnly).toBe(false);
   expect(result.current.target?.id).toBe("u500");
   rerender({ messages: [...latest, { id: "live", role: "assistant", content: "new output", createdAt: 2001 }] });
   expect(result.current.window?.messages).toHaveLength(2);
   for (let i = 0; i < 8; i++) await act(async () => result.current.newer());
   expect(result.current.window?.messages).toHaveLength(6);
   expect(result.current.window?.userMessageOffset).toBe(506);
+  expect(result.current.window?.olderAtBoundaryOnly).toBe(true);
   await act(async () => result.current.older());
   expect(result.current.window?.userMessageOffset).toBe(505);
   expect(result.current.window?.messages).toHaveLength(6);
@@ -174,4 +176,29 @@ it("merges a live input by transport identity without adding an anchor or reorde
   expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["old", "persisted", "distinct"]);
   expect(result.current.window).toBeNull();
   expect(result.current.target).toBeNull();
+});
+
+
+it("keeps the request operation with failures and retries", async () => {
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  let finish!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  act(() => result.current.jump("u10"));
+  expect(result.current.operation).toBe("jump");
+  expect(result.current.loading).toBe(true);
+  await act(async () => finish(page(10)));
+  expect(result.current.operation).toBeNull();
+
+  for (const operation of ["older", "newer"] as const) {
+    vi.mocked(api.fetchWebuiThread).mockRejectedValueOnce(new Error("offline"));
+    await act(async () => result.current[operation]());
+    expect(result.current.operation).toBe(operation);
+    expect(result.current.error).toBe("offline");
+    await act(async () => result.current.retry());
+    expect(result.current.operation).toBeNull();
+    expect(result.current.error).toBeNull();
+  }
+  act(() => result.current.cancel());
+  expect(result.current.operation).toBeNull();
 });

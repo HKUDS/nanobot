@@ -8,9 +8,10 @@ function historyPage(start: number, count = 12, more = start > 0) {
     has_more_before: more, has_more_after: start + count < 52 } };
 }
 
-async function installHistory(page: Page) {
+async function installHistory(page: Page, initialStart = 40, initialCount = 12) {
   const reads: string[] = [];
   const pending: Array<(value: "success" | "error") => void> = [];
+  let immediate = false;
   await page.route("**/api/sessions/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/prompts")) return route.fulfill({ json: {
@@ -19,15 +20,19 @@ async function installHistory(page: Page) {
     if (!url.pathname.endsWith("/webui-thread")) return route.fulfill({ json: {} });
     if (url.pathname.includes("boundary-b")) return route.fulfill({ json: historyPage(0, 2, false) });
     const cursor = url.searchParams.get("before") ?? url.searchParams.get("after");
-    if (cursor === null) return route.fulfill({ json: historyPage(40) });
+    if (cursor === null) return route.fulfill({ json: historyPage(initialStart, initialCount) });
     reads.push(url.search);
-    const outcome = await new Promise<"success" | "error">((resolve) => pending.push(resolve));
+    const outcome = immediate ? "success" : await new Promise<"success" | "error">((resolve) => pending.push(resolve));
     if (outcome === "error") return route.fulfill({ status: 503, body: "History unavailable" });
     const start = url.searchParams.has("after") ? Number(cursor) : Math.max(0, Number(cursor) - 12);
     const count = url.searchParams.has("after") ? 12 : Number(cursor) - start;
     await route.fulfill({ json: historyPage(start, count, start > 0) });
   });
-  return { reads, complete: (outcome: "success" | "error" = "success") => pending.shift()?.(outcome) };
+  return {
+    reads,
+    respondImmediately: (value: boolean) => { immediate = value; },
+    complete: (outcome: "success" | "error" = "success") => pending.shift()?.(outcome),
+  };
 }
 
 async function installShortHistory(page: Page) {
@@ -53,7 +58,7 @@ async function positionAtTop(body: Locator) {
     node.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [new Touch({ identifier: 1, target: node, clientX: 180, clientY: 200 })] }));
     node.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
     const first = node.querySelector("[data-thread-display-unit]")!;
-    return first.getBoundingClientRect().top - node.getBoundingClientRect().top;
+    return first.getBoundingClientRect().top;
   });
 }
 
@@ -74,18 +79,67 @@ async function stableLayout(body: Locator) {
   });
 }
 
-async function anchorOffset(body: Locator, text: string) {
+async function anchorTop(body: Locator, text: string) {
+  return body.getByText(text, { exact: true }).evaluate((node) =>
+    node.closest("[data-thread-display-unit]")!.getBoundingClientRect().top);
+}
+
+// Use the fixed viewport, never the transformed scroller, as the coordinate frame.
+async function historyGeometry(body: Locator, text: string) {
   return body.getByText(text, { exact: true }).evaluate((node) => {
-    const unit = node.closest("[data-thread-display-unit]")!;
-    const scroller = node.closest(".thread-message-viewport")!;
-    return unit.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    const unit = node.closest("[data-thread-display-unit]")!.getBoundingClientRect();
+    const frame = node.closest(".thread-viewport-frame")!.getBoundingClientRect();
+    const scroller = node.closest<HTMLElement>(".thread-message-viewport")!;
+    const header = node.closest(".thread-viewport")!.querySelector(".thread-history-status")!.getBoundingClientRect();
+    const slot = scroller.querySelector(".thread-history-slot");
+    return {
+      headerTop: header.top, headerBottom: header.bottom, headerHeight: header.height,
+      visibleHeight: Math.max(0, Math.min(header.bottom, frame.bottom) - Math.max(header.top, frame.top)),
+      anchorTop: unit.top, frameTop: frame.top, scrollTop: scroller.scrollTop,
+      transformY: new DOMMatrix(getComputedStyle(scroller).transform).m42,
+      slotHeight: slot?.getBoundingClientRect().height ?? 0,
+      slotBeforeKey: slot?.parentElement?.nextElementSibling?.getAttribute("data-thread-display-unit") ?? null,
+      firstKey: scroller.querySelector("[data-thread-display-unit]")?.getAttribute("data-thread-display-unit"),
+    };
   });
 }
 
-test("continuous wheel input holds real loading visible and preserves the reading anchor through prepend and delayed layout", async ({ page }) => {
+type HistoryGeometry = Awaited<ReturnType<typeof historyGeometry>>;
+
+async function expectCoordinates(body: Locator, text: string, reference: HistoryGeometry) {
+  let latest = reference;
+  try {
+    await expect.poll(async () => {
+      latest = await historyGeometry(body, text);
+      return Math.max(...(["headerTop", "headerBottom", "anchorTop", "frameTop"] as const)
+        .map((key) => Math.abs(latest[key] - reference[key])));
+    }, { message: `${text}: header and reading unit must keep their fixed viewport coordinates` }).toBeLessThan(1);
+  } catch (error) {
+    const diagnostic = JSON.stringify({ text, before: reference, after: latest });
+    console.log("history-coordinate-failure", diagnostic);
+    await test.info().attach("history-coordinate-failure", { body: diagnostic, contentType: "application/json" });
+    throw error;
+  }
+}
+
+async function expectHeld(body: Locator, text: string) {
+  await expect(body.locator(".thread-history-slot")).toHaveCSS("height", "48px");
+  await expect.poll(() => displacement(body)).toBe(0);
+  await expect.poll(async () => (await historyGeometry(body, text)).visibleHeight).toBeCloseTo(48, 0);
+  return historyGeometry(body, text);
+}
+
+function expectSameScroll(before: HistoryGeometry, after: HistoryGeometry, delta: number) {
+  expect(delta).toBeGreaterThan(0);
+  expect(Math.abs(after.headerTop - before.headerTop + delta)).toBeLessThan(1);
+  expect(Math.abs(after.anchorTop - before.anchorTop + delta)).toBeLessThan(1);
+}
+
+test("wheel loading hands off to a retained 48px slot; prepend and delayed layout keep absolute reading coordinates", async ({ page }) => {
   const history = await installHistory(page);
   await page.goto("/browser/fixture.html?case=history-boundary");
   const body = page.getByTestId("thread-message-region");
+  const header = page.locator(".thread-history-status");
   await expect(body).toBeVisible();
   await stableLayout(body);
   const nativeTop = await body.evaluate((node) => node.scrollTop);
@@ -94,29 +148,42 @@ test("continuous wheel input holds real loading visible and preserves the readin
   await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeLessThan(nativeTop);
   expect(await displacement(body)).toBe(0);
   expect(history.reads).toHaveLength(0);
-  await positionAtTop(body);
+  const originalTop = await positionAtTop(body);
+  await expect(header).not.toBeInViewport();
   await body.hover();
   await page.mouse.wheel(80, 0);
   expect(await displacement(body)).toBe(0);
   expect(history.reads).toHaveLength(0);
-  await body.hover();
   for (const delta of [-100, -70, -45, -28, -16, -8, -3]) await page.mouse.wheel(0, delta);
-  await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
-  await expect(page.locator(".thread-history-blocks")).toHaveCSS("color", "rgb(211, 94, 20)");
+  await expect(header).toHaveAttribute("data-state", "loading");
+  await expect(header.locator(".thread-history-blocks")).toHaveCSS("color", "rgb(211, 94, 20)");
+  await expect(header.locator(".thread-history-blocks > span").first()).not.toHaveCSS("animation-name", "none");
   expect(history.reads).toHaveLength(1);
-  await expect.poll(() => displacement(body)).toBeCloseTo(20, 1);
-  const still = await displacement(body);
+  const held = await expectHeld(body, "Question 40");
+  expect(held.anchorTop - originalTop).toBeCloseTo(48, 0);
+  expect(held.headerTop).toBeCloseTo(held.frameTop, 0);
   await page.waitForTimeout(150);
-  expect(Math.abs(await displacement(body) - still)).toBeLessThan(0.1);
-  await page.screenshot({ path: "test-results/history-boundary-loading.png" });
+  await expectCoordinates(body, "Question 40", held);
+  await page.screenshot({ path: test.info().outputPath("history-loading-held.png") });
 
-  await body.evaluate((node) => { node.scrollTop = 500; });
-  await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
-  await expect.poll(() => displacement(body)).toBe(0);
-  const reading = await anchorOffset(body, "Question 40");
+  // A programmatic scroll may clip the header, but must not retract its slot or spring.
+  await body.evaluate((node) => { node.scrollTop = 12; });
+  await stableLayout(body);
+  const programmed = await historyGeometry(body, "Question 40");
+  expectSameScroll(held, programmed, 12);
+  expect(programmed.visibleHeight).toBeCloseTo(36, 0);
+  expect(await displacement(body)).toBe(0);
+  await expect(body.locator(".thread-history-slot")).toHaveCSS("height", "48px");
+  await body.evaluate((node) => { node.scrollTop = 0; });
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 40", held);
+
   history.complete();
   await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
-  expect(Math.abs(await anchorOffset(body, "Question 40") - reading)).toBeLessThan(1);
+  await expect(header).toHaveAttribute("data-state", "ready");
+  await expect(header.locator(".thread-history-blocks > span").first()).toHaveCSS("animation-name", "none");
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 40", held);
   expect(history.reads).toHaveLength(1);
 
   await body.getByText("Question 28", { exact: true }).evaluate((node) => {
@@ -124,20 +191,42 @@ test("continuous wheel input holds real loading visible and preserves the readin
     delayed.style.height = "160px";
     node.closest("[data-thread-display-unit]")!.prepend(delayed);
   });
-  await page.waitForTimeout(100);
-  expect(Math.abs(await anchorOffset(body, "Question 40") - reading)).toBeLessThan(1);
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 40", held);
+  await page.screenshot({ path: test.info().outputPath("history-prepend-stable.png") });
+
+  // Real forward scrolling transports header and messages together, not a pinned overlay.
+  const beforeScroll = await body.evaluate((node) => node.scrollTop);
+  await body.hover();
+  await page.mouse.wheel(0, 16);
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(beforeScroll);
+  await stableLayout(body);
+  const partial = await historyGeometry(body, "Question 40");
+  const delta = await body.evaluate((node) => node.scrollTop) - beforeScroll;
+  expectSameScroll(held, partial, delta);
+  expect(partial.visibleHeight).toBeGreaterThan(0);
+  expect(partial.visibleHeight).toBeLessThan(48);
+  expect(await displacement(body)).toBe(0);
+  await page.screenshot({ path: test.info().outputPath("history-native-scroll-clipped.png") });
+  await page.mouse.wheel(0, 96);
+  await expect(header).not.toBeInViewport();
+  expect((await historyGeometry(body, "Question 40")).visibleHeight).toBe(0);
+  await expect(body.locator(".thread-history-slot")).toHaveCSS("height", "48px");
+  expect(history.reads).toHaveLength(1);
 });
 
-test("touch short-pull cancellation, armed release, loading takeover, and conversation changes converge", async ({ browser, baseURL }) => {
+test("touch reveals a static partial ready header, arms only on release, and retains a stable full loading header", async ({ browser, baseURL }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL });
   const page = await context.newPage();
   const history = await installHistory(page);
   try {
     await page.goto("/browser/fixture.html?case=history-boundary");
     const body = page.getByTestId("thread-message-region");
+    const header = page.locator(".thread-history-status");
     await expect(body).toBeVisible();
     await stableLayout(body);
     await positionAtTop(body);
+    await expect(header).not.toBeInViewport();
     const cdp = await context.newCDPSession(page);
     const touch = async (type: "touchStart" | "touchMove" | "touchEnd", y = 200, x = 180) => cdp.send("Input.dispatchTouchEvent", {
       type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }],
@@ -147,58 +236,90 @@ test("touch short-pull cancellation, armed release, loading takeover, and conver
     await touch("touchEnd");
     expect(await displacement(body)).toBe(0);
     expect(history.reads).toHaveLength(0);
+
     await touch("touchStart");
     await touch("touchMove", 240);
     const pulled = await displacement(body);
+    const partial = await historyGeometry(body, "Question 40");
     expect(pulled).toBeGreaterThan(0);
+    expect(pulled).toBeLessThan(80);
+    expect(partial.visibleHeight).toBeGreaterThan(0);
+    expect(partial.visibleHeight).toBeLessThan(partial.headerHeight);
+    await expect(header).toHaveAttribute("data-state", "ready");
+    await expect(header.locator(".thread-history-blocks > span").first()).toHaveCSS("animation-name", "none");
+    expect(history.reads).toHaveLength(0);
+    await page.screenshot({ path: test.info().outputPath("history-touch-partial-ready.png") });
     await touch("touchEnd");
-    expect(await displacement(body)).toBeGreaterThan(0);
     await expect.poll(() => displacement(body)).toBe(0);
+    await expect(header).not.toBeInViewport();
     expect(history.reads).toHaveLength(0);
 
     await touch("touchStart");
-    await touch("touchMove", 330);
-    await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeVisible();
-    expect(await displacement(body)).toBeGreaterThanOrEqual(42);
+    await touch("touchMove", 400);
+    const armedDistance = await displacement(body);
+    expect(armedDistance).toBeGreaterThanOrEqual(56);
+    expect(armedDistance).toBeLessThan(80);
+    await expect(header).toHaveAttribute("data-state", "ready");
     expect(history.reads).toHaveLength(0);
     await touch("touchEnd");
     await expect.poll(() => history.reads.length).toBe(1);
-    await expect.poll(() => displacement(body)).toBeCloseTo(20, 1);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    const held = await expectHeld(body, "Question 40");
+    await page.waitForTimeout(150);
+    await expectCoordinates(body, "Question 40", held);
+    await page.screenshot({ path: test.info().outputPath("history-touch-held.png") });
+
     await touch("touchStart");
     await touch("touchMove", 240);
-    expect(await displacement(body)).toBeGreaterThan(20);
     await touch("touchEnd");
-    await expect.poll(() => displacement(body)).toBeCloseTo(20, 1);
+    await expectHeld(body, "Question 40");
+    await expectCoordinates(body, "Question 40", held);
     expect(history.reads).toHaveLength(1);
+
+    // Native finger-up movement must be free to scroll the retained header away.
+    await touch("touchStart", 400);
+    await touch("touchMove", 376);
+    await touch("touchMove", 360);
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+    const scrolled = await historyGeometry(body, "Question 40");
+    expectSameScroll(held, scrolled, await body.evaluate((node) => node.scrollTop));
+    expect(scrolled.visibleHeight).toBeGreaterThan(0);
+    expect(scrolled.visibleHeight).toBeLessThan(48);
+    await touch("touchEnd");
     await page.getByRole("button", { name: "Switch conversation" }).click();
     await expect(body.getByText("Question 1", { exact: true })).toBeVisible();
     expect(await displacement(body)).toBe(0);
+    await expect(body.locator(".thread-history-slot")).toHaveCount(0);
     history.complete();
     await page.waitForTimeout(100);
     await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
   } finally { await context.close(); }
 });
 
-test("failure stays actionable away from the top; retry, fast completion and exhausted reduced-motion state remain truthful", async ({ page }) => {
+test("reduced-motion failure keeps its functional 48px slot and retry until naturally scrolled away", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
   const history = await installHistory(page);
   await page.goto("/browser/fixture.html?case=history-boundary");
   await page.locator("html").evaluate((node) => node.classList.add("dark"));
   await expect(page.locator("main")).toHaveCSS("background-color", "rgb(48, 48, 48)");
   const body = page.getByTestId("thread-message-region");
+  const header = page.locator(".thread-history-status");
   await expect(body).toBeVisible();
   await stableLayout(body);
-  await positionAtTop(body);
-  await page.getByRole("button", { name: "Load earlier messages", exact: true }).click();
+  const originalTop = await positionAtTop(body);
+  await body.hover();
+  await page.mouse.wheel(0, -120);
   await expect.poll(() => history.reads.length).toBe(1);
-  expect(await displacement(body)).toBe(0);
-  const block = page.locator(".thread-history-blocks > span").first();
+  const held = await expectHeld(body, "Question 40");
+  expect(held.anchorTop - originalTop).toBeCloseTo(48, 0);
+  const block = header.locator(".thread-history-blocks > span").first();
   await expect(block).toHaveCSS("background-color", "rgb(211, 94, 20)");
-  expect(await block.evaluate((node) => getComputedStyle(node).animationName)).toBe("none");
-  await body.evaluate((node) => { node.scrollTop = 600; });
+  await expect(block).toHaveCSS("animation-name", "none");
   history.complete("error");
   const retry = page.getByRole("button", { name: "Loading failed. Retry", exact: true });
   await expect(retry).toBeInViewport();
+  await page.waitForTimeout(150);
+  await expectCoordinates(body, "Question 40", held);
   const failedBlocks = retry.locator(".thread-history-blocks");
   await expect(failedBlocks).toHaveCSS("width", "24px");
   await expect(failedBlocks).toHaveCSS("height", "24px");
@@ -207,31 +328,163 @@ test("failure stays actionable away from the top; retry, fast completion and exh
   await expect(failedBlocks.locator("span").first()).toHaveCSS("transform", "none");
   await retry.focus();
   await expect(page.getByRole("tooltip")).toHaveText("HTTP 503");
+  await page.screenshot({ path: test.info().outputPath("history-failure-dark.png") });
+  await retry.evaluate((node) => node.blur());
+
+  await body.evaluate((node) => { node.scrollTop = 8; });
+  await stableLayout(body);
+  expectSameScroll(held, await historyGeometry(body, "Question 40"), 8);
+  expect(await displacement(body)).toBe(0);
+  await body.evaluate((node) => { node.scrollTop = 0; });
+  await expectCoordinates(body, "Question 40", held);
+  await body.hover();
+  await page.mouse.wheel(0, 96);
+  await expect(retry).not.toBeInViewport();
+  await expect(header).toHaveAttribute("data-state", "error");
+  await expect(body.locator(".thread-history-slot")).toHaveCSS("height", "48px");
+  expect(history.reads).toHaveLength(1);
+  await body.evaluate((node) => { node.scrollTop = 0; });
   await retry.click();
   await expect.poll(() => history.reads.length).toBe(2);
-  await expect(page.locator(".thread-history-blocks")).toHaveCSS("width", "20px");
-  await expect(page.locator(".thread-history-blocks")).toHaveCSS("color", "rgb(211, 94, 20)");
+  await expect(header).toHaveAttribute("data-state", "loading");
+  await expect(header.locator(".thread-history-blocks")).toHaveCSS("width", "20px");
+  await expect(block).toHaveCSS("animation-name", "none");
   history.complete();
   await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
-  await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
-  await expect(page.locator('.thread-history-status[data-state="exhausted"]')).toHaveCount(0);
-  for (const start of [16, 4, 0]) {
+  await expect(header).toHaveAttribute("data-state", "ready");
+  await expectCoordinates(body, "Question 40", held);
+
+  for (const [index, start] of [16, 4, 0].entries()) {
     await positionAtTop(body);
-    await page.getByRole("button", { name: "Load earlier messages", exact: true }).click();
-    await expect.poll(() => history.reads.length).toBe(start === 16 ? 3 : start === 4 ? 4 : 5);
+    await body.hover();
+    await page.mouse.wheel(0, -120);
+    await expect.poll(() => history.reads.length).toBe(index + 3);
     history.complete();
     await expect(body.getByText(`Question ${start}`, { exact: true })).toBeAttached();
   }
   await positionAtTop(body);
   const exhausted = page.locator('.thread-history-status[data-state="exhausted"]');
-  await expect(exhausted).toHaveCount(0);
   await body.hover();
   await page.mouse.wheel(0, -120);
   await expect(exhausted).toBeInViewport();
   expect(await displacement(body)).toBe(0);
   expect(history.reads).toHaveLength(5);
-  await page.screenshot({ path: "test-results/history-boundary-exhausted-dark.png" });
+  await page.screenshot({ path: test.info().outputPath("history-exhausted-dark.png") });
   await expect(exhausted).toHaveCount(0);
+});
+
+test("fast responses leave a static ready button, not synthetic loading, and that button can request again", async ({ page }) => {
+  const history = await installHistory(page);
+  history.respondImmediately(true);
+  await page.goto("/browser/fixture.html?case=history-boundary");
+  const body = page.getByTestId("thread-message-region");
+  const header = page.locator(".thread-history-status");
+  await expect(body).toBeVisible();
+  await stableLayout(body);
+  await positionAtTop(body);
+  await expect(header).toHaveAttribute("data-state", "ready");
+  await expect(header).not.toBeInViewport();
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
+  expect(history.reads).toHaveLength(1);
+  await expect(header).toHaveAttribute("data-state", "ready");
+  const held = await expectHeld(body, "Question 40");
+  const ready = page.getByRole("button", { name: "Load earlier messages", exact: true });
+  await expect(ready).toBeInViewport();
+  const block = ready.locator(".thread-history-blocks > span").first();
+  await expect(block).toHaveCSS("animation-name", "none");
+  await expect(block).toHaveCSS("transform", "none");
+  await page.waitForTimeout(150);
+  await expectCoordinates(body, "Question 40", held);
+  await page.screenshot({ path: test.info().outputPath("history-fast-ready.png") });
+
+  history.respondImmediately(false);
+  await ready.click();
+  await expect.poll(() => history.reads.length).toBe(2);
+  await expect(header).toHaveAttribute("data-state", "loading");
+  const duringRetry = await historyGeometry(body, "Question 40");
+  history.complete();
+  await expect(body.getByText("Question 16", { exact: true })).toBeAttached();
+  await expect(header).toHaveAttribute("data-state", "ready");
+  await expect(block).toHaveCSS("animation-name", "none");
+  await stableLayout(body);
+  const retryGeometry = JSON.stringify({ held, duringRetry, completed: await historyGeometry(body, "Question 40") });
+  console.log("history-ready-request-geometry", retryGeometry);
+  await test.info().attach("history-ready-request-geometry", { body: retryGeometry, contentType: "application/json" });
+  await expectCoordinates(body, "Question 40", held);
+});
+
+test("ordinary middle reading never reveals an exhausted overlay, even when the complete beginning is cached", async ({ page }) => {
+  const history = await installHistory(page, 0, 52);
+  await page.goto("/browser/fixture.html?case=history-boundary");
+  const body = page.getByTestId("thread-message-region");
+  const exhausted = page.getByText("No earlier messages", { exact: true });
+  await expect(body.getByText("Question 51", { exact: true })).toBeAttached();
+  await stableLayout(body);
+  await expect(exhausted).toHaveCount(0);
+  await body.evaluate((node) => {
+    node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    node.scrollTop = Math.round((node.scrollHeight - node.clientHeight) / 2);
+  });
+  await stableLayout(body);
+  const middle = await body.evaluate((node) => node.scrollTop);
+  expect(middle).toBeGreaterThan(48);
+  expect(middle).toBeLessThan(await body.evaluate((node) => node.scrollHeight - node.clientHeight - 48));
+  await expect(exhausted).toHaveCount(0);
+  await body.hover();
+  await page.mouse.wheel(0, -32);
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeLessThan(middle);
+  await expect(exhausted).toHaveCount(0);
+  await page.mouse.wheel(0, 64);
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(middle);
+  await expect(exhausted).toHaveCount(0);
+  await expect(body.locator(".thread-history-slot")).toHaveCount(0);
+  expect(await displacement(body)).toBe(0);
+  expect(history.reads).toHaveLength(0);
+  await page.screenshot({ path: test.info().outputPath("history-middle-no-exhausted.png") });
+});
+
+test("a successful exhausted result belongs to its original inline slot and scrolls out, never floating over middle reading", async ({ page }) => {
+  const history = await installHistory(page, 4);
+  await page.goto("/browser/fixture.html?case=history-boundary");
+  const body = page.getByTestId("thread-message-region");
+  const exhausted = page.locator('.thread-history-status[data-state="exhausted"]');
+  await expect(body).toBeVisible();
+  await stableLayout(body);
+  await expect(exhausted).toHaveCount(0);
+  await positionAtTop(body);
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await expect.poll(() => history.reads.length).toBe(1);
+  const held = await expectHeld(body, "Question 4");
+  history.complete();
+  await expect(body.getByText("Question 0", { exact: true })).toBeAttached();
+  await expect(body.locator('.thread-history-slot .thread-history-status[data-state="exhausted"]')).toHaveCount(1);
+  await expect(page.locator('.thread-viewport-frame > .thread-history-status[data-state="exhausted"]')).toHaveCount(0);
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 4", held);
+  const before = await historyGeometry(body, "Question 4");
+  const beforeScroll = await body.evaluate((node) => node.scrollTop);
+  await body.hover();
+  await page.mouse.wheel(0, before.headerTop - before.frameTop + 16);
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(beforeScroll);
+  await stableLayout(body);
+  const partial = await historyGeometry(body, "Question 4");
+  expectSameScroll(before, partial, await body.evaluate((node) => node.scrollTop) - beforeScroll);
+  expect(partial.visibleHeight).toBeGreaterThan(0);
+  expect(partial.visibleHeight).toBeLessThan(48);
+  await page.screenshot({ path: test.info().outputPath("history-exhausted-inline-clipped.png") });
+  await page.mouse.wheel(0, 96);
+  await expect(exhausted).not.toBeInViewport();
+  expect((await historyGeometry(body, "Question 4")).visibleHeight).toBe(0);
+  await page.mouse.wheel(0, 600);
+  await stableLayout(body);
+  await expect(exhausted).not.toBeInViewport();
+  await expect(body.locator(".thread-history-slot")).toHaveCSS("height", "48px");
+  expect(await displacement(body)).toBe(0);
+  expect(history.reads).toHaveLength(1);
+  await page.screenshot({ path: test.info().outputPath("history-exhausted-not-floating-in-middle.png") });
 });
 
 for (const reducedMotion of ["no-preference", "reduce"] as const) {
@@ -308,7 +561,7 @@ test("local cached windows expand without network loading and only the complete 
   await expect(body.getByText("Cached message 40", { exact: true })).toBeAttached();
   await stableLayout(body);
   await test.info().attach("local-window-anchor", { body: JSON.stringify({
-    before: localAnchor, after: await anchorOffset(body, "Cached message 160"),
+    before: localAnchor, after: await anchorTop(body, "Cached message 160"),
   }), contentType: "application/json" });
   await expect(page.locator('.thread-history-status[data-state="exhausted"]')).toHaveCount(0);
   await positionAtTop(body);
@@ -335,12 +588,15 @@ test("navigation-window loading and errors remain visible and retry uses the nav
   await page.keyboard.press("Home");
   await page.getByRole("button", { name: "Jump to message: Question 38", exact: true }).click();
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
+  await expect(body.locator(".thread-history-slot")).toHaveCount(0);
   history.complete();
   await expect(body.getByText("Question 38", { exact: true })).toBeInViewport();
   await stableLayout(body);
   await body.hover();
   await page.mouse.wheel(0, 10000);
   await expect.poll(() => history.reads.length).toBe(2);
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
+  await expect(body.locator(".thread-history-slot")).toHaveCount(0);
   history.complete();
   await expect(body.getByText("Question 51", { exact: true })).toBeAttached();
   await stableLayout(body);
@@ -349,13 +605,340 @@ test("navigation-window loading and errors remain visible and retry uses the nav
   await page.mouse.wheel(0, -120);
   await expect.poll(() => history.reads.length).toBe(3);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
+  const held = await expectHeld(body, "Question 38");
+  await page.mouse.wheel(0, -80);
+  expect(history.reads).toHaveLength(3);
   history.complete("error");
   await page.getByRole("button", { name: "Loading failed. Retry", exact: true }).click();
   await expect.poll(() => history.reads.length).toBe(4);
   history.complete();
   await expect(body.getByText("Question 26", { exact: true })).toBeAttached();
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  await expect(page.locator('.thread-history-status[data-state="ready"]')).toBeInViewport();
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 38", held);
   await positionAtTop(body);
-  await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  await expect(page.getByText("Scroll up to continue loading earlier messages", { exact: true })).toHaveCSS("animation-name", "none");
   expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&after=50", "?limit=24&before=38", "?limit=24&before=38"]);
+});
+
+async function jumpViaRail(page: Page, index: number) {
+  const rail = page.getByTestId("prompt-rail-scroll");
+  await expect(rail).toBeVisible();
+  await rail.getByRole("button").first().focus();
+  await page.keyboard.press(index < 26 ? "Home" : "End");
+  await rail.getByRole("button", { name: `Jump to message: Question ${index}`, exact: true }).click();
+}
+
+test("cross-path pending older keeps its original slot when pulling at the prepended page head", async ({ page }) => {
+  const history = await installHistory(page);
+  history.respondImmediately(true);
+  await page.goto("/browser/fixture.html?case=history-boundary");
+  const body = page.getByTestId("thread-message-region");
+  const header = page.locator(".thread-history-status");
+  const slot = body.locator(".thread-history-slot");
+  await expect(body).toBeVisible();
+  await stableLayout(body);
+  await positionAtTop(body);
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
+  await expectHeld(body, "Question 40");
+  expect((await historyGeometry(body, "Question 40")).slotBeforeKey).toBe("u40");
+
+  history.respondImmediately(false);
+  await page.getByRole("button", { name: "Load earlier messages", exact: true }).click();
+  await expect.poll(() => history.reads.length).toBe(2);
+  await expect(header).toHaveAttribute("data-state", "loading");
+  await positionAtTop(body);
+  await stableLayout(body);
+  const atNewHead = await historyGeometry(body, "Question 28");
+  expect(atNewHead.firstKey).toBe("u28");
+  expect(atNewHead.slotBeforeKey).toBe("u40");
+  await expect(header).not.toBeInViewport();
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await page.mouse.wheel(0, -80);
+  await expect(slot).toHaveCSS("height", "48px");
+  await expect.poll(() => displacement(body)).toBe(0);
+  expect((await historyGeometry(body, "Question 28")).slotBeforeKey).toBe("u40");
+  await expectCoordinates(body, "Question 28", atNewHead);
+  expect(history.reads).toEqual(["?limit=120&before=40", "?limit=120&before=28"]);
+
+  history.complete();
+  await expect(body.getByText("Question 16", { exact: true })).toBeAttached();
+  await expect(header).toHaveAttribute("data-state", "ready");
+  await stableLayout(body);
+  await expect(slot).toHaveCSS("height", "48px");
+  expect((await historyGeometry(body, "Question 28")).slotBeforeKey).toBe("u40");
+  await expectCoordinates(body, "Question 28", atNewHead);
+  expect(history.reads).toHaveLength(2);
+});
+
+test("cross-path unloaded rail jump has visible navigation feedback outside a scrolled-away older slot", async ({ page }) => {
+  const history = await installHistory(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/browser/fixture.html?case=history-boundary&navigate=1");
+  const body = page.getByTestId("thread-message-region");
+  const slot = body.locator(".thread-history-slot");
+  await expect(body).toBeVisible();
+  await stableLayout(body);
+  await positionAtTop(body);
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await expect.poll(() => history.reads.length).toBe(1);
+  history.complete();
+  await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
+  await expectHeld(body, "Question 40");
+  await body.hover();
+  await page.mouse.wheel(0, 128);
+  await expect(slot.locator(".thread-history-status")).not.toBeInViewport();
+  await expect(slot).toHaveCSS("height", "48px");
+  // Start the replacement away from the old bottom so setup cannot prefetch newer.
+  await positionAtTop(body);
+  await stableLayout(body);
+  await expect(slot.locator(".thread-history-status")).not.toBeInViewport();
+
+  await jumpViaRail(page, 10);
+  await expect.poll(() => history.reads.length).toBe(2);
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
+  await expect(slot.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  history.complete("error");
+  const retry = page.getByRole("button", { name: "Loading failed. Retry", exact: true });
+  await expect(retry).toBeInViewport();
+  await expect(slot.locator('.thread-history-status[data-state="error"]')).toHaveCount(0);
+  await retry.click();
+  await expect.poll(() => history.reads.length).toBe(3);
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
+  expect(history.reads).toEqual(["?limit=120&before=40", "?limit=24&after=10", "?limit=24&after=10"]);
+  history.complete();
+  await expect(body.getByText("Question 10", { exact: true })).toBeInViewport();
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  await expect(retry).toHaveCount(0);
+});
+
+test("cross-path newer has visible navigation feedback and retries newer after its older slot scrolls away", async ({ page }) => {
+  const history = await installHistory(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/browser/fixture.html?case=history-boundary&navigate=1");
+  const body = page.getByTestId("thread-message-region");
+  const slot = body.locator(".thread-history-slot");
+  await expect(body).toBeVisible();
+  await stableLayout(body);
+  await positionAtTop(body);
+  await stableLayout(body);
+  await jumpViaRail(page, 10);
+  await expect.poll(() => history.reads.length).toBe(1);
+  history.complete();
+  await expect(body.getByText("Question 10", { exact: true })).toBeInViewport();
+  await stableLayout(body);
+  await positionAtTop(body);
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await expect.poll(() => history.reads.length).toBe(2);
+  history.complete();
+  await expect(body.getByText("Question 0", { exact: true })).toBeAttached();
+  await expect(slot).toHaveCSS("height", "48px");
+  await expect.poll(() => displacement(body)).toBe(0);
+  await expect(slot.locator(".thread-history-status")).toBeInViewport();
+  await body.hover();
+  await page.mouse.wheel(0, 128);
+  await expect(slot.locator(".thread-history-status")).not.toBeInViewport();
+  await expect(slot).toHaveCSS("height", "48px");
+  await page.mouse.wheel(0, 10000);
+  await expect.poll(() => history.reads.length).toBe(3);
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
+  await expect(slot.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  history.complete("error");
+  const retry = page.getByRole("button", { name: "Loading failed. Retry", exact: true });
+  await expect(retry).toBeInViewport();
+  await expect(slot.locator('.thread-history-status[data-state="error"]')).toHaveCount(0);
+  await retry.click();
+  await expect.poll(() => history.reads.length).toBe(4);
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
+  expect(history.reads).toEqual(["?limit=24&after=10", "?limit=24&before=10", "?limit=24&after=22", "?limit=24&after=22"]);
+  history.complete();
+  await expect(body.getByText("Question 33", { exact: true })).toBeAttached();
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  await expect(retry).toHaveCount(0);
+});
+
+test("cross-path older errors never float after latest or a loaded rail jump, but boundary retry remains available", async ({ page }) => {
+  const history = await installHistory(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const body = page.getByTestId("thread-message-region");
+  const retry = page.getByRole("button", { name: "Loading failed. Retry", exact: true });
+  for (const destination of ["latest", "loaded prompt"] as const) {
+    await test.step(destination, async () => {
+      const initialReads = history.reads.length;
+      await page.goto("/browser/fixture.html?case=history-boundary&navigate=1");
+      await expect(body).toBeVisible();
+      await stableLayout(body);
+      await positionAtTop(body);
+      await body.hover();
+      await page.mouse.wheel(0, -120);
+      await expect.poll(() => history.reads.length).toBe(initialReads + 1);
+      history.complete("error");
+      await expect(retry).toBeInViewport();
+      await expectHeld(body, "Question 40");
+
+      if (destination === "latest") {
+        await page.getByRole("button", { name: "Scroll to bottom", exact: true }).click();
+        await expect(body.getByText("Question 51", { exact: true })).toBeInViewport();
+      } else {
+        await jumpViaRail(page, 46);
+        await expect(body.getByText("Question 46", { exact: true })).toBeInViewport();
+      }
+      await stableLayout(body);
+      await expect.soft(page.locator('.thread-viewport-frame > .thread-history-status[data-state="error"]')).toHaveCount(0, { timeout: 1000 });
+      await expect.soft(retry).not.toBeInViewport({ timeout: 1000 });
+      await body.hover();
+      await page.mouse.wheel(0, -64);
+      await stableLayout(body);
+      await expect.soft(retry).not.toBeInViewport({ timeout: 1000 });
+      expect(history.reads).toHaveLength(initialReads + 1);
+
+      await positionAtTop(body);
+      await retry.focus();
+      await expect(retry).toBeInViewport();
+      expect(history.reads).toHaveLength(initialReads + 1);
+      await retry.click();
+      await expect.poll(() => history.reads.length).toBe(initialReads + 2);
+      expect(history.reads.slice(initialReads)).toEqual(["?limit=120&before=40", "?limit=120&before=40"]);
+      history.complete();
+      await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
+      await expect(body.locator(".thread-history-slot")).toHaveCSS("height", "48px");
+      await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+    });
+  }
+});
+
+
+test("bounded navigation keeps the reading slot static at the three-page cap and loads again only at the new page head", async ({ page }) => {
+  const history = await installHistory(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/browser/fixture.html?case=history-boundary&navigate=1");
+  const body = page.getByTestId("thread-message-region");
+  const header = page.locator(".thread-history-status");
+  const slot = body.locator(".thread-history-slot");
+  const ready = page.getByRole("button", { name: "Load earlier messages", exact: true });
+  await expect(body.getByText("Question 40", { exact: true })).toBeAttached();
+  await expect(body.getByText("Question 38", { exact: true })).toHaveCount(0);
+  await stableLayout(body);
+  // Keep the replacement away from latest's bottom so setup cannot prefetch newer.
+  await positionAtTop(body);
+  await stableLayout(body);
+  expect(history.reads).toHaveLength(0);
+
+  // An unloaded rail destination replaces latest with P0 (38..49).
+  await jumpViaRail(page, 38);
+  await expect.poll(() => history.reads.length).toBe(1);
+  history.complete();
+  await expect(body.getByText("Question 38", { exact: true })).toBeInViewport();
+  await expect(body.getByText("Question 49", { exact: true })).toBeAttached();
+  await stableLayout(body);
+  await positionAtTop(body);
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await expect.poll(() => history.reads.length).toBe(2);
+  await expect(header).toHaveAttribute("data-state", "loading");
+  const held = await expectHeld(body, "Question 38");
+  expect(held.slotBeforeKey).toBe("u38");
+
+  // P1 (26..37) and P2 (14..25) must not move the retained u38 slot or reader.
+  history.complete();
+  await expect(body.getByText("Question 26", { exact: true })).toBeAttached();
+  await expect(ready).toBeInViewport();
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 38", held);
+  expect((await historyGeometry(body, "Question 38")).slotBeforeKey).toBe("u38");
+  await ready.click();
+  await expect.poll(() => history.reads.length).toBe(3);
+  await expect(header).toHaveAttribute("data-state", "loading");
+  await expectCoordinates(body, "Question 38", held);
+  history.complete();
+  await expect(body.getByText("Question 14", { exact: true })).toBeAttached();
+  await expect(header).toHaveAttribute("data-state", "ready");
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 38", held);
+  expect((await historyGeometry(body, "Question 38")).slotBeforeKey).toBe("u38");
+  await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(36);
+
+  // At the cap, a visible static hint cannot evict the page being read.
+  const hint = header.getByText("Scroll up to continue loading earlier messages", { exact: true });
+  await expect(hint).toBeVisible();
+  await expect(header.getByRole("button")).toHaveCount(0);
+  await expect(ready).toHaveCount(0);
+  const hintBox = (await hint.boundingBox())!;
+  await page.mouse.click(hintBox.x + hintBox.width / 2, hintBox.y + hintBox.height / 2);
+  await stableLayout(body);
+  await expect(header).toHaveAttribute("data-state", "ready");
+  await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
+  await expect(slot).toHaveCSS("height", "48px");
+  await expectCoordinates(body, "Question 38", held);
+  expect((await historyGeometry(body, "Question 38")).slotBeforeKey).toBe("u38");
+  expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&before=38", "?limit=24&before=26"]);
+
+  // Positioning is synthetic; only a real wheel at the new u14 head requests P3.
+  await positionAtTop(body);
+  await stableLayout(body);
+  const atNewHead = await historyGeometry(body, "Question 14");
+  expect(atNewHead.firstKey).toBe("u14");
+  expect(atNewHead.slotBeforeKey).toBe("u38");
+  await expect(header).not.toBeInViewport();
+  expect(history.reads).toHaveLength(3);
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await expect.poll(() => history.reads.length).toBe(4);
+  await expect(header).toHaveAttribute("data-state", "loading");
+  const newHeld = await expectHeld(body, "Question 14");
+  expect(newHeld.slotBeforeKey).toBe("u14");
+  expect(newHeld.anchorTop - atNewHead.anchorTop).toBeCloseTo(48, 0);
+  history.complete();
+  await expect(body.getByText("Question 2", { exact: true })).toBeAttached();
+  await expect(header).toHaveAttribute("data-state", "ready");
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 14", newHeld);
+  await expect(slot).toHaveCSS("height", "48px");
+  const completed = await historyGeometry(body, "Question 14");
+  expect(completed.slotBeforeKey).toBe("u14");
+  expect(completed.firstKey).toBe("u2");
+  await expect(body.getByText("Question 37", { exact: true })).toBeAttached();
+  await expect(body.getByText("Question 38", { exact: true })).toHaveCount(0);
+  await expect(body.getByText("Question 49", { exact: true })).toHaveCount(0);
+  await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(36);
+  await expect(hint).toBeVisible();
+  await expect(ready).toHaveCount(0);
+  await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
+  expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&before=38", "?limit=24&before=26", "?limit=24&before=14"]);
+
+  // Keyboard boundary loading must also rebind, even without a wheel pull.
+  await positionAtTop(body);
+  await stableLayout(body);
+  const atKeyboardHead = await historyGeometry(body, "Question 2");
+  expect(atKeyboardHead.firstKey).toBe("u2");
+  expect(atKeyboardHead.slotBeforeKey).toBe("u14");
+  await expect(header).not.toBeInViewport();
+  await body.evaluate((node) => { node.tabIndex = 0; node.focus({ preventScroll: true }); });
+  expect(history.reads).toHaveLength(4);
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => history.reads.length).toBe(5);
+  await expect(header).toHaveAttribute("data-state", "loading");
+  const keyboardHeld = await expectHeld(body, "Question 2");
+  expect(keyboardHeld.slotBeforeKey).toBe("u2");
+  expect(keyboardHeld.anchorTop - atKeyboardHead.anchorTop).toBeCloseTo(48, 0);
+  history.complete();
+  await expect(body.getByText("Question 0", { exact: true })).toBeAttached();
+  await expect(header).toHaveAttribute("data-state", "exhausted");
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 2", keyboardHeld);
+  await expect(slot).toHaveCSS("height", "48px");
+  const keyboardCompleted = await historyGeometry(body, "Question 2");
+  expect(keyboardCompleted.slotBeforeKey).toBe("u2");
+  expect(keyboardCompleted.firstKey).toBe("u0");
+  await expect(body.getByText("Question 25", { exact: true })).toBeAttached();
+  await expect(body.getByText("Question 26", { exact: true })).toHaveCount(0);
+  await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(26);
+  expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&before=38", "?limit=24&before=26", "?limit=24&before=14", "?limit=24&before=2"]);
 });

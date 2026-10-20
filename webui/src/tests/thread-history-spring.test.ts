@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { HISTORY_PULL_LIMIT_PX, ThreadHistorySpring } from "@/components/thread/thread-history-spring";
+import {
+  HISTORY_HOLD_PX,
+  HISTORY_PULL_LIMIT_PX,
+  HISTORY_PULL_TRIGGER_PX,
+  ThreadHistorySpring,
+  type HistoryRevealPhase,
+} from "@/components/thread/thread-history-spring";
 
 function harness(reduced = false) {
   let now = 0;
@@ -9,11 +15,12 @@ function harness(reduced = false) {
   const scheduler = {
     now: () => now,
     request: vi.fn((callback: FrameRequestCallback) => { frames.set(++nextId, callback); return nextId; }),
-    cancel: (id: number) => { frames.delete(id); },
+    cancel: vi.fn((id: number) => { frames.delete(id); }),
   };
-  const feedback = vi.fn();
+  const phase = vi.fn<(phase: HistoryRevealPhase) => void>();
+  const update = vi.fn((next: number) => { distance = next; });
   const spring = new ThreadHistorySpring({ scheduler, prefersReducedMotion: () => reduced,
-    onFeedbackChange: feedback, onUpdate: (next) => { distance = next; } });
+    onPhaseChange: phase, onUpdate: update });
   const advance = (milliseconds = 16) => {
     now += milliseconds;
     const callbacks = [...frames.values()];
@@ -21,8 +28,17 @@ function harness(reduced = false) {
     callbacks.forEach((callback) => callback(now));
     return distance;
   };
-  const settle = () => { for (let i = 0; i < 100 && frames.size; i++) advance(); };
-  return { spring, scheduler, advance, settle, frames, feedback, distance: () => distance };
+  const settle = () => {
+    for (let i = 0; i < 100 && frames.size; i++) advance();
+    expect(frames.size).toBe(0);
+  };
+  const expectBounded = () => {
+    for (const [next] of update.mock.calls) {
+      expect(next).toBeGreaterThanOrEqual(0);
+      expect(next).toBeLessThanOrEqual(HISTORY_PULL_LIMIT_PX);
+    }
+  };
+  return { spring, scheduler, advance, settle, frames, phase, update, expectBounded, distance: () => distance };
 }
 
 describe("history boundary spring", () => {
@@ -35,34 +51,100 @@ describe("history boundary spring", () => {
     expect(pulled).toBeLessThan(40);
     expect(h.spring.endTouch()).toBe(false);
     expect(h.distance()).toBe(pulled);
+    expect(h.phase.mock.calls).toEqual([["feedback"]]);
     expect(h.advance()).toBeGreaterThan(0);
     expect(h.distance()).toBeLessThan(pulled);
+    h.spring.leaveBoundary();
+    expect(h.phase.mock.calls).toEqual([["feedback"]]);
     h.settle();
     expect(h.distance()).toBe(0);
-    expect(h.frames.size).toBe(0);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["hidden"]]);
+    h.expectBounded();
   });
 
-  it("holds actual loading still, lets a new touch take over, and converges immediately after long frame gaps", () => {
+  it("uses a touch threshold above the held height and cancels even a full pull", () => {
     const h = harness();
     h.spring.startTouch();
     h.spring.moveTouch(120);
-    expect(h.spring.endTouch()).toBe(true);
-    h.spring.setLoading(true);
+    expect(h.distance()).toBeGreaterThan(HISTORY_HOLD_PX);
+    expect(h.distance()).toBeLessThan(HISTORY_PULL_TRIGGER_PX);
+    expect(h.spring.endTouch()).toBe(false);
     h.settle();
-    expect(h.distance()).toBe(20);
-    expect(h.frames.size).toBe(0);
+
     h.spring.startTouch();
-    expect(h.distance()).toBe(20);
-    h.spring.moveTouch(20);
-    expect(h.distance()).toBeGreaterThan(20);
-    h.spring.endTouch();
-    h.spring.setLoading(false);
-    h.advance(30_000);
+    h.spring.moveTouch(2_000);
+    expect(h.distance()).toBeGreaterThan(HISTORY_PULL_TRIGGER_PX);
+    expect(h.spring.endTouch(true)).toBe(false);
+    h.settle();
     expect(h.distance()).toBe(0);
-    expect(h.frames.size).toBe(0);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["hidden"], ["feedback"], ["hidden"]]);
+    h.expectBounded();
   });
 
-  it("merges decelerating wheel input into one bounded spring and one boundary request", () => {
+  it("keeps a request held even when it completes before the first animation frame", () => {
+    const h = harness();
+    expect(h.spring.wheel(100)).toBe(true);
+    h.spring.hold();
+    expect(h.frames.size).toBe(1);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["held"]]);
+    h.advance(30_000);
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.frames.size).toBe(0);
+    h.advance(30_000);
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.spring.wheel(20)).toBe(false);
+    h.settle();
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["held"]]);
+    h.expectBounded();
+  });
+
+  it("rearms wheel pagination after leaving the boundary without dismissing the held reveal", () => {
+    const h = harness();
+    expect(h.spring.wheel(100)).toBe(true);
+    h.spring.hold();
+    h.settle();
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+
+    h.spring.leaveBoundary();
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.frames.size).toBe(0);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["held"]]);
+    expect(h.spring.wheel(100)).toBe(true);
+    expect(h.spring.wheel(20)).toBe(false);
+    h.spring.hold();
+    h.settle();
+    h.advance(30_000);
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["held"]]);
+    h.expectBounded();
+  });
+
+  it("lets a new touch take over continuously and restores the held target on release", () => {
+    const h = harness();
+    h.spring.startTouch();
+    h.spring.moveTouch(160);
+    expect(h.spring.endTouch()).toBe(true);
+    h.spring.hold();
+    h.settle();
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+
+    h.spring.startTouch();
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.frames.size).toBe(0);
+    h.spring.moveTouch(120);
+    const pulled = h.distance();
+    expect(pulled).toBeGreaterThan(HISTORY_PULL_TRIGGER_PX);
+    expect(h.spring.endTouch()).toBe(true);
+    expect(h.distance()).toBe(pulled);
+    expect(h.advance()).toBeLessThan(pulled);
+    h.settle();
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["held"]]);
+    h.expectBounded();
+  });
+
+  it("merges decelerating wheel input into one spring and one request marker until feedback settles", () => {
     const h = harness();
     let requests = 0;
     for (const delta of [100, 70, 48, 32, 20, 12, 6, 2]) {
@@ -71,41 +153,100 @@ describe("history boundary spring", () => {
       h.advance();
     }
     expect(requests).toBe(1);
-    expect(h.feedback.mock.calls).toEqual([[true]]);
-    expect(h.distance()).toBeLessThan(HISTORY_PULL_LIMIT_PX);
+    expect(h.phase.mock.calls).toEqual([["feedback"]]);
     h.settle();
     expect(h.distance()).toBe(0);
-    expect(h.feedback.mock.calls).toEqual([[true], [false]]);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["hidden"]]);
     expect(h.spring.wheel(100)).toBe(true);
+    h.expectBounded();
   });
 
-  it("cancels task-owned motion on conversation changes", () => {
+  it("bounds sustained outward and reverse wheel packets without queuing frames or repeating a request", () => {
+    const h = harness();
+    expect(h.spring.wheel(2_000)).toBe(true);
+    h.spring.hold();
+    for (const direction of [1, -1, 1, -1]) {
+      for (let i = 0; i < 80; i++) {
+        for (let packet = 0; packet < 4; packet++) {
+          expect(h.spring.wheel(direction * 2_000)).toBe(false);
+          expect(h.frames.size).toBe(1);
+        }
+        h.advance(i % 2 === 0 ? 8 : 32);
+      }
+    }
+    h.expectBounded();
+    h.spring.startTouch();
+    const takenOver = h.distance();
+    h.spring.moveTouch(0);
+    expect(h.distance()).toBeCloseTo(takenOver);
+    expect(h.spring.endTouch(true)).toBe(false);
+    h.settle();
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["held"]]);
+  });
+
+  it("cancels owned animation and starts a new reveal round after a reset", () => {
     const h = harness();
     h.spring.wheel(100);
-    h.spring.setLoading(true);
+    h.spring.hold();
+    h.advance();
+    expect(h.distance()).toBeGreaterThan(0);
+    expect(h.frames.size).toBe(1);
     h.spring.reset();
+    expect(h.scheduler.cancel).toHaveBeenCalledTimes(1);
     expect(h.frames.size).toBe(0);
     expect(h.distance()).toBe(0);
+    h.advance(30_000);
+    expect(h.distance()).toBe(0);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["held"], ["hidden"]]);
     expect(h.spring.wheel(100)).toBe(true);
   });
 
-  it("keeps the touch trigger functional with reduced motion and no display travel", () => {
+  it("keeps reduced-motion feedback alive internally while publishing no travel", () => {
     const h = harness(true);
     h.spring.startTouch();
-    h.spring.moveTouch(120);
+    h.spring.moveTouch(160);
     expect(h.distance()).toBe(0);
     expect(h.spring.endTouch()).toBe(true);
-    h.spring.setLoading(true);
-    expect(h.distance()).toBe(0);
+    expect(h.frames.size).toBe(1);
+    expect(h.phase.mock.calls).toEqual([["feedback"]]);
+    h.advance();
+    expect(h.frames.size).toBe(1);
+    expect(h.phase.mock.calls).toEqual([["feedback"]]);
     h.settle();
-    expect(h.frames.size).toBe(0);
-    h.spring.setLoading(false);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["hidden"]]);
+
+    expect(h.spring.wheel(100)).toBe(true);
+    expect(h.spring.wheel(20)).toBe(false);
     h.settle();
-    expect(h.feedback.mock.calls).toEqual([[true], [false]]);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["hidden"], ["feedback"], ["hidden"]]);
+    expect(h.update.mock.calls.length).toBeGreaterThan(2);
+    expect(h.update.mock.calls.every(([next]) => next === 0)).toBe(true);
+  });
+
+  it("reveals the reduced-motion held slot immediately and restores it without a bounce", () => {
+    const h = harness(true);
     h.spring.wheel(100);
-    expect(h.feedback).toHaveBeenLastCalledWith(true);
-    h.settle();
+    expect(h.frames.size).toBe(1);
+    h.spring.hold();
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.frames.size).toBe(0);
+    h.advance(30_000);
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+
+    h.spring.startTouch();
+    h.spring.moveTouch(120);
+    expect(h.distance()).toBeGreaterThan(HISTORY_PULL_TRIGGER_PX);
+    expect(h.spring.endTouch()).toBe(true);
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.frames.size).toBe(0);
+    expect(h.spring.wheel(100)).toBe(false);
+    expect(h.distance()).toBe(HISTORY_HOLD_PX);
+    expect(h.frames.size).toBe(0);
+    expect(h.phase.mock.calls).toEqual([["feedback"], ["held"]]);
+    h.spring.reset();
     expect(h.distance()).toBe(0);
-    expect(h.feedback).toHaveBeenLastCalledWith(false);
+    expect(h.phase).toHaveBeenLastCalledWith("hidden");
+    h.expectBounded();
   });
 });
