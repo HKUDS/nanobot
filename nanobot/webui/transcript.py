@@ -21,7 +21,7 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
-from nanobot.bus.events import INBOUND_META_TURN_ID
+from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_TURN_ID
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.display_history import (
@@ -577,8 +577,15 @@ class WebUITranscriptRecorder:
     ) -> bool:
         if text.strip() == "/stop" and not media_paths:
             return False
-        event = build_user_transcript_event(chat_id, text, media_paths=media_paths,
-            cli_apps=cli_apps, mcp_presets=mcp_presets, session_mentions=session_mentions)
+        event = build_user_transcript_event(
+            chat_id,
+            text,
+            media_paths=media_paths,
+            local_media_paths=_local_media_paths(metadata),
+            cli_apps=cli_apps,
+            mcp_presets=mcp_presets,
+            session_mentions=session_mentions,
+        )
         if event is None:
             return False
         return await self.prepare_and_append(chat_id, event, metadata=metadata, phase="user")
@@ -689,11 +696,17 @@ def normalize_session_message_ui_metadata(raw: object) -> dict[str, Any] | None:
     }
 
 
+def _local_media_paths(record: Mapping[str, Any]) -> list[str]:
+    raw = record.get(INBOUND_META_LOCAL_MEDIA)
+    return [path for path in cast(list[object], raw) if isinstance(path, str)] if isinstance(raw, list) else []
+
+
 def build_user_transcript_event(
     chat_id: str,
     text: str,
     *,
     media_paths: list[Any] | None = None,
+    local_media_paths: list[str] | None = None,
     cli_apps: list[Any] | None = None,
     mcp_presets: list[Any] | None = None,
     session_mentions: Sequence[Any] | None = None,
@@ -708,6 +721,9 @@ def build_user_transcript_event(
     }
     if paths:
         event["media_paths"] = paths
+        local = [path for path in (local_media_paths or []) if path in paths]
+        if local:
+            event[INBOUND_META_LOCAL_MEDIA] = local
     apps = [
         dict(cast(Mapping[str, Any], app))
         for app in (cli_apps or [])
@@ -765,6 +781,7 @@ def _session_user_event(
         chat_id,
         text,
         media_paths=cast(list[Any], media) if isinstance(media, list) else None,
+        local_media_paths=_local_media_paths(message),
         cli_apps=cast(list[Any], cli_apps) if isinstance(cli_apps, list) else None,
         mcp_presets=cast(list[Any], mcp_presets) if isinstance(mcp_presets, list) else None,
         session_mentions=(
@@ -983,7 +1000,7 @@ def _transcript_turn_signature(records: list[dict[str, Any]]) -> tuple[str, ...]
 def _user_recovery_signature(event: dict[str, Any]) -> str:
     fields = {
         key: event[key]
-        for key in ("text", "media_paths", "cli_apps", "mcp_presets", "session_mentions", "session_message")
+        for key in ("text", "media_paths", INBOUND_META_LOCAL_MEDIA, "cli_apps", "mcp_presets", "session_mentions", "session_message")
         if key in event
     }
     return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1367,7 +1384,7 @@ def _client_projection_source(record: dict[str, Any]) -> dict[str, Any] | None:
 def _client_projection_event(
     record: dict[str, Any],
     *,
-    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None,
+    augment_user_media: Callable[[list[str], list[str]], list[dict[str, Any]]] | None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None,
     augment_assistant_text: Callable[[str], str] | None,
 ) -> dict[str, Any] | None:
@@ -1389,7 +1406,7 @@ def _client_projection_event(
             if path
         ] if isinstance(raw_paths, list) else []
         if paths and augment_user_media is not None:
-            media = augment_user_media(paths)
+            media = augment_user_media(paths, _local_media_paths(record))
             if media:
                 projected["media_urls"] = media
         for source_key, target_key in (
@@ -1603,7 +1620,7 @@ def _client_projection_page_event_count(turn: list[dict[str, Any]]) -> int:
 def _client_projection_events(
     lines: list[dict[str, Any]],
     *,
-    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None,
+    augment_user_media: Callable[[list[str], list[str]], list[dict[str, Any]]] | None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None,
     augment_assistant_text: Callable[[str], str] | None,
 ) -> tuple[list[dict[str, Any]], int | None]:
@@ -1658,7 +1675,7 @@ def build_session_thread_response(
     *,
     active: bool = False,
     latency_ms: int | None = None,
-    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+    augment_user_media: Callable[[list[str], list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
@@ -1727,7 +1744,7 @@ def build_webui_thread_response(
     session_key: str,
     *,
     history: HistoryReader,
-    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+    augment_user_media: Callable[[list[str], list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
     session_messages: list[dict[str, Any]] | None = None,

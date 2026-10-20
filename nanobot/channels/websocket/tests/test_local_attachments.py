@@ -57,7 +57,7 @@ def test_local_media_ranges_latest_contents_and_current_scope_without_staging(tm
     source.write_bytes(b"first video")
     media = tmp_path / "media"
     gateway = WebUIMediaGateway(workspace_path=project, logger=Mock(), media_dir=lambda _: media)
-    attachments = gateway.augment_transcript_user_media([str(source)], session_key="websocket:local")
+    attachments = gateway.augment_transcript_user_media([str(source)], [str(source)], session_key="websocket:local")
     sig, payload = attachments[0]["url"].split("/")[-2:]
     scope = default_workspace_scope(project, False)
 
@@ -79,7 +79,7 @@ def test_local_media_ranges_latest_contents_and_current_scope_without_staging(tm
     scope = default_workspace_scope(project, False)
     source.unlink()
     assert fetch().status_code == 404
-    assert gateway.augment_transcript_user_media([str(source)], session_key="websocket:local")[0]["url"] == ""
+    assert gateway.augment_transcript_user_media([str(source)], [str(source)], session_key="websocket:local")[0]["url"] == ""
 
 
 def test_referenced_file_in_media_storage_is_not_treated_as_immutable_upload(tmp_path):
@@ -88,7 +88,7 @@ def test_referenced_file_in_media_storage_is_not_treated_as_immutable_upload(tmp
     source = media / "original.mp4"
     source.write_bytes(b"before")
     gateway = WebUIMediaGateway(workspace_path=tmp_path, logger=Mock(), media_dir=lambda _: media)
-    attachment = gateway.augment_transcript_user_media([str(source)], session_key="websocket:local")[0]
+    attachment = gateway.augment_transcript_user_media([str(source)], [str(source)], session_key="websocket:local")[0]
     sig, payload = attachment["url"].split("/")[-2:]
     source.write_bytes(b"updated")
     response = gateway.serve_signed_media(
@@ -107,3 +107,43 @@ def test_legacy_media_filename_starting_with_bracket_keeps_working(tmp_path):
     sig, payload = attachment["url"].split("/")[-2:]
     response = gateway.serve_signed_media(sig, payload)
     assert bytes(response.body) == b"uploaded video"
+
+
+@pytest.mark.parametrize("canonical", [False, True])
+async def test_mixed_media_replay_keeps_uploaded_cache_and_borrowed_freshness(tmp_path, history, canonical):
+    from nanobot.session.manager import Session
+    from nanobot.webui.transcript import (
+        WebUITranscriptRecorder,
+        build_session_thread_response,
+    )
+    media = tmp_path / "media"
+    media.mkdir()
+    uploaded = media / "upload.png"
+    borrowed = media / "borrowed.png"
+    uploaded.write_bytes(b"upload")
+    borrowed.write_bytes(b"original")
+    paths = [str(uploaded), str(borrowed)]
+    metadata = {"local_media_paths": [str(borrowed)]}
+    gateway = WebUIMediaGateway(workspace_path=tmp_path, logger=Mock(), media_dir=lambda _: media)
+
+    def augment(paths, local):
+        return gateway.augment_transcript_user_media(paths, local, session_key="websocket:cache")
+
+    if canonical:
+        session = Session(key="websocket:cache")
+        session.add_message("user", "look", media=paths, **metadata)
+        response = build_session_thread_response(session, augment_user_media=augment)
+    else:
+        assert await WebUITranscriptRecorder(history.sessions).append_user_message(
+            "cache", "look", media_paths=paths, metadata=await history.metadata("cache", metadata),
+        )
+        response = history.build("websocket:cache", session_messages=[], augment_user_media=augment)
+    urls = response["events"][0]["media_urls"]
+    scope = default_workspace_scope(tmp_path, True)
+    borrowed.write_bytes(b"updated")
+    for attachment, expected, cache in zip(urls, [b"upload", b"updated"], ["private, max-age=31536000, immutable", "no-store"], strict=True):
+        sig, payload = attachment["url"].split("/")[-2:]
+        served = gateway.serve_signed_media(sig, payload, scope_for_session=lambda _: scope)
+        assert bytes(served.body) == expected
+        assert served.headers["Cache-Control"] == cache
+    assert sorted(path.name for path in media.iterdir()) == ["borrowed.png", "upload.png"]

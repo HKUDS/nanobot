@@ -46,6 +46,7 @@ from nanobot.agent.turn_delivery import (
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
+    INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_RUNTIME_CONTROL,
     INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
@@ -712,6 +713,9 @@ class AgentLoop:
         turn_id = msg.metadata.get(INBOUND_META_TURN_ID)
         if isinstance(turn_id, str) and turn_id:
             extra[INBOUND_META_TURN_ID] = turn_id
+        local_media = msg.metadata.get(INBOUND_META_LOCAL_MEDIA)
+        if isinstance(local_media, list) and local_media:
+            extra[INBOUND_META_LOCAL_MEDIA] = [path for path in cast(list[object], local_media) if isinstance(path, str)]
         return extra
 
     async def _persist_user_message_early(

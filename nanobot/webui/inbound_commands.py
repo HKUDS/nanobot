@@ -15,7 +15,7 @@ from typing import Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_USER_SHELL
+from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
@@ -240,8 +240,7 @@ class WebUICommandRouter:
         *,
         turn_id: str | None,
         starts_turn: bool,
-        media_paths: list[str],
-        media_names: list[str | None],
+        media: list[dict[str, Any]],
         cli_apps: list[dict[str, Any]],
         mcp_presets: list[dict[str, Any]],
         session_mentions: list[SessionMention],
@@ -254,10 +253,6 @@ class WebUICommandRouter:
         }
         if turn_id is not None:
             body["turn_id"] = turn_id
-        media = self._media.augment_transcript_user_media(media_paths, session_key=webui_session_key(chat_id))
-        for attachment, name in zip(media, media_names, strict=False):
-            if name:
-                attachment["name"] = name
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -615,8 +610,6 @@ class WebUICommandRouter:
                     references.append(reference)
                 name = attachment.get("name")
                 media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
-            if references:
-                self._uploads.store.resolve(references, owner=upload_owner)
         except AttachmentUploadError as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),
@@ -717,7 +710,7 @@ class WebUICommandRouter:
                 )
                 for path in local_paths
             ]
-            uploaded = self._uploads.store.inspect(references, owner=upload_owner)
+            uploaded = self._uploads.store.inspect(references, owner=upload_owner) if references else []
             validate_attachment_batch(
                 [(item["mime"], item["size"]) for item in local]
                 + [(item.mime, item.size) for item in uploaded],
@@ -737,6 +730,8 @@ class WebUICommandRouter:
                 **rejection_fields,
             )
             return
+        if local:
+            metadata[INBOUND_META_LOCAL_MEDIA] = [item["path"] for item in local]
         if temporary_policy is not None:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
@@ -857,6 +852,13 @@ class WebUICommandRouter:
             if not accepted and queued_owner is not None:
                 clear_websocket_turn_if_current(chat_id, queued_owner)
 
+        media = self._media.augment_transcript_user_media(
+            media_paths, local_paths=[item["path"] for item in local],
+            session_key=webui_session_key(chat_id),
+        ) if is_webui else []
+        for attachment, name in zip(media, media_names, strict=False):
+            if name:
+                attachment["name"] = name
         if is_webui and not restart_control:
             await self.broadcast_user_message(
                 connection,
@@ -864,8 +866,7 @@ class WebUICommandRouter:
                 content,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
-                media_paths=media_paths,
-                media_names=media_names,
+                media=media,
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
                 session_mentions=session_mentions,
@@ -879,6 +880,7 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}
                     if active_turn_id is not None

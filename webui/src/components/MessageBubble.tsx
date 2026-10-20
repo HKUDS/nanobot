@@ -477,7 +477,7 @@ export function MessageBubble({
         {!hasText ? contextMenu : null}
         {hasImages ? <ImageGallery images={images} align="right" size="compact" /> : null}
         {!hasImages && hasMedia ? (
-          <MessageMedia media={media} align="right" />
+          <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} />
         ) : null}
         {quotedContext ? (
           <UserQuotedContext
@@ -641,9 +641,11 @@ function mergeCliMentionApps(
 function MessageMedia({
   media,
   align,
+  pending = false,
 }: {
   media: UIMediaAttachment[];
   align: "left" | "right";
+  pending?: boolean;
 }) {
   const inlineImages = useInlineImages();
   if (media.length === 0) return null;
@@ -673,7 +675,7 @@ function MessageMedia({
         <ImageGallery images={images} align={align} size={align === "left" ? "large" : "compact"} />
       ) : null}
       {nonImages.map((item, i) => (
-        <AttachmentTile key={`${item.kind}-${i}`} attachment={item} />
+        <AttachmentTile key={`${item.kind}-${i}`} attachment={item} pending={pending} />
       ))}
     </div>
   );

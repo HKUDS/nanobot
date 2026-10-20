@@ -1076,24 +1076,26 @@ describe("MessageBubble", () => {
     expect(screen.queryByText("Code")).not.toBeInTheDocument();
   });
 
-  it("preserves an uploaded video player through canonical history hydration", () => {
-    const preview = "data:video/webm;base64,AAAA";
+  it("starts an uploaded player from its accepted URL and preserves it through hydration", () => {
     const message: UIMessage = {
       id: "optimistic-user", role: "user", content: "Watch this", createdAt: 1,
-      turnId: "video-turn", turnPhase: "user",
-      media: [{ kind: "video", name: "clip.webm", url: preview }],
+      turnId: "video-turn", turnPhase: "user", deliveryStatus: "sending",
+      media: [{ kind: "video", name: "clip.webm" }],
     };
-    const canonical: UIMessage = {
-      ...message, id: "history-user",
+    const accepted: UIMessage = {
+      ...message, deliveryStatus: "accepted",
       media: [{ kind: "video", name: "clip.webm", url: "/api/media/sig/clip" }],
     };
     const { rerender, unmount } = render(<ThreadMessages messages={[message]} />);
+    expect(screen.queryByLabelText(/video attachment/i)?.tagName).not.toBe("VIDEO");
+    expect(screen.queryByText(/attachment unavailable/i)).not.toBeInTheDocument();
+    rerender(<ThreadMessages messages={[accepted]} />);
     const video = screen.getByLabelText(/video attachment/i);
-    rerender(<ThreadMessages messages={[canonical]} />);
+    rerender(<ThreadMessages messages={[{ ...accepted, id: "history-user" }]} />);
     expect(screen.getByLabelText(/video attachment/i)).toBe(video);
-    expect(video).toHaveAttribute("src", preview);
+    expect(video).toHaveAttribute("src", "/api/media/sig/clip");
     unmount();
-    render(<ThreadMessages messages={[canonical]} />);
+    render(<ThreadMessages messages={[accepted]} />);
     expect(screen.getByLabelText(/video attachment/i)).toHaveAttribute("src", "/api/media/sig/clip");
   });
 

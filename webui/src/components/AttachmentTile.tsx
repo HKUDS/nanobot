@@ -13,15 +13,12 @@ interface AttachmentTileProps {
   className?: string;
   inline?: boolean;
   variant?: "default" | "compact";
+  pending?: boolean;
 }
 
-export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
+export function AttachmentTile({ attachment, className, inline = false, variant = "default", pending = false }: AttachmentTileProps) {
   const { t } = useTranslation();
-  // Uploads are immutable snapshots. A mounted player keeps its local preview
-  // when history supplies the durable URL; reloading uses the canonical URL.
-  const [videoPreviewUrl] = useState(() => attachment.kind === "video"
-    && attachment.url?.startsWith("data:video/") ? attachment.url : undefined);
-  const videoUrl = videoPreviewUrl ?? attachment.url;
+  const videoUrl = attachment.url;
   const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
   const failed = !!videoUrl && failedUrl === videoUrl;
   const [imageOpen, setImageOpen] = useState(false);
@@ -107,7 +104,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     >
       {body}
       <span className="text-xs text-muted-foreground">
-        {t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
+        {pending ? t("message.delivery.sending") : t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
       </span>
     </div>
   );

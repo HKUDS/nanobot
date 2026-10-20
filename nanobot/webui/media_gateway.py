@@ -16,6 +16,7 @@ from nanobot.webui.media_api import (
     media_attachment_kind,
     serve_signed_media,
     sign_local_attachment,
+    sign_media_path,
     sign_or_stage_media_path,
     signed_media_attachments,
 )
@@ -89,13 +90,15 @@ class WebUIMediaGateway:
         return sign_local_attachment(path, session_key=session_key, secret=self.secret)
 
     def augment_transcript_user_media(
-        self, paths: list[str], *, session_key: str,
+        self, paths: list[str], local_paths: list[str], *, session_key: str,
     ) -> list[dict[str, Any]]:
-        # A user may reference a file inside media storage too. Location alone
-        # doesn't grant immutable upload ownership: always serve user references
-        # in place with the session's current permissions and uncached contents.
-        return [
-            {"kind": media_attachment_kind(Path(raw).name), "name": Path(raw).name,
-             "url": self.local_attachment_url(raw, session_key=session_key) if Path(raw).is_file() else ""}
-            for raw in paths
-        ]
+        local = set(local_paths)
+        media: list[dict[str, Any]] = []
+        for raw in paths:
+            path = Path(raw)
+            if raw in local:
+                url = self.local_attachment_url(raw, session_key=session_key) if path.is_file() else ""
+            else:
+                url = sign_media_path(path, secret=self.secret, media_dir=self._media_dir) or ""
+            media.append({"kind": media_attachment_kind(path.name), "name": path.name, "url": url})
+        return media

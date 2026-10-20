@@ -2899,6 +2899,28 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("uses the accepted upload URL instead of retaining an encoded video in message state", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("uploaded-video", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => {
+      result.current.send("watch", [{
+        media: { data_url: "data:video/webm;base64,AAAA", name: "clip.webm" },
+        preview: { kind: "video", url: "data:video/webm;base64,AAAA", name: "clip.webm" },
+      }]);
+    });
+    const optimistic = result.current.messages[0];
+    expect(optimistic.media).toEqual([{ kind: "video", name: "clip.webm" }]);
+    const media = [{ kind: "video" as const, url: "/api/media/sig/upload", name: "clip.webm" }];
+    act(() => fake.emit("uploaded-video", {
+      event: "message_accepted", chat_id: "uploaded-video",
+      turn_id: optimistic.turnId!, starts_turn: true, media_urls: media,
+    }));
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({ id: optimistic.id, media, deliveryStatus: "accepted" });
+  });
+
   it("replaces a local reference's optimistic preview with the gateway's session URL", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("local-video", EMPTY_MESSAGES), {

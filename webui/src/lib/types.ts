@@ -1487,6 +1487,7 @@ export type InboundEvent =
       event: "message_accepted";
       chat_id: string;
       turn_id: string;
+      media_urls?: UIMediaAttachment[];
       starts_turn?: boolean;
       active_turn_id?: string;
       started_at?: number;

@@ -10,6 +10,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, cast
 
+from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA
 from nanobot.config.paths import get_webui_dir
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.manager import SessionInfo, SessionManager
@@ -36,7 +37,7 @@ _MESSAGE_KINDS = {
 }
 _CONTENT_FIELDS = frozenset({
     "text", "media_paths", "media", "media_urls", "reply_to", "agent_ui", "cli_apps", "mcp_presets", "session_mentions",
-    "session_message", "tool_events", "edits", "source", "response_sources", "resuming",
+    "session_message", INBOUND_META_LOCAL_MEDIA, "tool_events", "edits", "source", "response_sources", "resuming",
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
     "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason",

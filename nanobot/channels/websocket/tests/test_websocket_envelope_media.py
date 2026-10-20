@@ -68,11 +68,12 @@ def test_max_message_bytes_keeps_existing_transport_guard() -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_without_media_backward_compatible() -> None:
+async def test_message_without_media_backward_compatible(monkeypatch) -> None:
     """Existing clients that don't send ``media`` keep working unchanged."""
     channel = _make_channel()
     mock_conn = AsyncMock()
     envelope = {"type": "message", "chat_id": "abc123", "content": "hello"}
+    monkeypatch.setattr(channel.gateway.uploads.store, "prune", lambda: pytest.fail("text send scanned upload staging"))
 
     await channel._dispatch_envelope(mock_conn, "client-1", envelope)
 
@@ -313,6 +314,9 @@ async def test_reference_attachments_are_projected_to_other_clients(tmp_path, mo
     assert payload["media_urls"][0]["name"] == "shot.png"
     assert payload["media_urls"][0]["url"].startswith("/api/media/")
     assert reference not in str(payload)
+    accepted = json.loads(origin.send.await_args.args[0])
+    assert accepted["event"] == "message_accepted"
+    assert accepted["media_urls"] == payload["media_urls"]
 
 
 @pytest.mark.asyncio
@@ -360,6 +364,7 @@ async def test_local_reference_inspection_send_recheck_and_no_staging(tmp_path, 
     await channel._dispatch_envelope(conn, "client", message)
     channel._handle_message.assert_awaited_once()
     assert channel._handle_message.await_args.kwargs["media"] == [str(source)]
+    assert channel._handle_message.await_args.kwargs["metadata"]["local_media_paths"] == [str(source)]
     assert source.read_bytes() == b"latest video"
     assert not list(channel.gateway.uploads.store.media_dir.glob("*"))
 

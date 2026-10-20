@@ -213,3 +213,28 @@ def test_attachment_references_canonicalize_existing_relative_paths(
 
     assert media == [str(image_path.resolve())]
     assert f"[Attachment: {doc_path.resolve()}]" in content
+
+
+@pytest.mark.asyncio
+async def test_borrowed_image_origin_survives_canonical_reload(tmp_path: Path) -> None:
+    from nanobot.webui.transcript import build_session_thread_response
+
+    source = tmp_path / "borrowed.png"
+    source.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
+    ))
+    loop = _make_loop(tmp_path)
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("interrupt"))
+    message = InboundMessage(
+        channel="websocket", sender_id="u", chat_id="borrowed-origin", content="look",
+        media=[str(source)], metadata={"local_media_paths": [str(source)]},
+    )
+    with pytest.raises(RuntimeError, match="interrupt"):
+        await loop._process_message(message)
+    loop.sessions.invalidate(message.session_key)
+    persisted = loop.sessions.get_or_create(message.session_key)
+    assert persisted.messages[0]["local_media_paths"] == [str(source)]
+    augment = MagicMock(return_value=[{"kind": "image", "url": "/borrowed"}])
+    response = build_session_thread_response(persisted, augment_user_media=augment)
+    augment.assert_called_once_with([str(source)], [str(source)])
+    assert response["events"][0]["media_urls"][0]["url"] == "/borrowed"
