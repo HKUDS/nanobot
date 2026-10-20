@@ -2137,9 +2137,9 @@
     "forkFromHere": "Trò chuyện mới từ đây",
     "fallbackResponse": "Phản hồi này đã chuyển sang mô hình dự phòng, do {{preset}} trả lời.",
     "editMessage": "Chỉnh sửa tin nhắn",
-    "confirmEditResend": "Xác nhận và gửi lại",
-    "editReplacesSuffix": "Tin nhắn này và toàn bộ nội dung phía sau trong cuộc trò chuyện hiện tại sẽ được thay thế. Các thao tác bên ngoài đã thực hiện sẽ không được hoàn tác.",
-    "editFailed": "Không thể chấp nhận bản chỉnh sửa. Các thay đổi vẫn được giữ lại; hãy kiểm tra kết nối và thử lại.",
+    "confirmEditResend": "Gửi lại",
+    "editReplacesSuffix": "Tin nhắn này và các tin nhắn sau sẽ được thay thế. Các thao tác đã thực hiện vẫn có hiệu lực.",
+    "editFailed": "Chưa xác nhận được việc gửi lại. Kiểm tra kết nối rồi thử lại.",
     "editFinishCurrent": "Hãy hoàn tất hoặc hủy bản chỉnh sửa hiện tại trước.",
     "editErrors": {
       "edit_unavailable": "Không thể chỉnh sửa tin nhắn trong cuộc trò chuyện hoặc gateway này.",

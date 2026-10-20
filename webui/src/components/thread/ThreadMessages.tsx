@@ -304,7 +304,7 @@ export function ThreadMessages({
         ];
       })]}
       {missingEditSource ? <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>
-        <InlineMessageEditor sourceMissing />
+        <MessageBubble message={editDraft.message} textEditor={<InlineMessageEditor sourceMissing />} />
       </div> : null}
       {afterMessages}
       {pendingActivity ? (
@@ -772,15 +772,16 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
                 />
               </div>
             ) : null}
-            {isEditing ? <InlineMessageEditor /> : <MessageBubble
+            <MessageBubble
               message={unit.message}
+              textEditor={isEditing ? <InlineMessageEditor /> : undefined}
               temporary={temporary}
               cliApps={cliApps}
               mcpPresets={mcpPresets}
               slashCommands={slashCommands}
               onOpenFilePreview={onOpenFilePreview}
-              contextMenu={unit.message.role === "user" && !mobileActions ? blockMenu : undefined}
-            />}
+              contextMenu={unit.message.role === "user" && !mobileActions && !isEditing ? blockMenu : undefined}
+            />
             {mobileActions && !isEditing ? blockMenu : null}
             {unit.message.role === "assistant"
             && unit.message.kind !== "compaction"

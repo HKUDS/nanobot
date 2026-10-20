@@ -2523,9 +2523,9 @@
     "forkFromHere": "另开对话",
     "fallbackResponse": "本条回复已切换至备用模型，由 {{preset}} 回答。",
     "editMessage": "编辑消息",
-    "confirmEditResend": "确认并重发",
-    "editReplacesSuffix": "将替换当前会话中的这条消息及其全部后续内容，已执行的外部操作不会撤销。",
-    "editFailed": "未能确认接受编辑。修改内容已保留，请检查连接后重试。",
+    "confirmEditResend": "重新发送",
+    "editReplacesSuffix": "替换此条及后续对话，已执行操作仍生效。",
+    "editFailed": "未收到重发确认，请检查连接后重试。",
     "editFinishCurrent": "请先完成或取消当前编辑。",
     "editErrors": {
       "edit_unavailable": "此会话或网关暂不支持编辑消息。",

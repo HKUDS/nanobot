@@ -2137,9 +2137,9 @@
     "forkFromHere": "Nouvelle discussion ici",
     "fallbackResponse": "Cette réponse utilise un modèle de secours : {{preset}}.",
     "editMessage": "Modifier le message",
-    "confirmEditResend": "Confirmer et renvoyer",
-    "editReplacesSuffix": "Ce message et tout ce qui le suit seront remplacés dans la conversation actuelle. Les actions externes déjà effectuées ne sont pas annulées.",
-    "editFailed": "La modification n’a pas pu être acceptée. Vos changements sont conservés ; vérifiez la connexion et réessayez.",
+    "confirmEditResend": "Renvoyer",
+    "editReplacesSuffix": "Ce message et les suivants seront remplacés. Les actions effectuées restent en vigueur.",
+    "editFailed": "Renvoi non confirmé. Vérifiez la connexion et réessayez.",
     "editFinishCurrent": "Terminez ou annulez d’abord la modification en cours.",
     "editErrors": {
       "edit_unavailable": "La modification des messages est indisponible pour cette conversation ou passerelle.",

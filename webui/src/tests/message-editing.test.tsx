@@ -32,14 +32,15 @@ function openMenu() {
 async function openEditor() {
   fireEvent.click(openMenu());
   const input = screen.getByRole("textbox", { name: "Edit message" });
-  await waitFor(() => expect(screen.getByRole("button", { name: "Confirm and resend" })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Resend" })).toBeEnabled());
   return input;
 }
 
 describe("message editing", () => {
-  it("uses the existing copy action area and focuses a separate inline draft; cancel is read-only", async () => {
+  it("edits inside the original user bubble and keeps its draft separate; cancel is read-only", async () => {
     const onBegin = vi.fn();
     const { requests, send } = setup({ onBegin });
+    const bubble = screen.getByText("original question");
     const edit = openMenu();
     const menu = edit.closest("[data-message-block-menu-actions]")!;
     expect(within(menu as HTMLElement).getByRole("button", { name: "Copy" })).toBeVisible();
@@ -47,12 +48,14 @@ describe("message editing", () => {
     fireEvent.click(edit);
     const input = screen.getByRole("textbox", { name: "Edit message" });
     expect(input).toHaveFocus();
+    expect(bubble).toContainElement(input);
     expect(onBegin).toHaveBeenCalledTimes(1);
     expect(onBegin).toHaveBeenCalledWith("history-original");
     expect(input).toHaveValue("original question");
     fireEvent.change(input, { target: { value: "unconfirmed change" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox", { name: "Edit message" })).not.toBeInTheDocument();
+    expect(bubble).toBe(screen.getByText("original question"));
     expect(screen.getByRole("textbox", { name: "Composer draft" })).toHaveValue("untouched bottom draft");
     expect(requests).toHaveBeenCalledTimes(1);
     expect(requests.mock.calls[0][0]).toBe("chat.edit.prepare");
@@ -65,7 +68,7 @@ describe("message editing", () => {
     fireEvent.change(input, { target: { value: "edited question" } });
     let accept!: (value: unknown) => void;
     requests.mockReturnValueOnce(new Promise((resolve) => { accept = resolve; }));
-    const confirm = screen.getByRole("button", { name: "Confirm and resend" });
+    const confirm = screen.getByRole("button", { name: "Resend" });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
     expect(requests).toHaveBeenCalledTimes(2);
@@ -84,13 +87,13 @@ describe("message editing", () => {
     const input = await openEditor();
     fireEvent.change(input, { target: { value: "keep this edit" } });
     requests.mockRejectedValueOnce(new Error("edit_source_changed"));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and resend" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
     await screen.findByRole("alert");
     expect(input).toHaveValue("keep this edit");
     expect(screen.getByRole("alert")).toHaveTextContent("conversation changed");
     const submitted = requests.mock.calls[1][1];
     requests.mockResolvedValueOnce({ accepted: true });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and resend" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
     await waitFor(() => expect(requests).toHaveBeenCalledTimes(3));
     expect(requests.mock.calls[2][1]).toEqual(submitted);
   });
@@ -102,7 +105,7 @@ describe("message editing", () => {
     rerender(tree(false, [replacement]));
     expect(screen.getByRole("textbox", { name: "Edit message" })).toHaveValue("local edit still needs a decision");
     expect(screen.getByRole("alert")).toHaveTextContent("conversation changed");
-    expect(screen.getByRole("button", { name: "Confirm and resend" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Resend" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox", { name: "Edit message" })).not.toBeInTheDocument();
     expect(screen.getByText(replacement.content)).toBeVisible();
@@ -132,7 +135,7 @@ describe("message editing", () => {
     const { requests } = setup();
     const input = await openEditor();
     fireEvent.change(input, { target: { value: text } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and resend" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
     expect(screen.getByRole("alert")).toBeVisible();
     expect(requests).toHaveBeenCalledTimes(1);
   });

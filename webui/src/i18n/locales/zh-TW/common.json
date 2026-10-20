@@ -2136,9 +2136,9 @@
     "forkFromHere": "另開對話",
     "fallbackResponse": "本則回覆已切換至備用模型，由 {{preset}} 回答。",
     "editMessage": "編輯訊息",
-    "confirmEditResend": "確認並重新傳送",
-    "editReplacesSuffix": "將替換目前對話中的這則訊息及其全部後續內容，已執行的外部操作不會撤銷。",
-    "editFailed": "無法接受此次編輯。修改內容已保留，請檢查連線後重試。",
+    "confirmEditResend": "重新傳送",
+    "editReplacesSuffix": "替換此則及後續對話，已執行操作仍生效。",
+    "editFailed": "尚未收到重新傳送確認，請檢查連線後重試。",
     "editFinishCurrent": "請先完成或取消目前的編輯。",
     "editErrors": {
       "edit_unavailable": "此對話或閘道尚不支援編輯訊息。",

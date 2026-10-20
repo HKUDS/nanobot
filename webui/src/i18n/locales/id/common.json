@@ -2137,9 +2137,9 @@
     "forkFromHere": "Chat baru dari sini",
     "fallbackResponse": "Balasan ini beralih ke model cadangan dan dijawab oleh {{preset}}.",
     "editMessage": "Edit pesan",
-    "confirmEditResend": "Konfirmasi dan kirim ulang",
-    "editReplacesSuffix": "Pesan ini dan semua yang mengikutinya dalam percakapan saat ini akan diganti. Tindakan eksternal yang sudah dilakukan tidak dibatalkan.",
-    "editFailed": "Edit tidak dapat diterima. Perubahan Anda tetap tersimpan; periksa koneksi dan coba lagi.",
+    "confirmEditResend": "Kirim ulang",
+    "editReplacesSuffix": "Pesan ini dan pesan berikutnya akan diganti. Tindakan yang sudah dilakukan tetap berlaku.",
+    "editFailed": "Pengiriman ulang belum dikonfirmasi. Periksa koneksi lalu coba lagi.",
     "editFinishCurrent": "Selesaikan atau batalkan edit saat ini terlebih dahulu.",
     "editErrors": {
       "edit_unavailable": "Pengeditan pesan tidak tersedia untuk percakapan atau gateway ini.",

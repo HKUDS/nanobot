@@ -2331,9 +2331,9 @@
     "forkFromHere": "Nova conversa daqui",
     "fallbackResponse": "Esta resposta usa um modelo alternativo: {{preset}}.",
     "editMessage": "Editar mensagem",
-    "confirmEditResend": "Confirmar e reenviar",
-    "editReplacesSuffix": "Esta mensagem e tudo o que vem depois dela serão substituídos na conversa atual. Ações externas já realizadas não serão desfeitas.",
-    "editFailed": "Não foi possível aceitar a edição. Suas alterações foram mantidas; verifique a conexão e tente novamente.",
+    "confirmEditResend": "Reenviar",
+    "editReplacesSuffix": "Esta mensagem e as seguintes serão substituídas. As ações realizadas continuam em vigor.",
+    "editFailed": "O reenvio não foi confirmado. Verifique a conexão e tente novamente.",
     "editFinishCurrent": "Conclua ou cancele a edição atual primeiro.",
     "editErrors": {
       "edit_unavailable": "A edição de mensagens não está disponível para esta conversa ou gateway.",

@@ -2138,9 +2138,9 @@
     "forkFromHere": "Nuevo chat desde aquí",
     "fallbackResponse": "Esta respuesta usa un modelo de respaldo: {{preset}}.",
     "editMessage": "Editar mensaje",
-    "confirmEditResend": "Confirmar y reenviar",
-    "editReplacesSuffix": "Se reemplazarán este mensaje y todo lo que le sigue en el chat actual. Las acciones externas ya realizadas no se deshacen.",
-    "editFailed": "No se pudo aceptar la edición. Tus cambios se conservan; comprueba la conexión y vuelve a intentarlo.",
+    "confirmEditResend": "Reenviar",
+    "editReplacesSuffix": "Se reemplazarán este mensaje y los siguientes. Las acciones realizadas siguen vigentes.",
+    "editFailed": "No se ha confirmado el reenvío. Comprueba la conexión e inténtalo de nuevo.",
     "editFinishCurrent": "Termina o cancela la edición actual primero.",
     "editErrors": {
       "edit_unavailable": "No se pueden editar mensajes en esta conversación o pasarela.",

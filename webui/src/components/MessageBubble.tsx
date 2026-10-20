@@ -55,6 +55,8 @@ interface MessageBubbleProps {
   onOpenFilePreview?: (path: string) => void;
   /** Context-menu trigger positioned against this message's visual block. */
   contextMenu?: ReactNode;
+  /** Edit ordinary user text in its existing bubble surface. */
+  textEditor?: ReactNode;
 }
 
 function ForkArrowIcon({ className }: { className?: string }) {
@@ -435,6 +437,7 @@ export function MessageBubble({
   slashCommands = [],
   onOpenFilePreview,
   contextMenu,
+  textEditor,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mentionCliApps = useMemo(
@@ -521,7 +524,8 @@ export function MessageBubble({
         {hasText ? (
           <div data-user-text-bubble className="relative ml-auto w-fit max-w-full min-w-0">
             {contextMenu}
-            <p
+            <div
+              data-user-message-body
               data-theme-surface
               data-temporary-message={temporary ? "true" : undefined}
               className={cn(
@@ -532,8 +536,8 @@ export function MessageBubble({
                   : "bg-secondary/70",
               )}
             >
-              {messageText}
-            </p>
+              {textEditor ?? messageText}
+            </div>
           </div>
         ) : null}
         {showDeliveryStatus ? (

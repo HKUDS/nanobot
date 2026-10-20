@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { useClient } from "@/providers/ClientProvider";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import type { UIMessage } from "@/lib/types";
@@ -124,25 +125,33 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
   const editing = useMessageEditing();
   const { t } = useTranslation();
   const input = useRef<HTMLTextAreaElement>(null);
+  const descriptionId = useId();
+  const errorId = useId();
   const id = editing?.draft?.message.id;
   useLayoutEffect(() => { input.current?.focus({ preventScroll: true }); }, [id]);
   if (!editing?.draft) return null;
   const { draft, busy, change, cancel, confirm } = editing;
   const error = sourceMissing ? t("message.editErrors.edit_source_changed")
     : busy ? t("message.editErrors.edit_session_busy") : draft.error;
-  return <form data-message-editor className="ms-auto w-full max-w-full rounded-lg border border-border bg-background p-3"
+  return <form data-message-editor className="min-w-0 max-w-full whitespace-normal"
     onSubmit={(event) => { event.preventDefault(); confirm(); }}>
-    <textarea ref={input} aria-label={t("message.editMessage")} value={draft.text}
-      disabled={draft.submitting} rows={Math.min(14, Math.max(3, draft.text.split("\n").length))}
-      onChange={(event) => change(event.target.value)}
-      onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); cancel(); } }}
-      className="w-full resize-y bg-transparent text-sm leading-6 outline-none" />
-    <p className="mt-1 text-xs text-muted-foreground">{t("message.editReplacesSuffix")}</p>
-    {error ? <p role="alert" className="mt-2 text-xs text-destructive">{error}</p> : null}
-    <div className="mt-3 flex flex-wrap justify-end gap-2">
-      <button type="button" disabled={draft.submitting} onClick={cancel} className="rounded-control px-3 py-2 text-sm hover:bg-muted disabled:opacity-50">{t("common.cancel")}</button>
-      <button type="submit" disabled={sourceMissing || busy || draft.preparing || draft.submitting || !draft.anchor || !draft.text.trim()}
-        className="rounded-control bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50">{t("message.confirmEditResend")}</button>
+    <div className="relative min-w-0 [text-autospace:no-autospace]">
+      <div aria-hidden className="invisible whitespace-pre-wrap [overflow-wrap:anywhere]">{draft.text + "\u200b"}</div>
+      <textarea ref={input} aria-label={t("message.editMessage")} value={draft.text}
+        aria-describedby={`${descriptionId}${error ? ` ${errorId}` : ""}`} aria-invalid={!!error}
+        disabled={draft.submitting}
+        onChange={(event) => change(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); cancel(); } }}
+        className="absolute inset-0 block h-full w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 [font:inherit] text-inherit outline-none" />
+    </div>
+    <p id={descriptionId} className="mt-2 text-xs leading-5 text-muted-foreground">{t("message.editReplacesSuffix")}</p>
+    {error ? <p id={errorId} role="alert" className="mt-2 text-xs leading-5 text-destructive">{error}</p> : null}
+    <div className="mt-2 flex flex-wrap justify-end gap-1.5">
+      <Button type="button" size="sm" variant="ghost" disabled={draft.submitting} onClick={cancel}
+        className="max-md:min-h-11">{t("common.cancel")}</Button>
+      <Button type="submit" size="sm" aria-describedby={descriptionId}
+        disabled={sourceMissing || busy || draft.preparing || draft.submitting || !draft.anchor || !draft.text.trim()}
+        className="max-md:min-h-11">{t("message.confirmEditResend")}</Button>
     </div>
   </form>;
 }

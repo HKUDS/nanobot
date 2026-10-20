@@ -2137,9 +2137,9 @@
     "forkFromHere": "여기서 새 대화",
     "fallbackResponse": "이 응답은 대체 모델로 전환되어 {{preset}}이(가) 답변합니다.",
     "editMessage": "메시지 편집",
-    "confirmEditResend": "확인 후 다시 보내기",
-    "editReplacesSuffix": "현재 대화에서 이 메시지와 이후 내용을 모두 교체합니다. 이미 실행된 외부 작업은 취소되지 않습니다.",
-    "editFailed": "편집을 적용하지 못했습니다. 변경 내용은 유지됩니다. 연결을 확인하고 다시 시도하세요.",
+    "confirmEditResend": "다시 보내기",
+    "editReplacesSuffix": "이 메시지와 이후 메시지를 교체합니다. 실행한 작업은 그대로 유지됩니다.",
+    "editFailed": "다시 보내기를 확인하지 못했습니다. 연결을 확인하고 다시 시도하세요.",
     "editFinishCurrent": "먼저 현재 편집을 완료하거나 취소하세요.",
     "editErrors": {
       "edit_unavailable": "이 대화 또는 게이트웨이에서는 메시지를 편집할 수 없습니다.",

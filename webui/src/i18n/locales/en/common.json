@@ -2523,9 +2523,9 @@
     "forkFromHere": "New chat from here",
     "fallbackResponse": "This reply switched to a fallback model, answered by {{preset}}.",
     "editMessage": "Edit message",
-    "confirmEditResend": "Confirm and resend",
-    "editReplacesSuffix": "This replaces this message and everything after it in the current chat. Actions already taken are not undone.",
-    "editFailed": "Could not accept the edit. Your changes are still here; check the connection and retry.",
+    "confirmEditResend": "Resend",
+    "editReplacesSuffix": "Replaces this and later messages. Completed actions stay in effect.",
+    "editFailed": "Resend not confirmed. Check the connection and retry.",
     "editFinishCurrent": "Finish or cancel the current edit first.",
     "editErrors": {
       "edit_unavailable": "Message editing is unavailable for this conversation or gateway.",
