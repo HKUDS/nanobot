@@ -371,7 +371,11 @@ class QQChannel(BaseChannel):
 
         if not force and self.config.app_id and self.config.secret:
             return True
-        return await QQConnectStore().login()
+        credentials = await QQConnectStore().login()
+        if credentials is None:
+            return False
+        self.config.app_id, self.config.secret = credentials
+        return True
 
     async def start(self) -> None:
         """Start the QQ bot with auto-reconnect loop."""

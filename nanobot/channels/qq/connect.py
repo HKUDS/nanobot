@@ -12,11 +12,12 @@ import asyncio
 import base64
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
+from filelock import FileLock
 
 from nanobot.channels.connect import ChannelConnectError, QueryParams, query_first
 
@@ -36,6 +37,7 @@ class QQConnectSession:
     key: str
     created_wall: float
     deadline: float
+    credentials: tuple[str, str] | None = field(default=None, repr=False)
 
 
 def _decrypt_secret(encrypted: str, key: str) -> str:
@@ -72,15 +74,18 @@ async def _portal_post(path: str, body: dict[str, Any]) -> dict[str, Any]:
 
 
 def save_credentials(app_id: str, secret: str) -> None:
-    """Persist credentials before the post-connect enable step reads config."""
+    """Merge credentials under the same file lock as settings mutations."""
     from nanobot.config.loader import get_config_path, load_config, save_config
 
-    config = load_config()
-    raw = getattr(config.channels, "qq", None)
-    values: dict[str, Any] = dict(cast(dict[str, Any], raw)) if isinstance(raw, dict) else {}
-    values.update(appId=app_id, secret=secret)
-    setattr(config.channels, "qq", values)
-    save_config(config, get_config_path())
+    path = get_config_path().expanduser().resolve(strict=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path.with_suffix(f"{path.suffix}.lock"))):
+        config = load_config(path)
+        raw = getattr(config.channels, "qq", None)
+        values: dict[str, Any] = dict(cast(dict[str, Any], raw)) if isinstance(raw, dict) else {}
+        values.update(appId=app_id, secret=secret)
+        setattr(config.channels, "qq", values)
+        save_config(config, path)
 
 
 class QQConnectStore:
@@ -147,6 +152,7 @@ class QQConnectStore:
             return _payload(session_id, "failed", "QQ confirmed the scan but returned no credentials.")
 
         await asyncio.to_thread(save_credentials, app_id, secret)
+        session.credentials = (app_id, secret)
         return {
             "session_id": session_id,
             "status": "succeeded",
@@ -157,8 +163,8 @@ class QQConnectStore:
         self._sessions.pop(session_id, None)
         return _payload(session_id, "cancelled", "QQ login cancelled.")
 
-    async def login(self) -> bool:
-        """Blocking CLI login: print the QR and poll until scanned."""
+    async def login(self) -> tuple[str, str] | None:
+        """Print the QR and return committed credentials to the CLI config owner."""
         try:
             task_id, key = await create_bind_task()
         except Exception as exc:
@@ -169,7 +175,7 @@ class QQConnectStore:
             while True:
                 payload = await self.poll(session.id)
                 if payload["status"] != "pending":
-                    return payload["status"] == "succeeded"
+                    return session.credentials if payload["status"] == "succeeded" else None
                 await asyncio.sleep(POLL_INTERVAL_MS / 1000)
         finally:
             self._sessions.pop(session.id, None)
