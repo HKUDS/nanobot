@@ -802,6 +802,11 @@
       "failed": "任务失败，点击查看详情。",
       "interrupted": "任务需要处理，点击继续。"
     },
+    "readingTextSize": {
+      "small": "阅读字号：小",
+      "standard": "阅读字号：标准",
+      "large": "阅读字号：大"
+    },
     "rows": {
       "theme": "主题",
       "language": "语言",
@@ -816,6 +821,7 @@
       "currentModel": "当前配置",
       "selectedPreset": "所选预设",
       "presetModel": "预设模型",
+      "readingTextSize": "阅读字号",
       "activityMode": "处理过程",
       "fileEditDisplay": "修改预览",
       "codeWrap": "代码换行",

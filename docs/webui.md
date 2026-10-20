@@ -294,7 +294,7 @@ Settings is the control surface for browser-local and gateway-backed runtime con
 
 Some settings take effect immediately. Runtime settings that affect the gateway or agent process may require a restart; the WebUI shows that requirement next to the relevant control.
 
-Browser-only display preferences, such as file edit display mode, take effect immediately for the current browser and do not change gateway configuration.
+Browser-only display preferences take effect immediately and persist in the current browser. In **Appearance → Local preferences**, **Reading text size** offers three A buttons: small, standard (default), and large. They adjust conversation text, Markdown and code, with a coordinated message input size; navigation and toolbars keep their interface size. Browser zoom remains available. These preferences, including file edit display mode, do not change gateway configuration.
 
 To add a model, follow [Configure Your Model](./quick-start.md#2-configure-your-model).
 

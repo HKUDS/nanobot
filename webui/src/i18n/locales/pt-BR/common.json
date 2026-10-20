@@ -616,6 +616,11 @@
       "failed": "A tarefa falhou. Clique para ver os detalhes.",
       "interrupted": "A tarefa precisa de atenção. Clique para continuar."
     },
+    "readingTextSize": {
+      "small": "Texto de leitura pequeno",
+      "standard": "Texto de leitura padrão",
+      "large": "Texto de leitura grande"
+    },
     "rows": {
       "theme": "Tema",
       "language": "Idioma",
@@ -630,6 +635,7 @@
       "currentModel": "Configuração atual",
       "selectedPreset": "Preset selecionado",
       "presetModel": "Modelo da predefinição",
+      "readingTextSize": "Tamanho do texto de leitura",
       "activityMode": "Detalhes da atividade",
       "fileEditDisplay": "Prévia de alterações",
       "codeWrap": "Quebra de linha no código",

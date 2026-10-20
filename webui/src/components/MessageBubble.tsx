@@ -390,8 +390,7 @@ function IncomingSessionMessage({
   return (
     <div
       data-session-message
-      className="group relative w-full text-[15px]"
-      style={{ lineHeight: "var(--cjk-line-height)" }}
+      className="group relative w-full text-reading"
     >
       {contextMenu}
       <div
@@ -503,7 +502,7 @@ export function MessageBubble({
             data-temporary-message={temporary ? "true" : undefined}
             className={cn(
               "ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
-              "text-left text-[16px]/[1.75] whitespace-pre-wrap [overflow-wrap:anywhere]",
+              "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
               temporary
                 ? "border border-dashed border-muted-foreground/40 bg-transparent"
                 : "bg-secondary/70",
@@ -537,8 +536,7 @@ export function MessageBubble({
   return (
     <div
       data-assistant-message
-      className="group/assistant relative w-full text-[15px]"
-      style={{ lineHeight: "var(--cjk-line-height)" }}
+      className="group/assistant relative w-full text-reading"
     >
       {contextMenu}
       {hasReasoning ? (
@@ -579,7 +577,7 @@ function UserQuotedContext({ text, label }: { text: string; label: string }) {
       aria-label={label}
     >
       <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-      <p className="min-w-0 line-clamp-3 whitespace-pre-wrap text-[13px]/[1.45] [overflow-wrap:anywhere]">
+      <p className="min-w-0 line-clamp-3 whitespace-pre-wrap text-reading-small [overflow-wrap:anywhere]">
         {text}
       </p>
     </blockquote>

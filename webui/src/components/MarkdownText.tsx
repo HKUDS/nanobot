@@ -97,7 +97,7 @@ export function MarkdownText({
   const plainFallback = (
     <div
       className={cn(
-        "whitespace-pre-wrap break-words leading-relaxed text-foreground/92",
+        "whitespace-pre-wrap break-words text-reading text-foreground/92",
         streaming && "streaming-text-fallback",
         className,
       )}

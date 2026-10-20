@@ -21,6 +21,21 @@ export default {
       },
     },
     extend: {
+      // Text roles own their metrics; reading preferences never change the rem grid.
+      fontSize: {
+        ui: ["0.8125rem", { lineHeight: "1.25rem", fontWeight: "400" }],
+        "ui-label": ["0.75rem", { lineHeight: "1.125rem", fontWeight: "500" }],
+        "ui-heading": ["0.8125rem", { lineHeight: "1.25rem", fontWeight: "600" }],
+        "ui-body": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "400" }],
+        "control-label": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "500" }],
+        caption: ["0.75rem", { lineHeight: "1.125rem", fontWeight: "400" }],
+        title: ["1.25rem", { lineHeight: "1.75rem", fontWeight: "600" }],
+        reading: ["var(--text-reading-size)", { lineHeight: "var(--cjk-line-height)", fontWeight: "400" }],
+        "reading-small": ["calc(var(--text-reading-size) * 0.875)", { lineHeight: "var(--cjk-line-height)", fontWeight: "400" }],
+        code: ["var(--text-code-size)", { lineHeight: "1.6", fontWeight: "400" }],
+        "code-dense": ["var(--text-code-dense-size)", { lineHeight: "1.6", fontWeight: "400" }],
+        composer: ["max(16px, var(--text-reading-size))", { lineHeight: "1.5", fontWeight: "400" }],
+      },
       fontFamily: {
         sans: [
           "system-ui",
@@ -41,6 +56,8 @@ export default {
         ],
         mono: [
           '"JetBrains Mono"',
+          '"SFMono-Regular"',
+          '"SF Mono"',
           '"Fira Code"',
           '"Cascadia Code"',
           '"Source Code Pro"',

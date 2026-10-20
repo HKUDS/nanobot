@@ -49,6 +49,14 @@ Supporting hooks and display-model helpers stay near the feature that owns them.
 
 `onChat` provides live events to task and model observers. `useNanobotStream` uses `onTranscript` as the single transcript owner, receiving queued events once followed by live events.
 
+## Typography
+
+Use the text roles in `tailwind.config.js` for shared metrics: `text-ui` for navigation, `text-control-label` for controls, `text-ui-label` for compact labels, `text-caption` for auxiliary text, and `text-title` / `text-ui-heading` for interface headings. These roles stay independent of reading preferences. Register new size utilities in `src/lib/utils.ts` so `cn()` distinguishes them from text colors.
+
+`text-reading` and `.markdown-content` own reading typography; Markdown headings retain relative sizes, and tables, inline code and fenced code preserve their own hierarchy. Browser preferences select small / standard / large body sizes of 16 / 18 / 20px on desktop and 15 / 16 / 18px below 640px. Latin body line height is 1.625; Chinese, Japanese and Korean retain 1.8. `text-code` and `text-code-dense` share the mono stack and scale to 0.875 and 0.75 of body size. Avoid local font-size or line-height overrides for these roles.
+
+The Composer shares `text-composer` between its textarea and mention overlay, with a 16px minimum and 1.5 line height. Preserve identical text metrics, padding and literal CJK/Latin spacing in both layers. Reading preferences are projected by `useReadingTypography` through document tokens, without changing the root font size, the rem spacing grid or browser zoom.
+
 ## Choose an existing component
 
 - Check the gallery and current callers before creating a control. Different labels, colors, or sizes usually call for an existing component's options. `Button` already has appearance and size variants; `Input` and `SearchInput` share the input implementation.

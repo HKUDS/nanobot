@@ -547,6 +547,11 @@
       "failed": "La tâche a échoué. Cliquez pour les détails.",
       "interrupted": "La tâche demande votre attention. Cliquez pour continuer."
     },
+    "readingTextSize": {
+      "small": "Texte de lecture : petit",
+      "standard": "Texte de lecture : standard",
+      "large": "Texte de lecture : grand"
+    },
     "rows": {
       "theme": "Thème",
       "language": "Langue",
@@ -560,6 +565,7 @@
       "pendingChanges": "Modifications en attente",
       "selectedPreset": "Préréglage sélectionné",
       "presetModel": "Modèle du préréglage",
+      "readingTextSize": "Taille du texte de lecture",
       "activityMode": "Détails de l’activité",
       "fileEditDisplay": "Aperçu des modifications",
       "codeWrap": "Retour à la ligne du code",

@@ -547,6 +547,11 @@
       "failed": "Tugas gagal. Klik untuk melihat detailnya.",
       "interrupted": "Tugas perlu perhatian. Klik untuk melanjutkan."
     },
+    "readingTextSize": {
+      "small": "Teks bacaan kecil",
+      "standard": "Teks bacaan standar",
+      "large": "Teks bacaan besar"
+    },
     "rows": {
       "theme": "Tema",
       "language": "Bahasa",
@@ -560,6 +565,7 @@
       "pendingChanges": "Perubahan tertunda",
       "selectedPreset": "Preset dipilih",
       "presetModel": "Model prasetel",
+      "readingTextSize": "Ukuran teks bacaan",
       "activityMode": "Detail aktivitas",
       "fileEditDisplay": "Pratinjau perubahan",
       "codeWrap": "Bungkus baris kode",

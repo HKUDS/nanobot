@@ -992,7 +992,7 @@ export const ChatList = memo(function ChatList({
                             actionMenus.openFromContextMenu(event, actionMenuId)
                           )}
                           className={cn(
-                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px] font-normal leading-5",
+                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-ui",
                             SIDEBAR_SELECTION_ITEM_CLASS,
                             compact ? "min-h-7" : "min-h-8",
                             topicActive
@@ -1451,7 +1451,7 @@ function ActivePaneRows({
                 actionMenus.openFromContextMenu(event, actionMenuId)
               )}
               className={cn(
-                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px] font-normal leading-5",
+                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-ui",
                 SIDEBAR_SELECTION_ITEM_CLASS,
                 compact ? "min-h-7" : "min-h-8",
                 active
@@ -1674,7 +1674,7 @@ function TemporaryChatSection({
                 data-temporary-chat-row={session.key}
                 data-chat-row={session.key}
                 className={cn(
-                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-control px-2 text-[13px] font-normal leading-5",
+                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-control px-2 text-ui",
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "text-sidebar-accent-foreground"

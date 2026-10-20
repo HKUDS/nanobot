@@ -547,6 +547,11 @@
       "failed": "작업이 실패했습니다. 눌러서 자세히 확인하세요.",
       "interrupted": "확인이 필요합니다. 눌러서 계속하세요."
     },
+    "readingTextSize": {
+      "small": "읽기 글자 크기: 작게",
+      "standard": "읽기 글자 크기: 표준",
+      "large": "읽기 글자 크기: 크게"
+    },
     "rows": {
       "theme": "테마",
       "language": "언어",
@@ -560,6 +565,7 @@
       "pendingChanges": "적용 대기 변경",
       "selectedPreset": "선택한 프리셋",
       "presetModel": "프리셋 모델",
+      "readingTextSize": "읽기 글자 크기",
       "activityMode": "처리 과정",
       "fileEditDisplay": "수정 미리 보기",
       "codeWrap": "코드 줄바꿈",

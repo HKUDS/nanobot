@@ -68,7 +68,7 @@ export function NanobotFeatureInstallDialog({
         className="w-[min(calc(100vw-2rem),24rem)] gap-0 p-5 text-center"
       >
         <DialogHeader className="items-center space-y-0 text-center">
-          <DialogTitle className="text-center text-[20px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
+          <DialogTitle className="text-center text-title tracking-[-0.02em] text-foreground">
             {tx("settings.nanobotFeatures.installConfirmTitle", "Install support for {{name}}?", { name })}
           </DialogTitle>
           <DialogDescription className="mt-3 max-w-[20rem] text-center text-[14px] leading-6 text-muted-foreground">
@@ -189,7 +189,7 @@ export function RestartRequiredNotice({
 
 export function SettingsSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="settings-section-title select-none text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+    <h2 className="settings-section-title select-none text-ui-heading tracking-[-0.01em] text-foreground/85">
       {children}
     </h2>
   );
@@ -215,7 +215,7 @@ export function SettingsRow({
   return (
     <div className="settings-row rounded-xl transition-colors settings-hover focus-within:bg-sidebar-accent/60">
       <div className="min-w-0">
-        <div className="select-none text-[14px] font-medium leading-5 text-foreground">
+        <div className="select-none text-control-label text-foreground">
           {description ? <SettingsHint description={description}>{title}</SettingsHint> : title}
         </div>
       </div>
@@ -235,7 +235,7 @@ export function ReadOnlyRow({
 }) {
   return (
     <SettingsRow title={title} description={description}>
-      <span className="block max-w-full truncate text-left text-[13px] text-muted-foreground sm:max-w-[320px] sm:text-right">
+      <span className="block max-w-full truncate text-left text-ui text-muted-foreground sm:max-w-[320px] sm:text-right">
         {value}
       </span>
     </SettingsRow>

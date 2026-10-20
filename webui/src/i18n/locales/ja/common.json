@@ -547,6 +547,11 @@
       "failed": "タスクが失敗しました。クリックして詳細を確認。",
       "interrupted": "対応が必要です。クリックして続行。"
     },
+    "readingTextSize": {
+      "small": "本文の文字サイズ：小",
+      "standard": "本文の文字サイズ：標準",
+      "large": "本文の文字サイズ：大"
+    },
     "rows": {
       "theme": "テーマ",
       "language": "言語",
@@ -560,6 +565,7 @@
       "pendingChanges": "適用待ちの変更",
       "selectedPreset": "選択中のプリセット",
       "presetModel": "プリセットモデル",
+      "readingTextSize": "本文の文字サイズ",
       "activityMode": "処理の詳細",
       "fileEditDisplay": "変更のプレビュー",
       "codeWrap": "コードの折り返し",

@@ -111,7 +111,7 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
                 ) : null}
                 {markdown && mode === "preview" ? (
                   <MarkdownText documentPath={state.payload.path} onOpenFilePreview={onOpenFilePreview}
-                    className="px-5 pb-6 pt-1 text-sm [overflow-wrap:anywhere] sm:px-6 [&>:first-child]:mt-0">
+                    className="px-5 pb-6 pt-1 [overflow-wrap:anywhere] sm:px-6 [&>:first-child]:mt-0">
                     {state.payload.content}
                   </MarkdownText>
                 ) : <CodeBlock

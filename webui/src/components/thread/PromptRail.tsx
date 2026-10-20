@@ -178,7 +178,7 @@ export const PromptRail = memo(function PromptRail({ messages, prompts, onJumpTo
       style={{ top: Math.max(60, Math.min(height - 60, padding + focused * GAP - scrollTop)) }}>
       <div className="line-clamp-2 whitespace-pre-wrap break-words text-[15px] font-semibold leading-6">{preview.preview || preview.label}</div>
       {preview.answerPreview ? <div className="mt-1.5 max-h-[4.5rem] overflow-hidden break-words text-sm leading-6 text-muted-foreground">
-        <MarkdownText className="max-w-none text-sm leading-6 prose-headings:my-0 prose-headings:text-sm prose-p:my-0">{preview.answerPreview}</MarkdownText>
+        <MarkdownText className="max-w-none prose-headings:my-0 prose-p:my-0">{preview.answerPreview}</MarkdownText>
       </div> : null}
     </div> : null}
   </div>;

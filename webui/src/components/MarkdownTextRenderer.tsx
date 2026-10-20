@@ -619,8 +619,8 @@ export default function MarkdownTextRenderer({
           return (
             <code
               className={cn(
-                "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-[0.8125rem]",
-                "leading-snug text-inherit",
+                "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-code",
+                "text-inherit",
                 cls,
               )}
               {...props}
@@ -632,7 +632,7 @@ export default function MarkdownTextRenderer({
         return (
           <code
             className={cn(
-              "rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]",
+              "markdown-inline-code rounded bg-muted px-1 py-0.5 font-mono",
               cls,
             )}
             {...props}
@@ -654,7 +654,7 @@ export default function MarkdownTextRenderer({
           <pre
             className={cn(
               "my-3 overflow-x-auto rounded-lg border border-border/60 bg-muted/35",
-              "p-3 font-mono text-[0.8125rem] leading-snug text-foreground/90",
+              "p-3 font-mono text-code text-foreground/90",
               "whitespace-pre [overflow-wrap:normal]",
             )}
           >
@@ -755,7 +755,7 @@ export default function MarkdownTextRenderer({
           >
             <table
               className={cn(
-                "w-full table-fixed border-collapse text-[13px] leading-5",
+                "w-full table-fixed border-collapse text-reading-small",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
                 "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
@@ -793,7 +793,7 @@ export default function MarkdownTextRenderer({
             className={cn(
               itemClassName,
               taskItem
-                ? "flex min-w-0 items-start gap-2 text-[13px] leading-5 [&>p]:m-0"
+                ? "flex min-w-0 items-start gap-2 [&>p]:m-0"
                 : "[&>p]:inline",
             )}
           >
@@ -809,12 +809,12 @@ export default function MarkdownTextRenderer({
             data-testid="markdown-task-checkbox"
             data-task-checked={checked ? "true" : "false"}
             className={cn(
-              "mt-0.5 inline-grid h-4 w-4 shrink-0 place-items-center rounded-full",
+              "mt-[0.35em] inline-grid h-[1em] w-[1em] shrink-0 place-items-center rounded-full",
               "border border-dashed border-muted-foreground/55 bg-background text-background",
               checked && "border-solid border-emerald-500 bg-emerald-500 text-white",
             )}
           >
-            {checked ? <Check className="h-3 w-3 stroke-[3]" /> : null}
+            {checked ? <Check className="h-[0.75em] w-[0.75em] stroke-[3]" /> : null}
           </span>
         );
       },
@@ -840,7 +840,7 @@ export default function MarkdownTextRenderer({
       },
       summary({ children: markdownChildren }) {
         return (
-          <summary className="cursor-pointer select-none text-sm font-medium text-foreground/88 marker:text-muted-foreground">
+          <summary className="cursor-pointer select-none text-foreground/88 marker:text-muted-foreground">
             {markdownChildren}
           </summary>
         );
@@ -887,8 +887,7 @@ export default function MarkdownTextRenderer({
       components={components}
       className={cn(
         "markdown-content prose max-w-none dark:prose-invert",
-        "prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight",
-        "prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-h4:text-[13px]",
+        "prose-headings:mt-4 prose-headings:mb-2 prose-headings:tracking-tight",
         "prose-p:my-2",
         "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
         "prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:font-normal",

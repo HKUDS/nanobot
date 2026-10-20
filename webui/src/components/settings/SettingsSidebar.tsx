@@ -103,7 +103,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
         onClick={onBackToChat}
         aria-label={t("settings.backToChat")}
         className={cn(
-          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl text-[13px] leading-5 font-normal text-sidebar-content transition-colors duration-150 motion-reduce:transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ring hover:text-foreground lg:mb-3",
+          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl text-ui text-sidebar-content transition-colors duration-150 motion-reduce:transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ring hover:text-foreground lg:mb-3",
           hostChromeInset && "-ml-1",
         )}
       >
@@ -130,7 +130,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
                 aria-current={active ? "page" : undefined}
                 onClick={() => onSelectSection(key)}
                 className={cn(
-                  "touch-target flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-[13px] leading-5 font-normal",
+                  "touch-target flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-ui",
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "text-sidebar-accent-foreground"
@@ -161,7 +161,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
               onClick={onRestart}
               disabled={isRestarting}
               aria-describedby={restartPending ? "settings-restart-status" : undefined}
-              className={cn("h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] leading-5 font-normal settings-hover",
+              className={cn("h-9 w-full justify-start gap-2 rounded-control px-2.5 text-ui settings-hover",
                 restartPending && !isRestarting
                   ? "settings-restart-pending text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
                   : "text-sidebar-content hover:text-foreground")}
@@ -177,7 +177,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
             type="button"
             variant="ghost"
             onClick={onLogout}
-            className="hidden h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] leading-5 font-normal text-sidebar-content hover:bg-destructive/8 hover:text-destructive lg:flex"
+            className="hidden h-9 w-full justify-start gap-2 rounded-control px-2.5 text-ui text-sidebar-content hover:bg-destructive/8 hover:text-destructive lg:flex"
           >
             <LogOut className="h-4 w-4" aria-hidden />
             <span>{t("app.account.logout")}</span>

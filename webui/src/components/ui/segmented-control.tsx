@@ -6,11 +6,14 @@ import {
   type ReactNode,
 } from "react";
 
+import { HoverHint } from "@/components/ui/hover-hint";
 import { cn } from "@/lib/utils";
 
 interface SegmentedControlOption<T extends string> {
   value: T;
   label: ReactNode;
+  ariaLabel?: string;
+  tooltip?: string;
 }
 
 interface SegmentedControlProps<T extends string> {
@@ -18,7 +21,7 @@ interface SegmentedControlProps<T extends string> {
   options: Array<SegmentedControlOption<T>>;
   onChange: (value: T) => void;
   ariaLabel?: string;
-  mode?: "buttons" | "tabs";
+  mode?: "buttons" | "tabs" | "radio";
   className?: string;
   itemClassName?: string;
   indicatorClassName?: string;
@@ -55,6 +58,8 @@ export function SegmentedControl<T extends string>({
   animateIndicator = true,
 }: SegmentedControlProps<T>) {
   const tabs = mode === "tabs";
+  const radio = mode === "radio";
+  const rovingFocus = tabs || radio;
   const rootRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const previousValueRef = useRef<T | undefined>(undefined);
@@ -106,12 +111,14 @@ export function SegmentedControl<T extends string>({
     };
   }, [optionValuesKey, selectedIndex, value]);
 
-  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (!tabs) return;
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!rovingFocus) return;
 
     let nextIndex: number | null = null;
     if (event.key === "ArrowRight") nextIndex = (index + 1) % options.length;
     if (event.key === "ArrowLeft") nextIndex = (index - 1 + options.length) % options.length;
+    if (radio && event.key === "ArrowDown") nextIndex = (index + 1) % options.length;
+    if (radio && event.key === "ArrowUp") nextIndex = (index - 1 + options.length) % options.length;
     if (event.key === "Home") nextIndex = 0;
     if (event.key === "End") nextIndex = options.length - 1;
     if (nextIndex === null) return;
@@ -126,10 +133,10 @@ export function SegmentedControl<T extends string>({
   return (
     <div
       ref={rootRef}
-      role={tabs ? "tablist" : ariaLabel ? "group" : undefined}
+      role={tabs ? "tablist" : radio ? "radiogroup" : ariaLabel ? "group" : undefined}
       aria-label={ariaLabel}
       className={cn(
-        "segmented-control relative isolate inline-flex min-h-8 max-w-full flex-nowrap items-center gap-1 rounded-full bg-muted/65 p-1 text-[12px] font-medium text-muted-foreground",
+        "segmented-control relative isolate inline-flex min-h-8 max-w-full flex-nowrap items-center gap-1 rounded-full bg-muted/65 p-1 text-ui-label text-muted-foreground",
         className,
       )}
     >
@@ -152,19 +159,21 @@ export function SegmentedControl<T extends string>({
       ) : null}
       {options.map((option, index) => {
         const selected = value === option.value;
-        return (
+        const button = (
           <button
             ref={(item) => {
               itemRefs.current[index] = item;
             }}
             key={option.value}
             type="button"
-            role={tabs ? "tab" : undefined}
+            role={tabs ? "tab" : radio ? "radio" : undefined}
+            aria-label={option.ariaLabel}
             aria-selected={tabs ? selected : undefined}
-            aria-pressed={tabs ? undefined : selected}
-            tabIndex={tabs ? (selected || (selectedIndex < 0 && index === 0) ? 0 : -1) : undefined}
+            aria-checked={radio ? selected : undefined}
+            aria-pressed={rovingFocus ? undefined : selected}
+            tabIndex={rovingFocus ? (selected || (selectedIndex < 0 && index === 0) ? 0 : -1) : undefined}
             onClick={() => onChange(option.value)}
-            onKeyDown={(event) => handleTabKeyDown(event, index)}
+            onKeyDown={(event) => handleKeyDown(event, index)}
             className={cn(
               "relative z-[1] min-w-0 truncate whitespace-nowrap rounded-full px-2 py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               selected ? "text-foreground" : "hover:text-foreground",
@@ -174,6 +183,9 @@ export function SegmentedControl<T extends string>({
             {option.label}
           </button>
         );
+        return option.tooltip
+          ? <HoverHint key={option.value} content={option.tooltip} sideOffset={12}>{button}</HoverHint>
+          : button;
       })}
     </div>
   );

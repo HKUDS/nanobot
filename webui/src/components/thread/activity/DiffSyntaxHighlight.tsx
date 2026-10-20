@@ -12,18 +12,6 @@ interface DiffSyntaxHighlightProps {
 type RendererArgs = Parameters<NonNullable<SyntaxHighlighterProps["renderer"]>>[0];
 type SyntaxNode = RendererArgs["rows"][number];
 
-const CODE_FONT_STACK = [
-  '"JetBrains Mono"',
-  '"SFMono-Regular"',
-  '"SF Mono"',
-  '"Fira Code"',
-  '"Cascadia Code"',
-  '"Source Code Pro"',
-  "Menlo",
-  "Consolas",
-  "monospace",
-].join(", ");
-
 const LazyDiffSyntaxHighlight = lazy(async () => {
   const [
     { default: SyntaxHighlighter },
@@ -50,18 +38,18 @@ const LazyDiffSyntaxHighlight = lazy(async () => {
             margin: 0,
             padding: 0,
             overflow: "visible",
-            fontFamily: CODE_FONT_STACK,
-            fontSize: "11px",
-            lineHeight: "1.25rem",
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            lineHeight: "inherit",
           }}
           codeTagProps={{
             style: {
               background: "transparent",
-              fontFamily: CODE_FONT_STACK,
+              fontFamily: "inherit",
             },
           }}
           data-language={language}
-          className="code-content"
+          className="code-content font-mono text-code-dense"
           data-testid="syntax-highlighted-diff-hunk"
           renderer={({ rows, stylesheet, useInlineStyles }) => (
             <DiffLineTable
@@ -110,7 +98,7 @@ function DiffLineTable({
   renderCode: (line: RenderableFileDiffLine, index: number) => ReactNode;
 }) {
   return (
-    <table className="w-full border-collapse font-mono text-[11px] leading-5">
+    <table className="w-full border-collapse font-mono text-code-dense">
       <tbody>
         {lines.map((line, index) => (
           <DiffLineRow

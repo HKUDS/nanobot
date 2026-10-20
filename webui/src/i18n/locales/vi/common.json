@@ -547,6 +547,11 @@
       "failed": "Tác vụ thất bại. Nhấp để xem chi tiết.",
       "interrupted": "Tác vụ cần chú ý. Nhấp để tiếp tục."
     },
+    "readingTextSize": {
+      "small": "Cỡ chữ đọc nhỏ",
+      "standard": "Cỡ chữ đọc tiêu chuẩn",
+      "large": "Cỡ chữ đọc lớn"
+    },
     "rows": {
       "theme": "Chủ đề",
       "language": "Ngôn ngữ",
@@ -560,6 +565,7 @@
       "pendingChanges": "Thay đổi chờ áp dụng",
       "selectedPreset": "Bộ thiết lập đã chọn",
       "presetModel": "Mô hình của cấu hình đặt trước",
+      "readingTextSize": "Cỡ chữ đọc",
       "activityMode": "Chi tiết xử lý",
       "fileEditDisplay": "Xem trước thay đổi",
       "codeWrap": "Xuống dòng mã",

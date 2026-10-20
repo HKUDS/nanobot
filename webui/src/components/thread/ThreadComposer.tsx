@@ -143,6 +143,7 @@ import {
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
 import type { ComposerDraftStore } from "@/lib/composer-draft";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
@@ -973,7 +974,7 @@ function GoalStateStrip({
             id="nanobot-goal-panel-scroll"
             className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
           >
-            <MarkdownText className="max-w-none text-[13.5px] leading-relaxed text-foreground/90">
+            <MarkdownText className="max-w-none text-foreground/90">
               {markdownBody}
             </MarkdownText>
           </div>
@@ -1113,6 +1114,7 @@ export function ThreadComposer({
   // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
   // keyboard still get the newline-on-Enter behavior.
   const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
+  const { readingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1750,6 +1752,10 @@ export function ThreadComposer({
     el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
     if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = el.scrollTop;
   }, [compactControls, mentionInput.isComposing, mentionInput.value]);
+
+  useEffect(() => {
+    resizeTextarea(false);
+  }, [readingTextSize, resizeTextarea]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
@@ -2470,15 +2476,15 @@ export function ThreadComposer({
   ) : null;
   const inputTextClasses = cn(
     // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
-    "w-full resize-none bg-transparent [text-autospace:no-autospace]",
+    "w-full resize-none bg-transparent text-composer [text-autospace:no-autospace]",
     compactControls
-      ? "min-h-[52px] px-4 pb-2 pt-3 text-[16px] leading-6"
+      ? "min-h-[52px] px-4 pb-2 pt-3"
       : isHero
         ? cn(
-            "min-h-[78px] px-4 text-[16px] leading-6 sm:px-5",
+            "min-h-[78px] px-4 sm:px-5",
             relaxedHeroInput ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
           )
-        : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[16px] leading-5 sm:px-4",
+        : "min-h-[50px] px-3.5 pb-1.5 pt-3 sm:px-4",
   );
   const paletteBeside = showAnyPalette && slashPaletteLayout.placement === "beside";
 
@@ -2617,7 +2623,7 @@ export function ThreadComposer({
             aria-label={t("thread.composer.quotedContext")}
           >
             <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-            <p className="line-clamp-2 min-w-0 flex-1 text-[13px]/[1.45]">
+            <p className="line-clamp-2 min-w-0 flex-1 text-reading-small">
               {normalizedQuotedContext}
             </p>
             <button

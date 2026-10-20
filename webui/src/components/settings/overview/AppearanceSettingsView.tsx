@@ -50,6 +50,28 @@ export function AppearanceSettingsView({
       <section>
         <SettingsSectionTitle>{tx("settings.sections.localPreferences", "Local preferences")}</SettingsSectionTitle>
         <SettingsGroup>
+          <SettingsRow title={t("settings.rows.readingTextSize")}>
+            <SegmentedControl
+              value={localPrefs.readingTextSize}
+              mode="radio"
+              ariaLabel={t("settings.rows.readingTextSize")}
+              className="w-36 [@media(pointer:coarse)]:w-40"
+              itemClassName="flex flex-1 basis-0 items-center justify-center !overflow-visible px-0 after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
+              options={([
+                ["small", "text-[12px]"],
+                ["standard", "text-[16px]"],
+                ["large", "text-[20px]"],
+              ] as const).map(([value, size]) => ({
+                value,
+                label: <span aria-hidden className={size}>A</span>,
+                ariaLabel: t(`settings.readingTextSize.${value}`),
+                tooltip: t(`settings.readingTextSize.${value}`),
+              }))}
+              onChange={(readingTextSize) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, readingTextSize }))
+              }
+            />
+          </SettingsRow>
           <SettingsRow title={tx("settings.rows.activityMode", "Activity detail")}>
             <SegmentedControl
               value={localPrefs.activityMode}

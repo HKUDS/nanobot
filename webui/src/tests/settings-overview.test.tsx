@@ -112,6 +112,18 @@ describe("Settings overview and appearance", () => {
     expect(url.href).not.toContain("private-host");
   });
 
+  it("saves the reading size immediately while preserving the other local preferences", async () => {
+    const previous = { ...DEFAULT_LOCAL_PREFS, codeWrap: false, brandLogos: false, notificationSound: true };
+    writeLocalPreferences(previous);
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+
+    expect(screen.getByRole("radio", { name: "Standard reading text" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "Large reading text" }));
+
+    await waitFor(() => expect(readLocalPreferences()).toEqual({ ...previous, readingTextSize: "large" }));
+    expect(screen.getByRole("radio", { name: "Large reading text" })).toBeChecked();
+  });
+
   it("persists the file edit display local preference", async () => {
     renderSettingsView({
       initialSection: "appearance",
