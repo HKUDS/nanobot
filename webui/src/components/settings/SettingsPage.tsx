@@ -23,6 +23,7 @@ import {
 } from "@/components/settings/models/ProviderSettings";
 import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
+import { NotificationSettings } from "@/components/settings/notifications/NotificationSettings";
 import { SettingsSidebar, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
 import {
   NanobotFeatureInstallDialog,
@@ -217,6 +218,8 @@ export function SettingsPage({
         );
       case "about":
         return <AboutSettings settings={settings} />;
+      case "notifications":
+        return <NotificationSettings localPrefs={localPrefs} onChangeLocalPrefs={setLocalPrefs} />;
       case "appearance":
         return (
           <AppearanceSettings

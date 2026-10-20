@@ -31,29 +31,14 @@ When nanobot edits a file, the WebUI activity timeline can show the changed line
 
 ## Browser notifications
 
-In **Settings → Appearance**, enable **Browser notifications** and allow the
-browser's permission request. Notifications are off by default and saved in
-this browser, separately from the completion sound. Use **Test notification**
-to check delivery; a successful submission does not prove that the operating
-system displayed it. Check system notification and Do Not Disturb settings if
-nothing appears.
+When the WebUI is in the background, browser notifications tell you when a task finishes, fails, or needs attention. Click a notification to return to its chat.
 
-Notifications require HTTPS (or localhost), notification permission, and an
-active service worker. On iPhone or iPad, use the web app from the Home Screen;
-some browsers, including embedded browsers, cannot provide notifications.
-The settings page explains unavailable permissions or browser features.
+1. Open **Settings → Notifications**.
+2. Turn on **Browser notifications** and allow the browser's permission request.
+3. Select **Test notification** to try it. If nothing appears, check the browser's site permissions, system notification settings, and Do Not Disturb.
+4. Enable **Completion sound** separately if you want a page chime.
 
-While the page is in the background, notifications report completion, failure,
-or required recovery for chats connected by that page, including chats you have
-switched away from. They do not include chat text or error details. Clicking
-opens the chat on the same gateway, with normal authentication. A temporary
-chat can only be reopened while its original page connection exists.
-
-Keep the page open and connected. This is **not Web Push**: a closed or suspended
-page cannot receive new task events. This is not a notification feed for every
-gateway task. Recent events are deduplicated across tabs and reconnects (up to
-256 events within 24 hours); browser storage restrictions can limit deduplication
-after a service worker restarts.
+Keep the page open and connected, and use HTTPS or localhost. On iPhone or iPad, open the web app from the Home Screen. If your browser cannot enable notifications, follow the guidance shown in Settings.
 
 ## Production notes
 

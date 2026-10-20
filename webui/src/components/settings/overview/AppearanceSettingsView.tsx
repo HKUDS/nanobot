@@ -2,7 +2,6 @@ import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { BrowserNotificationSettings } from "./BrowserNotificationSettings";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle } from "@/components/settings/shared/SettingsControls";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -99,24 +98,6 @@ export function AppearanceSettingsView({
               onChange={(brandLogos) => onChangeLocalPrefs((prev) => ({ ...prev, brandLogos }))}
               ariaLabel={tx("settings.rows.brandLogos", "Brand logos")}
               label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-          <BrowserNotificationSettings localPrefs={localPrefs} onChangeLocalPrefs={onChangeLocalPrefs} />
-          <SettingsRow
-            title={tx("settings.rows.notificationSound", "Completion sound")}
-            description={tx(
-              "settings.help.notificationSound",
-              "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
-            )}
-          >
-            <ToggleButton
-              checked={localPrefs.notificationSound}
-              onChange={(notificationSound) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, notificationSound }))}
-              ariaLabel={tx("settings.rows.notificationSound", "Completion sound")}
-              label={localPrefs.notificationSound
-                ? tx("settings.values.on", "On")
-                : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
         </SettingsGroup>

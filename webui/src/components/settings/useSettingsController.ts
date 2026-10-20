@@ -37,6 +37,7 @@ import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
 import {
+  LOCAL_PREFS_CHANGED_EVENT,
   readLocalPreferences,
   writeLocalPreferences,
   type LocalPreferences,
@@ -257,6 +258,18 @@ export function useSettingsController({
     pageVisible,
   });
 
+  useEffect(() => {
+    const synchronize = (event: Event) => setLocalPrefs((event as CustomEvent<LocalPreferences>).detail);
+    const reload = () => setLocalPrefs(readLocalPreferences());
+    window.addEventListener(LOCAL_PREFS_CHANGED_EVENT, synchronize);
+    window.addEventListener("storage", reload);
+    window.addEventListener("focus", reload);
+    return () => {
+      window.removeEventListener(LOCAL_PREFS_CHANGED_EVENT, synchronize);
+      window.removeEventListener("storage", reload);
+      window.removeEventListener("focus", reload);
+    };
+  }, []);
   useEffect(() => {
     writeLocalPreferences(localPrefs);
   }, [localPrefs]);

@@ -73,7 +73,7 @@ import {
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
-import { BrowserNotifications } from "@/components/BrowserNotifications";
+import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
@@ -176,6 +176,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "overview",
   "about",
   "appearance",
+  "notifications",
   "models",
   "image",
   "voice",
@@ -938,6 +939,7 @@ function resolveRuntimeSurface(
 
 export default function App() {
   useAppViewport();
+  useBrowserNotificationLifecycle();
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
   const bootstrapSecretRef = useRef("");

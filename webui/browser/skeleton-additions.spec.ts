@@ -54,18 +54,38 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
       }
     });
 
-    test("settings sections preserve their loaded row layout", async ({ page }) => {
-      for (const section of ["appearance", "capabilities", "runtime", "advanced", "overview", "models", "about"]) {
-        await page.goto(fixture("settings", "loaded", `&section=${section}`));
+    test("settings sections preserve their loaded row layout", async ({ page }, testInfo) => {
+      for (const section of ["appearance", "notifications", "capabilities", "runtime", "advanced", "overview", "models", "about"]) {
+        const extra = `&section=${section}${section === "notifications" ? "&notificationPermission=granted" : ""}`;
+        await page.goto(fixture("settings", "loaded", extra));
+        const target = page.locator("[data-settings-section]");
+        if (section === "notifications") {
+          await page.context().grantPermissions(["notifications"]);
+          await page.evaluate(async () => {
+            await navigator.serviceWorker.register("/sw.js", { scope: "/browser/" });
+            await navigator.serviceWorker.ready;
+            window.dispatchEvent(new Event("focus"));
+          });
+          await expect(target.getByRole("status")).toBeEmpty();
+          await expect(target.getByRole("switch")).toHaveCount(2);
+          await expect(target.getByRole("switch").first()).toBeEnabled();
+        }
         if (section === "runtime") await expect(page.locator('[data-settings-section] button').filter({ hasText: locale === "en" ? "Start API server" : "启动 API 服务" })).toBeVisible();
         await settle(page);
-        const target = page.locator("[data-settings-section]");
         const selector = section === "overview" ? "section button.group" : section === "models" ? '[data-testid^="model-call-order-row"], .settings-footer' : section === "about" ? ".settings-list-row" : ".settings-row";
-        const loaded = await boxes(target.locator(selector));
-        await page.goto(fixture("settings", "loading", `&section=${section}`));
+        const notificationDetails = section === "notifications" ? ", .settings-list-inset > .border-t, section > p" : "";
+        const loaded = await boxes(target.locator(selector + notificationDetails));
+        const loadedControls = section === "notifications" ? await boxes(target.getByRole("switch")) : null;
+        await page.goto(fixture("settings", "loading", extra));
         await settle(page);
         const skeletonSelector = section === "overview" ? "[data-overview-skeleton-row]" : section === "models" ? "[data-model-preset-skeleton], .settings-footer" : section === "about" ? ".settings-list-row" : "[data-settings-skeleton-row]";
-        sameBoxes(await boxes(target.locator(skeletonSelector)), loaded);
+        const skeleton = await boxes(target.locator(skeletonSelector + notificationDetails));
+        sameBoxes(skeleton, loaded);
+        if (loadedControls) {
+          const skeletonControls = await boxes(target.locator("[data-skeleton-switch]"));
+          sameBoxes(skeletonControls, loadedControls);
+          await testInfo.attach("notifications-layout", { body: JSON.stringify({ loaded, skeleton, loadedControls, skeletonControls }, null, 2), contentType: "application/json" });
+        }
         await accessibleSkeleton(page);
       }
     });

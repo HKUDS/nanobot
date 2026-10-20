@@ -47,6 +47,10 @@ const previewSettings: SettingsPayload = {
 let detailState = "loaded";
 
 export function installSkeletonPreviewApi() {
+  // Windows headless Chromium can report denied even after a context permission grant.
+  if (new URLSearchParams(location.search).get("notificationPermission") === "granted") {
+    Object.defineProperty(Notification, "permission", { configurable: true, value: "granted" });
+  }
   const fetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), location.href);

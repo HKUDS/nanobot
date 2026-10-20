@@ -1003,9 +1003,10 @@ export class NanobotClient {
 
     if (correlatedChatId) {
       this.recordGoalStateSnapshot(correlatedChatId, parsed);
-      if (parsed.event === "turn_end" || parsed.event === "recovery_state") {
+      if ((parsed.event === "turn_end" || parsed.event === "recovery_state")
+        && (this.knownChats.has(correlatedChatId) || this.temporaryChatIds.has(correlatedChatId))) {
         for (const handler of this.taskNoticeHandlers) {
-          // Optional browser features must never interrupt delivery or cleanup.
+          // Optional browser features must not interrupt delivery or cleanup.
           try { handler({ event: parsed, temporary: this.temporaryChatIds.has(correlatedChatId) }); }
           catch { /* The notification owner reports its own delivery failure. */ }
         }

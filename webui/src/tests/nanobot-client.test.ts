@@ -79,14 +79,36 @@ describe("NanobotClient", () => {
     const broken = client.onTaskNotice(() => { throw new Error("optional notification failed"); });
     const notice = vi.fn();
     const unsubscribe = client.onTaskNotice(notice);
+    client.attach("away");
     const event = { event: "turn_end", chat_id: "away", turn_id: "turn", outcome: "completed" };
     lastSocket().fakeMessage(event);
     expect(notice).toHaveBeenCalledWith({ event, temporary: false });
     const replay = vi.fn();
-    client.onChat("away", replay);
+    client.onTranscript("away", replay);
     expect(replay).toHaveBeenCalledWith(event);
     expect(notice).toHaveBeenCalledOnce();
     broken(); unsubscribe(); client.close();
+  });
+  it("ignores in-flight task notices after a Temporary Chat is discarded", async () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const created = client.newTemporaryChat();
+    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true });
+    await created;
+    const notice = vi.fn();
+    client.onTaskNotice(notice);
+    client.sendMessage("temporary", "work", undefined, { turnId: "temporary-turn" });
+    client.discardTemporaryChat("temporary");
+    socket.fakeMessage({ event: "turn_end", chat_id: "temporary", turn_id: "temporary-turn" });
+    expect(notice).not.toHaveBeenCalled();
+    client.attach("regular");
+    const event = { event: "turn_end", chat_id: "regular", turn_id: "regular-turn" };
+    socket.fakeMessage(event);
+    expect(notice).toHaveBeenCalledWith({ event, temporary: false });
+    client.close();
   });
   it("bounds regular replay tails but retains temporary events until discard", async () => {
     const client = new NanobotClient({

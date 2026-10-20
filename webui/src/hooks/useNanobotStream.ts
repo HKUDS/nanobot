@@ -1,5 +1,6 @@
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
@@ -173,6 +174,7 @@ export function useNanobotStream(
   const threadVisible = useThreadVisibility();
   const threadVisibleRef = useRef(threadVisible);
   threadVisibleRef.current = threadVisible;
+  const { t } = useTranslation();
   const initialRunStartedAt = chatId ? client.getRunStartedAt(chatId) : null;
   const [messages, setRenderedMessages] = useState<UIMessage[]>(initialMessages);
   const messagesRef = useRef(messages);
@@ -903,6 +905,7 @@ export function useNanobotStream(
     onStreamDetach,
     schedulePendingStreamFlush,
     setMessages,
+    t,
   ]);
 
   const send = useCallback(
