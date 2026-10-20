@@ -2012,8 +2012,8 @@
     "loadEarlier": "Carregar mensagens anteriores",
     "history": {
       "loading": "Carregando mensagens anteriores…",
-      "error": "Falha ao carregar.",
-      "retry": "Tentar novamente"
+      "exhausted": "Não há mensagens anteriores",
+      "retryLabel": "Falha ao carregar. Tentar novamente"
     },
     "forkedFromHistory": "Bifurcado a partir do histórico",
     "promptNavigator": {

@@ -173,13 +173,13 @@ function ViewportPreview() {
 }
 
 function HistoryPreview() {
-  const [mode, setMode] = useState<"loading" | "error" | "pulling">("error");
+  const [mode, setMode] = useState<"loading" | "error" | "exhausted">("loading");
   const [retries, setRetries] = useState(0);
   return <div className="space-y-4">
-    <StatePicker label="历史加载状态" value={mode} options={["loading", "error", "pulling"]} onChange={setMode} />
+    <StatePicker label="历史状态" value={mode} options={["loading", "exhausted", "error"]} onChange={setMode} />
     <div className="relative h-20 rounded-control border">
       <ThreadHistoryStatus loading={mode === "loading"} error={mode === "error" ? "Example history unavailable" : null}
-        pullDistance={mode === "pulling" ? 32 : 0} onRetry={() => { setRetries((value) => value + 1); setMode("loading"); }} />
+        exhausted={mode === "exhausted"} onRetry={() => { setRetries((value) => value + 1); setMode("loading"); }} />
     </div>
     <p role="status" className="text-sm text-muted-foreground">重试次数：{retries}</p>
   </div>;
@@ -298,8 +298,8 @@ export const conversationExamples: ComponentExample[] = [
   { title: "ThreadViewport · 会话滚动", files: ["thread/ThreadViewport", "thread/PromptRail"], Preview: ViewportPreview,
     description: "真实长会话滚动区，包含问题标记、导航跳转和返回底部。", options: "固定预览容器高度；messages 驱动历史显示，ref.jumpToUserPrompt 执行定位；emptyState 提供空会话内容。",
     code: '<div className="flex h-96 flex-col"><ThreadViewport ref={viewport} messages={messages} isStreaming={false} /></div>' },
-  { title: "ThreadHistoryStatus · 历史加载", files: ["thread/ThreadHistoryStatus"], Preview: HistoryPreview,
-    description: "切换加载、失败和下拉状态，并试用重试按钮。", options: "loading 控制加载指示，error 控制错误提示，pullDistance 控制下拉位置，onRetry 由调用方提供。",
+  { title: "ThreadHistoryStatus · 历史状态", files: ["thread/ThreadHistoryStatus"], Preview: HistoryPreview,
+    description: "显示加载、历史起点与失败重试状态。", options: "loading 表示正在请求，exhausted 表示没有更早消息，error 提供报错信息，onRetry 重试加载。",
     code: '<ThreadHistoryStatus loading={loading} error={error} onRetry={retry} />' },
   { title: "RecoveryNotice · 任务恢复", files: ["thread/RecoveryNotice"], Preview: RecoveryPreview,
     description: "切换中断、恢复、失败和无法继续状态，试用继续与关闭。", options: "state 为已有恢复快照；onContinue 与 onDismiss 返回 Promise。示例回调只更新当前预览。",

@@ -1,4 +1,4 @@
-import { createRef, useRef } from "react";
+import { createRef, Profiler, useRef } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -40,12 +40,17 @@ function dispatchUserScroll(scroller: HTMLElement): void {
   scroller.dispatchEvent(new Event("scroll"));
 }
 
+function historyPull(scroller: HTMLElement): number {
+  return Number.parseFloat(/translateY\(([-.\d]+)px\)/.exec(scroller.style.transform)?.[1] ?? "0");
+}
+
 function dispatchHistoryInput(scroller: HTMLElement, input: "wheel" | "touch" | "keyboard") {
   if (input === "wheel") fireEvent.wheel(scroller, { deltaY: -100 });
   if (input === "keyboard") fireEvent.keyDown(scroller, { key: "PageUp" });
   if (input === "touch") {
     fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
     fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
+    fireEvent.touchEnd(scroller);
   }
 }
 
@@ -1542,7 +1547,7 @@ describe("ThreadViewport", () => {
     expect(screen.queryByText(`message ${firstVisible - 1}`)).not.toBeInTheDocument();
     expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
     expect(screen.getByText("message 299")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load earlier messages" })).toBeInTheDocument();
   });
 
   it("automatically expands earlier local history near the top", () => {
@@ -1712,7 +1717,7 @@ describe("ThreadViewport", () => {
       const scroller = getScroller(container);
       dispatchHistoryInput(scroller, input);
       expect(onLoadOlder).not.toHaveBeenCalled();
-      expect(scroller.style.transform).toBe("");
+      if ("conversationReady" in blocked && blocked.conversationReady === false) expect(historyPull(scroller)).toBe(0);
     });
   });
 
@@ -1762,11 +1767,11 @@ describe("ThreadViewport", () => {
     });
 
     expect(onLoadOlder).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Loading failed. Retry" }));
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
   });
 
-  it("hides history feedback away from the top without fetching again", async () => {
+  it("keeps real loading visible after leaving the top without fetching again", async () => {
     const onLoadOlder = vi.fn();
     const { container, rerender } = render(
       <ThreadViewport messages={messages} isStreaming={false}
@@ -1783,13 +1788,13 @@ describe("ThreadViewport", () => {
       scroller.scrollTop = 800;
       dispatchUserScroll(scroller);
     });
-    expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading earlier messages…")).toBeInTheDocument();
     rerender(<ThreadViewport messages={messages} isStreaming={false}
       conversationKey="another" hasMoreBefore onLoadOlder={onLoadOlder} />);
     expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
   });
 
-  it("reveals touch feedback before fetching, cancels short pulls, and fetches once per gesture", () => {
+  it("reveals touch feedback, springs back on cancellation, and requests only on an armed release", async () => {
     const onLoadOlder = vi.fn();
     const props = { messages, isStreaming: false, hasMoreBefore: true, onLoadOlder };
     const { container, rerender } = render(<ThreadViewport {...props} />);
@@ -1797,24 +1802,25 @@ describe("ThreadViewport", () => {
     const touch = (y: number) => ({ touches: [{ clientX: 100, clientY: y }] });
     fireEvent.touchStart(scroller, touch(200));
     fireEvent.touchMove(scroller, touch(240));
-    expect(scroller).toHaveStyle({ transform: "translateY(20px)" });
-    expect(screen.getByRole("status").querySelector("svg")).not.toBeNull();
+    expect(historyPull(scroller)).toBeGreaterThan(0);
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
     expect(onLoadOlder).not.toHaveBeenCalled();
     fireEvent.touchEnd(scroller);
-    expect(scroller.style.transform).toBe("");
+    expect(historyPull(scroller)).toBeGreaterThan(0);
+    await waitFor(() => expect(historyPull(scroller)).toBe(0));
 
     fireEvent.touchStart(scroller, touch(200));
     fireEvent.touchMove(scroller, touch(300));
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    fireEvent.touchEnd(scroller);
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
     rerender(<ThreadViewport {...props} loadingOlder />);
-    fireEvent.touchMove(scroller, touch(350));
     fireEvent.scroll(scroller);
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("status").querySelector("svg")).toHaveClass("animate-spin");
-    fireEvent.touchEnd(scroller);
-    expect(scroller).toHaveStyle({ transform: "translateY(48px)" });
+    expect(screen.getByText("Loading earlier messages…")).toBeInTheDocument();
     rerender(<ThreadViewport {...props} />);
-    expect(scroller.style.transform).toBe("");
+    await waitFor(() => expect(historyPull(scroller)).toBe(0));
   });
 
   it("does not fetch on touch scroll alone or horizontal gestures and clears pull on session change", () => {
@@ -1825,23 +1831,40 @@ describe("ThreadViewport", () => {
     fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
     fireEvent.touchMove(scroller, { touches: [{ clientX: 300, clientY: 220 }] });
     fireEvent.scroll(scroller);
-    expect(scroller.style.transform).toBe("");
+    expect(historyPull(scroller)).toBe(0);
     expect(onLoadOlder).not.toHaveBeenCalled();
     fireEvent.touchEnd(scroller);
     fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
     fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 240 }] });
     rerender(<ThreadViewport {...props} conversationKey="b" />);
-    expect(scroller.style.transform).toBe("");
+    expect(historyPull(scroller)).toBe(0);
     expect(onLoadOlder).not.toHaveBeenCalled();
   });
 
-  it("leaves completed history quiet", () => {
+  it("animates boundary frames without rerendering the message tree", async () => {
+    const onRender = vi.fn();
+    const { container } = render(<Profiler id="history" onRender={onRender}>
+      <ThreadViewport messages={messages} isStreaming={false} />
+    </Profiler>);
+    await flushAnimationFrame();
+    await flushAnimationFrame();
+    fireEvent.wheel(getScroller(container), { deltaY: -100 });
+    await flushAnimationFrame();
+    onRender.mockClear();
+    await flushAnimationFrame();
+    await flushAnimationFrame();
+    expect(historyPull(getScroller(container))).toBeGreaterThan(0);
+    expect(onRender).not.toHaveBeenCalled();
+  });
+
+  it("shows the confirmed start of conversation with boundary feedback", async () => {
     const onLoadOlder = vi.fn();
     const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
       onLoadOlder={onLoadOlder} />);
     fireEvent.wheel(getScroller(container), { deltaY: -100 });
     expect(screen.getByText("hello")).toBeVisible();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText("No earlier messages")).toBeVisible();
+    await waitFor(() => expect(historyPull(getScroller(container))).toBeGreaterThan(0));
     expect(onLoadOlder).not.toHaveBeenCalled();
   });
 

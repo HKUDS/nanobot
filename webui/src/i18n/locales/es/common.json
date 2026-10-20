@@ -1999,8 +1999,8 @@
     "loadEarlier": "Cargar mensajes anteriores",
     "history": {
       "loading": "Cargando mensajes anteriores…",
-      "error": "Error al cargar.",
-      "retry": "Reintentar"
+      "exhausted": "No hay mensajes anteriores",
+      "retryLabel": "Error al cargar. Reintentar"
     },
     "forkedFromHistory": "Bifurcado desde el historial",
     "promptNavigator": {

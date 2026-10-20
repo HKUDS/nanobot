@@ -1998,8 +1998,8 @@
     "loadEarlier": "Muat pesan sebelumnya",
     "history": {
       "loading": "Memuat pesan sebelumnya…",
-      "error": "Gagal memuat.",
-      "retry": "Coba lagi"
+      "exhausted": "Tidak ada pesan sebelumnya",
+      "retryLabel": "Gagal memuat. Coba lagi"
     },
     "forkedFromHistory": "Cabang dari riwayat",
     "promptNavigator": {

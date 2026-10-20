@@ -1,61 +1,51 @@
-import { useEffect, useState } from "react";
-import { Loader2, RotateCcw } from "lucide-react";
+import { forwardRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button } from "@/components/ui/button";
+import { HoverHint } from "@/components/ui/hover-hint";
+import { cn } from "@/lib/utils";
 
 interface ThreadHistoryStatusProps {
   loading: boolean;
   error: string | null;
-  pullDistance?: number;
+  exhausted?: boolean;
   onRetry: () => void;
+  className?: string;
 }
 
-export function ThreadHistoryStatus({ loading, error, onRetry, pullDistance = 0 }: ThreadHistoryStatusProps) {
+export const ThreadHistoryStatus = forwardRef<HTMLDivElement, ThreadHistoryStatusProps>(function ThreadHistoryStatus({ loading, error, exhausted = false, onRetry, className }, ref) {
   const { t } = useTranslation();
-  const [showLoading, setShowLoading] = useState(false);
-
-  useEffect(() => {
-    if (!loading) {
-      setShowLoading(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setShowLoading(true), 180);
-    return () => window.clearTimeout(timer);
-  }, [loading]);
+  const state = !loading && error ? "error" : !loading && exhausted ? "exhausted" : "loading";
+  const label = t(state === "error" ? "thread.history.retryLabel" : `thread.history.${state}`);
+  // Blocks adapted from loading.dev (MIT); see THIRD_PARTY_NOTICES.md.
+  const blocks = <span aria-hidden="true" className="thread-history-blocks">
+    {Array.from({ length: 9 }, (_, index) => <span key={index}
+      style={{ animationDelay: `${(index % 3 + Math.floor(index / 3) - 5) * 260}ms` }} />)}
+  </span>;
 
   return (
     <div
-      className="thread-message-row pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center"
-      style={{ height: 48 + pullDistance }}
+      ref={ref}
+      className={cn("thread-history-status thread-message-row pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center", className)}
+      data-state={state}
     >
       <div role="status" aria-live="polite" aria-atomic="true">
-        {(loading && showLoading) || pullDistance > 0 ? (
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-background/95 text-muted-foreground">
-            <Loader2
-              aria-hidden="true"
-              className={`h-4 w-4 ${loading ? "animate-spin motion-reduce:animate-none" : ""}`}
-              style={!loading ? { transform: `rotate(${pullDistance * 6}deg)`, opacity: Math.min(1, pullDistance / 24) } : undefined}
-            />
-            {loading ? <span className="sr-only">{t("thread.history.loading")}</span> : null}
-          </div>
-        ) : !loading && error ? (
-          <div className="pointer-events-auto flex items-center gap-1 rounded-control bg-background/95 pl-3 text-xs text-muted-foreground">
-            <span>{t("thread.history.error")}</span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-11 w-11 shrink-0 p-0 sm:h-8 sm:w-8"
-              aria-label={t("thread.history.retry")}
-              title={t("thread.history.retry")}
-              onClick={onRetry}
-            >
-              <RotateCcw aria-hidden="true" className="h-4 w-4" />
-            </Button>
-          </div>
-        ) : null}
+        {state === "exhausted" ? (
+          <span className="text-xs">{label}</span>
+        ) : (
+          <HoverHint content={state === "error" ? error : label} side="bottom">
+            {loading ? (
+              <div tabIndex={0} aria-label={label} className="thread-history-control pointer-events-auto rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {blocks}<span className="sr-only">{label}</span>
+              </div>
+            ) : (
+              <button type="button" aria-label={state === "error" ? label : t("thread.loadEarlier")} onClick={onRetry}
+                className="thread-history-control pointer-events-auto rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {blocks}<span className="sr-only">{label}</span>
+              </button>
+            )}
+          </HoverHint>
+        )}
       </div>
     </div>
   );
-}
+});

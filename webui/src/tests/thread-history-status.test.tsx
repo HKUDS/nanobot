@@ -1,51 +1,46 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
 describe("ThreadHistoryStatus", () => {
-  it("delays the loading indicator so fast history requests do not flash", () => {
-    vi.useFakeTimers();
-    render(<ThreadHistoryStatus loading error={null} onRetry={vi.fn()} />);
-
-    expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(179));
-    expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(1));
-    expect(screen.getByText("Loading earlier messages…")).toHaveClass("sr-only");
-    expect(screen.getByRole("status").querySelector("svg")).toHaveClass("animate-spin");
-  });
-
-  it("cancels the delay on completion and starts a fresh delay for the next request", () => {
-    vi.useFakeTimers();
+  it("exposes real loading immediately and switches to a distinct exhausted state on completion", () => {
     const props = { error: null, onRetry: vi.fn() };
-    const { rerender } = render(<ThreadHistoryStatus {...props} loading />);
-    act(() => vi.advanceTimersByTime(100));
-    rerender(<ThreadHistoryStatus {...props} loading={false} />);
-    act(() => vi.advanceTimersByTime(500));
-    expect(screen.getByRole("status")).toBeEmptyDOMElement();
-
-    rerender(<ThreadHistoryStatus {...props} loading />);
-    act(() => vi.advanceTimersByTime(180));
+    const { container, rerender } = render(<ThreadHistoryStatus {...props} loading />);
     expect(screen.getByText("Loading earlier messages…")).toHaveClass("sr-only");
-    expect(screen.getByRole("status").querySelector("svg")).toHaveClass("animate-spin");
-    rerender(<ThreadHistoryStatus {...props} loading={false} />);
-    expect(screen.getByRole("status")).toBeEmptyDOMElement();
-    rerender(<ThreadHistoryStatus {...props} loading />);
-    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+
+    rerender(<ThreadHistoryStatus {...props} loading={false} exhausted />);
+    expect(screen.getByText("No earlier messages")).toHaveClass("text-xs");
+    expect(container.firstElementChild).toHaveAttribute("data-state", "exhausted");
   });
 
-  it("offers an explicit retry after loading earlier history fails", () => {
+  it("uses one loading display before and during a request while preserving keyboard activation", () => {
     const onRetry = vi.fn();
-    render(<ThreadHistoryStatus loading={false} error="offline" onRetry={onRetry} />);
-
-    expect(screen.getByText("Loading failed.")).toBeVisible();
-    expect(screen.getByRole("status").parentElement).toHaveClass("thread-message-row");
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const { container, rerender } = render(<ThreadHistoryStatus loading={false} error={null} onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
+    const load = screen.getByRole("button", { name: "Load earlier messages" });
+    expect(load.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    fireEvent.click(load);
     expect(onRetry).toHaveBeenCalledTimes(1);
+    rerender(<ThreadHistoryStatus loading error={null} onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+  });
+
+  it("offers error Blocks with the actual failure on keyboard focus and resumes loading on retry", () => {
+    const onRetry = vi.fn();
+    const { container, rerender } = render(<ThreadHistoryStatus loading={false} error="offline" onRetry={onRetry} />);
+    const retry = screen.getByRole("button", { name: "Loading failed. Retry" });
+    expect(retry.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    expect(screen.getByText("Loading failed. Retry")).toHaveClass("sr-only");
+    fireEvent.focus(retry);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("offline");
+    fireEvent.click(retry);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    rerender(<ThreadHistoryStatus loading error={null} onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
+    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
   });
 });

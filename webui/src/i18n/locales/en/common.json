@@ -2198,8 +2198,8 @@
     "loadEarlier": "Load earlier messages",
     "history": {
       "loading": "Loading earlier messages…",
-      "error": "Loading failed.",
-      "retry": "Retry"
+      "exhausted": "No earlier messages",
+      "retryLabel": "Loading failed. Retry"
     },
     "forkedFromHistory": "Forked from history",
     "promptNavigator": {

@@ -1998,8 +1998,8 @@
     "loadEarlier": "Charger les messages précédents",
     "history": {
       "loading": "Chargement des messages précédents…",
-      "error": "Échec du chargement.",
-      "retry": "Réessayer"
+      "exhausted": "Aucun message plus ancien",
+      "retryLabel": "Échec du chargement. Réessayer"
     },
     "forkedFromHistory": "Bifurqué depuis l'historique",
     "promptNavigator": {
