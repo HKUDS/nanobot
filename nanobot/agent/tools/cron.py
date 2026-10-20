@@ -21,7 +21,7 @@ from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 _CRON_PARAMETERS = tool_parameters_schema(
-    action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
+    action=StringSchema("Action to perform", enum=["add", "list", "remove", "history"]),
     name=StringSchema("Job label; generated from message if omitted."),
     message=StringSchema(
         "REQUIRED when action='add': non-empty instruction to execute when the job triggers. "
@@ -40,7 +40,8 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). "
         "Naive values use the tool's default timezone."
     ),
-    job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
+    job_id=StringSchema("REQUIRED when action='remove' or action='history'. Job ID (obtain via action='list')."),
+    limit=IntegerSchema(description="Maximum runs for action='history'; defaults to 5.", minimum=1, maximum=20),
     required=["action"],
     description=(
         "add requires exactly one schedule: every_seconds, cron_expr, or at."
@@ -107,7 +108,7 @@ class CronTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Schedule reminders and recurring tasks. Actions: add, list, remove. "
+            "Schedule reminders and recurring tasks. Actions: add, list, remove, history. "
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
 
@@ -116,8 +117,8 @@ class CronTool(Tool):
         action = params.get("action")
         if action == "add" and not str(params.get("message") or "").strip():
             errors.append("message is required when action='add'")
-        if action == "remove" and not str(params.get("job_id") or "").strip():
-            errors.append("job_id is required when action='remove'")
+        if action in {"remove", "history"} and not str(params.get("job_id") or "").strip():
+            errors.append(f"job_id is required when action='{action}'")
         return errors
 
     async def execute(
@@ -130,6 +131,7 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        limit: int = 5,
     ) -> str:
         if action == "add":
             request = current_request_context()
@@ -140,6 +142,8 @@ class CronTool(Tool):
             return self._list_jobs()
         elif action == "remove":
             return self._remove_job(job_id)
+        elif action == "history":
+            return self._job_history(job_id, limit)
         return f"Unknown action: {action}"
 
     def _add_job(
@@ -275,6 +279,23 @@ class CronTool(Tool):
             parts.extend(self._format_state(j.state, j.schedule))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
+
+    def _job_history(self, job_id: str | None, limit: int) -> str:
+        if not job_id:
+            return ToolResult.error("Error: job_id is required for history")
+        job = self._cron.get_job(job_id)
+        if job is None:
+            return ToolResult.error(f"Error: job {job_id} not found")
+        if not job.state.run_history:
+            return f"No recorded runs for job {job_id}."
+        lines = [f"Recent runs for '{job.name}' (id: {job.id}), newest first:"]
+        display_tz = self._display_timezone(job.schedule)
+        for run in reversed(job.state.run_history[-limit:]):
+            timestamp = self._format_timestamp(run.run_at_ms, display_tz)
+            lines.append(f"- {timestamp} — {run.status} ({run.duration_ms}ms)")
+            if run.error:
+                lines.append(f"  Error: {run.error}")
+        return "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
         if not job_id:

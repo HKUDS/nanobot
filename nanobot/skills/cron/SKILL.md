@@ -61,3 +61,9 @@ cron(action="remove", job_id="abc123")
 ## Timezone
 
 Use `tz` with `cron_expr` to schedule in a specific IANA timezone. Without `tz`, the server's local timezone is used.
+
+## Run History
+
+Use `cron(action="history", job_id="...", limit=5)` to inspect recent executions, newest first. Each entry includes its time, status, duration in milliseconds, and any error. `job_id` is required; `limit` defaults to 5 and accepts 1–20. Listing jobs still shows only the last run.
+
+History can be inspected for disabled jobs too. The scheduler retains at most 20 runs per job; deleted jobs, including automatically deleted one-time tasks, cannot be queried. This reads execution records, not task output or delivery receipts.
