@@ -122,7 +122,10 @@ describe("Settings navigation on mobile", () => {
     const tap = (target: HTMLElement) => user.pointer([
       { keys: "[TouchA>]", target }, { keys: "[/TouchA]", target },
     ]);
-    await tap(screen.getByRole("button", { name: "Settings: Models" }));
+    const trigger = screen.getByRole("button", { name: "Settings: Models" });
+    await tap(trigger);
+    act(() => trigger.focus());
+    expect(screen.getByRole("menu")).toBeVisible();
     await tap(screen.getByRole("menuitem", { name: "System", exact: true }));
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Settings: System" })).toBeVisible();

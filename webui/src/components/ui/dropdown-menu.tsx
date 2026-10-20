@@ -11,8 +11,30 @@ import {
 import { cn } from "@/lib/utils";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
 
-const DropdownMenu = DropdownMenuPrimitive.Root;
-const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
+const DropdownTriggerContext = React.createContext<React.MutableRefObject<HTMLButtonElement | null> | null>(null);
+
+function DropdownMenu(props: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  return (
+    <DropdownTriggerContext.Provider value={triggerRef}>
+      <DropdownMenuPrimitive.Root {...props} />
+    </DropdownTriggerContext.Provider>
+  );
+}
+
+const DropdownMenuTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Trigger>
+>((props, forwardedRef) => {
+  const triggerRef = React.useContext(DropdownTriggerContext);
+  const setRef = React.useCallback((node: HTMLButtonElement | null) => {
+    if (triggerRef) triggerRef.current = node;
+    if (typeof forwardedRef === "function") forwardedRef(node);
+    else if (forwardedRef) forwardedRef.current = node;
+  }, [triggerRef, forwardedRef]);
+  return <DropdownMenuPrimitive.Trigger {...props} ref={setRef} />;
+});
+DropdownMenuTrigger.displayName = DropdownMenuPrimitive.Trigger.displayName;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 
@@ -27,8 +49,9 @@ interface DropdownMenuContentProps
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   DropdownMenuContentProps
->(({ className, sideOffset = 4, portalContainer, ...props }, ref) => {
+>(({ className, sideOffset = 4, portalContainer, onFocusOutside, ...props }, ref) => {
   const dialogContainer = useFloatingPortal();
+  const triggerRef = React.useContext(DropdownTriggerContext);
   return (
   <DropdownMenuPrimitive.Portal container={portalContainer ?? dialogContainer ?? undefined}>
     <DropdownMenuPrimitive.Content
@@ -41,6 +64,14 @@ const DropdownMenuContent = React.forwardRef<
         className,
       )}
       {...props}
+      onFocusOutside={(event) => {
+        onFocusOutside?.(event);
+        // Mobile browsers can focus the trigger after pointerdown opens the menu.
+        // Keep that focus inside this menu's boundary, without blocking real outside focus.
+        if (!event.defaultPrevented && event.target === triggerRef?.current) {
+          event.preventDefault();
+        }
+      }}
     />
   </DropdownMenuPrimitive.Portal>
   );
