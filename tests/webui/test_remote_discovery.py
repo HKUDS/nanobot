@@ -1,6 +1,7 @@
 """Remote setup discovers metadata, not secrets, and never invents sudo access."""
 
 import asyncio
+import getpass
 import json
 import os
 import subprocess
@@ -17,6 +18,13 @@ from nanobot.webui.remote_ssh import RemoteError, RemoteProfile
 
 if sys.platform != "win32":
     import pwd
+
+
+@pytest.fixture(autouse=True)
+def local_probe_user(monkeypatch):
+    # The probe runs over SSH on Unix in production; its local Windows harness
+    # must not depend on the test runner's optional username environment.
+    monkeypatch.setattr(getpass, "getuser", lambda: "probe-user")
 
 
 def locate(monkeypatch, capsys, path, units="", properties=""):

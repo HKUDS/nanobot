@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sqlite3
+import subprocess
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
@@ -359,7 +360,9 @@ async def test_recovery_rechecks_attachment_workspace_boundary(tmp_path):
     manager = make_manager(tmp_path, sessions)
     manager.config.agents.defaults.workspace = str(workspace)
     manager.config.tools.restrict_to_workspace = True
-    attachment = workspace / "report.txt"
+    reports = workspace / "reports"
+    reports.mkdir()
+    attachment = reports / "report.txt"
     attachment.write_text("report")
     msg = message(generation=session.generation)
     msg.media = [str(attachment)]
@@ -367,9 +370,19 @@ async def test_recovery_rechecks_attachment_workspace_boundary(tmp_path):
     try:
         await manager.bus.publish_outbound(msg)
         attachment.unlink()
-        private = tmp_path / "private.txt"
-        private.write_text("not authorized")
-        attachment.symlink_to(private)
+        reports.rmdir()
+        private = tmp_path / "private"
+        private.mkdir()
+        (private / "report.txt").write_text("not authorized")
+        if os.name == "nt":
+            # Directory junctions resolve across the same workspace boundary
+            # without requiring Windows' privileged symlink capability.
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(reports), str(private)],
+                check=True, capture_output=True,
+            )
+        else:
+            reports.symlink_to(private, target_is_directory=True)
         await manager._send_scheduled(channel, msg)
         channel.send.assert_not_called()
         assert rows(manager._outbox)[0]["error"] == "attachment_access_denied"

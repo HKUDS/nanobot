@@ -213,11 +213,10 @@ async def test_direct_process_cancellation_reaps_child(tmp_path, monkeypatch):
 async def test_direct_search_uses_configured_path(tmp_path, monkeypatch):
     installed = shutil.which("rg")
     assert installed
-    bin_dir = tmp_path / "custom bin"
-    bin_dir.mkdir()
-    shutil.copy2(installed, bin_dir / ("rg.exe" if sys.platform == "win32" else "rg"))
+    # Keep installed launchers with their adjacent files (e.g. Scoop's .shim).
+    bin_dir = os.path.dirname(installed)
     monkeypatch.setenv("PATH", "")
-    result = await RgTool(working_dir=str(tmp_path), path_prepend=str(bin_dir)).execute(
+    result = await RgTool(working_dir=str(tmp_path), path_prepend=bin_dir).execute(
         args=["--version"],
     )
     assert "ripgrep" in result
