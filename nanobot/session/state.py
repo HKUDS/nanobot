@@ -1119,7 +1119,7 @@ class SessionState:
                 if old is not None:
                     session.policy = old.policy
                     session.metadata = deepcopy(old.metadata)
-                for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary"):
+                for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
                     session.metadata.pop(name, None)
                 if session.policy.persist:
                     self._store.delete(key)

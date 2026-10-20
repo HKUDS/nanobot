@@ -43,6 +43,7 @@ _SESSION_PREVIEW_MAX_CHARS = 120
 _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _FORK_VOLATILE_METADATA_KEYS = {
+    "_stopped_at_iteration_limit",
     PARENT_SESSION_KEY,
     SESSION_TYPE_KEY,
     "goal_state",
@@ -353,6 +354,7 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        self.metadata.pop("_stopped_at_iteration_limit", None)
 
 class SessionPayload(TypedDict):
     key: str

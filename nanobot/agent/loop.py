@@ -660,6 +660,9 @@ class AgentLoop:
 
         runtime_control = AgentRuntimeControl(self)
         self.register_runtime_context_provider(runtime_control.workspace_context)
+        self.register_runtime_context_provider(
+            partial(turn_continuation.iteration_limit_context, self.sessions.state),
+        )
         ctx = ToolContext(
             config=self.tools_config,
             network=self.network_config,
@@ -2379,6 +2382,11 @@ class AgentLoop:
         turn_continuation.prepare_save_boundary(ctx)
         if ctx.usage is not None and not ctx.ephemeral:
             session.metadata["_last_usage"] = ctx.usage.to_dict()
+        if ctx.kind is TurnKind.USER and not ctx.ephemeral:
+            turn_continuation.record_iteration_limit(
+                session.metadata, ctx.stop_reason,
+                continuation_pending=ctx.delivery.continuation_pending,
+            )
         self._save_turn(
             session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
