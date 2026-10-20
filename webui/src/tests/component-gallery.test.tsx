@@ -2,15 +2,17 @@ import { resolve } from "node:path";
 import { cwd } from "node:process";
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 
 import { Gallery, examples } from "@/dev/gallery/Gallery";
 import { componentInventory } from "@/dev/gallery/inventory-plugin";
 import { foundationPath } from "@/dev/gallery/inventory";
+import { initializeGalleryI18n } from "@/dev/gallery/i18n";
 import { registeredChannelUiContributions } from "@/channel-plugins/registry";
 
 const inventory = componentInventory(resolve(cwd(), ".."));
 
+beforeAll(initializeGalleryI18n);
 beforeEach(() => {
   window.history.replaceState({}, "", "/gallery.html");
 });
@@ -45,7 +47,7 @@ it("provides a live example for every foundation source and resolves every docum
 it("finds a shared component by its name and renders its working variants", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => inventory }));
   render(<Gallery />);
-  await screen.findByRole("heading", { name: "Button · 按钮" });
+  await screen.findByRole("heading", { name: "Buttons" });
   await userEvent.type(screen.getByRole("searchbox", { name: "Search components" }), "toggle-button");
   expect(screen.getByRole("link", { name: /toggle-button/ })).toHaveAttribute("href", expect.stringContaining("toggle-button"));
   await userEvent.click(screen.getByRole("button", { name: "destructive" }));
@@ -59,7 +61,7 @@ it("lets the developer retry a failed inventory request", async () => {
   render(<Gallery />);
   expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the inventory");
   await userEvent.click(screen.getByRole("button", { name: "Refresh inventory" }));
-  expect(await screen.findByRole("heading", { name: "Button · 按钮" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "Buttons" })).toBeVisible();
 });
 
 it("covers every registered channel and its presentation components", () => {
@@ -78,22 +80,22 @@ it("covers every registered channel and its presentation components", () => {
 it("starts with working previews and lets the developer inspect source-only modules", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => inventory }));
   render(<Gallery />);
-  await screen.findByRole("heading", { name: "Button · 按钮" });
+  await screen.findByRole("heading", { name: "Buttons" });
   expect(screen.queryByRole("link", { name: /SettingsPage/ })).not.toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("button", { name: "All source · 源码" }));
+  await userEvent.click(screen.getByRole("button", { name: "All source" }));
   const sourceLink = screen.getByRole("link", { name: /SettingsPage Source only/ });
   // happy-dom does not follow anchor navigation or emit the browser's hashchange.
   act(() => {
     window.location.hash = sourceLink.getAttribute("href")!;
     window.dispatchEvent(new HashChangeEvent("hashchange"));
   });
-  expect(await screen.findByRole("heading", { name: "Source only · 暂无独立预览" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "Source only" })).toBeVisible();
   expect(screen.getByRole("link", { name: /Settings composition/ })).toBeVisible();
 
-  await userEvent.click(screen.getByRole("button", { name: "Previews · 预览" }));
+  await userEvent.click(screen.getByRole("button", { name: "Previews" }));
   expect(await screen.findByRole("region", { name: "Component preview" })).toBeVisible();
-  expect(screen.queryByRole("heading", { name: "Source only · 暂无独立预览" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Source only" })).not.toBeInTheDocument();
 });
 
 it("opens bookmarked source entries and offers all source when a preview search has no match", async () => {
@@ -104,7 +106,7 @@ it("opens bookmarked source entries and offers all source when a preview search 
   expect(await screen.findByRole("heading", { name: "SettingsView" })).toBeVisible();
   expect(screen.getByRole("link", { name: /^SettingsView Source only/ })).toHaveAttribute("aria-current", "page");
 
-  await userEvent.click(screen.getByRole("button", { name: "Previews · 预览" }));
+  await userEvent.click(screen.getByRole("button", { name: "Previews" }));
   await userEvent.type(screen.getByRole("searchbox", { name: "Search components" }), source);
   expect(screen.getByText("No matching previews.")).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Search all source" }));
@@ -117,9 +119,9 @@ it("submits a message through the actual composer using only local preview state
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
   vi.stubGlobal("fetch", fetch);
   render(<Gallery />);
-  const input = await screen.findByRole("textbox", { name: "示例消息" });
+  const input = await screen.findByRole("textbox", { name: "Example message" });
   await userEvent.type(input, "Try the real composer{Enter}");
-  expect(await screen.findByText("提交内容：Try the real composer")).toBeVisible();
+  expect(await screen.findByText("Submitted: Try the real composer")).toBeVisible();
   expect(input).toHaveValue("");
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
@@ -130,10 +132,10 @@ it("switches the chat list preview between ready, loading, empty and archived st
   window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => inventory }));
   render(<Gallery />);
-  await screen.findByRole("heading", { name: "ChatList · 会话列表" });
+  await screen.findByRole("heading", { name: "ChatList · Chat list" });
   const preview = within(screen.getByRole("region", { name: "Component preview" }));
   const setMode = async (mode: string) => {
-    await userEvent.click(preview.getByRole("combobox", { name: "会话列表状态" }));
+    await userEvent.click(preview.getByRole("combobox", { name: "Chat list state" }));
     await userEvent.click(screen.getByRole("option", { name: mode }));
   };
 
@@ -161,7 +163,7 @@ it("edits a pairing route without mounting a client or making a gateway mutation
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
   vi.stubGlobal("fetch", fetch);
   render(<Gallery />);
-  await screen.findByRole("heading", { name: "PairRouteSettingsView · 配对路由" });
+  await screen.findByRole("heading", { name: "PairRouteSettingsView · Pairing route" });
   const preview = within(screen.getByRole("region", { name: "Component preview" }));
   expect(preview.getByRole("button", { name: "Save changes" })).toBeDisabled();
   await userEvent.click(preview.getByRole("combobox", { name: "Network route" }));
@@ -179,7 +181,7 @@ it("uses the real provider manager and saves a new provider entirely in preview 
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
   vi.stubGlobal("fetch", fetch);
   render(<Gallery />);
-  await screen.findByRole("heading", { name: "ProvidersSettings · 管理提供商" });
+  await screen.findByRole("heading", { name: "Provider management" });
   const preview = within(screen.getByRole("region", { name: "Component preview" }));
   await userEvent.click(preview.getByRole("button", { name: "Manage providers" }));
   let dialog = within(screen.getByRole("dialog", { name: "Manage providers" }));
@@ -212,7 +214,7 @@ it("renders a registered channel's real secret fields and enable action without 
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
   vi.stubGlobal("fetch", fetch);
   render(<Gallery />);
-  await screen.findByRole("heading", { name: "Telegram · 频道配置" });
+  await screen.findByRole("heading", { name: "Telegram · Channel setup" });
   const preview = within(screen.getByRole("region", { name: "Component preview" }));
   const token = preview.getByLabelText("Bot token", { selector: "input" });
   expect(token).toHaveAttribute("type", "password");
