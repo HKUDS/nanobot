@@ -54,7 +54,7 @@
     "stopped": "Dibatalkan",
     "connecting": "Menyiapkan kode QR…",
     "qrAlt": "Kode QR penautan QQ",
-    "scanAgainWarning": "Penautan ulang yang berhasil mengganti App Secret dan menonaktifkan yang lama.",
+    "scanAgainWarning": "Setelah penautan ulang berhasil, instans lain memerlukan App Secret baru.",
     "configured": "Terkonfigurasi",
     "bind": "Tautkan bot QQ",
     "rebind": "Tautkan ulang bot",

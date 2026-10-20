@@ -54,7 +54,7 @@
     "stopped": "已取消",
     "connecting": "生成中…",
     "qrAlt": "QQ 绑定二维码",
-    "scanAgainWarning": "重绑成功后替换 App Secret，旧值失效。",
+    "scanAgainWarning": "重绑成功后，其他实例需更新 App Secret。",
     "configured": "已配置",
     "bind": "绑定机器人",
     "rebind": "重新绑定",

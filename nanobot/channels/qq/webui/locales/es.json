@@ -54,7 +54,7 @@
     "stopped": "Cancelado",
     "connecting": "Preparando código QR…",
     "qrAlt": "Código QR para vincular QQ",
-    "scanAgainWarning": "Volver a vincular con éxito reemplaza el App Secret e invalida el anterior.",
+    "scanAgainWarning": "Tras completar la nueva vinculación, las demás instancias necesitarán el nuevo App Secret.",
     "configured": "Configurado",
     "bind": "Vincular bot de QQ",
     "rebind": "Volver a vincular el bot",

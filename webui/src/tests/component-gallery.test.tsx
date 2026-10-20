@@ -247,8 +247,12 @@ it("previews QQ QR states and retries without connecting to the portal", async (
   await userEvent.click(preview.getByRole("combobox", { name: "QQ connection state" }));
   await userEvent.click(screen.getByRole("option", { name: "succeeded" }));
   expect(preview.getByText("Configured")).toBeVisible();
-  expect(preview.getByText(/invalidates the old one/)).toBeVisible();
-  expect(preview.getByRole("button", { name: "Rebind bot" })).toBeVisible();
+  expect(preview.queryByText(/other instances need the new App Secret/)).not.toBeInTheDocument();
+  await userEvent.click(preview.getByRole("button", { name: "Rebind bot" }));
+  const confirmation = screen.getByRole("alertdialog", { name: "Rebind bot" });
+  expect(confirmation).toHaveTextContent("After rebinding succeeds, other instances need the new App Secret.");
+  await userEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+  expect(preview.getByText("Configured")).toBeVisible();
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
 });

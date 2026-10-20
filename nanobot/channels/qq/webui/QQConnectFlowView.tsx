@@ -1,9 +1,20 @@
+import { useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
 import { ChannelStatusBadge } from "@/components/settings/channels/ChannelIdentity";
 import { ChannelQrConnectFlowView, type ChannelQrConnectFlowViewProps, type ChannelQrConnectLabels } from "@/components/settings/channels/ChannelQrConnectFlowView";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import type { ChannelRuntimeStatus } from "@/lib/types";
 
@@ -37,6 +48,8 @@ export function QQConnectFlowView({
   const { t } = useTranslation();
   const tx = channelTranslator(t, "qq");
   const labels = useQQConnectLabels();
+  const [rebindOpen, setRebindOpen] = useState(false);
+  const rebindTrigger = useRef<HTMLElement | null>(null);
   const pending = props.connect?.status === "pending";
   const pollFailed = pending && props.errorAction === "poll" && Boolean(props.error);
   const retrying = props.connect?.retrying || pollFailed;
@@ -66,10 +79,15 @@ export function QQConnectFlowView({
         {runtimeLabel ? <ChannelStatusBadge status={runtimeStatus}>{runtimeLabel}</ChannelStatusBadge> : null}
       </div>
     ) : null}
-    {configured ? <p className="text-caption text-muted-foreground">
-      {tx("custom.scanAgainWarning", "Successful rebinding replaces App Secret and invalidates the old one.")}
-    </p> : null}
     <ChannelQrConnectFlowView {...props}
+      onStart={() => {
+        if (configured) {
+          rebindTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          setRebindOpen(true);
+        } else {
+          props.onStart();
+        }
+      }}
       labels={{ ...labels, waiting: retrying
         ? tx("custom.retrying", "Retrying…") : labels.waiting }}
       idleLabel={idleLabel}
@@ -93,5 +111,22 @@ export function QQConnectFlowView({
       )}
     />
     {pending || (props.autoStart && props.busy && !props.connect) ? manualSetup : null}
+    <AlertDialog open={rebindOpen} onOpenChange={setRebindOpen}>
+      <AlertDialogContent onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        rebindTrigger.current?.focus();
+      }}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{labels.scanAgain}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {tx("custom.scanAgainWarning", "After rebinding succeeds, other instances need the new App Secret.")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("settings.actions.cancel", { defaultValue: "Cancel" })}</AlertDialogCancel>
+          <AlertDialogAction onClick={props.onStart}>{labels.scanAgain}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>;
 }

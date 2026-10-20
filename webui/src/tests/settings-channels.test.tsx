@@ -2122,7 +2122,8 @@ describe("Settings channels", () => {
       "settings.channel.connect.poll", { channel: "qq", session_id: "qq-1" }, 150_000,
     ));
     expect(await screen.findByText("Configured")).toBeInTheDocument();
-    expect(screen.getByText(/invalidates the old one/)).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.queryByText(/other instances need the new App Secret/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByLabelText("App ID")).toHaveValue("1024");
     expect(screen.getByLabelText("Acknowledgement message")).toHaveValue("⏳ Processing...");
@@ -2166,8 +2167,28 @@ describe("Settings channels", () => {
     expect(screen.getByLabelText("App ID")).toHaveValue("1024");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
-    expect(await screen.findByRole("button", { name: "Rebind bot" })).toBeInTheDocument();
+    const rebind = await screen.findByRole("button", { name: "Rebind bot" });
+    expect(screen.queryByText(/other instances need the new App Secret/)).not.toBeInTheDocument();
     expect(requestMutationMock).not.toHaveBeenCalled();
+    rebind.focus();
+    fireEvent.click(rebind);
+    const confirmation = await screen.findByRole("alertdialog", { name: "Rebind bot" });
+    expect(confirmation).toHaveTextContent("After rebinding succeeds, other instances need the new App Secret.");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(screen.queryByText(/other instances need the new App Secret/)).not.toBeInTheDocument();
+    expect(rebind).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+
+    requestMutationMock.mockResolvedValue({ status: "pending", session_id: "qq-rebind", qr_url: "https://example.com/qq-rebind" });
+    fireEvent.click(rebind);
+    fireEvent.click(within(await screen.findByRole("alertdialog", { name: "Rebind bot" }))
+      .getByRole("button", { name: "Rebind bot" }));
+    expect(await screen.findByRole("img", { name: "QQ binding QR code" })).toBeInTheDocument();
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.channel.connect.start", { channel: "qq" }, 150_000);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
   it("keeps the WebUI websocket channel enabled without opening a setup dialog", async () => {
