@@ -9,6 +9,7 @@ const DAMPING_RATIO = 0.78;
 
 interface HistorySpringOptions {
   onUpdate: (distance: number) => void;
+  onFeedbackChange: (active: boolean) => void;
   scheduler?: ThreadCameraScheduler;
   prefersReducedMotion?: () => boolean;
 }
@@ -26,6 +27,7 @@ export class ThreadHistorySpring {
   private dragging = false;
   private travel = 0;
   private wheelLatched = false;
+  private feedbackActive = false;
 
   constructor(options: HistorySpringOptions) {
     this.options = options;
@@ -49,6 +51,7 @@ export class ThreadHistorySpring {
     if (this.dragging) return false;
     const first = !this.wheelLatched && travel > 0;
     this.wheelLatched = true;
+    if (travel > 0) this.setFeedbackActive(true);
     // Wheel packets add pressure to one live spring, without a position jump.
     const speed = FREQUENCY * (travel > 0
       ? HISTORY_PULL_LIMIT_PX - Math.max(0, this.distance)
@@ -61,6 +64,7 @@ export class ThreadHistorySpring {
   startTouch(): void {
     this.stopFrame();
     this.dragging = true;
+    this.setFeedbackActive(true);
     this.velocity = 0;
     this.travel = -RESISTANCE_LENGTH_PX
       * Math.log(Math.max(Number.EPSILON, 1 - Math.max(0, this.distance) / HISTORY_PULL_LIMIT_PX));
@@ -85,6 +89,7 @@ export class ThreadHistorySpring {
     this.loading = false;
     this.dragging = false;
     this.wheelLatched = false;
+    this.setFeedbackActive(false);
     this.animate();
   }
 
@@ -96,10 +101,18 @@ export class ThreadHistorySpring {
     this.loading = false;
     this.dragging = false;
     this.wheelLatched = false;
+    this.setFeedbackActive(false);
     this.publish();
   }
 
+  private setFeedbackActive(active: boolean): void {
+    if (this.feedbackActive === active) return;
+    this.feedbackActive = active;
+    this.options.onFeedbackChange(active);
+  }
+
   private publish(): void {
+    // Reduced motion suppresses travel, not the input/settlement lifecycle.
     this.options.onUpdate(this.reducedMotion() ? 0 : Math.max(0, this.distance));
   }
 
@@ -110,16 +123,12 @@ export class ThreadHistorySpring {
   }
 
   private animate(): void {
-    if (this.reducedMotion()) {
-      this.distance = 0;
-      this.velocity = 0;
-      this.stopFrame();
-      this.publish();
-      return;
-    }
     if (this.frame !== null) return;
     if (this.distance === (this.loading ? LOADING_POCKET_PX : 0) && this.velocity === 0) {
-      if (!this.loading) this.wheelLatched = false;
+      if (!this.loading) {
+        this.wheelLatched = false;
+        this.setFeedbackActive(false);
+      }
       return;
     }
     this.timestamp = this.scheduler.now();
@@ -128,13 +137,6 @@ export class ThreadHistorySpring {
 
   private readonly advance = (timestamp: number): void => {
     this.frame = null;
-    if (this.reducedMotion()) {
-      this.distance = 0;
-      this.velocity = 0;
-      this.timestamp = null;
-      this.publish();
-      return;
-    }
     const seconds = Math.max(0, timestamp - (this.timestamp ?? timestamp)) / 1000;
     this.timestamp = timestamp;
     const target = this.loading ? LOADING_POCKET_PX : 0;
@@ -155,7 +157,10 @@ export class ThreadHistorySpring {
       this.distance = target;
       this.velocity = 0;
       this.timestamp = null;
-      if (!this.loading) this.wheelLatched = false;
+      if (!this.loading) {
+        this.wheelLatched = false;
+        this.setFeedbackActive(false);
+      }
     }
     this.publish();
     if (!settled) this.frame = this.scheduler.request(this.advance);

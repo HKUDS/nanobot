@@ -1857,14 +1857,24 @@ describe("ThreadViewport", () => {
     expect(onRender).not.toHaveBeenCalled();
   });
 
-  it("shows the confirmed start of conversation with boundary feedback", async () => {
+  it("shows the confirmed start only during boundary feedback and clears it on conversation changes", async () => {
     const onLoadOlder = vi.fn();
-    const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
-      onLoadOlder={onLoadOlder} />);
-    fireEvent.wheel(getScroller(container), { deltaY: -100 });
+    const props = { messages, isStreaming: false, onLoadOlder };
+    const { container, rerender } = render(<ThreadViewport {...props} conversationKey="a" />);
+    const scroller = getScroller(container);
+    expect(screen.queryByText("No earlier messages")).not.toBeInTheDocument();
+    fireEvent.wheel(scroller, { deltaY: -100 });
     expect(screen.getByText("hello")).toBeVisible();
     expect(screen.getByText("No earlier messages")).toBeVisible();
-    await waitFor(() => expect(historyPull(getScroller(container))).toBeGreaterThan(0));
+    await waitFor(() => expect(historyPull(scroller)).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.queryByText("No earlier messages")).not.toBeInTheDocument());
+    expect(historyPull(scroller)).toBe(0);
+    expect(scroller.scrollTop).toBe(0);
+    fireEvent.wheel(scroller, { deltaY: -100 });
+    expect(screen.getByText("No earlier messages")).toBeVisible();
+    rerender(<ThreadViewport {...props} conversationKey="b" />);
+    expect(screen.queryByText("No earlier messages")).not.toBeInTheDocument();
+    expect(historyPull(scroller)).toBe(0);
     expect(onLoadOlder).not.toHaveBeenCalled();
   });
 

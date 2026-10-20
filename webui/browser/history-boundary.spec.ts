@@ -30,6 +30,21 @@ async function installHistory(page: Page) {
   return { reads, complete: (outcome: "success" | "error" = "success") => pending.shift()?.(outcome) };
 }
 
+async function installShortHistory(page: Page) {
+  let reads = 0;
+  await page.route("**/api/sessions/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith("/prompts")) return route.fulfill({ json: { prompts: [] } });
+    if (!pathname.endsWith("/webui-thread")) return route.fulfill({ json: {} });
+    reads++;
+    const history = historyPage(0, 1, false);
+    return route.fulfill({ json: { ...history, events: history.events.map((event) => ({
+      ...event, text: event.event === "message" ? "Short answer." : event.text,
+    })) } });
+  });
+  return () => reads;
+}
+
 // Positioning is synthetic; gesture assertions below use browser wheel / CDP touch input.
 async function positionAtTop(body: Locator) {
   return body.evaluate((node) => {
@@ -208,13 +223,80 @@ test("failure stays actionable away from the top; retry, fast completion and exh
     await expect(body.getByText(`Question ${start}`, { exact: true })).toBeAttached();
   }
   await positionAtTop(body);
-  await expect(page.locator('.thread-history-status[data-state="exhausted"]')).toBeInViewport();
+  const exhausted = page.locator('.thread-history-status[data-state="exhausted"]');
+  await expect(exhausted).toHaveCount(0);
   await body.hover();
   await page.mouse.wheel(0, -120);
+  await expect(exhausted).toBeInViewport();
   expect(await displacement(body)).toBe(0);
   expect(history.reads).toHaveLength(5);
   await page.screenshot({ path: "test-results/history-boundary-exhausted-dark.png" });
+  await expect(exhausted).toHaveCount(0);
 });
+
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`exhausted hints follow wheel and touch feedback, including settlement (${reducedMotion})`, async ({ page, browser, baseURL }) => {
+    await page.emulateMedia({ reducedMotion });
+    const reads = await installShortHistory(page);
+    await page.goto("/browser/fixture.html?case=history-boundary");
+    const body = page.getByTestId("thread-message-region");
+    const hint = page.getByText("No earlier messages", { exact: true });
+    await expect(body.getByText("Short answer.", { exact: true })).toBeVisible();
+    await stableLayout(body);
+    expect(await body.evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
+    await expect(hint).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath("exhausted-at-rest.png") });
+    await body.hover();
+    await page.mouse.wheel(80, 0);
+    await expect(hint).toHaveCount(0);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await page.mouse.wheel(0, -120);
+      await expect(hint).toBeVisible();
+      if (reducedMotion === "reduce") expect(await displacement(body)).toBe(0);
+      else await expect.poll(() => displacement(body)).toBeGreaterThan(0);
+      if (attempt === 0) await page.screenshot({ path: test.info().outputPath("exhausted-wheel.png") });
+      await expect(hint).toHaveCount(0);
+      expect(await displacement(body)).toBe(0);
+      expect(await body.evaluate((node) => node.scrollTop)).toBe(0);
+    }
+    expect(reads()).toBe(1);
+    await page.reload();
+    await expect(body.getByText("Short answer.", { exact: true })).toBeVisible();
+    await expect(hint).toHaveCount(0);
+    await body.hover();
+    await page.mouse.wheel(0, -120);
+    await expect(hint).toBeVisible();
+    await page.getByRole("button", { name: "Switch conversation" }).click();
+    await expect(hint).toHaveCount(0);
+    expect(await displacement(body)).toBe(0);
+
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion, baseURL });
+    try {
+      const touchPage = await context.newPage();
+      const touchReads = await installShortHistory(touchPage);
+      await touchPage.goto("/browser/fixture.html?case=history-boundary");
+      const touchBody = touchPage.getByTestId("thread-message-region");
+      const touchHint = touchPage.getByText("No earlier messages", { exact: true });
+      await expect(touchBody.getByText("Short answer.", { exact: true })).toBeVisible();
+      await stableLayout(touchBody);
+      await expect(touchHint).toHaveCount(0);
+      const cdp = await context.newCDPSession(touchPage);
+      const touch = (type: "touchStart" | "touchMove" | "touchEnd", y = 200) => cdp.send("Input.dispatchTouchEvent", {
+        type, touchPoints: type === "touchEnd" ? [] : [{ x: 180, y, id: 1 }],
+      });
+      await touch("touchStart");
+      await touch("touchMove", 300);
+      await expect(touchHint).toBeVisible();
+      if (reducedMotion === "reduce") expect(await displacement(touchBody)).toBe(0);
+      else expect(await displacement(touchBody)).toBeGreaterThan(0);
+      await touchPage.screenshot({ path: test.info().outputPath("exhausted-touch.png") });
+      await touch("touchEnd");
+      await expect(touchHint).toHaveCount(0);
+      expect(await displacement(touchBody)).toBe(0);
+      expect(touchReads()).toBe(1);
+    } finally { await context.close(); }
+  });
+}
 
 test("local cached windows expand without network loading and only the complete beginning is exhausted", async ({ page }) => {
   const history = await installHistory(page);
@@ -232,7 +314,12 @@ test("local cached windows expand without network loading and only the complete 
   await positionAtTop(body);
   await expect(body.getByText("Cached message 0", { exact: true })).toBeAttached();
   await positionAtTop(body);
-  await expect(page.locator('.thread-history-status[data-state="exhausted"]')).toBeInViewport();
+  const exhausted = page.locator('.thread-history-status[data-state="exhausted"]');
+  await expect(exhausted).toHaveCount(0);
+  await body.hover();
+  await page.mouse.wheel(0, -120);
+  await expect(exhausted).toBeInViewport();
+  await expect(exhausted).toHaveCount(0);
   expect(history.reads).toHaveLength(0);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
 });

@@ -301,6 +301,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const composerDockHeightRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const [atHistoryTop, setAtHistoryTop] = useState(false);
+  const [historyFeedbackActive, setHistoryFeedbackActive] = useState(false);
   const historyInputRef = useRef<"touch" | "other">("other");
   const historyTouchRef = useRef<{
     lastY: number; startX: number; startY: number; pulling: boolean; horizontal: boolean;
@@ -310,6 +311,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const historySpringRef = useRef<ThreadHistorySpring | null>(null);
   if (historySpringRef.current === null) {
     historySpringRef.current = new ThreadHistorySpring({
+      onFeedbackChange: setHistoryFeedbackActive,
       onUpdate: (distance) => {
         // Presentation travel never becomes a scrollTop destination or an anchor correction.
         historyDistanceRef.current = distance;
@@ -396,6 +398,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     [messages, visibleMessageCount],
   );
   const hiddenMessageCount = messages.length - visibleMessages.length;
+  const historyExhausted = !hasMoreBefore && hiddenMessageCount === 0;
   const hiddenUserMessageCount =
     userMessageOffset
     + (hiddenMessageCount > 0
@@ -1156,11 +1159,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         </div>
         {navigation && (navigation.loading || navigation.error) ? (
           <ThreadHistoryStatus ref={setHistoryStatus} loading={navigation.loading} error={navigation.error} onRetry={navigation.retry} />
-        ) : messages.length > 0 && conversationReady && (atHistoryTop || loadingOlder || olderError) ? (
+        ) : messages.length > 0 && conversationReady && ((atHistoryTop && (!historyExhausted || historyFeedbackActive)) || loadingOlder || olderError) ? (
           <ThreadHistoryStatus
             ref={setHistoryStatus}
             loading={loadingOlder}
-            exhausted={!hasMoreBefore && hiddenMessageCount === 0}
+            exhausted={historyExhausted}
             error={olderError}
             onRetry={loadEarlierMessages}
           />

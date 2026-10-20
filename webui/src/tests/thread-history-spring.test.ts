@@ -11,8 +11,9 @@ function harness(reduced = false) {
     request: vi.fn((callback: FrameRequestCallback) => { frames.set(++nextId, callback); return nextId; }),
     cancel: (id: number) => { frames.delete(id); },
   };
+  const feedback = vi.fn();
   const spring = new ThreadHistorySpring({ scheduler, prefersReducedMotion: () => reduced,
-    onUpdate: (next) => { distance = next; } });
+    onFeedbackChange: feedback, onUpdate: (next) => { distance = next; } });
   const advance = (milliseconds = 16) => {
     now += milliseconds;
     const callbacks = [...frames.values()];
@@ -21,7 +22,7 @@ function harness(reduced = false) {
     return distance;
   };
   const settle = () => { for (let i = 0; i < 100 && frames.size; i++) advance(); };
-  return { spring, scheduler, advance, settle, frames, distance: () => distance };
+  return { spring, scheduler, advance, settle, frames, feedback, distance: () => distance };
 }
 
 describe("history boundary spring", () => {
@@ -70,9 +71,11 @@ describe("history boundary spring", () => {
       h.advance();
     }
     expect(requests).toBe(1);
+    expect(h.feedback.mock.calls).toEqual([[true]]);
     expect(h.distance()).toBeLessThan(HISTORY_PULL_LIMIT_PX);
     h.settle();
     expect(h.distance()).toBe(0);
+    expect(h.feedback.mock.calls).toEqual([[true], [false]]);
     expect(h.spring.wheel(100)).toBe(true);
   });
 
@@ -93,7 +96,16 @@ describe("history boundary spring", () => {
     expect(h.distance()).toBe(0);
     expect(h.spring.endTouch()).toBe(true);
     h.spring.setLoading(true);
-    expect(h.frames.size).toBe(0);
     expect(h.distance()).toBe(0);
+    h.settle();
+    expect(h.frames.size).toBe(0);
+    h.spring.setLoading(false);
+    h.settle();
+    expect(h.feedback.mock.calls).toEqual([[true], [false]]);
+    h.spring.wheel(100);
+    expect(h.feedback).toHaveBeenLastCalledWith(true);
+    h.settle();
+    expect(h.distance()).toBe(0);
+    expect(h.feedback).toHaveBeenLastCalledWith(false);
   });
 });
