@@ -140,7 +140,7 @@ export function ImageViewport({
         event.stopPropagation();
       }}>
       <img ref={image} src={src} alt={alt} decoding="async" draggable={false} onLoad={() => apply(viewRef.current)}
-        className={cn("max-h-full max-w-full select-none object-contain will-change-transform", imageClassName)}
+        className={cn("max-h-full max-w-full select-none object-contain", imageClassName)}
         style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})` }} />
     </div>
     <div className={cn("flex items-center justify-center gap-1 rounded-full p-1 text-muted-foreground", controlsClassName)}>

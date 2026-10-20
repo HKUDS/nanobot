@@ -39,8 +39,10 @@ test("same-source completion loads a real Pele image only after generation, with
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Zoom in" }).click();
-  await expect(dialog.getByRole("button", { name: "Fit image" })).toHaveText("150%");
+  for (let step = 0; step < 3; step++) await dialog.getByRole("button", { name: "Zoom in" }).click();
+  await expect(dialog.getByRole("button", { name: "Fit image" })).toHaveText("338%");
+  // CDP screenshots can hide fit-size raster caching, so check the compositor hint.
+  await expect(dialog.locator("img")).toHaveCSS("will-change", "auto");
   const viewport = dialog.getByTestId("image-viewport");
   await viewport.focus();
   await page.keyboard.press("0");
