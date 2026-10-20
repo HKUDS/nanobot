@@ -370,6 +370,11 @@
     "state": "Trạng thái kết nối {{channel}}",
     "error": "Tạm thời không thể ủy quyền. Vui lòng thử lại."
   },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Kết nối QR QQ",
+    "description": "Thử đăng nhập QR QQ, thử lại và cảnh báo thay thế App Secret.",
+    "options": "Giao diện nhận trạng thái kết nối và callback. Thao tác xem trước chỉ đổi trạng thái cục bộ; phần runtime tạo phiên và thăm dò cổng QQ."
+  },
   "feishuConnect": {
     "title": "FeishuConnectFlowView · Ủy quyền QR Feishu",
     "description": "Thử luồng QR Feishu thực với chờ, thành công, hết hạn, hủy và lỗi.",

@@ -370,6 +370,11 @@
     "state": "Estado de conexión de {{channel}}",
     "error": "La autorización no está disponible temporalmente. Inténtalo de nuevo."
   },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Conexión QR de QQ",
+    "description": "Prueba el acceso por QR de QQ, los reintentos y el aviso de sustitución de App Secret.",
+    "options": "La vista recibe el estado y los callbacks. Las acciones de ejemplo solo cambian el estado local; la entrada de ejecución crea sesiones y consulta el portal de QQ."
+  },
   "feishuConnect": {
     "title": "FeishuConnectFlowView · Autorización QR de Feishu",
     "description": "Prueba el flujo QR real de Feishu con espera, éxito, caducidad, cancelación y errores.",

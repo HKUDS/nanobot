@@ -230,3 +230,25 @@ it("renders a registered channel's real secret fields and enable action without 
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
 });
+
+it("previews QQ QR states and retries without connecting to the portal", async () => {
+  const source = "nanobot/channels/qq/webui/index.tsx";
+  window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
+  vi.stubGlobal("fetch", fetch);
+  render(<Gallery />);
+  await screen.findByRole("heading", { name: "QQConnectFlowView · QQ QR connection" });
+  const preview = within(screen.getByRole("region", { name: "Component preview" }));
+  expect(await preview.findByRole("img", { name: "QQ login QR code" })).toBeVisible();
+  await userEvent.click(preview.getByRole("button", { name: "Cancel" }));
+  expect(preview.queryByRole("img", { name: "QQ login QR code" })).not.toBeInTheDocument();
+  await userEvent.click(preview.getByRole("button", { name: "Connect" }));
+  expect(await preview.findByRole("img", { name: "QQ login QR code" })).toBeVisible();
+  await userEvent.click(preview.getByRole("combobox", { name: "QQ connection state" }));
+  await userEvent.click(screen.getByRole("option", { name: "succeeded" }));
+  expect(preview.getByText("QQ is connected.")).toBeVisible();
+  expect(preview.getByText(/previous App Secret stops working/)).toBeVisible();
+  expect(preview.getByRole("button", { name: "Scan again" })).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0][0]).toBe("/__nanobot_components");
+});

@@ -370,6 +370,11 @@
     "state": "État de connexion {{channel}}",
     "error": "L’autorisation est temporairement indisponible. Réessayez."
   },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Connexion QR QQ",
+    "description": "Essayez la connexion QR QQ, les nouvelles tentatives et l’avertissement de remplacement de l’App Secret.",
+    "options": "La vue reçoit l’état et les callbacks. Les actions d’aperçu restent locales ; l’entrée du runtime crée les sessions et interroge le portail QQ."
+  },
   "feishuConnect": {
     "title": "FeishuConnectFlowView · Autorisation Feishu par QR",
     "description": "Essayez le parcours QR Feishu avec attente, réussite, expiration, annulation et erreurs.",

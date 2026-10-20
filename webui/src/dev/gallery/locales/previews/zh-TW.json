@@ -370,6 +370,11 @@
     "state": "{{channel}} 連線狀態",
     "error": "授權暫時無法使用，請重試。"
   },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ 掃碼連線",
+    "description": "查看 QQ 掃碼、重試與 App Secret 替換提示。",
+    "options": "檢視接收連線狀態和操作回呼。預覽操作只改變本機狀態；工作階段建立和 QQ 輪詢由執行階段入口負責。"
+  },
   "feishuConnect": {
     "title": "FeishuConnectFlowView · 飛書掃碼授權",
     "description": "試用飛書掃碼、成功、到期與錯誤狀態。",

@@ -20,12 +20,13 @@ import { runtimeSettingsExamples } from "./runtime-settings";
 import { channelExamples, withChannelEntries } from "./channels";
 import { feishuWhatsAppChannelExamples } from "./channels-feishu-whatsapp";
 import { linearChannelExamples } from "./channels-linear";
+import { qqChannelExamples } from "./channels-qq";
 import { weixinChannelExamples } from "./channels-weixin";
 import { foundationPath, type ComponentSource } from "./inventory";
 import { useGalleryTranslation } from "./i18n";
 
 export const examples = [...foundationExamples, ...sharedExamples, ...settingsExamples, ...providerExamples, ...conversationExamples, ...shellExamples, ...standaloneExamples, ...remoteExamples, ...contentExamples, ...runtimeSettingsExamples,
-  ...channelExamples, ...withChannelEntries([...feishuWhatsAppChannelExamples, ...linearChannelExamples, ...weixinChannelExamples])];
+  ...channelExamples, ...withChannelEntries([...feishuWhatsAppChannelExamples, ...linearChannelExamples, ...qqChannelExamples, ...weixinChannelExamples])];
 const examplesByPath = new Map(examples.flatMap((example) => example.files.map((file) => [file, example] as const)));
 const groupKeys: Record<string, string> = {
   All: "all", "Shared views & shell": "shared", Icons: "icons", Hosts: "hosts", Settings: "settings",

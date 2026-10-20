@@ -370,6 +370,11 @@
     "state": "{{channel}} connection state",
     "error": "Authorization is temporarily unavailable. Try again."
   },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ QR connection",
+    "description": "Explore QQ QR login, retries and the App Secret replacement warning.",
+    "options": "The view receives connection state and callbacks. Preview actions stay local; the runtime entry creates sessions and polls the QQ portal."
+  },
   "feishuConnect": {
     "title": "FeishuConnectFlowView · Feishu QR authorization",
     "description": "Try the real Feishu QR flow with waiting, success, expiry, cancellation and errors.",

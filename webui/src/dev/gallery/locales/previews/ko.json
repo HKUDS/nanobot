@@ -370,6 +370,11 @@
     "state": "{{channel}} 연결 상태",
     "error": "일시적으로 인증할 수 없습니다. 다시 시도하세요."
   },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ QR 연결",
+    "description": "QQ QR 로그인, 재시도와 App Secret 교체 경고를 확인합니다.",
+    "options": "뷰는 연결 상태와 콜백을 받습니다. 미리보기 작업은 로컬 상태만 변경하며 세션 생성과 QQ 폴링은 런타임에서 처리합니다."
+  },
   "feishuConnect": {
     "title": "FeishuConnectFlowView · Feishu QR 인증",
     "description": "실제 Feishu QR 화면에서 대기, 성공, 만료, 취소, 오류를 시험합니다.",

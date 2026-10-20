@@ -370,6 +370,11 @@
     "state": "{{channel}} の接続状態",
     "error": "認証を一時的に利用できません。再試行してください。"
   },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ QR 接続",
+    "description": "QQ の QR ログイン、再試行、App Secret の置き換え警告を確認します。",
+    "options": "ビューは接続状態とコールバックを受け取ります。プレビューの操作はローカル状態のみを変更し、セッション作成と QQ のポーリングはランタイム側で行います。"
+  },
   "feishuConnect": {
     "title": "FeishuConnectFlowView · Feishu QR 認証",
     "description": "実際の QR 認証画面で待機、成功、期限切れ、キャンセル、エラーを試せます。",

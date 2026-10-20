@@ -370,6 +370,11 @@
     "state": "Status koneksi {{channel}}",
     "error": "Otorisasi sementara tidak tersedia. Coba lagi."
   },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Koneksi QR QQ",
+    "description": "Coba login QR QQ, percobaan ulang, dan peringatan penggantian App Secret.",
+    "options": "Tampilan menerima status koneksi dan callback. Tindakan pratinjau tetap lokal; bagian runtime membuat sesi dan melakukan polling ke portal QQ."
+  },
   "feishuConnect": {
     "title": "FeishuConnectFlowView · Otorisasi QR Feishu",
     "description": "Coba alur QR Feishu asli dengan status menunggu, berhasil, kedaluwarsa, batal, dan kesalahan.",
