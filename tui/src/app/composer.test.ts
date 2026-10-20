@@ -155,6 +155,13 @@ describe("NanobotTui composer", () => {
       await waitUntil(() => !ui.pathInspectionPending)
       expect(ui.draft.imageCount, `${name}: ${ui.composer.plainText}; ${ui.status.plainText}`).toBe(index + 1)
     }
+    const beforeResize = ui.composer.plainText
+    for (const width of [140, 40, 100]) {
+      setup.resize(width, 30)
+      await setup.flush()
+      expect(ui.composer.plainText).toBe(beforeResize)
+      expect(ui.draft.imageCount).toBe(4)
+    }
     setup.mockInput.pressKey("v", { ctrl: true })
     await waitUntil(() => ui.draft.imageCount === 5)
     setup.mockInput.pressKey("v", { ctrl: true })
