@@ -1076,6 +1076,27 @@ describe("MessageBubble", () => {
     expect(screen.queryByText("Code")).not.toBeInTheDocument();
   });
 
+  it("preserves an uploaded video player through canonical history hydration", () => {
+    const preview = "data:video/webm;base64,AAAA";
+    const message: UIMessage = {
+      id: "optimistic-user", role: "user", content: "Watch this", createdAt: 1,
+      turnId: "video-turn", turnPhase: "user",
+      media: [{ kind: "video", name: "clip.webm", url: preview }],
+    };
+    const canonical: UIMessage = {
+      ...message, id: "history-user",
+      media: [{ kind: "video", name: "clip.webm", url: "/api/media/sig/clip" }],
+    };
+    const { rerender, unmount } = render(<ThreadMessages messages={[message]} />);
+    const video = screen.getByLabelText(/video attachment/i);
+    rerender(<ThreadMessages messages={[canonical]} />);
+    expect(screen.getByLabelText(/video attachment/i)).toBe(video);
+    expect(video).toHaveAttribute("src", preview);
+    unmount();
+    render(<ThreadMessages messages={[canonical]} />);
+    expect(screen.getByLabelText(/video attachment/i)).toHaveAttribute("src", "/api/media/sig/clip");
+  });
+
   it("renders streaming reasoning as one compact activity line", () => {
     const message: UIMessage = {
       id: "a-reasoning-streaming",

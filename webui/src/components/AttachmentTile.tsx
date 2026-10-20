@@ -17,8 +17,13 @@ interface AttachmentTileProps {
 
 export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
   const { t } = useTranslation();
+  // Uploads are immutable snapshots. A mounted player keeps its local preview
+  // when history supplies the durable URL; reloading uses the canonical URL.
+  const [videoPreviewUrl] = useState(() => attachment.kind === "video"
+    && attachment.url?.startsWith("data:video/") ? attachment.url : undefined);
+  const videoUrl = videoPreviewUrl ?? attachment.url;
   const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
-  const failed = !!attachment.url && failedUrl === attachment.url;
+  const failed = !!videoUrl && failedUrl === videoUrl;
   const [imageOpen, setImageOpen] = useState(false);
   const hasUrl = typeof attachment.url === "string" && attachment.url.length > 0;
   const label = attachmentLabel(attachment, t);
@@ -45,10 +50,10 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         variant={variant}
       >
         <video
-          src={attachment.url}
+          src={videoUrl}
           controls
           preload="metadata"
-          onError={() => setFailedUrl(attachment.url)}
+          onError={() => setFailedUrl(videoUrl)}
           className={cn(
             "block w-full bg-black",
             variant === "compact" ? "max-h-40" : "max-h-[26rem]",
