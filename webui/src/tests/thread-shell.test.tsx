@@ -23,6 +23,7 @@ import type {
   WebuiThreadPersistedPayload,
 } from "@/lib/types";
 import { canonicalThreadPayload } from "./thread-test-payload";
+import { createStreamClient } from "./stream-client";
 
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -35,65 +36,16 @@ async function openMessageActions(text: string): Promise<HTMLElement> {
 }
 
 function makeClient() {
+  const { client: lifecycle, receive } = createStreamClient();
   const errorHandlers = new Set<(err: StreamError) => void>();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
-  const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
   const runtimeModelHandlers = new Set<
     (modelName: string | null, modelPreset?: string | null) => void
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
-  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
-  const runCompletionHandlers = new Set<(chatId: string) => void>();
-  const runStartedAtByChatId = new Map<string, number>();
-  const runGenerationByChatId = new Map<string, number>();
-  const latestRunTurnIdByChatId = new Map<string, string>();
-  const closedRunTurnIdsByChatId = new Map<string, Set<string>>();
-  const completedTurnIdsByChatId = new Map<string, Set<string>>();
-  const goalStateByChatId = new Map<string, import("@/lib/types").GoalStateWsPayload>();
   let status: ConnectionStatus = "open";
-  const advanceRunGeneration = (chatId: string, turnId?: string) => {
-    runGenerationByChatId.set(chatId, (runGenerationByChatId.get(chatId) ?? 0) + 1);
-    if (turnId) latestRunTurnIdByChatId.set(chatId, turnId);
-    else latestRunTurnIdByChatId.delete(chatId);
-  };
-  const sendMessage = vi.fn((
-    chatId: string,
-    _content: string,
-    _media?: unknown,
-    options?: { turnId?: string; startsNewRun?: boolean },
-  ) => {
-    if (options?.turnId && options.startsNewRun !== false) {
-      advanceRunGeneration(chatId, options.turnId);
-    }
-  });
-  const canReconcileCanonicalCompletion = vi.fn((
-    chatId: string,
-    expectedRunGeneration: number,
-    completedTurnIds: readonly string[],
-    snapshot?: CanonicalRunSnapshot,
-  ) => {
-    const existingFences = completedTurnIdsByChatId.get(chatId);
-    const prospectiveFences = new Set(completedTurnIds);
-    const observedTurnIds = new Set(snapshot?.observedTurnIds ?? []);
-    const isRepresented = (turnId: string) => (
-      prospectiveFences.has(turnId)
-      || existingFences?.has(turnId) === true
-      || (
-        snapshot?.completionIdsProvided !== true
-        && snapshot?.hasPendingToolCalls === false
-        && snapshot?.activeTurnId !== turnId
-        && observedTurnIds.has(turnId)
-      )
-    );
-    const currentGeneration = runGenerationByChatId.get(chatId) ?? 0;
-    const latestTurnId = latestRunTurnIdByChatId.get(chatId);
-    if (latestTurnId && !closedRunTurnIdsByChatId.get(chatId)?.has(latestTurnId)
-      && !isRepresented(latestTurnId)) return false;
-    return (
-      currentGeneration === expectedRunGeneration
-      || (typeof latestTurnId === "string" && isRepresented(latestTurnId))
-    );
-  });
+  const sendMessage = vi.fn(lifecycle.sendMessage.bind(lifecycle));
+  const canReconcileCanonicalCompletion = vi.fn(lifecycle.canReconcileCanonicalCompletion.bind(lifecycle));
   const reconcileCanonicalCompletion = vi.fn((
     chatId: string,
     expectedRunGeneration: number,
@@ -108,12 +60,7 @@ function makeClient() {
     )) {
       return false;
     }
-    const fences = completedTurnIdsByChatId.get(chatId) ?? new Set<string>();
-    for (const turnId of completedTurnIds) fences.add(turnId);
-    completedTurnIdsByChatId.set(chatId, fences);
-    const hadClock = runStartedAtByChatId.delete(chatId);
-    if (hadClock) for (const h of runStatusHandlers) h(chatId, null);
-    return true;
+    return lifecycle.reconcileCanonicalCompletion(chatId, expectedRunGeneration, completedTurnIds, snapshot);
   });
   return {
     get status() {
@@ -127,17 +74,8 @@ function makeClient() {
         statusHandlers.delete(handler);
       };
     },
-    onRunStatus: (handler: (chatId: string, startedAt: number | null) => void) => {
-      runStatusHandlers.add(handler);
-      for (const [chatId, startedAt] of runStartedAtByChatId) handler(chatId, startedAt);
-      return () => {
-        runStatusHandlers.delete(handler);
-      };
-    },
-    onRunCompletion: (handler: (chatId: string) => void) => {
-      runCompletionHandlers.add(handler);
-      return () => { runCompletionHandlers.delete(handler); };
-    },
+    onRunStatus: lifecycle.onRunStatus.bind(lifecycle),
+    onRunCompletion: lifecycle.onRunCompletion.bind(lifecycle),
     onRuntimeModelUpdate: (
       handler: (modelName: string | null, modelPreset?: string | null) => void,
     ) => {
@@ -146,40 +84,20 @@ function makeClient() {
         runtimeModelHandlers.delete(handler);
       };
     },
-    getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
-    getRunTurnId: (chatId: string) => latestRunTurnIdByChatId.get(chatId) ?? null,
-    isRunCompleted: (chatId: string, turnId: string) => (
-      closedRunTurnIdsByChatId.get(chatId)?.has(turnId) === true
-      || completedTurnIdsByChatId.get(chatId)?.has(turnId) === true
-    ),
-    finishRunLocally: vi.fn((chatId: string) => {
-      runStartedAtByChatId.delete(chatId);
-      latestRunTurnIdByChatId.delete(chatId);
-    }),
-    hasUnsettledRun: () => false,
-    getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
+    getRunState: lifecycle.getRunState.bind(lifecycle),
+    restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
+    getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
+    getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
+    isRunCompleted: lifecycle.isRunCompleted.bind(lifecycle),
+    finishRunLocally: vi.fn(lifecycle.finishRunLocally.bind(lifecycle)),
+    hasUnsettledRun: lifecycle.hasUnsettledRun.bind(lifecycle),
+    getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
     canReconcileCanonicalCompletion,
     reconcileCanonicalCompletion,
-    fenceCanonicalCompletedTurns: (chatId: string, turnIds: readonly string[]) => {
-      const fences = completedTurnIdsByChatId.get(chatId) ?? new Set<string>();
-      for (const turnId of turnIds) fences.add(turnId);
-      completedTurnIdsByChatId.set(chatId, fences);
-    },
-    getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
-    onTranscript(chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) {
-      return this.onChat(chatId, handler);
-    },
-    onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
-      let handlers = chatHandlers.get(chatId);
-      if (!handlers) {
-        handlers = new Set();
-        chatHandlers.set(chatId, handlers);
-      }
-      handlers.add(handler);
-      return () => {
-        handlers?.delete(handler);
-      };
-    },
+    fenceCanonicalCompletedTurns: lifecycle.fenceCanonicalCompletedTurns.bind(lifecycle),
+    getGoalState: lifecycle.getGoalState.bind(lifecycle),
+    onTranscript: lifecycle.onTranscript.bind(lifecycle),
+    onChat: lifecycle.onChat.bind(lifecycle),
     onError: (handler: (err: StreamError) => void) => {
       errorHandlers.add(handler);
       return () => {
@@ -193,48 +111,16 @@ function makeClient() {
       };
     },
     _emitError(err: StreamError) {
-      if (err.kind !== "model_request_failed" && err.chatId && err.turnId) {
-        if (latestRunTurnIdByChatId.get(err.chatId) === err.turnId) {
-          latestRunTurnIdByChatId.delete(err.chatId);
-          const hadClock = runStartedAtByChatId.delete(err.chatId);
-          if (hadClock) for (const h of runStatusHandlers) h(err.chatId, null);
-        }
-      }
+      if (err.chatId && err.turnId) receive({
+        event: "error", chat_id: err.chatId, turn_id: err.turnId, detail: err.kind,
+      });
       for (const h of errorHandlers) h(err);
     },
     _emitStatus(nextStatus: ConnectionStatus) {
       status = nextStatus;
       for (const h of statusHandlers) h(status);
     },
-    _emitChat(chatId: string, ev: import("@/lib/types").InboundEvent) {
-      const turnId = "turn_id" in ev && typeof ev.turn_id === "string" ? ev.turn_id : null;
-      if (turnId && completedTurnIdsByChatId.get(chatId)?.has(turnId)) return;
-      if (
-        ev.event === "goal_status"
-        && ev.status === "running"
-        && typeof ev.started_at === "number"
-      ) {
-        advanceRunGeneration(chatId, ev.turn_id);
-        runStartedAtByChatId.set(chatId, ev.started_at);
-        for (const h of runStatusHandlers) h(chatId, ev.started_at);
-      } else if (
-        (ev.event === "goal_status" && ev.status === "idle")
-        || ev.event === "turn_end"
-      ) {
-        if (turnId) {
-          const closed = closedRunTurnIdsByChatId.get(chatId) ?? new Set<string>();
-          closed.add(turnId);
-          closedRunTurnIdsByChatId.set(chatId, closed);
-        }
-        runStartedAtByChatId.delete(chatId);
-        for (const h of runStatusHandlers) h(chatId, null);
-        for (const h of runCompletionHandlers) h(chatId);
-      }
-      if (ev.event === "goal_state") {
-        goalStateByChatId.set(chatId, ev.goal_state);
-      }
-      for (const h of chatHandlers.get(chatId) ?? []) h(ev);
-    },
+    _emitChat(_chatId: string, ev: import("@/lib/types").InboundEvent) { receive(ev); },
     _emitRuntimeModelUpdate(modelName: string | null, modelPreset?: string | null) {
       for (const h of runtimeModelHandlers) h(modelName, modelPreset);
     },
@@ -3300,7 +3186,13 @@ describe("ThreadShell", () => {
       detail: "message_rejected",
     }));
 
-    act(() => client._emitSessionUpdate("empty-reset-chat", "thread"));
+    act(() => {
+      client._emitError({
+        kind: "turn_rejected", chatId: "empty-reset-chat",
+        turnId: client.sendMessage.mock.calls[0][3]!.turnId!,
+      });
+      client._emitSessionUpdate("empty-reset-chat", "thread");
+    });
 
     await waitFor(() => expect(historyCalls).toBe(2));
     await waitFor(() =>
@@ -5863,7 +5755,7 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).toHaveBeenCalledWith("resuming-chat", "/stop");
   });
 
-  it("allows a new turn after a completed recovery state", async () => {
+  it.each(["awaiting_user", "failed", "recovered"] as const)("allows a new turn after a %s recovery state", async (status) => {
     const client = makeClient();
     render(wrap(
       client,
@@ -5880,7 +5772,7 @@ describe("ThreadShell", () => {
         event: "recovery_state",
         chat_id: "recovered-chat",
         recovery_id: "recovery-1",
-        status: "recovered",
+        status,
       });
     });
 

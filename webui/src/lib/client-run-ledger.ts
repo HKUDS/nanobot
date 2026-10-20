@@ -15,6 +15,7 @@ interface ChatRecord {
   generation: number;
   latestTurnId: string | null;
   effectiveStartedAt: number | null;
+  anonymousActive: boolean;
   turns: Map<string, TurnRecord>;
   /** Closed turns permit late inputs, messages, completions and idle. */
   closed: Set<string>;
@@ -47,7 +48,8 @@ export type RunObservation = Readonly<{
 }> & (
   | { kind: "admission" | "input"; owner?: { turnId: string; startedAt?: number } }
   | { kind: "status"; activity: "running" | "idle"; startedAt?: number }
-  | { kind: "completed" | "message" | "progress" | "rejection" }
+  | { kind: "completed" | "message" | "progress" | "activity" | "rejection" }
+  | { kind: "recovery"; active: boolean }
 );
 
 type Command =
@@ -55,10 +57,11 @@ type Command =
   | ({ kind: "written" | "reject" } & TurnRef)
   | { kind: "transport-lost" }
   | { kind: "local-stop" | "forget"; chatId: string }
-  | { kind: "fence"; chatId: string; completedTurnIds: readonly string[] };
+  | { kind: "fence"; chatId: string; completedTurnIds: readonly string[] }
+  | { kind: "restore-pending"; chatId: string; generation: number; turnId: string | null };
 
 export type RunEffect =
-  | { kind: "run-status"; chatId: string; startedAt: number | null }
+  | { kind: "run-status"; chatId: string; state: RunState }
   | { kind: "completion"; chatId: string }
   | ({ kind: "discard-send" } & TurnRef)
   | { kind: "prune-inbound"; chatId: string; turnIds: readonly string[] };
@@ -68,7 +71,8 @@ interface ObservationResult {
   effects: readonly RunEffect[];
 }
 
-interface RunView {
+export interface RunState {
+  active: boolean;
   generation: number;
   latestTurnId: string | null;
   startedAt: number | null;
@@ -81,9 +85,10 @@ const COMPLETED_TURN_FENCE_MAX = 256;
 export class ClientRunLedger {
   private chats = new Map<string, ChatRecord>();
 
-  view(chatId: string): RunView {
+  view(chatId: string): RunState {
     const chat = this.chats.get(chatId);
     return {
+      active: chat?.anonymousActive === true || chat?.effectiveStartedAt != null || this.hasOpenTurn(chat),
       generation: chat?.generation ?? 0,
       latestTurnId: chat?.latestTurnId ?? null,
       startedAt: chat?.effectiveStartedAt ?? null,
@@ -100,15 +105,13 @@ export class ClientRunLedger {
     return this.chats.get(chatId)?.turns.get(turnId)?.delivery != null;
   }
 
-  activeClocks(): readonly Readonly<{ chatId: string; startedAt: number }>[] {
-    return Array.from(this.chats).flatMap(([chatId, chat]) => (
-      chat.effectiveStartedAt === null ? [] : [{ chatId, startedAt: chat.effectiveStartedAt }]
-    ));
+  states(): readonly Readonly<{ chatId: string; state: RunState }>[] {
+    return Array.from(this.chats.keys(), (chatId) => ({ chatId, state: this.view(chatId) }));
   }
 
   unresolvedChatIds(): string[] {
     return Array.from(this.chats).flatMap(([chatId, chat]) => (
-      chat.effectiveStartedAt !== null || this.hasOpenTurn(chat) ? [chatId] : []
+      chat.anonymousActive || chat.effectiveStartedAt !== null || this.hasOpenTurn(chat) ? [chatId] : []
     ));
   }
 
@@ -140,6 +143,20 @@ export class ClientRunLedger {
   }
 
   transition(command: Command): readonly RunEffect[] {
+    if (command.kind === "transport-lost") return this.applyCommand(command);
+    const before = this.view(command.chatId);
+    return this.withRunStatus(command.chatId, before, this.applyCommand(command));
+  }
+
+  private withRunStatus(chatId: string, before: RunState, effects: readonly RunEffect[]): readonly RunEffect[] {
+    const state = this.view(chatId);
+    if (state.active === before.active && state.startedAt === before.startedAt
+      && state.latestTurnId === before.latestTurnId && state.generation === before.generation
+      && state.unsettled === before.unsettled) return effects;
+    return [...effects, { kind: "run-status", chatId, state }];
+  }
+
+  private applyCommand(command: Command): readonly RunEffect[] {
     const effects: RunEffect[] = [];
     switch (command.kind) {
       case "submit": {
@@ -173,15 +190,21 @@ export class ClientRunLedger {
         for (const turnId of openTurnIds) this.rememberClosed(chat, turnId);
         for (const turnId of openTurnIds) this.settle(command.chatId, turnId, effects);
         chat.latestTurnId = null;
-        this.updateClock(command.chatId, chat, null, effects);
+        chat.anonymousActive = false;
+        chat.effectiveStartedAt = null;
         break;
       }
-      case "forget": {
-        const chat = this.chats.get(command.chatId);
+      case "forget":
         this.chats.delete(command.chatId);
-        if (chat?.effectiveStartedAt != null) {
-          effects.push({ kind: "run-status", chatId: command.chatId, startedAt: null });
-        }
+        break;
+      case "restore-pending": {
+        if (this.view(command.chatId).generation !== command.generation || this.view(command.chatId).active) break;
+        const chat = this.ensureChat(command.chatId);
+        if (command.turnId
+          ? chat.closed.has(command.turnId) || chat.fenced.has(command.turnId)
+          : chat.generation !== 0 || chat.closed.size > 0 || chat.fenced.size > 0) break;
+        this.advance(chat, command.turnId);
+        chat.anonymousActive = command.turnId === null;
         break;
       }
       case "fence":
@@ -196,6 +219,12 @@ export class ClientRunLedger {
   }
 
   observe(observation: RunObservation): ObservationResult {
+    const before = this.view(observation.chatId);
+    const result = this.applyObservation(observation);
+    return { ...result, effects: this.withRunStatus(observation.chatId, before, result.effects) };
+  }
+
+  private applyObservation(observation: RunObservation): ObservationResult {
     const { chatId, turnId } = observation;
     let chat = this.chats.get(chatId);
     const effects: RunEffect[] = [];
@@ -214,7 +243,6 @@ export class ClientRunLedger {
       if (chat.closed.has(owner.turnId) || chat.fenced.has(owner.turnId)) {
         if (turnId && turnId !== owner.turnId && chat.turns.get(turnId)?.delivery?.role === "candidate-owner") {
           this.reject(chatId, turnId, effects);
-          if (!this.hasOpenTurn(chat)) effects.push({ kind: "run-status", chatId, startedAt: null });
         }
         forward = "without-owner";
       } else {
@@ -224,7 +252,7 @@ export class ClientRunLedger {
         if (chat.latestTurnId !== owner.turnId) this.advance(chat, owner.turnId);
         if (typeof owner.startedAt === "number") {
           this.ensureTurn(chat, owner.turnId).startedAt = owner.startedAt;
-          this.updateClock(chatId, chat, owner.startedAt, effects);
+          chat.effectiveStartedAt = owner.startedAt;
         }
       }
     }
@@ -240,6 +268,25 @@ export class ClientRunLedger {
     }
     if (turnId) this.accept(chat, turnId);
 
+    if (observation.kind === "recovery") {
+      if (!observation.active) {
+        if (!turnId || !chat?.latestTurnId || turnId === chat.latestTurnId) {
+          effects.push(...this.applyCommand({ kind: "local-stop", chatId }));
+        }
+      } else {
+        chat = this.ensureChat(chatId);
+        if (turnId) this.advance(chat, turnId);
+        else chat.anonymousActive = true;
+      }
+      return { forward, effects };
+    }
+    if (observation.kind === "activity" && !this.view(chatId).active
+      && (turnId !== null || !chat?.latestTurnId || !this.isCompleted({ chatId, turnId: chat.latestTurnId }))) {
+      chat = this.ensureChat(chatId);
+      this.advance(chat, turnId);
+      chat.anonymousActive = turnId === null;
+    }
+
     const completion = observation.kind === "completed"
       || (observation.kind === "status" && observation.activity === "idle");
     const superseded = completion && chat?.latestTurnId != null && turnId !== chat.latestTurnId;
@@ -247,14 +294,15 @@ export class ClientRunLedger {
       chat = this.ensureChat(chatId);
       this.advance(chat, turnId);
       if (turnId) this.ensureTurn(chat, turnId).startedAt = observation.startedAt;
-      this.updateClock(chatId, chat, observation.startedAt, effects);
+      chat.effectiveStartedAt = observation.startedAt;
     } else if (observation.kind === "status" || observation.kind === "completed") {
       // A running status without a numeric start time also settles the turn.
       chat = this.ensureChat(chatId);
       if (turnId) this.rememberClosed(chat, turnId);
       if (turnId) this.settle(chatId, turnId, effects);
       if (chat.latestTurnId === null || turnId === chat.latestTurnId) {
-        this.updateClock(chatId, chat, null, effects);
+        chat.anonymousActive = false;
+        chat.effectiveStartedAt = null;
       }
       effects.push({ kind: "completion", chatId });
     }
@@ -286,6 +334,12 @@ export class ClientRunLedger {
   }
 
   applyCanonical(request: CanonicalRequest): { accepted: boolean; effects: readonly RunEffect[] } {
+    const before = this.view(request.chatId);
+    const result = this.applyCanonicalSnapshot(request);
+    return { ...result, effects: this.withRunStatus(request.chatId, before, result.effects) };
+  }
+
+  private applyCanonicalSnapshot(request: CanonicalRequest): { accepted: boolean; effects: readonly RunEffect[] } {
     const { chatId, snapshot } = request;
     const effects: RunEffect[] = [];
     this.fence(chatId, request.completedTurnIds, effects);
@@ -307,7 +361,8 @@ export class ClientRunLedger {
       this.removeEmptyTurn(chat, turnId, turn);
       effects.push({ kind: "discard-send", chatId, turnId });
     }
-    this.updateClock(chatId, chat, null, effects);
+    chat.anonymousActive = false;
+    chat.effectiveStartedAt = null;
     return { accepted: true, effects };
   }
 
@@ -318,6 +373,7 @@ export class ClientRunLedger {
         generation: 0,
         latestTurnId: null,
         effectiveStartedAt: null,
+        anonymousActive: false,
         turns: new Map(),
         closed: new Set(),
         fenced: new Set(),
@@ -340,6 +396,7 @@ export class ClientRunLedger {
     chat.generation += 1;
     chat.latestTurnId = turnId || null;
     if (turnId) {
+      chat.anonymousActive = false;
       const turn = this.ensureTurn(chat, turnId);
       if (turn.openOrder === null) turn.openOrder = chat.generation;
     }
@@ -395,14 +452,7 @@ export class ClientRunLedger {
       }
     }
     chat.latestTurnId = previous?.turnId ?? null;
-    this.updateClock(chatId, chat, previous?.startedAt ?? null, effects);
-  }
-
-  private updateClock(chatId: string, chat: ChatRecord, startedAt: number | null, effects: RunEffect[]): void {
-    // An optimistic latest identity can coexist with an older effective clock.
-    const previous = chat.effectiveStartedAt;
-    chat.effectiveStartedAt = startedAt;
-    if (previous !== startedAt) effects.push({ kind: "run-status", chatId, startedAt });
+    chat.effectiveStartedAt = previous?.startedAt ?? null;
   }
 
   private rememberClosed(chat: ChatRecord, turnId: string): void {

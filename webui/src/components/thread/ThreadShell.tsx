@@ -691,15 +691,11 @@ export function ThreadShell({
     [displayMessages],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
-  // Decision states freeze the interrupted turn and hand the next action to
-  // the recovery notice. ``resuming`` remains active; ``recovered`` is only
-  // historical metadata and must not suppress a later normal turn.
+  // Recovery decisions gate queued input, not the ledger-owned run state.
   const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"
     || recoveryState?.status === "failed";
-  const currentRunStartedAt = messagesReady && !recoveryNeedsDecision ? runStartedAt : null;
-  const turnActive = messagesReady
-    && !recoveryNeedsDecision
-    && (isStreaming || currentRunStartedAt !== null);
+  const currentRunStartedAt = messagesReady ? runStartedAt : null;
+  const turnActive = messagesReady && isStreaming;
   const restoredViewportTurnId = useMemo(
     () => turnActive ? latestActiveTurnId(displayMessages, currentRunStartedAt) : null,
     [currentRunStartedAt, displayMessages, turnActive],

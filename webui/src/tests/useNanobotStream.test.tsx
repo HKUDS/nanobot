@@ -6,16 +6,16 @@ import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
-import type { StreamError } from "@/lib/nanobot-client";
+import type { NanobotClient, StreamError } from "@/lib/nanobot-client";
 import type {
   ConnectionStatus,
-  GoalStateWsPayload,
   InboundEvent,
   UIMediaAttachment,
   UIMessage,
 } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 import projectionFixture from "./fixtures/live-replay-event-projection.json";
+import { createStreamClient } from "./stream-client";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 
@@ -72,112 +72,64 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
 }
 
 function fakeClient() {
-  const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
+  const { client: lifecycle, receive } = createStreamClient();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
-  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const errorHandlers = new Set<(error: StreamError) => void>();
-  const runStartedAtByChatId = new Map<string, number>();
-  const unsettledRunByChatId = new Map<string, boolean>();
-  const goalStateByChatId = new Map<string, GoalStateWsPayload>();
   const requestMutation = vi.fn().mockResolvedValue({});
   let status: ConnectionStatus = "open";
 
-  function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
-    if (ev.event === "turn_end") {
-      runStartedAtByChatId.delete(chatId);
-      return;
-    }
-    if (ev.event !== "goal_status") return;
-    if (ev.status === "running" && typeof ev.started_at === "number") {
-      runStartedAtByChatId.set(chatId, ev.started_at);
-    } else {
-      runStartedAtByChatId.delete(chatId);
-    }
-  }
-
-  function recordGoalStateSnapshot(chatId: string, ev: InboundEvent) {
-    if (ev.event === "goal_state") {
-      goalStateByChatId.set(chatId, ev.goal_state);
-      return;
-    }
-    if (ev.event === "turn_end" && ev.goal_state != null && typeof ev.goal_state === "object") {
-      goalStateByChatId.set(chatId, ev.goal_state);
-    }
-  }
-
   return {
     client: {
-      get status() {
-        return status;
-      },
+      get status() { return status; },
       defaultChatId: null as string | null,
       onStatus(handler: (nextStatus: ConnectionStatus) => void) {
         statusHandlers.add(handler);
         handler(status);
         return () => statusHandlers.delete(handler);
       },
-      onRunStatus(handler: (chatId: string, startedAt: number | null) => void) {
-        runStatusHandlers.add(handler);
-        for (const [chatId, startedAt] of runStartedAtByChatId) handler(chatId, startedAt);
-        return () => runStatusHandlers.delete(handler);
-      },
+      onRunStatus: lifecycle.onRunStatus.bind(lifecycle),
+      getRunState: lifecycle.getRunState.bind(lifecycle),
+      getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
+      restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
+      getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
+      getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
+      getGoalState: lifecycle.getGoalState.bind(lifecycle),
+      hasUnsettledRun: lifecycle.hasUnsettledRun.bind(lifecycle),
+      onTranscript: lifecycle.onTranscript.bind(lifecycle),
       onError(handler: (error: StreamError) => void) {
         errorHandlers.add(handler);
         return () => errorHandlers.delete(handler);
       },
-      getRunStartedAt(chatId: string) {
-        const v = runStartedAtByChatId.get(chatId);
-        return v === undefined ? null : v;
-      },
-      getRunTurnId() {
-        return null;
-      },
-      getGoalState(chatId: string) {
-        return goalStateByChatId.get(chatId);
-      },
-      hasUnsettledRun(chatId: string) {
-        return unsettledRunByChatId.get(chatId) === true;
-      },
-      onTranscript(chatId: string, h: (ev: InboundEvent) => void) {
-        let set = handlers.get(chatId);
-        if (!set) {
-          set = new Set();
-          handlers.set(chatId, set);
-        }
-        set.add(h);
-        return () => set!.delete(h);
-      },
-      sendMessage: vi.fn(),
-      sendAttachments: vi.fn().mockResolvedValue(undefined),
+      sendMessage: vi.fn(lifecycle.sendMessage.bind(lifecycle)),
+      sendAttachments: vi.fn(async (...args: Parameters<NanobotClient["sendAttachments"]>) => {
+        lifecycle.sendMessage(args[0], args[1], undefined, args[3]);
+      }),
       requestMutation,
-      finishRunLocally: vi.fn(),
-      newChat: vi.fn(),
-      forkChat: vi.fn(),
-      attach: vi.fn(),
-      connect: vi.fn(),
-      close: vi.fn(),
-      updateUrl: vi.fn(),
+      finishRunLocally: vi.fn(lifecycle.finishRunLocally.bind(lifecycle)),
+      newChat: vi.fn(), forkChat: vi.fn(), attach: vi.fn(),
+      connect: vi.fn(), close: vi.fn(), updateUrl: vi.fn(),
     },
-    emit(chatId: string, ev: InboundEvent) {
-      recordGoalStatusForRunStrip(chatId, ev);
-      recordGoalStateSnapshot(chatId, ev);
-      const set = handlers.get(chatId);
-      set?.forEach((h) => h(ev));
-    },
+    emit(_chatId: string, event: InboundEvent) { receive(event); },
     emitStatus(nextStatus: ConnectionStatus) {
       status = nextStatus;
       statusHandlers.forEach((handler) => handler(status));
     },
     emitRunStatus(chatId: string, startedAt: number | null) {
-      if (startedAt === null) runStartedAtByChatId.delete(chatId);
-      else runStartedAtByChatId.set(chatId, startedAt);
-      runStatusHandlers.forEach((handler) => handler(chatId, startedAt));
+      receive({ event: "goal_status", chat_id: chatId,
+        status: startedAt === null ? "idle" : "running",
+        ...(startedAt !== null ? { started_at: startedAt } : {}),
+      });
     },
     emitError(error: StreamError) {
+      if (error.chatId && error.turnId) receive({
+        event: "error", chat_id: error.chatId, turn_id: error.turnId,
+        detail: error.kind,
+      });
       errorHandlers.forEach((handler) => handler(error));
     },
     setUnsettled(chatId: string, unsettled: boolean) {
-      unsettledRunByChatId.set(chatId, unsettled);
+      if (unsettled) lifecycle.sendMessage(chatId, "pending", undefined, { turnId: "pending-fixture" });
+      else lifecycle.finishRunLocally(chatId);
     },
     requestMutation,
   };
@@ -808,7 +760,7 @@ describe("useNanobotStream", () => {
     });
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.runStartedAt).toBeNull();
-    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-recovery");
+    expect(fake.client.getRunState("chat-recovery").active).toBe(false);
 
     act(() => {
       fake.emit("chat-recovery", {
@@ -836,7 +788,7 @@ describe("useNanobotStream", () => {
       });
     });
     expect(result.current.isStreaming).toBe(false);
-    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-recovery");
+    expect(fake.client.getRunState("chat-recovery").active).toBe(false);
   });
 
   it.each(["awaiting_user", "resuming"] as const)(
@@ -3787,6 +3739,14 @@ describe("live canonical event projection", () => {
 
       for (const event of fixtureCase.live_events) {
         act(() => {
+          // Projection fixtures omit lifecycle admission between their turns.
+          if ("turn_id" in event && event.turn_id
+            && fake.client.getRunTurnId(fixtureCase.chat_id) !== event.turn_id) {
+            fake.emit(fixtureCase.chat_id, {
+              event: "goal_status", chat_id: fixtureCase.chat_id,
+              turn_id: event.turn_id, status: "running", started_at: 0,
+            });
+          }
           fake.emit(fixtureCase.chat_id, event);
         });
       }

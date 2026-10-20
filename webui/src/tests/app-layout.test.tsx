@@ -6,6 +6,7 @@ import type { Window as HappyWindow } from "happy-dom";
 import i18n from "@/i18n";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import { useSessions } from "@/hooks/useSessions";
+import type { RunState } from "@/lib/nanobot-client";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
@@ -33,7 +34,10 @@ const sendMessageSpy = vi.fn();
 const sendSystemCommandSpy = vi.fn().mockResolvedValue(undefined);
 let mockDefaultChatId: string | null = null;
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
-const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
+const runStatusHandlers = new Set<(chatId: string, state: RunState) => void>();
+const runState = (startedAt: number | null): RunState => ({
+  active: startedAt !== null, startedAt, latestTurnId: null, generation: 0, unsettled: false,
+});
 const sessionUpdateHandlers = new Set<(
   chatId: string,
   scope?: string,
@@ -272,11 +276,13 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       sidebarStateUpdateHandlers.add(handler);
       return () => sidebarStateUpdateHandlers.delete(handler);
     };
-    onRunStatus = (handler: (chatId: string, startedAt: number | null) => void) => {
+    onRunStatus = (handler: (chatId: string, state: RunState) => void) => {
       runStatusHandlers.add(handler);
       return () => runStatusHandlers.delete(handler);
     };
     onRunCompletion = () => () => {};
+    getRunState = () => runState(null);
+    restorePendingRun = vi.fn();
     getRunStartedAt = () => null;
     getRunTurnId = () => null;
     getUnsettledRunChatIds = () => [];
@@ -2915,12 +2921,12 @@ describe("App layout", () => {
     );
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(12_345));
     });
     expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", null);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(null));
     });
     expect(within(sidebar).queryByRole("img", { name: "Agent running" }))
       .not.toBeInTheDocument();
@@ -2969,12 +2975,12 @@ describe("App layout", () => {
     await waitFor(() => expect(document.title).toContain("Active work"));
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(12_345));
     });
     expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", null);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(null));
     });
     expect(within(sidebar).queryByRole("img", { name: "Agent running" }))
       .not.toBeInTheDocument();
@@ -3062,12 +3068,12 @@ describe("App layout", () => {
     await waitFor(() => expect(attachSpy).toHaveBeenCalledWith("chat-a"));
     expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(12_345));
     });
     expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", null);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(null));
     });
     mockSessions = mockSessions.map((session) => ({ ...session }));
     rerender(<App />);

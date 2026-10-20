@@ -299,8 +299,8 @@ describe("durable run recovery", () => {
     running();
     sockets[0].receive({ event: "delta", chat_id: "inactive", turn_id: "turn-old", text: "The" });
     const cachedAtCompletion: WebuiThreadPersistedPayload[] = [];
-    client.onRunStatus((chatId, startedAt) => {
-      if (startedAt === null) cachedAtCompletion.push(webuiThreadCache.get(`websocket:${chatId}`)!);
+    client.onRunStatus((chatId, state) => {
+      if (!state.active) cachedAtCompletion.push(webuiThreadCache.get(`websocket:${chatId}`)!);
     });
 
     await reopen();
