@@ -93,7 +93,7 @@ interface HistoryScrollAnchor {
 const THREAD_DISPLAY_UNIT_SELECTOR = "[data-thread-display-unit]";
 
 function promptTopInset(scroller: HTMLElement): number {
-  const padding = Number.parseFloat(getComputedStyle(scroller).paddingTop);
+  const padding = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop);
   return Number.isFinite(padding) ? padding : PROMPT_TOP_INSET_PX;
 }
 
@@ -1091,8 +1091,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       error={olderError}
       exhausted={historyExhausted}
       onRetry={loadEarlierMessages}
-      className={historySlotKey ? "thread-history-inline"
-        : cn("thread-history-reveal", historyPhase === "feedback" && "thread-history-feedback")}
+      className={!historySlotKey ? cn("thread-history-reveal", historyPhase === "feedback" && "thread-history-feedback") : undefined}
     />
   ) : null;
 
@@ -1130,7 +1129,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-message-region"
               className={cn(
                 "thread-message-viewport thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
-                "scroll-auto justify-start overflow-x-hidden overscroll-y-none pb-0 pt-12",
+                "scroll-auto justify-start overflow-x-hidden overscroll-y-none pb-0 scroll-pt-12",
                 "[overflow-anchor:none] [scrollbar-width:none]",
                 "[&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
@@ -1140,6 +1139,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 <DiagramScope identity={conversationKey}>
                 <SubagentThreadMessages
                   messages={visibleMessages}
+                  topInset={PROMPT_TOP_INSET_PX}
                   beforeUnit={historySlotKey ? { key: historySlotKey, content: (
                     <div ref={setHistorySlot} className="thread-history-slot relative" style={{ height: HISTORY_HOLD_PX }}>
                       {historyStatus}

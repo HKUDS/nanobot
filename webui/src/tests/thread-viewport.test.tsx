@@ -2101,17 +2101,17 @@ describe("ThreadViewport", () => {
     expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, (count - 1) * 40 - 48));
   });
 
-  it("keeps prompt jumps aligned when the header changes between a row and an overlay", async () => {
+  it("aligns prompt jumps with the scroll inset independently of message layout", async () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
       .mockReturnValue("started");
     const { scroller } = await renderPromptRailViewport();
     const marker = screen.getByRole("button", { name: "Jump to message: message 1" });
 
-    scroller.style.paddingTop = "16px";
+    scroller.style.scrollPaddingTop = "16px";
     fireEvent.click(marker);
     expect(navigateTo).toHaveBeenLastCalledWith(344);
 
-    scroller.style.paddingTop = "48px";
+    scroller.style.scrollPaddingTop = "48px";
     fireEvent.click(marker);
     expect(navigateTo).toHaveBeenLastCalledWith(312);
   });

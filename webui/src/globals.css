@@ -617,9 +617,6 @@
   .thread-history-reveal:focus-within {
     transform: none;
   }
-  .thread-history-inline {
-    top: -48px;
-  }
   .thread-history-control {
     display: flex;
     width: 120px;

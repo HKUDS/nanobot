@@ -122,10 +122,26 @@ async function expectCoordinates(body: Locator, text: string, reference: History
   }
 }
 
+async function expectHeaderInsideSlot(body: Locator) {
+  const geometry = await body.locator(".thread-history-slot").evaluate((slot) => {
+    const header = slot.querySelector(".thread-history-status")!.getBoundingClientRect();
+    const own = slot.getBoundingClientRect();
+    const before = slot.parentElement!.previousElementSibling?.getBoundingClientRect();
+    const after = slot.parentElement!.nextElementSibling!.getBoundingClientRect();
+    return { headerTop: header.top, headerBottom: header.bottom, slotTop: own.top, slotBottom: own.bottom,
+      previousBottom: before?.bottom, nextTop: after.top };
+  });
+  expect(Math.abs(geometry.headerTop - geometry.slotTop)).toBeLessThan(1);
+  expect(Math.abs(geometry.headerBottom - geometry.slotBottom)).toBeLessThan(1);
+  if (geometry.previousBottom !== undefined) expect(geometry.previousBottom).toBeLessThanOrEqual(geometry.headerTop);
+  expect(geometry.headerBottom).toBeLessThanOrEqual(geometry.nextTop);
+}
+
 async function expectHeld(body: Locator, text: string) {
   await expect(body.locator(".thread-history-slot")).toHaveCSS("height", "48px");
   await expect.poll(() => displacement(body)).toBe(0);
   await expect.poll(async () => (await historyGeometry(body, text)).visibleHeight).toBeCloseTo(48, 0);
+  await expectHeaderInsideSlot(body);
   return historyGeometry(body, text);
 }
 
@@ -192,6 +208,7 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   await expect(header.locator(".thread-history-blocks > span").first()).toHaveCSS("animation-name", "none");
   await stableLayout(body);
   await expectCoordinates(body, "Question 40", held);
+  await expectHeaderInsideSlot(body);
   expect(history.reads).toHaveLength(1);
 
   await body.getByText("Question 28", { exact: true }).evaluate((node) => {
@@ -201,6 +218,7 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   });
   await stableLayout(body);
   await expectCoordinates(body, "Question 40", held);
+  await expectHeaderInsideSlot(body);
   await page.screenshot({ path: test.info().outputPath("history-prepend-stable.png") });
 
   // Real forward scrolling transports header and messages together, not a pinned overlay.
@@ -220,6 +238,39 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   await expect(header).not.toBeInViewport();
   expect((await historyGeometry(body, "Question 40")).visibleHeight).toBe(0);
   await expect(body.locator(".thread-history-slot")).toHaveCSS("height", "48px");
+  expect(history.reads).toHaveLength(1);
+});
+
+test("unlinked task prelude stays with the retained boundary when earlier messages load", async ({ page }) => {
+  const history = await installHistory(page);
+  await page.route("**/api/sessions/**/subagents", (route) => route.fulfill({ json: { tasks: [{
+    task_id: "legacy", revision: 1, label: "Earlier check", task_description: "Check earlier work",
+    state: "done", phase: "completed", elapsed_seconds: 2, iteration: 1,
+    tool_events: [], usage: null, receipts: {}, result: "Verified", partial: false,
+    stop_reason: null, error: null, origin_turn_id: "legacy-turn", origin_message_id: null,
+    created_at: 100, completed_at: 102,
+  }] } }));
+  await page.goto("/browser/fixture.html?case=history-boundary&tasks");
+  const body = page.getByTestId("thread-message-region");
+  const otherTasks = body.getByRole("region", { name: "Other tasks" });
+  await expect(otherTasks).toBeAttached();
+  await otherTasks.getByRole("button", { name: /Other tasks/ }).click();
+  await expect(otherTasks.getByRole("button", { name: /Earlier check Completed/ })).toBeVisible();
+  await stableLayout(body);
+  const originalTop = await positionAtTop(body);
+  await body.hover();
+  await page.mouse.wheel(0, -100);
+  await expect(page.locator(".thread-history-status")).toHaveAttribute("data-state", "loading");
+  const held = await expectHeld(body, "Question 40");
+  expect(held.anchorTop - originalTop).toBeCloseTo(48, 0);
+  history.complete();
+  await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
+  await expect(page.locator(".thread-history-status")).toHaveAttribute("data-state", "ready");
+  await stableLayout(body);
+  await expectCoordinates(body, "Question 40", held);
+  await expectHeaderInsideSlot(body);
+  await expect(otherTasks).toHaveCount(1);
+  await expect(otherTasks.getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "true");
   expect(history.reads).toHaveLength(1);
 });
 
@@ -334,6 +385,7 @@ test("reduced-motion failure keeps its functional 48px slot and retry until natu
   await expect(failedBlocks).toHaveCSS("height", "24px");
   await expect(failedBlocks).toHaveCSS("color", "rgb(252, 165, 165)");
   await expect(failedBlocks.locator("span").first()).toHaveCSS("animation-name", "none");
+  await expectHeaderInsideSlot(body);
   await expectNoVisibleHistoryText(header);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await failedBlocks.hover();
@@ -495,6 +547,7 @@ test("a successful exhausted result belongs to its original inline slot and scro
   await expect(page.locator('.thread-viewport-frame > .thread-history-status[data-state="exhausted"]')).toHaveCount(0);
   await stableLayout(body);
   await expectCoordinates(body, "Question 4", held);
+  await expectHeaderInsideSlot(body);
   const before = await historyGeometry(body, "Question 4");
   const beforeScroll = await body.evaluate((node) => node.scrollTop);
   await body.hover();
@@ -684,6 +737,7 @@ test("failed Blocks animate without visible error text; pulling retries once and
   await expect(blocks).toBeInViewport();
   await expect(blocks).toHaveCSS("color", "rgb(185, 28, 28)");
   await expect(blocks.locator("span").first()).not.toHaveCSS("animation-name", "none");
+  await expectHeaderInsideSlot(body);
   await expectNoVisibleHistoryText(header);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await stableLayout(body);

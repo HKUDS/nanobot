@@ -381,7 +381,7 @@ describe("session-owned task UI", () => {
     expect(screen.getByText("Check more").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("keeps legacy work with an unknown origin separate from the latest request after refresh", async () => {
+  it("keeps legacy work separate after refresh and preserves its disclosure through local history prepends", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "legacy", revision: 0, label: "Nanjing weather", state: "done", completed_at: 102,
         origin_turn_id: "websocket:a:1791046873588004336", result: "## Nanjing\n\n- **Rain**" }),
@@ -402,6 +402,13 @@ describe("session-owned task UI", () => {
     expect(within(detail).getByRole("heading", { name: "Nanjing" })).toBeVisible();
     expect(within(detail).getByRole("list")).toHaveTextContent("Rain");
     await user.keyboard("{Escape}");
+    view.rerender(layout({ threadMessages: [
+      { id: "cached-prompt", role: "user", content: "Earlier cached prompt", createdAt: 99_000 },
+      ...messages,
+    ] }));
+    const expanded = screen.getByRole("region", { name: "Other tasks" });
+    expect(within(expanded).getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(expanded).getByRole("button", { name: /Nanjing weather Completed/ })).toBeVisible();
     view.unmount();
     render(layout());
     const restored = await screen.findByRole("region", { name: "Other tasks" });
