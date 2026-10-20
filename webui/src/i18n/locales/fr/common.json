@@ -1961,6 +1961,9 @@
     "loadEarlier": "Charger les messages précédents",
     "history": {
       "loading": "Chargement des messages précédents…",
+      "available": "Des messages précédents sont disponibles",
+      "armed": "Relâchez pour charger les messages précédents",
+      "exhausted": "Début de la conversation",
       "error": "Échec du chargement.",
       "retry": "Réessayer"
     },

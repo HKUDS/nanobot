@@ -535,6 +535,54 @@
   .thread-message-end-gap {
     height: var(--thread-composer-fade-height);
   }
+
+  .thread-history-status {
+    height: calc(48px + var(--history-pull, 0px));
+    background: linear-gradient(hsl(var(--background)) 35%, hsl(var(--background) / 0));
+    color: hsl(var(--muted-foreground));
+  }
+  .thread-history-control {
+    display: flex;
+    width: 120px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+  .thread-history-line {
+    width: 120px;
+    height: 32px;
+    overflow: visible;
+  }
+  .thread-history-elastic {
+    transform: scaleX(calc(1 + var(--history-tension, 0) * 0.65)) scaleY(calc(0.08 + var(--history-tension, 0) * 0.92));
+  }
+  .thread-history-status[data-state="armed"] {
+    color: hsl(var(--foreground));
+  }
+  /* loading.dev Blocks, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+  .thread-history-blocks {
+    display: grid;
+    width: 20px;
+    height: 20px;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 2px;
+  }
+  .thread-history-blocks > span {
+    background: currentColor;
+    border-radius: 1.25px;
+    animation: thread-history-blocks 1300ms ease-in-out infinite;
+  }
+  @keyframes thread-history-blocks {
+    0%, 70%, 100% { transform: scale(1); }
+    35% { transform: scale(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .thread-history-blocks > span {
+      animation: none;
+      transform: scale(0.8);
+    }
+  }
   .thread-composer-dock {
     background: hsl(var(--background));
   }

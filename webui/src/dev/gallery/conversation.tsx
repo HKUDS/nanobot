@@ -173,13 +173,13 @@ function ViewportPreview() {
 }
 
 function HistoryPreview() {
-  const [mode, setMode] = useState<"loading" | "error" | "pulling">("error");
+  const [mode, setMode] = useState<"available" | "loading" | "error" | "pulling" | "exhausted">("available");
   const [retries, setRetries] = useState(0);
   return <div className="space-y-4">
-    <StatePicker label="历史加载状态" value={mode} options={["loading", "error", "pulling"]} onChange={setMode} />
+    <StatePicker label="历史加载状态" value={mode} options={["available", "loading", "error", "pulling", "exhausted"]} onChange={setMode} />
     <div className="relative h-20 rounded-control border">
       <ThreadHistoryStatus loading={mode === "loading"} error={mode === "error" ? "Example history unavailable" : null}
-        pullDistance={mode === "pulling" ? 32 : 0} onRetry={() => { setRetries((value) => value + 1); setMode("loading"); }} />
+        exhausted={mode === "exhausted"} pullDistance={mode === "pulling" ? 32 : 0} onRetry={() => { setRetries((value) => value + 1); setMode("loading"); }} />
     </div>
     <p role="status" className="text-sm text-muted-foreground">重试次数：{retries}</p>
   </div>;

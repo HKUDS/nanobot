@@ -2161,6 +2161,9 @@
     "loadEarlier": "Load earlier messages",
     "history": {
       "loading": "Loading earlier messages…",
+      "available": "Earlier messages available",
+      "armed": "Release to load earlier messages",
+      "exhausted": "Start of conversation",
       "error": "Loading failed.",
       "retry": "Retry"
     },
