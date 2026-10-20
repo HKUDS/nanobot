@@ -1,6 +1,11 @@
 import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
 import { desktopConnectionSource } from "./platform/desktop"
+import { runDiagramWorker } from "./rendering/mermaid/worker"
 
+if (process.argv.slice(2).join(" ") === "--render-mermaid") {
+  await runDiagramWorker()
+  process.exit(0)
+}
 if (process.argv.slice(2).join(" ") === "--desktop-protocol") {
   process.stdout.write("1\n")
   process.exit(0)

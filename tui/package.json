@@ -12,10 +12,17 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@opentui/core": "0.5.11"
+    "@opentui/core": "0.5.11",
+    "@resvg/resvg-js": "2.6.2",
+    "@xmldom/xmldom": "0.8.11",
+    "css-tree": "3.2.1",
+    "fontkit": "2.0.4",
+    "pele": "1.6.0"
   },
   "devDependencies": {
     "@types/bun": "^1.3.13",
+    "@types/css-tree": "^3.2.0",
+    "@types/fontkit": "^2.0.9",
     "typescript": "^5.9.3"
   }
 }

@@ -19,6 +19,10 @@ The TUI uses OpenTUI's retained full-screen layout: the transcript reflows with 
 
 Assistant math written with `$...$`, `$$...$$`, `\\(...\\)`, or `\\[...\\]` is presented as Unicode plain text so formulas remain readable in terminals without a math renderer. Currency and LaTeX inside inline or fenced code remain literal.
 
+Mermaid code fences stay as source while a reply is streaming. Completed diagrams use Pele 1.6.0 and resvg to display real images through OpenTUI's Kitty/Sixel support, with a transparent canvas that follows the terminal background. Press `Ctrl+G` or run `/diagrams` to open the diagram viewer: `+`/`-` zoom, arrow keys pan, `0` fits, `[`/`]` selects another diagram, `s` switches between image and source, `c` copies the original source, and `q` or `Esc` returns without changing your draft or reading position. `x` cancels rendering and `r` retries. If the terminal has no image protocol, rendering fails, or a budget is exceeded, the original source remains available with a status message.
+
+Diagram measurement and rasterization use the same installed fonts: Microsoft YaHei on Windows, PingFang on macOS, and Noto Sans CJK (or DejaVu Sans for covered glyphs) on Linux. Missing fonts/glyphs and unsupported italic diagram text produce source feedback. Rendering runs in one terminable native child process per transcript, with a 10-second deadline, 50,000 source bytes, 500 edges, 2 MB output, 8 million pixels per image, and a maximum dimension of 8192 pixels; retained native images have a combined 16-million-pixel budget. Off-screen previews and closed viewers release native images.
+
 Automatic theme selection follows the terminal's OSC 10/11 responses. Until a response arrives, the TUI uses the terminal's default foreground and background without semantic colors or color animations. Terminals that do not answer keep this readable fallback. Use `nanobot --theme light` or `nanobot --theme dark` to select a color palette explicitly.
 
 ## Herdr pane titles

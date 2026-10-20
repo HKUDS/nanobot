@@ -25,6 +25,7 @@ const output = join(outputDir, `nanobot-tui-${platform}-${arch}${extension}`)
 await mkdir(outputDir, { recursive: true })
 const result = await Bun.build({
   entrypoints: [join(import.meta.dir, "..", "src", "index.ts")],
+  define: { NANOBOT_COMPILED: "true" },
   compile: {
     target: `bun-${bunPlatform}-${arch}${cpuVariant}` as Bun.Build.CompileTarget,
     outfile: output,
