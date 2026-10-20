@@ -676,6 +676,25 @@ def _run_gateway(
                 + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
             )
 
+            # Resolve the model used for this heartbeat run without changing the
+            # main agent. With no override, snapshot the current default.
+            heartbeat_model = (
+                config.gateway.heartbeat.model_override.strip()
+                if config.gateway.heartbeat.model_override
+                else ""
+            )
+            if heartbeat_model:
+                heartbeat_runtime = agent.runtime_resolver.resolve_override(
+                    model=heartbeat_model,
+                    model_preset=None,
+                    config=config,
+                )
+            else:
+                heartbeat_runtime = agent.runtime_resolver.current()
+            # A non-empty override resolves to a runtime; the default branch
+            # always returns one, so this is non-None for the code below.
+            assert heartbeat_runtime is not None
+
             # Internal check: funnel all output through the post-run gate so the
             # turn can't deliver directly via the message tool and skip it.
             suppress_token = None
@@ -689,6 +708,7 @@ def _run_gateway(
                     channel=channel,
                     chat_id=chat_id,
                     on_progress=_silent,
+                    runtime=heartbeat_runtime,
                 )
             finally:
                 if isinstance(message_tool, MessageTool) and suppress_token is not None:
@@ -706,8 +726,8 @@ def _run_gateway(
                 should_notify = await evaluate_response(
                     response=response,
                     task_context=prompt,
-                    provider=agent.provider,
-                    model=agent.model,
+                    provider=heartbeat_runtime.provider,
+                    model=heartbeat_runtime.model,
                     evaluator_prompt=evaluator_prompt,
                     default_notify=False,
                 )
@@ -803,7 +823,11 @@ def _run_gateway(
 
     hb_cfg = config.gateway.heartbeat
     if hb_cfg.enabled:
-        console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+        heartbeat_model = hb_cfg.model_override.strip() if hb_cfg.model_override else agent.model
+        console.print(
+            f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s "
+            f"(model: {heartbeat_model})"
+        )
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
