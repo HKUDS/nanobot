@@ -302,7 +302,9 @@ async def test_partial_stdout_and_stderr_bytes_refresh_idle_without_log_reads(tm
         assert await _file_text(stderr_ack) == "stderr"
         await wait_for_output_activity(stdout_at)
 
-        finish_gate.write_text("finish")
+        pending_finish = finish_gate.with_suffix(".tmp")
+        pending_finish.write_text("finish")
+        pending_finish.replace(finish_gate)
         final = await session_tool.execute(session_id=sid, until_exit=True, timeout_ms=5000)
         assert not is_tool_error_result(final), final
         assert "byte-gated complete" in final
