@@ -42,5 +42,14 @@
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "Scannez avec QQ mobile",
+    "waiting": "En attente du scan QQ…",
+    "connected": "QQ est connecté.",
+    "stopped": "La connexion QQ s'est arrêtée.",
+    "connecting": "Connexion…",
+    "qrAlt": "QR code de connexion QQ",
+    "scanAgainWarning": "Un nouveau scan remplace l'App Secret actuel. L'ancien App Secret cesse de fonctionner dès la fin du nouveau scan."
   }
 }

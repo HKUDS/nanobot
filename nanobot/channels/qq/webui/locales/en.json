@@ -42,5 +42,14 @@
         }
       }
     }
+  },
+  "custom": {
+    "qrAlt": "QQ login QR code",
+    "scanTitle": "Scan with mobile QQ",
+    "waiting": "Waiting for QQ scan…",
+    "connected": "QQ is connected.",
+    "stopped": "QQ login stopped.",
+    "connecting": "Connecting...",
+    "scanAgainWarning": "Scanning again replaces the current App Secret. The previous App Secret stops working once the new scan completes."
   }
 }

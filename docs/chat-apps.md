@@ -97,7 +97,7 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Slack** | Bot token + App-Level token |
 | **Matrix** | Homeserver URL + Access token |
 | **Email** | IMAP/SMTP credentials |
-| **QQ** | App ID + App Secret |
+| **QQ** | QR code scan (`nanobot channels login qq`) or App ID + App Secret |
 | **Napcat (QQ)** | Napcat Forward WebSocket URL + access token |
 | **Wecom** | Bot ID + Bot Secret |
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
@@ -608,6 +608,14 @@ nanobot plugins enable qq
 - Once added, scan the bot's QR code with mobile QQ → open the bot profile → tap "发消息" to start chatting
 
 **3. Configure**
+
+Run the QR login and scan with mobile QQ to save the AppID and AppSecret automatically. Scanning again replaces the App Secret and stops the previous secret from working:
+
+```bash
+nanobot channels login qq
+```
+
+To enter them yourself, copy **AppID** and **AppSecret** from **开发设置 (Developer Settings)** into `channels.qq`:
 
 > - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
 > - `msgFormat`: Optional. Use `"plain"` (default) for maximum compatibility with legacy QQ clients, or `"markdown"` for richer formatting on newer clients.

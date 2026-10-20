@@ -304,7 +304,7 @@ def test_special_setup_validation_is_owned_by_channel_package(name: str):
     assert plugin.setup.validator.__module__ == f"nanobot.channels.{name}.validation"
 
 
-@pytest.mark.parametrize("name", ["feishu", "linear", "weixin", "whatsapp"])
+@pytest.mark.parametrize("name", ["feishu", "linear", "qq", "weixin", "whatsapp"])
 def test_interactive_connector_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
 

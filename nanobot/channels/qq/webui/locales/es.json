@@ -42,5 +42,14 @@
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "Escanea con QQ móvil",
+    "waiting": "Esperando el escaneo de QQ…",
+    "connected": "QQ está conectado.",
+    "stopped": "El inicio de sesión de QQ se detuvo.",
+    "connecting": "Conectando…",
+    "qrAlt": "Código QR de inicio de sesión de QQ",
+    "scanAgainWarning": "Escanear de nuevo reemplaza el App Secret actual. El App Secret anterior deja de funcionar cuando termina el nuevo escaneo."
   }
 }

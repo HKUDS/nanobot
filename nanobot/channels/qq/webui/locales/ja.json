@@ -42,5 +42,14 @@
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "モバイル QQ でスキャン",
+    "waiting": "QQ のスキャンを待っています…",
+    "connected": "QQ に接続しました。",
+    "stopped": "QQ ログインを停止しました。",
+    "connecting": "接続中…",
+    "qrAlt": "QQ ログイン QR コード",
+    "scanAgainWarning": "再スキャンすると現在の App Secret が置き換わります。新しいスキャンが完了すると、以前の App Secret は無効になります。"
   }
 }

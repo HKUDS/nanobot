@@ -42,5 +42,14 @@
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "用手机 QQ 扫码登录",
+    "waiting": "等待 QQ 扫码…",
+    "connected": "QQ 已连接。",
+    "stopped": "QQ 登录已停止。",
+    "connecting": "连接中…",
+    "qrAlt": "QQ 登录二维码",
+    "scanAgainWarning": "重新扫码会替换当前的 App Secret，新扫码完成后旧 Secret 将失效。"
   }
 }

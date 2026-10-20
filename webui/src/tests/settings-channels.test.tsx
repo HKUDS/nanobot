@@ -144,6 +144,11 @@ function channelSetupContract(
             choices: ["markdown", "plain"],
             defaultValue: "plain",
           }),
+          field("ackMessage", "string", { defaultValue: "⏳ Processing..." }),
+          field("showCompactionNotices", "bool", { choices: ["true", "false"] }),
+          field("mediaDir", "string"),
+          field("downloadChunkSize", "int", { defaultValue: "262144" }),
+          field("downloadMaxBytes", "int", { defaultValue: "209715200" }),
         ],
         requirements: [
           { alternatives: [["channels.qq.appId"]] },
@@ -1967,7 +1972,7 @@ describe("Settings channels", () => {
             features: channels.map(([name, displayName]) => ({
               name,
               display_name: displayName,
-              webui: ["feishu", "weixin", "whatsapp"].includes(name) ? "webui/index.tsx" : "webui/index.ts",
+              webui: ["feishu", "qq", "weixin", "whatsapp"].includes(name) ? "webui/index.tsx" : "webui/index.ts",
               type: "channel",
               enabled: false,
               installed: true,
@@ -2008,7 +2013,7 @@ describe("Settings channels", () => {
             features: ["email", "feishu", "matrix", "qq"].map((name) => ({
               name,
               display_name: name === "qq" ? "QQ" : name[0].toUpperCase() + name.slice(1),
-              webui: name === "feishu" ? "webui/index.tsx" : "webui/index.ts",
+              webui: name === "feishu" || name === "qq" ? "webui/index.tsx" : "webui/index.ts",
               type: "channel",
               enabled: true,
               installed: true,
@@ -2053,6 +2058,74 @@ describe("Settings channels", () => {
     const format = screen.getByRole("group", { name: "Message format" });
     expect(within(format).getByRole("radio", { name: "Plain text" })).toBeChecked();
     expect(within(format).getByRole("radio", { name: "Markdown" })).toBeInTheDocument();
+  });
+
+  it("connects QQ by QR scan and fills AppID from saved credentials", async () => {
+    const qqFeature: NanobotFeatureInfo = {
+      name: "qq",
+      display_name: "QQ",
+      webui: "webui/index.tsx",
+      type: "channel",
+      enabled: false,
+      configured: false,
+      installed: true,
+      ready: false,
+      status: "not_enabled",
+      install_supported: true,
+      requires_restart: false,
+      setup: channelSetupContract("qq"),
+    };
+    let currentFeature = qqFeature;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({ features: [currentFeature], enabled_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.channel.connect.start") {
+        return { status: "pending", session_id: "qq-1", qr_url: "https://example.com/qq-login" };
+      }
+      if (action === "settings.channel.connect.poll") {
+        currentFeature = {
+          ...qqFeature,
+          enabled: true,
+          configured: true,
+          config_values: { "channels.qq.appId": "1024" },
+          configured_fields: ["channels.qq.appId", "channels.qq.secret"],
+        };
+        return {
+          status: "succeeded",
+          session_id: "qq-1",
+          message: "QQ is connected.",
+          nanobot_features: { features: [currentFeature], enabled_count: 1 },
+        };
+      }
+      return settingsPayload();
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View QQ settings" }));
+
+    expect(await screen.findByRole("img", { name: "QQ login QR code" })).toBeInTheDocument();
+    expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.channel.connect.start", { channel: "qq" }, 150_000,
+    );
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.channel.connect.poll", { channel: "qq", session_id: "qq-1" }, 150_000,
+    ));
+    expect(await screen.findByText("QQ is connected.")).toBeInTheDocument();
+    expect(screen.getByText(/previous App Secret stops working/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByLabelText("App ID")).toHaveValue("1024");
+    expect(screen.getByLabelText("Acknowledgement message")).toHaveValue("⏳ Processing...");
   });
 
   it("keeps the WebUI websocket channel enabled without opening a setup dialog", async () => {

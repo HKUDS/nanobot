@@ -42,5 +42,14 @@
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "Quét bằng QQ di động",
+    "waiting": "Đang chờ quét QQ…",
+    "connected": "QQ đã được kết nối.",
+    "stopped": "Đăng nhập QQ đã dừng.",
+    "connecting": "Đang kết nối…",
+    "qrAlt": "Mã QR đăng nhập QQ",
+    "scanAgainWarning": "Quét lại sẽ thay thế App Secret hiện tại. App Secret cũ sẽ ngừng hoạt động khi lần quét mới hoàn tất."
   }
 }

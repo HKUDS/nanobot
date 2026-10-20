@@ -42,5 +42,14 @@
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "用手機 QQ 掃碼登入",
+    "waiting": "等待 QQ 掃碼…",
+    "connected": "QQ 已連線。",
+    "stopped": "QQ 登入已停止。",
+    "connecting": "連線中…",
+    "qrAlt": "QQ 登入 QR code",
+    "scanAgainWarning": "重新掃碼會取代目前的 App Secret，新掃碼完成後舊 Secret 將失效。"
   }
 }
