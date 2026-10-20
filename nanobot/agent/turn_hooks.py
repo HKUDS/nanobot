@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from nanobot.agent.hook import (
     CompositeHook,
 )
 from nanobot.agent.progress_hook import AgentProgressHook
+from nanobot.agent.tools.execution_activity import ExecutionActivityContract
 from nanobot.events import NO_EVENTS, EventSink
 
 
@@ -39,6 +41,7 @@ class AgentTurnHookSpec:
     run_extra_hooks_for_ephemeral: bool = False
     attributes: dict[str, Any] | None = None
     log_content: bool = True
+    resolve_activity_contract: Callable[[str], ExecutionActivityContract | None] | None = None
 
 
 def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
@@ -50,6 +53,7 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         session_key=spec.session_key,
         tool_hint_max_length=spec.tool_hint_max_length,
         log_content=log_content,
+        resolve_activity_contract=spec.resolve_activity_contract,
     )
     if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:
         return progress_hook

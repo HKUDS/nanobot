@@ -1491,3 +1491,191 @@ def test_build_response_schema(monkeypatch, tmp_path) -> None:
     assert out["schemaVersion"] == WEBUI_TRANSCRIPT_SCHEMA_VERSION
     assert out["sessionKey"] == key
     assert len(_conversation_events(out)) == 1
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_execution_public_projection_is_consistent_in_history_and_details(tmp_path, monkeypatch, deferred):
+    from nanobot.agent.tools.execution_activity import (
+        EXEC_ACTIVITY,
+        EXEC_SESSION_ACTIVITY,
+        ExecutionFact,
+        public_execution_finish,
+    )
+    from nanobot.providers.base import ToolCallRequest
+    from nanobot.utils.public_tool_activity import execution_start, public_activity_hint
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    if deferred:
+        monkeypatch.setattr(transcript_module, "_MAX_INLINE_TRACE_DETAIL_BYTES", 128)
+    key = "websocket:public-execution"
+    call = ToolCallRequest(id="launch", name="exec", arguments={"command": "bun test"})
+    start = dict(execution_start(call, EXEC_ACTIVITY))
+    finish = dict(public_execution_finish(
+        EXEC_ACTIVITY, call_id=call.id, arguments=call.arguments,
+        fact=ExecutionFact("started"), failed=False,
+    )[0])
+    notice = dict(public_execution_finish(
+        EXEC_SESSION_ACTIVITY, call_id="final-result", arguments={},
+        fact=ExecutionFact("failed", 7), failed=False,
+    )[0])
+    hidden = {"version": 1, "phase": "end", "call_id": "wait", "name": "exec_session",
+              "arguments": {"session_id": "private-handle"}, "result": "x" * 40_000}
+    append_transcript_object(key, {"event": "user", "text": "run"})
+    for item in (start, finish, notice, hidden, hidden):
+        append_transcript_object(key, {"event": "message", "kind": "tool_hint",
+                                      "text": public_activity_hint([item]), "tool_events": [item]})
+    prose = 'Explain exec_session("private-handle")'
+    append_transcript_object(key, {"event": "message", "text": prose})
+    append_transcript_object(key, {"event": "turn_end"})
+    stored = transcript_module.webui_transcript_path(key).read_bytes()
+    response = build_webui_thread_response(key)
+    repeated = build_webui_thread_response(key)
+    assert response["events"] == repeated["events"]
+    activities = [event for event in response["events"] if event.get("kind") == "execution"]
+    assert activities
+    assert "private-handle" not in json.dumps(activities)
+    if deferred:
+        assert len(activities) == 1
+        trace = activities[0]["execution_detail"]
+        assert "trace_detail" not in activities[0]
+        assert trace["traceCount"] == 1
+        assert "Command failed" in activities[0]["text"]
+        detail = build_webui_trace_detail_response(key, trace["ref"])
+        events = detail["events"]
+        assert trace["bytes"] == sum(len(transcript_module._record_json_line(event).encode("utf-8")) for event in events)
+    else:
+        assert len(activities) == 3
+        assert all("execution_detail" not in event for event in activities)
+        events = activities
+    assert [event["tool_events"][0]["state"] for event in events] == ["starting", "started", "failed"]
+    assert any(event.get("text") == prose for event in response["events"])
+    assert transcript_module.webui_transcript_path(key).read_bytes() == stored
+
+
+def test_hidden_control_only_has_no_placeholder_and_notice_only_counts_zero(tmp_path, monkeypatch):
+    from nanobot.agent.tools.execution_activity import (
+        EXEC_SESSION_ACTIVITY,
+        ExecutionFact,
+        public_execution_finish,
+    )
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(transcript_module, "_MAX_INLINE_TRACE_DETAIL_BYTES", 128)
+    key = "websocket:control-only"
+    append_transcript_object(key, {"event": "user", "text": "run"})
+    append_transcript_object(key, {"event": "message", "kind": "tool_hint", "text": 'exec_session("private")'})
+    append_transcript_object(key, {"event": "turn_end"})
+    empty = build_webui_thread_response(key)
+    assert [event["event"] for event in empty["events"]] == ["user_message", "turn_end"]
+    notice = dict(public_execution_finish(
+        EXEC_SESSION_ACTIVITY, call_id="bad-input", arguments={"input": "private"},
+        fact=ExecutionFact("control_failed"), failed=True,
+    )[0])
+    append_transcript_object(key, {"event": "user", "text": "input"})
+    append_transcript_object(key, {"event": "message", "kind": "tool_hint", "text": "Could not send command input", "tool_events": [notice]})
+    append_transcript_object(key, {"event": "turn_end"})
+    response = build_webui_thread_response(key)
+    activity = next(event for event in response["events"] if event.get("kind") == "execution")
+    assert activity["execution_detail"]["traceCount"] == 0
+    detail = build_webui_trace_detail_response(key, activity["execution_detail"]["ref"])
+    assert detail["events"][0]["tool_events"][0] == notice
+
+
+def test_session_activity_fallback_preserves_public_notice_and_model_prose():
+    from nanobot.session.manager import Session
+    from nanobot.webui.transcript import build_session_thread_response
+
+    session = Session(key="websocket:fallback")
+    session.add_message("user", "run")
+    session.add_message("assistant", 'exec_session("literal prose")', tool_events=[
+        {"phase": "end", "name": "exec_session", "arguments": {"session_id": "private"}},
+        {"phase": "error", "name": "exec_session", "arguments": {"session_id": "private"}, "error": "private"},
+    ])
+    response = build_session_thread_response(session)
+    activities = [event for event in response["events"] if event.get("kind") == "execution"]
+    assert len(activities) == 1
+    assert len(activities[0]["tool_events"]) == 1
+    assert activities[0]["tool_events"][0]["state"] == "control_failed"
+    assert "private" not in json.dumps(activities)
+    assert any(event.get("text") == 'exec_session("literal prose")' for event in response["events"])
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_mixed_stored_activity_splits_stable_public_siblings(tmp_path, monkeypatch, deferred):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    if deferred:
+        monkeypatch.setattr(transcript_module, "_MAX_INLINE_TRACE_DETAIL_BYTES", 128)
+    key = "websocket:mixed-execution"
+    ordinary = {"phase": "end", "name": "read_file", "call_id": "read", "arguments": {"path": "a.txt"}, "result": "file"}
+    control_error = {"phase": "error", "name": "exec_session", "call_id": "wait", "arguments": {"session_id": "private"}, "error": "private"}
+    append_transcript_object(key, {"event": "user", "text": "check"})
+    append_transcript_object(key, {"event": "message", "kind": "progress", "text": "private", "tool_events": [ordinary, control_error]})
+    append_transcript_object(key, {"event": "turn_end"})
+    stored = transcript_module.webui_transcript_path(key).read_bytes()
+    response = build_webui_thread_response(key)
+    activities = [event for event in response["events"] if event.get("kind") in {"progress", "execution"}]
+    assert [event["kind"] for event in activities] == ["progress", "execution"]
+    assert activities[0]["projection_id"] != activities[1]["projection_id"]
+    assert response["events"] == build_webui_thread_response(key)["events"]
+    assert "private" not in json.dumps(activities)
+    if deferred:
+        assert activities[0]["trace_detail"]["traceCount"] == 1
+        assert activities[1]["execution_detail"]["traceCount"] == 0
+        assert "trace_detail" not in activities[1]
+        events = []
+        for event, field in zip(activities, ["trace_detail", "execution_detail"]):
+            detail = build_webui_trace_detail_response(key, event[field]["ref"])
+            assert detail is not None
+            assert event[field]["bytes"] == sum(len(transcript_module._record_json_line(item).encode("utf-8")) for item in detail["events"])
+            events.extend(detail["events"])
+    else:
+        events = activities
+    assert events[0]["tool_events"] == [ordinary]
+    assert events[1]["tool_events"][0]["state"] == "control_failed"
+    assert transcript_module.webui_transcript_path(key).read_bytes() == stored
+
+
+def test_execution_notice_keeps_a_turn_pending_until_real_turn_end():
+    records = [{"event": "message", "kind": "execution", "text": "Command completed"}]
+    assert transcript_module.has_pending_tool_calls(records) is True
+    records.append({"event": "turn_end"})
+    assert transcript_module.has_pending_tool_calls(records) is False
+
+
+def test_dense_turn_projects_page_budget_only_once_before_full_delivery(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(transcript_module, "_MAX_INLINE_TRACE_DETAIL_BYTES", 128)
+    key = "websocket:dense-public-activity"
+    append_transcript_object(key, {"event": "user", "text": "read files"})
+    for index in range(80):
+        append_transcript_object(key, {
+            "event": "message", "kind": "tool_hint", "text": "read a.py",
+            "tool_events": [{"phase": "end", "name": "read_file", "call_id": str(index), "result": "file"}],
+        })
+    append_transcript_object(key, {"event": "message", "text": "done"})
+    append_transcript_object(key, {"event": "turn_end"})
+    projection = transcript_module.project_stored_tool_activity
+    calls = 0
+
+    def counted_projection(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return projection(*args, **kwargs)
+
+    monkeypatch.setattr(transcript_module, "project_stored_tool_activity", counted_projection)
+    response = build_webui_thread_response(key, limit=5)
+    assert calls <= 84  # Four activity rows reach the soft limit; delivery still projects all 80.
+    activity = next(event for event in response["events"] if "trace_detail" in event)
+    wire_projection = transcript_module._client_projection_event
+    serialized = []
+
+    def counted_wire_projection(record, **kwargs):
+        serialized.append(record)
+        return wire_projection(record, **kwargs)
+
+    monkeypatch.setattr(transcript_module, "_client_projection_event", counted_wire_projection)
+    events = build_webui_trace_detail_response(key, activity["trace_detail"]["ref"])["events"]
+    assert len(serialized) == 80
+    assert sum(len(event.get("tool_events", [])) for event in events) == 80
+    assert any(event.get("text") == "done" for event in response["events"])
+    assert response["page"]["has_more_before"] is False

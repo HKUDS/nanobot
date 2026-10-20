@@ -8,12 +8,20 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 
+from nanobot.agent.tools.execution_activity import (
+    EXEC_ACTIVITY,
+    EXEC_SESSION_ACTIVITY,
+    ExecutionFact,
+    ExecutionState,
+    public_execution_finish,
+)
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.weixin.manifest import SETUP_SPEC
 from nanobot.channels.weixin.runtime import (
+    ITEM_TEXT,
     ITEM_TOOL_CALL_RESULT,
     ITEM_TOOL_CALL_START,
     WEIXIN_MAX_MESSAGE_LEN,
@@ -458,3 +466,83 @@ async def test_structured_progress_is_capped_and_uses_one_run_id() -> None:
     assert first.args[1]["type"] == ITEM_TOOL_CALL_START
     assert second.args[1]["type"] == ITEM_TOOL_CALL_RESULT
     assert first.kwargs["run_id"] == second.kwargs["run_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "exit_code", "incomplete", "text"),
+    [
+        ("started", None, False, "Command started: python check.py"),
+        ("completed", 0, False, "Command completed"),
+        ("failed", 7, True, "Command failed (exit code 7) — output may be incomplete"),
+        ("timed_out", None, False, "Command timed out"),
+        ("stopped", None, False, "Command stopped"),
+        ("control_failed", None, False, "Could not check command"),
+    ],
+)
+async def test_execution_progress_uses_native_text_and_command_states(
+    state: ExecutionState,
+    exit_code: int | None,
+    incomplete: bool,
+    text: str,
+) -> None:
+    channel = _ready_channel(replyProgressMessages=True)
+    channel._api_post = AsyncMock(return_value={"ret": 0})
+    launch = state == "started"
+    events = public_execution_finish(
+        EXEC_ACTIVITY if launch else EXEC_SESSION_ACTIVITY,
+        call_id="execution-1",
+        arguments={"command": "python check.py"} if launch else {},
+        fact=ExecutionFact(state, exit_code=exit_code, output_incomplete=incomplete),
+        failed=state in {"failed", "timed_out", "control_failed"},
+    )
+
+    await channel.send(OutboundMessage(
+        channel="weixin",
+        chat_id="wx-user",
+        content=text,
+        event=ProgressEvent(content=text, tool_hint=True, tool_events=[dict(item) for item in events]),
+    ))
+
+    channel._api_post.assert_awaited_once()
+    sent = channel._api_post.await_args.args[1]["msg"]
+    assert sent["item_list"] == [{"type": ITEM_TEXT, "text_item": {"text": text}}]
+    assert sent["run_id"]
+    assert channel._reply_progress_counts["wx-user"] == 1
+    assert channel._context_send_counts["ctx-1"] == 1
+
+
+@pytest.mark.asyncio
+async def test_execution_progress_shares_tool_cap_run_and_final_reply_budget() -> None:
+    channel = _ready_channel(
+        replyProgressMessages=True,
+        replyProgressMaxMessages=2,
+        contextMessageBudget=3,
+    )
+    channel._api_post = AsyncMock(return_value={"ret": 0})
+    execution = public_execution_finish(
+        EXEC_ACTIVITY,
+        call_id="execution-1",
+        arguments={"command": "python check.py"},
+        fact=ExecutionFact("started"),
+        failed=False,
+    )
+    batches = [
+        [{"phase": "start", "call_id": "read-1", "name": "read_file"}],
+        [dict(item) for item in execution],
+        [{"phase": "end", "call_id": "read-1", "name": "read_file"}],
+    ]
+    for batch in batches:
+        await channel.send(OutboundMessage(
+            channel="weixin", chat_id="wx-user", content="",
+            event=ProgressEvent(tool_events=batch),
+        ))
+    await channel.send(OutboundMessage(channel="weixin", chat_id="wx-user", content="Done"))
+
+    sent = [call.args[1]["msg"] for call in channel._api_post.await_args_list]
+    assert len(sent) == 3
+    assert [msg["item_list"][0]["type"] for msg in sent] == [ITEM_TOOL_CALL_START, ITEM_TEXT, ITEM_TEXT]
+    assert sent[1]["item_list"][0]["text_item"]["text"] == "Command started: python check.py"
+    assert sent[2]["item_list"][0]["text_item"]["text"] == "Done"
+    assert len({msg["run_id"] for msg in sent}) == 1
+    assert channel._context_send_counts["ctx-1"] == 3

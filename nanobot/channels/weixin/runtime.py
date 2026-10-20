@@ -40,6 +40,7 @@ from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
 from nanobot.utils.logging_bridge import redirect_lib_logging
+from nanobot.utils.public_tool_activity import execution_activity_text
 
 # ---------------------------------------------------------------------------
 # Protocol constants (from openclaw-weixin types.ts)
@@ -1798,35 +1799,42 @@ class WeixinChannel(BaseChannel):
         for tool_event in event.tool_events:
             if sent >= self.config.reply_progress_max_messages:
                 break
-            phase = str(tool_event.get("phase", "") or "")
-            if phase not in {"start", "end", "error"}:
-                continue
             call_id = str(tool_event.get("call_id", "") or "")
-            tool_name = str(tool_event.get("name", "") or "tool")
-            part = f"progress:{phase}:{call_id or tool_name}"
-            if part in state.completed_parts:
-                continue
-            if phase == "start":
+            if tool_event.get("activity") == "execution":
+                part = f"progress:execution:{tool_event['state']}:{call_id}"
                 item: dict[str, Any] = {
-                    "type": ITEM_TOOL_CALL_START,
-                    "create_time_ms": int(time.time() * 1000),
-                    "is_completed": False,
-                    "tool_call_start_item": {
-                        "tool_name": tool_name,
-                        "tool_call_id": call_id or None,
-                    },
+                    "type": ITEM_TEXT,
+                    "text_item": {"text": sanitize_weixin_markdown(execution_activity_text(tool_event))},
                 }
             else:
-                item = {
-                    "type": ITEM_TOOL_CALL_RESULT,
-                    "create_time_ms": int(time.time() * 1000),
-                    "is_completed": True,
-                    "tool_call_result_item": {
-                        "tool_name": tool_name,
-                        "tool_call_id": call_id or None,
-                        "status": "completed" if phase == "end" else "failed",
-                    },
-                }
+                phase = str(tool_event.get("phase", "") or "")
+                if phase not in {"start", "end", "error"}:
+                    continue
+                tool_name = str(tool_event.get("name", "") or "tool")
+                part = f"progress:{phase}:{call_id or tool_name}"
+                if phase == "start":
+                    item = {
+                        "type": ITEM_TOOL_CALL_START,
+                        "create_time_ms": int(time.time() * 1000),
+                        "is_completed": False,
+                        "tool_call_start_item": {
+                            "tool_name": tool_name,
+                            "tool_call_id": call_id or None,
+                        },
+                    }
+                else:
+                    item = {
+                        "type": ITEM_TOOL_CALL_RESULT,
+                        "create_time_ms": int(time.time() * 1000),
+                        "is_completed": True,
+                        "tool_call_result_item": {
+                            "tool_name": tool_name,
+                            "tool_call_id": call_id or None,
+                            "status": "completed" if phase == "end" else "failed",
+                        },
+                    }
+            if part in state.completed_parts:
+                continue
             await self._send_message_item(
                 msg.chat_id,
                 item,

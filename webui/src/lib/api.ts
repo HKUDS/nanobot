@@ -354,6 +354,9 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
         !["tool_hint", "progress"].includes(String(value.kind))
         || !isProjectionTraceDetail(value.trace_detail)
       )) break;
+      if (value.execution_detail !== undefined && (
+        value.kind !== "execution" || !isProjectionTraceDetail(value.execution_detail)
+      )) break;
       if (value.media_urls !== undefined && (
         !Array.isArray(value.media_urls) || !value.media_urls.every(isProjectionMedia)
       )) break;

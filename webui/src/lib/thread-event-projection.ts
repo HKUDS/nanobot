@@ -641,9 +641,9 @@ function projectToolActivity(
       : event.text
         ? [event.text]
         : [];
-  if (lines.length === 0) return;
+  if (lines.length === 0 && visibleEvents.length === 0) return;
 
-  const deferredDetail = event.trace_detail;
+  const deferredDetail = event.kind === "execution" ? event.execution_detail : event.trace_detail;
   const segmentId = ensureProjectionActivitySegment(state);
   const turn = turnFieldsForProjection(state, event, "activity");
   const last = state.messages[state.messages.length - 1];
@@ -677,8 +677,8 @@ function projectToolActivity(
         ...last,
         traces: mergedLines ?? [...previousTraces, ...lines],
         content: mergedLines
-          ? mergedLines[mergedLines.length - 1]
-          : lines[lines.length - 1],
+          ? mergedLines[mergedLines.length - 1] ?? ""
+          : lines[lines.length - 1] ?? "",
         toolEvents: mergedEvents,
         activitySegmentId: last.activitySegmentId ?? segmentId,
         ...turn,
@@ -692,7 +692,7 @@ function projectToolActivity(
       id: projectionMessageId(event, options),
       role: "tool",
       kind: "trace",
-      content: lines[lines.length - 1],
+      content: lines[lines.length - 1] ?? "",
       traces: lines,
       ...(visibleEvents.length ? { toolEvents: visibleEvents } : {}),
       ...(deferredDetail ? { traceDetail: deferredDetail } : {}),
@@ -914,7 +914,7 @@ export function projectThreadEvent(
   if (event.event === "message") {
     if (
       state.suppressUntilTurnEnd
-      && (event.kind === "tool_hint" || event.kind === "progress" || event.kind === "reasoning")
+      && (event.kind === "tool_hint" || event.kind === "progress" || event.kind === "reasoning" || event.kind === "execution")
     ) return state;
     if (event.kind === "reasoning") {
       if (event.text) {
@@ -929,7 +929,7 @@ export function projectThreadEvent(
       }
       return state;
     }
-    if (event.kind === "tool_hint" || event.kind === "progress") {
+    if (event.kind === "tool_hint" || event.kind === "progress" || event.kind === "execution") {
       projectToolActivity(state, event, options);
       return state;
     }

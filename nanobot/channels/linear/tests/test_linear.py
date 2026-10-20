@@ -18,6 +18,13 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
+from nanobot.agent.tools.execution_activity import (
+    EXEC_ACTIVITY,
+    EXEC_SESSION_ACTIVITY,
+    ExecutionFact,
+    ExecutionState,
+    public_execution_finish,
+)
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
@@ -1053,6 +1060,50 @@ async def test_outbound_response_and_tool_progress_use_native_activity_shapes(
     assert client.activities[1]["activity_id"] == activity_id
     assert client.activities[2]["content"]["type"] == "action"
     assert client.activities[2]["content"]["action"] == "Linear Get Issue"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "exit_code", "incomplete", "body"),
+    [
+        ("started", None, False, "Command started: python check.py"),
+        ("completed", 0, False, "Command completed"),
+        ("failed", 7, True, "Command failed (exit code 7) — output may be incomplete"),
+        ("timed_out", None, False, "Command timed out"),
+        ("stopped", None, False, "Command stopped"),
+        ("control_failed", None, False, "Could not check command"),
+    ],
+)
+async def test_execution_progress_uses_native_thoughts_and_command_states(
+    tmp_path: Path,
+    state: ExecutionState,
+    exit_code: int | None,
+    incomplete: bool,
+    body: str,
+) -> None:
+    channel, client = _runtime(tmp_path)
+    launch = state == "started"
+    events = public_execution_finish(
+        EXEC_ACTIVITY if launch else EXEC_SESSION_ACTIVITY,
+        call_id="execution-1",
+        arguments={"command": "python check.py"} if launch else {},
+        fact=ExecutionFact(state, exit_code=exit_code, output_incomplete=incomplete),
+        failed=state in {"failed", "timed_out", "control_failed"},
+    )
+    msg = OutboundMessage(
+        channel="linear",
+        chat_id="session-1",
+        content=body,
+        metadata={"linear": {"organization_id": "org-1", "agent_session_id": "session-1"}},
+        event=ProgressEvent(content=body, tool_hint=True, tool_events=[dict(item) for item in events]),
+    )
+
+    await channel.send(msg)
+    await channel.send(msg)
+
+    assert client.activities[0]["content"] == {"type": "thought", "body": body}
+    assert client.activities[0]["ephemeral"] is launch
+    assert client.activities[1]["activity_id"] == client.activities[0]["activity_id"]
 
 
 @pytest.mark.asyncio

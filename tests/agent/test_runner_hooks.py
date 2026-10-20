@@ -36,6 +36,7 @@ async def test_runner_calls_hooks_in_order():
     provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
+    tools.get_activity_contract.return_value = None
     tools.execute = AsyncMock(return_value="tool result")
 
     class RecordingHook(AgentHook):
@@ -410,6 +411,7 @@ async def test_runner_run_level_context_is_detached_snapshot(composite):
     provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
+    tools.get_activity_contract.return_value = None
     tools.execute = AsyncMock(return_value="tool result")
 
     class MutatingRunHook(AgentHook):

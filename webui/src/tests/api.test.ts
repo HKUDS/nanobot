@@ -264,6 +264,19 @@ describe("webui API helpers", () => {
     });
   });
 
+  it("accepts execution detail metadata without using the legacy trace-detail field", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ schemaVersion: 3, projection: "events", events: [{
+        event: "message", chat_id: "chat-1", text: "Command failed (exit code 7)", kind: "execution",
+        execution_detail: { ref: "2.history-aaaaaaaaaaaaaaaaaaaa", bytes: 40_000, traceCount: 0 },
+      }] }),
+    } as Response);
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({
+      events: [{ kind: "execution", execution_detail: { bytes: 40_000, traceCount: 0 } }],
+    });
+  });
+
   it("rejects malformed deferred trace metadata at the HTTP boundary", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

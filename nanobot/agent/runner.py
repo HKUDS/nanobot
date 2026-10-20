@@ -25,6 +25,7 @@ from nanobot.agent.context_governance import (
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import execute_tool_calls
+from nanobot.agent.tools.execution_activity import ToolExecutionReport
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.events import NO_EVENTS, EventSink
 from nanobot.llm_usage.context import (
@@ -139,7 +140,7 @@ class AgentRunResult:
     stop_reason: str = "completed"
     error: str | None = None
     failure_error_kind: str | None = None
-    tool_events: list[dict[str, str]] = field(default_factory=list)
+    tool_events: list[ToolExecutionReport] = field(default_factory=list)
     had_injections: bool = False
     # Terminal tail to emit when the preceding final-content prefix was already streamed.
     pending_stream_content: str | None = None
@@ -419,7 +420,7 @@ class AgentRunner:
         error: str | None = None
         failure_error_kind: str | None = None
         stop_reason = "completed"
-        tool_events: list[dict[str, str]] = []
+        tool_events: list[ToolExecutionReport] = []
         external_lookup_counts: dict[str, int] = {}
         # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}

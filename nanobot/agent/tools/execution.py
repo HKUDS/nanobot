@@ -11,7 +11,9 @@ from typing import Any, cast
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.agent.tools.execution_activity import ToolExecutionReport, public_execution_finish
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
 from nanobot.providers.base import ToolCallRequest
@@ -57,7 +59,7 @@ async def execute_tool_calls(
     context: AgentHookContext,
     model_messages: list[dict[str, Any]] | None = None,
     compacted_tool_results: set[str] | None = None,
-) -> tuple[list[Any], list[dict[str, str]]]:
+) -> tuple[list[Any], list[ToolExecutionReport]]:
     """Execute one model response's tool calls in stable result order."""
     @cache
     def read_results() -> dict[str, str]:
@@ -70,7 +72,7 @@ async def execute_tool_calls(
             and isinstance(message.get("content"), str)
             and message["tool_call_id"] not in (compacted_tool_results or ())
         }
-    tool_results: list[tuple[Any, dict[str, str]]] = []
+    tool_results: list[tuple[Any, ToolExecutionReport]] = []
     for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
         if concurrent and len(batch) > 1:
             batch_results = await asyncio.gather(*(
@@ -112,18 +114,26 @@ async def _execute_tool_call(
     hook: AgentHook,
     context: AgentHookContext,
     read_results: Callable[[], dict[str, str]],
-) -> tuple[Any, dict[str, str]]:
+) -> tuple[Any, ToolExecutionReport]:
+    contract = tools.get_activity_contract(tool_call.name)
+
+    def report(status: str, detail: str, raw_result: Any = None) -> ToolExecutionReport:
+        event: ToolExecutionReport = {"name": tool_call.name, "status": status, "detail": detail}
+        if contract is not None:
+            fact = raw_result.activity_fact if isinstance(raw_result, ToolResult) else None
+            event["public_finish"] = public_execution_finish(
+                contract, call_id=tool_call.id, arguments=tool_call.arguments,
+                fact=fact, failed=status != "ok",
+            )
+        return event
+
     lookup_error = repeated_external_lookup_error(
         tool_call.name,
         tool_call.arguments,
         external_lookup_counts,
     )
     if lookup_error:
-        event = {
-            "name": tool_call.name,
-            "status": "error",
-            "detail": "repeated external lookup blocked",
-        }
+        event = report("error", "repeated external lookup blocked")
         return with_tool_error_hint(lookup_error), event
 
     prepare_call = cast(
@@ -138,12 +148,8 @@ async def _execute_tool_call(
             if len(prepared_tuple) == 3:
                 tool, params, prep_error = cast(tuple[Any, Any, str | None], prepared_tuple)
     if prep_error:
+        event = report("error", prep_error.split(": ", 1)[-1][:120], prep_error)
         payload = with_tool_error_hint(prep_error)
-        event = {
-            "name": tool_call.name,
-            "status": "error",
-            "detail": prep_error.split(": ", 1)[-1][:120],
-        }
         handled = _classify_violation(
             raw_text=prep_error,
             soft_payload=payload,
@@ -169,11 +175,7 @@ async def _execute_tool_call(
         raise
     except Exception as exc:
         await hook.on_execute_tool_error(context, tool_call, tool, params, exc)
-        event = {
-            "name": tool_call.name,
-            "status": "error",
-            "detail": str(exc),
-        }
+        event = report("error", str(exc))
         payload = with_tool_error_hint(f"Error: {type(exc).__name__}: {exc}")
         handled = _classify_violation(
             raw_text=str(exc),
@@ -188,12 +190,8 @@ async def _execute_tool_call(
 
     if is_tool_error_result(result):
         await hook.on_execute_tool_error(context, tool_call, tool, params, result)
+        event = report("error", result.replace("\n", " ").strip()[:120], result)
         payload = with_tool_error_hint(result)
-        event = {
-            "name": tool_call.name,
-            "status": "error",
-            "detail": result.replace("\n", " ").strip()[:120],
-        }
         handled = _classify_violation(
             raw_text=result,
             soft_payload=payload,
@@ -213,7 +211,7 @@ async def _execute_tool_call(
         detail = "(empty)"
     elif len(detail) > 120:
         detail = detail[:120] + "..."
-    return result, {"name": tool_call.name, "status": "ok", "detail": detail}
+    return result, report("ok", detail, result)
 
 
 def is_ssrf_violation(text: str) -> bool:
@@ -238,10 +236,10 @@ def _classify_violation(
     *,
     raw_text: str,
     soft_payload: str,
-    event: dict[str, str],
+    event: ToolExecutionReport,
     tool_call: ToolCallRequest,
     workspace_violation_counts: dict[str, int],
-) -> tuple[Any, dict[str, str]] | None:
+) -> tuple[Any, ToolExecutionReport] | None:
     if is_ssrf_violation(raw_text):
         logger.warning(
             "Tool {} blocked by SSRF guard; returning non-retryable tool error: {}",

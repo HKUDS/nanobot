@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.agent.tools.execution_activity import ToolExecutionReport
 from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
@@ -24,7 +25,7 @@ class AgentHookContext:
     usage: LLMUsage | None = None
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     tool_results: list[Any] = field(default_factory=list)
-    tool_events: list[dict[str, str]] = field(default_factory=list)
+    tool_events: list[ToolExecutionReport] = field(default_factory=list)
     streamed_content: bool = False
     streamed_reasoning: bool = False
     stream_continues_current_message: bool = False
@@ -44,7 +45,7 @@ class AgentRunHookContext:
     usage: LLMUsage | None = None
     stop_reason: str | None = None
     error: str | None = None
-    tool_events: list[dict[str, str]] = field(default_factory=list)
+    tool_events: list[ToolExecutionReport] = field(default_factory=list)
     had_injections: bool = False
     exception: BaseException | None = None
 
@@ -306,7 +307,7 @@ class SDKCaptureHook(AgentHook):
         self.usage: LLMUsage | None = None
         self.stop_reason: str | None = None
         self.error: str | None = None
-        self.tool_events: list[dict[str, str]] = []
+        self.tool_events: list[ToolExecutionReport] = []
         self.had_injections: bool = False
 
     async def after_iteration(self, context: AgentHookContext) -> None:

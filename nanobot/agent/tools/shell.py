@@ -28,8 +28,10 @@ from nanobot.agent.tools.exec_session import (
     MAX_YIELD_MS,
     ExecSessionManager,
     clamp_session_int,
+    execution_fact_from_poll,
     format_session_poll,
 )
+from nanobot.agent.tools.execution_activity import EXEC_ACTIVITY
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import (
     BooleanSchema,
@@ -256,7 +258,9 @@ class ExecTool(Tool):
 
     @property
     def name(self) -> str:
-        return "exec"
+        return EXEC_ACTIVITY.name
+
+    activity_contract = EXEC_ACTIVITY
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -350,7 +354,9 @@ class ExecTool(Tool):
             result = format_session_poll(session_id, poll)
             if not poll.done and yield_time_ms is not None:
                 result += "\nInitial wait ended; session remains active."
-            return ToolResult.error(result) if poll.failed else result
+            return ToolResult(
+                result, is_error=poll.failed, activity_fact=execution_fact_from_poll(poll),
+            )
         except Exception as exc:
             return ToolResult.error(f"Error executing command: {exc}")
 

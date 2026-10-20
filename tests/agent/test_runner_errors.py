@@ -36,6 +36,7 @@ async def test_runner_returns_tool_exception_to_model_for_recovery():
     ])
     tools = MagicMock()
     tools.get_definitions.return_value = []
+    tools.get_activity_contract.return_value = None
     tools.execute = AsyncMock(side_effect=RuntimeError("boom"))
 
     runner = AgentRunner()
@@ -71,6 +72,7 @@ async def test_tool_execution_does_not_duplicate_existing_error_hint():
         "and decide whether and how to proceed.]"
     )
     tools = SimpleNamespace(
+        get_activity_contract=lambda _name: None,
         execute=AsyncMock(return_value=ToolResult.error("Error: boom" + error_hint)),
     )
 
@@ -97,6 +99,7 @@ async def test_tool_execution_propagates_control_flow_exceptions(control_error: 
 
     tools = SimpleNamespace(
         get_definitions=lambda: [],
+        get_activity_contract=lambda _name: None,
         execute=execute,
     )
     with pytest.raises(control_error):
@@ -228,6 +231,7 @@ async def test_runner_returns_structured_tool_error_to_model_for_recovery():
     ])
     tools = MagicMock()
     tools.get_definitions.return_value = []
+    tools.get_activity_contract.return_value = None
     tools.execute = AsyncMock(return_value=ToolResult.error("Error: File not found: x"))
 
     runner = AgentRunner()
@@ -341,6 +345,7 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
     output = "Error: generated report successfully\n\nExit code: 0"
     tools = MagicMock()
     tools.get_definitions.return_value = []
+    tools.get_activity_contract.return_value = None
     tools.execute = AsyncMock(return_value=output)
 
     runner = AgentRunner()

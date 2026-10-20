@@ -20,6 +20,11 @@ from nanobot.agent.tools.context import (
     current_request_session_key,
     tool_log_content_allowed,
 )
+from nanobot.agent.tools.execution_activity import (
+    EXEC_SESSION_ACTIVITY,
+    LIST_EXEC_SESSIONS_ACTIVITY,
+    ExecutionFact,
+)
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -679,6 +684,23 @@ def _truncate_output(output: str, max_output_chars: int) -> tuple[str, int]:
     return output[:head_chars] + output[-tail_chars:], omitted
 
 
+def execution_fact_from_poll(poll: _SessionPoll) -> ExecutionFact:
+    """Project the existing owner snapshot without polling or draining again."""
+    if not poll.done:
+        return ExecutionFact("started")
+    if poll.timed_out:
+        state = "timed_out"
+    elif poll.finish_reason == "execution_error":
+        state = "failed"
+    elif poll.terminated:
+        state = "stopped"
+    elif poll.exit_code not in (0, None):
+        state = "failed"
+    else:
+        state = "completed"
+    return ExecutionFact(state, poll.exit_code, poll.output_incomplete)
+
+
 def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
     parts = [poll.output] if poll.output else []
     if poll.truncated_chars:
@@ -775,7 +797,9 @@ class ExecSessionTool(Tool):
 
     @property
     def name(self) -> str:
-        return "exec_session"
+        return EXEC_SESSION_ACTIVITY.name
+
+    activity_contract = EXEC_SESSION_ACTIVITY
 
     @property
     def description(self) -> str:
@@ -820,7 +844,9 @@ class ExecSessionTool(Tool):
                     owner_session_key=current_request_session_key(),
                 )
                 result = format_session_poll(session_id, poll)
-                return ToolResult.error(result) if poll.failed else result
+                return ToolResult(
+                    result, is_error=poll.failed, activity_fact=execution_fact_from_poll(poll),
+                )
 
             default_timeout_ms = (
                 DEFAULT_UNTIL_EXIT_MS
@@ -899,7 +925,9 @@ class ExecSessionTool(Tool):
                         f"\nWait timed out after {timeout_ms / 1000:g}s; "
                         "session remains active."
                     )
-                return ToolResult.error(result) if poll.failed else result
+                return ToolResult(
+                    result, is_error=poll.failed, activity_fact=execution_fact_from_poll(poll),
+                )
 
 
 @tool_parameters(tool_parameters_schema())
@@ -930,7 +958,9 @@ class ListExecSessionsTool(Tool):
 
     @property
     def name(self) -> str:
-        return "list_exec_sessions"
+        return LIST_EXEC_SESSIONS_ACTIVITY.name
+
+    activity_contract = LIST_EXEC_SESSIONS_ACTIVITY
 
     @property
     def description(self) -> str:

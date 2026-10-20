@@ -96,6 +96,7 @@ class TestToolEventProgress:
                 True,
                 [{
                     "version": 1,
+                    "activity": "tool",
                     "phase": "start",
                     "call_id": "call1",
                     "name": "custom_tool",
@@ -111,6 +112,7 @@ class TestToolEventProgress:
                 False,
                 [{
                     "version": 1,
+                    "activity": "tool",
                     "phase": "end",
                     "call_id": "call1",
                     "name": "custom_tool",
@@ -283,14 +285,14 @@ class TestToolEventProgress:
         provider.get_default_model.return_value = "test-model"
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
-        tool_call = ToolCallRequest(id="tc1", name="exec", arguments={"command": "ls"})
+        tool_call = ToolCallRequest(id="tc1", name="read_file", arguments={"path": "file.txt"})
         calls = iter([
             LLMResponse(content="", tool_calls=[tool_call]),
             LLMResponse(content="Done", tool_calls=[]),
         ])
         loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.tools.prepare_call = MagicMock(return_value=(None, {"command": "ls"}, None))
+        loop.tools.prepare_call = MagicMock(return_value=(None, {"path": "file.txt"}, None))
         loop.tools.execute = AsyncMock(return_value="file.txt")
 
         msg = InboundMessage(
@@ -333,7 +335,7 @@ class TestToolEventProgress:
         assert isinstance(start_msgs[0].event, ProgressEvent)
         assert start_msgs[0].event.tool_events is not None
         start = start_msgs[0].event.tool_events[0]
-        assert start["name"] == "exec"
+        assert start["name"] == "read_file"
         assert start["call_id"] == "tc1"
         assert start["result"] is None
 

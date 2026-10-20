@@ -194,7 +194,10 @@ class _SubagentHook(AgentHook):
         if self._status is None:
             return
         self._status.iteration = context.iteration
-        self._status.tool_events = list(context.tool_events)
+        self._status.tool_events = [
+            {"name": event["name"], "status": event["status"], "detail": event["detail"]}
+            for event in context.tool_events
+        ]
         self._status.usage = context.usage
         self._remember_output(context)
         if context.error:
@@ -805,6 +808,7 @@ class SubagentManager:
             ephemeral=not record.session.policy.persist,
             run_extra_hooks_for_ephemeral=True,
             log_content=record.session.policy.log_content,
+            resolve_activity_contract=tools.get_activity_contract,
         ))
 
         request_token = bind_request_context(RequestContext(

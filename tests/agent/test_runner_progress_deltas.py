@@ -81,6 +81,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
     assert progress_events == [
         {
             "version": 1,
+            "activity": "tool",
             "phase": "start",
             "call_id": "x-search-1",
             "name": "x_search",
@@ -92,6 +93,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
         },
         {
             "version": 1,
+            "activity": "tool",
             "phase": "end",
             "call_id": "x-search-1",
             "name": "x_search",
@@ -156,6 +158,7 @@ async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
     ]
     assert progress_events[-1] == {
         "version": 1,
+        "activity": "tool",
         "phase": "error",
         "call_id": "x-search-failed",
         "name": "x_search",
@@ -186,6 +189,9 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
     class Tools:
         def get_definitions(self):
             return [{"type": "function", "function": {"name": "write_file"}}]
+
+        def get_activity_contract(self, name):
+            return tool.activity_contract
 
         def prepare_call(self, name, params):
             return tool, params, None
@@ -268,6 +274,9 @@ async def test_runner_reuses_edit_diff_for_summary_and_progress(tmp_path, monkey
         def get_definitions(self):
             return [{"type": "function", "function": {"name": tool_name}}]
 
+        def get_activity_contract(self, name):
+            return tool.activity_contract
+
         def prepare_call(self, name, params):
             return tool, params, None
 
@@ -334,6 +343,9 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
         def get_definitions(self):
             return [{"type": "function", "function": {"name": "write_file"}}]
 
+        def get_activity_contract(self, name):
+            return tool.activity_contract
+
         def prepare_call(self, name, params):
             return tool, params, None
 
@@ -397,6 +409,9 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
     class Tools:
         def get_definitions(self):
             return [{"type": "function", "function": {"name": "write_file"}}]
+
+        def get_activity_contract(self, name):
+            return tool.activity_contract
 
         def prepare_call(self, name, params):
             return tool, params, None

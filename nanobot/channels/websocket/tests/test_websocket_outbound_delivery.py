@@ -10,12 +10,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.tools.execution_activity import (
+    EXEC_SESSION_ACTIVITY,
+    ExecutionFact,
+    public_execution_finish,
+)
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket import runtime
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.schema import Config
+from nanobot.utils.public_tool_activity import public_activity_hint
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -442,3 +449,27 @@ async def test_normal_cleanup_can_overlap_connection_retirement(monkeypatch) -> 
     assert connection not in channel._connection_outbound
     assert connection not in channel._conn_chats
     assert channel._subs == {}
+
+
+@pytest.mark.asyncio
+async def test_execution_notice_uses_optional_text_compatible_wire_kind() -> None:
+    channel = _channel()
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), "execution")
+    tools = [dict(item) for item in public_execution_finish(
+        EXEC_SESSION_ACTIVITY, call_id="result", arguments={"session_id": "private"},
+        fact=ExecutionFact("failed", 7, True), failed=False,
+    )]
+    event = ProgressEvent(content=public_activity_hint(tools), tool_hint=True, tool_events=tools)
+    try:
+        await channel.send(outbound_message_for_event(channel="websocket", chat_id="execution", event=event))
+        raw = await asyncio.wait_for(connection.sent.get(), timeout=1)
+        payload = json.loads(raw)
+        assert payload["kind"] == "execution"
+        assert payload["tool_events"] == tools
+        assert "exit code 7" in payload["text"]
+        assert "output may be incomplete" in payload["text"]
+        assert "private" not in raw
+        assert channel._persist_turn_transcript_event.call_args.kwargs["phase"] == "activity"
+    finally:
+        await channel._cleanup_connection(cast(Any, connection))

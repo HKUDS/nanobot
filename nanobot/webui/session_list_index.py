@@ -56,7 +56,7 @@ _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
 _WEBUI_SESSION_STEM_PREFIX = SessionManager.safe_key(WEBUI_SESSION_STORAGE_PREFIX)
 _WEBUI_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
 _TRANSCRIPT_SEGMENTS_SUFFIX = ".segments"
-_TRANSCRIPT_NON_ANSWER_KINDS = {"progress", "reasoning", "tool_hint"}
+_TRANSCRIPT_NON_ANSWER_KINDS = {"progress", "reasoning", "tool_hint", "execution"}
 
 
 @dataclass

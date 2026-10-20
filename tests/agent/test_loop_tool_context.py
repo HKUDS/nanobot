@@ -57,6 +57,9 @@ class _Tools:
     def get_definitions(self) -> list:
         return []
 
+    def get_activity_contract(self, name: str):
+        return None
+
     def prepare_call(self, name: str, arguments: dict):
         return (self.tool, arguments, None) if name == "cron" else (None, arguments, None)
 

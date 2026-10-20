@@ -1,7 +1,19 @@
-import type { ToolProgressEvent } from "@/lib/types";
+import type { ExecutionProgressEvent, ToolProgressEvent } from "@/lib/types";
+
+const EXECUTION_STATES = new Set(["starting", "started", "completed", "failed", "timed_out", "stopped", "control_failed"]);
+const EXECUTION_OPERATIONS = new Set(["launch", "observe", "input", "stop", "inventory"]);
+
+export function isExecutionActivity(event: ToolProgressEvent): event is ExecutionProgressEvent {
+  const item = event as Partial<ExecutionProgressEvent>;
+  return item.activity === "execution" && item.version === 2
+    && typeof item.state === "string" && EXECUTION_STATES.has(item.state)
+    && typeof item.operation === "string" && EXECUTION_OPERATIONS.has(item.operation)
+    && typeof item.counts_as_operation === "boolean";
+}
 
 export function formatToolCallTrace(call: unknown): string | null {
   if (!call || typeof call !== "object") return null;
+  if (isExecutionActivity(call as ToolProgressEvent)) return null;
   const item = call as {
     name?: unknown;
     arguments?: unknown;

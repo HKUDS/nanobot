@@ -8,6 +8,8 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, TypeVar, cast
 
+from nanobot.agent.tools.execution_activity import ExecutionActivityContract, ExecutionFact
+
 if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
@@ -197,13 +199,18 @@ class Schema(ABC):
 
 
 class ToolResult(str):
-    """String-compatible tool output with structured status."""
+    """String-compatible model output with return-point execution facts."""
 
     is_error: bool
+    activity_fact: ExecutionFact | None
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(
+        cls, content: str, *, is_error: bool = False,
+        activity_fact: ExecutionFact | None = None,
+    ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.activity_fact = activity_fact
         return obj
 
     @classmethod
@@ -255,6 +262,8 @@ class Tool(ABC):
     def exclusive(self) -> bool:
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
+
+    activity_contract: ExecutionActivityContract | None = None
 
     # --- Plugin metadata ---
 

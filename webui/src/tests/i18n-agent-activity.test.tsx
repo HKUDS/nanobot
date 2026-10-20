@@ -15,15 +15,22 @@ function placeholders(value: string): string[] {
   return [...value.matchAll(/{{\s*(\w+)\s*}}/g)].map((match) => match[1]).sort();
 }
 
+function expectResourceStrings(english: Record<string, string>, translated: Record<string, string>) {
+  expect(Object.keys(translated).sort()).toEqual(Object.keys(english).sort());
+  for (const [key, value] of Object.entries(english)) {
+    expect(translated[key].trim(), key).not.toBe("");
+    expect(placeholders(translated[key]), key).toEqual(placeholders(value));
+  }
+}
+
 describe("localized agent activity contracts", () => {
   it.each(supportedLocales.map(({ code }) => code))("keeps complete activity resources and interpolation in %s", async (locale) => {
     const english = resources.en.common.message.agentActivity;
     const translated = resources[locale].common.message.agentActivity;
-    expect(Object.keys(translated).sort()).toEqual(Object.keys(english).sort());
-    for (const key of Object.keys(english) as (keyof typeof english)[]) {
-      expect(translated[key].trim(), key).not.toBe("");
-      expect(placeholders(translated[key]), key).toEqual(placeholders(english[key]));
-    }
+    const { execution: englishExecution, ...englishLabels } = english;
+    const { execution: translatedExecution, ...translatedLabels } = translated;
+    expectResourceStrings(englishLabels, translatedLabels);
+    expectResourceStrings(englishExecution, translatedExecution);
     expect(translated.actionTargetRich).toContain("<action>{{action}}</action>");
     expect(translated.actionTargetRich).toContain("<target></target>");
 

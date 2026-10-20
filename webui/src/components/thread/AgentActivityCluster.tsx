@@ -28,6 +28,7 @@ import {
 } from "@/components/thread/activity/activity-text";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
 import { GenericToolRun } from "@/components/thread/activity/GenericToolRun";
+import { ExecutionActivity } from "@/components/thread/activity/ExecutionActivity";
 import {
   canGroupGenericToolRuns,
   type GenericToolRunItem,
@@ -54,7 +55,7 @@ import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { logoFallbackUrls } from "@/lib/provider-brand";
-import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
+import { canonicalToolTrace, formatToolCallTrace, isExecutionActivity } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
 import type {
   CliAppInfo,
@@ -113,6 +114,7 @@ function countActivity(
   let modelSegments = 0;
   const cliCount = cliRuns.length;
   const mcpCount = mcpRuns.length;
+  const executionCalls = new Set<string>();
   for (const m of messages) {
     if (m.activityKind === "model") {
       modelSegments += 1;
@@ -126,6 +128,15 @@ function countActivity(
       if (m.traceDetail) {
         toolCalls += m.traceDetail.traceCount;
         continue;
+      }
+      for (const event of m.toolEvents ?? []) {
+        if (isExecutionActivity(event) && event.counts_as_operation) {
+          const key = event.call_id ?? m.id;
+          if (!executionCalls.has(key)) {
+            executionCalls.add(key);
+            toolCalls += 1;
+          }
+        }
       }
       const lines = traceLines(m);
       for (const line of lines) {
@@ -203,7 +214,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     const edits = editsByMessage.get(message.id);
     if (message.fileEdits?.length) {
       const traces = traceLines(message).filter((line) => !isFileEditTraceLine(line));
-      if (traces.some((line) => line.trim())) {
+      if (traces.some((line) => line.trim()) || message.toolEvents?.some(isExecutionActivity)) {
         pending.push({ ...message, traces, content: traces.at(-1) ?? "", fileEdits: undefined });
       }
     } else {
@@ -317,7 +328,10 @@ function FoldedAgentActivity({
     }
   }, [onLoadTraceDetails, traceDetailScope]);
 
-  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || modelSegments > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
+  const hasExecutionNotice = activityMessages.some((message) =>
+    message.toolEvents?.some(isExecutionActivity) || message.traceDetail,
+  );
+  const hasVisibleActivity = hasExecutionNotice || reasoningSteps > 0 || toolCalls > 0 || modelSegments > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const hasOnlyFileActivity = fileCount > 0 && activityMessages.every(messageHasOnlyFileActivity);
   const durationMs = activityDurationMs(
     activityMessages,
@@ -782,6 +796,14 @@ function ActivityTraceTimeline({
     );
   }
 
+  for (const event of message.toolEvents ?? []) {
+    if (!isExecutionActivity(event)) continue;
+    items.push(<ExecutionActivity
+      key={`${message.id}:execution:${event.call_id ?? items.length}`}
+      event={event}
+      active={active}
+    />);
+  }
   if (!items.length) return null;
   return (
     <>

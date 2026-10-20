@@ -507,3 +507,9 @@ Clients connect with `?token=my-shared-secret&client_id=alice`.
 ```
 
 Clients connect to `ws://127.0.0.1:8765/chat/ws?client_id=...`. Trailing slashes are normalized, so `/chat/ws/` works the same.
+
+## Execution activity compatibility
+
+WebUI protocol 1 hosts may advertise the optional `webui.execution-activity.v2` capability. Their public command activity uses `message` frames with `kind: "execution"`, safe fallback `text`, and version-2 `tool_events` containing execution facts rather than internal control calls. A successful observer wait that still finds the command running produces no activity frame. A result notice is not another tool operation; only a command launch counts as an operation. Completion, failure, timeout, owner-confirmed termination and control failures remain visible. Raw tool results stay in the model/diagnostic path, and command output is not copied into progress messages.
+
+Current clients render these facts as localized activity. The protocol-1 client at source snapshot `103840171b47a811b0119462bb5c569fe521ca0a` renders the fallback text as progress replies, ignoring the optional structured facts, without inventing tool calls or operation counts. Oversized execution groups use the optional `execution_detail` field, not `trace_detail`, so that client's history parser continues to accept the page. Current clients load it through the existing trace-detail endpoint. Ordinary tool activity retains its existing format; mixed batches are split in causal order, including read-only projection of stored mixed records. This addition does not raise the core protocol floor or rewrite saved conversations.

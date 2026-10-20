@@ -397,6 +397,7 @@ export interface GoalStateWsPayload {
 }
 
 export interface ToolProgressEvent {
+  activity?: string;
   version?: number;
   phase?: "start" | "end" | "error" | string;
   call_id?: string;
@@ -406,6 +407,17 @@ export interface ToolProgressEvent {
   error?: unknown;
   files?: unknown[];
   embeds?: unknown[];
+}
+
+export interface ExecutionProgressEvent extends ToolProgressEvent {
+  version: 2;
+  activity: "execution";
+  state: "starting" | "started" | "completed" | "failed" | "timed_out" | "stopped" | "control_failed";
+  operation: "launch" | "observe" | "input" | "stop" | "inventory";
+  counts_as_operation: boolean;
+  command?: string | null;
+  exit_code?: number | null;
+  output_incomplete?: boolean;
 }
 
 export interface UIFileDiff {
@@ -1508,9 +1520,11 @@ export type InboundEvent =
       tool_events?: ToolProgressEvent[];
       /** Oversized persisted activity detail, fetched only when the trace is expanded. */
       trace_detail?: UITraceDetail;
+      /** Execution details use a separate optional field for protocol-1 text fallback. */
+      execution_detail?: UITraceDetail;
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
-      kind?: "tool_hint" | "progress" | "reasoning";
+      kind?: "tool_hint" | "progress" | "reasoning" | "execution";
       /** Server-measured turn wall time when this frame finishes an assistant reply. */
       latency_ms?: number;
       /** Lightweight provenance for proactive assistant messages. */

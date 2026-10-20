@@ -91,6 +91,7 @@ def _tool_event_arguments(tool_call: Any) -> dict[str, Any]:
 def build_tool_event_start_payload(tool_call: Any) -> dict[str, Any]:
     return {
         "version": 1,
+        "activity": "tool",
         "phase": "start",
         "call_id": str(getattr(tool_call, "id", "") or ""),
         "name": getattr(tool_call, "name", ""),
@@ -120,11 +121,15 @@ def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str
         tool_call = context.tool_calls[idx]
         result = context.tool_results[idx]
         event = context.tool_events[idx]
+        if "public_finish" in event:
+            payloads.extend(dict(item) for item in event["public_finish"])
+            continue
         status = event.get("status")
         phase = "end" if status == "ok" else "error"
         files, embeds = tool_event_result_extras(result)
         payload = {
             "version": 1,
+            "activity": "tool",
             "phase": phase,
             "call_id": str(getattr(tool_call, "id", "") or ""),
             "name": getattr(tool_call, "name", ""),

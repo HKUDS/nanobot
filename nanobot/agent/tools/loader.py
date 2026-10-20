@@ -143,6 +143,7 @@ class _LegacyErrorPrefixTool(Tool):
 
     def __init__(self, wrapped: Tool) -> None:
         self._wrapped = wrapped
+        self.activity_contract = wrapped.activity_contract
 
     @property
     def name(self) -> str:

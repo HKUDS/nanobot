@@ -1305,6 +1305,7 @@ class AgentLoop:
                 session_key=active_session_key,
                 workspace=effective_scope.project_path,
                 tool_hint_max_length=self.tool_hint_max_length,
+                resolve_activity_contract=effective_tools.get_activity_contract,
                 registered_hook_factories=self._hook_factories,
                 turn_hook_factories=list(hook_factories or []),
                 registered_hooks=self._extra_hooks,

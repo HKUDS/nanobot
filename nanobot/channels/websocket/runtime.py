@@ -1239,11 +1239,14 @@ class WebSocketChannel(BaseChannel):
         # Mark intermediate agent breadcrumbs (tool-call hints, generic
         # progress strings) so WS clients can render them as subordinate
         # trace rows rather than conversational replies.
-        if progress_event and progress_event.tool_hint:
-            payload["kind"] = "tool_hint"
-        elif progress_event:
-            payload["kind"] = "progress"
-        phase = "activity" if payload.get("kind") in ("tool_hint", "progress") else "answer"
+        if progress_event:
+            execution = bool(progress_event.tool_events) and all(
+                item.get("activity") == "execution" for item in progress_event.tool_events or []
+            )
+            payload["kind"] = "execution" if execution else (
+                "tool_hint" if progress_event.tool_hint else "progress"
+            )
+        phase = "activity" if progress_event else "answer"
         self._persist_turn_transcript_event(
             msg.chat_id,
             payload,

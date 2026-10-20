@@ -241,6 +241,7 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
     provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
+    tools.get_activity_contract.return_value = None
     tools.execute = AsyncMock(return_value="tool result")
 
     runner = AgentRunner()

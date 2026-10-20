@@ -12,9 +12,14 @@ try:
 except ImportError:
     pytest.skip("Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True)
 
+from nanobot.agent.tools.execution_activity import (
+    EXEC_ACTIVITY,
+    ExecutionFact,
+    public_execution_finish,
+)
 from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram.runtime import (
     TELEGRAM_MAX_MESSAGE_LEN,
@@ -29,6 +34,7 @@ from nanobot.channels.telegram.runtime import (
     _telegram_command_text,
 )
 from nanobot.events import ContextCompactionEvent
+from nanobot.utils.public_tool_activity import public_activity_hint
 
 
 class _FakeHTTPXRequest:
@@ -1905,6 +1911,32 @@ async def test_send_progress_keeps_message_in_topic() -> None:
     )
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_execution_progress_uses_escaped_blockquote_in_topic() -> None:
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]), MessageBus())
+    _install_ready_app(channel)
+    events = [dict(item) for item in public_execution_finish(
+        EXEC_ACTIVITY,
+        call_id="execution-1",
+        arguments={"command": "python check.py < input.txt"},
+        fact=ExecutionFact("failed", exit_code=7, output_incomplete=True),
+        failed=True,
+    )]
+    event = ProgressEvent(content=public_activity_hint(events), tool_hint=True, tool_events=events)
+
+    await channel.send(outbound_message_for_event(
+        channel="telegram", chat_id="123", event=event, metadata={"message_thread_id": 42},
+    ))
+
+    sent = channel._app.bot.sent_messages
+    assert len(sent) == 1
+    assert sent[0]["text"] == (
+        "<blockquote expandable>Command failed (exit code 7) — output may be incomplete: "
+        "python check.py &lt; input.txt</blockquote>"
+    )
+    assert sent[0]["message_thread_id"] == 42
 
 
 @pytest.mark.asyncio

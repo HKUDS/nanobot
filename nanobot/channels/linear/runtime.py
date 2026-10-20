@@ -27,6 +27,7 @@ from nanobot.config.paths import get_media_dir
 from nanobot.pairing import PAIRING_CODE_META_KEY
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import safe_filename
+from nanobot.utils.public_tool_activity import execution_activity_text
 
 MAX_PROMPT_ATTACHMENTS = 10
 
@@ -148,7 +149,7 @@ class LinearChannel(BaseChannel):
         if isinstance(event, ProgressEvent):
             if event.tool_events:
                 for item in event.tool_events:
-                    await self._send_tool_event(msg, item)
+                    await self._send_activity_event(msg, item)
                 return
             if msg.content:
                 await self._create_activity(
@@ -279,10 +280,20 @@ class LinearChannel(BaseChannel):
                 key=f"file:{path}:{index}:{result}",
             )
 
-    async def _send_tool_event(self, msg: OutboundMessage, item: dict[str, Any]) -> None:
+    async def _send_activity_event(self, msg: OutboundMessage, item: dict[str, Any]) -> None:
+        call_id = str(item.get("call_id") or uuid.uuid4())
+        if item.get("activity") == "execution":
+            state = str(item.get("state") or "")
+            await self._create_activity(
+                msg.chat_id,
+                msg.metadata,
+                {"type": "thought", "body": _redact_sensitive_text(execution_activity_text(item))},
+                key=f"execution:{call_id}:{state}",
+                ephemeral=state in {"starting", "started"},
+            )
+            return
         name = str(item.get("name") or "tool")
         phase = str(item.get("phase") or "start")
-        call_id = str(item.get("call_id") or uuid.uuid4())
         arguments = item.get("arguments")
         parameter = json.dumps(
             _redact_sensitive(arguments), ensure_ascii=False, default=str

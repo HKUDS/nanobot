@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
+from nanobot.agent.tools.execution_activity import ExecutionActivityContract, ExecutionFact
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -52,6 +53,10 @@ class ToolRegistry:
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)
+
+    def get_activity_contract(self, name: str) -> ExecutionActivityContract | None:
+        tool = self.get(name)
+        return tool.activity_contract if tool is not None else None
 
     def get_runtime_context_providers(self) -> list[RuntimeContextProvider]:
         """Return tool-owned providers in stable tool-name order."""
@@ -199,17 +204,25 @@ class ToolRegistry:
     async def execute(self, name: str, params: Any) -> Any:
         """Execute a tool by name with given parameters."""
         tool, params, error = self.prepare_call(name, params)
+        def error_result(content: str, original: Any = None) -> ToolResult:
+            fact = original.activity_fact if isinstance(original, ToolResult) else None
+            if fact is None and tool is not None and tool.activity_contract is not None:
+                fact = ExecutionFact("control_failed")
+            return ToolResult(
+                with_tool_error_hint(content), is_error=True, activity_fact=fact,
+            )
+
         if error:
-            return ToolResult.error(with_tool_error_hint(str(error)))
+            return error_result(str(error))
 
         try:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
             if is_tool_error_result(result):
-                return ToolResult.error(with_tool_error_hint(str(result)))
+                return error_result(str(result), result)
             return result
         except Exception as e:
-            return ToolResult.error(with_tool_error_hint(f"Error executing {name}: {str(e)}"))
+            return error_result(f"Error executing {name}: {str(e)}")
 
     @property
     def tool_names(self) -> list[str]:

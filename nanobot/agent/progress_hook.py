@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.execution_activity import ExecutionActivityContract
 from nanobot.bus.outbound_events import ProgressEvent, StreamDeltaEvent, StreamEndEvent
 from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import ToolCallRequest
@@ -15,6 +17,11 @@ from nanobot.utils.helpers import IncrementalThinkExtractor, strip_think
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
+)
+from nanobot.utils.public_tool_activity import (
+    execution_start,
+    public_activity_batches,
+    public_activity_hint,
 )
 from nanobot.utils.tool_hints import format_tool_hints
 
@@ -30,6 +37,7 @@ class AgentProgressHook(AgentHook):
         session_key: str | None = None,
         tool_hint_max_length: int = 40,
         log_content: bool = True,
+        resolve_activity_contract: Callable[[str], ExecutionActivityContract | None] | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._publish = events.publish
@@ -37,6 +45,7 @@ class AgentProgressHook(AgentHook):
         self._session_key = session_key
         self._tool_hint_max_length = tool_hint_max_length
         self._log_content = log_content
+        self._resolve_activity_contract = resolve_activity_contract
         self._stream_buf = ""
         self._think_extractor = IncrementalThinkExtractor()
         self._reasoning_open = False
@@ -107,6 +116,7 @@ class AgentProgressHook(AgentHook):
             arguments = {}
         payload: dict[str, Any] = {
             "version": 1,
+            "activity": "tool",
             "phase": phase,
             "call_id": str(call_id),
             "name": name,
@@ -138,11 +148,23 @@ class AgentProgressHook(AgentHook):
                 thought = self._strip_think(context.response.content if context.response else None)
                 if thought:
                     await self._publish(ProgressEvent(content=thought))
-            tool_hint = self._strip_think(self._tool_hint(context.tool_calls))
-            tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
-            await self._publish(ProgressEvent(
-                content=tool_hint or "", tool_hint=True, tool_events=tool_events,
-            ))
+            tool_events: list[dict[str, Any]] = []
+            for call in context.tool_calls:
+                contract = (
+                    self._resolve_activity_contract(call.name)
+                    if self._resolve_activity_contract else None
+                )
+                if contract is None:
+                    tool_events.append(build_tool_event_start_payload(call))
+                elif item := execution_start(call, contract):
+                    tool_events.append(dict(item))
+            for _, batch in public_activity_batches(tool_events):
+                tool_hint = self._strip_think(public_activity_hint(
+                    batch, max_length=self._tool_hint_max_length,
+                ))
+                await self._publish(ProgressEvent(
+                    content=tool_hint or "", tool_hint=True, tool_events=batch,
+                ))
         for tc in context.tool_calls:
             args_str = (
                 json.dumps(tc.arguments, ensure_ascii=False)[:200]
@@ -171,8 +193,11 @@ class AgentProgressHook(AgentHook):
             and context.tool_events
         ):
             tool_events = build_tool_event_finish_payloads(context)
-            if tool_events:
-                await self._publish(ProgressEvent(tool_events=tool_events))
+            for is_notice, batch in public_activity_batches(tool_events):
+                await self._publish(ProgressEvent(
+                    content=public_activity_hint(batch) if is_notice else "", tool_hint=is_notice,
+                    tool_events=batch,
+                ))
         u = context.usage
         logger.debug(
             "LLM usage: input={} output={} cache_read={} cache_write={} source={}",
