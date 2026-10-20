@@ -2500,6 +2500,8 @@ The WebUI has no control for the idle-compaction threshold or scan interval. Con
 
 When a session is idle for longer than a configured threshold, nanobot summarizes its conversation context. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. The original conversation remains in your saved chat history, but even its most recent messages are no longer included verbatim in the model's context after idle compaction.
 
+Subagent tasks are excluded from idle compaction. They still compact their context as needed to stay within the model's context budget during execution.
+
 ```json
 {
   "agents": {

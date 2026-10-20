@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
@@ -147,6 +148,57 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
     assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
     assert loop.bus.outbound.empty()
+
+
+@pytest.mark.parametrize("reopen", [False, True])
+async def test_idle_compaction_skips_subagent_sessions(tmp_path, monkeypatch, reopen):
+    loop = _make_loop(tmp_path)
+    try:
+        parent = await loop.sessions.state.get("cli:parent")
+        _add_turns(parent, 1)
+        await loop.sessions.state.finish_turn(parent)
+        assert loop.subagents.sessions is not None
+        child_keys = []
+        for completed in (False, True):
+            status = SubagentStatus(
+                task_id=f"idle-{completed}",
+                label="Idle task",
+                task_description="Inspect the workspace",
+                started_at=time.monotonic(),
+                owner=parent.key,
+                state="done" if completed else "running",
+                phase="done" if completed else "running",
+                result="Task observation" if completed else None,
+                finished_at=time.monotonic() if completed else None,
+                completed_at=time.time() if completed else None,
+            )
+            child = await loop.subagents.sessions.create(status)
+            child.add_message("assistant", "Task observation")
+            await loop.sessions.state.finish_turn(child)
+            child_keys.append(child.key)
+
+        if reopen:
+            await loop.aclose()
+            loop = _make_loop(tmp_path)
+
+        clock = MagicMock(wraps=datetime)
+        clock.now.return_value = datetime.now() + timedelta(minutes=20)
+        monkeypatch.setattr("nanobot.agent.autocompact.datetime", clock)
+        loop.consolidator.archive_session = AsyncMock(return_value="Conversation summary.")
+        await loop._check_expired_sessions_if_due()
+        await _drain_background_tasks(loop)
+
+        loop.consolidator.archive_session.assert_awaited_once()
+        assert loop.consolidator.archive_session.await_args.args[0].key == parent.key
+        compacted_parent = await loop.sessions.state.get(parent.key)
+        assert compacted_parent.metadata["_last_summary"]["text"] == "Conversation summary."
+        for key in child_keys:
+            child = await loop.sessions.state.get(key)
+            assert len(child.messages) == 2
+            assert child.last_archived == 0
+            assert "_last_summary" not in child.metadata
+    finally:
+        await loop.aclose()
 
 
 async def test_expired_unified_turn_keeps_latest_delivery_route(tmp_path, monkeypatch):
