@@ -15,13 +15,12 @@ from nanobot.command.router import CommandContext
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_RESTART_CONTROL_METADATA_KEY
 from nanobot.webui.session_list_index import list_webui_sessions
-from nanobot.webui.transcript import append_transcript_object, read_transcript_lines
 
 from .test_websocket_channel import _basic_handler, _sent_ws_payloads
 
 
-def _channel(tmp_path: Path, *, allowed: bool = True):
-    sessions = SessionManager(tmp_path / "workspace")
+def _channel(tmp_path: Path, *, allowed: bool = True, sessions=None):
+    sessions = sessions or SessionManager(tmp_path / "workspace")
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     channel = WebSocketChannel(
@@ -37,8 +36,8 @@ def _channel(tmp_path: Path, *, allowed: bool = True):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("existing", ["none", "canonical", "transcript", "both"])
-async def test_settings_restart_does_not_create_or_change_chat_history(tmp_path, monkeypatch, existing):
-    sessions, bus, channel, connection = _channel(tmp_path)
+async def test_settings_restart_does_not_create_or_change_chat_history(history, tmp_path, monkeypatch, existing):
+    sessions, bus, channel, connection = _channel(tmp_path, sessions=history.sessions)
     monkeypatch.setattr("nanobot.command.builtin.set_restart_notice_to_env", MagicMock())
     key = "websocket:existing"
     if existing in {"canonical", "both"}:
@@ -47,12 +46,12 @@ async def test_settings_restart_does_not_create_or_change_chat_history(tmp_path,
         session.metadata.update({"webui": True, "title": "Keep this title"})
         sessions.save(session)
     if existing in {"transcript", "both"}:
-        append_transcript_object(key, {
-            "event": "user_message", "chat_id": "existing", "text": "Keep my conversation",
+        history.append(key, {
+            "event": "user", "chat_id": "existing", "text": "Keep my conversation",
         })
     before_rows = list_webui_sessions(sessions)
     before_files = {p: p.read_bytes() for p in tmp_path.rglob("*.jsonl")}
-    before_transcript = read_transcript_lines(key)
+    before_transcript = history.read(key)
 
     # Use each new connection's default ID, then an existing chat when present.
     chat_ids = ["ready-default-1", "ready-default-2"]
@@ -86,9 +85,9 @@ async def test_settings_restart_does_not_create_or_change_chat_history(tmp_path,
     assert len(replies) == len(chat_ids)
     assert all(frame["text"] == "Restarting..." and frame["turn_id"].startswith("webui-system:") for frame in replies)
     assert {p: p.read_bytes() for p in tmp_path.rglob("*.jsonl")} == before_files
-    assert read_transcript_lines(key) == before_transcript
+    assert history.read(key) == before_transcript
     # A fresh manager uses the public sidebar discovery path, not a cached count.
-    fresh = SessionManager(tmp_path / "workspace")
+    fresh = SessionManager(sessions.workspace)
     assert list_webui_sessions(fresh) == before_rows
     if existing in {"canonical", "both"}:
         restored = fresh.get_existing(key)
@@ -104,8 +103,8 @@ async def test_settings_restart_does_not_create_or_change_chat_history(tmp_path,
     ("/restart later", "webui-system:not-a-restart"),
     ("ordinary message", "webui-system:not-a-command"),
 ])
-async def test_control_prefix_does_not_suppress_ordinary_or_session_command_history(tmp_path, text, turn_id):
-    sessions, bus, channel, connection = _channel(tmp_path)
+async def test_control_prefix_does_not_suppress_ordinary_or_session_command_history(history, tmp_path, text, turn_id):
+    sessions, bus, channel, connection = _channel(tmp_path, sessions=history.sessions)
     await channel._dispatch_envelope(connection, "browser", {
         "type": "message", "chat_id": "chat", "content": text, "webui": True, "turn_id": turn_id,
         "metadata": {WEBUI_RESTART_CONTROL_METADATA_KEY: True},
@@ -114,7 +113,7 @@ async def test_control_prefix_does_not_suppress_ordinary_or_session_command_hist
     assert WEBUI_RESTART_CONTROL_METADATA_KEY not in message.metadata
     await channel.send(OutboundMessage(channel="websocket", chat_id="chat", content="Reply", metadata=message.metadata))
     assert len(list_webui_sessions(sessions)) == 1
-    assert [row["text"] for row in read_transcript_lines("websocket:chat")] == [text, "Reply"]
+    assert [row["text"] for row in history.read("websocket:chat")] == [text, "Reply"]
     await channel._cleanup_connection(connection)
 
 

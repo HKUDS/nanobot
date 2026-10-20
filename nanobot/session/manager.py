@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Callable, TypedDict, TypeVar, cast
 from uuid import uuid4
 
 from nanobot.providers.base import ProviderConversationState
@@ -16,6 +16,7 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.location import SessionLocation
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
@@ -33,6 +34,7 @@ from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 if TYPE_CHECKING:
     from nanobot.session.state import SessionState
 
+_T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
@@ -585,9 +587,26 @@ class SessionManager:
             target = fork_session(source, target_key, before_user_index)
             if target is not None:
                 self._store.save(target)
+                self._store.copy_history_prefix(source_key, target, before_user_index)
             return target
 
         return self._store.run_write(fork)
+
+    def project_history(self, key: str, project: Callable[[HistoryReader], _T]) -> _T:
+        """Read an administrative display snapshot; runtime uses state.project_history."""
+        return self._store.project_history(key, project)
+
+    def append_history(self, key: str, facts: list[HistoryFact]) -> None:
+        """Append offline fixture/import facts with the current admitted generation."""
+        self._require_offline_mutation()
+
+        def append() -> None:
+            session = self._store.load(key, history=False)
+            if session is None:
+                session = self.get_or_create(key)
+                self._store.save(session)
+            self._store.append_history(key, facts, expected_generation=session.generation)
+        self._store.run_write(append)
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:
         """Read a session without populating the cache."""

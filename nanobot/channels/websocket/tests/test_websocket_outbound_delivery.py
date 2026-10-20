@@ -83,7 +83,7 @@ def _channel() -> WebSocketChannel:
     )
     channel = WebSocketChannel(config, bus, gateway=gateway)
     # Keep disk latency out of every connection delivery synchronization check.
-    channel._persist_turn_transcript_event = MagicMock(return_value=True)
+    channel._persist_turn_transcript_event = AsyncMock(return_value=True)
     return channel
 
 

@@ -28,6 +28,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.keys import session_key_for_channel
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
@@ -752,10 +753,12 @@ class WebUICommandRouter:
                             execution_session_key, {},
                         )
                     )
+            if session_generation is not None:
+                metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
             if is_webui and not restart_control and (
                 temporary_policy is None or temporary_policy.persist_transcript
             ):
-                self._transcripts.append_user_message(
+                await self._transcripts.append_user_message(
                     chat_id,
                     content,
                     metadata=metadata,

@@ -297,23 +297,23 @@ async def test_sessions_list_requires_bearer_token(
 
 
 @pytest.mark.asyncio
-async def test_sessions_list_and_thread_restore_transcript_without_canonical_file(
+async def test_sessions_list_and_thread_restore_display_without_model_messages(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sm = SessionManager(tmp_path / "workspace")
-    from nanobot.webui.transcript import append_transcript_object
+    sm = history.sessions
+
 
     key = "websocket:restored-history"
-    append_transcript_object(
+    history.append(
         key,
         {"event": "user", "chat_id": "restored-history", "text": "original question"},
     )
-    append_transcript_object(
+    history.append(
         key,
         {"event": "message", "chat_id": "restored-history", "text": "original answer"},
     )
-    assert sm.read_session_snapshot(key) is None
+    assert sm.read_session_snapshot(key).messages == []
 
     port = _free_port()
     channel = _ch(bus, session_manager=sm, port=port)
@@ -344,7 +344,7 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
             "original question",
             "original answer",
         ]
-        assert sm.read_session_snapshot(key) is None
+        assert sm.read_session_snapshot(key).messages == []
     finally:
         await channel.stop()
         await server_task
@@ -2414,21 +2414,23 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 
 
 @pytest.mark.asyncio
-async def test_session_delete_removes_file(
+async def test_session_delete_removes_canonical_and_display_history(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sm = _seed_session(tmp_path, key="websocket:doomed")
-    from nanobot.webui.transcript import append_transcript_object
+    sm = history.sessions
+    draft = sm.get_or_create("websocket:doomed")
+    draft.add_message("user", "canonical")
+    sm.save(draft)
 
-    append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
+
+    history.append("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     try:
         session_key = "websocket:doomed"
         assert sm.read_session_snapshot(session_key) is not None
-        webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
-        assert webui_path.is_file()
+        assert history.read(session_key)[0]["text"] == "x"
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -2437,28 +2439,27 @@ async def test_session_delete_removes_file(
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert sm.read_session_snapshot(session_key) is None
-        assert not webui_path.exists()
+        assert history.read(session_key) == []
     finally:
         await channel.stop()
         await server_task
 
 
 @pytest.mark.asyncio
-async def test_session_delete_removes_transcript_without_canonical_file(
+async def test_session_delete_removes_display_without_model_messages(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sm = SessionManager(tmp_path / "workspace")
-    from nanobot.webui.transcript import append_transcript_object
+    sm = history.sessions
+
 
     key = "websocket:transcript-only"
-    append_transcript_object(
+    history.append(
         key,
         {"event": "user", "chat_id": "transcript-only", "text": "recover me"},
     )
-    assert sm.read_session_snapshot(key) is None
-    webui_path = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
-    assert webui_path.is_file()
+    assert sm.read_session_snapshot(key).messages == []
+    assert history.read(key)[0]["text"] == "recover me"
 
     channel = _ch(bus, session_manager=sm, port=_free_port())
     server_task = asyncio.create_task(channel.start())
@@ -2471,7 +2472,8 @@ async def test_session_delete_removes_transcript_without_canonical_file(
 
         assert response.status_code == 200
         assert response.json()["deleted"] is True
-        assert not webui_path.exists()
+        assert sm.read_session_snapshot(key) is None
+        assert history.read(key) == []
     finally:
         await channel.stop()
         await server_task
@@ -3211,10 +3213,10 @@ async def test_session_delete_action_accepts_websocket_keys(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_resigns_assistant_media_urls(
+async def test_webui_thread_resigns_assistant_media_urls(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     media_root = tmp_path / "media"
@@ -3228,11 +3230,11 @@ async def test_webui_thread_resigns_assistant_media_urls(
 
     monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
 
-    append_transcript_object(
+    history.append(
         "websocket:video-replay",
         {"event": "user", "chat_id": "video-replay", "text": "make a video"},
     )
-    append_transcript_object(
+    history.append(
         "websocket:video-replay",
         {
             "event": "message",
@@ -3243,7 +3245,7 @@ async def test_webui_thread_resigns_assistant_media_urls(
         },
     )
 
-    channel = _ch(bus, port=29914)
+    channel = _ch(bus, port=29914, session_manager=history.sessions)
     server_task = asyncio.create_task(channel.start())
     try:
         token = channel.gateway.tokens.issue_api_token(300)
@@ -3311,10 +3313,10 @@ async def test_sessions_list_negotiates_gzip_across_repeated_headers(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_complete_transcript_skips_session_history_read(
+async def test_webui_thread_complete_transcript_skips_session_history_read(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:fast-thread"
@@ -3324,7 +3326,7 @@ async def test_webui_thread_complete_transcript_skips_session_history_read(
         {"event": "message", "chat_id": "fast-thread", "text": "hello back"},
         {"event": "turn_end", "chat_id": "fast-thread"},
     ):
-        append_transcript_object(key, event)
+        history.append(key, event)
 
     read_session_file = MagicMock(
         side_effect=AssertionError("complete transcripts must not read canonical history")
@@ -3361,14 +3363,14 @@ async def test_webui_thread_complete_transcript_skips_session_history_read(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_negotiates_gzip_for_large_payloads(
+async def test_webui_thread_negotiates_gzip_for_large_payloads(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sm = SessionManager(tmp_path)
-    append_transcript_object(
+    sm = history.sessions
+    history.append(
         "websocket:gzip-thread",
         {
             "event": "user",
@@ -3421,10 +3423,10 @@ async def test_webui_thread_negotiates_gzip_for_large_payloads(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_revalidates_and_loads_large_trace_details(
+async def test_webui_thread_revalidates_and_loads_large_trace_details(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:revalidated-thread"
@@ -3441,7 +3443,7 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
         {"event": "message", "chat_id": "revalidated-thread", "text": "done"},
         {"event": "turn_end", "chat_id": "revalidated-thread"},
     ):
-        append_transcript_object(key, event)
+        history.append(key, event)
     port = _free_port()
     channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
     server_task = asyncio.create_task(channel.start())
@@ -3481,7 +3483,7 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
         assert detail.json()["message_id"] == trace_event["projection_id"]
         assert detail.json()["events"][0]["text"] == trace
 
-        append_transcript_object(
+        history.append(
             key,
             {"event": "user", "chat_id": "revalidated-thread", "text": "again"},
         )
@@ -3497,15 +3499,15 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_omits_validator_when_transcript_changes_during_replay(
+async def test_webui_thread_omits_validator_when_transcript_changes_during_replay(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:changing-thread"
     sm = _seed_session(tmp_path, key=key)
-    append_transcript_object(
+    history.append(
         key,
         {"event": "user", "chat_id": "changing-thread", "text": "hello"},
     )

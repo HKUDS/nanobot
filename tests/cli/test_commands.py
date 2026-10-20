@@ -131,6 +131,7 @@ class _EmptyGatewaySessionManager:
     def state(self):
         return SimpleNamespace(
             list_sessions=AsyncMock(return_value=[]),
+            migrate_history=AsyncMock(),
             record_delivery=AsyncMock(),
             aclose=AsyncMock(),
         )

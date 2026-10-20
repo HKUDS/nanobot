@@ -41,6 +41,7 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackModelSelection
 from nanobot.runtime_context import public_history_message
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
@@ -531,6 +532,24 @@ class WebuiTurnRoutePolicy:
 
         return routed
 
+    async def admit(self, route: TurnRoute, session_key: str, generation: str) -> TurnRoute:
+        """Pin independently routed replies to the destination's current lifetime."""
+        if route.channel != "websocket":
+            return route
+        target_key = webui_session_key(route.chat_id)
+        if target_key == session_key:
+            return route
+        revision = await self.sessions.state.project_history(target_key, lambda history: history.revision)
+        if revision is None:
+            raise SessionConflictError("display destination is no longer active")
+        metadata = dict(route.metadata)
+        admitted = metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        # A distinct alias admitted by the WebSocket edge must still be current.
+        if admitted not in (None, generation, revision[0]):
+            raise SessionConflictError("display destination generation was replaced")
+        metadata[HISTORY_GENERATION_METADATA_KEY] = revision[0]
+        return replace(route, metadata=metadata)
+
 
 def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserver:
     """Translate provider fallback choices into chat-scoped WebUI events."""
@@ -630,6 +649,7 @@ class WebuiTurnCoordinator:
             content="",
             metadata=dict(ctx.metadata or {}),
             session_key_override=ctx.session_key,
+            session_generation=ctx.session_generation,
         )
 
     @staticmethod
@@ -657,8 +677,11 @@ class WebuiTurnCoordinator:
             return
         public_metadata = _session_message_public_metadata(envelope)
         try:
-            append_session_message_input(
+            assert event.context.session_generation is not None
+            await append_session_message_input(
                 session_key,
+                sessions=self.sessions,
+                expected_generation=event.context.session_generation,
                 content=event.content,
                 created_at_ms=envelope["created_at_ms"],
                 session_message=public_metadata,

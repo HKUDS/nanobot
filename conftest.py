@@ -62,6 +62,7 @@ def _isolate_runtime_stores(
         return path
 
     monkeypatch.setattr(session_location, "get_runtime_subdir", runtime_subdir)
+    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: runtime_subdir("webui"))
     monkeypatch.setattr(star_prompt, "get_webui_dir", lambda: runtime_subdir("webui"))
     monkeypatch.setattr(pairing_store, "_store_path", lambda: data_dir() / "pairing.json")
     monkeypatch.setattr(llm_usage, "get_data_dir", data_dir)
@@ -126,3 +127,69 @@ def create_symlink():
             raise
 
     return create
+
+
+class DisplayHistoryFixture:
+    """Explicit offline setup plus snapshot reads for history projection tests."""
+
+    def __init__(self, workspace: Path) -> None:
+        from nanobot.session.manager import SessionManager
+
+        self.sessions = SessionManager(workspace)
+
+    async def metadata(self, chat_id, metadata=None):
+        from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+
+        session = await self.sessions.state.get_header(f"websocket:{chat_id}")
+        return {**(metadata or {}), HISTORY_GENERATION_METADATA_KEY: session.generation}
+
+    async def message(self, **kwargs):
+        from nanobot.bus.events import OutboundMessage
+
+        kwargs["metadata"] = await self.metadata(kwargs["chat_id"], kwargs.get("metadata"))
+        return OutboundMessage(**kwargs)
+
+    async def stream(self, channel, method, chat_id, *args, **kwargs):
+        kwargs["metadata"] = await self.metadata(chat_id, kwargs.get("metadata"))
+        await getattr(channel, method)(chat_id, *args, **kwargs)
+
+    def append(self, key, record):
+        from nanobot.webui.transcript import append_transcript_object
+
+        append_transcript_object(key, record, sessions=self.sessions)
+
+    def _project(self, name, key, *args, **kwargs):
+        from nanobot.webui import transcript
+
+        return self.sessions.project_history(key, lambda snapshot: getattr(transcript, name)(
+            key, *args, history=snapshot, **kwargs,
+        ))
+
+    def read(self, key):
+        return self._project("read_transcript_lines", key)
+
+    def build(self, key, **kwargs):
+        return self._project("build_webui_thread_response", key, **kwargs)
+
+    def trace(self, key, detail_ref):
+        return self._project("build_webui_trace_detail_response", key, detail_ref)
+
+    def revision(self, key, **kwargs):
+        return self._project("webui_transcript_revision", key, **kwargs)
+
+    def prompts(self, key, **kwargs):
+        return self._project("build_prompt_index", key, **kwargs)
+
+    def prompt_response(self, key, previous_revision, **kwargs):
+        return self._project("prompt_index_response", key, previous_revision, **kwargs)
+
+    def unfinished(self, key):
+        return self._project("has_unfinished_transcript_tail", key)
+
+
+@pytest.fixture
+async def history(tmp_path: Path):
+    fixture = DisplayHistoryFixture(tmp_path)
+    yield fixture
+    if fixture.sessions._state is not None:
+        await fixture.sessions.state.aclose()

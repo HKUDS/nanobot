@@ -112,7 +112,7 @@ def build_gateway_services(
     uploads = AttachmentHTTP(AttachmentStore(
         get_media_dir("websocket"), limits=ingress.attachments,
     ))
-    transcripts = WebUITranscriptRecorder(log=logger)
+    transcripts = WebUITranscriptRecorder(session_manager, log=logger)
     workspaces = WebUIWorkspaceController(
         session_manager=session_manager,
         default_workspace=workspace_path,

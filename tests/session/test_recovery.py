@@ -19,7 +19,7 @@ from nanobot.session.recovery import (
     pending_followups,
     record_pending_followup,
 )
-from nanobot.webui import session_list_index, transcript
+from nanobot.webui import history as history_module
 from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 
 
@@ -28,8 +28,8 @@ def _isolate_webui_transcripts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     """Recovery scans must discover only test-owned transcripts, not active user chats."""
     webui_dir = tmp_path / "isolated-webui"
     webui_dir.mkdir()
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr(transcript, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
 
 
 def _persist(manager: SessionManager, session: Session) -> None:
@@ -69,7 +69,7 @@ async def test_stale_incomplete_transcript_waits_for_confirmation(tmp_path: Path
     _persist(sessions, session)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
-        lambda _key: True,
+        lambda _key, **_kwargs: True,
     )
 
     coordinator, bus, restarted = _coordinator(tmp_path)
@@ -102,7 +102,7 @@ async def test_materialized_interruption_can_continue_from_saved_context(
     _persist(sessions, session)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
-        lambda _key: True,
+        lambda _key, **_kwargs: True,
     )
 
     coordinator, bus, restarted = _coordinator(tmp_path)
@@ -132,8 +132,8 @@ async def test_transcript_only_interruption_is_discovered_without_materializing_
 ) -> None:
     webui_dir = tmp_path / "webui"
     webui_dir.mkdir()
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr(transcript, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
     unfinished_key = "websocket:unfinished"
     completed_key = "websocket:completed"
     (webui_dir / f"{SessionManager.safe_key(unfinished_key)}.jsonl").write_text(
@@ -155,7 +155,9 @@ async def test_transcript_only_interruption_is_discovered_without_materializing_
     assert restored.metadata[RECOVERY_METADATA_KEY]["status"] == "awaiting_user"
     assert restored.metadata[RECOVERY_METADATA_KEY]["reason"] == "interrupted_without_checkpoint"
     assert restored.metadata[RECOVERY_METADATA_KEY]["can_continue"] is False
-    assert sessions.read_session_metadata(completed_key) is None
+    completed = sessions.get_existing(completed_key)
+    assert completed is not None and completed.messages == []
+    assert RECOVERY_METADATA_KEY not in completed.metadata
     event = bus.outbound.get_nowait().event
     assert isinstance(event, RecoveryStateEvent)
     assert event.status == "awaiting_user"
@@ -196,7 +198,7 @@ async def test_scan_loads_only_sessions_that_need_webui_recovery(
     monkeypatch.setattr(restarted.state, "get", tracked_get_or_create)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
-        lambda _key: False,
+        lambda _key, **_kwargs: False,
     )
 
     await coordinator.scan()

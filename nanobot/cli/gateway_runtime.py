@@ -102,6 +102,11 @@ async def _deliver_to_channel(
         await session_manager.state.record_delivery(
             key, msg.content, extra, expected_generation=expected_generation,
         )
+        if msg.channel == "websocket":
+            from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+
+            metadata[HISTORY_GENERATION_METADATA_KEY] = expected_generation
+            msg = replace(msg, metadata=metadata)
     await bus.publish_outbound(msg)
 
 
@@ -525,9 +530,11 @@ def _run_gateway(
     cron = CronService(cron_store_path)
     trigger_store = LocalTriggerStore(config.workspace_path)
 
+    webui_route_policy = WebuiTurnRoutePolicy(session_manager)
     turn_delivery_factory = TurnDeliveryFactory(
         bus,
-        route_policy=WebuiTurnRoutePolicy(session_manager),
+        route_policy=webui_route_policy,
+        route_admission=webui_route_policy.admit,
     )
 
     tools = ToolRegistry()

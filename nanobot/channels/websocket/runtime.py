@@ -683,6 +683,7 @@ class WebSocketChannel(BaseChannel):
             )
 
     async def start(self) -> None:
+        await self._transcripts.initialize()
         self.gateway.http.remote_instances.resume()
         from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -1119,7 +1120,7 @@ class WebSocketChannel(BaseChannel):
         # Give an idle writer a chance to start without waiting for physical I/O.
         await asyncio.sleep(0)
 
-    def _persist_turn_transcript_event(
+    async def _persist_turn_transcript_event(
         self,
         chat_id: str,
         event: dict[str, Any],
@@ -1138,7 +1139,7 @@ class WebSocketChannel(BaseChannel):
                 chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
             )
             return True
-        persisted = self._transcripts.prepare_and_append(
+        persisted = await self._transcripts.prepare_and_append(
             chat_id,
             event,
             metadata=metadata,
@@ -1169,7 +1170,7 @@ class WebSocketChannel(BaseChannel):
             )
         return persisted
 
-    def _persist_turn_stream_event(
+    async def _persist_turn_stream_event(
         self,
         chat_id: str,
         event: dict[str, Any],
@@ -1185,7 +1186,7 @@ class WebSocketChannel(BaseChannel):
                 chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
             )
             return True
-        persisted = self._transcripts.prepare_and_append_stream_event(
+        persisted = await self._transcripts.prepare_and_append_stream_event(
             chat_id,
             event,
             completed_text=completed_text,
@@ -1247,7 +1248,7 @@ class WebSocketChannel(BaseChannel):
         elif progress_event:
             payload["kind"] = "progress"
         phase = "activity" if payload.get("kind") in ("tool_hint", "progress") else "answer"
-        self._persist_turn_transcript_event(
+        await self._persist_turn_transcript_event(
             msg.chat_id,
             payload,
             metadata=msg.metadata,
@@ -1287,7 +1288,7 @@ class WebSocketChannel(BaseChannel):
             body["stream_id"] = stream_id
         stream_key = (chat_id, str(stream_id or ""))
         self._reasoning_text_buffers.setdefault(stream_key, []).append(delta)
-        self._persist_turn_stream_event(
+        await self._persist_turn_stream_event(
             chat_id,
             body,
             completed_text=None,
@@ -1318,7 +1319,7 @@ class WebSocketChannel(BaseChannel):
             body["stream_id"] = stream_id
         stream_key = (chat_id, str(stream_id or ""))
         reasoning_text = "".join(self._reasoning_text_buffers.pop(stream_key, []))
-        self._persist_turn_stream_event(
+        await self._persist_turn_stream_event(
             chat_id,
             body,
             completed_text=reasoning_text or None,
@@ -1343,7 +1344,7 @@ class WebSocketChannel(BaseChannel):
             "chat_id": chat_id,
             "edits": edits,
         }
-        self._persist_turn_transcript_event(
+        await self._persist_turn_transcript_event(
             chat_id,
             payload,
             metadata=metadata,
@@ -1397,7 +1398,7 @@ class WebSocketChannel(BaseChannel):
             body["resuming"] = True
         if stream_end and merge_next:
             body["merge_next"] = True
-        self._persist_turn_stream_event(
+        await self._persist_turn_stream_event(
             chat_id,
             body,
             completed_text=completed_text,
@@ -1424,7 +1425,7 @@ class WebSocketChannel(BaseChannel):
         conns = list(self._subs.get(chat_id, ()))
         body: dict[str, Any] = dict(payload)
         if persistence == "turn_activity":
-            self._persist_turn_transcript_event(
+            await self._persist_turn_transcript_event(
                 chat_id,
                 body,
                 metadata=metadata,
@@ -1436,7 +1437,7 @@ class WebSocketChannel(BaseChannel):
                 canonical_webui_turn
                 and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
             )
-            persisted = self._persist_turn_transcript_event(
+            persisted = await self._persist_turn_transcript_event(
                 chat_id,
                 body,
                 metadata=metadata,
