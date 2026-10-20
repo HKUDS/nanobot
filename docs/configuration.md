@@ -2443,13 +2443,16 @@ The gateway can run a protected heartbeat cron job that periodically checks `HEA
   "gateway": {
     "heartbeat": {
       "enabled": true,
-      "intervalS": 1800
+      "intervalS": 1800,
+      "modelOverride": "openai/gpt-4o-mini"
     }
   }
 }
 ```
 
 If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and sends only useful/actionable results to the most recently active chat target. If the file has no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.
+
+Set `gateway.heartbeat.modelOverride` to a lower-cost model to run the heartbeat turn and its notification evaluation on that model; the main agent model and provider are unchanged. When unset, heartbeat runs on the main agent model.
 
 Use `HEARTBEAT.md` for recurring background checks that should not notify you on every run. For a scheduled task that normally sends its result back to the chat where it was created, use the `cron` tool.
 
@@ -2459,6 +2462,7 @@ The heartbeat appears as `heartbeat` when you list cron jobs, but cannot be remo
 |--------|---------|-------------|
 | `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
+| `gateway.heartbeat.modelOverride` | `null` | Optional model used for heartbeat execution and its notification evaluation. The main agent model remains unchanged. |
 | `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
 
 ### Custom heartbeat evaluator prompt
