@@ -76,11 +76,13 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
         const notificationDetails = section === "notifications" ? ", .settings-list-inset > .border-t, section > p" : "";
         const loaded = await boxes(target.locator(selector + notificationDetails));
         const loadedControls = section === "notifications" ? await boxes(target.getByRole("switch")) : null;
+        const readingControl = section === "appearance" ? await boxes(target.getByRole("radiogroup")) : null;
         await page.goto(fixture("settings", "loading", extra));
         await settle(page);
         const skeletonSelector = section === "overview" ? "[data-overview-skeleton-row]" : section === "models" ? "[data-model-preset-skeleton], .settings-footer" : section === "about" ? ".settings-list-row" : "[data-settings-skeleton-row]";
         const skeleton = await boxes(target.locator(skeletonSelector + notificationDetails));
         sameBoxes(skeleton, loaded);
+        if (readingControl) sameBoxes(await boxes(target.locator("[data-skeleton-reading-size]")), readingControl);
         if (loadedControls) {
           const skeletonControls = await boxes(target.locator("[data-skeleton-switch]"));
           sameBoxes(skeletonControls, loadedControls);

@@ -9,6 +9,7 @@ import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings"
 import { McpManagementDialog } from "@/components/settings/system/McpManagementDialog";
 import { WorkspaceProjectPicker } from "@/components/thread/WorkspaceControls";
 import { settings } from "@/dev/gallery/settings";
+import { useReadingTypography } from "@/hooks/useReadingTypography";
 import { fetchWorkspaceDirectories } from "@/lib/api";
 import type { McpPresetInfo, NanobotFeatureInfo } from "@/lib/types";
 
@@ -22,6 +23,7 @@ const preset: McpPresetInfo = {
 };
 
 export function SkeletonFixture({ surface, loading }: { surface: string; loading: boolean }) {
+  useReadingTypography();
   const [model, setModel] = useState("");
   const [previewLoading, setPreviewLoading] = useState(loading);
   const feature: NanobotFeatureInfo = {

@@ -7,7 +7,7 @@ import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { cn } from "@/lib/utils";
 
-type Control = "switch" | "input" | "duration" | "segments" | "theme" | "edit" | "text" | "feature";
+type Control = "switch" | "input" | "duration" | "segments" | "reading" | "theme" | "edit" | "text" | "feature";
 const block = "rounded bg-muted-foreground/20";
 
 function Title({ heading = false }: { heading?: boolean }) {
@@ -22,10 +22,11 @@ function Row({ control }: { control: Control }) {
     <div className="flex h-5 items-center"><div className={cn(block, "h-3.5 w-32 max-w-full")} /></div>
     <div className="settings-control">
       {control === "feature" ? <div className={cn(block, "mr-3 h-3 w-14")} /> : null}
-      {control === "duration" ? <div className="w-full"><div className={cn(block, "h-9 w-full rounded-full")} /><div className="mt-1.5 flex h-4 items-center"><div className={cn(block, "h-2.5 w-4/5 opacity-60")} /></div></div> : <div data-skeleton-switch={toggle ? "" : undefined} className={cn(block,
+      {control === "duration" ? <div className="w-full"><div className={cn(block, "h-9 w-full rounded-full")} /><div className="mt-1.5 flex h-4 items-center"><div className={cn(block, "h-2.5 w-4/5 opacity-60")} /></div></div> : <div data-skeleton-switch={toggle ? "" : undefined} data-skeleton-reading-size={control === "reading" ? "" : undefined} className={cn(block,
         toggle ? "h-5 w-9 shrink-0 rounded-full" : control === "input" ? "h-9 w-full rounded-full"
-          : control === "segments" || control === "theme" ? "segmented-control w-44 rounded-full" : control === "edit" ? "ml-auto h-9 w-9 rounded-full" : "h-[19.5px] w-24",
-        control === "segments" && "h-[34px]", control === "theme" && "h-8",
+          : control === "segments" || control === "reading" || control === "theme" ? "segmented-control w-44 rounded-full" : control === "edit" ? "ml-auto h-9 w-9 rounded-full" : "h-[1lh] w-24 text-ui",
+        (control === "segments" || control === "reading") && "h-[34px]", control === "theme" && "h-8",
+        control === "reading" && "w-36 [@media(pointer:coarse)]:w-40",
       )} />}
     </div>
   </div>;
@@ -52,7 +53,7 @@ export function SettingsSectionSkeleton({ section, showRestart = false }: { sect
   </>;
   else switch (section) {
     case "appearance":
-      content = <><Group controls={["theme", "input"]} /><Group controls={["segments", "segments", "switch", "switch"]} /></>;
+      content = <><Group controls={["theme", "input"]} /><Group controls={["reading", "segments", "segments", "switch", "switch"]} /></>;
       break;
     case "notifications":
       content = <section><Title /><SettingsGroup>

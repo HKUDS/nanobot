@@ -58,17 +58,17 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
                     <div className="aspect-[8/5] w-full max-w-sm rounded-compact bg-muted/40" />
                   </div> : <>
                     {previewKind === "markdown" ? <div className="flex justify-end px-4 py-2">
-                      <div className="inline-flex min-h-8 items-center gap-1 rounded-full bg-muted/40 p-1 text-[12px] font-medium">
+                      <div className="inline-flex min-h-8 items-center gap-1 rounded-full bg-muted/40 p-1 text-ui-label">
                         {[t("filePreview.preview"), t("filePreview.source")].map((label) => <span key={label} className="invisible px-3 py-1 [@media(pointer:coarse)]:min-h-9">{label}</span>)}
                       </div>
                     </div> : null}
-                    {previewKind === "markdown" && mode === "preview" ? <div className="px-5 pb-6 pt-1 text-sm sm:px-6">
-                      <div className="flex h-7 items-center"><div className="h-5 w-2/3 rounded bg-muted/40" /></div>
-                      {["w-full", "w-5/6", "w-3/4"].map((width) => <div key={width} className="mt-4 flex h-[1.625em] items-center">
+                    {previewKind === "markdown" && mode === "preview" ? <div className="markdown-content px-5 pb-6 pt-1 sm:px-6">
+                      <h1 data-file-preview-heading-skeleton className="flex h-[1lh] items-center"><div className="h-[0.75em] w-2/3 rounded bg-muted/40" /></h1>
+                      {["w-full", "w-5/6", "w-3/4"].map((width) => <div key={width} className="mt-4 flex h-[1lh] items-center">
                         <div className={`h-3 rounded bg-muted/40 ${width}`} />
                       </div>)}
-                    </div> : <div className="px-4 py-3 font-mono text-[13px] leading-[1.55]">
-                      {["w-2/3", "w-full", "w-5/6", "w-3/4", "w-1/2", "w-3/5"].map((width) => <div key={width} className="flex h-[1.55em] items-center">
+                    </div> : <div className="px-4 py-3 font-mono text-code">
+                      {["w-2/3", "w-full", "w-5/6", "w-3/4", "w-1/2", "w-3/5"].map((width) => <div key={width} className="flex h-[1lh] items-center">
                         <div className="w-[4.25em] shrink-0 pr-[1.15rem]"><div className="ml-auto h-3 w-2 rounded bg-muted/40" /></div>
                         <div className={`h-3 max-w-[calc(100%-4.25em)] rounded bg-muted/40 ${width}`} />
                       </div>)}
