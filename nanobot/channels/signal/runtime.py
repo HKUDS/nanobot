@@ -18,7 +18,7 @@ import httpx
 from pydantic import Field, computed_field, field_validator
 
 from nanobot.bus.delivery import ChannelNotReadyError
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import ExecutionAdmission, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -434,6 +434,7 @@ class SignalChannel(BaseChannel):
         authorization_id: str | None = None,
         require_existing_session: bool = False,
         session_generation: str | None = None,
+        execution_admission: ExecutionAdmission | None = None,
     ) -> None:
         """Handle an inbound message whose policy has already been checked.
 
@@ -458,6 +459,7 @@ class SignalChannel(BaseChannel):
                 session_key_override=session_key,
                 session_generation=session_generation,
                 require_existing_session=require_existing_session,
+                execution_admission=execution_admission,
             )
         )
 

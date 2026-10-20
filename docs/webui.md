@@ -104,6 +104,11 @@ To use work from another topic, mention it with `@` and tell nanobot what you ne
 The message timeline shows replies and agent activity. Expand the **Worked for** section to inspect the reasoning and tool activity for a completed turn.
 
 Scroll past the oldest loaded message, or pull down and release on touch devices, to load earlier history. A red indicator offers error details and retry; **No earlier messages** marks the history boundary.
+Task indicators follow the gateway's confirmed state, including work waiting to start and requests to stop. Sending a message or uploading an attachment does not itself mean the agent is running. **Stop** remains pending until the gateway confirms that the requested work has ended; a finished task can still be synchronizing its reply.
+
+If the connection drops, task state becomes unconfirmed and the host control shows **Reconnecting**. Tasks in persistent topics can continue during the interruption. After reconnecting, task indicators and completed replies update automatically, including topics you have switched away from. Some text generated while disconnected may appear only after the task finishes. Queued messages wait for confirmed idle state and the previous result before sending automatically; an unconfirmed message receipt is not automatically resent. [Temporary chats](#temporary-chats) end when their connection is lost.
+
+Older compatible hosts can still exchange chat messages. If live task state is unavailable, update the host to enable confirmed task indicators, Stop controls and automatic queued sending.
 
 Tasks in persistent topics can continue while the connection is lost. Status and completed replies update after reconnecting; some missed text may appear only when the task finishes. [Temporary chats](#temporary-chats) end on connection loss.
 

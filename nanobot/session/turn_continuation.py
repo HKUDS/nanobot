@@ -147,15 +147,17 @@ async def maybe_continue_turn(
     ctx.final_content = ""
     ctx.all_messages = messages
     ctx.suppress_response = True
-    await ctx.pending_queue.put(
-        dataclasses.replace(
-            ctx.msg,
-            sender_id=_GOAL_CONTINUATION_SENDER,
-            content=content,
-            media=[],
-            metadata=metadata,
-            session_key_override=ctx.session_key,
-        )
+    continuation = dataclasses.replace(
+        ctx.msg,
+        sender_id=_GOAL_CONTINUATION_SENDER,
+        content=content,
+        media=[],
+        metadata=metadata,
+        session_key_override=ctx.session_key,
+    )
+    ctx.pending_queue.put_nowait(continuation)
+    await ctx.delivery.runtime_event_publisher.execution_queued(
+        continuation, ctx.session_key, new_owner=True,
     )
     return True
 

@@ -1966,6 +1966,19 @@
     "error": "Connection error"
   },
   "thread": {
+    "runStatus": {
+      "syncing": "Checking task status…",
+      "unknown": "Task status unknown. Reconnect to check.",
+      "unavailable": "Task status unavailable. Update nanobot on this host to enable task status, Stop, and automatic queued messages.",
+      "queued": "Task queued",
+      "running": "Task running",
+      "stopping": "Task stopping…",
+      "cancelPending": "Stop requested. Waiting for the task to exit…",
+      "sending": "Sending message…",
+      "deliveryUnknown": "Message delivery unconfirmed. Check the conversation before sending again.",
+      "resultUnknown": "Reply not confirmed. Reconnect to check the conversation.",
+      "stopFailed": "Stop request failed. Check the task status and try again."
+    },
     "subagents": {
       "stopFailed": "Could not stop this task.",
       "stopTask": "Stop {{label}}",

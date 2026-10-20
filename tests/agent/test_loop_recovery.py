@@ -112,16 +112,12 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
     sessions.save(session)
     recovery = RecoveryCoordinator(sessions, bus)
 
-    loop = AgentLoop.__new__(AgentLoop)
-    loop.sessions = sessions
-    loop._unified_session = False
-    loop._recovery_admission = recovery
-    loop._session_locks = {}
-    loop._concurrency_gate = None
-    loop._automation_turn_coordinators = []
-    loop._discarding_sessions = set()
-    loop._preserve_inflight_turns_on_shutdown = False
-    loop.turn_delivery_factory = TurnDeliveryFactory(bus)
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+        session_manager=sessions, recovery_admission=recovery,
+    )
     process_message = AsyncMock(return_value=OutboundMessage(
         channel="websocket",
         chat_id="chat",
@@ -135,10 +131,12 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
     )
     continuation = bus.inbound.get_nowait()
 
-    assert continuation.metadata[INTERNAL_CONTINUATION_META] is True
-    await loop._dispatch_one(continuation, asyncio.Queue())
-
-    process_message.assert_awaited_once()
+    try:
+        assert continuation.metadata[INTERNAL_CONTINUATION_META] is True
+        await loop._dispatch_one(continuation, asyncio.Queue())
+        process_message.assert_awaited_once()
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio

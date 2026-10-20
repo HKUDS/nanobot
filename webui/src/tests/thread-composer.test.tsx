@@ -399,7 +399,7 @@ describe("ThreadComposer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(input).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sending message…" })).toBeDisabled();
     await act(async () => resolveSend(false));
 
     await waitFor(() => expect(input).toBeEnabled());
@@ -1881,6 +1881,7 @@ describe("ThreadComposer", () => {
         onSend={vi.fn()}
         onStop={onStop}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
         slashCommands={COMMANDS}
       />,
@@ -2430,6 +2431,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
         sessions={[target]}
       />,
@@ -2449,6 +2451,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
         sessions={[replacement]}
       />,
@@ -3180,7 +3183,7 @@ describe("ThreadComposer", () => {
     );
   });
 
-  it("does not classify exact-only slash commands with arguments", () => {
+  it("sends exact-only argument errors as side-channel input without finalizing the active turn", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
@@ -3203,7 +3206,7 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "/new with a title" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, { sideChannel: true });
   });
 
   it("routes a manually submitted stop command through the stop handler", () => {
@@ -3214,6 +3217,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={onStop}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
         slashCommands={COMMANDS}
       />,
@@ -3293,6 +3297,7 @@ describe("ThreadComposer", () => {
         onSend={vi.fn()}
         onStop={onStop}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3300,6 +3305,31 @@ describe("ThreadComposer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
 
     expect(onStop).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+  });
+
+  it("shows local sending without pretending an execution is running", () => {
+    const onStop = vi.fn();
+    render(<ThreadComposer onSend={vi.fn()} onStop={onStop} isSending />);
+    expect(screen.getByRole("button", { name: "Sending message…" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    expect(onStop).not.toHaveBeenCalled();
+  });
+
+  it("keeps Stop pending until confirmed exit and does not complete a rejected request", async () => {
+    let rejectStop!: (error: Error) => void;
+    const onStop = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectStop = reject; }));
+    const props = { onSend: vi.fn(), onStop, isStreaming: true, activeTurnId: "turn-a" };
+    const view = render(<ThreadComposer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    view.rerender(<ThreadComposer {...props} cancelPending />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop requested. Waiting for the task to exit…" }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Stop requested. Waiting for the task to exit…" })).toBeDisabled();
+    await act(async () => { rejectStop(new Error("rejected")); });
+    view.rerender(<ThreadComposer {...props} />);
+    expect(screen.getByText("Stop request failed. Check the task status and try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
   });
 
@@ -3311,6 +3341,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={onStop}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3337,6 +3368,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3401,6 +3433,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3432,7 +3465,9 @@ describe("ThreadComposer", () => {
     (content) => {
       const onSend = vi.fn();
       const composer = (isStreaming: boolean) => (
-        <ThreadComposer onSend={onSend} isStreaming={isStreaming} slashCommands={COMMANDS} />
+        <ThreadComposer onSend={onSend} isStreaming={isStreaming} slashCommands={COMMANDS}
+          activeTurnId={isStreaming ? "turn-a" : null} queueAutoSendAllowed={!isStreaming}
+          completedTurnIds={isStreaming ? [] : ["turn-a"]} />
       );
       const { rerender } = render(composer(true));
       const input = screen.getByLabelText("Message input");
@@ -3471,6 +3506,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3509,6 +3545,7 @@ describe("ThreadComposer", () => {
         onStop={vi.fn()}
         onTranscribeAudio={onTranscribeAudio}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3538,6 +3575,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={onStop}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3557,6 +3595,8 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={onStop}
         isStreaming={false}
+        queueAutoSendAllowed
+        completedTurnIds={["turn-a"]}
         placeholder="Type your message..."
       />,
     );
@@ -3565,6 +3605,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={onStop}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3581,6 +3622,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3603,6 +3645,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3630,6 +3673,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3653,6 +3697,8 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming={false}
+        queueAutoSendAllowed
+        completedTurnIds={["turn-a"]}
         placeholder="Type your message..."
       />,
     );
@@ -3668,6 +3714,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3676,6 +3723,8 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming={false}
+        queueAutoSendAllowed
+        completedTurnIds={["turn-a"]}
         placeholder="Type your message..."
       />,
     );
@@ -3691,6 +3740,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3723,6 +3773,8 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming={false}
+        queueAutoSendAllowed
+        completedTurnIds={["turn-a"]}
         placeholder="Type your message..."
       />,
     );
@@ -3734,7 +3786,7 @@ describe("ThreadComposer", () => {
 
   it("edits the complete pending message without overwriting a newer draft", () => {
     const onSend = vi.fn();
-    const { rerender } = render(<ThreadComposer onSend={onSend} isStreaming />);
+    const { rerender } = render(<ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" />);
     const input = screen.getByLabelText("Message input");
     for (const text of ["first follow-up", "second follow-up"]) {
       fireEvent.change(input, { target: { value: text } });
@@ -3746,7 +3798,7 @@ describe("ThreadComposer", () => {
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: "edited complete message" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    rerender(<ThreadComposer onSend={onSend} />);
+    rerender(<ThreadComposer onSend={onSend} queueAutoSendAllowed completedTurnIds={["turn-a"]} />);
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledWith("edited complete message");
   });
@@ -3759,6 +3811,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
+        activeTurnId="turn-a"
         placeholder="Type your message..."
       />,
     );
@@ -3789,6 +3842,8 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming={false}
+        queueAutoSendAllowed
+        completedTurnIds={["turn-a"]}
         placeholder="Type your message..."
       />,
     );
@@ -3825,7 +3880,7 @@ describe("ThreadComposer", () => {
     const sendA = vi.fn();
     const sendB = vi.fn();
     const view = render(
-      <ThreadComposer onSend={sendA} isStreaming pendingQueueKey="chat-a" />,
+      <ThreadComposer onSend={sendA} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />,
     );
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "follow-up for A" },
@@ -3841,12 +3896,13 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("follow-up for A")).not.toBeInTheDocument();
 
     view.rerender(
-      <ThreadComposer onSend={sendA} isStreaming pendingQueueKey="chat-a" />,
+      <ThreadComposer onSend={sendA} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />,
     );
     expect(screen.getByText("follow-up for A")).toBeInTheDocument();
     expect(sendA).not.toHaveBeenCalled();
     view.rerender(
-      <ThreadComposer onSend={sendA} isStreaming={false} pendingQueueKey="chat-a" />,
+      <ThreadComposer onSend={sendA} isStreaming={false} pendingQueueKey="chat-a"
+        queueAutoSendAllowed completedTurnIds={["turn-a"]} />,
     );
     expect(sendA).toHaveBeenCalledTimes(1);
     expect(sendA).toHaveBeenCalledWith("follow-up for A");
@@ -3958,21 +4014,24 @@ describe("ThreadComposer", () => {
     other.unmount();
 
     const returned = render(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={[]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={[]} />,
     );
     expect(screen.getByText("first follow-up second follow-up")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     returned.rerender(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-other"]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-other"]} />,
     );
     expect(onSend).not.toHaveBeenCalled();
+    // A completed result alone is insufficient while execution authority is not granted.
+    returned.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />);
+    expect(onSend).not.toHaveBeenCalled();
     returned.rerender(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-a"]} />,
     );
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("first follow-up\nsecond follow-up"));
     for (let update = 0; update < 3; update += 1) {
       returned.rerender(
-        <ThreadComposer onSend={(...args) => onSend(...args)} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+        <ThreadComposer onSend={(...args) => onSend(...args)} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-a"]} />,
       );
     }
     expect(onSend).toHaveBeenCalledTimes(1);
@@ -3983,12 +4042,12 @@ describe("ThreadComposer", () => {
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-next" completedTurnIds={["turn-a"]} />,
     );
     returned.rerender(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-a"]} />,
     );
     expect(onSend).toHaveBeenCalledTimes(1);
     returned.unmount();
     render(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-next"]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-a", "turn-next"]} />,
     );
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
@@ -4011,7 +4070,7 @@ describe("ThreadComposer", () => {
     expect(onStop).toHaveBeenCalledTimes(1);
     view.unmount();
     const returned = render(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-a"]} />,
     );
     expect(screen.getByText("keep for later")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
@@ -4020,7 +4079,7 @@ describe("ThreadComposer", () => {
       <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-other-pane" completedTurnIds={["turn-a"]} />,
     );
     returned.rerender(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-other-pane"]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-a", "turn-other-pane"]} />,
     );
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
@@ -4046,7 +4105,7 @@ describe("ThreadComposer", () => {
     }
     first.unmount();
     const returned = render(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-a"]} />,
     );
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     await act(async () => { rejectDelivery(new Error("Attachment upload interrupted")); });
@@ -4054,7 +4113,7 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     returned.unmount();
     render(
-      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["turn-a"]} />,
     );
     expect(screen.getByText("queued attachment more guidance")).toBeInTheDocument();
     expect(onSend).toHaveBeenCalledTimes(1);
@@ -4070,7 +4129,7 @@ describe("ThreadComposer", () => {
       { id: "legacy-draft", text: "legacy follow-up" },
     ]));
     const onSend = vi.fn();
-    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["old-turn"]} />);
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" queueAutoSendAllowed completedTurnIds={["old-turn"]} />);
     expect(screen.getByText("legacy follow-up")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));

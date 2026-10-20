@@ -1966,6 +1966,19 @@
     "error": "连接出错"
   },
   "thread": {
+    "runStatus": {
+      "syncing": "正在确认任务状态…",
+      "unknown": "任务状态未知，请重新连接后确认。",
+      "unavailable": "任务状态不可用。请更新此主机的 nanobot，以启用任务状态、停止和队列自动发送。",
+      "queued": "任务排队中",
+      "running": "任务执行中",
+      "stopping": "任务停止中…",
+      "cancelPending": "已请求停止，等待任务退出…",
+      "sending": "正在发送消息…",
+      "deliveryUnknown": "消息送达未确认，请查看对话后再决定是否重发。",
+      "resultUnknown": "回复尚未确认，请重新连接后查看对话。",
+      "stopFailed": "停止请求失败，请确认任务状态后重试。"
+    },
     "subagents": {
       "stopFailed": "无法停止此任务。",
       "stopTask": "停止 {{label}}",

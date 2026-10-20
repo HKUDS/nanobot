@@ -17,9 +17,14 @@ class TestSocket {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  send() {}
+  onSend: ((frame: Record<string, unknown>) => void) | null = null;
+  send(value: string) { this.onSend?.(JSON.parse(value)); }
   close() { this.readyState = 3; this.onclose?.(); }
-  open() { this.readyState = 1; this.onopen?.(); }
+  open() {
+    this.readyState = 1;
+    this.onopen?.();
+    this.receive({ event: "ready", chat_id: "default", client_id: "test", run_state_instance_id: "recovery-host" });
+  }
   receive(payload: unknown) {
     this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);
   }
@@ -30,6 +35,7 @@ function completedThread(chatId = "inactive", turnId = "turn-old"): WebuiThreadP
     schemaVersion: 1,
     projection: "events",
     has_pending_tool_calls: false,
+    run_state: { instance_id: "recovery-host", revision: 2, runs: [], completed: [] },
     events: [
       { event: "user_message", chat_id: chatId, turn_id: turnId, text: "Take your time", starts_turn: true },
       { event: "message", chat_id: chatId, turn_id: turnId, text: "The complete answer" },
@@ -44,10 +50,18 @@ function response(body: WebuiThreadPersistedPayload): Response {
 
 function setup() {
   const sockets: TestSocket[] = [];
+  const baselines = new Map<string, unknown>();
   const client = new NanobotClient({
     url: "ws://test", reconnect: true, maxBackoffMs: 10,
     socketFactory: () => {
       const socket = new TestSocket();
+      socket.onSend = (frame) => {
+        if (frame.type !== "watch_runs") return;
+        for (const chatId of frame.chat_ids as string[]) socket.receive({
+          event: "run_state", chat_id: chatId,
+          run_state: baselines.get(chatId) ?? { instance_id: "recovery-host", revision: 0, runs: [], completed: [] },
+        });
+      };
       sockets.push(socket);
       return socket as unknown as WebSocket;
     },
@@ -55,10 +69,19 @@ function setup() {
   client.connect();
   sockets[0].open();
   const hook = renderHook(() => useReconnectRuns(client, () => "renewed-token"));
-  const running = (chatId = "inactive", turnId = "turn-old", startedAt = 123) => sockets.at(-1)!.receive({
-    event: "goal_status", chat_id: chatId, turn_id: turnId,
-    status: "running", started_at: startedAt,
-  });
+  const revisions = new Map<string, number>();
+  const running = (chatId = "inactive", turnId = "turn-old", startedAt = 123) => {
+    const revision = (revisions.get(chatId) ?? -1) + 2;
+    revisions.set(chatId, revision);
+    const runState = {
+      instance_id: "recovery-host", revision, completed: [],
+      runs: [{ run_id: `owner:${turnId}`, turn_id: turnId, phase: "running", started_at: startedAt }],
+    };
+    baselines.set(chatId, runState);
+    sockets.at(-1)!.receive({ event: "run_state", chat_id: chatId, run_state: runState });
+    sockets.at(-1)!.receive({ event: "goal_status", chat_id: chatId, turn_id: turnId,
+      status: "running", started_at: startedAt });
+  };
   const reopen = async () => {
     act(() => sockets.at(-1)!.close());
     await act(async () => { await vi.advanceTimersByTimeAsync(10); });
@@ -200,8 +223,7 @@ describe("durable run recovery", () => {
     const mounted = renderHook(() => {
       const history = useSessionHistory("websocket:inactive");
       const stream = useNanobotStream(
-        "inactive", history.messages, history.hasPendingToolCalls,
-        undefined, undefined, history.completedTurnIds,
+        "inactive", history.messages,
       );
       useEffect(() => client.onSessionUpdate((chatId, scope) => {
         if (chatId === "inactive" && scope !== "metadata") history.refresh();
@@ -225,6 +247,7 @@ describe("durable run recovery", () => {
     act(() => {
       sockets.at(-1)!.receive({ event: "message", chat_id: "inactive", turn_id: "turn-old", text: "The complete answer" });
       sockets.at(-1)!.receive({ event: "turn_end", chat_id: "inactive", turn_id: "turn-old" });
+      sockets.at(-1)!.receive({ event: "run_state", chat_id: "inactive", run_state: completedThread().run_state });
       if (timing === "together") {
         sockets.at(-1)!.receive({ event: "session_updated", chat_id: "inactive", scope: "thread" });
       }
@@ -300,7 +323,9 @@ describe("durable run recovery", () => {
     sockets[0].receive({ event: "delta", chat_id: "inactive", turn_id: "turn-old", text: "The" });
     const cachedAtCompletion: WebuiThreadPersistedPayload[] = [];
     client.onRunStatus((chatId, state) => {
-      if (!state.active) cachedAtCompletion.push(webuiThreadCache.get(`websocket:${chatId}`)!);
+      if (chatId === "inactive" && state.freshness === "fresh" && !state.active && !state.unsettled) {
+        cachedAtCompletion.push(webuiThreadCache.get(`websocket:${chatId}`)!);
+      }
     });
 
     await reopen();
@@ -319,11 +344,34 @@ describe("durable run recovery", () => {
     close();
   });
 
+  it("rereads after an execution exit snapshot when its canonical result is not ready yet", async () => {
+    const incomplete = completedThread();
+    incomplete.events = incomplete.events.slice(0, 1);
+    incomplete.completed_turn_ids = [];
+    incomplete.has_pending_tool_calls = true;
+    incomplete.active_turn_id = "turn-old";
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(incomplete))
+      .mockResolvedValue(response(completedThread()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, running, reopen, close } = setup();
+    running();
+    await reopen();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(client.hasUnsettledRun("inactive")).toBe(false);
+    expect(webuiThreadCache.get("websocket:inactive")?.events.at(-2)).toMatchObject({
+      event: "message", text: "The complete answer",
+    });
+    close();
+  });
+
   it("checks every unsettled chat while keeping a still-running chat active", async () => {
     const body = completedThread("running", "turn-running");
     body.events = body.events.slice(0, 1);
     body.has_pending_tool_calls = true;
     body.active_turn_id = "turn-running";
+    body.run_state = { instance_id: "recovery-host", revision: 2, completed: [],
+      runs: [{ run_id: "owner:turn-running", turn_id: "turn-running", phase: "running", started_at: 456 }],
+    };
     const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve(response(
       url.includes("websocket%3Arunning") ? body : completedThread(),
     )));
@@ -339,13 +387,15 @@ describe("durable run recovery", () => {
     expect(client.getRunStartedAt("running")).toBe(456);
     expect(client.getRunTurnId("running")).toBe("turn-running");
     expect(client.hasUnsettledRun("running")).toBe(true);
-    expect(runStatus).toHaveBeenCalledTimes(3);
+    expect(runStatus).toHaveBeenCalledWith("running", expect.objectContaining({ freshness: "unknown" }));
+    expect(runStatus).toHaveBeenLastCalledWith("running", expect.objectContaining({ freshness: "fresh", active: true }));
     close();
   });
 
   it.each(["failed read", "missing activity state"])("leaves %s unresolved", async (failure) => {
     const body = completedThread();
     Reflect.deleteProperty(body, "has_pending_tool_calls");
+    Reflect.deleteProperty(body, "run_state");
     body.events = body.events.slice(0, 2);
     const fetchMock = failure === "failed read"
       ? vi.fn().mockRejectedValue(new Error("offline"))
@@ -406,6 +456,7 @@ describe("durable run recovery", () => {
     const body = completedThread();
     body.completed_turn_ids = [];
     body.has_pending_tool_calls = true;
+    delete body.run_state;
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(body)));
     const { client, running, reopen, close } = setup();
     running();
@@ -431,6 +482,7 @@ describe("durable run recovery", () => {
     body.events = body.events.slice(0, 1);
     body.completed_turn_ids = [];
     body.active_turn_id = null;
+    delete body.run_state;
     await act(async () => { resolveRead(response(body)); });
     expect(client.getRunStartedAt("inactive")).toBe(456);
     expect(client.hasUnsettledRun("inactive")).toBe(true);

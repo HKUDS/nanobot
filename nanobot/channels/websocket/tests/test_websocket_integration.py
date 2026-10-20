@@ -358,8 +358,12 @@ async def test_same_session_projects_one_turn_to_both_clients(bus: MagicMock) ->
                     }
                 )
 
-                accepted = await a.recv()
-                projected = await b.recv()
+                state_a, accepted = await a.recv_n(2)
+                state_b, projected = await b.recv_n(2)
+                assert state_a.event == state_b.event == "run_state"
+                assert state_a.raw == state_b.raw
+                assert state_a.raw["run_state"]["runs"][0]["phase"] == "queued"
+                assert state_a.raw["run_state"]["runs"][0]["turn_id"] == "turn-a"
                 assert accepted.event == "message_accepted"
                 assert accepted.raw["turn_id"] == "turn-a"
                 assert accepted.raw["starts_turn"] is True

@@ -13,6 +13,7 @@ from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.state import SessionState
 from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
+from nanobot.webui.run_state import RunStateAuthority
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -33,10 +34,12 @@ class WebUISessionProjection:
         sessions: SessionMetadataReader | None,
         *,
         subagent_manager: SubagentManager | None = None,
+        runs: RunStateAuthority | None = None,
         log: Any = default_logger,
     ) -> None:
         self._sessions = sessions
         self._subagents = subagent_manager
+        self._runs = runs
         self._log = log
 
     def subagent_task(self, session_key: str, task_id: str) -> dict[str, object] | None:
@@ -50,13 +53,17 @@ class WebUISessionProjection:
 
     async def attach_fields(self, session_key: str) -> dict[str, Any]:
         """Return the session runtime facts sent with an attach handshake."""
+        fields: dict[str, Any] = {}
         if self._sessions is None:
-            return {}
+            if self._runs is not None:
+                fields["run_state"] = self._runs.snapshot(session_key)
+            return fields
         snapshot = await self._sessions.state.read_metadata(session_key)
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
 
-        fields: dict[str, Any] = {}
+        if self._runs is not None:
+            fields["run_state"] = self._runs.snapshot(session_key)
         try:
             fields["model_preset"] = model_preset_from_metadata(metadata)
         except ValueError:

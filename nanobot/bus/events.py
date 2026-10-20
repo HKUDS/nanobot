@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
+from uuid import uuid4
 
 from nanobot.bus.delivery import DeliveryRequest
 
@@ -18,11 +19,21 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 # services. Never accept these keys verbatim from an untrusted client.
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 INBOUND_META_USER_SHELL = "_user_shell"
+INBOUND_META_EXECUTION_ID = "_execution_id"
+INBOUND_META_STOP_EXECUTION_ID = "_stop_execution_id"
 RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
 # Transport-provided turn correlation; the persisted spelling is retained for clients.
 INBOUND_META_TURN_ID = "webui_turn_id"
 INBOUND_META_LOCAL_MEDIA = "local_media_paths"
+
+
+@dataclass
+class ExecutionAdmission:
+    """One accepted root carries its Stop intent through transport and scheduling."""
+
+    execution_id: str = field(default_factory=lambda: uuid4().hex)
+    stop_requested: bool = False
 
 
 @dataclass
@@ -40,6 +51,7 @@ class InboundMessage:
     require_existing_session: bool = False
     input_role: Literal["user", "system"] | None = None
     session_generation: str | None = None  # Trusted identity assigned at session admission
+    execution_admission: ExecutionAdmission | None = None  # In-process, never persisted
 
     @property
     def session_key(self) -> str:

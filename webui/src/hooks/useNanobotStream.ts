@@ -1,16 +1,15 @@
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
-import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { ApiError, fetchWebuiThread, fetchWebuiThreadTraceDetail } from "@/lib/api";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadTranscript, type ThreadPaging, type ThreadRead, type ThreadTranscriptSnapshot } from "@/lib/thread-transcript";
 import type { ThreadMessageCache } from "@/lib/thread-message-cache";
-import type { StreamError } from "@/lib/nanobot-client";
+import type { RunState, StreamError } from "@/lib/nanobot-client";
 import {
   clearThreadProjectionActivity,
   closeThreadProjectionAnswer,
@@ -47,7 +46,6 @@ const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
 // Markdown and layout work must leave room for input between visible updates.
 const VISIBLE_STREAM_FLUSH_INTERVAL_MS = 50;
 const EMPTY_INITIAL_MESSAGES: UIMessage[] = [];
-const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
 
 /** Own the received transcript, accepting fetched pages and live events together. */
 /** Payload passed to ``send`` when the user attaches one or more files.
@@ -139,17 +137,16 @@ function createTranscript(messages: UIMessage[], saved: ThreadTranscriptSnapshot
 export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = EMPTY_INITIAL_MESSAGES,
-  hasPendingToolCalls = false,
   onTurnEnd?: () => void,
   onStreamDetach?: (messages: UIMessage[]) => void,
-  completedTurnIds: readonly string[] = EMPTY_COMPLETED_TURN_IDS,
   history?: { key: string | null; cache?: ThreadMessageCache },
 ): {
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
   messagesReady: boolean;
   isStreaming: boolean;
-  /** Unix epoch seconds when the current user turn started (WebSocket ``goal_status``). */
+  runState: RunState | null;
+  /** Confirmed server start time, only while runtime state is fresh. */
   runStartedAt: number | null;
   /** Transient model retry state for the active turn. */
   retryStatus: RetryStatus | null;
@@ -164,7 +161,7 @@ export function useNanobotStream(
     options?: SendOptions,
   ) => SubmittedTurn | null;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
-  stop: () => void;
+  stop: () => Promise<void>;
   history: ThreadPaging;
   refreshHistory: () => void;
   loadOlder: () => Promise<void>;
@@ -189,14 +186,9 @@ export function useNanobotStream(
   const threadVisible = useThreadVisibility();
   const threadVisibleRef = useRef(threadVisible);
   threadVisibleRef.current = threadVisible;
-  const { t } = useTranslation();
   const [runState, setRunState] = useState(() => chatId ? client.getRunState(chatId) : null);
-  const isStreaming = runState?.active ?? false;
-  const runStartedAt = runState?.startedAt ?? null;
-  const historyRunGenerationRef = useRef({ chatId, generation: chatId ? client.getRunGeneration(chatId) : 0 });
-  if (historyRunGenerationRef.current.chatId !== chatId) {
-    historyRunGenerationRef.current = { chatId, generation: chatId ? client.getRunGeneration(chatId) : 0 };
-  }
+  const isStreaming = runState?.freshness === "fresh" && runState.active;
+  const runStartedAt = runState?.freshness === "fresh" ? runState.startedAt : null;
   const [messages, setRenderedMessages] = useState<UIMessage[]>(initialTranscript.messages);
   const messagesRef = useRef(messages);
   // Keep received state ahead of React's batched render: navigation can unmount
@@ -209,14 +201,6 @@ export function useNanobotStream(
     setHistoryState(transcriptRef.current.paging);
   }, []);
   const [messageScope, setMessageScope] = useState({ chatId, historyKey, client });
-  /** If history ends in unfinished agent activity, keep the loading spinner alive. */
-  const initialStreaming = useMemo(() => {
-    if (completedTurnIds.length === 0) return hasPendingAgentActivity(initialMessages);
-    const completedInitialTurns = new Set(completedTurnIds);
-    return hasPendingAgentActivity(initialMessages.filter((message) => (
-      !message.turnId || !completedInitialTurns.has(message.turnId)
-    )));
-  }, [completedTurnIds, initialMessages]);
   const [retryStatus, setRetryStatus] = useState<RetryStatus | null>(null);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
   const [recoveryState, setRecoveryState] = useState<RecoveryState | null>(null);
@@ -472,21 +456,11 @@ export function useNanobotStream(
     if (!chatId) return;
     return client.onRunStatus((runChatId, state) => {
       if (runChatId !== chatId) return;
+      // Runtime idle (or lost freshness) does not confirm transcript delivery.
+      // Only turn_end or a committed canonical result may close message cursors.
       setRunState(state);
-      if (state.active) return;
-      flushPendingStreamEvents();
-      setMessages((prev) => {
-        const settled = prev.map((message) => (
-          message.isStreaming ? { ...message, isStreaming: false } : message
-        ));
-        transcriptRef.current.projection = resetThreadProjectionCursor(
-          transcriptRef.current.projection,
-          settled,
-        );
-        return settled;
-      });
     });
-  }, [chatId, client, clearActivitySegment, flushPendingStreamEvents, setMessages]);
+  }, [chatId, client]);
 
   // Reset local state when switching chats. Do not reset on every
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
@@ -503,11 +477,6 @@ export function useNanobotStream(
     clearPendingStreamWork();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, client, historyKey, clearActivitySegment, clearPendingStreamWork, setMessages]);
-
-  useEffect(() => {
-    if (!chatId || (!hasPendingToolCalls && !initialStreaming)) return;
-    client.restorePendingRun(chatId, historyRunGenerationRef.current.generation, historyActiveTurnId);
-  }, [chatId, client, hasPendingToolCalls, historyActiveTurnId, initialStreaming]);
 
   const applyProjectionEvent = useCallback((
     event: ThreadProjectionEvent,
@@ -967,16 +936,11 @@ export function useNanobotStream(
 
       setStreamError(null);
       const sideChannel = options?.sideChannel === true;
-      const finalizeActiveTurn = options?.finalizeActiveTurn === true;
       const continueActiveTurn = options?.continueActiveTurn === true;
       const outboundContent = options?.quotedContext
         ? formatQuotedUserMessage(content, options.quotedContext)
         : content;
       flushPendingStreamEvents();
-      if (finalizeActiveTurn) {
-        client.finishRunLocally(chatId);
-        setRetryStatus(null);
-      }
       const turnId = crypto.randomUUID();
       const userMessageId = crypto.randomUUID();
       if (sideChannel) transcriptRef.current.sideChannelTurnIds.add(turnId);
@@ -987,7 +951,7 @@ export function useNanobotStream(
       )) : undefined;
       setMessages((prev) => {
         let projection = { ...transcriptRef.current.projection, messages: prev };
-        if ((!sideChannel && !continueActiveTurn) || finalizeActiveTurn) {
+        if (!sideChannel && !continueActiveTurn) {
           projection = resetThreadProjectionCursor(projection, prev);
         } else if (continueActiveTurn) {
           // Guidance belongs to the active backend turn. Preserve the answer
@@ -995,9 +959,8 @@ export function useNanobotStream(
           // shown before the new user row, while starting fresh activity after it.
           projection = clearThreadProjectionActivity(projection);
         }
-        const base = finalizeActiveTurn ? finalizeStreamedTurn(prev) : prev;
         const next: UIMessage[] = [
-          ...base,
+          ...prev,
           {
             id: userMessageId,
             role: "user" as const,
@@ -1041,18 +1004,11 @@ export function useNanobotStream(
     [chatId, clearActivitySegment, client, flushPendingStreamEvents, setMessages],
   );
 
-  const stop = useCallback(() => {
+  const stop = useCallback(async () => {
     if (!chatId) return;
     flushPendingStreamEvents();
-    setRetryStatus(null);
-    setMessages((prev) => {
-      const settled = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
-      transcriptRef.current.projection = resetThreadProjectionCursor(transcriptRef.current.projection, settled);
-      return settled;
-    });
-    client.finishRunLocally(chatId);
-    client.sendMessage(chatId, "/stop");
-  }, [chatId, clearActivitySegment, client, flushPendingStreamEvents, setMessages]);
+    await client.requestStop(chatId);
+  }, [chatId, client, flushPendingStreamEvents]);
 
   const transcribeAudio = useCallback(
     (dataUrl: string, options?: { durationMs?: number }) =>
@@ -1081,6 +1037,7 @@ export function useNanobotStream(
     messages,
     messagesReady: messageScope.chatId === chatId && messageScope.historyKey === historyKey && messageScope.client === client,
     isStreaming,
+    runState,
     runStartedAt,
     retryStatus,
     goalState,

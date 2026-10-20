@@ -200,16 +200,20 @@ def builtin_command_palette() -> list[dict[str, str | bool]]:
 def builtin_command_starts_agent_turn(text: str) -> bool:
     """Return whether WebUI ingress should expect a normal agent lifecycle."""
     normalized = normalize_command_text(text)
-    command, separator, args = normalized.partition(" ")
+    command = normalized.split(maxsplit=1)[0].lower() if normalized else ""
+    if command == USER_SHELL_COMMAND:
+        return False
     spec = next(
-        (item for item in BUILTIN_COMMAND_SPECS if item.command == command.lower()),
+        (item for item in BUILTIN_COMMAND_SPECS if item.command == command),
         None,
     )
-    if spec is None or (separator and not spec.accepts_args):
+    if spec is None:
         return True
     if spec.lifecycle == "agent_turn":
         return True
-    return spec.lifecycle == "agent_turn_with_args" and bool(args.strip())
+    # Registered command misuse is an inline argument error. Argument-taking
+    # agent commands must match the router's literal-space prefix as well.
+    return spec.lifecycle == "agent_turn_with_args" and normalized.lower().startswith(f"{command} ")
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:

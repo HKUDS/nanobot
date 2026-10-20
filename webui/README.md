@@ -122,6 +122,18 @@ bun run build
 
 `lint` runs ESLint; `typecheck` checks application and unit-test TypeScript, including channel-owned frontend code and tests; `test` runs Vitest; `test:browser` typechecks and runs Chromium tests with the real components and stylesheet to check tall-dialog reachability and completed-history motion without a gateway; `build` checks production TypeScript and produces the production bundle. Keep tests near the changed behavior and exercise settings save/reload in the browser. Browser-only preferences stay in the frontend; persistent configuration and security policy belong to the Python gateway. When changing that boundary, also run the relevant Python tests from [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+## Execution-state contract
+
+`webui.runs.v1` is an optional capability within WebUI protocol 1; it does not raise the core protocol floor. Hosts without it remain usable for basic chat. The client reports execution state as unavailable rather than inferring it from legacy `goal_status`, transcript markers or local actions.
+
+The authenticated socket's `ready.run_state_instance_id` pins the runtime authority. `run_state` snapshots on `ready`, `attached`, session index rows, thread responses and dedicated `{event: "run_state", chat_id, run_state}` notifications carry `{instance_id, revision, runs, completed}`. Revisions are monotonic within one gateway instance; they are unrelated to history ETags or client generations. Each run has an opaque execution `run_id`, optional `turn_id`, `phase` (`queued`, `running`, `stopping`) and nullable epoch-second `started_at`. An empty run set explicitly means idle. Bounded completion receipts report execution outcomes, not successful result delivery; an absent receipt never proves success.
+
+`{type: "watch_runs", chat_ids: [...]}` replaces a socket's state-only subscriptions. The gateway validates access, registers the set and enqueues a full baseline for each chat without an intervening await. This avoids a snapshot/subscription gap and does not subscribe sidebar sessions to transcript text. Full chat attachment also sends a baseline. Updates reuse the bounded socket outbound queue; backpressure disconnects require a fresh baseline rather than silently losing the final state.
+
+The client accepts runtime snapshots only from its pinned instance and at nondecreasing per-session revisions. Replaced sockets cannot update the store; disconnect marks state unknown, and reconnection requires fresh confirmation even if the revision is unchanged. HTTP can supply versioned state only after the current socket pins its instance; HTTP alone cannot restore freshness after a disconnect, even at the same revision. No history marker, text chunk, local send, upload or cancellation request can change confirmed execution.
+
+Stop uses the existing correlated `webui_request` action `runs.stop` with `{chat_id, run_ids}`. The gateway targets those execution owners, not whatever happens to be running when a delayed request arrives. A successful mutation response acknowledges the request, not execution exit. Input delivery, execution liveness, cancellation intent, transcript recovery and final-result settlement remain separate. The rendered or cached canonical result must be committed before completion fences prune buffered events or queued input is released.
+
 ## Acknowledgements
 
 - [`agent-chat-ui`](https://github.com/langchain-ai/agent-chat-ui) for UI and interaction inspiration across the chat surface.

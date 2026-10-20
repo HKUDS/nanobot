@@ -1761,6 +1761,19 @@
     "error": "Error de conexión"
   },
   "thread": {
+    "runStatus": {
+      "syncing": "Comprobando el estado de la tarea…",
+      "unknown": "Estado de la tarea desconocido. Vuelve a conectarte para comprobarlo.",
+      "unavailable": "Estado de la tarea no disponible. Actualiza nanobot en este host para activar el estado de las tareas, la detención y el envío automático de mensajes en espera.",
+      "queued": "Tarea en espera",
+      "running": "Tarea en curso",
+      "stopping": "Deteniendo la tarea…",
+      "cancelPending": "Detención solicitada. Esperando a que termine la tarea…",
+      "sending": "Enviando mensaje…",
+      "deliveryUnknown": "Recepción del mensaje sin confirmar. Revisa la conversación antes de volver a enviarlo.",
+      "resultUnknown": "Respuesta sin confirmar. Vuelve a conectarte para revisar la conversación.",
+      "stopFailed": "La solicitud de detención falló. Comprueba el estado de la tarea e inténtalo de nuevo."
+    },
     "subagents": {
       "stopFailed": "No se pudo detener esta tarea.",
       "stopTask": "Detener {{label}}",

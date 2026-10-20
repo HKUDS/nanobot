@@ -224,6 +224,10 @@ interface ThreadComposerProps {
   inputAriaLabel?: string;
   compactWhenIdle?: boolean;
   isStreaming?: boolean;
+  isSending?: boolean;
+  cancelPending?: boolean;
+  /** Granted only by fresh idle state with no outstanding delivery/result or recovery decision. */
+  queueAutoSendAllowed?: boolean;
   activeTurnId?: string | null;
   completedTurnIds?: readonly string[];
   modelLabel?: string | null;
@@ -245,7 +249,7 @@ interface ThreadComposerProps {
   mcpPresets?: McpPresetInfo[];
   sessions?: ChatSummary[];
   skills?: SkillSummary[];
-  onStop?: () => void;
+  onStop?: () => void | Promise<void>;
   surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   onInspectAttachment?: (path: string) => Promise<LocalAttachment>;
@@ -1082,6 +1086,9 @@ export function ThreadComposer({
   inputAriaLabel,
   compactWhenIdle = false,
   isStreaming = false,
+  isSending = false,
+  cancelPending = false,
+  queueAutoSendAllowed = false,
   activeTurnId = null,
   completedTurnIds = EMPTY_COMPLETED_TURN_IDS,
   modelLabel = null,
@@ -1159,7 +1166,8 @@ export function ThreadComposer({
   const queueSnapshot = useSyncExternalStore(queuedPromptStore.subscribe, queuedPromptStore.getSnapshot);
   const queuedPrompt = queueSnapshot.prompt;
   const setQueuedPrompt = queuedPromptStore.set;
-  const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
+  const deliverySending = isSending || sendPending || queueSnapshot.sending;
+  const interactionDisabled = !!disabled || deliverySending;
   useEffect(() => {
     if (queueSnapshot.error) setInlineError(queueSnapshot.error);
   }, [queueSnapshot.error]);
@@ -1965,10 +1973,12 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const handleStop = useCallback(() => {
+    if (cancelPending) return;
     secondEnterPromptIdRef.current = null;
     setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
-    onStop?.();
-  }, [onStop, setQueuedPrompt]);
+    const result = onStop?.();
+    if (result instanceof Promise) void result.catch(() => setInlineError(t("thread.runStatus.stopFailed")));
+  }, [cancelPending, onStop, setQueuedPrompt, t]);
 
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
@@ -2204,13 +2214,12 @@ export function ThreadComposer({
     if (!isStreaming) secondEnterPromptIdRef.current = null;
     // Switching to an idle session is not completion of the previous session's run.
     if (previous.key !== pendingQueueKey) return;
-    if (isStreaming || interactionDisabled || !queuedPrompt || !canAutoSendQueuedPrompt(queuedPrompt)) return;
-    const waitingTurnCompleted = queuedPromptStorageKey !== null && queuedPrompt.autoAfterTurnId !== undefined
-      ? completedTurnIds.includes(queuedPrompt.autoAfterTurnId)
-      : previous.isStreaming;
+    if (!queueAutoSendAllowed || isStreaming || interactionDisabled || !queuedPrompt || !canAutoSendQueuedPrompt(queuedPrompt)) return;
+    const waitingTurnCompleted = queuedPrompt.autoAfterTurnId !== undefined
+      && completedTurnIds.includes(queuedPrompt.autoAfterTurnId);
     if (!waitingTurnCompleted) return;
     sendQueuedPrompt(queuedPrompt);
-  }, [completedTurnIds, interactionDisabled, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt, queuedPromptStorageKey]);
+  }, [completedTurnIds, interactionDisabled, queueAutoSendAllowed, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt]);
 
   const submit = useCallback(() => {
     if (modelNeedsSetup) {
@@ -2478,7 +2487,7 @@ export function ThreadComposer({
   const attachButtonDisabled = interactionDisabled || full;
   const showVoiceButton = Boolean(onTranscribeAudio) && (
     voiceRecorder.state !== "idle"
-    || (!hasComposerContent && images.length === 0 && !isStreaming && !modelNeedsSetup)
+    || (!hasComposerContent && images.length === 0 && !isStreaming && !deliverySending && !modelNeedsSetup)
   );
   const voiceRecordingStatusLabel = t("thread.composer.voice.recordingStatus", {
     time: voiceRecorder.elapsedLabel,
@@ -2867,12 +2876,14 @@ export function ThreadComposer({
                   <Button
                     type={showVoiceButton || showStopButton || modelNeedsSetup ? "button" : "submit"}
                     size="icon"
-                    disabled={showVoiceButton ? voiceRecorder.buttonDisabled : showStopButton ? interactionDisabled : !canSend && !canOpenModelSettings}
+                    disabled={showVoiceButton ? voiceRecorder.buttonDisabled : showStopButton ? !!disabled || cancelPending : !canSend && !canOpenModelSettings}
                     aria-label={
                       showVoiceButton
                         ? voiceButtonLabel
                         : showStopButton
-                          ? t("thread.composer.stop")
+                          ? t(cancelPending ? "thread.runStatus.cancelPending" : "thread.composer.stop")
+                          : deliverySending
+                            ? t("thread.runStatus.sending")
                           : modelNeedsSetup
                             ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
                             : t("thread.composer.send")
@@ -2905,7 +2916,10 @@ export function ThreadComposer({
                         <VoiceIcon className="h-4 w-4" />
                       )
                     ) : showStopButton ? (
-                      <StopIcon className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
+                      cancelPending ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+                        : <StopIcon className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
+                    ) : deliverySending ? (
+                      <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
                     ) : modelNeedsSetup ? (
                       <ModelsIcon className="h-4 w-4" />
                     ) : canSend || !isStreaming ? (

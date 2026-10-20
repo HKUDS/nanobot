@@ -15,8 +15,14 @@ from typing import Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
+from nanobot.bus.events import (
+    INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_EXECUTION_ID,
+    INBOUND_META_STOP_EXECUTION_ID,
+    INBOUND_META_USER_SHELL,
+    ExecutionAdmission,
+)
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.runtime_context import (
@@ -98,6 +104,8 @@ class WebUICommandTransport(Protocol):
 
     def webui_detach(self, connection: ServerConnection, chat_id: str) -> None: ...
 
+    def webui_watch_runs(self, connection: ServerConnection, chat_ids: set[str]) -> None: ...
+
     def webui_clear_connection_default(self, connection: ServerConnection) -> None: ...
 
     def webui_clear_stream_buffers(self, chat_id: str) -> None: ...
@@ -131,6 +139,7 @@ class WebUICommandTransport(Protocol):
         session_key: str | None,
         require_existing_session: bool,
         session_generation: str | None,
+        execution_admission: ExecutionAdmission | None = None,
     ) -> None: ...
 
     async def send_session_updated(
@@ -301,8 +310,16 @@ class WebUICommandRouter:
     ) -> None:
         """Execute one typed WebUI command."""
         command_type = envelope.get("type")
+        if command_type == "watch_runs":
+            await self.watch_runs(connection, client_id, envelope)
+            return
         if command_type == "webui_request":
-            await self.start_webui_request(connection, envelope)
+            if envelope.get("action") == "runs.stop" and not self._transport.is_allowed(client_id):
+                request_id = envelope.get("request_id")
+                if isinstance(request_id, str):
+                    await self.send_webui_response(connection, request_id, status=403, message="access_denied")
+                return
+            await self.start_webui_request(connection, envelope, client_id=client_id)
             return
         if command_type == "new_chat":
             new_id = str(uuid.uuid4())
@@ -347,6 +364,7 @@ class WebUICommandRouter:
                 "attached",
                 chat_id=new_id,
                 temporary=True,
+                run_state=self.gateway.runs.snapshot(webui_session_key(new_id)),
             )
             return
         if command_type == "fork_chat":
@@ -481,6 +499,59 @@ class WebUICommandRouter:
             "error",
             detail=f"unknown type: {command_type!r}",
         )
+
+    async def watch_runs(
+        self, connection: ServerConnection, client_id: str, envelope: dict[str, Any],
+    ) -> None:
+        chat_ids = envelope.get("chat_ids")
+        if not self._transport.is_allowed(client_id):
+            await self._transport.webui_send_event(connection, "error", detail="access_denied")
+            return
+        if not isinstance(chat_ids, list) or not all(is_valid_webui_chat_id(chat_id) for chat_id in cast(list[object], chat_ids)):
+            await self._transport.webui_send_event(connection, "error", detail="invalid chat_ids")
+            return
+        watched = set(cast(list[str], chat_ids))
+        try:
+            for chat_id in watched:
+                # Unlike attach, the owning socket may observe its temporary chat.
+                self._temporary_chats.message_policy(connection, chat_id, "")
+                await self._workspaces.async_scope_for_session_key(webui_session_key(chat_id))
+        except (TemporaryChatError, WorkspaceScopeError):
+            await self._transport.webui_send_event(connection, "error", detail="access_denied")
+            return
+        # No await between registration and enqueuing every explicit idle baseline.
+        self._transport.webui_watch_runs(connection, watched)
+
+    async def stop_runs(
+        self, connection: ServerConnection, payload: dict[str, Any], *, client_id: str,
+    ) -> WebUIRequestResult:
+        chat_id, run_ids = payload.get("chat_id"), payload.get("run_ids")
+        if (
+            not is_valid_webui_chat_id(chat_id)
+            or not isinstance(run_ids, list)
+            or not all(isinstance(owner, str) and 0 < len(owner) <= 128 for owner in cast(list[object], run_ids))
+        ):
+            return WebUIRequestResult(status=400, message="invalid run owners")
+        try:
+            policy = self._temporary_chats.message_policy(connection, chat_id, "/stop")
+            await self._workspaces.async_scope_for_session_key(webui_session_key(chat_id))
+        except (TemporaryChatError, WorkspaceScopeError):
+            return WebUIRequestResult(status=403, message="access_denied")
+        session_key = webui_session_key(chat_id)
+        for owner in dict.fromkeys(cast(list[str], run_ids)):
+            execution_key = self.gateway.runs.request_stop(session_key, owner)
+            if execution_key is None:
+                continue
+            await self._transport.webui_dispatch_message(
+                sender_id=client_id, chat_id=chat_id, content="/stop", media=None,
+                metadata={INBOUND_META_STOP_EXECUTION_ID: owner}, is_dm=False,
+                session_key=execution_key,
+                require_existing_session=policy.require_existing_session if policy is not None else False,
+                session_generation=policy.session_generation if policy is not None else None,
+            )
+        return WebUIRequestResult(result={
+            "chat_id": chat_id, "run_state": self.gateway.runs.snapshot(session_key),
+        })
 
     async def _dispatch_message(
         self,
@@ -735,11 +806,7 @@ class WebUICommandRouter:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
         queued_owner = None
-        if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
-            queued_owner = register_queued_websocket_turn_if_idle(chat_id, turn_id)
-            if queued_owner is not None:
-                metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
-
+        execution_admission = None
         accepted = False
         admission_session_key = (
             temporary_policy.session_key
@@ -753,6 +820,15 @@ class WebUICommandRouter:
                 "websocket", chat_id, unified_session=self.gateway.unified_session,
             )
         )
+        if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
+            execution_admission = self.gateway.runs.admit_if_idle(
+                admission_session_key, turn_id, execution_session_key,
+            )
+            if execution_admission is not None:
+                queued_owner = execution_admission.execution_id
+                register_queued_websocket_turn_if_idle(chat_id, turn_id, owner=queued_owner)
+                metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
+                metadata[INBOUND_META_EXECUTION_ID] = queued_owner
         session_generation: str | None = None
         session_created = False
         execution_generation: str | None = None
@@ -829,6 +905,7 @@ class WebUICommandRouter:
                     else False
                 ),
                 session_generation=execution_generation,
+                execution_admission=execution_admission,
             )
             accepted = True
             if turn_id:
@@ -849,6 +926,7 @@ class WebUICommandRouter:
             raise
         finally:
             if not accepted and queued_owner is not None:
+                self.gateway.runs.finish(admission_session_key, queued_owner, "failed")
                 clear_websocket_turn_if_current(chat_id, queued_owner)
 
         media = self._media.augment_transcript_user_media(
@@ -896,6 +974,8 @@ class WebUICommandRouter:
         self,
         connection: ServerConnection,
         envelope: dict[str, Any],
+        *,
+        client_id: str,
     ) -> None:
         request_id = envelope.get("request_id")
         if not isinstance(request_id, str) or re.fullmatch(
@@ -978,6 +1058,17 @@ class WebUICommandRouter:
                     ) if chat_id is not None else ""},
                 )
             return
+        if action == "runs.stop":
+            # A cached response must not bypass connection-owned temporary policy.
+            stop_chat_id = cast(dict[str, Any], payload).get("chat_id")
+            if is_valid_webui_chat_id(stop_chat_id):
+                try:
+                    self._temporary_chats.message_policy(connection, stop_chat_id, "/stop")
+                except TemporaryChatError:
+                    await self.send_webui_response(
+                        connection, request_id, status=403, message="access_denied",
+                    )
+                    return
 
         if action == "temporary_chat.file_preview":
             # Connection-owned, read-only, and deliberately outside the mutation
@@ -1045,7 +1136,8 @@ class WebUICommandRouter:
                 self.execute_webui_request(
                     connection,
                     action,
-                    payload,
+                    cast(dict[str, Any], payload),
+                    client_id=client_id,
                 )
             )
             new_operation = WebUIRequestOperation(
@@ -1143,10 +1235,14 @@ class WebUICommandRouter:
         connection: ServerConnection,
         action: str,
         payload: dict[str, Any],
+        *,
+        client_id: str,
     ) -> WebUIRequestResult:
         try:
             lock = self.request_locks.setdefault(connection, asyncio.Lock())
             async with lock:
+                if action == "runs.stop":
+                    return await self.stop_runs(connection, payload, client_id=client_id)
                 response = await self._http_router.dispatch_webui_mutation(
                     connection,
                     action,
@@ -1223,6 +1319,7 @@ class WebUICommandRouter:
         self.request_tasks.clear()
         self.request_locks.clear()
         self.request_operations.clear()
+        self.gateway.runs.close()
         await self._http_router.settings_routes.close()
         self.gateway.tokens.clear()
         self.gateway.endpoint.clear()

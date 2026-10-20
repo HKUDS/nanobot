@@ -47,10 +47,13 @@ from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
     INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_EXECUTION_ID,
     INBOUND_META_RUNTIME_CONTROL,
+    INBOUND_META_STOP_EXECUTION_ID,
     INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
     RUNTIME_CONTROL_SESSION_DISCARD,
+    ExecutionAdmission,
     InboundMessage,
     OutboundMessage,
 )
@@ -60,6 +63,7 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import ExecutionOutcome
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.command.router import command_text
 from nanobot.config.network import NetworkConfig
@@ -144,6 +148,11 @@ def _prompt_scope_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
 class TurnKind(Enum):
     USER = auto()
     SYSTEM = auto()
+
+
+@dataclass(frozen=True)
+class _ExecutionStop:
+    execution_id: str
 
 
 @dataclass
@@ -433,6 +442,8 @@ class AgentLoop:
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
         self._pending_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
+        # The root currently owned by each FIFO worker, for owner-targeted cancellation.
+        self._execution_roots: dict[str, InboundMessage] = {}
         self._preserve_inflight_turns_on_shutdown = False
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
@@ -962,6 +973,11 @@ class AgentLoop:
         )
         pending = self._pending_queues.get(key)
         tasks = tuple(self._active_tasks.pop(key, set()))
+        root = self._execution_roots.get(key)
+        if root is not None and tasks:
+            admission = root.execution_admission
+            if admission is not None:
+                await self.runtime_event_publisher.execution_changed(root, key, admission, "stopping")
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             with suppress(asyncio.CancelledError, Exception):
@@ -970,6 +986,7 @@ class AgentLoop:
             # A task cancelled before its first step never enters the worker's
             # cleanup handler. Only reclaim that worker's original inbox.
             self._pending_queues.pop(key, None)
+            self._execution_roots.pop(key, None)
             await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
         if journaled_followup_ids and journal_session is not None:
             # Explicit session cancellation owns the follow-ups accepted before
@@ -979,6 +996,59 @@ class AgentLoop:
         sub_cancelled = await self.subagents.cancel_by_session(key)
         exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
         return cancelled + sub_cancelled + exec_cancelled
+
+    async def _cancel_execution(self, key: str, execution_id: str) -> int:
+        """Cancel only the requested root, never a newer owner of the session."""
+        root = self._execution_roots.get(key)
+        if (
+            root is not None
+            and (admission := root.execution_admission) is not None
+            and admission.execution_id == execution_id
+        ):
+            journal_session = await self.sessions.state.read(key)
+            followup_ids = tuple(
+                followup_id
+                for followup in pending_followups(journal_session)
+                if isinstance(followup_id := followup.metadata.get(PENDING_FOLLOWUP_ID_KEY), str)
+            ) if journal_session is not None else ()
+            if self._execution_roots.get(key) is not root:
+                return 0
+            tasks = tuple(self._active_tasks.get(key, ()))
+            pending = self._pending_queues.get(key)
+            admission.stop_requested = True
+            await self.runtime_event_publisher.execution_changed(root, key, admission, "stopping")
+            if self._execution_roots.get(key) is not root:
+                return 0
+            cancelled = sum(1 for task in tasks if not task.done() and task.cancel(_ExecutionStop(execution_id)))
+            for task in tasks:
+                with suppress(asyncio.CancelledError, Exception):
+                    await task
+            if pending is not None and self._pending_queues.get(key) is pending:
+                # A worker cancelled before its first step cannot run its finally.
+                retained = await self._cancel_pending_messages(
+                    key, pending, asyncio.CancelledError(), preserve_other_owners=execution_id,
+                )
+                self._pending_queues.pop(key, None)
+                self._execution_roots.pop(key, None)
+                for msg in retained:
+                    await self._enqueue_session_message(msg)
+            if followup_ids:
+                await self.sessions.state.acknowledge_followups(key, followup_ids)
+            return cancelled
+        pending = self._pending_queues.get(key)
+        if pending is None:
+            return 0
+        retained: list[InboundMessage] = []
+        removed: list[InboundMessage] = []
+        while not pending.empty():
+            msg = pending.get_nowait()
+            admission = msg.execution_admission
+            (removed if admission is not None and admission.execution_id == execution_id else retained).append(msg)
+        for msg in retained:
+            pending.put_nowait(msg)
+        for msg in removed:
+            await self._complete_cancelled_message(key, msg, asyncio.CancelledError())
+        return len(removed)
 
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
@@ -1473,9 +1543,21 @@ class AgentLoop:
             msg.require_existing_session
             and await self.sessions.state.read_metadata(effective_key) is None
         ):
+            admission = msg.execution_admission
+            if admission is not None:
+                await self.runtime_event_publisher.execution_changed(
+                    msg, effective_key, admission, "exited", outcome="cancelled",
+                )
             return
         if msg.is_user_input:
             await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
+        if (
+            msg.channel != "system"
+            and raw.strip().lower() == "/stop"
+            and isinstance(execution_id := msg.metadata.get(INBOUND_META_STOP_EXECUTION_ID), str)
+        ):
+            await self._cancel_execution(effective_key, execution_id)
+            return
         if msg.channel != "system" and self.commands.is_priority(raw):
             await self._dispatch_command_inline(
                 msg, effective_key, raw,
@@ -1546,7 +1628,14 @@ class AgentLoop:
         """Persist a recoverable WebUI follow-up before adding it to the inbox."""
         if not self._can_inject_message(msg):
             return msg
-        followup_id = await self.sessions.state.queue_followup(session_key, msg)
+        try:
+            followup_id = await self.sessions.state.queue_followup(session_key, msg)
+        except (SessionOperationQueueFullError, SessionConflictError):
+            if (admission := msg.execution_admission) is not None:
+                await self.runtime_event_publisher.execution_changed(
+                    msg, session_key, admission, "rejected", outcome="failed",
+                )
+            raise
         if followup_id is None:
             return msg
         pending_msg = dataclasses.replace(
@@ -1558,10 +1647,36 @@ class AgentLoop:
         )
         return pending_msg
 
+    async def _cancel_stopped_admission(self, session_key: str, msg: InboundMessage) -> bool:
+        admission = msg.execution_admission
+        if admission is None or not admission.stop_requested:
+            return False
+        followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
+        if isinstance(followup_id, str):
+            await self.sessions.state.acknowledge_followups(session_key, (followup_id,))
+        await self._complete_cancelled_message(session_key, msg, asyncio.CancelledError())
+        return True
+
+    async def _complete_cancelled_message(
+        self, session_key: str, msg: InboundMessage, error: asyncio.CancelledError,
+    ) -> None:
+        admission = msg.execution_admission
+        if admission is not None:
+            await self.runtime_event_publisher.execution_changed(
+                msg, session_key, admission, "exited", outcome="cancelled",
+            )
+        for coordinator in self._automation_turn_coordinators:
+            coordinator.complete(msg, error=error)
+        if msg.channel != "system" and self.commands.requires_session_queue(command_text(msg)):
+            delivery = self.turn_delivery_factory.unrouted(msg, session_key)
+            await delivery.complete(None, publish_completion=True)
+
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
         """Admit session work without waiting for its execution or result."""
         self.bus.admission.check()
         session_key = self._effective_session_key(msg)
+        if await self._cancel_stopped_admission(session_key, msg):
+            return
         if not self.subagents.accepts_result(msg, session_key):
             return
         if session_key != msg.session_key:
@@ -1577,7 +1692,23 @@ class AgentLoop:
 
         if session_key in self._pending_queues:
             msg = await self._journal_pending_message(session_key, msg)
+            if await self._cancel_stopped_admission(session_key, msg):
+                return
         pending = self._pending_queues.get(session_key)
+        if pending is None or not self._can_inject_message(msg):
+            await self.runtime_event_publisher.execution_queued(msg, session_key)
+        elif (admission := msg.execution_admission) is not None:
+            # Transport can reserve a root before the shared-session FIFO knows
+            # this input belongs to an existing execution instead. Its durable
+            # follow-up journal remains owned by that execution, not this receipt.
+            pending.put_nowait(dataclasses.replace(
+                msg, execution_admission=None,
+                metadata={key: value for key, value in msg.metadata.items() if key != INBOUND_META_EXECUTION_ID},
+            ))
+            await self.runtime_event_publisher.execution_changed(
+                msg, session_key, admission, "injected",
+            )
+            return
         if pending is not None:
             pending.put_nowait(msg)
             return
@@ -1585,6 +1716,7 @@ class AgentLoop:
         new_pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
         new_pending.put_nowait(msg)
         self._pending_queues[session_key] = new_pending
+        self._execution_roots[session_key] = msg
         task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
         self._track_active_task(session_key, task)
 
@@ -1594,6 +1726,7 @@ class AgentLoop:
         pending: asyncio.Queue[InboundMessage],
     ) -> None:
         """Run the sole worker for a session until its inbox is empty."""
+        retained: list[InboundMessage] = []
         try:
             while self._pending_queues.get(session_key) is pending:
                 try:
@@ -1623,38 +1756,78 @@ class AgentLoop:
                         session_key,
                     )
         except asyncio.CancelledError as exc:
-            await self._cancel_pending_messages(session_key, pending, exc)
-            raise
+            stop = exc.args[0] if exc.args else None
+            if not isinstance(stop, _ExecutionStop):
+                await self._cancel_pending_messages(session_key, pending, exc)
+                raise
+            # Clean up the old root before any retained independent owner starts.
+            await self.subagents.cancel_by_session(session_key)
+            await self._exec_session_manager.terminate_by_owner(session_key)
+            retained = await self._cancel_pending_messages(
+                session_key, pending, exc, preserve_other_owners=stop.execution_id,
+            )
         finally:
             owns_queue = self._pending_queues.get(session_key) is pending
             if owns_queue:
                 self._pending_queues.pop(session_key, None)
+                self._execution_roots.pop(session_key, None)
+        for msg in retained:
+            await self._enqueue_session_message(msg)
 
     async def _cancel_pending_messages(
         self,
         session_key: str,
         pending: asyncio.Queue[InboundMessage],
         error: asyncio.CancelledError,
-    ) -> None:
-        """Complete queued independent turns after their session worker stops."""
+        *,
+        preserve_other_owners: str | None = None,
+    ) -> list[InboundMessage]:
+        """Complete cancelled input, retaining other independently admitted owners."""
+        retained: list[InboundMessage] = []
         for msg in self._deferred_automation_turns.pop(session_key, []):
             pending.put_nowait(msg)
         while not pending.empty():
             msg = pending.get_nowait()
-            for coordinator in self._automation_turn_coordinators:
-                coordinator.complete(msg, error=error)
-            if (
-                msg.channel != "system"
-                and self.commands.requires_session_queue(command_text(msg))
-            ):
-                delivery = self.turn_delivery_factory.unrouted(msg, session_key)
-                await delivery.complete(None, publish_completion=True)
+            admission = msg.execution_admission
+            if preserve_other_owners is not None and admission is not None and admission.execution_id != preserve_other_owners:
+                retained.append(msg)
+                continue
+            await self._complete_cancelled_message(session_key, msg, error)
+        return retained
 
     async def _dispatch_one(
         self,
         msg: InboundMessage,
         pending: asyncio.Queue[InboundMessage],
     ) -> None:
+        """Own physical execution, including waiting, cancellation and internal failures."""
+        session_key = self._effective_session_key(msg)
+        admission = await self.runtime_event_publisher.execution_queued(msg, session_key)
+        if await self._cancel_stopped_admission(session_key, msg):
+            return
+        self._execution_roots[session_key] = msg
+        outcome: ExecutionOutcome = "unknown"
+        try:
+            outcome = await self._execute_one(msg, pending, admission)
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        except Exception:
+            outcome = "failed"
+            raise
+        finally:
+            if self._execution_roots.get(session_key) is msg:
+                self._execution_roots.pop(session_key, None)
+            await self.runtime_event_publisher.execution_changed(
+                msg, session_key, admission, "exited", outcome=outcome,
+            )
+
+    async def _execute_one(
+        self,
+        msg: InboundMessage,
+        pending: asyncio.Queue[InboundMessage],
+        admission: ExecutionAdmission,
+    ) -> ExecutionOutcome:
         """Process one root message while later inputs remain in its session inbox."""
         session_key = self._effective_session_key(msg)
         # The request context is reset before errors reach this boundary, and
@@ -1677,12 +1850,13 @@ class AgentLoop:
                 logger.info("Skipped stale recovery for session {}", session_key)
                 if recovery_task_registered and current_task is not None:
                     recovery_admission.unregister_recovery_task(session_key, current_task)
-                return
+                return "unknown"
         lock = self._get_session_lock(session_key)
         gate = self._concurrency_gate or nullcontext()
 
         delivery = self.turn_delivery_factory.unrouted(msg, session_key)
         completion_published = False
+        outcome: ExecutionOutcome = "unknown"
         try:
             async with lock, gate:
                 # A preceding user turn may have completed or blocked the goal
@@ -1690,7 +1864,12 @@ class AgentLoop:
                 if turn_continuation.sustained_goal_continuation_inbound(msg.metadata) and not (
                     sustained_goal_active((await self.sessions.state.get(session_key)).metadata)
                 ):
-                    return
+                    return "unknown"
+                if admission.stop_requested:
+                    raise asyncio.CancelledError(_ExecutionStop(admission.execution_id))
+                await self.runtime_event_publisher.execution_changed(
+                    msg, session_key, admission, "running", started_at=time.time(),
+                )
                 try:
                     await self.sessions.state.read(session_key)
                     delivery = self.turn_delivery_factory.create(
@@ -1704,6 +1883,7 @@ class AgentLoop:
                         delivery=delivery,
                     )
                     continuing = turn_continuation.internal_continuation_pending(msg.metadata)
+                    outcome = delivery.execution_outcome(response)
                     await delivery.complete(
                         response,
                         publish_completion=not continuing,
@@ -1742,6 +1922,7 @@ class AgentLoop:
                         )
                     raise
                 except Exception as exc:
+                    outcome = "failed"
                     logger.opt(exception=log_content).error(
                         "Error processing message for session {}", session_key,
                     )
@@ -1766,6 +1947,7 @@ class AgentLoop:
                 and recovery_admission is not None
             ):
                 recovery_admission.unregister_recovery_task(session_key, current_task)
+        return outcome
 
     async def aclose(self) -> None:
         """Stop active work, then close resources owned by the agent loop.
@@ -1805,6 +1987,7 @@ class AgentLoop:
             for key, pending in pending_queues.items():
                 if self._pending_queues.get(key) is pending:
                     self._pending_queues.pop(key)
+                    self._execution_roots.pop(key, None)
                     await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)

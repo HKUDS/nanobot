@@ -459,6 +459,10 @@ async def test_attach_exposes_the_session_canonical_model_preset(bus, tmp_path) 
         "event": "attached",
         "chat_id": "pinned-model",
         "model_preset": "Deep Research",
+        "run_state": {
+            "instance_id": channel.gateway.tokens.instance_id, "revision": 0,
+            "runs": [], "completed": [],
+        },
     }
 
 
@@ -525,8 +529,12 @@ async def test_temporary_chat_is_transient_and_discarded(history, bus, tmp_path)
     assert upload.exists()
     assert history.read(inbound.session_key) == []
     assert [payload["event"] for payload in _sent_ws_payloads(connection)] == [
-        "message_accepted",
+        "run_state", "message_accepted",
     ]
+    runtime = _sent_ws_payloads(connection)[0]["run_state"]
+    assert runtime["instance_id"] == channel.gateway.tokens.instance_id
+    assert runtime["runs"][0]["phase"] == "queued"
+    assert runtime["runs"][0]["started_at"] is None
 
     await channel._dispatch_envelope(
         connection,
@@ -5834,6 +5842,10 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "preview": "work",
             "model_preset": "fast",
             "run_started_at": 1_700_000_000.0,
+            "run_state": {
+                "instance_id": channel.gateway.tokens.instance_id, "revision": 0,
+                "runs": [], "completed": [],
+            },
             "handle": handle.public_payload(),
         }
     ]

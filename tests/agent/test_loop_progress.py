@@ -845,10 +845,13 @@ class TestToolEventProgress:
         assert len(request_contexts) == 1
         request_ctx = request_contexts[0]
         assert request_ctx is not None
+        execution_id = request_ctx.metadata["_execution_id"]
+        assert isinstance(execution_id, str) and execution_id
         assert request_ctx.metadata == {
             "injected_event": "subagent_result",
             "subagent_task_id": "sub-1",
             "_history_generation": request_ctx.session_generation,
+            "_execution_id": execution_id,
         }
         statuses = [
             message.event.status

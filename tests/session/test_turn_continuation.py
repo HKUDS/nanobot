@@ -8,7 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.agent.tools.context import RequestContext
-from nanobot.bus.events import InboundMessage
+from nanobot.agent.turn_delivery import TurnDeliveryFactory
+from nanobot.bus.events import INBOUND_META_EXECUTION_ID, InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import TurnExecutionChanged
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     explicit_goal_requested,
@@ -59,6 +62,7 @@ async def test_maybe_continue_turn_queues_internal_message():
                 "webui": True,
                 "original_command": "/goal",
                 "goal_requested": True,
+                INBOUND_META_EXECUTION_ID: "previous-owner",
             },
         ),
         session_key="feishu:c1",
@@ -73,9 +77,17 @@ async def test_maybe_continue_turn_queues_internal_message():
         visible_run_started_at=1234.5,
     )
 
+    bus = MessageBus()
+    facts = []
+    bus.subscribe(facts.append, TurnExecutionChanged)
+    ctx.delivery = TurnDeliveryFactory(bus).unrouted(ctx.msg, ctx.session_key)
     assert await maybe_continue_turn(ctx, session_metadata=ctx.session.metadata) is True
 
     queued = pending.get_nowait()
+    assert queued.metadata[INBOUND_META_EXECUTION_ID] != "previous-owner"
+    assert facts[0].execution_id == queued.metadata[INBOUND_META_EXECUTION_ID]
+    assert facts[0].phase == "queued"
+    assert ctx.msg.metadata[INBOUND_META_EXECUTION_ID] == "previous-owner"
     assert queued.sender_id == "system:continuation"
     assert queued.metadata[INTERNAL_CONTINUATION_META] is True
     assert queued.metadata[INTERNAL_CONTINUATION_KIND_META] == "sustained_goal"

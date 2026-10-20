@@ -19,7 +19,7 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import RuntimeEventPublisher
+from nanobot.bus.runtime_events import ExecutionOutcome, RuntimeEventPublisher
 from nanobot.channels.notification_routes import notification_metadata, system_reply_metadata
 from nanobot.events import (
     AgentEvent,
@@ -344,6 +344,13 @@ class TurnDelivery:
             metadata=metadata,
             event=event,
         )
+
+    def execution_outcome(self, response: OutboundMessage | None) -> ExecutionOutcome:
+        """Classify execution before delivery/persistence callbacks can fail."""
+        stop_reason = self._stop_reason
+        if stop_reason is None and response is not None:
+            stop_reason = response.metadata.get("_stop_reason")
+        return "failed" if stop_reason in {"error", "tool_error"} else "completed"
 
     async def complete(
         self,

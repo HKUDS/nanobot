@@ -1760,6 +1760,19 @@
     "error": "Lỗi kết nối"
   },
   "thread": {
+    "runStatus": {
+      "syncing": "Đang kiểm tra trạng thái tác vụ…",
+      "unknown": "Chưa rõ trạng thái tác vụ. Hãy kết nối lại để kiểm tra.",
+      "unavailable": "Không có trạng thái tác vụ. Cập nhật nanobot trên máy chủ này để bật trạng thái tác vụ, dừng và tự động gửi tin nhắn đang chờ.",
+      "queued": "Tác vụ đang chờ",
+      "running": "Tác vụ đang chạy",
+      "stopping": "Đang dừng tác vụ…",
+      "cancelPending": "Đã yêu cầu dừng. Đang chờ tác vụ kết thúc…",
+      "sending": "Đang gửi tin nhắn…",
+      "deliveryUnknown": "Chưa xác nhận tin nhắn đã được nhận. Hãy kiểm tra cuộc trò chuyện trước khi gửi lại.",
+      "resultUnknown": "Chưa xác nhận phản hồi. Hãy kết nối lại để kiểm tra cuộc trò chuyện.",
+      "stopFailed": "Yêu cầu dừng thất bại. Hãy kiểm tra trạng thái tác vụ rồi thử lại."
+    },
     "subagents": {
       "stopFailed": "Không thể dừng tác vụ này.",
       "stopTask": "Dừng {{label}}",

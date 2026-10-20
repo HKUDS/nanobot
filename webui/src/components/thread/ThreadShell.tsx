@@ -583,6 +583,7 @@ export function ThreadShell({
     messages,
     messagesReady,
     isStreaming,
+    runState,
     runStartedAt,
     retryStatus,
     goalState,
@@ -611,9 +612,15 @@ export function ThreadShell({
     streamError,
     dismissStreamError,
   } = useNanobotStream(
-    chatId, undefined, false, handleTurnEnd, undefined, undefined,
+    chatId, undefined, handleTurnEnd, undefined,
     { key: historyKey, cache: messageCacheRef.current },
   );
+  useEffect(() => {
+    if (!chatId || !historyKey) return;
+    const body = webuiThreadCache.get(historyKey);
+    if (body?.run_state) client.ingestRunSnapshot(chatId, body.run_state);
+  }, [chatId, client, historyKey, historyVersion, runState?.freshness]);
+
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const initialHistoryLoading = loading;
   const showTemporaryChatControl =
@@ -694,8 +701,23 @@ export function ThreadShell({
   // Recovery decisions gate queued input, not the ledger-owned run state.
   const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"
     || recoveryState?.status === "failed";
+  const currentRunState = messagesReady ? runState : null;
   const currentRunStartedAt = messagesReady ? runStartedAt : null;
   const turnActive = messagesReady && isStreaming;
+  const queueAutoSendAllowed = !!currentRunState
+    && currentRunState.freshness === "fresh"
+    && !currentRunState.active
+    && currentRunState.delivery === "none"
+    && !currentRunState.cancelPending
+    && !currentRunState.unsettled
+    && !recoveryNeedsDecision;
+  const runtimeStatusKey = !currentRunState ? "syncing"
+    : currentRunState.freshness !== "fresh" ? currentRunState.freshness
+    : currentRunState.cancelPending ? "cancelPending"
+    : currentRunState.active ? currentRunState.phase
+    : currentRunState.delivery === "sending" ? "sending"
+    : currentRunState.delivery === "unknown" ? "deliveryUnknown"
+    : currentRunState.unsettled ? "resultUnknown" : null;
   const restoredViewportTurnId = useMemo(
     () => turnActive ? latestActiveTurnId(displayMessages, currentRunStartedAt) : null,
     [currentRunStartedAt, displayMessages, turnActive],
@@ -1283,6 +1305,14 @@ export function ThreadShell({
       {restoredFirstDraft?.chatId === chatId && restoredFirstDraft.error ? (
         <p role="alert" className="px-3 text-sm text-destructive">{restoredFirstDraft.error}</p>
       ) : null}
+      {session && runtimeStatusKey ? (
+        <p role="status" data-run-status={runtimeStatusKey} className="px-3 pb-2 text-xs text-muted-foreground">
+          {currentRunState?.delivery === "sending" && runtimeStatusKey !== "sending" ? (
+            <span data-message-delivery="sending">{t("thread.runStatus.sending")} </span>
+          ) : null}
+          {t(`thread.runStatus.${runtimeStatusKey}`)}
+        </p>
+      ) : null}
       {session ? (
         <ThreadComposer
           key={`${draftKey}:${restoredFirstDraft?.chatId === chatId ? restoredFirstDraft.revision : 0}`}
@@ -1293,9 +1323,11 @@ export function ThreadShell({
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
-          activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) ?? historyActiveTurnId : null}
-          completedTurnIds={messagesReady && !recoveryNeedsDecision
-            && chatId && !client.hasUnsettledRun(chatId) ? queueCompletedTurnIds : undefined}
+          isSending={currentRunState?.delivery === "sending"}
+          cancelPending={currentRunState?.cancelPending}
+          queueAutoSendAllowed={queueAutoSendAllowed}
+          activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) : null}
+          completedTurnIds={queueCompletedTurnIds}
           placeholder={
             composerVariant === "hero"
               ? t("thread.composer.placeholderHero")

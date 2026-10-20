@@ -33,6 +33,7 @@ from nanobot.bus.runtime_events import (
     SessionTurnStarted,
     SubagentTaskChanged,
     TurnCompleted,
+    TurnExecutionChanged,
     TurnRunStatusChanged,
     TurnRuntimeAdmitted,
     UserInputAccepted,
@@ -354,11 +355,13 @@ def websocket_turn_id(chat_id: str) -> str | None:
 def register_queued_websocket_turn_if_idle(
     chat_id: str,
     turn_id: str | None,
+    *,
+    owner: str | None = None,
 ) -> str | None:
-    """Track an accepted WebUI turn while it waits for AgentLoop admission."""
-    if websocket_turn_wall_started_at(chat_id) is not None:
+    """Keep the legacy transcript projection separate from execution authority."""
+    if owner is None and websocket_turn_wall_started_at(chat_id) is not None:
         return None
-    owner = uuid4().hex
+    owner = owner or uuid4().hex
     _WEBSOCKET_ACTIVE_TURNS.setdefault(chat_id, {})[owner] = _WebsocketTurn(
         started_at=time.time(),
         turn_id=turn_id,
@@ -604,6 +607,10 @@ class WebuiTurnCoordinator:
                 SessionTurnStarted,
             ),
             self.bus.subscribe(
+                self._handle_execution_changed,
+                TurnExecutionChanged,
+            ),
+            self.bus.subscribe(
                 self._handle_run_status_changed,
                 TurnRunStatusChanged,
             ),
@@ -710,6 +717,10 @@ class WebuiTurnCoordinator:
                 expected_generation=event.context.session_generation,
                 create_if_missing=False,
             )
+
+    def _handle_execution_changed(self, event: TurnExecutionChanged) -> None:
+        if event.phase in {"injected", "rejected"} and self._is_websocket_event(event.context):
+            clear_websocket_turn_if_current(event.context.chat_id, event.execution_id)
 
     async def _handle_run_status_changed(self, event: TurnRunStatusChanged) -> None:
         if not self._is_websocket_event(event.context):

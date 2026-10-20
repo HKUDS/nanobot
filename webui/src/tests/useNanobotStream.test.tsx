@@ -71,8 +71,8 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
   });
 }
 
-function fakeClient() {
-  const { client: lifecycle, receive } = createStreamClient();
+function fakeClient(options?: Parameters<typeof createStreamClient>[0]) {
+  const { client: lifecycle, receive, receiveRaw, updateRuns, setConnected } = createStreamClient(options);
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
   const errorHandlers = new Set<(error: StreamError) => void>();
   const requestMutation = vi.fn().mockResolvedValue({});
@@ -90,7 +90,6 @@ function fakeClient() {
       onRunStatus: lifecycle.onRunStatus.bind(lifecycle),
       getRunState: lifecycle.getRunState.bind(lifecycle),
       getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
-      restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
       getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
       getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
       getGoalState: lifecycle.getGoalState.bind(lifecycle),
@@ -105,12 +104,15 @@ function fakeClient() {
         lifecycle.sendMessage(args[0], args[1], undefined, args[3]);
       }),
       requestMutation,
-      finishRunLocally: vi.fn(lifecycle.finishRunLocally.bind(lifecycle)),
+      requestStop: vi.fn(lifecycle.requestStop.bind(lifecycle)),
       newChat: vi.fn(), forkChat: vi.fn(), attach: vi.fn(),
       connect: vi.fn(), close: vi.fn(), updateUrl: vi.fn(),
     },
+    receiveRaw,
+    updateRuns,
     emit(_chatId: string, event: InboundEvent) { receive(event); },
     emitStatus(nextStatus: ConnectionStatus) {
+      setConnected(nextStatus === "open");
       status = nextStatus;
       statusHandlers.forEach((handler) => handler(status));
     },
@@ -129,7 +131,7 @@ function fakeClient() {
     },
     setUnsettled(chatId: string, unsettled: boolean) {
       if (unsettled) lifecycle.sendMessage(chatId, "pending", undefined, { turnId: "pending-fixture" });
-      else lifecycle.finishRunLocally(chatId);
+      else receive({ event: "turn_end", chat_id: chatId });
     },
     requestMutation,
   };
@@ -587,8 +589,9 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(true);
 
     act(() => fake.emitStatus("reconnecting"));
-    expect(result.current.runStartedAt).toBe(1_700);
-    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.runStartedAt).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.runState).toMatchObject({ active: true, freshness: "unknown", unsettled: true });
     expect(result.current.messages[0]).toMatchObject({
       id: assistantId,
       content: "partial",
@@ -620,7 +623,7 @@ describe("useNanobotStream", () => {
     });
   });
 
-  it("clears stale stream state when the transport resets a run", async () => {
+  it("clears the running indicator but retains incomplete output when the backend becomes idle", async () => {
     const fake = fakeClient();
     const { result } = renderHook(
       () => useNanobotStream("chat-reconnect-reset", EMPTY_MESSAGES),
@@ -649,8 +652,9 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages[0]).toMatchObject({
       content: "partial",
-      isStreaming: false,
+      isStreaming: true,
     });
+    expect(result.current.runState?.unsettled).toBe(true);
   });
 
   it("flushes pending delta text before turn_end finalizes the turn", () => {
@@ -847,7 +851,7 @@ describe("useNanobotStream", () => {
 
     expect(result.current.isStreaming).toBe(true);
     expect(result.current.runStartedAt).toBe(1_700);
-    expect(fake.client.finishRunLocally).not.toHaveBeenCalled();
+    expect(fake.client.requestStop).not.toHaveBeenCalled();
   });
 
   it("preserves proactive automation source metadata on complete assistant messages", () => {
@@ -959,7 +963,7 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
-  it("restores cached tool activity according to each conversation's completed turns", () => {
+  it("never restores runtime activity from either completed or unfinished cached tool rows", () => {
     const fake = fakeClient();
     const initialMessages: UIMessage[] = [{
       id: "cached-tool-activity", role: "tool", kind: "trace", content: "exec(…)",
@@ -971,7 +975,7 @@ describe("useNanobotStream", () => {
       completedTurnIds: ["completed-tool-turn"],
     };
     const { result, rerender } = renderHook((props: typeof initialProps) => useNanobotStream(
-      props.chatId, props.initialMessages, false, undefined, undefined, props.completedTurnIds,
+      props.chatId, props.initialMessages,
     ), { wrapper: wrap(fake.client), initialProps });
     expect(result.current.isStreaming).toBe(false);
     rerender({
@@ -979,7 +983,8 @@ describe("useNanobotStream", () => {
       initialMessages: [{ ...initialMessages[0], turnId: "active-tool-turn" }],
       completedTurnIds: [],
     });
-    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messages[0].turnId).toBe("active-tool-turn");
     rerender(initialProps);
     expect(result.current.isStreaming).toBe(false);
   });
@@ -1020,7 +1025,7 @@ describe("useNanobotStream", () => {
     });
   });
 
-  it("starts in streaming mode when history shows pending tool calls", () => {
+  it("keeps pending history visible without claiming backend execution", () => {
     const fake = fakeClient();
     const initialMessages = [{
       id: "m1",
@@ -1029,13 +1034,15 @@ describe("useNanobotStream", () => {
       createdAt: Date.now(),
     }];
     const { result } = renderHook(
-      () => useNanobotStream("chat-p", initialMessages, true),
+      () => useNanobotStream("chat-p", initialMessages),
       {
         wrapper: wrap(fake.client),
       },
     );
 
-    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.runState?.freshness).toBe("fresh");
+    expect(result.current.messages).toEqual(initialMessages);
   });
 
   it("collapses consecutive tool_hint frames into one trace row", () => {
@@ -2456,6 +2463,25 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("does not treat legacy activity as execution or result completion", () => {
+    const fake = fakeClient();
+    const chatId = "chat-without-ack";
+    const { result } = renderHook(() => useNanobotStream(chatId, EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    let turnId = "";
+    act(() => { turnId = result.current.send("Do not assume delivery")!.turnId; });
+    act(() => {
+      fake.receiveRaw({ event: "goal_status", chat_id: chatId, turn_id: turnId, status: "running", started_at: 123 });
+      fake.receiveRaw({ event: "tool_hint", chat_id: chatId, turn_id: turnId, text: "Working" });
+      fake.receiveRaw({ event: "recovery_state", chat_id: chatId, turn_id: turnId, status: "resuming", recovery_id: "r1" });
+    });
+    expect(result.current.runState).toMatchObject({ active: false, unsettled: true });
+    expect(result.current.isStreaming).toBe(false);
+    act(() => fake.emitStatus("reconnecting"));
+    expect(result.current.runState).toMatchObject({ freshness: "unknown", unsettled: true });
+    expect(result.current.messages.find((message) => message.turnId === turnId && message.role === "user"))
+      .toMatchObject({ content: "Do not assume delivery" });
+  });
+
   it("marks an optimistic turn accepted when its acknowledgement arrives", () => {
     const fake = fakeClient();
     const { result } = renderHook(
@@ -2568,6 +2594,10 @@ describe("useNanobotStream", () => {
       createdAt: 1_700_000_000_123,
       sessionMessage: event.provenance?.session_message,
     })]);
+    expect(result.current.isStreaming).toBe(false);
+    act(() => fake.updateRuns("chat-target", [{
+      run_id: "target-owner", turn_id: "target-turn", phase: "running", started_at: null,
+    }]));
     expect(result.current.isStreaming).toBe(true);
   });
 
@@ -2609,7 +2639,8 @@ describe("useNanobotStream", () => {
         deliveryStatus: "sending",
       }),
     ]);
-    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.runState).toMatchObject({ delivery: "sending", unsettled: true });
     expect(result.current.streamError).toMatchObject({
       kind: "turn_rejected",
       turnId: first!.turnId,
@@ -3036,7 +3067,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].media).toHaveLength(1);
   });
 
-  it("stops the active turn without adding a user slash command bubble", () => {
+  it("keeps Stop pending until backend exit without adding a user slash command bubble", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-stop", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -3046,15 +3077,19 @@ describe("useNanobotStream", () => {
       result.current.send("long task");
     });
     expect(result.current.messages).toHaveLength(1);
+    expect(result.current.isStreaming).toBe(false);
+    act(() => fake.emitRunStatus("chat-stop", 123));
     expect(result.current.isStreaming).toBe(true);
 
-    act(() => {
-      result.current.stop();
-    });
+    await act(async () => { await result.current.stop(); });
 
-    expect(fake.client.sendMessage).toHaveBeenLastCalledWith("chat-stop", "/stop");
-    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-stop");
+    expect(fake.client.requestStop).toHaveBeenCalledWith("chat-stop");
+    expect(fake.client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.runState?.cancelPending).toBe(true);
+    act(() => fake.emit("chat-stop", { event: "turn_end", chat_id: "chat-stop" }));
     expect(result.current.isStreaming).toBe(false);
+    expect(result.current.runState?.cancelPending).toBe(false);
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("long task");
   });
@@ -3091,7 +3126,7 @@ describe("useNanobotStream", () => {
     ]);
   });
 
-  it("finalizes active streaming before turn-ending side-channel commands", async () => {
+  it("waits for backend completion after a turn-ending side-channel command", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-new", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -3126,9 +3161,9 @@ describe("useNanobotStream", () => {
     const newCall = fake.client.sendMessage.mock.calls.at(-1)!;
     expect(newCall[3]).not.toHaveProperty("sideChannel");
     expect(newCall[3]).not.toHaveProperty("finalizeActiveTurn");
-    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.isStreaming).toBe(true);
     expect(result.current.messages.find((message) => message.content === "partial answer"))
-      .toMatchObject({ isStreaming: false });
+      .toMatchObject({ isStreaming: true });
 
     act(() => {
       fake.emit("chat-new", {
@@ -3137,6 +3172,7 @@ describe("useNanobotStream", () => {
         text: "New session started.",
         turn_id: newCall[3]?.turnId,
       });
+      fake.emit("chat-new", { event: "turn_end", chat_id: "chat-new", turn_id: activeTurnId });
     });
 
     expect(result.current.isStreaming).toBe(false);
@@ -3371,7 +3407,7 @@ describe("useNanobotStream", () => {
   it("keeps streaming alive across stream_end when tool activity follows", async () => {
     const fake = fakeClient();
     const onTurnEnd = vi.fn();
-    const { result } = renderHook(() => useNanobotStream("chat-s", EMPTY_MESSAGES, false, onTurnEnd), {
+    const { result } = renderHook(() => useNanobotStream("chat-s", EMPTY_MESSAGES, onTurnEnd), {
       wrapper: wrap(fake.client),
     });
 
