@@ -176,8 +176,8 @@ export class DiagramViewer {
     this.sourceScroll.visible = this.sourceMode
     this.viewport.visible = !this.sourceMode
     this.footer.content = !this.items.length ? "q/esc back" : this.renderer.width < 85
-      ? "+/- zoom · arrows pan · s source · c copy · [] diagram · q/esc back"
-      : "+/- zoom   arrows pan   0 fit   s source/image   c copy source   [/] diagram   x cancel   q/esc back"
+      ? "+/- zoom   arrows pan   s source   c copy   [ previous   ] next   q/esc back"
+      : "+/- zoom   arrows pan   0 fit   s source/image   c copy source   [ previous   ] next   x cancel   q/esc back"
     this.root.requestRender()
   }
 
