@@ -126,14 +126,7 @@ class QQConnectStore:
         except Exception as exc:
             raise ChannelConnectError(f"Unable to start QQ QR login: {exc}", status=502) from exc
         session = self._new_session(task_id, key)
-        return {
-            "session_id": session.id,
-            "status": "pending",
-            "qr_url": CONNECT_URL.format(task_id=quote(task_id)),
-            "interval_ms": POLL_INTERVAL_MS,
-            "expires_at_ms": int((session.created_wall + SESSION_TTL_SECONDS) * 1000),
-            "message": "Scan with mobile QQ to connect.",
-        }
+        return _pending(session, "Scan with mobile QQ to connect.")
 
     async def poll(self, session_id: str) -> dict[str, Any]:
         self._cleanup()
@@ -145,7 +138,7 @@ class QQConnectStore:
             result = await poll_bind_task(session.task_id)
         except Exception:
             # A transient portal error is not proof the scan failed; keep waiting.
-            return _pending(session, "Waiting for QQ scan...")
+            return _pending(session, "Waiting for QQ scan...", retrying=True)
 
         self._cleanup()
         if self._sessions.get(session_id) is not session:
@@ -176,11 +169,7 @@ class QQConnectStore:
         commit.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
         await asyncio.shield(commit)
         session.credentials = (app_id, secret)
-        return {
-            "session_id": session_id,
-            "status": "succeeded",
-            "message": "QQ is connected.",
-        }
+        return _payload(session_id, "succeeded", "QQ is connected.")
 
     async def cancel(self, session_id: str) -> dict[str, Any]:
         self._sessions.pop(session_id, None)
@@ -234,10 +223,10 @@ def _print_qr(url: str) -> None:
 
 
 def _payload(session_id: str, status: str, message: str) -> dict[str, Any]:
-    return {"session_id": session_id, "status": status, "message": message}
+    return {"session_id": session_id, "status": status, "message": message, "retrying": False}
 
 
-def _pending(session: QQConnectSession, message: str) -> dict[str, Any]:
+def _pending(session: QQConnectSession, message: str, *, retrying: bool = False) -> dict[str, Any]:
     return {
         "session_id": session.id,
         "status": "pending",
@@ -245,6 +234,7 @@ def _pending(session: QQConnectSession, message: str) -> dict[str, Any]:
         "interval_ms": POLL_INTERVAL_MS,
         "expires_at_ms": int((session.created_wall + SESSION_TTL_SECONDS) * 1000),
         "message": message,
+        "retrying": retrying,
     }
 
 

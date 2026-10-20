@@ -47,16 +47,19 @@ async def test_qq_connect_writes_scanned_credentials_to_config(monkeypatch: pyte
 
     started = await store.start()
     assert started["status"] == "pending"
+    assert started["retrying"] is False
     assert started["qr_url"].endswith("task_id=task-1&_wv=2")
     assert store.has_pending_work
 
     polled = await store.poll(started["session_id"])
     assert polled["status"] == "succeeded"
     assert not store.has_pending_work
+    assert polled["retrying"] is False
     assert await store.poll(started["session_id"]) == {
         "session_id": started["session_id"],
         "status": "expired",
         "message": "This QQ login has expired. Start again.",
+        "retrying": False,
     }
 
     saved = json.loads(_isolated_config.read_text(encoding="utf-8"))
@@ -178,19 +181,40 @@ async def test_qq_close_during_start_does_not_leave_a_new_session(monkeypatch: p
 
 
 @pytest.mark.asyncio
-async def test_qq_connect_keeps_waiting_on_transient_portal_errors(monkeypatch: pytest.MonkeyPatch):
+async def test_qq_connect_clears_retrying_after_portal_recovers(monkeypatch: pytest.MonkeyPatch):
     async def fake_create() -> tuple[str, str]:
         return "task-2", base64.b64encode(b"k" * 32).decode()
 
-    async def fake_poll(_task_id: str) -> dict[str, Any]:
-        raise RuntimeError("portal hiccup")
+    poll_count = 0
+
+    async def fake_poll(task_id: str) -> dict[str, Any]:
+        nonlocal poll_count
+        assert task_id == "task-2"
+        poll_count += 1
+        if poll_count == 1:
+            raise RuntimeError("portal hiccup")
+        return {"status": 0}
 
     monkeypatch.setattr(connect, "create_bind_task", fake_create)
     monkeypatch.setattr(connect, "poll_bind_task", fake_poll)
     store = QQConnectStore()
 
     started = await store.start()
-    assert (await store.poll(started["session_id"]))["status"] == "pending"
+    assert started["retrying"] is False
+
+    retrying = await store.poll(started["session_id"])
+    assert retrying["status"] == "pending"
+    assert retrying["retrying"] is True
+    assert retrying["qr_url"] == started["qr_url"]
+
+    waiting = await store.poll(started["session_id"])
+    assert waiting["status"] == "pending"
+    assert waiting["retrying"] is False
+    assert waiting["qr_url"] == started["qr_url"]
+
+    cancelled = await store.cancel(started["session_id"])
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["retrying"] is False
 
 
 @pytest.mark.asyncio

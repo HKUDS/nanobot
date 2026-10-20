@@ -2114,18 +2114,60 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
     fireEvent.click(await screen.findByRole("button", { name: "View QQ settings" }));
 
-    expect(await screen.findByRole("img", { name: "QQ login QR code" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "QQ binding QR code" })).toBeInTheDocument();
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.connect.start", { channel: "qq" }, 150_000,
     );
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.connect.poll", { channel: "qq", session_id: "qq-1" }, 150_000,
     ));
-    expect(await screen.findByText("QQ is connected.")).toBeInTheDocument();
-    expect(screen.getByText(/previous App Secret stops working/)).toBeInTheDocument();
+    expect(await screen.findByText("Configured")).toBeInTheDocument();
+    expect(screen.getByText(/invalidates the old one/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByLabelText("App ID")).toHaveValue("1024");
     expect(screen.getByLabelText("Acknowledgement message")).toHaveValue("⏳ Processing...");
+  });
+
+  it("keeps saved QQ setup distinct from a running connection when reopening settings", async () => {
+    const qqFeature: NanobotFeatureInfo = {
+      ...catalogFeature("qq", false),
+      display_name: "QQ",
+      webui: "webui/index.tsx",
+      configured: true,
+      runtime_status: "stopped",
+      config_values: { "channels.qq.appId": "1024" },
+      configured_fields: ["channels.qq.appId", "channels.qq.secret"],
+      setup: channelSetupContract("qq"),
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({ features: [qqFeature], enabled_count: 0 });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    }));
+
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View QQ settings" }));
+    expect(await screen.findByText("Configured")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("Not running")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).queryByText("Running")).not.toBeInTheDocument();
+    expect(screen.getByText("1024")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rebind bot" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "QQ binding QR code" })).not.toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter credentials manually" }));
+    expect(screen.getByRole("group", { name: "Manual credentials" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Access" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Behavior" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Advanced" })).toBeInTheDocument();
+    expect(screen.getByLabelText("App ID")).toHaveValue("1024");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
+    expect(await screen.findByRole("button", { name: "Rebind bot" })).toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
   it("keeps the WebUI websocket channel enabled without opening a setup dialog", async () => {

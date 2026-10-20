@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { Check, Loader2, RotateCcw } from "lucide-react";
+import { Check, CircleAlert, Clock, Loader2, RotateCcw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ export type ChannelQrConnectFlowViewProps = {
   connect: ChannelConnectPayload | null;
   busy: boolean;
   error: string | null;
+  errorAction?: "start" | "poll" | "cancel";
   onStart: () => void;
   onCancel: () => void;
   onPoll: ChannelQrConnectPendingContext["poll"];
@@ -70,6 +71,7 @@ export function ChannelQrConnectFlowView({
   const pending = connect?.status === "pending";
   const succeeded = !pending && (connected || connect?.status === "succeeded");
   const canStart = !pending && !busy;
+  const TerminalIcon = connect?.status === "expired" ? Clock : connect?.status === "failed" ? CircleAlert : X;
   const displayMessage = connect
     ? resolveMessage?.(connect) ?? (connect.message ? channelValidationMessage(connect.message, t) : undefined)
     : undefined;
@@ -103,9 +105,9 @@ export function ChannelQrConnectFlowView({
   return (
     <div className="mt-3 space-y-3">
       {autoStart && busy && !connect ? (
-        <div role="status" className="grid min-h-[228px] place-items-center">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
-          <span className="sr-only">{labels.connecting}</span>
+        <div role="status" className="flex min-h-[228px] flex-col items-center justify-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" aria-hidden />
+          <span className="text-caption">{labels.connecting}</span>
         </div>
       ) : null}
       {pending && minimalPending && showQrCode ? (
@@ -124,7 +126,7 @@ export function ChannelQrConnectFlowView({
           {renderPending?.({ connect, busy, poll: onPoll })}
         </div>
       ) : pending ? (
-        <div className={`grid gap-4 rounded-control border border-border/70 p-4 ${showQrCode ? "sm:grid-cols-[auto_minmax(0,1fr)]" : ""}`}>
+        <div className={`grid items-center gap-4 py-2 ${showQrCode ? "sm:grid-cols-[auto_minmax(0,1fr)]" : ""}`}>
           {showQrCode ? <div className="grid h-[196px] w-[196px] place-items-center rounded-control border border-border/60 bg-background">
             {qrDataUrl ? (
               <img
@@ -137,15 +139,15 @@ export function ChannelQrConnectFlowView({
             )}
           </div> : null}
           <div className="flex min-w-0 flex-col justify-center">
-            <div className="text-[13px] font-semibold text-foreground">
+            <div className="text-ui-heading text-foreground">
               {labels.scanTitle}
             </div>
-            <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
-              {!showQrCode || qrDataUrl ? labels.scanDescription : null}
-            </p>
+            {labels.scanDescription && (!showQrCode || qrDataUrl) ? (
+              <p className="mt-1 text-caption text-muted-foreground">{labels.scanDescription}</p>
+            ) : null}
             {renderPending?.({ connect, busy, poll: onPoll }) ?? (
-              <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              <div role="status" className="mt-3 flex items-center gap-2 text-caption text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
                 {!showQrCode || qrDataUrl ? labels.waiting : labels.connecting}
               </div>
             )}
@@ -154,7 +156,6 @@ export function ChannelQrConnectFlowView({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-8 rounded-full px-3 text-[12px] font-semibold"
                 onClick={() => onCancel()}
                 disabled={busy}
               >
@@ -166,7 +167,7 @@ export function ChannelQrConnectFlowView({
       ) : null}
 
       {succeeded && !suppressSucceeded ? (
-        <div className="flex items-center gap-2 rounded-control border border-emerald-500/20 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-200">
+        <div role="status" className="flex items-center gap-2 text-caption text-emerald-700 dark:text-emerald-200">
           <Check className="h-3.5 w-3.5" aria-hidden />
           {displayMessage ?? labels.connected}
         </div>
@@ -174,13 +175,15 @@ export function ChannelQrConnectFlowView({
 
       {connect && ["expired", "failed", "cancelled"].includes(connect.status)
         && !(connected && connect.status === "cancelled") ? (
-        <div className="rounded-control border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+        <div role="status" className="flex items-center gap-2 text-caption text-muted-foreground">
+          <TerminalIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {displayMessage || labels.stopped}
         </div>
       ) : null}
 
       {error ? (
-        <div className="rounded-control border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+        <div role="alert" className="flex items-center gap-2 text-caption text-destructive">
+          <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {error}
         </div>
       ) : null}
@@ -190,7 +193,6 @@ export function ChannelQrConnectFlowView({
           type="button"
           size="sm"
           variant="outline"
-          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold settings-hover"
           onClick={() => onStart()}
           disabled={!canStart}
         >

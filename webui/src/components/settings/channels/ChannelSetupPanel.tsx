@@ -121,7 +121,7 @@ export function ChannelSetupPanel({
   const header = (
     <div className="flex min-w-0 items-center gap-3">
       <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
-      <h3 className="sr-only">{displayName}</h3>
+      <h3 className="text-ui-heading">{displayName}</h3>
       {missingSupport && feature.install_supported ? (
         <Button
           type="button"
@@ -508,7 +508,8 @@ function ChannelSetupSurface({
     connectFlow={mode === "connect" && ConnectFlow ? <Suspense fallback={<ChannelPluginLoading compact />}>
       <ConnectFlow token={token} feature={feature}
         idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-        connectRequestId={connectRequestId} onFeaturesUpdate={onFeaturesUpdate} />
+        connectRequestId={connectRequestId} onOpenAdvanced={() => setAdvancedOpen(true)}
+        onFeaturesUpdate={onFeaturesUpdate} />
     </Suspense> : undefined}
   />;
 }

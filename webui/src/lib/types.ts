@@ -1330,6 +1330,7 @@ export interface ChannelConnectPayload {
   qr_url?: string;
   interval_ms?: number;
   expires_at_ms?: number;
+  retrying?: boolean;
   nanobot_features?: NanobotFeaturesPayload;
 }
 

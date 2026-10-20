@@ -64,6 +64,19 @@ export function ChannelSetupSurfaceView({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const mode = setup.mode ?? "credentials";
   const hasAdvanced = advancedFields.length > 0 || savedSecretFields.length > 0 || availablePresets.length > 0;
+  const advancedFormProps = {
+    fields: advancedFields,
+    values: fieldValues,
+    configuredFields,
+    visibleSecrets,
+    onChange: setFieldValue,
+    onFieldBlur: saveSecretOnBlur,
+    onToggleSecret: toggleSecret,
+    errors: fieldErrors,
+    clearedSecrets,
+    onClearSecret: setSecretCleared,
+    disabled: actionPending,
+  };
   const inlineActions = mode === "credentials" && primaryFields.length === 1
     && !advancedOpen && !setup.presets?.length && !setup.actions?.length;
   const credentialActions = mode === "credentials" ? (
@@ -243,20 +256,11 @@ export function ChannelSetupSurfaceView({
             </div>
             {advancedFields.length ? (
               <div onBlur={() => void saveConnectionSettings()}>
-                <CredentialForm
-                  fields={advancedFields}
-                  values={fieldValues}
-                  configuredFields={configuredFields}
-                  visibleSecrets={visibleSecrets}
-                  onChange={setFieldValue}
-                  onFieldBlur={saveSecretOnBlur}
-                  onToggleSecret={toggleSecret}
-                  errors={fieldErrors}
-                  clearedSecrets={clearedSecrets}
-                  onClearSecret={setSecretCleared}
-                  compact
-                  disabled={actionPending}
-                />
+                {mode === "connect" ? (
+                  <ChannelFieldGroups {...advancedFormProps} requirements={[]} sectionLabels={setup.sectionLabels} />
+                ) : (
+                  <CredentialForm {...advancedFormProps} compact />
+                )}
               </div>
             ) : null}
           </div>
